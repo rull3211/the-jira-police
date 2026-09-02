@@ -1,0 +1,16 @@
+node_modules/
+.storecode/
+.env
+.env.local
+
+# Runtime state: poll cursor + seen issue keys.
+# Leading slash anchors this to the repo root — an unanchored `state/` also
+# matches `src/state/`, which silently excludes the state-store source.
+/state/
+
+# Triage reports
+/groomed/
+
+coverage/
+*.log
+.DS_Store

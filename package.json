@@ -1,0 +1,32 @@
+{
+  "name": "the-jira-police",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Watches the SSX Jira board and auto-runs intake-triage on new tickets",
+  "type": "module",
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "poll:once": "node src/cli/poll-once.ts",
+    "triage:once": "node src/cli/triage-once.ts",
+    "check-types": "tsc --noEmit",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "oxfmt": "^0.60.0",
+    "oxlint": "^1.75.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.20.0"
+}
