@@ -19,10 +19,10 @@ import { runLoop } from "./loop.ts";
 import { runPollCycle } from "./poller.ts";
 import {
   type Settings,
-  SettingsError,
   describeSettings,
   numeric,
   readSettings,
+  withConfigErrors,
 } from "./settings.ts";
 import { loadState } from "./state/store.ts";
 import { createJiraClient, createPollDeps } from "./wiring.ts";
@@ -81,17 +81,7 @@ function createShutdown(runForMs: number | undefined): AbortController {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
 
-  let settings: Settings;
-  try {
-    settings = applyOverrides(readSettings(), argv);
-  } catch (error) {
-    if (error instanceof SettingsError) {
-      process.stderr.write(`${error.message}\n`);
-      process.exitCode = 78; // EX_CONFIG
-      return;
-    }
-    throw error;
-  }
+  const settings = applyOverrides(readSettings(), argv);
 
   const runForRaw = flagValue(argv, "--for");
   const runForMs = runForRaw === undefined ? undefined : parseDuration(runForRaw);
@@ -131,4 +121,4 @@ async function main(): Promise<void> {
   logger.info("service.stopped", { cycles: summary.cycles, failures: summary.failures });
 }
 
-await main();
+await withConfigErrors(main);

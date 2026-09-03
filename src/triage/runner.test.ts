@@ -38,6 +38,16 @@ describe("buildPrompt", () => {
       "/mock-triage SSX-1234 --no-write",
     );
   });
+
+  it("passes --no-html, since the run has no Write tool to render one with", () => {
+    expect(buildPrompt({ ...BASE, noHtml: true })).toBe(
+      "/intake-triage SSX-1234 --no-write --no-html",
+    );
+  });
+
+  it("leaves --no-html off for skills that never write a dashboard", () => {
+    expect(buildPrompt(BASE)).not.toContain("--no-html");
+  });
 });
 
 describe("buildArgs", () => {
@@ -69,6 +79,24 @@ describe("buildArgs", () => {
     );
     const mocked = buildArgs({ ...BASE, allowedTools: [] });
     expect(mocked[mocked.indexOf("--allowedTools") + 1]).toBe("");
+  });
+
+  it("adds the vault as a working directory so Read can reach it", () => {
+    // The vault is a sibling of this repo, not inside it. Without --add-dir the
+    // skill's reads land outside every directory the run is allowed to touch.
+    const args = buildArgs({ ...BASE, vaultPath: "/vaults/insurance-knowledge-vault" });
+    expect(args[args.indexOf("--add-dir") + 1]).toBe("/vaults/insurance-knowledge-vault");
+  });
+
+  it("omits --add-dir entirely when there is no vault", () => {
+    expect(buildArgs(BASE)).not.toContain("--add-dir");
+    expect(buildArgs({ ...BASE, vaultPath: "" })).not.toContain("--add-dir");
+  });
+
+  it("does not pass the vault as a prompt flag", () => {
+    // It travels as an environment variable instead: a path the model has to
+    // parse back out of a prompt string is a path that can be misread.
+    expect(buildPrompt({ ...BASE, vaultPath: "/vaults/v" })).not.toContain("/vaults/v");
   });
 
   it("grants no Jira write tools", () => {
@@ -136,6 +164,22 @@ describe("childEnv", () => {
 
   it("keeps the safety hooks on even if the parent turned them off", () => {
     expect(childEnv({ CLAUDE_SKIP_HOOKS: "1" })["CLAUDE_SKIP_HOOKS"]).toBe("0");
+  });
+
+  it("hands the skill its vault, so it never reaches the ask-a-human branch", () => {
+    expect(childEnv({ PATH: "/usr/bin" }, "/vaults/v")["INSURANCE_VAULT"]).toBe("/vaults/v");
+  });
+
+  it("overrides a vault path inherited from the operator's shell", () => {
+    // Otherwise the service would silently triage against whatever clone
+    // happened to be exported in the terminal it was started from.
+    expect(childEnv({ INSURANCE_VAULT: "/stale" }, "/vaults/v")["INSURANCE_VAULT"]).toBe(
+      "/vaults/v",
+    );
+  });
+
+  it.each([undefined, ""])("sets nothing for vault path %o", (vaultPath) => {
+    expect(childEnv({ PATH: "/usr/bin" }, vaultPath)["INSURANCE_VAULT"]).toBeUndefined();
   });
 
   it("does not mutate the parent environment", () => {

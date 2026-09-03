@@ -4,13 +4,19 @@
  *   node src/cli/triage-once.ts SSX-1234
  *   node src/cli/triage-once.ts SSX-1234 --skill intake-triage
  *
- * Defaults to the mock skill so this is safe to run before the real skill and
- * its knowledge vault are installed.
+ * Skips discovery entirely: no Jira REST call, no state file, no cursor. It
+ * exists to answer "does the skill work on this ticket" without a poll cycle
+ * in the way — which makes it the right place to try a new skill first.
+ *
+ * `--skill` overrides `SKILL_NAME`, which defaults to the mock, so this is safe
+ * to run before the real skill is configured.
  */
 
 import { logger } from "../logger.ts";
 import { FileSink, type TriageResult } from "../output/sink.ts";
+import { readSettings, withConfigErrors } from "../settings.ts";
 import { runTriage } from "../triage/runner.ts";
+import { buildTriageOptions } from "../wiring.ts";
 
 function flagValue(argv: readonly string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -27,26 +33,19 @@ async function main(): Promise<void> {
     return;
   }
 
-  const skillName = flagValue(argv, "--skill") ?? "mock-triage";
-  const isMock = skillName === "mock-triage";
+  const skill = flagValue(argv, "--skill");
+  const settings = { ...readSettings(), ...(skill === undefined ? {} : { SKILL_NAME: skill }) };
 
-  const payload = await runTriage({
-    issueKey,
-    skillName,
-    executable: "storecode",
-    workingDirectory: process.cwd(),
-    timeoutMs: 10 * 60 * 1000,
-    noWrite: true,
-    deep: false,
-    // The mock reads nothing, so demanding a live Atlassian session would fail
-    // runs for a reason unrelated to what is being tested.
-    requiredMcpServers: isMock ? [] : ["atlassian"],
-    ...(isMock ? { allowedTools: [] as readonly string[] } : {}),
-  });
+  // The same options the daemon would build, so a run here proves something
+  // about the run there rather than about this file.
+  const options = buildTriageOptions(settings, issueKey);
+  const payload = await runTriage(options);
 
   const result: TriageResult = {
     issueKey,
-    issueUrl: `https://storebrand.atlassian.net/browse/${issueKey}`,
+    issueUrl: `${settings.JIRA_BASE_URL}/browse/${issueKey}`,
+    // Discovery is what knows an issue's summary, and discovery is the half
+    // this command skips. Naming that beats inventing a plausible-looking one.
     summary: `${issueKey} (summary not fetched in single-run mode)`,
     verdict: payload.verdict,
     labels: payload.labels,
@@ -54,15 +53,16 @@ async function main(): Promise<void> {
     report: payload.report,
   };
 
-  const sink = new FileSink("groomed");
+  const sink = new FileSink(settings.OUTPUT_DIR);
   await sink.write(result);
 
   logger.info("triage-once.written", {
     issueKey,
     verdict: result.verdict,
-    path: `groomed/${issueKey}.md`,
-    mocked: isMock,
+    path: `${settings.OUTPUT_DIR}/${issueKey}.md`,
+    skill: options.skillName,
+    vault: options.vaultPath ?? "<none>",
   });
 }
 
-await main();
+await withConfigErrors(main);

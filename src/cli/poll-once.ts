@@ -14,25 +14,14 @@
 
 import { logger } from "../logger.ts";
 import { runPollCycle } from "../poller.ts";
-import { type Settings, SettingsError, describeSettings, readSettings } from "../settings.ts";
+import { describeSettings, readSettings, withConfigErrors } from "../settings.ts";
 import { isUnseen, loadState } from "../state/store.ts";
 import { createDiscover, createJiraClient, createPollDeps } from "../wiring.ts";
 
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
 
-  let settings: Settings;
-  try {
-    settings = readSettings();
-  } catch (error) {
-    if (error instanceof SettingsError) {
-      // A configuration problem is the user's to fix, not a stack trace.
-      process.stderr.write(`${error.message}\n`);
-      process.exitCode = 78; // EX_CONFIG
-      return;
-    }
-    throw error;
-  }
+  const settings = readSettings();
 
   logger.info("poll-once.settings", describeSettings(settings));
 
@@ -82,4 +71,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+await withConfigErrors(main);

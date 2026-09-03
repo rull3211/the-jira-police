@@ -95,6 +95,12 @@ export const SETTINGS = [
     fallback: "mock-triage",
   },
   {
+    name: "VAULT_PATH",
+    description:
+      "Absolute path to the insurance-knowledge-vault clone. intake-triage stops and asks a human if it cannot find one, which in a headless run means exiting successfully having done nothing — so this is set explicitly rather than left to the skill's own search. Blank for skills that need no vault.",
+    fallback: "",
+  },
+  {
     name: "STORECODE_PATH",
     description: "Executable used to run the skill.",
     fallback: "storecode",
@@ -170,6 +176,27 @@ export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   }
 
   return resolved as Settings;
+}
+
+/**
+ * Runs an entry point, turning a configuration problem into a message.
+ *
+ * Wraps the whole of `main` rather than just `readSettings`, because not every
+ * such problem is visible from one setting alone: `SKILL_NAME=intake-triage`
+ * with no `VAULT_PATH` is only wrong as a pair, and it is caught at wiring
+ * time. A misconfiguration is the operator's to fix either way, so it earns a
+ * sentence and EX_CONFIG rather than a stack trace.
+ */
+export async function withConfigErrors(main: () => Promise<void>): Promise<void> {
+  try {
+    await main();
+  } catch (error) {
+    if (!(error instanceof SettingsError)) {
+      throw error;
+    }
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 78; // EX_CONFIG
+  }
 }
 
 /** Resolved settings with sensitive values masked, safe to log. */

@@ -20,11 +20,23 @@ import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
-import { type Settings, list, numeric } from "./settings.ts";
-import { type TriagePayload, runTriage } from "./triage/runner.ts";
+import { type Settings, SettingsError, list, numeric } from "./settings.ts";
+import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
 
 /** Skill that reads nothing, so it must not be made to wait on Atlassian. */
 const MOCK_SKILL = "mock-triage";
+
+/**
+ * Skills that stand in for the real one while the pipeline is being exercised.
+ *
+ * Neither consults the knowledge vault and neither writes a dashboard, so both
+ * are spared the arguments that exist to make `intake-triage` survive a
+ * headless run. Anything not on this list is treated as the real thing —
+ * including a fork of it, which is the safer way round: a fork that gets a
+ * vault it does not need loses nothing, whereas one silently denied a vault
+ * would produce confident verdicts with no dedup behind them.
+ */
+const STAND_IN_SKILLS: ReadonlySet<string> = new Set([MOCK_SKILL, "live-triage-probe"]);
 
 export function createDiscover(
   settings: Settings,
@@ -45,23 +57,50 @@ export function createDiscover(
   };
 }
 
-export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<TriagePayload> {
+/**
+ * How one issue is handed to the skill.
+ *
+ * Its own function because three callers need the same answer — the daemon,
+ * `poll:once` and `triage:once` — and the last of those used to build it by
+ * hand. That copy drifted the moment the real skill grew requirements, which is
+ * exactly the bug this module exists to prevent.
+ */
+export function buildTriageOptions(settings: Settings, issueKey: string): TriageRunOptions {
   const isMock = settings.SKILL_NAME === MOCK_SKILL;
+  const isStandIn = STAND_IN_SKILLS.has(settings.SKILL_NAME);
 
-  return async (ticket: TicketRef) =>
-    await runTriage({
-      issueKey: ticket.key,
-      skillName: settings.SKILL_NAME,
-      executable: settings.STORECODE_PATH,
-      workingDirectory: process.cwd(),
-      timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS"),
-      noWrite: true,
-      deep: false,
-      // Requiring a live Atlassian session from a skill that reads nothing
-      // would fail runs for a reason unrelated to what is being exercised.
-      requiredMcpServers: isMock ? [] : ["atlassian"],
-      ...(isMock ? { allowedTools: [] as readonly string[] } : {}),
-    });
+  // Checked here rather than left to the skill. Without a vault `intake-triage`
+  // stops and asks a human for the path — which in a headless run is a question
+  // asked of nobody, followed by a clean exit and no verdict. Better to refuse
+  // to start than to poll quietly forever.
+  if (!isStandIn && settings.VAULT_PATH === "") {
+    throw new SettingsError(["VAULT_PATH"]);
+  }
+
+  return {
+    issueKey,
+    skillName: settings.SKILL_NAME,
+    executable: settings.STORECODE_PATH,
+    workingDirectory: process.cwd(),
+    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS"),
+    noWrite: true,
+    deep: false,
+    // Requiring a live Atlassian session from a skill that reads nothing
+    // would fail runs for a reason unrelated to what is being exercised.
+    requiredMcpServers: isMock ? [] : ["atlassian"],
+    ...(isMock ? { allowedTools: [] as readonly string[] } : {}),
+    ...(isStandIn ? {} : { vaultPath: settings.VAULT_PATH, noHtml: true }),
+  };
+}
+
+export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<TriagePayload> {
+  // Built once, so a misconfiguration surfaces at startup rather than on the
+  // first issue that happens to arrive.
+  const template = buildTriageOptions(settings, "");
+
+  // The ticket carries summary, type and timestamps; only the key crosses over.
+  // Everything else the skill needs, it reads for itself over its own session.
+  return async (ticket: TicketRef) => await runTriage({ ...template, issueKey: ticket.key });
 }
 
 export function createJiraClient(settings: Settings): JiraClient {

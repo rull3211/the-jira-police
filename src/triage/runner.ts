@@ -4,13 +4,16 @@
  * Invocation shape, with every flag verified against the local arg parser
  * rather than assumed:
  *
- *   storecode -p "/intake-triage SSX-1234 --no-write"
+ *   storecode -p "/intake-triage SSX-1234 --no-write --no-html"
  *             --output-format stream-json --verbose
  *             --permission-mode dontAsk
  *             --allowedTools <explicit list>
+ *             --add-dir <vault>
  *             --json-schema '<inline draft-07>'
  *
- * Two non-obvious decisions:
+ * with `INSURANCE_VAULT=<vault>` in the child's environment.
+ *
+ * Three non-obvious decisions:
  *
  * 1. `dontAsk` rather than `acceptEdits`. acceptEdits does not auto-approve MCP
  *    tool calls, so a run would stall waiting for input that never comes.
@@ -22,12 +25,16 @@
  *    read the issue. That failure is silent, indistinguishable from a real
  *    verdict downstream, and is the single most likely production bug in this
  *    service. The init event carries per-server status, so we fail loudly.
+ *
+ * 3. The vault reaches the skill as an environment variable and an extra
+ *    working directory, never as its `--vault` flag. See `vaultPath` below.
  */
 
 import { spawn } from "node:child_process";
 
 import { logger } from "../logger.ts";
-import { TRIAGE_SCHEMA_JSON } from "./schema.ts";
+import type { Verdict } from "../output/sink.ts";
+import { TRIAGE_SCHEMA, TRIAGE_SCHEMA_JSON } from "./schema.ts";
 
 /** Tools the skill legitimately needs. Anything absent here will not run. */
 export const ALLOWED_TOOLS: readonly string[] = [
@@ -60,6 +67,26 @@ export interface TriageRunOptions {
   readonly noWrite: boolean;
   readonly deep: boolean;
   /**
+   * Absolute path to the insurance-knowledge-vault clone.
+   *
+   * Passed two ways, because one is not enough. As `$INSURANCE_VAULT`, which is
+   * the skill's own second resolution step, so it never reaches the "STOP and
+   * ask the user" branch that a headless run cannot answer. And as `--add-dir`,
+   * because the vault is a sibling of this repo rather than inside it, and
+   * without that the Read tool has no business being there.
+   *
+   * Deliberately not passed as the skill's `--vault` flag: that value would
+   * have to survive the model parsing it out of a prompt string, and an
+   * environment variable does not.
+   */
+  readonly vaultPath?: string;
+  /**
+   * Suppresses the HTML roll-up dashboard the skill otherwise writes after
+   * every run. This service has a sink of its own, and `Write` is not a tool
+   * the run is granted — so left on, it ends every run with a denied call.
+   */
+  readonly noHtml?: boolean;
+  /**
    * Servers that must be `connected`. Empty for the mock skill, which reads
    * nothing — requiring Atlassian there would fail runs for the wrong reason.
    */
@@ -69,7 +96,7 @@ export interface TriageRunOptions {
 }
 
 export interface TriagePayload {
-  readonly verdict: "duplicate" | "not-our-team" | "needs-info" | "ready-ish";
+  readonly verdict: Verdict;
   readonly labels: readonly string[];
   readonly recommendedNextStep: string;
   readonly report: string;
@@ -122,7 +149,10 @@ const WITHHELD_FROM_CHILD = /^JIRA_/;
  * Exported for testing — that the credential is absent is a property worth
  * asserting, not assuming.
  */
-export function childEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function childEnv(
+  parent: NodeJS.ProcessEnv = process.env,
+  vaultPath?: string,
+): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(parent)) {
     if (!WITHHELD_FROM_CHILD.test(key)) {
@@ -131,17 +161,26 @@ export function childEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.Proces
   }
   // Safety hooks must stay active in headless runs.
   result["CLAUDE_SKIP_HOOKS"] = "0";
+  // Set last, so a stale value in the operator's own shell cannot win.
+  if (vaultPath !== undefined && vaultPath !== "") {
+    result["INSURANCE_VAULT"] = vaultPath;
+  }
   return result;
 }
 
 export function buildPrompt(options: TriageRunOptions): string {
-  const flags = [options.noWrite ? "--no-write" : "", options.deep ? "--deep" : ""]
+  const flags = [
+    options.noWrite ? "--no-write" : "",
+    options.deep ? "--deep" : "",
+    options.noHtml === true ? "--no-html" : "",
+  ]
     .filter(Boolean)
     .join(" ");
   return `/${options.skillName} ${options.issueKey}${flags === "" ? "" : ` ${flags}`}`;
 }
 
 export function buildArgs(options: TriageRunOptions): string[] {
+  const vaultPath = options.vaultPath ?? "";
   return [
     "-p",
     buildPrompt(options),
@@ -152,6 +191,7 @@ export function buildArgs(options: TriageRunOptions): string[] {
     "dontAsk",
     "--allowedTools",
     (options.allowedTools ?? ALLOWED_TOOLS).join(","),
+    ...(vaultPath === "" ? [] : ["--add-dir", vaultPath]),
     "--json-schema",
     TRIAGE_SCHEMA_JSON,
   ];
@@ -176,18 +216,26 @@ export function assertMcpReady(
   }
 }
 
+/**
+ * The accepted verdicts, read off the schema the model was given.
+ *
+ * Deriving them rather than restating them means the check and the contract
+ * cannot disagree — and the annotation makes it a compile error for the schema
+ * to offer a verdict `Verdict` has no name for.
+ */
+const VERDICTS: readonly Verdict[] = TRIAGE_SCHEMA.properties.verdict.enum;
+
+function isVerdict(value: unknown): value is Verdict {
+  return typeof value === "string" && VERDICTS.includes(value as Verdict);
+}
+
 function parsePayload(value: unknown, issueKey: string): TriagePayload {
   if (typeof value !== "object" || value === null) {
     throw new TriageError(`No structured output returned for ${issueKey}`);
   }
   const candidate = value as Record<string, unknown>;
   const verdict = candidate["verdict"];
-  if (
-    verdict !== "duplicate" &&
-    verdict !== "not-our-team" &&
-    verdict !== "needs-info" &&
-    verdict !== "ready-ish"
-  ) {
+  if (!isVerdict(verdict)) {
     throw new TriageError(`Unrecognised verdict for ${issueKey}: ${String(verdict)}`);
   }
 
@@ -210,7 +258,7 @@ export async function runTriage(options: TriageRunOptions): Promise<TriagePayloa
     const child = spawn(options.executable, args, {
       cwd: options.workingDirectory,
       stdio: ["ignore", "pipe", "pipe"],
-      env: childEnv(),
+      env: childEnv(process.env, options.vaultPath),
     });
 
     let settled = false;
