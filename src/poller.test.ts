@@ -16,6 +16,8 @@ function ticket(key: string, created: string): TicketRef {
     issueTypeId: "10007",
     issueTypeName: "Oppgave",
     created,
+    updated: created,
+    labels: [],
     url: `https://example.invalid/browse/${key}`,
   };
 }

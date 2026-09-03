@@ -18,6 +18,10 @@ const FIELDS = [
   "summary",
   "issuetype",
   "created",
+  // Requested for the solve queue, which orders by it. The new-issue poller has
+  // no use for it and pays a few bytes a ticket, which is cheaper than a second
+  // field list to keep in step with a second normaliser.
+  "updated",
   "status",
   "priority",
   "labels",

@@ -13,7 +13,7 @@ function client(): JiraClient {
   });
 }
 
-function issue(key: string, created: string): unknown {
+function issue(key: string, created: string, fields: Record<string, unknown> = {}): unknown {
   return {
     id: "1",
     key,
@@ -21,6 +21,9 @@ function issue(key: string, created: string): unknown {
       summary: `Summary ${key}`,
       issuetype: { id: "10007", name: "Oppgave", subtask: false },
       created,
+      updated: created,
+      labels: [],
+      ...fields,
     },
   };
 }
@@ -68,6 +71,8 @@ describe("JiraClient.search", () => {
         issueTypeId: "10007",
         issueTypeName: "Oppgave",
         created: "2026-09-02T10:00:00Z",
+        updated: "2026-09-02T10:00:00Z",
+        labels: [],
         url: "https://example.invalid/browse/SSX-1",
       },
     ]);
@@ -75,6 +80,76 @@ describe("JiraClient.search", () => {
     const { url, init } = callArgs(fetchMock, 0);
     expect(url).toBe("https://example.invalid/rest/api/3/search/jql");
     expect(JSON.parse(init.body as string)).toMatchObject({ jql: "project = SSX" });
+  });
+
+  /**
+   * The solve queue's entire state is in the labels and it orders by `updated`,
+   * so a normaliser that drops either makes that queue unfeedable — which is
+   * exactly what it did until now. `labels` was already being requested from
+   * Jira and thrown away in the mapping, which is the kind of gap that reads as
+   * working code right up until something needs the field.
+   */
+  it("carries labels and updated through the normaliser", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        issues: [
+          issue("SSX-1", "2026-09-02T10:00:00Z", {
+            updated: "2026-09-03T18:30:00Z",
+            labels: ["agent:solvable", "agent:start"],
+          }),
+        ],
+        isLast: true,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [ticket] = await client().search("project = SSX");
+
+    expect(ticket?.labels).toEqual(["agent:solvable", "agent:start"]);
+    expect(ticket?.updated).toBe("2026-09-03T18:30:00Z");
+    // Distinct from `created`, so a fixture reusing one value could not have
+    // made this pass by accident.
+    expect(ticket?.created).toBe("2026-09-02T10:00:00Z");
+  });
+
+  it("asks Jira for updated, or the field would always normalise to empty", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ issues: [], isLast: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client().search("project = SSX");
+
+    const { init } = callArgs(fetchMock, 0);
+    expect(JSON.parse(init.body as string).fields).toContain("updated");
+    expect(JSON.parse(init.body as string).fields).toContain("labels");
+  });
+
+  it("normalises absent labels to an empty list, not undefined", async () => {
+    // An unlabelled ticket is ordinary. The solve queue reads this straight into
+    // a Set, and `undefined` there would throw on a perfectly normal issue.
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        issues: [
+          {
+            id: "1",
+            key: "SSX-2",
+            fields: {
+              summary: "x",
+              issuetype: { id: "1", name: "Oppgave", subtask: false },
+              created: "2026-09-02T10:00:00Z",
+            },
+          },
+        ],
+        isLast: true,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [ticket] = await client().search("project = SSX");
+
+    expect(ticket?.labels).toEqual([]);
+    // Empty rather than falling back to `created`: an absent timestamp should
+    // fail loudly downstream, not quietly sort by the wrong instant.
+    expect(ticket?.updated).toBe("");
   });
 
   it("authenticates with Basic and the email as the user half", async () => {

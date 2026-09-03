@@ -82,6 +82,8 @@ async function main(): Promise<void> {
     summary: `${issueKey} (summary not fetched in single-run mode)`,
     url: `${settings.JIRA_BASE_URL}/browse/${issueKey}`,
     created: new Date().toISOString(),
+    updated: "",
+    labels: [],
     issueTypeId: "",
     issueTypeName: "",
   };

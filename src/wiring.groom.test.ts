@@ -46,6 +46,8 @@ const TICKET: TicketRef = {
   issueTypeId: "10007",
   issueTypeName: "Oppgave",
   created: "2026-09-02T09:55:34.178+0200",
+  updated: "2026-09-02T09:55:34.178+0200",
+  labels: [],
   url: "https://example.invalid/browse/SSX-1234",
 };
 
