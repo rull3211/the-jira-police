@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { JqlError, assertSafe, buildNewIssuesJql, lookbackMinutes } from "./jql.ts";
+import { JqlError, assertSafe, buildNewIssuesJql, jqlValue, lookbackMinutes } from "./jql.ts";
 
 const NOW = new Date("2026-09-02T12:00:00Z");
 
 const BASE = {
   project: "SSX",
+  components: [] as readonly string[],
   excludedTypeIds: ["10009"],
   cursor: null,
   now: NOW,
@@ -95,6 +96,57 @@ describe("buildNewIssuesJql", () => {
 
   it("refuses to interpolate an unsafe issue type id", () => {
     expect(() => buildNewIssuesJql({ ...BASE, excludedTypeIds: ["1) OR true --"] })).toThrow(
+      JqlError,
+    );
+  });
+});
+
+/**
+ * The SSX board is shared by several teams. Without this clause the service
+ * triages — and pays for — every other team's tickets.
+ */
+describe("jqlValue", () => {
+  it("quotes a name, because real component names contain spaces", () => {
+    expect(jqlValue("SSX Advisor", "component")).toBe('"SSX Advisor"');
+  });
+
+  it("leaves an id bare, because Jira looks up quoted values by name", () => {
+    // `component = "12644"` searches for a component *named* 12644 and finds
+    // nothing, so the quoting is what selects id- versus name-lookup.
+    expect(jqlValue("12644", "component")).toBe("12644");
+  });
+
+  it("trims, so a comma-separated setting does not become a leading space", () => {
+    expect(jqlValue("  SSX Advisor  ", "component")).toBe('"SSX Advisor"');
+  });
+
+  it.each(['SSX" OR project = FOO', "SSX\\", "SSX'", "SSX\nOR", ""])(
+    "rejects %j rather than escaping it",
+    (value) => {
+      expect(() => jqlValue(value, "component")).toThrow(JqlError);
+    },
+  );
+});
+
+describe("buildNewIssuesJql component filter", () => {
+  it("restricts to a single named component", () => {
+    expect(buildNewIssuesJql({ ...BASE, components: ["SSX Advisor"] })).toBe(
+      'project = SSX AND created >= -60m AND component IN ("SSX Advisor") AND issuetype NOT IN (10009) ORDER BY created ASC',
+    );
+  });
+
+  it("accepts ids and names side by side", () => {
+    expect(buildNewIssuesJql({ ...BASE, components: ["12644", "SSX Nettsalg"] })).toContain(
+      'component IN (12644, "SSX Nettsalg")',
+    );
+  });
+
+  it("omits the clause entirely when no component is configured", () => {
+    expect(buildNewIssuesJql({ ...BASE, components: [] })).not.toContain("component");
+  });
+
+  it("refuses to interpolate an unsafe component", () => {
+    expect(() => buildNewIssuesJql({ ...BASE, components: ['x") OR project = FOO ("'] })).toThrow(
       JqlError,
     );
   });

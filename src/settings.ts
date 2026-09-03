@@ -50,6 +50,12 @@ export const SETTINGS = [
     fallback: "SSX",
   },
   {
+    name: "JIRA_COMPONENTS",
+    description:
+      'Comma-separated components to watch, by name or id. The SSX board is shared by several teams, so this is what keeps the service off other teams\' tickets. "SSX Advisor" is id 12644 — not to be confused with "App Buy Insurance Advisor" (11408). Blank watches the whole board.',
+    fallback: "SSX Advisor",
+  },
+  {
     name: "JIRA_EXCLUDED_TYPES",
     description:
       "Comma-separated issue type ids to skip. Defaults to Deloppgave (sub-tasks), which arrive attached to a parent that was triaged already.",

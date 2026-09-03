@@ -32,6 +32,37 @@ export function assertSafe(value: string, label: string): string {
   return value;
 }
 
+/** Anything that would let a value escape its JQL string literal. */
+const QUOTE_BREAKERS = /["'\\\r\n]/;
+
+/**
+ * Renders a value that may be either an entity id or an entity name.
+ *
+ * Jira resolves these differently and the quoting decides which: a bare number
+ * is looked up as an id, anything quoted is looked up as a name. So
+ * `component = 12644` finds the component by id, while `component = "12644"`
+ * searches for a component *named* "12644" and finds nothing. Both forms are
+ * worth supporting — ids are stable across renames, names are legible in a
+ * config file — which makes the numeric check the deciding rule rather than a
+ * shortcut.
+ *
+ * Names are quoted rather than validated against SAFE_IDENTIFIER because real
+ * ones contain spaces ("SSX Advisor"). JQL has no parameter binding, so the
+ * characters that could terminate the literal early are rejected outright
+ * instead of escaped — no legitimate component name contains them, and
+ * rejecting is easier to be sure of than escaping.
+ */
+export function jqlValue(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    throw new JqlError(`Empty ${label} for JQL interpolation`);
+  }
+  if (QUOTE_BREAKERS.test(trimmed)) {
+    throw new JqlError(`Unsafe ${label} for JQL interpolation: ${JSON.stringify(value)}`);
+  }
+  return /^[0-9]+$/.test(trimmed) ? trimmed : `"${trimmed}"`;
+}
+
 export interface WindowOptions {
   /** ISO-8601 timestamp of the newest issue already processed, or null. */
   readonly cursor: string | null;
@@ -66,6 +97,16 @@ export interface NewIssuesJqlOptions extends WindowOptions {
   readonly project: string;
   /** Issue type ids to exclude, e.g. sub-tasks. */
   readonly excludedTypeIds: readonly string[];
+  /**
+   * Components to restrict the search to, by id or by name. Empty means no
+   * restriction.
+   *
+   * The SSX board is shared by several teams, and triaging another team's
+   * tickets is both noise and spend. Note that this also excludes issues with
+   * no component at all, which is intended: an unclassified ticket is not
+   * demonstrably ours.
+   */
+  readonly components: readonly string[];
 }
 
 export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
@@ -73,6 +114,11 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
   const minutes = lookbackMinutes(options);
 
   const clauses = [`project = ${project}`, `created >= -${minutes}m`];
+
+  if (options.components.length > 0) {
+    const values = options.components.map((entry) => jqlValue(entry, "component")).join(", ");
+    clauses.push(`component IN (${values})`);
+  }
 
   if (options.excludedTypeIds.length > 0) {
     const ids = options.excludedTypeIds.map((id) => assertSafe(id, "issue type id")).join(", ");
