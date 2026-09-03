@@ -4,9 +4,11 @@ import {
   SETTINGS,
   SettingsError,
   describeSettings,
+  flag,
   list,
   numeric,
   readSettings,
+  solveMode,
 } from "./settings.ts";
 
 /** Minimal environment that satisfies every required setting. */
@@ -95,5 +97,97 @@ describe("list", () => {
       JIRA_EXCLUDED_TYPES: " 10009 , 10007 ,, ",
     });
     expect(list(settings, "JIRA_EXCLUDED_TYPES")).toEqual(["10009", "10007"]);
+  });
+});
+
+/**
+ * The solve queue's control plane. Every one of these grants some amount of
+ * privilege to a thing that will eventually write code, so every one of them
+ * has to be safe when nobody has said anything.
+ */
+describe("the solve settings", () => {
+  it("is off unless somebody turned it on", () => {
+    expect(flag(readSettings(MINIMAL), "SOLVE_ENABLED")).toBe(false);
+  });
+
+  it.each(["", "  ", "yes", "1", "on", "ture", "false"])(
+    "reads %j as off, because only true may arm it",
+    (value) => {
+      // Matches WRITE_BACK: a typo in the setting that eventually starts
+      // unattended code changes has to fail closed.
+      expect(flag(readSettings({ ...MINIMAL, SOLVE_ENABLED: value }), "SOLVE_ENABLED")).toBe(false);
+    },
+  );
+
+  it("arms only on an explicit true", () => {
+    expect(flag(readSettings({ ...MINIMAL, SOLVE_ENABLED: "true" }), "SOLVE_ENABLED")).toBe(true);
+  });
+
+  it("defaults to manual, so a solve waits for a human", () => {
+    expect(solveMode(readSettings(MINIMAL))).toBe("manual");
+  });
+
+  it("reads an explicit auto", () => {
+    expect(solveMode(readSettings({ ...MINIMAL, SOLVE_MODE: "auto" }))).toBe("auto");
+  });
+
+  it.each(["atuo", "AUTOMATIC", "on", "yes", "0", "manual auto"])(
+    "refuses %j rather than guessing",
+    (value) => {
+      // Not a silent fallback to manual, even though manual is the safe one: a
+      // fallback means the operator is running in a mode they did not choose
+      // and cannot see, in exactly the case where they were changing it.
+      const settings = readSettings({ ...MINIMAL, SOLVE_MODE: value });
+      expect(() => solveMode(settings)).toThrow(SettingsError);
+      expect(() => solveMode(settings)).toThrow(/SOLVE_MODE/);
+    },
+  );
+
+  it("never resolves an unreadable mode to auto", () => {
+    // The failure that matters. Anything is better than quietly granting the
+    // privilege the operator was trying to describe.
+    for (const value of ["atuo", "AUTOMATIC", "on"]) {
+      const settings = readSettings({ ...MINIMAL, SOLVE_MODE: value });
+      let resolved: string | null = null;
+      try {
+        resolved = solveMode(settings);
+      } catch {
+        resolved = null;
+      }
+      expect(resolved).not.toBe("auto");
+    }
+  });
+
+  it("names the setting and quotes the value it could not read", () => {
+    try {
+      solveMode(readSettings({ ...MINIMAL, SOLVE_MODE: "atuo" }));
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      expect((error as SettingsError).message).toContain("atuo");
+    }
+  });
+
+  it("reports the mode as a configuration problem, so it exits 78 rather than crashing", () => {
+    // `withConfigErrors` keys on SettingsError; anything else reaches the
+    // operator as a stack trace.
+    expect(() => solveMode(readSettings({ ...MINIMAL, SOLVE_MODE: "atuo" }))).toThrow(
+      SettingsError,
+    );
+  });
+
+  it("allows only the pilot repository out of the box", () => {
+    expect(list(readSettings(MINIMAL), "SOLVE_REPOS")).toEqual(["buy-insurance-advisor-web"]);
+  });
+
+  it("reads a blank allowlist as an empty list, which the poller reads as nothing", () => {
+    // Blank means "no repository", not "every repository". The poller is what
+    // enforces that reading; this only checks the list arrives empty.
+    expect(list(readSettings({ ...MINIMAL, SOLVE_REPOS: " , " }), "SOLVE_REPOS")).toEqual([]);
+  });
+
+  it("defaults to one solve at a time and three review rounds", () => {
+    const settings = readSettings(MINIMAL);
+    expect(numeric(settings, "MAX_CONCURRENT_SOLVES")).toBe(1);
+    expect(numeric(settings, "MAX_REVIEW_ITERATIONS")).toBe(3);
   });
 });

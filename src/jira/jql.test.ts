@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { JqlError, assertSafe, buildNewIssuesJql, jqlValue, lookbackMinutes } from "./jql.ts";
+import type { SolveMode } from "../settings.ts";
+import {
+  JqlError,
+  assertSafe,
+  buildNewIssuesJql,
+  buildSolveQueueJql,
+  jqlValue,
+  lookbackMinutes,
+} from "./jql.ts";
 
 const NOW = new Date("2026-09-02T12:00:00Z");
 
@@ -147,6 +155,105 @@ describe("buildNewIssuesJql component filter", () => {
 
   it("refuses to interpolate an unsafe component", () => {
     expect(() => buildNewIssuesJql({ ...BASE, components: ['x") OR project = FOO ("'] })).toThrow(
+      JqlError,
+    );
+  });
+});
+
+/**
+ * The second queue. Selects on label state and nothing else — no cursor, no
+ * window — because a ticket labelled for solving months after it was triaged
+ * still has to be picked up.
+ */
+describe("buildSolveQueueJql", () => {
+  const QUEUE = {
+    project: "SSX",
+    components: ["SSX Advisor"],
+    mode: "manual" as SolveMode,
+  };
+
+  it("builds the manual-mode query verbatim", () => {
+    expect(buildSolveQueueJql(QUEUE)).toBe(
+      'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
+        'AND labels = "agent:solvable" AND labels = "agent:start" ' +
+        'AND labels NOT IN ("agent:solving", "agent:done", "agent:failed") ORDER BY updated ASC',
+    );
+  });
+
+  it("builds the auto-mode query verbatim, differing only in the start clause", () => {
+    expect(buildSolveQueueJql({ ...QUEUE, mode: "auto" })).toBe(
+      'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
+        'AND labels = "agent:solvable" ' +
+        'AND labels NOT IN ("agent:solving", "agent:done", "agent:failed") ORDER BY updated ASC',
+    );
+  });
+
+  it("requires the human go-ahead in manual mode", () => {
+    // The single human step in the whole feature.
+    expect(buildSolveQueueJql(QUEUE)).toContain('labels = "agent:start"');
+  });
+
+  it("drops the go-ahead clause only for auto", () => {
+    expect(buildSolveQueueJql({ ...QUEUE, mode: "auto" })).not.toContain("agent:start");
+  });
+
+  it("treats an unrecognised mode as manual rather than as auto", () => {
+    // `solveMode` is the only validator, and it throws — but nothing stops a
+    // future caller from reading the mode off something else. The clause is
+    // written as "not auto" precisely so that a value which never passed
+    // validation still lands on the side that waits for a person.
+    const rogue = buildSolveQueueJql({ ...QUEUE, mode: "AUTO" as SolveMode });
+    expect(rogue).toContain('labels = "agent:start"');
+  });
+
+  it("excludes the claim and both terminal labels", () => {
+    // The exclusion is the entire dedupe mechanism: there is no seenKeys list
+    // and no cursor behind this query.
+    expect(buildSolveQueueJql(QUEUE)).toContain(
+      'labels NOT IN ("agent:solving", "agent:done", "agent:failed")',
+    );
+  });
+
+  it("keeps a positive label clause, which is what makes NOT IN safe", () => {
+    // `labels NOT IN (...)` also excludes issues whose labels field is empty.
+    // Harmless only while every candidate is guaranteed at least one label.
+    const jql = buildSolveQueueJql(QUEUE);
+    expect(jql.indexOf('labels = "agent:solvable"')).toBeLessThan(jql.indexOf("labels NOT IN"));
+  });
+
+  it("has no time or cursor clause at all", () => {
+    // The defining difference from the new-issue query. A relative window here
+    // would drop a ticket a human labels a week after it was triaged.
+    const jql = buildSolveQueueJql(QUEUE);
+    expect(jql).not.toContain("created");
+    expect(jql).not.toMatch(/-\d+m/);
+    expect(jql).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it("skips closed tickets, which no cursor would ever carry out of range", () => {
+    expect(buildSolveQueueJql(QUEUE)).toContain("statusCategory != Done");
+  });
+
+  it("orders oldest touched first, so a backlog drains fairly", () => {
+    expect(buildSolveQueueJql(QUEUE)).toMatch(/ORDER BY updated ASC$/);
+  });
+
+  it("omits the component clause when nothing is configured", () => {
+    expect(buildSolveQueueJql({ ...QUEUE, components: [] })).not.toContain("component");
+  });
+
+  it("accepts a component id bare and a component name quoted", () => {
+    expect(buildSolveQueueJql({ ...QUEUE, components: ["12644", "SSX Nettsalg"] })).toContain(
+      'component IN (12644, "SSX Nettsalg")',
+    );
+  });
+
+  it("refuses to interpolate an unsafe project", () => {
+    expect(() => buildSolveQueueJql({ ...QUEUE, project: 'X" OR "1"="1' })).toThrow(JqlError);
+  });
+
+  it("refuses to interpolate an unsafe component", () => {
+    expect(() => buildSolveQueueJql({ ...QUEUE, components: ['x") OR labels = "y'] })).toThrow(
       JqlError,
     );
   });

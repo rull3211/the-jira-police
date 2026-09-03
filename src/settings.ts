@@ -117,6 +117,36 @@ export const SETTINGS = [
     fallback: "600000",
   },
   {
+    name: "SOLVE_ENABLED",
+    description:
+      'Master switch for the solve queue. Off means the second poller never starts, so no ticket is ever claimed. Separate from SOLVE_MODE because they answer different questions — whether the machinery runs at all, and how much human approval it needs when it does — and collapsing them into one setting would mean the only way to test the plumbing was to arm it. Strict "true", so a typo fails closed.',
+    fallback: "false",
+  },
+  {
+    name: "SOLVE_MODE",
+    description:
+      'manual | auto. Manual additionally requires the label "agent:start" on a ticket before it may be claimed, which is the single human step in the whole flow and the only thing standing between a triage assessment and an unattended code change. Defaults to manual, and an unrecognised value is a startup error rather than a fallback: guessing here would guess in the direction of more privilege.',
+    fallback: "manual",
+  },
+  {
+    name: "SOLVE_REPOS",
+    description:
+      "Comma-separated allowlist of repositories the solver may touch. Unlike JIRA_COMPONENTS, blank means *nothing* is allowed rather than everything: this list grants a write privilege, so its empty state has to be the safe one. A ticket naming a repo outside the list is skipped and not failed, so widening the list later picks it up without a manual reset.",
+    fallback: "buy-insurance-advisor-web",
+  },
+  {
+    name: "MAX_CONCURRENT_SOLVES",
+    description:
+      "How many tickets may be in flight at once, counted from the tickets currently carrying the claim label rather than from anything local. One, for the pilot: a solve is expensive, and a bounded blast radius is worth more than throughput while the fitness call is still being calibrated.",
+    fallback: "1",
+  },
+  {
+    name: "MAX_REVIEW_ITERATIONS",
+    description:
+      "How many times a solve may respond to a review before the pull request is marked ready anyway, with the ticket comment saying the cap was hit. A cap rather than a loop, because a reviewer and a fixer that disagree can trade comments indefinitely and neither of them is paying.",
+    fallback: "3",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",
@@ -240,4 +270,44 @@ export function list(settings: Settings, name: SettingName): readonly string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
+}
+
+/**
+ * How much human approval a solve needs.
+ *
+ * `manual` requires the label `agent:start` on the ticket; `auto` does not.
+ * There is no third value and there is deliberately no "off" — that is
+ * `SOLVE_ENABLED`, kept separate so that arming the machinery and lowering the
+ * approval bar are two decisions rather than one.
+ */
+export type SolveMode = "manual" | "auto";
+
+/**
+ * Reads `SOLVE_MODE`, refusing anything it does not recognise.
+ *
+ * The obvious alternative — treat an unreadable value as `manual`, since
+ * `manual` is the safe one — is wrong for a reason worth writing down. Falling
+ * back silently means `SOLVE_MODE=atuo` runs the service in a mode the operator
+ * did not choose and cannot see, and the failure is invisible in exactly the
+ * case they were trying to change the setting. Refusing at startup costs a
+ * restart; a silent fallback costs a wrong belief about what the service is
+ * doing, and the whole point of this setting is that somebody knows.
+ *
+ * That this fails closed *and* loudly is not a compromise between the two: an
+ * unreadable value is not evidence of intent in either direction, so there is
+ * nothing to fail closed to.
+ *
+ * The wording of the resulting message is inherited from `SettingsError`, which
+ * frames every configuration problem as a missing setting. That reads slightly
+ * off for a present-but-invalid one; `missing` still names `SOLVE_MODE`, and
+ * the value is quoted below so the operator can see their typo.
+ */
+export function solveMode(settings: Settings): SolveMode {
+  const raw = settings.SOLVE_MODE.trim().toLowerCase();
+  if (raw === "manual" || raw === "auto") {
+    return raw;
+  }
+  throw new SettingsError([
+    `SOLVE_MODE (expected "manual" or "auto", got "${settings.SOLVE_MODE}")`,
+  ]);
 }

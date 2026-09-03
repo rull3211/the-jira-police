@@ -1,5 +1,12 @@
 /**
- * Builds the JQL used to find newly created issues.
+ * The two queries this service runs, and the validation both share.
+ *
+ * `buildNewIssuesJql` finds newly created issues; `buildSolveQueueJql` finds
+ * issues whose labels say they are waiting to be fixed. They share nothing but
+ * the helpers below, because they disagree about the one thing that matters:
+ * the first selects on time and the second selects on state.
+ *
+ * On the new-issue query:
  *
  * Uses a relative minute offset (`created >= -90m`) rather than an absolute
  * timestamp. Absolute dates in JQL are interpreted in the *server's* timezone,
@@ -11,6 +18,9 @@
  * deliberately overlaps and why key-level dedupe in the poller is mandatory
  * rather than an optimisation.
  */
+
+import type { SolveMode } from "../settings.ts";
+import { AGENT_LABELS, SOLVE_QUEUE_EXCLUDED_LABELS } from "../solve/labels.ts";
 
 export class JqlError extends Error {
   constructor(message: string) {
@@ -127,4 +137,77 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
 
   // Ascending so the poller can advance its cursor monotonically.
   return `${clauses.join(" AND ")} ORDER BY created ASC`;
+}
+
+export interface SolveQueueJqlOptions {
+  readonly project: string;
+  /** Same restriction as the new-issue query, for the same reason. */
+  readonly components: readonly string[];
+  /**
+   * `manual` additionally requires `agent:start`, the human go-ahead.
+   *
+   * Passed as the mode rather than as a boolean on purpose. A
+   * `requireStartLabel: false` left at its default by a careless caller is a
+   * silent promotion to unattended solving; a mode has to be spelled `"auto"`
+   * to mean it, and anything else is read below as manual.
+   */
+  readonly mode: SolveMode;
+}
+
+/**
+ * Builds the JQL that selects tickets waiting to be solved.
+ *
+ * Deliberately has **no time or cursor clause**, which is the one structural
+ * difference from `buildNewIssuesJql` and the reason the two queries cannot be
+ * merged. The new-issue poller asks "what appeared since I last looked" and
+ * dedupes against a local `seenKeys` list; this one asks "what is in the
+ * waiting state right now", and its dedupe is the ticket's own labels. A
+ * ticket triaged on Monday is permanently ineligible for the first query and
+ * must still be eligible for this one the moment a human labels it on Friday.
+ *
+ * Because the queue's state lives in Jira rather than on disk, it survives a
+ * restart, a wiped `state/` and a second instance without a lock file — but
+ * only for as long as the exclusion clause below and the claim written by the
+ * solver name exactly the same labels. That is why both come from
+ * `src/solve/labels.ts` rather than being spelled out here: two copies of this
+ * vocabulary that drifted apart would mean a ticket claimed by one instance
+ * and re-claimed by the next.
+ *
+ * Note the classic `labels NOT IN (...)` gotcha: in Jira that clause also
+ * excludes issues whose `labels` field is *empty*, because the field has no
+ * value to compare. It is harmless here — `labels = "agent:solvable"`
+ * guarantees every candidate already carries at least one label — but the next
+ * reader should not have to rediscover that, and any future rewrite that drops
+ * the positive label clause would silently start missing unlabelled tickets.
+ */
+export function buildSolveQueueJql(options: SolveQueueJqlOptions): string {
+  const project = assertSafe(options.project, "project");
+
+  const clauses = [`project = ${project}`];
+
+  if (options.components.length > 0) {
+    const values = options.components.map((entry) => jqlValue(entry, "component")).join(", ");
+    clauses.push(`component IN (${values})`);
+  }
+
+  // A closed ticket is not worth a code change, and the solve queue has no
+  // cursor to carry it out of range — without this it would sit in the queue
+  // forever.
+  clauses.push("statusCategory != Done");
+
+  clauses.push(`labels = ${jqlValue(AGENT_LABELS.solvable, "label")}`);
+
+  // Not `=== "manual"`. The privilege here is running unattended, so the test
+  // is for the one value that grants it; every other value, including one that
+  // slipped past validation, falls through to requiring a human's label.
+  if (options.mode !== "auto") {
+    clauses.push(`labels = ${jqlValue(AGENT_LABELS.start, "label")}`);
+  }
+
+  const excluded = SOLVE_QUEUE_EXCLUDED_LABELS.map((label) => jqlValue(label, "label")).join(", ");
+  clauses.push(`labels NOT IN (${excluded})`);
+
+  // Oldest touched first, so a backlog drains in a fair order rather than
+  // whichever ticket Jira happened to return first.
+  return `${clauses.join(" AND ")} ORDER BY updated ASC`;
 }
