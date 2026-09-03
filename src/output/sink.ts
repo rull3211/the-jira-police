@@ -9,6 +9,11 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+// Mutually referential with `runner.ts`, which imports `Verdict` from here.
+// Both directions are `import type`, so the cycle exists only for the type
+// checker: Node's type-stripping erases these lines before anything is loaded.
+import type { AgentFitness } from "../triage/runner.ts";
+
 /** Verdict emitted by the intake-triage skill. */
 export type Verdict = "duplicate" | "not-our-team" | "out-of-scope" | "needs-info" | "ready-ish";
 
@@ -30,6 +35,21 @@ export interface TriageResult {
   readonly recommendedNextStep: string;
   /** The full report, as rendered by the skill. */
   readonly report: string;
+  /**
+   * The agent-fitness call, carried through so it can be judged.
+   *
+   * Required rather than optional, and that is the point. The assessment ships
+   * ahead of anything that acts on it precisely so its accuracy can be measured
+   * first — which is impossible if it never reaches an artifact. It did not: the
+   * first live run produced a fitness call that existed only in memory, and the
+   * sole surviving trace on disk was whether `agent:solvable` appeared in
+   * `labels`. That is the conclusion without the reasoning, so a wrong call and
+   * a right one look identical afterwards.
+   *
+   * Both construction sites already hold the payload, so there is no caller for
+   * whom this is a burden, and optional would only have re-created the hole.
+   */
+  readonly agentFitness: AgentFitness;
 }
 
 export interface OutputSink {
@@ -101,6 +121,30 @@ export async function clearRejection(directory: string, issueKey: string): Promi
   await rm(join(directory, `${issueKey}.rejected.md`), { force: true });
 }
 
+/**
+ * The fitness call, rendered so a human can mark it right or wrong.
+ *
+ * Both halves are shown. A "no" is the common case and the more interesting
+ * one to audit — the failure mode this whole staged rollout is guarding against
+ * is an assessment that says yes when it should not, and you cannot spot the
+ * pattern in the yeses without the noes to compare them against. So the
+ * rationale and blockers print either way; only `repo` is conditional, because
+ * it is routinely empty when the answer is no and an empty field teaches
+ * nothing.
+ */
+export function formatAgentFitness(fitness: AgentFitness): readonly string[] {
+  const verdict = fitness.solvable ? "🤖 yes" : "— no";
+
+  return [
+    "## Agent fitness",
+    "",
+    `- **Solvable by an agent:** ${verdict} (confidence: ${fitness.confidence})`,
+    ...(fitness.repo === "" ? [] : [`- **Repo:** \`${fitness.repo}\``]),
+    `- **Rationale:** ${fitness.rationale === "" ? "—" : fitness.rationale}`,
+    `- **Blockers:** ${fitness.blockers.length > 0 ? fitness.blockers.join("; ") : "—"}`,
+  ];
+}
+
 /** One line, suitable for a canvas checklist item or a terminal summary. */
 export function formatChecklistLine(result: TriageResult): string {
   const emoji = VERDICT_EMOJI[result.verdict];
@@ -135,6 +179,10 @@ export class FileSink implements OutputSink {
       `- **Labels:** ${result.labels.length > 0 ? result.labels.join(", ") : "—"}`,
       `- **Next step:** ${result.recommendedNextStep}`,
       `- **Issue:** ${result.issueUrl}`,
+      "",
+      "---",
+      "",
+      ...formatAgentFitness(result.agentFitness),
       "",
       "---",
       "",

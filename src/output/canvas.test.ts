@@ -19,6 +19,13 @@ function result(overrides: Partial<TriageResult> = {}): TriageResult {
     labels: ["dor:gaps"],
     recommendedNextStep: "Ask the reporter.",
     report: "## report",
+    agentFitness: {
+      solvable: false,
+      confidence: "low",
+      repo: "",
+      rationale: "DoR gaps.",
+      blockers: ["baseline unfilled"],
+    },
     ...overrides,
   };
 }

@@ -65,6 +65,7 @@ export function toTriageResult(ticket: TicketRef, payload: TriagePayload): Triag
     labels: payload.labels,
     recommendedNextStep: payload.recommendedNextStep,
     report: payload.report,
+    agentFitness: payload.agentFitness,
   };
 }
 

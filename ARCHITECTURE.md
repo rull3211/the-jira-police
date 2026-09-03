@@ -13,7 +13,7 @@ new SSX ticket  →  discover  →  analyse  →  gate  →  post
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 325 tests, no build step, no deployment
+Status: running end to end against production Jira. 339 tests, no build step, no deployment
 target yet.
 
 ---
@@ -335,6 +335,25 @@ files.
 
 A later run that passes the gate calls `clearRejection` first, so a stale refusal never sits next
 to a fresh report for the same key claiming both are current.
+
+### The same rule applies to what the gate lets through
+
+`agentFitness` shipped one run before this was noticed. It was parsed, gated by five rules, and
+then dropped on the floor: `TriageResult` stopped at `report`, so the assessment reached neither
+the artifact nor the log line. The only surviving trace on disk was whether `agent:solvable`
+appeared in `labels` — the conclusion with the reasoning stripped off.
+
+That is a bad way to fail, because the entire argument for Phase A was that the assessment costs
+nothing extra per run and **tells you how often the fitness call is right before anything acts on
+it.** A yes/no with no rationale, confidence or blockers cannot be marked wrong, so a calibration
+period reading those artifacts would have measured nothing while looking like it was working.
+
+`TriageResult.agentFitness` is therefore required rather than optional. Both construction sites
+(`toTriageResult`, `triage-once`) already hold the payload, so nothing is burdened by it, and
+optional would only have re-created the hole one caller at a time. The generalisation, which is
+§8 pointed the other way: **an artifact must record the judgements that were made, not only the
+ones that were refused.** A gate you cannot audit gets switched off; an assessment you cannot
+audit gets trusted, which is worse.
 
 ---
 

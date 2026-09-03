@@ -96,6 +96,7 @@ async function main(): Promise<void> {
     labels: payload.labels,
     recommendedNextStep: payload.recommendedNextStep,
     report: payload.report,
+    agentFitness: payload.agentFitness,
   };
 
   const sink = new FileSink(settings.OUTPUT_DIR);
