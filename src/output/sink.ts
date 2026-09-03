@@ -6,7 +6,7 @@
  * confirmed yet, so the interface exists to keep that swap cheap.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Verdict emitted by the intake-triage skill. */
@@ -35,6 +35,70 @@ export interface TriageResult {
 export interface OutputSink {
   readonly name: string;
   write(result: TriageResult): Promise<void>;
+}
+
+/** Everything needed to judge a refusal after the fact. */
+export interface Rejection {
+  readonly issueKey: string;
+  readonly violations: readonly string[];
+  readonly verdict: string;
+  readonly labels: readonly string[];
+  readonly dorPlaceholders: readonly string[];
+  /** The payload that was refused, rendered as-is. */
+  readonly mutation: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Writes a refused mutation to `<dir>/<ISSUE-KEY>.rejected.md`.
+ *
+ * The gate throws, and a throw carries only its message — so without this the
+ * one artifact an operator needs to decide whether the refusal was *correct*,
+ * the comment body itself, is destroyed at the moment it becomes interesting.
+ * That matters more than it sounds: these checks are heuristics over prose, and
+ * a heuristic you cannot audit is one you end up disabling out of frustration.
+ *
+ * Written under a distinct suffix rather than `<KEY>.md` so a refusal can never
+ * be mistaken for a delivered report, and so a later successful run does not
+ * silently overwrite the evidence of the earlier failure.
+ */
+export async function writeRejection(directory: string, rejection: Rejection): Promise<void> {
+  await mkdir(directory, { recursive: true });
+
+  const body = [
+    `# ${rejection.issueKey} — REFUSED, nothing was posted`,
+    "",
+    `- **Verdict:** ${rejection.verdict}`,
+    `- **Labels:** ${rejection.labels.join(", ") || "—"}`,
+    `- **DoR placeholders:** ${rejection.dorPlaceholders.join(", ") || "—"}`,
+    "",
+    "## Why it was refused",
+    "",
+    ...rejection.violations.map((violation) => `- ${violation}`),
+    "",
+    "## The mutation that was withheld",
+    "",
+    "```json",
+    JSON.stringify(rejection.mutation, null, 2),
+    "```",
+    "",
+  ].join("\n");
+
+  await writeFile(join(directory, `${rejection.issueKey}.rejected.md`), body, "utf8");
+}
+
+/**
+ * Removes a superseded rejection, if one is there.
+ *
+ * A refusal file is a claim about the present — "this ticket has a mutation we
+ * would not post". Once a later run gets through the gate that claim is false,
+ * and leaving it on disk puts a stale failure next to a fresh report for the
+ * same key. Whoever reads the directory next has no way to tell which is
+ * current.
+ *
+ * Missing file is the normal case, not an error: most runs never refuse.
+ */
+export async function clearRejection(directory: string, issueKey: string): Promise<void> {
+  await rm(join(directory, `${issueKey}.rejected.md`), { force: true });
 }
 
 /** One line, suitable for a canvas checklist item or a terminal summary. */
