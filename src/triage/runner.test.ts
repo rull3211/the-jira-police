@@ -6,6 +6,7 @@ import {
   assertMcpReady,
   buildArgs,
   buildPrompt,
+  childEnv,
 } from "./runner.ts";
 
 const BASE = {
@@ -106,5 +107,41 @@ describe("assertMcpReady", () => {
     // The mock skill reads no data, so demanding Atlassian would fail runs for
     // a reason unrelated to what is under test.
     expect(() => assertMcpReady([], [])).not.toThrow();
+  });
+});
+
+/**
+ * The poller and the skill reach Jira by different routes on purpose: a REST
+ * credential to discover which tickets are new, the Atlassian MCP session to
+ * read what is in them. The skill has no use for the REST credential, so it
+ * must not be handed one.
+ */
+describe("childEnv", () => {
+  it("withholds the Jira REST credential from the subprocess", () => {
+    const env = childEnv({ JIRA_AUTH: "placeholder", JIRA_EMAIL: "a@b.c", PATH: "/usr/bin" });
+
+    expect(env["JIRA_AUTH"]).toBeUndefined();
+    expect(env["JIRA_EMAIL"]).toBeUndefined();
+  });
+
+  it("passes everything else through, since storecode needs the Vertex config", () => {
+    const env = childEnv({ PATH: "/usr/bin", CLAUDE_CODE_USE_VERTEX: "1", HOME: "/home/x" });
+
+    expect(env).toMatchObject({
+      PATH: "/usr/bin",
+      CLAUDE_CODE_USE_VERTEX: "1",
+      HOME: "/home/x",
+    });
+  });
+
+  it("keeps the safety hooks on even if the parent turned them off", () => {
+    expect(childEnv({ CLAUDE_SKIP_HOOKS: "1" })["CLAUDE_SKIP_HOOKS"]).toBe("0");
+  });
+
+  it("does not mutate the parent environment", () => {
+    const parent = { JIRA_AUTH: "placeholder", PATH: "/usr/bin" };
+    childEnv(parent);
+
+    expect(parent["JIRA_AUTH"]).toBe("placeholder");
   });
 });

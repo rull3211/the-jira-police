@@ -104,6 +104,36 @@ interface McpServerStatus {
   readonly status: string;
 }
 
+/**
+ * Variables withheld from the triage subprocess.
+ *
+ * The two halves of this service authenticate to Jira by different means and
+ * deliberately so: the poller uses a REST credential to discover *which*
+ * tickets are new, and the skill uses the Atlassian MCP session to read what
+ * is *in* them. The skill therefore never needs the REST credential, so it
+ * does not get it. Inheriting the whole environment would hand it over for no
+ * reason, and least privilege is cheap here.
+ */
+const WITHHELD_FROM_CHILD = /^JIRA_/;
+
+/**
+ * The child's environment: ours, minus the Jira REST credential.
+ *
+ * Exported for testing — that the credential is absent is a property worth
+ * asserting, not assuming.
+ */
+export function childEnv(parent: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(parent)) {
+    if (!WITHHELD_FROM_CHILD.test(key)) {
+      result[key] = value;
+    }
+  }
+  // Safety hooks must stay active in headless runs.
+  result["CLAUDE_SKIP_HOOKS"] = "0";
+  return result;
+}
+
 export function buildPrompt(options: TriageRunOptions): string {
   const flags = [options.noWrite ? "--no-write" : "", options.deep ? "--deep" : ""]
     .filter(Boolean)
@@ -180,8 +210,7 @@ export async function runTriage(options: TriageRunOptions): Promise<TriagePayloa
     const child = spawn(options.executable, args, {
       cwd: options.workingDirectory,
       stdio: ["ignore", "pipe", "pipe"],
-      // Safety hooks must stay active in headless runs.
-      env: { ...process.env, CLAUDE_SKIP_HOOKS: "0" },
+      env: childEnv(),
     });
 
     let settled = false;
