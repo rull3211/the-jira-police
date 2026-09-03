@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   ALLOWED_TOOLS,
   McpUnavailableError,
+  WRITE_TOOLS,
   assertMcpReady,
   buildArgs,
   buildPrompt,
   childEnv,
+  toolsFor,
 } from "./runner.ts";
 
 const BASE = {
@@ -22,11 +24,25 @@ const BASE = {
 
 describe("buildPrompt", () => {
   it("renders the skill as a slash command", () => {
-    expect(buildPrompt({ ...BASE, noWrite: false })).toBe("/intake-triage SSX-1234");
+    expect(buildPrompt(BASE)).toBe("/intake-triage SSX-1234 --no-write");
   });
 
   it("passes --no-write so nothing is published to the ticket", () => {
     expect(buildPrompt(BASE)).toBe("/intake-triage SSX-1234 --no-write");
+  });
+
+  it("passes --yes when the run may write, because no one is there to say y", () => {
+    // Without it the skill renders the mutation payload and stops at
+    // "[y] post · [n] skip · [e] edit" — a prompt with no operator behind it.
+    // The run would burn its whole timeout and publish nothing.
+    expect(buildPrompt({ ...BASE, noWrite: false })).toBe("/intake-triage SSX-1234 --yes");
+  });
+
+  it("never emits both, and never neither", () => {
+    for (const noWrite of [true, false]) {
+      const prompt = buildPrompt({ ...BASE, noWrite });
+      expect(prompt.includes("--no-write") ? 1 : 0).not.toBe(prompt.includes("--yes") ? 1 : 0);
+    }
   });
 
   it("combines flags", () => {
@@ -99,11 +115,53 @@ describe("buildArgs", () => {
     expect(buildPrompt({ ...BASE, vaultPath: "/vaults/v" })).not.toContain("/vaults/v");
   });
 
-  it("grants no Jira write tools", () => {
+  it("grants no Jira write tools by default", () => {
     const granted = ALLOWED_TOOLS.join(" ");
     expect(granted).not.toContain("editJiraIssue");
     expect(granted).not.toContain("addCommentToJiraIssue");
     expect(granted).not.toContain("transitionJiraIssue");
+  });
+});
+
+describe("toolsFor", () => {
+  it("withholds the write tools from a preview run", () => {
+    // The prompt already says --no-write, but that is a sentence the model
+    // could misread. This is a permission check it cannot.
+    expect(toolsFor(BASE)).toEqual(ALLOWED_TOOLS);
+    expect(toolsFor(BASE).join(" ")).not.toContain("addCommentToJiraIssue");
+  });
+
+  it("grants them to a run that is going to write", () => {
+    const granted = toolsFor({ ...BASE, noWrite: false });
+
+    for (const tool of WRITE_TOOLS) {
+      expect(granted).toContain(tool);
+    }
+    // Still everything it needs to read, or it would write an uninformed verdict.
+    for (const tool of ALLOWED_TOOLS) {
+      expect(granted).toContain(tool);
+    }
+  });
+
+  it("never grants the transition tool, on either side of the switch", () => {
+    // The skill promises never to change status — "not after a `y`, not for a
+    // close-as-duplicate". Withholding the tool makes that enforceable rather
+    // than merely promised, which is the difference that matters if the skill
+    // is ever edited upstream.
+    for (const noWrite of [true, false]) {
+      expect(toolsFor({ ...BASE, noWrite }).join(" ")).not.toContain("transitionJiraIssue");
+    }
+  });
+
+  it("lets an explicit allowlist win, so the mock can be given nothing", () => {
+    expect(toolsFor({ ...BASE, noWrite: false, allowedTools: [] })).toEqual([]);
+  });
+
+  it("reaches the command line", () => {
+    const args = buildArgs({ ...BASE, noWrite: false });
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe(
+      [...ALLOWED_TOOLS, ...WRITE_TOOLS].join(","),
+    );
   });
 });
 

@@ -4,7 +4,7 @@
  * Invocation shape, with every flag verified against the local arg parser
  * rather than assumed:
  *
- *   storecode -p "/intake-triage SSX-1234 --no-write --no-html"
+ *   storecode -p "/intake-triage SSX-1234 --no-write|--yes --no-html"
  *             --output-format stream-json --verbose
  *             --permission-mode dontAsk
  *             --allowedTools <explicit list>
@@ -43,9 +43,39 @@ export const ALLOWED_TOOLS: readonly string[] = [
   "mcp__atlassian__search",
   "mcp__atlassian__getConfluencePage",
   "mcp__atlassian__searchConfluenceUsingCql",
+  // Denying this one is not free. A live run reported it: "Component
+  // create-metadata could not be fetched (getAccessibleAtlassianResources
+  // denied); SSX Advisor was validated against the copy live on the issue,
+  // which does not re-confirm that all four policy streams still exist." That
+  // was a caveat in a preview; with WRITE_BACK on, the component is a real
+  // mutation, so the run needs to be able to check the name before setting it.
+  "mcp__atlassian__getAccessibleAtlassianResources",
   "Read",
   "Grep",
   "Glob",
+];
+
+/**
+ * Additionally granted when the run may write back to the issue.
+ *
+ * This is the exact set named in `INTAKE_INSTRUCTIONS.md` §11 — labels and
+ * component via `editJiraIssue`, the idempotent report comment, and an issue
+ * link on a duplicate. `atlassianUserInfo` is here because it is what makes the
+ * comment idempotent: the skill updates a prior comment in place only when it
+ * matches BOTH the footer sentinel AND its own Jira account, so without a way
+ * to learn who it is, a re-run appends a second copy instead of refreshing.
+ *
+ * Conspicuously absent: `transitionJiraIssue`. The skill promises never to
+ * change status — "not after a `y`, not for a close-as-duplicate" — and
+ * withholding the tool turns that promise into something the service enforces
+ * rather than something it trusts.
+ */
+export const WRITE_TOOLS: readonly string[] = [
+  "mcp__atlassian__editJiraIssue",
+  "mcp__atlassian__addCommentToJiraIssue",
+  "mcp__atlassian__createIssueLink",
+  "mcp__atlassian__getIssueLinkTypes",
+  "mcp__atlassian__atlassianUserInfo",
 ];
 
 /** MCP servers that must report `connected` before the run is trusted. */
@@ -63,7 +93,21 @@ export interface TriageRunOptions {
   /** Directory to run in — must be where the skill and vault are resolvable. */
   readonly workingDirectory: string;
   readonly timeoutMs: number;
-  /** When true, passes --no-write so nothing is published to the Jira issue. */
+  /**
+   * When true, passes `--no-write` so nothing is published to the Jira issue.
+   *
+   * When false the run passes `--yes` instead, and that pairing is not a
+   * choice — it is the only coherent one. Left to itself the skill renders the
+   * mutation payload and stops at `[y] post · [n] skip · [e] edit`, which in a
+   * headless run is a prompt nobody can answer: the process would sit there
+   * until the timeout killed it, having done the expensive part and published
+   * nothing. `--yes` exists in the skill precisely for "non-interactive /
+   * scheduled (cron) runs", which is what this service is.
+   *
+   * So there is no separate "confirm" mode to model, and deriving `--yes` from
+   * this one field rather than adding a second one means the two can never be
+   * set to disagree.
+   */
   readonly noWrite: boolean;
   readonly deep: boolean;
   /**
@@ -170,13 +214,30 @@ export function childEnv(
 
 export function buildPrompt(options: TriageRunOptions): string {
   const flags = [
-    options.noWrite ? "--no-write" : "",
+    // Never neither, never both: see `noWrite`.
+    options.noWrite ? "--no-write" : "--yes",
     options.deep ? "--deep" : "",
     options.noHtml === true ? "--no-html" : "",
   ]
     .filter(Boolean)
     .join(" ");
   return `/${options.skillName} ${options.issueKey}${flags === "" ? "" : ` ${flags}`}`;
+}
+
+/**
+ * The tool allowlist for a run.
+ *
+ * Write tools are granted only to a run that is actually going to write. The
+ * prompt already says `--no-write`, so this is belt and braces — but the belt
+ * is a sentence in a prompt the model could misread, and the braces are a
+ * permission check it cannot. On a preview run the write tools are simply not
+ * there to call.
+ */
+export function toolsFor(options: TriageRunOptions): readonly string[] {
+  if (options.allowedTools !== undefined) {
+    return options.allowedTools;
+  }
+  return options.noWrite ? ALLOWED_TOOLS : [...ALLOWED_TOOLS, ...WRITE_TOOLS];
 }
 
 export function buildArgs(options: TriageRunOptions): string[] {
@@ -190,7 +251,7 @@ export function buildArgs(options: TriageRunOptions): string[] {
     "--permission-mode",
     "dontAsk",
     "--allowedTools",
-    (options.allowedTools ?? ALLOWED_TOOLS).join(","),
+    toolsFor(options).join(","),
     ...(vaultPath === "" ? [] : ["--add-dir", vaultPath]),
     "--json-schema",
     TRIAGE_SCHEMA_JSON,

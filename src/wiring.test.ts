@@ -77,3 +77,49 @@ describe("buildTriageOptions", () => {
     expect(options.allowedTools).toBeUndefined();
   });
 });
+
+describe("buildTriageOptions and WRITE_BACK", () => {
+  function real(overrides: Partial<Record<string, string>> = {}) {
+    return buildTriageOptions(
+      settingsWith({ SKILL_NAME: "intake-triage", VAULT_PATH: "/vaults/v", ...overrides }),
+      "SSX-1",
+    );
+  }
+
+  it("does not write back unless asked", () => {
+    // The default matters more than usual here: this is the only setting whose
+    // effect is visible to the whole team.
+    expect(real().noWrite).toBe(true);
+  });
+
+  it("writes back when the setting is true", () => {
+    expect(real({ WRITE_BACK: "true" }).noWrite).toBe(false);
+  });
+
+  it.each(["TRUE", "True", " true "])("accepts %o, since .env values arrive untidy", (value) => {
+    expect(real({ WRITE_BACK: value }).noWrite).toBe(false);
+  });
+
+  it.each(["yes", "1", "on", "", "  ", "no", "maybe"])(
+    "fails closed on %o rather than guessing",
+    (value) => {
+      // Truthiness would make "0" and "false" enable writes. A setting that
+      // posts to shared tickets is the wrong place to be generous.
+      expect(real({ WRITE_BACK: value }).noWrite).toBe(true);
+    },
+  );
+
+  it.each(["mock-triage", "live-triage-probe"])(
+    "keeps %s in preview even when WRITE_BACK is on",
+    (skill) => {
+      // Both exist to rehearse the pipeline. A rehearsal that comments on a
+      // real ticket is not a rehearsal — and the probe does hit a real key.
+      const options = buildTriageOptions(
+        settingsWith({ SKILL_NAME: skill, WRITE_BACK: "true" }),
+        "SSX-1",
+      );
+
+      expect(options.noWrite).toBe(true);
+    },
+  );
+});

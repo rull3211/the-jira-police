@@ -101,6 +101,12 @@ export const SETTINGS = [
     fallback: "",
   },
   {
+    name: "WRITE_BACK",
+    description:
+      "Whether the skill may post its verdict to the Jira issue itself: a comment, a label union and, on a duplicate, an issue link. Never a transition — the skill refuses to change status even when asked. Off by default, because this is the only setting whose effect the whole team can see, and an unattended service that starts commenting on shared tickets should be an explicit decision rather than a default. Off still writes the local markdown report.",
+    fallback: "false",
+  },
+  {
     name: "STORECODE_PATH",
     description: "Executable used to run the skill.",
     fallback: "storecode",
@@ -216,6 +222,17 @@ export function numeric(settings: Settings, name: SettingName): number {
     throw new Error(`Setting ${name} must be a number, got "${settings[name]}"`);
   }
   return parsed;
+}
+
+/**
+ * Reads a boolean setting.
+ *
+ * Only "true" enables — deliberately strict rather than truthy. The one flag
+ * this reads today decides whether the service writes to shared Jira tickets,
+ * and a typo there should fail closed, not open.
+ */
+export function flag(settings: Settings, name: SettingName): boolean {
+  return settings[name].trim().toLowerCase() === "true";
 }
 
 export function list(settings: Settings, name: SettingName): readonly string[] {

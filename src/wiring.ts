@@ -11,7 +11,15 @@
  *   discover — Jira REST, with the configured credential, to learn *which*
  *              issues are new. Returns keys and metadata, nothing more.
  *   groom    — storecode, with its own Atlassian MCP session, to read what is
- *              *in* an issue. Receives the key and nothing else.
+ *              *in* an issue, and to write the verdict back. Receives the key
+ *              and nothing else.
+ *
+ * `WRITE_BACK` does not soften that split, it leans on it. The REST credential
+ * stays read-only and discovery-only — it is withheld from the subprocess
+ * entirely (`WITHHELD_FROM_CHILD` in the runner) — so every mutation is made by
+ * the skill's own MCP session, as that session's own Jira user. Which means the
+ * comments are attributable to a real account, and revoking the write is a
+ * matter of this one setting rather than of re-scoping a token.
  */
 
 import { JiraClient } from "./jira/client.ts";
@@ -20,7 +28,7 @@ import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
-import { type Settings, SettingsError, list, numeric } from "./settings.ts";
+import { type Settings, SettingsError, flag, list, numeric } from "./settings.ts";
 import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
 
 /** Skill that reads nothing, so it must not be made to wait on Atlassian. */
@@ -83,7 +91,10 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
     timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS"),
-    noWrite: true,
+    // A stand-in is pinned to preview whatever the operator configured. Both
+    // exist to rehearse the pipeline, and a rehearsal that comments on a real
+    // ticket is not a rehearsal.
+    noWrite: isStandIn || !flag(settings, "WRITE_BACK"),
     deep: false,
     // Requiring a live Atlassian session from a skill that reads nothing
     // would fail runs for a reason unrelated to what is being exercised.
