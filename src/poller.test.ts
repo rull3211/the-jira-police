@@ -195,6 +195,148 @@ describe("runPollCycle", () => {
     await expect(loadState(statePath)).resolves.toEqual(EMPTY_STATE);
   });
 
+  /**
+   * Each triage is a paid model run. Deferring the record of one until the
+   * whole cycle finishes means an ill-timed kill buys the same verdict twice.
+   */
+  describe("durability between issues", () => {
+    it("persists after every issue, not once at the end", async () => {
+      const seenAtEachStep: (readonly string[])[] = [];
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({
+          fetchCandidates: async () => [
+            ticket("SSX-1", "2026-09-02T10:00:00Z"),
+            ticket("SSX-2", "2026-09-02T10:05:00Z"),
+            ticket("SSX-3", "2026-09-02T10:10:00Z"),
+          ],
+          // Observed from inside the loop: what is already durable on disk by
+          // the time the next issue starts.
+          triage: async () => {
+            seenAtEachStep.push((await loadState(statePath).catch(() => EMPTY_STATE)).seenKeys);
+            return PAYLOAD;
+          },
+        }),
+      );
+
+      expect(seenAtEachStep).toEqual([[], ["SSX-1"], ["SSX-1", "SSX-2"]]);
+    });
+
+    it("has the cursor durable too, not just the key", async () => {
+      // Keys alone would stop the re-triage but leave the window re-scanning
+      // from the old cursor on every subsequent run.
+      let midCycle = EMPTY_STATE;
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({
+          fetchCandidates: async () => [
+            ticket("SSX-1", "2026-09-02T10:00:00Z"),
+            ticket("SSX-2", "2026-09-02T10:05:00Z"),
+          ],
+          triage: async (t) => {
+            if (t.key === "SSX-2") {
+              midCycle = await loadState(statePath);
+            }
+            return PAYLOAD;
+          },
+        }),
+      );
+
+      expect(midCycle).toEqual({ cursor: "2026-09-02T10:00:00Z", seenKeys: ["SSX-1"] });
+    });
+  });
+
+  /**
+   * A cycle runs one paid subprocess per issue, sequentially. Checking for
+   * shutdown only between cycles would mean an operator's stop request is
+   * followed by the rest of the backlog.
+   */
+  describe("shutdown between issues", () => {
+    function abortingDeps(controller: AbortController, abortAfter: string) {
+      const attempted: string[] = [];
+      return {
+        attempted,
+        deps: deps({
+          signal: controller.signal,
+          fetchCandidates: async () => [
+            ticket("SSX-1", "2026-09-02T10:00:00Z"),
+            ticket("SSX-2", "2026-09-02T10:05:00Z"),
+            ticket("SSX-3", "2026-09-02T10:10:00Z"),
+          ],
+          triage: async (t) => {
+            attempted.push(t.key);
+            if (t.key === abortAfter) {
+              controller.abort();
+            }
+            return PAYLOAD;
+          },
+        }),
+      };
+    }
+
+    it("stops after the issue in flight rather than finishing the backlog", async () => {
+      const controller = new AbortController();
+      const { attempted, deps: aborting } = abortingDeps(controller, "SSX-1");
+
+      const outcome = await runPollCycle(EMPTY_STATE, aborting);
+
+      expect(attempted).toEqual(["SSX-1"]);
+      expect(outcome).toMatchObject({ triaged: 1, failed: 0, abandoned: 2 });
+    });
+
+    it("finishes the issue in flight rather than discarding it", async () => {
+      // Abandoning paid work already in progress would be worse than the wait.
+      const controller = new AbortController();
+      const { deps: aborting } = abortingDeps(controller, "SSX-1");
+
+      await runPollCycle(EMPTY_STATE, aborting);
+
+      expect(sink.written.map((r) => r.issueKey)).toEqual(["SSX-1"]);
+      await expect(loadState(statePath)).resolves.toEqual({
+        cursor: "2026-09-02T10:00:00Z",
+        seenKeys: ["SSX-1"],
+      });
+    });
+
+    it("leaves the abandoned issues unseen, so the next cycle takes them", async () => {
+      const controller = new AbortController();
+      const { deps: aborting } = abortingDeps(controller, "SSX-2");
+
+      const outcome = await runPollCycle(EMPTY_STATE, aborting);
+
+      expect(outcome.state.seenKeys).toEqual(["SSX-1", "SSX-2"]);
+      expect(outcome.abandoned).toBe(1);
+    });
+
+    it("attempts nothing when shutdown was requested before the cycle began", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const { attempted, deps: aborting } = abortingDeps(controller, "never");
+
+      const outcome = await runPollCycle(EMPTY_STATE, aborting);
+
+      expect(attempted).toEqual([]);
+      expect(outcome).toMatchObject({ found: 3, triaged: 0, abandoned: 3 });
+    });
+
+    it("runs the whole backlog when no signal is supplied", async () => {
+      // The one-shot CLI passes none; it must not be treated as aborted.
+      const outcome = await runPollCycle(
+        EMPTY_STATE,
+        deps({
+          fetchCandidates: async () => [
+            ticket("SSX-1", "2026-09-02T10:00:00Z"),
+            ticket("SSX-2", "2026-09-02T10:05:00Z"),
+          ],
+        }),
+      );
+
+      expect(outcome).toMatchObject({ triaged: 2, abandoned: 0 });
+    });
+  });
+
   it("passes the cursor to the query", async () => {
     const fetchCandidates = vi.fn(async () => []);
     const state = { cursor: "2026-09-02T09:00:00Z", seenKeys: [] };

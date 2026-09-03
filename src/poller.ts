@@ -14,6 +14,11 @@
  *    oldest issue forward. If issue #3 fails but #4 succeeds, moving the cursor
  *    to #4 would strand #3 outside the next query window. Stopping at the gap
  *    costs a little rework and loses nothing.
+ *
+ * 3. State is persisted after every issue rather than once at the end. Each
+ *    triage is a paid model run, so losing the record of one to an ill-timed
+ *    kill means paying for it twice. Per-cycle saving made the cost of a crash
+ *    proportional to the size of the backlog; per-issue saving caps it at one.
  */
 
 import { logger } from "./logger.ts";
@@ -28,6 +33,16 @@ export interface PollDeps {
   readonly triage: (ticket: TicketRef) => Promise<TriagePayload>;
   readonly sink: OutputSink;
   readonly statePath: string;
+  /**
+   * Aborted to request a graceful stop.
+   *
+   * Checked between issues rather than only between cycles. A cycle with a
+   * backlog runs one paid subprocess per issue, sequentially, so "finish the
+   * current cycle" can mean several more minutes and several more model runs
+   * after the operator has already asked it to stop — which reads as a hang.
+   * Stopping between issues keeps shutdown bounded by a single triage.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface PollOutcome {
@@ -36,6 +51,8 @@ export interface PollOutcome {
   readonly skipped: number;
   readonly triaged: number;
   readonly failed: number;
+  /** Fresh issues never attempted, because shutdown was requested mid-cycle. */
+  readonly abandoned: number;
   readonly state: PollState;
 }
 
@@ -92,25 +109,31 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
 
   if (fresh.length === 0) {
     logger.debug("poll.nothing_new", { found: candidates.length, skipped });
-    return { found: candidates.length, skipped, triaged: 0, failed: 0, state };
+    return { found: candidates.length, skipped, triaged: 0, failed: 0, abandoned: 0, state };
   }
 
   logger.info("poll.candidates", { found: candidates.length, skipped, fresh: fresh.length });
 
-  const processed: string[] = [];
-  let cursorCreated: string | null = null;
+  let current = state;
   let stillContiguous = true;
+  let triaged = 0;
   let failed = 0;
 
   for (const ticket of fresh) {
+    if (deps.signal?.aborted === true) {
+      break;
+    }
+
     try {
       const payload = await deps.triage(ticket);
       await deps.sink.write(toTriageResult(ticket, payload));
 
-      processed.push(ticket.key);
-      if (stillContiguous) {
-        cursorCreated = ticket.created;
-      }
+      // Saved here, not after the loop. The report is already on disk and the
+      // model run is already paid for; leaving the key unrecorded until the
+      // cycle ends means a kill in between buys the same verdict twice.
+      current = recordSeen(current, [ticket.key], stillContiguous ? ticket.created : null);
+      await saveState(deps.statePath, current);
+      triaged += 1;
     } catch (error) {
       failed += 1;
       // Leave the cursor behind this issue so the next cycle sees it again.
@@ -119,18 +142,22 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
     }
   }
 
-  const next = recordSeen(state, processed, cursorCreated);
-  if (processed.length > 0 || failed > 0) {
-    await saveState(deps.statePath, next);
+  const abandoned = fresh.length - triaged - failed;
+  if (abandoned > 0) {
+    // Not an error: these are simply still unseen, so the next run picks them
+    // up. Logged because a cycle reporting fewer results than it found would
+    // otherwise look like tickets going missing.
+    logger.warn("poll.interrupted", { abandoned, note: "left for the next cycle" });
   }
 
-  logger.info("poll.done", { triaged: processed.length, failed });
+  logger.info("poll.done", { triaged, failed, abandoned });
 
   return {
     found: candidates.length,
     skipped,
-    triaged: processed.length,
+    triaged,
     failed,
-    state: next,
+    abandoned,
+    state: current,
   };
 }
