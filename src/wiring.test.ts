@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { type Settings, SettingsError, readSettings } from "./settings.ts";
-import { buildTriageOptions } from "./wiring.ts";
+import { buildPrompt, toolsFor } from "./triage/runner.ts";
+import { buildTriageOptions, shouldPost } from "./wiring.ts";
 
 /** Minimum environment that satisfies the required settings. */
 const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
@@ -55,7 +56,6 @@ describe("buildTriageOptions", () => {
       skillName: "intake-triage",
       vaultPath: "/vaults/v",
       noHtml: true,
-      noWrite: true,
       // Sub-agents cannot prompt for tool permissions, so the skill's own
       // instructions forbid them outside --deep. Keeping deep off keeps that true.
       deep: false,
@@ -78,26 +78,25 @@ describe("buildTriageOptions", () => {
   });
 });
 
-describe("buildTriageOptions and WRITE_BACK", () => {
-  function real(overrides: Partial<Record<string, string>> = {}) {
-    return buildTriageOptions(
+describe("shouldPost and WRITE_BACK", () => {
+  function real(overrides: Partial<Record<string, string>> = {}): boolean {
+    return shouldPost(
       settingsWith({ SKILL_NAME: "intake-triage", VAULT_PATH: "/vaults/v", ...overrides }),
-      "SSX-1",
     );
   }
 
   it("does not write back unless asked", () => {
     // The default matters more than usual here: this is the only setting whose
     // effect is visible to the whole team.
-    expect(real().noWrite).toBe(true);
+    expect(real()).toBe(false);
   });
 
   it("writes back when the setting is true", () => {
-    expect(real({ WRITE_BACK: "true" }).noWrite).toBe(false);
+    expect(real({ WRITE_BACK: "true" })).toBe(true);
   });
 
   it.each(["TRUE", "True", " true "])("accepts %o, since .env values arrive untidy", (value) => {
-    expect(real({ WRITE_BACK: value }).noWrite).toBe(false);
+    expect(real({ WRITE_BACK: value })).toBe(true);
   });
 
   it.each(["yes", "1", "on", "", "  ", "no", "maybe"])(
@@ -105,7 +104,7 @@ describe("buildTriageOptions and WRITE_BACK", () => {
     (value) => {
       // Truthiness would make "0" and "false" enable writes. A setting that
       // posts to shared tickets is the wrong place to be generous.
-      expect(real({ WRITE_BACK: value }).noWrite).toBe(true);
+      expect(real({ WRITE_BACK: value })).toBe(false);
     },
   );
 
@@ -114,12 +113,23 @@ describe("buildTriageOptions and WRITE_BACK", () => {
     (skill) => {
       // Both exist to rehearse the pipeline. A rehearsal that comments on a
       // real ticket is not a rehearsal — and the probe does hit a real key.
+      expect(shouldPost(settingsWith({ SKILL_NAME: skill, WRITE_BACK: "true" }))).toBe(false);
+    },
+  );
+
+  it("never lets the analyst write, whatever WRITE_BACK says", () => {
+    // The two halves are independent: WRITE_BACK decides whether the poster is
+    // dispatched, and cannot re-arm the analyst. Before the split this was one
+    // flag doing both jobs, which is how a comment reached a ticket before the
+    // verdict behind it had been checked.
+    for (const value of ["true", "false"]) {
       const options = buildTriageOptions(
-        settingsWith({ SKILL_NAME: skill, WRITE_BACK: "true" }),
+        settingsWith({ SKILL_NAME: "intake-triage", VAULT_PATH: "/vaults/v", WRITE_BACK: value }),
         "SSX-1",
       );
 
-      expect(options.noWrite).toBe(true);
-    },
-  );
+      expect(buildPrompt(options)).toContain("--no-write");
+      expect(toolsFor(options).join(" ")).not.toContain("addCommentToJiraIssue");
+    }
+  });
 });

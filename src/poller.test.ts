@@ -23,8 +23,22 @@ function ticket(key: string, created: string): TicketRef {
 const PAYLOAD: TriagePayload = {
   verdict: "ready-ish",
   labels: ["dor:pass"],
+  // A coherent payload: ready-ish and dor:pass are only legitimate when the
+  // ticket has no unfilled placeholders left in it.
+  dorPlaceholders: [],
   recommendedNextStep: "Refine it.",
   report: "## report",
+  // The poller never inspects the mutation — grooming decides whether it is
+  // posted, before the poller sees the payload at all — but the type requires
+  // one, and a fixture that lied about its shape would be worse than a dull one.
+  mutation: {
+    commentBody: "## report",
+    labelsAdd: ["dor:pass"],
+    labelsRemove: [],
+    component: "",
+    links: [],
+    commentAction: "create",
+  },
 };
 
 class RecordingSink implements OutputSink {

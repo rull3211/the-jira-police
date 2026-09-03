@@ -39,7 +39,19 @@ Choose the verdict by `N mod 4`:
 | 2         | `duplicate`    | `dup:open`, `route:ours` |
 | 3         | `not-our-team` | `route:other-team`       |
 
+Set `dorPlaceholders` to `[]` — always, for every key. The mock reads no ticket,
+so it has found no placeholders, and claiming otherwise would trip the coherence
+check on the `ready-ish` branch and make every fourth key fail for a reason that
+has nothing to do with the pipeline being exercised.
+
 Set `recommendedNextStep` to a single sentence appropriate to the verdict.
+
+Fill `mutation` in as the schema describes, so the shape of a real run is
+exercised — `commentBody` should be the same mock report text ending with the
+footer sentinel line, `labelsAdd` the labels from the table above, `labelsRemove`
+and `links` empty, `component` an empty string, `commentAction` `create`. It is
+never posted: the service refuses to dispatch its writer for a stand-in skill,
+whatever `WRITE_BACK` says.
 
 Set `report` to markdown of roughly this shape:
 

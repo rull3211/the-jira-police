@@ -20,15 +20,32 @@
  * the skill's own MCP session, as that session's own Jira user. Which means the
  * comments are attributable to a real account, and revoking the write is a
  * matter of this one setting rather than of re-scoping a token.
+ *
+ * Grooming is itself three steps, composed here and nowhere else:
+ *
+ *   analyse — `runTriage`, always `--no-write`, no write tool in its allowlist.
+ *             Returns the verdict AND the mutation that verdict implies.
+ *   gate    — `assertPostable`. Mechanical checks against the rules the skill
+ *             sets for itself. Throwing here means nothing was sent.
+ *   post    — `runPost`, a second session holding the finished text and no
+ *             means of forming a different opinion about it.
+ *
+ * The order is the point. The service previously ran a single write-enabled
+ * session, which posted its comment before the verdict could be inspected — so
+ * the check could only ever report a bad write, never prevent one. Splitting
+ * the run puts the check in the middle, where refusal still costs nothing but
+ * a retry.
  */
 
 import { JiraClient } from "./jira/client.ts";
 import { buildNewIssuesJql } from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
-import { FileSink } from "./output/sink.ts";
+import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
 import { type Settings, SettingsError, flag, list, numeric } from "./settings.ts";
+import { UnpostableError, assertPostable } from "./triage/gate.ts";
+import { runPost } from "./triage/poster.ts";
 import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
 
 /** Skill that reads nothing, so it must not be made to wait on Atlassian. */
@@ -91,10 +108,6 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
     timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS"),
-    // A stand-in is pinned to preview whatever the operator configured. Both
-    // exist to rehearse the pipeline, and a rehearsal that comments on a real
-    // ticket is not a rehearsal.
-    noWrite: isStandIn || !flag(settings, "WRITE_BACK"),
     deep: false,
     // Requiring a live Atlassian session from a skill that reads nothing
     // would fail runs for a reason unrelated to what is being exercised.
@@ -104,14 +117,75 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
   };
 }
 
+/**
+ * Whether a run may post, given the settings.
+ *
+ * A stand-in is pinned to preview whatever the operator configured. Both
+ * stand-ins exist to rehearse the pipeline, and a rehearsal that comments on a
+ * real ticket is not a rehearsal — nor could it, since neither produces a real
+ * §11 mutation to post.
+ */
+export function shouldPost(settings: Settings): boolean {
+  return !STAND_IN_SKILLS.has(settings.SKILL_NAME) && flag(settings, "WRITE_BACK");
+}
+
 export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<TriagePayload> {
   // Built once, so a misconfiguration surfaces at startup rather than on the
   // first issue that happens to arrive.
   const template = buildTriageOptions(settings, "");
+  const posting = shouldPost(settings);
 
-  // The ticket carries summary, type and timestamps; only the key crosses over.
-  // Everything else the skill needs, it reads for itself over its own session.
-  return async (ticket: TicketRef) => await runTriage({ ...template, issueKey: ticket.key });
+  return async (ticket: TicketRef) => {
+    // The ticket carries summary, type and timestamps; only the key crosses
+    // over. Everything else the skill needs, it reads over its own session.
+    const payload = await runTriage({ ...template, issueKey: ticket.key });
+
+    if (!posting) {
+      return payload;
+    }
+
+    // Throws rather than returning a flag, deliberately. The poller treats a
+    // thrown triage as a failed ticket: the key stays unrecorded, the cursor
+    // stays behind it, and the next cycle tries again — which is what a refused
+    // verdict deserves, since the fault is usually one the model can avoid
+    // second time round. It also means no local report is written for a verdict
+    // we would not post, matching how `TriageContradictionError` already
+    // behaves. An incoherent verdict is not a partial result.
+    // The refusal is recorded before it is re-thrown. A gate that destroys the
+    // text it objected to cannot be audited, and an unauditable guard is one an
+    // operator eventually switches off rather than one they come to trust.
+    try {
+      assertPostable(payload, ticket.key);
+    } catch (error) {
+      if (error instanceof UnpostableError) {
+        await writeRejection(settings.OUTPUT_DIR, {
+          issueKey: ticket.key,
+          violations: error.violations,
+          verdict: payload.verdict,
+          labels: payload.labels,
+          dorPlaceholders: payload.dorPlaceholders,
+          mutation: { ...payload.mutation },
+        });
+      }
+      throw error;
+    }
+
+    // The gate is satisfied, so any refusal recorded for this key describes a
+    // mutation that no longer exists. Cleared before the write rather than
+    // after, so a poster failure does not leave the old refusal standing as an
+    // explanation for a new problem.
+    await clearRejection(settings.OUTPUT_DIR, ticket.key);
+
+    await runPost({
+      issueKey: ticket.key,
+      mutation: payload.mutation,
+      executable: template.executable,
+      workingDirectory: template.workingDirectory,
+      timeoutMs: template.timeoutMs,
+    });
+
+    return payload;
+  };
 }
 
 export function createJiraClient(settings: Settings): JiraClient {

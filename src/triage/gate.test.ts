@@ -1,0 +1,282 @@
+import { describe, expect, it } from "vitest";
+
+import { FOOTER_SENTINEL, UnpostableError, assertPostable } from "./gate.ts";
+import { TriageContradictionError, type Mutation, type TriagePayload } from "./runner.ts";
+
+function mutation(overrides: Partial<Mutation> = {}): Mutation {
+  return {
+    commentBody: `## Triage of SSX-1234\n\nLooks fine.\n\n${FOOTER_SENTINEL}`,
+    labelsAdd: [],
+    labelsRemove: [],
+    component: "",
+    links: [],
+    commentAction: "create",
+    ...overrides,
+  };
+}
+
+function payload(overrides: Partial<TriagePayload> = {}): TriagePayload {
+  return {
+    verdict: "needs-info",
+    labels: ["dor:gaps", "route:ours"],
+    dorPlaceholders: [],
+    recommendedNextStep: "Ask the reporter.",
+    report: "## report",
+    mutation: mutation(),
+    ...overrides,
+  };
+}
+
+/** Convenience: the violation strings from a refusal, or [] if it allowed it. */
+function violations(input: TriagePayload, issueKey = "SSX-1234"): readonly string[] {
+  try {
+    assertPostable(input, issueKey);
+    return [];
+  } catch (error) {
+    if (error instanceof UnpostableError) {
+      return error.violations;
+    }
+    throw error;
+  }
+}
+
+describe("assertPostable", () => {
+  it("allows a well-formed mutation", () => {
+    expect(() => assertPostable(payload(), "SSX-1234")).not.toThrow();
+  });
+
+  it("still enforces the DoR coherence rule", () => {
+    // The gate is documented as the last thing before a write, so it re-checks
+    // rather than assuming the parser did. This is also the check that exists
+    // because of SSX-3822.
+    expect(() =>
+      assertPostable(
+        payload({ verdict: "ready-ish", labels: ["dor:pass"], dorPlaceholders: ["[N]"] }),
+        "SSX-3822",
+      ),
+    ).toThrow(TriageContradictionError);
+  });
+});
+
+describe("the comment body", () => {
+  it.each(["", "   ", "\n\n"])("refuses a blank body (%o)", (commentBody) => {
+    expect(violations(payload({ mutation: mutation({ commentBody }) }))).toEqual([
+      "the comment body is empty, so there is nothing to post",
+    ]);
+  });
+
+  it("says only that, so the real problem is not buried", () => {
+    // A blank body also fails the sentinel check and the issue-key check. Three
+    // complaints about one cause is worse reading than one.
+    expect(violations(payload({ mutation: mutation({ commentBody: "" }) }))).toHaveLength(1);
+  });
+
+  it("refuses a body missing the idempotency sentinel", () => {
+    // Without it the skill cannot recognise its own prior comment, so every
+    // re-run stacks another copy instead of refreshing the last one.
+    const body = "## Triage of SSX-1234\n\nLooks fine.";
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
+      "footer sentinel",
+    );
+  });
+
+  it("tolerates trailing whitespace after the sentinel", () => {
+    const body = `## SSX-1234\n\n${FOOTER_SENTINEL}\n\n`;
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
+  });
+
+  it("refuses a body that mentions a different issue", () => {
+    // The poster is handed text it did not write. This is the only place the
+    // pairing of body to key is ever checked.
+    const body = `## Triage of SSX-9999\n\nLooks fine.\n\n${FOOTER_SENTINEL}`;
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
+      "belongs to another issue",
+    );
+  });
+
+  it("allows a send-back that names dor:pass in order to reverse it", () => {
+    // REGRESSION, from the live SSX-3822 run of 2026-09-03.
+    //
+    // An earlier check refused any body containing the string "dor:pass" while
+    // placeholders remained. It rejected this comment — a correct send-back,
+    // verdict needs-info, whose whole purpose was to undo a `dor:pass` a prior
+    // run had wrongly stamped. Repudiating a label requires naming it, so the
+    // check fired hardest on the runs that were fixing things. The rule now
+    // reads the delta instead, where applying and reversing are distinct.
+    const body = [
+      "# ↩ SEND BACK → needs info · SSX-1234",
+      "",
+      "**This reverses the previous intake comment** (it stamped `dor:pass`",
+      "while noting the same unfilled `[N]` — an unfilled placeholder is not a",
+      "baseline, so row 9 fails).",
+      "",
+      "LABEL DELTA — remove: dor:pass · add: dor:gaps",
+      "",
+      FOOTER_SENTINEL,
+    ].join("\n");
+
+    expect(
+      violations(
+        payload({
+          verdict: "needs-info",
+          labels: ["dor:gaps", "next:to-reporter"],
+          dorPlaceholders: ["[N]"],
+          mutation: mutation({
+            commentBody: body,
+            labelsAdd: ["dor:gaps", "next:to-reporter"],
+            labelsRemove: ["dor:pass"],
+            commentAction: "update",
+          }),
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("refuses a delta that APPLIES dor:pass while placeholders remain", () => {
+    // The surviving half of the SSX-3822 rule. Verdict and labels are honest,
+    // so assertDorCoherent sees nothing wrong; only the delta claims the pass.
+    const input = payload({
+      verdict: "needs-info",
+      labels: ["dor:gaps"],
+      dorPlaceholders: ["[N]"],
+      mutation: mutation({ labelsAdd: ["dor:pass"] }),
+    });
+
+    expect(violations(input).join(" ")).toContain('still contains "[N]"');
+  });
+
+  it("allows a body that merely quotes the placeholder", () => {
+    // Reporting "baseline [N] left unfilled" is the correct behaviour, and
+    // punishing it would push the model towards saying less.
+    const body = `## SSX-1234\n\nDoR: gaps — baseline is still "[N]".\n\n${FOOTER_SENTINEL}`;
+
+    expect(
+      violations(payload({ dorPlaceholders: ["[N]"], mutation: mutation({ commentBody: body }) })),
+    ).toEqual([]);
+  });
+});
+
+describe("labels", () => {
+  it.each(["route:ours", "dup:open", "dor:gaps", "tier:2", "intake:tech-reviewed", "next:to-trio"])(
+    "allows removing the skill's own %s",
+    (label) => {
+      expect(violations(payload({ mutation: mutation({ labelsRemove: [label] }) }))).toEqual([]);
+    },
+  );
+
+  it("clears a stale next:* while applying its replacement", () => {
+    // REGRESSION, from the live SSX-3822 run of 2026-09-03. §11 originally
+    // omitted `next:*` from the removal allow-list while the skill set it on
+    // every verdict, so a verdict change could not retire the previous routing
+    // label — leaving `next:to-trio` on a ticket alongside the
+    // `next:to-reporter` that contradicts it. Refusing the removal refused the
+    // whole mutation, so the correction could never post at all.
+    expect(
+      violations(
+        payload({
+          labels: ["dor:gaps", "next:to-reporter"],
+          dorPlaceholders: ["[N]"],
+          mutation: mutation({
+            labelsAdd: ["dor:gaps", "next:to-reporter"],
+            labelsRemove: ["dor:pass", "next:to-trio"],
+            commentAction: "update",
+          }),
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("refuses removing comp:advisor, which no part of the skill sets", () => {
+    // Looks like one of the skill's namespaces and is not one. The allow-list
+    // tracks §11 exactly; anything else is somebody's label until §11 says so.
+    expect(
+      violations(payload({ mutation: mutation({ labelsRemove: ["comp:advisor"] }) })).join(" "),
+    ).toContain("not in a namespace the skill owns");
+  });
+
+  it.each(["blocked", "customer-escalation", "q3-roadmap"])(
+    "refuses to remove the human label %o",
+    (label) => {
+      // §11: "never touch a human label". This is the one field in the payload
+      // whose misuse destroys somebody else's information.
+      expect(
+        violations(payload({ mutation: mutation({ labelsRemove: [label] }) })).join(" "),
+      ).toContain(`"${label}"`);
+    },
+  );
+
+  it("refuses to add a label the verdict never suggested", () => {
+    // The delta and the label list are two renderings of one decision, made by
+    // one run. Disagreement between them means something has come apart.
+    const input = payload({
+      labels: ["dor:gaps"],
+      mutation: mutation({ labelsAdd: ["dor:pass"] }),
+    });
+
+    expect(violations(input).join(" ")).toContain("the delta and the verdict disagree");
+  });
+
+  it("allows adding a subset of the suggested labels", () => {
+    // The rest are presumably already on the issue, which is what a delta means.
+    const input = payload({
+      labels: ["dor:gaps", "route:ours"],
+      mutation: mutation({ labelsAdd: ["route:ours"] }),
+    });
+
+    expect(violations(input)).toEqual([]);
+  });
+});
+
+describe("component", () => {
+  it.each(["SSX Advisor", "EDH", "SSX Partner", "SSX Nettsalg"])("allows %o", (component) => {
+    expect(violations(payload({ mutation: mutation({ component }) }))).toEqual([]);
+  });
+
+  it("allows an empty component, which means 'uncertain, do not write'", () => {
+    expect(violations(payload({ mutation: mutation({ component: "" }) }))).toEqual([]);
+  });
+
+  it.each(["SSX advisor", "Advisor", "SSX-Advisor", "Nettsalg"])(
+    "refuses %o, which is not a policy stream",
+    (component) => {
+      expect(violations(payload({ mutation: mutation({ component }) })).join(" ")).toContain(
+        "policy streams",
+      );
+    },
+  );
+});
+
+describe("the refusal itself", () => {
+  it("collects every violation rather than stopping at the first", () => {
+    // A run costs real money. Sending the operator round the loop once per
+    // problem would be miserly with the wrong resource.
+    const input = payload({
+      labels: ["dor:gaps"],
+      mutation: mutation({
+        commentBody: "no sentinel here, and the wrong key: SSX-9999",
+        labelsAdd: ["dor:pass"],
+        labelsRemove: ["blocked"],
+        component: "Nonsense",
+      }),
+    });
+
+    expect(violations(input).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("reports the count and lists them, so the log explains itself", () => {
+    const input = payload({ mutation: mutation({ component: "Nonsense" }) });
+
+    try {
+      assertPostable(input, "SSX-1234");
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain("SSX-1234");
+      expect(message).toContain("refusing to post");
+      expect(message).toContain("Nonsense");
+    }
+  });
+});

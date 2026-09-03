@@ -1,10 +1,25 @@
 /**
  * Runs the intake-triage skill headlessly and parses the result.
  *
+ * This is the ANALYST half of the pipeline, and it never writes to Jira. It
+ * reads the issue, decides, and returns the verdict together with the exact
+ * mutation that verdict implies. Posting that mutation is `poster.ts`, and only
+ * after `gate.ts` has agreed the verdict is coherent.
+ *
+ * The split exists because of a defect this service shipped: the skill posts
+ * its comment mid-run, but `structured_output` — the only thing we can check —
+ * arrives with the final result event. Checking afterwards is not checking; on
+ * SSX-3822 a contradictory verdict was already on the board by the time we
+ * could see it. With the write moved out, the check happens between the two
+ * halves, where refusing still means nothing was sent.
+ *
+ * So there is deliberately no write path here any more, and no `--yes`. A
+ * second way to post would be a second way to post unchecked.
+ *
  * Invocation shape, with every flag verified against the local arg parser
  * rather than assumed:
  *
- *   storecode -p "/intake-triage SSX-1234 --no-write|--yes --no-html"
+ *   storecode -p "/intake-triage SSX-1234 --no-write --no-html"
  *             --output-format stream-json --verbose
  *             --permission-mode dontAsk
  *             --allowedTools <explicit list>
@@ -30,11 +45,19 @@
  *    working directory, never as its `--vault` flag. See `vaultPath` below.
  */
 
-import { spawn } from "node:child_process";
-
 import { logger } from "../logger.ts";
 import type { Verdict } from "../output/sink.ts";
 import { TRIAGE_SCHEMA, TRIAGE_SCHEMA_JSON } from "./schema.ts";
+import { runSession } from "./session.ts";
+
+// Re-exported so callers and tests that reason about a triage run keep a single
+// import. The machinery moved to `session.ts` when the poster began sharing it;
+// where it lives is an implementation detail of running a subprocess.
+export {
+  McpUnavailableError,
+  SessionTimeoutError as TriageTimeoutError,
+  assertMcpReady,
+} from "./session.ts";
 
 /** Tools the skill legitimately needs. Anything absent here will not run. */
 export const ALLOWED_TOOLS: readonly string[] = [
@@ -55,29 +78,6 @@ export const ALLOWED_TOOLS: readonly string[] = [
   "Glob",
 ];
 
-/**
- * Additionally granted when the run may write back to the issue.
- *
- * This is the exact set named in `INTAKE_INSTRUCTIONS.md` §11 — labels and
- * component via `editJiraIssue`, the idempotent report comment, and an issue
- * link on a duplicate. `atlassianUserInfo` is here because it is what makes the
- * comment idempotent: the skill updates a prior comment in place only when it
- * matches BOTH the footer sentinel AND its own Jira account, so without a way
- * to learn who it is, a re-run appends a second copy instead of refreshing.
- *
- * Conspicuously absent: `transitionJiraIssue`. The skill promises never to
- * change status — "not after a `y`, not for a close-as-duplicate" — and
- * withholding the tool turns that promise into something the service enforces
- * rather than something it trusts.
- */
-export const WRITE_TOOLS: readonly string[] = [
-  "mcp__atlassian__editJiraIssue",
-  "mcp__atlassian__addCommentToJiraIssue",
-  "mcp__atlassian__createIssueLink",
-  "mcp__atlassian__getIssueLinkTypes",
-  "mcp__atlassian__atlassianUserInfo",
-];
-
 /** MCP servers that must report `connected` before the run is trusted. */
 export const REQUIRED_MCP_SERVERS: readonly string[] = ["atlassian"];
 
@@ -93,22 +93,6 @@ export interface TriageRunOptions {
   /** Directory to run in — must be where the skill and vault are resolvable. */
   readonly workingDirectory: string;
   readonly timeoutMs: number;
-  /**
-   * When true, passes `--no-write` so nothing is published to the Jira issue.
-   *
-   * When false the run passes `--yes` instead, and that pairing is not a
-   * choice — it is the only coherent one. Left to itself the skill renders the
-   * mutation payload and stops at `[y] post · [n] skip · [e] edit`, which in a
-   * headless run is a prompt nobody can answer: the process would sit there
-   * until the timeout killed it, having done the expensive part and published
-   * nothing. `--yes` exists in the skill precisely for "non-interactive /
-   * scheduled (cron) runs", which is what this service is.
-   *
-   * So there is no separate "confirm" mode to model, and deriving `--yes` from
-   * this one field rather than adding a second one means the two can never be
-   * set to disagree.
-   */
-  readonly noWrite: boolean;
   readonly deep: boolean;
   /**
    * Absolute path to the insurance-knowledge-vault clone.
@@ -139,40 +123,81 @@ export interface TriageRunOptions {
   readonly allowedTools?: readonly string[];
 }
 
+export type LinkType = "duplicates" | "relates to";
+
+export interface IssueLink {
+  readonly type: LinkType;
+  readonly targetKey: string;
+}
+
+/**
+ * The §11 mutation payload, as data rather than as printed text.
+ *
+ * A label DELTA rather than a final set, deliberately. §11 requires the write
+ * to union against the labels live on the issue and forbids "a bare replacement
+ * array"; if the analyst returned a finished set, a human who edited labels
+ * between analysis and post would have their edit silently reverted. The delta
+ * survives that gap because it is applied, not imposed.
+ */
+export interface Mutation {
+  readonly commentBody: string;
+  readonly labelsAdd: readonly string[];
+  readonly labelsRemove: readonly string[];
+  /** Empty when uncertain or already correct — never a guess. */
+  readonly component: string;
+  readonly links: readonly IssueLink[];
+  readonly commentAction: "create" | "update";
+}
+
 export interface TriagePayload {
   readonly verdict: Verdict;
   readonly labels: readonly string[];
+  /** Unfilled fill-in placeholders the skill found in the ticket, verbatim. */
+  readonly dorPlaceholders: readonly string[];
   readonly recommendedNextStep: string;
   readonly report: string;
+  /** What a write WOULD send. Nothing in this module sends it. */
+  readonly mutation: Mutation;
 }
 
 export class TriageError extends Error {}
 
-/** An MCP server the skill depends on was not connected. */
-export class McpUnavailableError extends TriageError {
-  readonly server: string;
-  readonly status: string;
+/**
+ * The structured verdict contradicts the evidence in the same payload.
+ *
+ * Raised for the failure this service has now seen twice: a report whose prose
+ * is accurate and whose machine-readable field is not. On SSX-3814 the enum
+ * offered no honest option and the model said so; on SSX-3822 it wrote
+ * "baseline [N] left unfilled" into its own scorecard, flagged the row green,
+ * and emitted `dor:pass` + `ready-ish`. Nothing was fabricated either time —
+ * the step from evidence to label is what broke, and the label is the only part
+ * downstream reads.
+ *
+ * IMPORTANT — this is detection, not prevention. The skill posts its comment
+ * mid-run via `addCommentToJiraIssue`; `structured_output` only arrives with
+ * the final result event. By the time this throws, a write-enabled run has
+ * already commented on the ticket. What it does buy: the contradiction is
+ * refused rather than compounded into the local report, the operator is told,
+ * and — because the poller does not record a failed key as seen — the next
+ * cycle retries. The skill's comment is idempotent on its footer sentinel, so
+ * a retry that gets it right updates the comment in place rather than stacking
+ * a second one.
+ */
+export class TriageContradictionError extends TriageError {
+  readonly issueKey: string;
+  readonly placeholders: readonly string[];
 
-  constructor(server: string, status: string) {
+  constructor(issueKey: string, placeholders: readonly string[], claims: readonly string[]) {
     super(
-      `MCP server "${server}" reported status "${status}" — the run would have produced a verdict without reading the issue.`,
+      `${issueKey}: the ticket still contains ${placeholders.map((p) => `"${p}"`).join(", ")}, ` +
+        `so DoR row 9 (baseline metric) does not hold — but the run returned ${claims.join(" and ")}. ` +
+        `DOR_CHECKLIST.md: "Output dor:pass only if 1-9 hold." Refusing the verdict; ` +
+        `if the run was write-enabled, a comment making the same claim is already on the issue.`,
     );
-    this.name = "McpUnavailableError";
-    this.server = server;
-    this.status = status;
+    this.name = "TriageContradictionError";
+    this.issueKey = issueKey;
+    this.placeholders = placeholders;
   }
-}
-
-export class TriageTimeoutError extends TriageError {
-  constructor(issueKey: string, timeoutMs: number) {
-    super(`Triage of ${issueKey} exceeded ${timeoutMs}ms`);
-    this.name = "TriageTimeoutError";
-  }
-}
-
-interface McpServerStatus {
-  readonly name: string;
-  readonly status: string;
 }
 
 /**
@@ -188,6 +213,23 @@ interface McpServerStatus {
 const WITHHELD_FROM_CHILD = /^JIRA_/;
 
 /**
+ * Undocumented switch that this service must never be the one to set.
+ *
+ * It appears in neither the environment-variable reference nor the hooks
+ * reference, and the two plausible readings disagree about the value we were
+ * using: if it is a presence check, `CLAUDE_SKIP_HOOKS=0` means "skip hooks";
+ * if it is a value check, it means "do not skip". This file previously set it
+ * to "0" under the comment "safety hooks must stay active" — which, on the
+ * first reading, silently disabled the hooks in every triage subprocess and
+ * would have made any future PreToolUse guard a no-op that looked installed.
+ *
+ * Removing it from the child's environment is correct under both readings, so
+ * the ambiguity does not need resolving. Hooks are turned off deliberately via
+ * the documented `disableAllHooks` setting, not by an inherited variable.
+ */
+const HOOK_KILL_SWITCH = "CLAUDE_SKIP_HOOKS";
+
+/**
  * The child's environment: ours, minus the Jira REST credential.
  *
  * Exported for testing — that the credential is absent is a property worth
@@ -199,12 +241,11 @@ export function childEnv(
 ): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(parent)) {
-    if (!WITHHELD_FROM_CHILD.test(key)) {
-      result[key] = value;
+    if (WITHHELD_FROM_CHILD.test(key) || key === HOOK_KILL_SWITCH) {
+      continue;
     }
+    result[key] = value;
   }
-  // Safety hooks must stay active in headless runs.
-  result["CLAUDE_SKIP_HOOKS"] = "0";
   // Set last, so a stale value in the operator's own shell cannot win.
   if (vaultPath !== undefined && vaultPath !== "") {
     result["INSURANCE_VAULT"] = vaultPath;
@@ -212,32 +253,35 @@ export function childEnv(
   return result;
 }
 
+/**
+ * `--no-write` is unconditional, and is the whole point of this half.
+ *
+ * It is a "pure dry-run" in the skill's own words: it still renders the full
+ * §11 mutation payload, which the schema now collects, but it never offers to
+ * write. The analyst therefore produces everything needed to post without being
+ * able to post any of it.
+ */
 export function buildPrompt(options: TriageRunOptions): string {
   const flags = [
-    // Never neither, never both: see `noWrite`.
-    options.noWrite ? "--no-write" : "--yes",
+    "--no-write",
     options.deep ? "--deep" : "",
     options.noHtml === true ? "--no-html" : "",
   ]
     .filter(Boolean)
     .join(" ");
-  return `/${options.skillName} ${options.issueKey}${flags === "" ? "" : ` ${flags}`}`;
+  return `/${options.skillName} ${options.issueKey} ${flags}`;
 }
 
 /**
  * The tool allowlist for a run.
  *
- * Write tools are granted only to a run that is actually going to write. The
- * prompt already says `--no-write`, so this is belt and braces — but the belt
- * is a sentence in a prompt the model could misread, and the braces are a
- * permission check it cannot. On a preview run the write tools are simply not
- * there to call.
+ * No write tool appears here or in anything this function can return by
+ * default. The prompt already says `--no-write`, so this is belt and braces —
+ * but the belt is a sentence in a prompt the model could misread, and the
+ * braces are a permission check it cannot.
  */
 export function toolsFor(options: TriageRunOptions): readonly string[] {
-  if (options.allowedTools !== undefined) {
-    return options.allowedTools;
-  }
-  return options.noWrite ? ALLOWED_TOOLS : [...ALLOWED_TOOLS, ...WRITE_TOOLS];
+  return options.allowedTools ?? ALLOWED_TOOLS;
 }
 
 export function buildArgs(options: TriageRunOptions): string[] {
@@ -259,25 +303,6 @@ export function buildArgs(options: TriageRunOptions): string[] {
 }
 
 /**
- * Inspects an init event and throws if a required server is not connected.
- *
- * Exported so this can be unit-tested against recorded events without spawning
- * a real run.
- */
-export function assertMcpReady(
-  servers: readonly McpServerStatus[],
-  requiredServers: readonly string[] = REQUIRED_MCP_SERVERS,
-): void {
-  for (const required of requiredServers) {
-    const found = servers.find((server) => server.name === required);
-    const status = found?.status ?? "absent";
-    if (status !== "connected") {
-      throw new McpUnavailableError(required, status);
-    }
-  }
-}
-
-/**
  * The accepted verdicts, read off the schema the model was given.
  *
  * Deriving them rather than restating them means the check and the contract
@@ -290,7 +315,41 @@ function isVerdict(value: unknown): value is Verdict {
   return typeof value === "string" && VERDICTS.includes(value as Verdict);
 }
 
-function parsePayload(value: unknown, issueKey: string): TriagePayload {
+/**
+ * Refuses a payload whose verdict contradicts its own evidence.
+ *
+ * Checks both the label and the verdict, deliberately. The label is what the
+ * skill's own rule is written about; the verdict is what this service actually
+ * consumes — it sets the emoji, the sink's heading and anything routed later.
+ * Guarding only the label would leave the field that matters unguarded.
+ *
+ * Exported for testing: the point is not that it exists but that it fires.
+ */
+export function assertDorCoherent(payload: TriagePayload, issueKey: string): void {
+  if (payload.dorPlaceholders.length === 0) {
+    return;
+  }
+
+  const claims = [
+    payload.labels.includes("dor:pass") ? "the label dor:pass" : "",
+    payload.verdict === "ready-ish" ? 'the verdict "ready-ish"' : "",
+  ].filter((claim) => claim !== "");
+
+  if (claims.length === 0) {
+    return;
+  }
+
+  throw new TriageContradictionError(issueKey, payload.dorPlaceholders, claims);
+}
+
+/**
+ * Turns the run's structured output into a payload, or refuses it.
+ *
+ * Exported because testing `assertDorCoherent` in isolation proved nothing: a
+ * mutation that deleted the call from here left the whole suite green. The
+ * check has to be exercised through the path the run actually takes.
+ */
+export function parsePayload(value: unknown, issueKey: string): TriagePayload {
   if (typeof value !== "object" || value === null) {
     throw new TriageError(`No structured output returned for ${issueKey}`);
   }
@@ -300,127 +359,94 @@ function parsePayload(value: unknown, issueKey: string): TriagePayload {
     throw new TriageError(`Unrecognised verdict for ${issueKey}: ${String(verdict)}`);
   }
 
-  const rawLabels = candidate["labels"];
-  return {
+  const payload: TriagePayload = {
     verdict,
-    labels: Array.isArray(rawLabels)
-      ? rawLabels.filter((label): label is string => typeof label === "string")
-      : [],
+    labels: strings(candidate["labels"]),
+    dorPlaceholders: strings(candidate["dorPlaceholders"]),
     recommendedNextStep: String(candidate["recommendedNextStep"] ?? ""),
     report: String(candidate["report"] ?? ""),
+    mutation: parseMutation(candidate["mutation"]),
+  };
+
+  assertDorCoherent(payload, issueKey);
+  return payload;
+}
+
+/**
+ * Reads the mutation leniently, because the gate reads it strictly.
+ *
+ * Nothing here throws on a missing field: an absent comment body becomes `""`,
+ * which `assertPostable` then refuses by name. Rejecting twice, in two places,
+ * with two different messages would only make the failure harder to read — and
+ * a payload that cannot be posted is still worth keeping, since the local
+ * report is written either way.
+ */
+function parseMutation(value: unknown): Mutation {
+  const source =
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    commentBody: String(source["commentBody"] ?? ""),
+    labelsAdd: strings(source["labelsAdd"]),
+    labelsRemove: strings(source["labelsRemove"]),
+    component: String(source["component"] ?? ""),
+    links: parseLinks(source["links"]),
+    commentAction: source["commentAction"] === "update" ? "update" : "create",
   };
 }
 
+/**
+ * Unknown link types are dropped rather than coerced.
+ *
+ * The two §11 types differ in consequence — `duplicates` is the one that
+ * invites a human to close a ticket — so guessing which was meant is worse than
+ * creating no link at all. A dropped link costs a re-run; a wrong one costs
+ * somebody's ticket.
+ */
+function parseLinks(value: unknown): readonly IssueLink[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const links: IssueLink[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const type = record["type"];
+    const targetKey = record["targetKey"];
+    if (
+      (type === "duplicates" || type === "relates to") &&
+      typeof targetKey === "string" &&
+      targetKey !== ""
+    ) {
+      links.push({ type, targetKey });
+    }
+  }
+  return links;
+}
+
+function strings(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
 export async function runTriage(options: TriageRunOptions): Promise<TriagePayload> {
-  const args = buildArgs(options);
   logger.info("triage.start", { issueKey: options.issueKey });
 
-  return await new Promise<TriagePayload>((resolve, reject) => {
-    const child = spawn(options.executable, args, {
-      cwd: options.workingDirectory,
-      stdio: ["ignore", "pipe", "pipe"],
+  const payload = await runSession(
+    {
+      executable: options.executable,
+      args: buildArgs(options),
+      workingDirectory: options.workingDirectory,
+      timeoutMs: options.timeoutMs,
       env: childEnv(process.env, options.vaultPath),
-    });
+      requiredMcpServers: options.requiredMcpServers,
+      label: `Triage of ${options.issueKey}`,
+    },
+    (structuredOutput) => parsePayload(structuredOutput, options.issueKey),
+  );
 
-    let settled = false;
-    let buffered = "";
-    let stderr = "";
-    let payload: TriagePayload | null = null;
-    let failure: Error | null = null;
-
-    const finish = (error: Error | null, value?: TriagePayload): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      if (error !== null) {
-        reject(error);
-      } else if (value !== undefined) {
-        resolve(value);
-      }
-    };
-
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(new TriageTimeoutError(options.issueKey, options.timeoutMs));
-    }, options.timeoutMs);
-
-    const handleEvent = (event: Record<string, unknown>): void => {
-      if (event["type"] === "system" && event["subtype"] === "init") {
-        const servers = Array.isArray(event["mcp_servers"])
-          ? (event["mcp_servers"] as McpServerStatus[])
-          : [];
-        try {
-          assertMcpReady(servers, options.requiredMcpServers);
-        } catch (error) {
-          failure = error as Error;
-          // No point letting the run continue; it cannot read the issue.
-          child.kill("SIGTERM");
-        }
-        return;
-      }
-
-      if (event["type"] === "result") {
-        if (event["subtype"] !== "success" || event["is_error"] === true) {
-          failure ??= new TriageError(
-            `Triage of ${options.issueKey} failed: ${String(event["subtype"])}`,
-          );
-          return;
-        }
-        try {
-          payload = parsePayload(event["structured_output"], options.issueKey);
-        } catch (error) {
-          failure ??= error as Error;
-        }
-      }
-    };
-
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      buffered += chunk;
-      const lines = buffered.split("\n");
-      buffered = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed === "") {
-          continue;
-        }
-        try {
-          handleEvent(JSON.parse(trimmed) as Record<string, unknown>);
-        } catch {
-          logger.debug("triage.unparsed_line", { line: trimmed.slice(0, 200) });
-        }
-      }
-    });
-
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.on("error", (error) => {
-      finish(error);
-    });
-
-    child.on("close", (code) => {
-      if (failure !== null) {
-        finish(failure);
-        return;
-      }
-      if (payload === null) {
-        finish(
-          new TriageError(
-            `Triage of ${options.issueKey} exited ${String(code)} without structured output. stderr: ${stderr.slice(0, 500)}`,
-          ),
-        );
-        return;
-      }
-      logger.info("triage.done", {
-        issueKey: options.issueKey,
-        verdict: payload.verdict,
-      });
-      finish(null, payload);
-    });
-  });
+  logger.info("triage.done", { issueKey: options.issueKey, verdict: payload.verdict });
+  return payload;
 }

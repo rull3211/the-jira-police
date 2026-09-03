@@ -19,11 +19,11 @@
  * override that needs to be deliberate is the one that mutates a shared ticket.
  */
 
+import type { TicketRef } from "../jira/types.ts";
 import { logger } from "../logger.ts";
 import { FileSink, type TriageResult } from "../output/sink.ts";
 import { readSettings, withConfigErrors } from "../settings.ts";
-import { runTriage } from "../triage/runner.ts";
-import { buildTriageOptions } from "../wiring.ts";
+import { buildTriageOptions, createGroom, shouldPost } from "../wiring.ts";
 
 function flagValue(argv: readonly string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -47,17 +47,31 @@ async function main(): Promise<void> {
     ...(argv.includes("--write") ? { WRITE_BACK: "true" } : {}),
   };
 
-  // The same options the daemon would build, so a run here proves something
-  // about the run there rather than about this file.
+  // The same three steps the daemon runs — analyse, gate, post — rather than a
+  // bare `runTriage`. Calling the analyst directly would make this command a
+  // rehearsal of something the service does not do, and would quietly skip the
+  // check that decides whether the verdict is fit to publish.
   const options = buildTriageOptions(settings, issueKey);
-  const payload = await runTriage(options);
+  const groom = createGroom(settings);
+
+  // Discovery is what knows an issue's summary, and discovery is the half this
+  // command skips. The remaining fields are unused by grooming: only the key
+  // crosses into the skill.
+  const ticket: TicketRef = {
+    key: issueKey,
+    summary: `${issueKey} (summary not fetched in single-run mode)`,
+    url: `${settings.JIRA_BASE_URL}/browse/${issueKey}`,
+    created: new Date().toISOString(),
+    issueTypeId: "",
+    issueTypeName: "",
+  };
+
+  const payload = await groom(ticket);
 
   const result: TriageResult = {
     issueKey,
-    issueUrl: `${settings.JIRA_BASE_URL}/browse/${issueKey}`,
-    // Discovery is what knows an issue's summary, and discovery is the half
-    // this command skips. Naming that beats inventing a plausible-looking one.
-    summary: `${issueKey} (summary not fetched in single-run mode)`,
+    issueUrl: ticket.url,
+    summary: ticket.summary,
     verdict: payload.verdict,
     labels: payload.labels,
     recommendedNextStep: payload.recommendedNextStep,
@@ -75,7 +89,7 @@ async function main(): Promise<void> {
     vault: options.vaultPath ?? "<none>",
     // Whether the ticket itself was touched is the one fact worth being able to
     // grep for afterwards.
-    wroteToJira: !options.noWrite,
+    wroteToJira: shouldPost(settings),
   });
 }
 
