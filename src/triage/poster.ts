@@ -220,14 +220,54 @@ function strings(value: unknown): readonly string[] {
 }
 
 /**
+ * Whether the labels we asked for are the labels the receipt says it wrote.
+ *
+ * `problems` is a free-text bucket the model fills in, and it conflates two
+ * unlike things: "I could not do what you asked" and "FYI, I noticed
+ * something". The first live write produced two entries, both of the second
+ * kind — a tool it routed around, and Jira normalising two trailing spaces into
+ * four — on a run that succeeded completely.
+ *
+ * So severity cannot be read off that list. This reads the structured fields
+ * instead and asks the only question with a definite answer: did the delta we
+ * requested actually appear? It is the same rule the gate learned the hard way
+ * — trust the machine-readable field, not the prose next to it — and the same
+ * reason the solver is specified to read exit codes rather than ask the model
+ * whether the tests passed.
+ *
+ * `labelsWritten` is the complete post-union array, so every added label must
+ * be present in it and every removed label must be absent.
+ */
+export function findLabelDiscrepancies(
+  mutation: Mutation,
+  receipt: PostReceipt,
+): readonly string[] {
+  const written = new Set(receipt.labelsWritten);
+
+  return [
+    ...mutation.labelsAdd
+      .filter((label) => !written.has(label))
+      .map((label) => `"${label}" was to be added but is absent from the labels written`),
+    ...mutation.labelsRemove
+      .filter((label) => written.has(label))
+      .map((label) => `"${label}" was to be removed but is still present in the labels written`),
+  ];
+}
+
+/**
  * Posts the mutation and returns what the run says it did.
  *
- * A receipt reporting `problems` is logged as an error but does NOT throw. The
- * writes are already applied by then, so failing the ticket would send the
- * poller round again to redo work that partly succeeded; the comment sentinel
- * makes a re-run safe, but a partial success is better surfaced than retried
- * blindly. A receipt saying it skipped the comment entirely is a different
- * matter and does throw — that is the run reporting it did nothing.
+ * A receipt reporting `problems` does NOT throw. The writes are already applied
+ * by then, so failing the ticket would send the poller round again to redo work
+ * that partly succeeded; the comment sentinel makes a re-run safe, but a partial
+ * success is better surfaced than retried blindly. A receipt saying it skipped
+ * the comment entirely is a different matter and does throw — that is the run
+ * reporting it did nothing.
+ *
+ * Only a mechanical discrepancy is logged at `error`. Notes on an otherwise
+ * complete write are logged at `warn`, because an error line on a wholly
+ * successful run is how a team learns to filter out error lines — and this one
+ * would have fired on every single write the daemon ever made.
  */
 export async function runPost(options: PostOptions): Promise<PostReceipt> {
   logger.info("post.start", {
@@ -248,8 +288,16 @@ export async function runPost(options: PostOptions): Promise<PostReceipt> {
     (structuredOutput) => parseReceipt(structuredOutput, options.issueKey),
   );
 
-  if (receipt.problems.length > 0) {
-    logger.error("post.partial", { issueKey: options.issueKey, problems: receipt.problems });
+  const discrepancies = findLabelDiscrepancies(options.mutation, receipt);
+
+  if (discrepancies.length > 0) {
+    logger.error("post.incomplete", {
+      issueKey: options.issueKey,
+      discrepancies,
+      problems: receipt.problems,
+    });
+  } else if (receipt.problems.length > 0) {
+    logger.warn("post.notes", { issueKey: options.issueKey, problems: receipt.problems });
   }
 
   if (receipt.commentAction === "skipped") {

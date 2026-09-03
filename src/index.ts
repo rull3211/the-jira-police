@@ -70,6 +70,18 @@ function createShutdown(runForMs: number | undefined): AbortController {
   process.on("SIGINT", () => stop("SIGINT"));
   process.on("SIGTERM", () => stop("SIGTERM"));
 
+  // SIGHUP is the one that actually happened. Node's default action for it is
+  // immediate termination, so a daemon started in a terminal died the instant
+  // that terminal closed — mid-cycle, with no `service.stopped` line and no
+  // chance to finish the ticket in flight. The symptom is the worst kind: a
+  // service that is simply gone, with nothing in its own logs to say why.
+  //
+  // Handled identically to the other two rather than ignored. A closed terminal
+  // is a legitimate request to stop; the bug was never that it stopped, only
+  // that it stopped abruptly and silently. Surviving a hangup is a job for
+  // nohup or a service manager, not for this process to arrogate.
+  process.on("SIGHUP", () => stop("SIGHUP"));
+
   if (runForMs !== undefined) {
     // Unref'd: the deadline should not by itself keep the process alive.
     setTimeout(() => stop("deadline"), runForMs).unref();
@@ -78,8 +90,35 @@ function createShutdown(runForMs: number | undefined): AbortController {
   return controller;
 }
 
+/**
+ * Makes a silent death loud.
+ *
+ * `runLoop` catches everything `runCycle` throws, so no triage failure can end
+ * the service — which means any exit that is not a signal came from outside
+ * that try, and Node's default is to print to stderr and leave. If stderr is a
+ * terminal that has since closed, the reason is simply lost, and the only
+ * evidence left is a stale state file and a process that is no longer there.
+ *
+ * These handlers do not attempt recovery: the process still exits, because a
+ * daemon carrying on after an unhandled rejection is in an unknown state. They
+ * exist so the last thing it does is say why, in the same structured format as
+ * everything else it logs.
+ */
+function logUnexpectedExits(): void {
+  process.on("unhandledRejection", (reason) => {
+    logger.error("service.unhandled_rejection", { error: reason });
+    process.exitCode = 1;
+  });
+
+  process.on("uncaughtException", (error) => {
+    logger.error("service.uncaught_exception", { error });
+    process.exit(1);
+  });
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  logUnexpectedExits();
 
   const settings = applyOverrides(readSettings(), argv);
 
