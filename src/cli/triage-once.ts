@@ -12,22 +12,47 @@
  * `--skill` overrides `SKILL_NAME`, which defaults to the mock, so this is safe
  * to run before the real skill is configured.
  *
- * `--write` overrides `WRITE_BACK` for this run only, and exists so the first
- * real comment the service ever posts is one an operator chose, on a ticket
- * they picked, rather than whichever issue the poller happened to find first.
- * There is no `--no-write` counterpart: preview is already the default, and the
- * override that needs to be deliberate is the one that mutates a shared ticket.
+ * `--write` decides `WRITE_BACK` for this run, and exists so the first real
+ * comment the service ever posts is one an operator chose, on a ticket they
+ * picked, rather than whichever issue the poller happened to find first. There
+ * is no `--no-write` counterpart: preview is the default, and the override that
+ * needs to be deliberate is the one that mutates a shared ticket.
+ *
+ * Note "decides", not "overrides". This previously only *added* `WRITE_BACK`
+ * when the flag was present, which left `.env` in charge of the case that
+ * matters: with `WRITE_BACK=true` configured for the daemon, a `triage:once`
+ * run with no flag would post to the ticket, and the flag whose entire purpose
+ * is to make that deliberate became decorative. The value is now set both ways
+ * from the flag alone, so what this command does to a shared ticket is legible
+ * from the command line that started it.
  */
 
 import type { TicketRef } from "../jira/types.ts";
 import { logger } from "../logger.ts";
 import { FileSink, type TriageResult } from "../output/sink.ts";
-import { readSettings, withConfigErrors } from "../settings.ts";
+import { type Settings, readSettings, withConfigErrors } from "../settings.ts";
 import { buildTriageOptions, createGroom, shouldPost } from "../wiring.ts";
 
 function flagValue(argv: readonly string[], name: string): string | undefined {
   const index = argv.indexOf(name);
   return index === -1 ? undefined : argv[index + 1];
+}
+
+/**
+ * The command line's last word on what this run may do.
+ *
+ * Split out from `main` so it can be tested without starting a subprocess. That
+ * is not ceremony: the one thing worth asserting about this command is that an
+ * operator who does not type `--write` cannot post to a shared ticket no matter
+ * what `.env` says, and until this was a function there was nowhere to assert it.
+ */
+export function resolveSettings(argv: readonly string[], base: Settings): Settings {
+  const skill = flagValue(argv, "--skill");
+  return {
+    ...base,
+    ...(skill === undefined ? {} : { SKILL_NAME: skill }),
+    WRITE_BACK: argv.includes("--write") ? "true" : "false",
+  };
 }
 
 async function main(): Promise<void> {
@@ -40,12 +65,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const skill = flagValue(argv, "--skill");
-  const settings = {
-    ...readSettings(),
-    ...(skill === undefined ? {} : { SKILL_NAME: skill }),
-    ...(argv.includes("--write") ? { WRITE_BACK: "true" } : {}),
-  };
+  const settings = resolveSettings(argv, readSettings());
 
   // The same three steps the daemon runs — analyse, gate, post — rather than a
   // bare `runTriage`. Calling the analyst directly would make this command a
