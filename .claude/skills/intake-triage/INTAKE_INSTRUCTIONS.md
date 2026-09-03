@@ -266,8 +266,15 @@ On a confirmed `y`, perform these writes (only these):
 - **Labels — UNION, never clobber.** READ the ticket's current labels (already fetched in §1), then
   write `current ∪ skill-set` via `mcp__atlassian__editJiraIssue` — never a bare replacement array.
   On a verdict change, remove ONLY the skill's own stale namespaced labels (`route:*`, `dup:*`,
-  `dor:*`, `tier:*`, `intake:*`); never touch a human label. The preview's LABEL DELTA is exactly
-  this reconciliation.
+  `dor:*`, `tier:*`, `intake:*`, `next:*`); never touch a human label. The preview's LABEL DELTA is
+  exactly this reconciliation.
+
+  `next:*` was added to that list on 2026-09-03. It is set by this skill (§ vocabulary below:
+  `next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead`) and never by a
+  human, but its omission here meant a verdict change had to leave the previous routing label in
+  place — so a ticket sent back to its reporter kept a `next:to-trio` directly contradicting the
+  `next:to-reporter` alongside it. Local change; not yet upstream.
+
 - Apply the detected **component** via `mcp__atlassian__editJiraIssue`
   (`{"components":[{"name":"<exact live name>"}]}`) — ONLY one of the four policy streams
   (`SSX Advisor` · `EDH` · `SSX Partner` · `SSX Nettsalg`), only at high confidence, cap 1. Merge
