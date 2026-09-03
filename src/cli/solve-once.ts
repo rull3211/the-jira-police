@@ -3,13 +3,20 @@
  *
  *   node src/cli/solve-once.ts
  *
- * **This writes nothing.** Not to Jira, not to git, not to disk. It reads the
- * board, works out which tickets it would claim and exactly which label edit
- * each claim would be, and prints that. Phase B of the plan is this command and
- * nothing else — the point is to watch which tickets arrive in the queue for a
- * while before anything is allowed to act on them, because the fitness
- * assessment that puts them there is made by a model that cannot read source
- * code.
+ * **This changes nothing.** Not a label, not a branch, not a file in any
+ * repository. It reads the board, works out which tickets it would claim and
+ * exactly which label edit each claim would be, and reports that. Phase B of
+ * the plan is this command and nothing else — the point is to watch which
+ * tickets arrive in the queue for a while before anything is allowed to act on
+ * them, because the fitness assessment that puts them there is made by a model
+ * that cannot read source code.
+ *
+ * The one thing it does write is a local artifact,
+ * `<OUTPUT_DIR>/solve-cycle.md`, and that is the point of it: watching requires
+ * something to look at afterwards, and stdout scrolls away. It is the same
+ * category of output as the groomed reports beside it — gitignored, local,
+ * read by a human deciding whether the queue is picking the right tickets. It
+ * is emphatically not a step toward the claim; see `solve/report.ts`.
  *
  * There is deliberately no `--dry-run` flag, and no flag to turn the dry run
  * off. A flag would imply the other mode exists; it does not. `runSolveCycle`
@@ -24,6 +31,7 @@
 import { logger } from "../logger.ts";
 import { describeSettings, readSettings, withConfigErrors } from "../settings.ts";
 import { runSolveCycle } from "../solve/poller.ts";
+import { writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
 
 async function main(): Promise<void> {
@@ -32,7 +40,8 @@ async function main(): Promise<void> {
   logger.info("solve-once.settings", describeSettings(settings));
 
   const client = createJiraClient(settings);
-  const outcome = await runSolveCycle(createSolveDeps(settings, client));
+  const deps = createSolveDeps(settings, client);
+  const outcome = await runSolveCycle(deps);
 
   for (const claim of outcome.planned) {
     process.stdout.write(
@@ -51,8 +60,14 @@ async function main(): Promise<void> {
     process.stdout.write(`SKIP  ${skip.issueKey}  ${skip.reason}\n`);
   }
 
+  // After the stdout lines, so a failure to write the artifact cannot cost the
+  // operator the summary they came for.
+  const report = await writeSolveReport(settings.OUTPUT_DIR, outcome, deps, new Date());
+  process.stdout.write(`\nWrote ${report}\n`);
+
   logger.info("solve-once.done", {
     dryRun: outcome.dryRun,
+    report,
     found: outcome.found,
     inFlight: outcome.inFlight,
     capacity: outcome.capacity,

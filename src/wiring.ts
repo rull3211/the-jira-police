@@ -287,6 +287,11 @@ export function createSolveDeps(
     mode,
     allowedRepos: list(settings, "SOLVE_REPOS"),
     maxConcurrent: numeric(settings, "MAX_CONCURRENT_SOLVES"),
+    // The same two constants the closures below run, handed to the cycle report
+    // so the artifact prints the query that produced its numbers rather than a
+    // second rendering of it that could disagree.
+    queueJql,
+    inFlightJql,
     fetchQueue: async () => {
       logger.info("solve.query", { jql: queueJql });
       return (await client.search(queueJql)).map(toSolveCandidate);

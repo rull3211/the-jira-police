@@ -252,6 +252,22 @@ describe("createSolveDeps", () => {
     expect(callable.toSorted()).toEqual(["countInFlight", "fetchQueue"]);
   });
 
+  it("advertises the same queries it runs", async () => {
+    // The cycle report prints `queueJql` and `inFlightJql` as the explanation
+    // for its numbers, so an operator can paste them into Jira and check the
+    // result by hand. That is only worth anything if the advertised query is
+    // the executed one — a second rendering built alongside the first would be
+    // free to disagree with it, and the report would then be a confident
+    // account of a query nobody ran.
+    const { client, queries } = fakeClient();
+    const deps = createSolveDeps(solveSettings(), client);
+
+    await deps.fetchQueue();
+    await deps.countInFlight();
+
+    expect(queries).toEqual([deps.queueJql, deps.inFlightJql]);
+  });
+
   it("is disabled unless SOLVE_ENABLED is exactly true", () => {
     const deps = (value: string): boolean =>
       createSolveDeps(solveSettings({ SOLVE_ENABLED: value }), fakeClient().client).enabled;

@@ -9,18 +9,20 @@ new SSX ticket  →  discover  →  analyse  →  gate  →  post
                                     ↓
                             groomed/SSX-1234.md
 
-labelled ticket →  solve queue  →  (plans a claim, writes nothing)
+labelled ticket →  solve queue  →  (plans a claim, makes none)
+                                    ↓
+                            groomed/solve-cycle.md
 ```
 
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 517 tests, no build step, no deployment
+Status: running end to end against production Jira. 532 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
 `agent:solvable`, waiting to be fixed by an agent. It is read-only today — it selects the right
-tickets and reports the exact label edit it *would* make, and has no function capable of making
+tickets and reports the exact label edit it _would_ make, and has no function capable of making
 it. See §4 for the queue and §13 for what is deliberately unbuilt. Nothing runs it from the
 daemon; `pnpm start` is the grooming loop only.
 
@@ -239,16 +241,16 @@ rather than groomed. It shares the JQL helpers with the above and nothing else, 
 queries disagree about the only thing that matters: the first selects on **time**, the second on
 **label state**.
 
-|         | new-issue poller          | solve queue                    |
-| ------- | ------------------------- | ------------------------------ |
-| Selects | `created >= -Nm`          | labels                         |
-| Cursor  | `state/poll.json`         | **none**                       |
-| Dedupe  | local `seenKeys`          | **ticket label state in Jira** |
-| Run by  | the daemon                | `pnpm solve:once`, by hand     |
+|         | new-issue poller  | solve queue                    |
+| ------- | ----------------- | ------------------------------ |
+| Selects | `created >= -Nm`  | labels                         |
+| Cursor  | `state/poll.json` | **none**                       |
+| Dedupe  | local `seenKeys`  | **ticket label state in Jira** |
+| Run by  | the daemon        | `pnpm solve:once`, by hand     |
 
 **It cannot reuse the first poller.** `isUnseen` (`src/state/store.ts:92`) checks a permanent seen
 list, so a ticket triaged in March could never re-enter — but a ticket labelled for solving in
-September must. The queue is a *state*, not a window: running it twice reports the same tickets
+September must. The queue is a _state_, not a window: running it twice reports the same tickets
 twice, and that repetition is the queue working.
 
 **Dedupe lives in Jira, not on disk**, so the queue survives a restart, a wiped `state/` and a
@@ -261,7 +263,7 @@ clause; 46 `triaged` issues, all 46 surviving it. Numbers are in the `jql.ts` do
 
 **The concurrency bound needs its own query.** The queue excludes `agent:solving` by design, so
 the tickets counting against `MAX_CONCURRENT_SOLVES` are precisely the ones the queue cannot see;
-a bound computed from the queue result would cap claims *per cycle* and let the next tick start
+a bound computed from the queue result would cap claims _per cycle_ and let the next tick start
 another. `buildInFlightJql` deliberately omits `statusCategory != Done` — a solve whose ticket
 someone closed mid-run is still in flight, and **undercounting** a concurrency limit is the
 failure that lets a second claim through. Over-counting only causes waiting.
@@ -274,9 +276,20 @@ so widening `SOLVE_REPOS` picks it up later with no manual reset. The label prop
 allowlist decides. An earlier pattern accepted `..`, the one string guaranteed to escape any
 directory it is joined to.
 
-**Nothing here can write.** `SolveDeps` has two dependencies and both are readers. The refusal is
-structural rather than promised: granting it means changing that interface, which is where a
-reviewer looks. See §13.
+**Nothing here can change anything.** `SolveDeps` has two dependencies and both are readers. The
+refusal is structural rather than promised: granting it means changing that interface, which is
+where a reviewer looks. See §13.
+
+The one thing a cycle emits is `groomed/solve-cycle.md` — the configuration it ran under, both
+queries verbatim, and every candidate with the decision made about it and the labels that
+decision was made from. The phase is dry so its picks can be judged before anything acts on
+them, and judging needs something that outlives stdout. It is deliberately **not** a section
+appended to `groomed/<KEY>.md`: `FileSink` rewrites those wholesale on the next triage, so such a
+section would disappear at a moment having nothing to do with the solve queue. Same reasoning
+that gives refusals their own `.rejected.md`. Ticket text reaches this file, so summaries and
+skip reasons are collapsed to one line — a summary containing a newline and a `## PLAN — SSX-9999`
+would otherwise forge a decision in the one document an operator reads to find out what was
+decided.
 
 ---
 
@@ -348,29 +361,30 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-| Path                    | Role                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------ |
-| `src/index.ts`          | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides    |
-| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep |
-| `src/poller.ts`         | One cycle. Ordering, dedupe, failure isolation, the three rules above                |
+| Path                    | Role                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`          | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides                       |
+| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                    |
+| `src/poller.ts`         | One cycle. Ordering, dedupe, failure isolation, the three rules above                                   |
 | `src/wiring.ts`         | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps` |
-| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker               |
-| `src/jira/jql.ts`       | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting   |
-| `src/solve/labels.ts`   | The `agent:` state machine as pure functions; `repoFromLabels`                       |
-| `src/solve/poller.ts`   | One solve cycle. **Dry run only** — plans the claim, cannot make it                  |
-| `src/cli/solve-once.ts` | One solve cycle and exit. No `--dry-run` flag, because there is no other mode        |
-| `src/jira/client.ts`    | `/rest/api/3/search/jql`, token pagination, Basic auth                               |
-| `src/jira/types.ts`     | The slice of the Jira payload actually read, plus `TicketRef`                        |
-| `src/state/store.ts`    | Cursor + seen keys, atomic write                                                     |
-| `src/triage/schema.ts`  | The draft-07 contract handed to the analyst. Descriptions double as instructions     |
-| `src/triage/session.ts` | Shared subprocess machinery for both runs                                            |
-| `src/triage/runner.ts`  | The analyst                                                                          |
-| `src/triage/gate.ts`    | The check                                                                            |
-| `src/triage/poster.ts`  | The writer                                                                           |
-| `src/output/sink.ts`    | `FileSink` (reports) and the rejection artifacts                                     |
-| `src/output/canvas.ts`  | Slack canvas payload builders — **built, never called** (§10)                        |
-| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint                             |
-| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                  |
+| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                  |
+| `src/jira/jql.ts`       | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting                      |
+| `src/solve/labels.ts`   | The `agent:` state machine as pure functions; `repoFromLabels`                                          |
+| `src/solve/poller.ts`   | One solve cycle. **Dry run only** — plans the claim, cannot make it                                     |
+| `src/solve/report.ts`   | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                      |
+| `src/cli/solve-once.ts` | One solve cycle and exit. No `--dry-run` flag, because there is no other mode                           |
+| `src/jira/client.ts`    | `/rest/api/3/search/jql`, token pagination, Basic auth                                                  |
+| `src/jira/types.ts`     | The slice of the Jira payload actually read, plus `TicketRef`                                           |
+| `src/state/store.ts`    | Cursor + seen keys, atomic write                                                                        |
+| `src/triage/schema.ts`  | The draft-07 contract handed to the analyst. Descriptions double as instructions                        |
+| `src/triage/session.ts` | Shared subprocess machinery for both runs                                                               |
+| `src/triage/runner.ts`  | The analyst                                                                                             |
+| `src/triage/gate.ts`    | The check                                                                                               |
+| `src/triage/poster.ts`  | The writer                                                                                              |
+| `src/output/sink.ts`    | `FileSink` (reports) and the rejection artifacts                                                        |
+| `src/output/canvas.ts`  | Slack canvas payload builders — **built, never called** (§10)                                           |
+| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint                                                |
+| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                     |
 
 `wiring.ts` exists because there are three entry points — the daemon, `poll:once` and
 `triage:once` — and a difference in how they wire the same pipeline would be a bug that only shows
@@ -465,28 +479,28 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 `.env`, read via `node --env-file-if-exists`. Every setting is declared once in `src/settings.ts`;
 `describeSettings()` masks the sensitive ones so the startup dump is safe to paste.
 
-| Setting                      | Default                            | Notes                                                                                             |
-| ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `JIRA_BASE_URL`              | `https://storebrand.atlassian.net` |                                                                                                   |
-| `JIRA_EMAIL`                 | —                                  | **required**                                                                                      |
-| `JIRA_AUTH`                  | —                                  | **required**, sensitive, discovery only                                                           |
-| `JIRA_PROJECT`               | `SSX`                              |                                                                                                   |
-| `JIRA_COMPONENTS`            | `SSX Advisor`                      | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets |
-| `JIRA_EXCLUDED_TYPES`        | `10009`                            | Deloppgave / sub-task — arrives attached to a parent already triaged                              |
-| `POLL_INTERVAL_MS`           | `300000`                           |                                                                                                   |
-| `CURSOR_OVERLAP_MS`          | `120000`                           | See §4                                                                                            |
-| `FIRST_RUN_LOOKBACK_MINUTES` | `60`                               | Deliberately short — a wide first window means one paid run per historical issue                  |
-| `SKILL_NAME`                 | `mock-triage`                      | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                    |
-| `VAULT_PATH`                 | —                                  | Required for the real skill; checked at wiring time, not first-ticket time                        |
-| `WRITE_BACK`                 | `false`                            | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed       |
-| `TRIAGE_TIMEOUT_MS`          | `600000`                           |                                                                                                   |
-| `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`      | Both gitignored                                                                                   |
-| `SOLVE_ENABLED`              | `false`                            | Master switch for the solve queue. Strict `"true"`. Checked at composition *and* in the poller    |
-| `SOLVE_MODE`                 | `manual`                           | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback |
+| Setting                      | Default                            | Notes                                                                                                                                                  |
+| ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `JIRA_BASE_URL`              | `https://storebrand.atlassian.net` |                                                                                                                                                        |
+| `JIRA_EMAIL`                 | —                                  | **required**                                                                                                                                           |
+| `JIRA_AUTH`                  | —                                  | **required**, sensitive, discovery only                                                                                                                |
+| `JIRA_PROJECT`               | `SSX`                              |                                                                                                                                                        |
+| `JIRA_COMPONENTS`            | `SSX Advisor`                      | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets                                                      |
+| `JIRA_EXCLUDED_TYPES`        | `10009`                            | Deloppgave / sub-task — arrives attached to a parent already triaged                                                                                   |
+| `POLL_INTERVAL_MS`           | `300000`                           |                                                                                                                                                        |
+| `CURSOR_OVERLAP_MS`          | `120000`                           | See §4                                                                                                                                                 |
+| `FIRST_RUN_LOOKBACK_MINUTES` | `60`                               | Deliberately short — a wide first window means one paid run per historical issue                                                                       |
+| `SKILL_NAME`                 | `mock-triage`                      | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                                                                         |
+| `VAULT_PATH`                 | —                                  | Required for the real skill; checked at wiring time, not first-ticket time                                                                             |
+| `WRITE_BACK`                 | `false`                            | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed                                                            |
+| `TRIAGE_TIMEOUT_MS`          | `600000`                           |                                                                                                                                                        |
+| `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`      | Both gitignored                                                                                                                                        |
+| `SOLVE_ENABLED`              | `false`                            | Master switch for the solve queue. Strict `"true"`. Checked at composition _and_ in the poller                                                         |
+| `SOLVE_MODE`                 | `manual`                           | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback                              |
 | `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                             | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing |
-| `SOLVE_REPOS`                | — (**no fallback**)                | Repository allowlist. The only solve setting without a default, deliberately: see §14.10          |
-| `MAX_CONCURRENT_SOLVES`      | `1`                                | Counted from the board via `buildInFlightJql`, never from local state                             |
-| `MAX_REVIEW_ITERATIONS`      | `3`                                | Unused until Phase D                                                                              |
+| `SOLVE_REPOS`                | — (**no fallback**)                | Repository allowlist. The only solve setting without a default, deliberately: see §14.10                                                               |
+| `MAX_CONCURRENT_SOLVES`      | `1`                                | Counted from the board via `buildInFlightJql`, never from local state                                                                                  |
+| `MAX_REVIEW_ITERATIONS`      | `3`                                | Unused until Phase D                                                                                                                                   |
 
 Commands:
 
@@ -496,7 +510,7 @@ pnpm dev                           # daemon, --watch
 pnpm poll:once --dry-run           # discovery only; free, and the fastest config check
 pnpm poll:once                     # one full cycle
 pnpm triage:once SSX-1234 [--write]
-pnpm solve:once                    # one solve cycle; reads the board, writes nothing
+pnpm solve:once                    # one solve cycle; reads the board, changes nothing
 pnpm check-types && pnpm lint && pnpm test
 ```
 
@@ -581,12 +595,12 @@ is likewise only partly owned, copy that shape rather than widening the prefix l
 
 ### The solve feature, from the claim onward
 
-Everything that *selects* a ticket is built and was verified against the live board on
-2026-09-03. Everything that *changes* anything is not.
+Everything that _selects_ a ticket is built and was verified against the live board on
+2026-09-03. Everything that _changes_ anything is not.
 
 - **The claim write.** The queue reports the edit (`+agent:solving` / `-agent:start`) and cannot
   perform it. This is the next increment, and it is what makes the queue's dedupe testable at
-  all — *claim one ticket, confirm a second `solve:once` picks nothing up, release it* is the
+  all — _claim one ticket, confirm a second `solve:once` picks nothing up, release it_ is the
   experiment, and it needs a write to run.
 - **Running it from the daemon.** Not wired into `index.ts`, and that is a decision rather than
   an omission. Wiring it in is the step that makes it **unattended**; if it were already looping
@@ -631,13 +645,13 @@ Things that look like details and are not:
    belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
    attacker-controlled ticket text, so this is a boundary rather than a convention.
 10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
-    value is missing *or blank* (`settings.ts:209`) — the two are indistinguishable to it. So a
+    value is missing _or blank_ (`settings.ts:209`) — the two are indistinguishable to it. So a
     default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
     an operator emptying the allowlist to take the solver off a repository would have it handed
     straight back, revocable only by editing source. It is the one solve setting with no
     fallback, and unset means nothing is allowed. The same reasoning applies to anything future
     that names what may be written to. Note this cuts the opposite way from
-    `SOLVE_AUTO_ISSUE_TYPES`, where the fallback *is* the restriction — the test to apply is not
+    `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_ the restriction — the test to apply is not
     "does it have a default" but "does silence widen or narrow what the service may touch."
 11. **Every label write is read-modify-write, and must be verified after the fact.** The
     available write path — MCP `editJiraIssue` — exposes only `fields`, never Jira's
@@ -648,6 +662,6 @@ Things that look like details and are not:
     a solve claims the ticket loses their edit, with nothing in either history explaining it.
     The mitigation is to re-read after writing and confirm the set is what was intended, and to
     keep the window between read and write free of model calls and I/O. This is why invariant 5
-    reads *delta, never a replacement array*: the poster path can honour it because the skill
+    reads _delta, never a replacement array_: the poster path can honour it because the skill
     resolves the delta against live inside a single session, and the claim path cannot, which
     makes the claim the more dangerous of the two writes despite being the smaller one.

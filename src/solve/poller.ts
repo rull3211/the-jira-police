@@ -96,6 +96,22 @@ export interface SolveDeps {
   readonly countInFlight: () => Promise<number>;
   /** Aborted to request a graceful stop; checked between tickets. */
   readonly signal?: AbortSignal;
+  /**
+   * The two queries this cycle reads, verbatim, for the cycle report.
+   *
+   * Unused by the logic below — they are here so the artifact can print the
+   * exact JQL that produced its numbers, which is the difference between a
+   * report you can check against the board by hand and one you have to trust.
+   * Sourced from the same constants the fetch closures use, so the printed
+   * query cannot drift from the executed one.
+   *
+   * Optional because a hand-built fake genuinely has no query behind it: its
+   * `fetchQueue` returns an array, not the result of a search. Absent means
+   * "these deps were not composed from settings", which is the truth in a test
+   * and never the truth in `createSolveDeps`.
+   */
+  readonly queueJql?: string;
+  readonly inFlightJql?: string;
 }
 
 /** What the cycle would do to one ticket, had it been allowed to. */
@@ -130,6 +146,20 @@ export interface SolveCycleOutcome {
   readonly skipped: readonly SkippedTicket[];
   /** Eligible and allowed, but out of capacity or interrupted. Next tick takes them. */
   readonly deferred: readonly string[];
+  /**
+   * Every candidate the queue returned, exactly as read.
+   *
+   * The decisions above are keys and reasons; this is what they were made from.
+   * Retained for the same reason `TriageResult.agentFitness` is required rather
+   * than optional — a conclusion without its input cannot be judged after the
+   * fact, and the whole point of running this phase dry is to judge it. A `SKIP`
+   * reading "no single svc:<repo> label" is unactionable on its own and obvious
+   * next to the ticket's actual labels.
+   *
+   * Sorted as the cycle processed them, oldest-updated first, so the order in
+   * the artifact is the order the concurrency bound applied in.
+   */
+  readonly candidates: readonly SolveCandidate[];
 }
 
 const NOTHING: SolveCycleOutcome = {
@@ -140,6 +170,7 @@ const NOTHING: SolveCycleOutcome = {
   planned: [],
   skipped: [],
   deferred: [],
+  candidates: [],
 };
 
 /**
@@ -317,5 +348,6 @@ export async function runSolveCycle(deps: SolveDeps): Promise<SolveCycleOutcome>
     planned,
     skipped,
     deferred,
+    candidates,
   };
 }
