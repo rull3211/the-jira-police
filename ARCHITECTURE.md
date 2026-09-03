@@ -346,7 +346,7 @@ to a fresh report for the same key claiming both are current.
 | The gate refuses                  | Nothing posted. Rejection artifact written. Same retry path                                                                                         |
 | The poster reports `problems`     | Logged as an error, **not** thrown. Writes already landed; retrying redoes partial work                                                             |
 | The poster reports `skipped`      | Throws. It did nothing, so a retry is right                                                                                                         |
-| Atlassian MCP not connected       | Child killed on the init event, before a turn is spent. **Fired for real on 2026-09-03**, status `pending` — see below                              |
+| Atlassian MCP not connected       | Child killed on the init event, before a turn is spent. **Fired for real on 2026-09-03** — expired OAuth session, status `pending`; see below       |
 | A run exceeds `TRIAGE_TIMEOUT_MS` | Child `SIGKILL`ed, run rejected                                                                                                                     |
 | Jira down / credential expired    | Reaches `runLoop`, which backs off exponentially to a 15-min cap. Uncapped backoff would make the service indistinguishable from a dead one         |
 | SIGINT / SIGTERM                  | Current issue finishes, then stop. A second signal exits 130 immediately                                                                            |
@@ -356,19 +356,31 @@ Retries are safe because the comment is idempotent on its footer sentinel: a re-
 place** rather than stacking a second copy. That is why the sentinel is a gate rule and not a
 nicety.
 
-**The MCP guard has now met reality**, and by a cause nobody had predicted. It was written for an
-expired OAuth session; what actually tripped it was `⏸ Pending approval` — both MCP servers waiting
-on an interactive approval that a headless run can never give:
+**The MCP guard has now met reality**, on 2026-09-03, and by exactly the cause it was written for:
+the Atlassian OAuth session had expired. The init event reported `pending`, `assertMcpReady`
+refused, and the child was killed before a turn was spent. Without it the run would have exited 0
+with a verdict formed without the ticket ever being read.
+
+Two things about this are worth more than the incident:
+
+**`storecode mcp list` is not a reliable oracle, and it misdiagnoses in the dangerous direction.**
+It reported `⏸ Pending approval (run 'claude' to approve)` both before the re-auth and _after_ it,
+while a real subprocess was connecting fine. Its own health check runs in a context that cannot
+approve, so it reports an approval problem where the actual problem was authentication. Read the
+init event instead — that is what the run itself sees:
 
 ```
-atlassian: https://mcp.atlassian.com/v1/mcp (HTTP) - ⏸ Pending approval (run `claude` to approve)
+storecode -p "reply with the single word ok" --output-format stream-json --verbose \
+  --permission-mode dontAsk --allowedTools "" | head -1
+→ atlassian: connected
 ```
 
-`assertMcpReady` treats anything other than `connected` as not ready, so `pending` was refused on
-the init event with no turn spent. This is the failure the guard exists for, in its most literal
-form: the tools were absent, the run would have exited 0, and the verdict would have been formed
-without the ticket ever being read. **Recovery is a human step** — run `storecode` interactively
-once and approve the server. Nothing in the service can clear it, and nothing should be able to.
+**Recovery is a human step, and this is a deployment blocker rather than a footnote.** The token is
+refreshed by running `/mcp` in an interactive session. A headless run cannot do it, and should not
+be able to. So a long-running daemon will stop being able to read Jira every time the session
+expires, and will keep refusing — correctly, loudly, and until a person intervenes. Any deployment
+story has to answer that: at minimum an alert on `McpUnavailableError` rather than a silent retry
+loop, because backoff makes an expired token look exactly like a Jira outage.
 
 ---
 
