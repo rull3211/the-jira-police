@@ -7,7 +7,8 @@ import {
   renderChecklist,
   renderChecklistItem,
 } from "./canvas.ts";
-import type { TriageResult } from "./sink.ts";
+import { TRIAGE_SCHEMA } from "../triage/schema.ts";
+import { VERDICT_EMOJI, type TriageResult } from "./sink.ts";
 
 function result(overrides: Partial<TriageResult> = {}): TriageResult {
   return {
@@ -51,13 +52,23 @@ describe("renderChecklistItem", () => {
     expect(renderChecklistItem(result({ labels: [] }))).not.toContain("`");
   });
 
-  it("uses red for both rejecting verdicts", () => {
-    expect(renderChecklistItem(result({ verdict: "duplicate" }))).toContain("🟥");
-    expect(renderChecklistItem(result({ verdict: "not-our-team" }))).toContain("🟥");
-  });
+  it.each(["duplicate", "not-our-team", "out-of-scope"] as const)(
+    "uses red for the rejecting verdict %s",
+    (verdict) => {
+      expect(renderChecklistItem(result({ verdict }))).toContain("🟥");
+    },
+  );
 
   it("uses green for ready-ish", () => {
     expect(renderChecklistItem(result({ verdict: "ready-ish" }))).toContain("🟩");
+  });
+
+  it("has an emoji for every verdict the schema can return", () => {
+    // The two lists are separate declarations, and a verdict with no emoji
+    // renders `undefined` into a checklist item rather than failing.
+    expect(Object.keys(VERDICT_EMOJI).toSorted()).toEqual(
+      TRIAGE_SCHEMA.properties.verdict.enum.toSorted(),
+    );
   });
 
   it("escapes a summary containing brackets", () => {

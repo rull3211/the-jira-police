@@ -19,8 +19,15 @@ export const TRIAGE_SCHEMA = {
   properties: {
     verdict: {
       type: "string",
-      enum: ["duplicate", "not-our-team", "needs-info", "ready-ish"],
-      description: "The intake-triage verdict for this issue.",
+      enum: ["duplicate", "not-our-team", "out-of-scope", "needs-info", "ready-ish"],
+      // The skill's own banners are ✅ ACCEPT / ⛔ REJECT / ↪ ROUTE / ↩ SEND
+      // BACK, so the mapping is spelled out here rather than left to be
+      // guessed. `out-of-scope` earns its place the hard way: without it a
+      // live run picked `needs-info` as "closest" and said so in its own
+      // caveat, which reads as "go ask the reporter" for a ticket that wants
+      // nothing of the sort.
+      description:
+        'The verdict, taken from the report banner. "ACCEPT" is ready-ish. "REJECT → duplicate" (or possible duplicate) is duplicate. "REJECT → out-of-scope" is out-of-scope. "ROUTE" is not-our-team. "SEND BACK" is needs-info.',
     },
     labels: {
       type: "array",

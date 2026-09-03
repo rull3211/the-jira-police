@@ -10,11 +10,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Verdict emitted by the intake-triage skill. */
-export type Verdict = "duplicate" | "not-our-team" | "needs-info" | "ready-ish";
+export type Verdict = "duplicate" | "not-our-team" | "out-of-scope" | "needs-info" | "ready-ish";
 
 export const VERDICT_EMOJI: Record<Verdict, string> = {
   duplicate: "🟥",
   "not-our-team": "🟥",
+  "out-of-scope": "🟥",
   "needs-info": "🟨",
   "ready-ish": "🟩",
 };
