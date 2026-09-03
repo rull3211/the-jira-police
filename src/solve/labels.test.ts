@@ -12,6 +12,7 @@ import {
   isEligible,
   isTerminal,
   labelEdit,
+  repoFromLabels,
   reviewTransition,
 } from "./labels.ts";
 
@@ -231,5 +232,77 @@ describe("isTerminal", () => {
     expect(isTerminal([AGENT_LABELS.solvable, AGENT_LABELS.solving])).toBe(false);
     expect(isTerminal([AGENT_LABELS.done])).toBe(true);
     expect(isTerminal([AGENT_LABELS.failed])).toBe(true);
+  });
+});
+
+/**
+ * `svc:<repo>` is not this feature's label. It is an existing board convention
+ * written by triage (`INTAKE_INSTRUCTIONS.md:359`) and only read here, which is
+ * why the solve queue needs no private channel to learn where a fix would go —
+ * SSX-3822 already carries `svc:buy-insurance-advisor-web`.
+ *
+ * It also means the value comes from text a stranger can edit, so every
+ * ambiguous reading resolves to `null` and the allowlist decides from there.
+ */
+describe("repoFromLabels", () => {
+  const REPO = "buy-insurance-advisor-web";
+
+  it("reads the repository from the label the board actually carries", () => {
+    // Copied verbatim from groomed/SSX-3822.md rather than invented, so the
+    // fixture cannot agree with the code while disagreeing with Jira.
+    const live = [
+      "triaged",
+      "route:ours",
+      "team:ssx",
+      "jira:SSX",
+      "domain:insurance",
+      `svc:${REPO}`,
+      "tier:leaf",
+      "dup:none",
+      "dor:pass",
+      "value:med",
+      "effort:S",
+      "intake:pm-screened",
+      "next:to-trio",
+    ];
+
+    expect(repoFromLabels(live)).toBe(REPO);
+  });
+
+  it("returns null when no svc: label is present", () => {
+    expect(repoFromLabels([AGENT_LABELS.solvable, "dor:pass"])).toBeNull();
+  });
+
+  it("returns null rather than picking one of two", () => {
+    // A contradiction is not a decision. Taking the first would invent one, and
+    // this value chooses which repository gets written to.
+    expect(repoFromLabels([`svc:${REPO}`, "svc:some-other-repo"])).toBeNull();
+  });
+
+  it("returns null when triage said it could not tell", () => {
+    // impl-uncertain is the documented alternative to svc:, so a ticket
+    // carrying both is in a state the convention does not describe.
+    expect(repoFromLabels([`svc:${REPO}`, "impl-uncertain"])).toBeNull();
+    expect(repoFromLabels(["impl-uncertain"])).toBeNull();
+  });
+
+  it("returns null for an empty or blank repository name", () => {
+    expect(repoFromLabels(["svc:"])).toBeNull();
+    expect(repoFromLabels(["svc:   "])).toBeNull();
+  });
+
+  it.each(["../../etc/passwd", "a/b", "..", "repo name", "repo;rm -rf /", "$(whoami)"])(
+    "refuses %j, which Phase C would turn into a worktree path",
+    (name) => {
+      expect(repoFromLabels([`svc:${name}`])).toBeNull();
+    },
+  );
+
+  it("accepts the punctuation real repository names use", () => {
+    expect(repoFromLabels(["svc:my-repo_v2.0"])).toBe("my-repo_v2.0");
+  });
+
+  it("does not confuse a label that merely contains svc:", () => {
+    expect(repoFromLabels(["domain:svc:thing"])).toBeNull();
   });
 });

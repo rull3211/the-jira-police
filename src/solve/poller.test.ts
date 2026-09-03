@@ -6,6 +6,27 @@ import { type SolveCandidate, type SolveDeps, runSolveCycle } from "./poller.ts"
 
 const PILOT_REPO = "buy-insurance-advisor-web";
 
+/** Exactly what SSX-3822 carries on the live board today. */
+const SVC = `svc:${PILOT_REPO}`;
+
+/**
+ * An authorised ticket's labels, optionally naming a repository.
+ *
+ * The repository is a label rather than a field because that is how it reaches
+ * the queue in production: `svc:<repo>` is an existing board convention written
+ * by triage, and SSX-3822 carries `svc:buy-insurance-advisor-web` today. A
+ * fixture that passed the repo alongside the labels would be testing a channel
+ * that does not exist.
+ */
+function authorised(repo: string | null = PILOT_REPO, extra: readonly string[] = []): string[] {
+  return [
+    AGENT_LABELS.solvable,
+    AGENT_LABELS.start,
+    ...(repo === null ? [] : [`svc:${repo}`]),
+    ...extra,
+  ];
+}
+
 /**
  * A ticket in the state the queue is looking for: assessed by triage, approved
  * by a human, unclaimed.
@@ -19,9 +40,8 @@ function candidate(key: string, overrides: Partial<SolveCandidate> = {}): SolveC
     key,
     summary: `Summary for ${key}`,
     url: `https://example.invalid/browse/${key}`,
-    labels: [AGENT_LABELS.solvable, AGENT_LABELS.start],
+    labels: authorised(),
     updated: "2026-09-02T09:55:34.178+0200",
-    repo: PILOT_REPO,
     ...overrides,
   };
 }
@@ -47,7 +67,7 @@ describe("runSolveCycle", () => {
         issueKey: "SSX-1",
         repo: PILOT_REPO,
         claim: { add: [AGENT_LABELS.solving], remove: [AGENT_LABELS.start] },
-        labelsAfter: [AGENT_LABELS.solvable, AGENT_LABELS.solving],
+        labelsAfter: [AGENT_LABELS.solvable, SVC, AGENT_LABELS.solving],
       },
     ]);
   });
@@ -108,7 +128,7 @@ describe("runSolveCycle", () => {
     it("skips a solvable ticket nobody started, in manual mode", async () => {
       const outcome = await runSolveCycle(
         deps({
-          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.solvable] })],
+          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.solvable, SVC] })],
         }),
       );
 
@@ -122,7 +142,7 @@ describe("runSolveCycle", () => {
       const outcome = await runSolveCycle(
         deps({
           mode: "auto",
-          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.solvable] })],
+          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.solvable, SVC] })],
         }),
       );
 
@@ -133,7 +153,7 @@ describe("runSolveCycle", () => {
       const outcome = await runSolveCycle(
         deps({
           mode: "AUTO" as SolveMode,
-          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.solvable] })],
+          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.solvable, SVC] })],
         }),
       );
 
@@ -145,7 +165,7 @@ describe("runSolveCycle", () => {
       const outcome = await runSolveCycle(
         deps({
           mode: "auto",
-          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.start] })],
+          fetchQueue: async () => [candidate("SSX-1", { labels: [AGENT_LABELS.start, SVC] })],
         }),
       );
 
@@ -165,7 +185,7 @@ describe("runSolveCycle", () => {
           deps({
             fetchQueue: async () => [
               candidate("SSX-1", {
-                labels: [AGENT_LABELS.solvable, AGENT_LABELS.start, blocker],
+                labels: [AGENT_LABELS.solvable, AGENT_LABELS.start, SVC, blocker],
               }),
             ],
           }),
@@ -201,7 +221,9 @@ describe("runSolveCycle", () => {
   describe("the repository allowlist", () => {
     it("skips a ticket naming a repo that is not on the list", async () => {
       const outcome = await runSolveCycle(
-        deps({ fetchQueue: async () => [candidate("SSX-1", { repo: "some-other-repo" })] }),
+        deps({
+          fetchQueue: async () => [candidate("SSX-1", { labels: authorised("some-other-repo") })],
+        }),
       );
 
       expect(outcome.planned).toEqual([]);
@@ -210,7 +232,7 @@ describe("runSolveCycle", () => {
 
     it("skips rather than fails, so widening the list later picks it up", async () => {
       // Nothing about a skipped ticket changes, so no manual reset is needed.
-      const ticket = candidate("SSX-1", { repo: "some-other-repo" });
+      const ticket = candidate("SSX-1", { labels: authorised("some-other-repo") });
 
       const before = await runSolveCycle(deps({ fetchQueue: async () => [ticket] }));
       expect(before.planned).toEqual([]);
@@ -234,16 +256,16 @@ describe("runSolveCycle", () => {
     });
 
     it("skips a ticket that names no repo at all", async () => {
-      const { repo: _repo, ...withoutRepo } = candidate("SSX-1");
+      const withoutRepo = candidate("SSX-1", { labels: authorised(null) });
       const outcome = await runSolveCycle(deps({ fetchQueue: async () => [withoutRepo] }));
 
       expect(outcome.planned).toEqual([]);
-      expect(outcome.skipped[0]?.reason).toContain("no repository named");
+      expect(outcome.skipped[0]?.reason).toContain("svc:");
     });
 
     it("skips a ticket whose repo is blank", async () => {
       const outcome = await runSolveCycle(
-        deps({ fetchQueue: async () => [candidate("SSX-1", { repo: "   " })] }),
+        deps({ fetchQueue: async () => [candidate("SSX-1", { labels: authorised("   ") })] }),
       );
 
       expect(outcome.planned).toEqual([]);
@@ -251,7 +273,11 @@ describe("runSolveCycle", () => {
 
     it("matches the repo name exactly, not by prefix", async () => {
       const outcome = await runSolveCycle(
-        deps({ fetchQueue: async () => [candidate("SSX-1", { repo: `${PILOT_REPO}-fork` })] }),
+        deps({
+          fetchQueue: async () => [
+            candidate("SSX-1", { labels: authorised(`${PILOT_REPO}-fork`) }),
+          ],
+        }),
       );
 
       expect(outcome.planned).toEqual([]);
@@ -319,7 +345,7 @@ describe("runSolveCycle", () => {
         deps({
           fetchQueue: async () => [
             candidate("SSX-1"),
-            candidate("SSX-2", { repo: "elsewhere" }),
+            candidate("SSX-2", { labels: authorised("elsewhere") }),
             candidate("SSX-3"),
           ],
         }),

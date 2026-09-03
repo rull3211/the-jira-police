@@ -90,6 +90,76 @@ const CLAIM_BLOCKING_LABELS: readonly string[] = [
   AGENT_LABELS.failed,
 ];
 
+/**
+ * The prefix that names the owning repository.
+ *
+ * Not part of `AGENT_LABELS`, and that separation is the point: `svc:` is not
+ * this feature's to define. It is an existing board convention, written by
+ * triage today (`INTAKE_INSTRUCTIONS.md:359`, `intake-triage.spec.md:110`) and
+ * read here. The solve queue is a consumer of it, so it gets no say in its
+ * shape and must not write it.
+ */
+const SVC_PREFIX = "svc:";
+
+/**
+ * The label triage uses instead of `svc:` when it could not tell.
+ *
+ * Worth naming rather than treating as just another unrecognised label. It is a
+ * positive statement — "I looked and I do not know" — and the correct response
+ * to it is the same as to silence, so the code reads better for saying that
+ * once, out loud, than for arriving at it by omission.
+ */
+const IMPL_UNCERTAIN = "impl-uncertain";
+
+/**
+ * Repository names, and nothing that could be read as a path.
+ *
+ * Phase C turns this string into a git worktree directory, so the check belongs
+ * here at the parse boundary rather than there at the point of use. `SOLVE_REPOS`
+ * is an exact-match allowlist and would already stop a traversal attempt today,
+ * but that is one careless widening away from being the only thing that does,
+ * and a value derived from a Jira label is derived from something a stranger
+ * can edit.
+ *
+ * Must *begin* with an alphanumeric, which is not decoration. An earlier version
+ * of this pattern was `[A-Za-z0-9._-]+` and happily returned `..` — a name made
+ * entirely of legal characters that is also the one string guaranteed to escape
+ * whatever directory it is joined to. Requiring a leading alphanumeric rules out
+ * `.` and `..` together with dotfiles, and rules out a leading `-` besides,
+ * which is how a repository name gets read as a command-line flag.
+ */
+const REPO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * The repository a ticket names, or `null` if it does not name exactly one.
+ *
+ * Every ambiguous answer is `null`, including two `svc:` labels at once. The
+ * tempting alternative — take the first — invents a decision out of a
+ * contradiction, and this value chooses which repository gets written to. There
+ * is no reading of "this ticket says two different things" that justifies
+ * picking one and proceeding.
+ *
+ * `impl-uncertain` alongside an `svc:` label is treated the same way. The spec
+ * offers them as alternatives, so a ticket carrying both is in a state the
+ * convention does not describe, and guessing which half is stale would be
+ * guessing in the direction of doing more work rather than less.
+ */
+export function repoFromLabels(labels: readonly string[]): string | null {
+  const named = labels
+    .filter((label) => label.startsWith(SVC_PREFIX))
+    .map((label) => label.slice(SVC_PREFIX.length).trim());
+
+  if (named.length !== 1) {
+    return null;
+  }
+  if (labels.includes(IMPL_UNCERTAIN)) {
+    return null;
+  }
+
+  const repo = named[0] ?? "";
+  return REPO_NAME.test(repo) ? repo : null;
+}
+
 /** A label delta, in §11's shape: applied against what is live, never a replacement set. */
 export interface LabelEdit {
   readonly add: readonly string[];

@@ -35,7 +35,13 @@
 
 import { logger } from "../logger.ts";
 import type { SolveMode } from "../settings.ts";
-import { type LabelEdit, applyEdit, claimTransition, eligibility } from "./labels.ts";
+import {
+  type LabelEdit,
+  applyEdit,
+  claimTransition,
+  eligibility,
+  repoFromLabels,
+} from "./labels.ts";
 
 /**
  * A ticket from the solve queue.
@@ -52,15 +58,6 @@ export interface SolveCandidate {
   readonly labels: readonly string[];
   /** ISO-8601 with offset, as Jira returns it: `2026-09-02T09:55:34.178+0200`. */
   readonly updated: string;
-  /**
-   * The repository triage named in `agentFitness.repo`, if it is known.
-   *
-   * Optional because the label on the board does not carry it — the assessment
-   * that produced `agent:solvable` does, and reuniting the two is the caller's
-   * job. Absent is read as "no repository named" and therefore as a skip, not
-   * as "any repository".
-   */
-  readonly repo?: string;
 }
 
 export interface SolveDeps {
@@ -204,14 +201,27 @@ type RepoDecision =
       readonly reason: string;
     };
 
+/**
+ * Which repository a ticket points at, and whether we may touch it.
+ *
+ * The repository is read from the ticket's own `svc:<repo>` label rather than
+ * carried alongside it. That label is an existing board convention written by
+ * triage — not something this feature invented — which means the queue needs no
+ * private channel from the assessment that produced `agent:solvable`, and a
+ * ticket that has never been near this service still answers the question if a
+ * human labelled it.
+ *
+ * It also means the value originates in text a stranger can edit, which is why
+ * the allowlist below is the thing that decides and the label only proposes.
+ */
 function checkRepo(candidate: SolveCandidate, allowed: ReadonlySet<string>): RepoDecision {
-  const repo = candidate.repo?.trim() ?? "";
+  const repo = repoFromLabels(candidate.labels);
 
-  if (repo === "") {
+  if (repo === null) {
     return {
       ok: false,
       reason:
-        "no repository named — agentFitness.repo is the only thing that says where a fix would go, and an unnamed one cannot be checked against SOLVE_REPOS",
+        "no single svc:<repo> label — the ticket does not say which repository a fix would go to, or says more than one, and neither can be checked against SOLVE_REPOS",
     };
   }
 
