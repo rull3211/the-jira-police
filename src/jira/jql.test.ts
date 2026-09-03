@@ -170,6 +170,7 @@ describe("buildSolveQueueJql", () => {
     project: "SSX",
     components: ["SSX Advisor"],
     mode: "manual" as SolveMode,
+    autoIssueTypes: ["Feil"],
   };
 
   it("builds the manual-mode query verbatim", () => {
@@ -180,12 +181,61 @@ describe("buildSolveQueueJql", () => {
     );
   });
 
-  it("builds the auto-mode query verbatim, differing only in the start clause", () => {
+  it("builds the auto-mode query verbatim: no start clause, but an issuetype one", () => {
+    // Auto is not manual-minus-a-check. It trades the human's label for a type
+    // restriction, so the query is the same length and differs in what it asks.
     expect(buildSolveQueueJql({ ...QUEUE, mode: "auto" })).toBe(
       'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
-        'AND labels = "agent:solvable" ' +
+        'AND labels = "agent:solvable" AND issuetype IN ("Feil") ' +
         'AND labels NOT IN ("agent:solving", "agent:done", "agent:failed") ORDER BY updated ASC',
     );
+  });
+
+  it("restricts unattended solving to the configured issue types", () => {
+    expect(buildSolveQueueJql({ ...QUEUE, mode: "auto" })).toContain('issuetype IN ("Feil")');
+  });
+
+  it("refuses to build an auto query with no issue-type restriction", () => {
+    // The dangerous reading of an empty list is "every type", and this is the
+    // only path that changes code with nobody watching. Refusing is louder than
+    // allowing nothing, and the silent-no-op is the bug this clause exists for.
+    expect(() => buildSolveQueueJql({ ...QUEUE, mode: "auto", autoIssueTypes: [] })).toThrow(
+      JqlError,
+    );
+  });
+
+  it("does not restrict issue type in manual mode, even with the list set", () => {
+    // A human typing agent:start on an Epic has said something this list could
+    // only second-guess.
+    expect(buildSolveQueueJql(QUEUE)).not.toContain("issuetype");
+  });
+
+  it("ignores an empty issue-type list in manual mode rather than throwing", () => {
+    expect(() =>
+      buildSolveQueueJql({ ...QUEUE, mode: "manual", autoIssueTypes: [] }),
+    ).not.toThrow();
+  });
+
+  it("resolves a numeric issue type as an id and a name as a name", () => {
+    // Same rule as components: `issuetype IN (10004)` is an id lookup, while
+    // `issuetype IN ("10004")` searches for a type *named* 10004 and finds
+    // nothing. Ids are what survive a rename of "Feil".
+    expect(buildSolveQueueJql({ ...QUEUE, mode: "auto", autoIssueTypes: ["10004"] })).toContain(
+      "issuetype IN (10004)",
+    );
+    expect(
+      buildSolveQueueJql({ ...QUEUE, mode: "auto", autoIssueTypes: ["Feil", "10004"] }),
+    ).toContain('issuetype IN ("Feil", 10004)');
+  });
+
+  it("rejects an injection attempt through the issue-type list", () => {
+    expect(() =>
+      buildSolveQueueJql({
+        ...QUEUE,
+        mode: "auto",
+        autoIssueTypes: ['x") OR labels = "agent:solvable'],
+      }),
+    ).toThrow(JqlError);
   });
 
   it("requires the human go-ahead in manual mode", () => {

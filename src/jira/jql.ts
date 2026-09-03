@@ -152,6 +152,20 @@ export interface SolveQueueJqlOptions {
    * to mean it, and anything else is read below as manual.
    */
   readonly mode: SolveMode;
+  /**
+   * Issue types eligible for *unattended* solving, by id or by name.
+   *
+   * Only consulted in auto mode, and there it is mandatory — see the throw
+   * below. Manual mode ignores it entirely, because a human typing `agent:start`
+   * on an Epic has said something this list could only second-guess.
+   *
+   * Rendered through `jqlValue`, so `10004` is resolved as a type id and `Feil`
+   * as a type name. Prefer the id: names are localised and renameable, and this
+   * board's bug type is `Feil` rather than `Bug` — a hardcoded English default
+   * would have matched nothing and turned autosolve into a feature that appeared
+   * to be on and never fired.
+   */
+  readonly autoIssueTypes: readonly string[];
 }
 
 /**
@@ -202,6 +216,31 @@ export function buildSolveQueueJql(options: SolveQueueJqlOptions): string {
   // slipped past validation, falls through to requiring a human's label.
   if (options.mode !== "auto") {
     clauses.push(`labels = ${jqlValue(AGENT_LABELS.start, "label")}`);
+  } else {
+    // Auto mode drops the human's label, so it takes on a restriction in
+    // exchange rather than simply being manual-minus-a-check. A bug has a
+    // defined broken behaviour and a fix has a definition of done; a Story or an
+    // Epic assessed as "solvable" is a judgement about scope, and that is the
+    // one this service is least equipped to make without a person.
+    //
+    // Empty is a hard error, and the reason is not the obvious one. An empty
+    // list does not render as "every type" — `issuetype IN ()` is malformed and
+    // Jira rejects it — so the immediate behaviour is already a refusal.
+    //
+    // What this guards is the *fix*. Someone meeting a Jira 400 from a
+    // poller cycle reads it as a query-building bug, and the natural repair is
+    // to omit the clause when the list is empty, exactly as the component filter
+    // legitimately does eight lines above. That repair is a one-line diff, looks
+    // like consistency with its neighbour, and quietly promotes auto mode to
+    // solving every issue type unattended. Failing here instead, with a message
+    // naming the setting, makes the safe repair the obvious one.
+    if (options.autoIssueTypes.length === 0) {
+      throw new JqlError(
+        "SOLVE_MODE=auto with no SOLVE_AUTO_ISSUE_TYPES: set it (the bug type on this board is Feil) rather than removing this restriction — auto mode has no human check, and the issue-type filter is the one it trades for that",
+      );
+    }
+    const types = options.autoIssueTypes.map((entry) => jqlValue(entry, "issue type")).join(", ");
+    clauses.push(`issuetype IN (${types})`);
   }
 
   const excluded = SOLVE_QUEUE_EXCLUDED_LABELS.map((label) => jqlValue(label, "label")).join(", ");

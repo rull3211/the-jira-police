@@ -129,6 +129,12 @@ export const SETTINGS = [
     fallback: "manual",
   },
   {
+    name: "SOLVE_AUTO_ISSUE_TYPES",
+    description:
+      'Issue types that may be solved UNATTENDED, by id or by name, consulted only when SOLVE_MODE=auto. Defaults to "Feil" — this board is Norwegian and its bug type is not called "Bug", so an English default would match nothing and make autosolve look enabled while never firing. Prefer the numeric id if you have it: names are localised and can be renamed out from under this setting. Blank in auto mode is a startup error rather than "everything", because this is the only path that changes code with nobody watching.',
+    fallback: "Feil",
+  },
+  {
     name: "SOLVE_REPOS",
     description:
       "Comma-separated allowlist of repositories the solver may touch. Unlike JIRA_COMPONENTS, blank means *nothing* is allowed rather than everything: this list grants a write privilege, so its empty state has to be the safe one. A ticket naming a repo outside the list is skipped and not failed, so widening the list later picks it up without a manual reset.",
