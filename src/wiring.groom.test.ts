@@ -90,6 +90,30 @@ function payload(overrides: Partial<TriagePayload> = {}): TriagePayload {
  */
 const SCRATCH = await mkdtemp(join(tmpdir(), "groom-"));
 
+/**
+ * An accepted ticket — the only kind that gets an agent-fitness note.
+ *
+ * `solvable: false` with a populated `blockers` list is the interesting shape,
+ * not an edge case: it is what the first two live runs on SSX-3822 actually
+ * produced, and it is the case the note exists to serve, since the blockers are
+ * a to-do list a human can often clear cheaply.
+ */
+function readyish(overrides: Partial<TriagePayload> = {}): TriagePayload {
+  return payload({
+    verdict: "ready-ish",
+    labels: ["dor:pass", "route:ours"],
+    mutation: mutation({ labelsAdd: ["dor:pass"], labelsRemove: ["dor:gaps"] }),
+    agentFitness: {
+      solvable: false,
+      confidence: "med",
+      repo: "buy-insurance-advisor-web",
+      rationale: "The deliverable is a brand asset.",
+      blockers: ["needs a real .ico asset"],
+    },
+    ...overrides,
+  });
+}
+
 function settings(overrides: Partial<Record<string, string>> = {}) {
   return readSettings({
     JIRA_EMAIL: "a@b.c",
@@ -151,6 +175,11 @@ describe("createGroom with WRITE_BACK on", () => {
   it("hands the poster the analyst's own mutation, unaltered", async () => {
     // The property the whole design rests on: the thing checked is the thing
     // posted. If these two could differ, the gate would be checking a draft.
+    //
+    // This fixture is `needs-info`, which is below the threshold for the
+    // fitness note, so the mutation genuinely passes through untouched. The
+    // ready-ish case — where the note IS spliced in — is covered below, and
+    // the same property holds there because the splice happens before the gate.
     const result = payload();
     runTriage.mockResolvedValue(result);
     await createGroom(on())(TICKET);
@@ -159,6 +188,48 @@ describe("createGroom with WRITE_BACK on", () => {
       issueKey: "SSX-1234",
       mutation: result.mutation,
     });
+  });
+
+  it("posts the agent-fitness note on a ready-ish ticket", async () => {
+    // MUTATION TEST. Unplug `withFitnessNote` in `createGroom` and this fails.
+    // Without it the blockers stay in a gitignored local file, so the one
+    // audience who can actually clear them — the reporter and the Trio — never
+    // sees the list.
+    runTriage.mockResolvedValue(readyish());
+    await createGroom(on())(TICKET);
+
+    const posted = runPost.mock.calls[0]?.[0]?.mutation.commentBody ?? "";
+
+    expect(posted).toContain("🤖 **Agent fitness:**");
+    expect(posted).toContain("* needs a real .ico asset");
+    expect(posted).toContain("`buy-insurance-advisor-web`");
+  });
+
+  it("keeps the footer sentinel last, so a re-run still updates in place", async () => {
+    // The poster identifies its own previous comment by that exact trailing
+    // line. Splice the note after it and every re-run posts a duplicate.
+    runTriage.mockResolvedValue(readyish());
+    await createGroom(on())(TICKET);
+
+    const posted = runPost.mock.calls[0]?.[0]?.mutation.commentBody ?? "";
+
+    expect(posted.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
+    expect(posted.split(FOOTER_SENTINEL)).toHaveLength(2);
+  });
+
+  it("gates the body it will actually post, not the draft before the splice", async () => {
+    // The note is added before `assertPostable` runs, so the checked text and
+    // the sent text are the same string. Asserting it the other way round —
+    // that the analyst's original body is NOT what got posted — is what makes
+    // this distinct from the test above.
+    const original = readyish();
+    runTriage.mockResolvedValue(original);
+    await createGroom(on())(TICKET);
+
+    const posted = runPost.mock.calls[0]?.[0]?.mutation.commentBody ?? "";
+
+    expect(posted).not.toBe(original.mutation.commentBody);
+    expect(posted).toContain("Gaps remain.");
   });
 
   it("REFUSES to post when the gate objects", async () => {

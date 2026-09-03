@@ -44,6 +44,7 @@ import { logger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
 import { type Settings, SettingsError, flag, list, numeric } from "./settings.ts";
+import { withFitnessNote } from "./triage/fitness-note.ts";
 import { UnpostableError, assertPostable } from "./triage/gate.ts";
 import { runPost } from "./triage/poster.ts";
 import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
@@ -138,7 +139,15 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
   return async (ticket: TicketRef) => {
     // The ticket carries summary, type and timestamps; only the key crosses
     // over. Everything else the skill needs, it reads over its own session.
-    const payload = await runTriage({ ...template, issueKey: ticket.key });
+    const analysed = await runTriage({ ...template, issueKey: ticket.key });
+
+    // Spliced in before the gate runs, not after, so `assertPostable` checks the
+    // exact text that reaches Jira rather than an earlier draft of it. Applied
+    // unconditionally rather than only when posting, so a preview run and a
+    // rejection artifact both show the real body too — a refusal that displays
+    // a mutation which is not the one we would have sent is a refusal you
+    // cannot audit.
+    const payload = withFitnessNote(analysed);
 
     if (!posting) {
       return payload;
