@@ -602,18 +602,29 @@ Everything that _selects_ a ticket is built and was verified against the live bo
   perform it. This is the next increment, and it is what makes the queue's dedupe testable at
   all — _claim one ticket, confirm a second `solve:once` picks nothing up, release it_ is the
   experiment, and it needs a write to run.
-- **Running it from the daemon.** Not wired into `index.ts`, and that is a decision rather than
-  an omission. Wiring it in is the step that makes it **unattended**; if it were already looping
-  when the write landed, whoever landed the write would arm an unattended bot as a side effect of
-  a diff about something else. Keeping them apart keeps "grant the write" and "run it with nobody
-  watching" as two separately reviewable decisions. It also still needs its own slower cadence
-  and a decision about what a solve failure does to `loop.ts` backoff — a failed solve is not the
-  same event as a Jira outage, and the backoff only understands the latter.
 - **The solver itself** — worktree isolation, read-only recon, the diff-bounds gate, mechanical
   (not model-asserted) verification. No component in this service has ever held `Write`, `Edit`
   or `Bash`.
 - **Delivery** — draft PR, Copilot review, iterate, undraft. `MAX_REVIEW_ITERATIONS` exists and
   is read by nothing.
+- **Running it from the daemon, and this one is deliberately *last*.** Not wired into `index.ts`;
+  `pnpm start` is the grooming loop and must stay that way until everything above has been driven
+  by hand. The property the daemon adds is *nobody is watching*, which is the last property you
+  want to add rather than an early one: every phase before it can be verified by a person typing
+  a command and reading the output, and wiring the loop converts all of them at once into things
+  that happen on a timer whether or not anyone looks. It also adds no capability — by then the
+  bot can already do everything, and the daemon only changes who asks. Still needs its own slower
+  cadence and a decision about what a solve failure does to `loop.ts` backoff: a failed solve is
+  not the same event as a Jira outage, and the backoff only understands the latter.
+
+  The corollary is the rule to hold the line on: **a ticket claimed, solved and PR'd by hand is a
+  demonstration; the same sequence on a five-minute timer is a deployment.**
+
+Each phase is expected to ship two hand-operated commands before it counts as done — a dry run
+that reports what it *would* change, and a single run against one named ticket, chosen by the
+operator rather than by the queue. `triage:once SSX-1234 [--write]` is the shape being copied.
+`solve:once` grows one flag per phase (`--claim`, `--solve`, `--pr`), each implying the ones
+before it, so the command line reads as the privilege escalation it is.
 - **Two probes that gate the above and have not been run:** whether `Bash(pnpm test:*)` scoping
   is honoured by the local arg parser (if not, Phase C changes shape — the harness runs the
   commands and the model gets no `Bash` at all), and whether `gh pr edit --add-reviewer @copilot`
