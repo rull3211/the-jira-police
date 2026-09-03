@@ -50,7 +50,7 @@ Lists the new tickets discovery found and stops. Free.
 ### 2. Triage one ticket, without posting
 
 ```bash
-pnpm triage:once SSX-1234
+pnpm triage:once SSX-1234 --skill intake-triage
 ```
 
 Runs the real skill (~3–8 min, ~$0.11), writes `groomed/SSX-1234.md`, and posts **nothing**. The
@@ -60,7 +60,7 @@ whether this ticket looks safely fixable by an agent, with the reasoning.
 Add `--write` to actually post the comment and labels:
 
 ```bash
-pnpm triage:once SSX-1234 --write
+pnpm triage:once SSX-1234 --skill intake-triage --write
 ```
 
 `--write` **decides** `WRITE_BACK` for that run rather than adding to it — typing it posts even
@@ -156,11 +156,16 @@ unable to post** — stand-in skills are pinned to preview no matter what `WRITE
 **3 — the real skill, previewing.**
 
 ```bash
-FIRST_RUN_LOOKBACK_MINUTES=5 pnpm start --for 20m
+FIRST_RUN_LOOKBACK_MINUTES=5 pnpm start --skill intake-triage --for 20m
 ```
 
 Real triage, real cost — roughly **$0.11 and 3–8 minutes per ticket**. Reports land in
 `groomed/`; nothing reaches Jira while `WRITE_BACK=false`, which is the default.
+
+Name the skill on the command line even if `.env` already sets it. `SKILL_NAME` **defaults to
+`mock-triage`**, deliberately — an unconfigured service must not be able to post — so a run that
+omits the flag on a machine without that setting quietly produces mock verdicts, and mock output
+is plausible enough to be believed. Stating it makes each step of this ladder self-contained.
 
 Note `--interval` is the gap *between* cycles, not a rate limit on triages: a cycle takes as long
 as its tickets do, so `--interval 20s` with the real skill does not mean three triages a minute.
@@ -168,10 +173,14 @@ as its tickets do, so `--interval 20s` with the real skill does not mean three t
 **4 — writing to the board.**
 
 ```bash
-WRITE_BACK=true pnpm start --for 20m
+WRITE_BACK=true pnpm start --skill intake-triage --for 20m
 ```
 
 Everything above, plus comments and labels on real tickets, as your own Jira user.
+
+Both halves are required and neither is enough alone: a stand-in skill ignores `WRITE_BACK`
+entirely, and the real skill with `WRITE_BACK=false` previews. Posting needs the real skill *and*
+the setting.
 
 ### The two things that catch people out
 
@@ -251,9 +260,9 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | --- | --- | --- |
 | `pnpm poll:once --dry-run` | Discovery only. Free | no |
 | `pnpm poll:once` | One full grooming cycle | only with `WRITE_BACK=true` |
-| `pnpm triage:once <KEY>` | Triage one ticket, preview the result | `groomed/<KEY>.md` |
-| `pnpm triage:once <KEY> --write` | …and post it. The flag decides `WRITE_BACK` on its own | Jira |
-| `pnpm triage:once <KEY> --skill <name>` | Use a different skill (e.g. `mock-triage`) | as above |
+| `pnpm triage:once <KEY> --skill intake-triage` | Triage one ticket, preview the result | `groomed/<KEY>.md` |
+| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own | Jira |
+| `pnpm triage:once <KEY>` | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock** | `groomed/<KEY>.md` |
 | `pnpm solve:once` | One solve cycle. Needs `SOLVE_ENABLED=true` | `groomed/solve-cycle.md` |
 | `pnpm start` | The daemon — **grooming only**. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
 | `pnpm dev` | The daemon with `--watch`; same flags | as above |
