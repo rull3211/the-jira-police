@@ -131,14 +131,22 @@ export const SETTINGS = [
   {
     name: "SOLVE_AUTO_ISSUE_TYPES",
     description:
-      'Issue types that may be solved UNATTENDED, by id or by name, consulted only when SOLVE_MODE=auto. Defaults to "Feil" — this board is Norwegian and its bug type is not called "Bug", so an English default would match nothing and make autosolve look enabled while never firing. Prefer the numeric id if you have it: names are localised and can be renamed out from under this setting. Blank in auto mode is a startup error rather than "everything", because this is the only path that changes code with nobody watching.',
+      'Issue types that may be solved UNATTENDED, by id or by name, consulted only when SOLVE_MODE=auto. Defaults to "Feil" — this board is Norwegian and its bug type is not called "Bug", so an English default would match nothing and make autosolve look enabled while never firing. Prefer the numeric id if you have it: names are localised and can be renamed out from under this setting. Blanking this does NOT widen auto mode to every type: an empty value falls back to "Feil" like any other setting here, and the fallback is itself the restriction. Widening is done by naming more types, which leaves a record of who decided to.',
     fallback: "Feil",
   },
   {
     name: "SOLVE_REPOS",
     description:
       "Comma-separated allowlist of repositories the solver may touch. Unlike JIRA_COMPONENTS, blank means *nothing* is allowed rather than everything: this list grants a write privilege, so its empty state has to be the safe one. A ticket naming a repo outside the list is skipped and not failed, so widening the list later picks it up without a manual reset.",
-    fallback: "buy-insurance-advisor-web",
+    // Deliberately has no fallback, and it is the only solve setting that
+    // doesn't. Every other blank here falls back to something *more*
+    // restrictive than the alternative, so the fallback is safe. This one is an
+    // allowlist: a default would name a repository that no operator ever typed,
+    // and — because `readSettings` cannot tell blank from unset — it would make
+    // the privilege unrevokable by the obvious means. Someone emptying
+    // SOLVE_REPOS to take the solver off a repo would have handed it straight
+    // back. Unset means no repository is allowed, which costs a line in .env
+    // and buys an allowlist that can actually be emptied.
   },
   {
     name: "MAX_CONCURRENT_SOLVES",

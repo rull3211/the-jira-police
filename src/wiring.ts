@@ -38,12 +38,13 @@
  */
 
 import { JiraClient } from "./jira/client.ts";
-import { buildNewIssuesJql } from "./jira/jql.ts";
+import { buildInFlightJql, buildNewIssuesJql, buildSolveQueueJql } from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
-import { type Settings, SettingsError, flag, list, numeric } from "./settings.ts";
+import { type Settings, SettingsError, flag, list, numeric, solveMode } from "./settings.ts";
+import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
 import { withFitnessNote } from "./triage/fitness-note.ts";
 import { UnpostableError, assertPostable } from "./triage/gate.ts";
 import { runPost } from "./triage/poster.ts";
@@ -220,6 +221,80 @@ export function createPollDeps(
     triage: createGroom(settings),
     sink: new FileSink(settings.OUTPUT_DIR),
     statePath: settings.STATE_PATH,
+    ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+/**
+ * Narrows a discovered issue to what the solve queue actually reasons about.
+ *
+ * `TicketRef` carries `created`, `issueTypeId` and `issueTypeName` as well, and
+ * this drops all three deliberately. The issue-type restriction on auto mode is
+ * enforced *in the JQL*, where Jira resolves ids and localised names correctly;
+ * handing the type to the poller as well would invite a second, weaker copy of
+ * that check written against the English name — on a board whose bug type is
+ * `Feil`, a check that would silently match nothing.
+ */
+function toSolveCandidate(ticket: TicketRef): SolveCandidate {
+  return {
+    key: ticket.key,
+    summary: ticket.summary,
+    url: ticket.url,
+    labels: ticket.labels,
+    updated: ticket.updated,
+  };
+}
+
+/**
+ * Composes the solve-queue cycle from settings, the way `createPollDeps`
+ * composes the grooming one and for the same reason: `solve:once` and the
+ * daemon must be the same run, or the rehearsal proves nothing.
+ *
+ * Both reads go through the same Jira REST credential the grooming poller
+ * uses, and that is still discovery-only. Nothing here can write — `SolveDeps`
+ * has no write function to give, which is the Phase B refusal made structural
+ * rather than promised. When the claim is eventually written it will go through
+ * storecode's own MCP session, as every other mutation in this service does.
+ *
+ * `solveMode` is called here rather than deeper in, so an unrecognised
+ * `SOLVE_MODE` fails at composition — before a query is built, before the board
+ * is touched — instead of at the point where its value would have decided
+ * whether a human's go-ahead was required.
+ */
+export function createSolveDeps(
+  settings: Settings,
+  client: JiraClient,
+  signal?: AbortSignal,
+): SolveDeps {
+  const mode = solveMode(settings);
+  const project = settings.JIRA_PROJECT;
+  const components = list(settings, "JIRA_COMPONENTS");
+
+  const queueJql = buildSolveQueueJql({
+    project,
+    components,
+    mode,
+    autoIssueTypes: list(settings, "SOLVE_AUTO_ISSUE_TYPES"),
+  });
+  const inFlightJql = buildInFlightJql({ project, components });
+
+  // Both built eagerly, outside the closures. A malformed query — an unsafe
+  // project key, or auto mode with no issue types — is a misconfiguration, and
+  // it should stop the process at startup rather than on whichever cycle first
+  // happens to reach the board.
+  return {
+    enabled: flag(settings, "SOLVE_ENABLED"),
+    mode,
+    allowedRepos: list(settings, "SOLVE_REPOS"),
+    maxConcurrent: numeric(settings, "MAX_CONCURRENT_SOLVES"),
+    fetchQueue: async () => {
+      logger.info("solve.query", { jql: queueJql });
+      return (await client.search(queueJql)).map(toSolveCandidate);
+    },
+    countInFlight: async () => {
+      logger.info("solve.in_flight_query", { jql: inFlightJql });
+      return (await client.search(inFlightJql)).length;
+    },
     ...(signal === undefined ? {} : { signal }),
   };
 }

@@ -175,14 +175,27 @@ describe("the solve settings", () => {
     );
   });
 
-  it("allows only the pilot repository out of the box", () => {
-    expect(list(readSettings(MINIMAL), "SOLVE_REPOS")).toEqual(["buy-insurance-advisor-web"]);
+  it("allows no repository out of the box", () => {
+    // The one solve setting with no fallback, and the reason is that
+    // `readSettings` cannot tell blank from unset. Give this a default and the
+    // privilege it grants survives being deleted from .env: an operator taking
+    // the solver off a repository would have handed it straight back, and the
+    // only way to revoke it would be to edit this file. The pilot repository is
+    // named in .env, where somebody chose it.
+    expect(list(readSettings(MINIMAL), "SOLVE_REPOS")).toEqual([]);
   });
 
   it("reads a blank allowlist as an empty list, which the poller reads as nothing", () => {
     // Blank means "no repository", not "every repository". The poller is what
     // enforces that reading; this only checks the list arrives empty.
     expect(list(readSettings({ ...MINIMAL, SOLVE_REPOS: " , " }), "SOLVE_REPOS")).toEqual([]);
+    expect(list(readSettings({ ...MINIMAL, SOLVE_REPOS: "" }), "SOLVE_REPOS")).toEqual([]);
+  });
+
+  it("still takes an allowlist when one is configured", () => {
+    expect(
+      list(readSettings({ ...MINIMAL, SOLVE_REPOS: "buy-insurance-advisor-web" }), "SOLVE_REPOS"),
+    ).toEqual(["buy-insurance-advisor-web"]);
   });
 
   it("defaults to one solve at a time and three review rounds", () => {

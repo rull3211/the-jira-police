@@ -5,6 +5,7 @@ import {
   JqlError,
   assertSafe,
   buildNewIssuesJql,
+  buildInFlightJql,
   buildSolveQueueJql,
   jqlValue,
   lookbackMinutes,
@@ -304,6 +305,65 @@ describe("buildSolveQueueJql", () => {
 
   it("refuses to interpolate an unsafe component", () => {
     expect(() => buildSolveQueueJql({ ...QUEUE, components: ['x") OR labels = "y'] })).toThrow(
+      JqlError,
+    );
+  });
+});
+
+/**
+ * The concurrency bound's other half.
+ *
+ * Everything here is about one asymmetry: this query may over-count freely and
+ * must never under-count, because an undercount is what lets a second claim
+ * through a limit of one.
+ */
+describe("buildInFlightJql", () => {
+  const SCOPE = { project: "SSX", components: ["SSX Advisor"] };
+
+  it("builds the query verbatim", () => {
+    expect(buildInFlightJql(SCOPE)).toBe(
+      'project = SSX AND component IN ("SSX Advisor") AND labels = "agent:solving"',
+    );
+  });
+
+  it("counts exactly the tickets the solve queue excludes", () => {
+    // The two queries have to disagree on this label and agree on nothing else,
+    // or the bound is computed from the wrong population. A claimed ticket is
+    // absent from the queue and present here; that is the whole mechanism.
+    expect(buildInFlightJql(SCOPE)).toContain('labels = "agent:solving"');
+    expect(
+      buildSolveQueueJql({ ...SCOPE, mode: "manual" as SolveMode, autoIssueTypes: ["Feil"] }),
+    ).toContain('labels NOT IN ("agent:solving"');
+  });
+
+  it("counts a claimed ticket even after someone closes it", () => {
+    // The deliberate divergence from the queue query. A solve whose ticket was
+    // closed mid-run is still running; filtering it out here would undercount,
+    // and undercounting a limit of one means two agents in the same repository.
+    expect(buildInFlightJql(SCOPE)).not.toContain("statusCategory");
+  });
+
+  it("has no ordering clause, because a count does not need one", () => {
+    expect(buildInFlightJql(SCOPE)).not.toContain("ORDER BY");
+  });
+
+  it("stays inside the same scope the queue claims within", () => {
+    // Not widened to the whole project. This poller only ever writes the claim
+    // inside its component scope, so a stray agent:solving elsewhere is not its
+    // work — and blocking on it forever would be a stall with no findable cause.
+    expect(buildInFlightJql(SCOPE)).toContain('component IN ("SSX Advisor")');
+  });
+
+  it("omits the component clause when nothing is configured", () => {
+    expect(buildInFlightJql({ ...SCOPE, components: [] })).not.toContain("component");
+  });
+
+  it("refuses to interpolate an unsafe project", () => {
+    expect(() => buildInFlightJql({ ...SCOPE, project: 'X" OR "1"="1' })).toThrow(JqlError);
+  });
+
+  it("refuses to interpolate an unsafe component", () => {
+    expect(() => buildInFlightJql({ ...SCOPE, components: ['x") OR labels = "y'] })).toThrow(
       JqlError,
     );
   });

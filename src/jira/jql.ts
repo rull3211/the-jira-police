@@ -139,6 +139,48 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
   return `${clauses.join(" AND ")} ORDER BY created ASC`;
 }
 
+export interface InFlightJqlOptions {
+  readonly project: string;
+  readonly components: readonly string[];
+}
+
+/**
+ * Builds the JQL that counts solves already running.
+ *
+ * A separate query because it has to be one. The solve queue excludes
+ * `agent:solving` by design — a claimed ticket is not waiting to be claimed —
+ * so the tickets that count against `MAX_CONCURRENT_SOLVES` are exactly the
+ * ones the queue cannot see. A bound computed from the queue result would cap
+ * claims *per cycle* and let the next tick start another, which is not a bound
+ * at all.
+ *
+ * Two differences from `buildSolveQueueJql`, and only one of them is
+ * arbitrary:
+ *
+ *   - **No `statusCategory != Done`.** The queue filters closed tickets out
+ *     because working one is pointless; this query must not, because a solve
+ *     whose ticket someone closed mid-run is still a solve in flight. Dropping
+ *     it here would *undercount*, and undercounting a concurrency limit is the
+ *     failure that lets a second claim through. Over-counting only means
+ *     waiting, which is the direction to be wrong in.
+ *   - **Same project and component scope as the queue.** Kept identical rather
+ *     than widened, because this poller only ever writes `agent:solving` inside
+ *     that scope, so a claim outside it was not made here and blocking on it
+ *     forever would be a stall with no cause anyone could find.
+ */
+export function buildInFlightJql(options: InFlightJqlOptions): string {
+  const clauses = [`project = ${assertSafe(options.project, "project")}`];
+
+  if (options.components.length > 0) {
+    const values = options.components.map((entry) => jqlValue(entry, "component")).join(", ");
+    clauses.push(`component IN (${values})`);
+  }
+
+  clauses.push(`labels = ${jqlValue(AGENT_LABELS.solving, "label")}`);
+
+  return clauses.join(" AND ");
+}
+
 export interface SolveQueueJqlOptions {
   readonly project: string;
   /** Same restriction as the new-issue query, for the same reason. */
@@ -193,6 +235,19 @@ export interface SolveQueueJqlOptions {
  * guarantees every candidate already carries at least one label — but the next
  * reader should not have to rediscover that, and any future rewrite that drops
  * the positive label clause would silently start missing unlabelled tickets.
+ *
+ * Measured against this board rather than taken on trust, 2026-09-03:
+ *
+ *   labels IS EMPTY                                    → 57 issues
+ *   labels IS EMPTY AND labels NOT IN (the three)      →  0 issues
+ *   labels = "triaged"                                 → 46 issues
+ *   labels = "triaged" AND labels NOT IN (the three)   → 46 issues
+ *   labels = "triaged" AND labels NOT IN ("triaged")   →  0 issues
+ *
+ * So the clause excludes on absence as well as on presence, it does not touch
+ * a labelled ticket that simply lacks the named labels, and it does exclude one
+ * that carries them. All three are load-bearing, and the first is the reason
+ * the positive clause above cannot be removed as redundant.
  */
 export function buildSolveQueueJql(options: SolveQueueJqlOptions): string {
   const project = assertSafe(options.project, "project");
