@@ -266,14 +266,21 @@ On a confirmed `y`, perform these writes (only these):
 - **Labels — UNION, never clobber.** READ the ticket's current labels (already fetched in §1), then
   write `current ∪ skill-set` via `mcp__atlassian__editJiraIssue` — never a bare replacement array.
   On a verdict change, remove ONLY the skill's own stale namespaced labels (`route:*`, `dup:*`,
-  `dor:*`, `tier:*`, `intake:*`, `next:*`); never touch a human label. The preview's LABEL DELTA is
-  exactly this reconciliation.
+  `dor:*`, `tier:*`, `intake:*`, `next:*`, `agent:solvable`); never touch a human label. The
+  preview's LABEL DELTA is exactly this reconciliation.
 
   `next:*` was added to that list on 2026-09-03. It is set by this skill (§ vocabulary below:
   `next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead`) and never by a
   human, but its omission here meant a verdict change had to leave the previous routing label in
   place — so a ticket sent back to its reporter kept a `next:to-trio` directly contradicting the
   `next:to-reporter` alongside it. Local change; not yet upstream.
+
+  `agent:solvable` was added on 2026-09-03, and note that it is listed as a single label rather
+  than as `agent:*`. The rest of that namespace does not belong to this skill: `agent:start` is a
+  human's authorisation for a bot to attempt a fix, and `agent:solving` / `agent:done` /
+  `agent:failed` are that bot's own lifecycle. This skill sets and clears its own assessment and
+  nothing else — it must never add `agent:start`, since a ticket that could talk the skill into
+  granting that would have talked it into authorising itself. Local change; not yet upstream.
 
 - Apply the detected **component** via `mcp__atlassian__editJiraIssue`
   (`{"components":[{"name":"<exact live name>"}]}`) — ONLY one of the four policy streams

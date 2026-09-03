@@ -91,8 +91,12 @@ export const TRIAGE_SCHEMA = {
         labelsRemove: {
           type: "array",
           items: { type: "string" },
+          // Kept in step with §11 by hand, and it had already fallen behind:
+          // this omitted `next:*` for as long as `next:*` was missing from §11
+          // itself. `agent:` is the namespace where the omission would cost
+          // most, since the rest of it belongs to a human and to the solver.
           description:
-            "The `- remove:` half of the LABEL DELTA. ONLY the skill's own stale namespaced labels (route:*, dup:*, dor:*, tier:*, intake:*). Never a human label.",
+            "The `- remove:` half of the LABEL DELTA. ONLY the skill's own stale namespaced labels (route:*, dup:*, dor:*, tier:*, intake:*, next:*, and agent:solvable). Never a human label, and never any other agent:* label — agent:start is a human's authorisation for a bot to attempt a fix, and agent:solving / agent:done / agent:failed are that bot's own lifecycle.",
         },
         component: {
           type: "string",
@@ -118,6 +122,56 @@ export const TRIAGE_SCHEMA = {
           enum: ["create", "update"],
           description:
             "Whether a comment satisfying BOTH the skill's own Jira account authorship AND the full footer sentinel already exists (update) or not (create).",
+        },
+      },
+    },
+    agentFitness: {
+      type: "object",
+      additionalProperties: false,
+      required: ["solvable", "confidence", "repo", "rationale", "blockers"],
+      // Deliberately absent from the top-level `required` list. Two reasons,
+      // and they point the same way.
+      //
+      // The schema's own header warns that every extra required field is
+      // another way for a run to fail after paying for the work — and this
+      // one is five subfields deep. But more importantly, omission has to
+      // mean something safe. `parseAgentFitness` reads a missing object as
+      // `solvable: false`, so a run that never mentions agent fitness has
+      // declined to authorise anything. Requiring the field would turn a
+      // model's silence into a retry loop; making it optional turns it into
+      // a "no". A field that grants privilege should fail closed.
+      description:
+        "Whether an autonomous coding agent could safely and reliably fix this ticket without a human writing the patch. Judge conservatively: this drives whether a bot is later allowed to edit source and open a pull request, so the cost of a wrong `true` is far higher than the cost of a wrong `false`. Omit this object entirely if you are unsure — omission is read as `solvable: false`.",
+      properties: {
+        solvable: {
+          type: "boolean",
+          // The verdict coupling is stated here as well as enforced in the
+          // gate, because a model told the rule up front produces a coherent
+          // payload, whereas one told it only by rejection produces a retry.
+          description:
+            'True ONLY if ALL of: the verdict is "ready-ish"; the fault is localised to one repo you can name; the acceptance criteria are concrete enough that a passing test could demonstrate the fix; and the change does not need a product decision, a design, a schema/API migration, or credentials. If the verdict is anything other than "ready-ish", this MUST be false — a ticket that does not meet Definition of Ready has nothing an agent could verify itself against. When true, you MUST also include the label "agent:solvable" in the top-level `labels` array. NEVER emit any other `agent:*` label: "agent:start" in particular is a human authorisation and is not yours to grant.',
+        },
+        confidence: {
+          type: "string",
+          enum: ["low", "med", "high"],
+          description:
+            "How much weight this call bears. Note that you are judging from the ticket and the knowledge vault only — you have not read the source — so `high` should be rare and means the vault names the exact file and mechanism.",
+        },
+        repo: {
+          type: "string",
+          description:
+            "The single repository the fix would land in, exactly as named in the vault index (e.g. buy-insurance-advisor-web). Empty string if unknown or if more than one repo is involved — which is itself a reason for `solvable: false`.",
+        },
+        rationale: {
+          type: "string",
+          description:
+            "One sentence: why an agent could, or could not, do this unattended. Name the deciding factor rather than restating the verdict.",
+        },
+        blockers: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            'What stands in the way, one short phrase each — e.g. "needs a product decision on copy", "touches the payment schema", "no reproduction steps". MUST be empty when `solvable` is true, and should name at least one item when it is false.',
         },
       },
     },

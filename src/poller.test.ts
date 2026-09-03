@@ -39,6 +39,13 @@ const PAYLOAD: TriagePayload = {
     links: [],
     commentAction: "create",
   },
+  agentFitness: {
+    solvable: false,
+    confidence: "low",
+    repo: "",
+    rationale: "Needs a human.",
+    blockers: ["no reproduction steps"],
+  },
 };
 
 class RecordingSink implements OutputSink {

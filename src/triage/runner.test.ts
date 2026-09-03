@@ -8,6 +8,7 @@ import {
   TriageError,
   assertDorCoherent,
   assertMcpReady,
+  parseAgentFitness,
   parsePayload,
   buildArgs,
   buildPrompt,
@@ -223,6 +224,13 @@ describe("assertDorCoherent", () => {
     recommendedNextStep: "Ask the reporter.",
     report: "## report",
     mutation: MUTATION,
+    agentFitness: {
+      solvable: false,
+      confidence: "low",
+      repo: "",
+      rationale: "Needs a human.",
+      blockers: ["no reproduction steps"],
+    },
   } as const;
 
   it("passes a payload with no placeholders", () => {
@@ -396,5 +404,103 @@ describe("childEnv", () => {
     childEnv(parent);
 
     expect(parent["JIRA_AUTH"]).toBe("placeholder");
+  });
+});
+
+describe("parseAgentFitness", () => {
+  // Every test in this block is a variation on one question: what does this
+  // function do when it is not told a clear yes? The answer has to be "no" in
+  // all of them, because `solvable: true` is the first value in this service
+  // that eventually authorises a subprocess to edit source. A wrong `false`
+  // costs a human triaging a ticket they were going to triage anyway; a wrong
+  // `true` costs an unasked-for pull request. The asymmetry is not close.
+
+  it.each([undefined, null, "yes", 42, [], "{}"])("reads %o as not solvable", (value) => {
+    expect(parseAgentFitness(value).solvable).toBe(false);
+  });
+
+  it("reads an object that never mentions solvable as not solvable", () => {
+    expect(parseAgentFitness({ confidence: "high", repo: "x" }).solvable).toBe(false);
+  });
+
+  it.each(["true", 1, "TRUE", {}])("does not accept the truthy-but-not-true %o", (solvable) => {
+    // A JSON schema constrains a well-behaved reply, not a malformed one, and
+    // this is the field where coercion would be most expensive.
+    expect(parseAgentFitness({ solvable }).solvable).toBe(false);
+  });
+
+  it("accepts a well-formed yes", () => {
+    expect(
+      parseAgentFitness({
+        solvable: true,
+        confidence: "high",
+        repo: "buy-insurance-advisor-web",
+        rationale: "One file.",
+        blockers: [],
+      }),
+    ).toEqual({
+      solvable: true,
+      confidence: "high",
+      repo: "buy-insurance-advisor-web",
+      rationale: "One file.",
+      blockers: [],
+    });
+  });
+
+  it.each(["certain", "medium", "", undefined, 3])(
+    "downgrades the unrecognised confidence %o to low",
+    (confidence) => {
+      // Falling back to the model's own string would let an unknown level be
+      // read downstream as a strong one purely by not matching "low".
+      expect(parseAgentFitness({ solvable: true, confidence }).confidence).toBe("low");
+    },
+  );
+
+  it("drops non-string blockers rather than stringifying them", () => {
+    expect(parseAgentFitness({ blockers: ["real", 7, null] }).blockers).toEqual(["real"]);
+  });
+
+  it("is applied by parsePayload, not merely available to it", () => {
+    // The lesson from `assertDorCoherent`: testing the helper in isolation
+    // proved nothing, because deleting the call site left the suite green.
+    const parsed = parsePayload(
+      {
+        verdict: "ready-ish",
+        labels: [],
+        dorPlaceholders: [],
+        recommendedNextStep: "Go.",
+        report: "## report",
+        mutation: {},
+        agentFitness: { solvable: true, confidence: "med", repo: "r", rationale: "", blockers: [] },
+      },
+      "SSX-1",
+    );
+
+    expect(parsed.agentFitness).toEqual({
+      solvable: true,
+      confidence: "med",
+      repo: "r",
+      rationale: "",
+      blockers: [],
+    });
+  });
+
+  it("gives parsePayload a declining fitness when the field is absent", () => {
+    // The schema leaves `agentFitness` optional on purpose, so this is the
+    // ordinary path for any run that does not volunteer an opinion — including
+    // every run made before this field existed.
+    const parsed = parsePayload(
+      {
+        verdict: "needs-info",
+        labels: [],
+        dorPlaceholders: [],
+        recommendedNextStep: "Ask.",
+        report: "## report",
+        mutation: {},
+      },
+      "SSX-1",
+    );
+
+    expect(parsed.agentFitness.solvable).toBe(false);
   });
 });

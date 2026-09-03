@@ -69,6 +69,13 @@ function payload(overrides: Partial<TriagePayload> = {}): TriagePayload {
     recommendedNextStep: "Ask the reporter.",
     report: "## report",
     mutation: mutation(),
+    agentFitness: {
+      solvable: false,
+      confidence: "low",
+      repo: "",
+      rationale: "Needs a human.",
+      blockers: ["no reproduction steps"],
+    },
     ...overrides,
   };
 }

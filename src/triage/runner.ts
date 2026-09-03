@@ -149,6 +149,30 @@ export interface Mutation {
   readonly commentAction: "create" | "update";
 }
 
+export type Confidence = "low" | "med" | "high";
+
+/**
+ * Whether a coding agent could be trusted to fix this ticket unattended.
+ *
+ * An estimate, and a weak one by construction: the analyst has no `--deep`, no
+ * `Task`, and no checkout of the repo it is naming, so the call is made from the
+ * ticket plus the knowledge vault. It is a candidate signal — the thing that
+ * decides a ticket is *worth* looking at — not a warrant. Whatever eventually
+ * acts on it reads the code first and is expected to disagree sometimes.
+ *
+ * The one field with teeth is `solvable`, and it fails closed: absent means
+ * false. See the schema for why the whole object is optional.
+ */
+export interface AgentFitness {
+  readonly solvable: boolean;
+  readonly confidence: Confidence;
+  /** Single repo the fix would land in; empty when unknown or spread across several. */
+  readonly repo: string;
+  readonly rationale: string;
+  /** Empty iff `solvable`. */
+  readonly blockers: readonly string[];
+}
+
 export interface TriagePayload {
   readonly verdict: Verdict;
   readonly labels: readonly string[];
@@ -158,6 +182,8 @@ export interface TriagePayload {
   readonly report: string;
   /** What a write WOULD send. Nothing in this module sends it. */
   readonly mutation: Mutation;
+  /** Never absent here even when absent from the model's reply — see `parseAgentFitness`. */
+  readonly agentFitness: AgentFitness;
 }
 
 export class TriageError extends Error {}
@@ -366,6 +392,7 @@ export function parsePayload(value: unknown, issueKey: string): TriagePayload {
     recommendedNextStep: String(candidate["recommendedNextStep"] ?? ""),
     report: String(candidate["report"] ?? ""),
     mutation: parseMutation(candidate["mutation"]),
+    agentFitness: parseAgentFitness(candidate["agentFitness"]),
   };
 
   assertDorCoherent(payload, issueKey);
@@ -391,6 +418,37 @@ function parseMutation(value: unknown): Mutation {
     component: String(source["component"] ?? ""),
     links: parseLinks(source["links"]),
     commentAction: source["commentAction"] === "update" ? "update" : "create",
+  };
+}
+
+/** Read off the schema, so the parser cannot accept a level the model was never offered. */
+const CONFIDENCES: readonly Confidence[] =
+  TRIAGE_SCHEMA.properties.agentFitness.properties.confidence.enum;
+
+/**
+ * Reads the fitness object, defaulting every way out to "no".
+ *
+ * Three separate paths lead to `solvable: false` here: the object is missing,
+ * the object is malformed, or `solvable` is anything other than the literal
+ * `true`. That is not defensiveness for its own sake — this field is the first
+ * one in the service whose `true` eventually authorises a subprocess to edit
+ * source, and the asymmetry between a wrong `false` (a human triages the ticket,
+ * as they do today) and a wrong `true` (a bot opens a pull request nobody asked
+ * for) is not close. Every ambiguity resolves to the cheap mistake.
+ *
+ * `confidence` falls back to `low` rather than to the model's string, so an
+ * unrecognised level cannot be read downstream as a strong one.
+ */
+export function parseAgentFitness(value: unknown): AgentFitness {
+  const source =
+    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  const confidence = source["confidence"];
+  return {
+    solvable: source["solvable"] === true,
+    confidence: CONFIDENCES.includes(confidence as Confidence) ? (confidence as Confidence) : "low",
+    repo: String(source["repo"] ?? ""),
+    rationale: String(source["rationale"] ?? ""),
+    blockers: strings(source["blockers"]),
   };
 }
 

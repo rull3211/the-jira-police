@@ -1,7 +1,36 @@
 import { describe, expect, it } from "vitest";
 
 import { FOOTER_SENTINEL, UnpostableError, assertPostable } from "./gate.ts";
-import { TriageContradictionError, type Mutation, type TriagePayload } from "./runner.ts";
+import {
+  TriageContradictionError,
+  type AgentFitness,
+  type Mutation,
+  type TriagePayload,
+} from "./runner.ts";
+
+/** Defaults to "no", matching what `parseAgentFitness` produces from silence. */
+function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
+  return {
+    solvable: false,
+    confidence: "low",
+    repo: "",
+    rationale: "Needs a human.",
+    blockers: ["no reproduction steps"],
+    ...overrides,
+  };
+}
+
+/** The other half: a fitness call that should sail through, for mutating in place. */
+function solvable(overrides: Partial<AgentFitness> = {}): AgentFitness {
+  return fitness({
+    solvable: true,
+    confidence: "med",
+    repo: "buy-insurance-advisor-web",
+    rationale: "One file, covered by tests.",
+    blockers: [],
+    ...overrides,
+  });
+}
 
 function mutation(overrides: Partial<Mutation> = {}): Mutation {
   return {
@@ -23,6 +52,7 @@ function payload(overrides: Partial<TriagePayload> = {}): TriagePayload {
     recommendedNextStep: "Ask the reporter.",
     report: "## report",
     mutation: mutation(),
+    agentFitness: fitness(),
     ...overrides,
   };
 }
@@ -227,6 +257,112 @@ describe("labels", () => {
     });
 
     expect(violations(input)).toEqual([]);
+  });
+});
+
+describe("the agent: namespace, which triage only partly owns", () => {
+  it("allows retiring its own agent:solvable when it changes its mind", () => {
+    expect(
+      violations(payload({ mutation: mutation({ labelsRemove: ["agent:solvable"] }) })),
+    ).toEqual([]);
+  });
+
+  it("refuses to grant agent:start, which is a human's authorisation", () => {
+    // The one that matters. The analyst's whole input is a Jira ticket, and a
+    // ticket is written by whoever felt like writing one. If the skill could
+    // emit `agent:start`, a ticket body could ask it to — and the human
+    // approval step in manual mode would be one the bot performs for itself.
+    const input = payload({
+      labels: ["dor:gaps", "route:ours", "agent:start"],
+      mutation: mutation({ labelsAdd: ["agent:start"] }),
+    });
+
+    expect(violations(input).join(" ")).toContain("agent:start is a human's authorisation");
+  });
+
+  it.each(["agent:solving", "agent:done", "agent:failed"])(
+    "refuses to remove the solver's own %s",
+    (label) => {
+      // The solve queue has no local cursor: its idempotency rests entirely on
+      // these labels being written once, by one writer. A re-triage that
+      // cleared `agent:solving` would unclaim a fix already in flight.
+      expect(
+        violations(payload({ mutation: mutation({ labelsRemove: [label] }) })).join(" "),
+      ).toContain(`"${label}"`);
+    },
+  );
+});
+
+describe("agent fitness", () => {
+  /** A coherent yes: ready-ish, labelled, no blockers, repo named. */
+  function ok(overrides: Partial<TriagePayload> = {}): TriagePayload {
+    return payload({
+      verdict: "ready-ish",
+      labels: ["dor:pass", "route:ours", "agent:solvable"],
+      agentFitness: solvable(),
+      ...overrides,
+    });
+  }
+
+  it("allows a coherent solvable payload", () => {
+    expect(violations(ok())).toEqual([]);
+  });
+
+  it("does not fire on a re-run that leaves the label out of the delta", () => {
+    // The check reads `labels`, never `labelsAdd`, and this is why. §11's delta
+    // holds only labels NOT already on the issue, so the second run over a
+    // ticket already marked solvable legitimately omits it. A gate keyed on the
+    // delta would fire hardest on the runs least deserving of it — the same
+    // false-positive shape that got the old prose check withdrawn.
+    expect(
+      violations(ok({ mutation: mutation({ labelsAdd: [], commentAction: "update" }) })),
+    ).toEqual([]);
+  });
+
+  it.each(["needs-info", "duplicate", "not-our-team", "out-of-scope"] as const)(
+    "refuses solvable on a %s verdict",
+    (verdict) => {
+      // Only ready-ish has passed DoR, and without DoR there are no acceptance
+      // criteria concrete enough for an agent to check its own work against.
+      expect(violations(ok({ verdict })).join(" ")).toContain(
+        "only a ready-ish ticket has passed DoR",
+      );
+    },
+  );
+
+  it("refuses solvable while blockers remain", () => {
+    expect(
+      violations(ok({ agentFitness: solvable({ blockers: ["needs a product decision"] }) })).join(
+        " ",
+      ),
+    ).toContain("needs a product decision");
+  });
+
+  it.each(["", "   "])("refuses solvable with repo %o", (repo) => {
+    expect(violations(ok({ agentFitness: solvable({ repo }) })).join(" ")).toContain(
+      "names no repo",
+    );
+  });
+
+  it("refuses solvable that never reaches the board", () => {
+    expect(violations(ok({ labels: ["dor:pass", "route:ours"] })).join(" ")).toContain(
+      "the assessment would never reach the board",
+    );
+  });
+
+  it("refuses a label the assessment does not stand behind", () => {
+    // The other direction, and the SSX-3822 shape exactly: prose and structured
+    // field each defensible alone, disagreeing with each other. Here the label
+    // would authorise work the assessment declined.
+    expect(violations(ok({ agentFitness: fitness() })).join(" ")).toContain(
+      "would authorise work the assessment declined",
+    );
+  });
+
+  it("says nothing about a payload that simply declines", () => {
+    // The common case by far, and it must stay free. Every default in
+    // `parseAgentFitness` lands here.
+    expect(violations(payload())).toEqual([]);
   });
 });
 

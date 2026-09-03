@@ -75,7 +75,32 @@ const OWNED_LABEL_NAMESPACES: readonly string[] = [
   "tier:",
   "intake:",
   "next:",
+  "agent:",
 ];
+
+/**
+ * The only `agent:` label triage may touch — and the reason the namespace above
+ * is not enough on its own.
+ *
+ * `agent:` is the first namespace this service shares with something other than
+ * the skill. Triage contributes an assessment, `agent:solvable`. A human
+ * contributes `agent:start`, which is the authorisation for a bot to attempt a
+ * fix. A solver contributes `agent:solving` / `agent:done` / `agent:failed`,
+ * which are its own lifecycle.
+ *
+ * Only the first of those is triage's to write, and the gap matters more than it
+ * looks. The analyst's entire input is a Jira ticket, and a Jira ticket is
+ * written by whoever felt like writing one — it is data, not instruction. If the
+ * skill could emit `agent:start`, then a ticket body could ask it to, and the
+ * human authorisation step in manual mode would be one that the thing being
+ * authorised is able to perform for itself. Enforcing the narrower rule costs a
+ * set lookup, so there is no reason to rely on the model declining.
+ *
+ * The same argument applies to removal: a re-triage that cleared `agent:solving`
+ * would unclaim a solve already in flight, and the queue's idempotency rests on
+ * that label being written exactly once by exactly one writer.
+ */
+const TRIAGE_OWNED_AGENT_LABELS: ReadonlySet<string> = new Set(["agent:solvable"]);
 
 /** The mutation may not be posted. Carries every reason, not the first. */
 export class UnpostableError extends TriageError {
@@ -110,6 +135,7 @@ export function assertPostable(payload: TriagePayload, issueKey: string): void {
     ...checkComment(payload, issueKey),
     ...checkLabels(payload),
     ...checkComponent(payload.mutation),
+    ...checkAgentFitness(payload),
   ];
 
   if (violations.length > 0) {
@@ -156,6 +182,19 @@ function checkLabels(payload: TriagePayload): readonly string[] {
     }
   }
 
+  // The namespace check above lets any `agent:` label through, which is too
+  // generous for this one namespace — see TRIAGE_OWNED_AGENT_LABELS. Both
+  // halves of the delta are checked: adding `agent:start` would be the skill
+  // authorising its own solve, and removing `agent:solving` would unclaim one
+  // already running.
+  for (const label of [...payload.mutation.labelsAdd, ...payload.mutation.labelsRemove]) {
+    if (label.startsWith("agent:") && !TRIAGE_OWNED_AGENT_LABELS.has(label)) {
+      violations.push(
+        `the mutation touches "${label}", and triage owns only ${[...TRIAGE_OWNED_AGENT_LABELS].join(", ")} in the agent: namespace — agent:start is a human's authorisation and the rest belong to the solver`,
+      );
+    }
+  }
+
   // The delta and the verdict's own label list are two renderings of one
   // decision, and they are produced by the same run. Adding a label the verdict
   // never suggested means they have come apart somewhere.
@@ -189,6 +228,83 @@ function checkLabels(payload: TriagePayload): readonly string[] {
         .join(
           ", ",
         )} — DOR_CHECKLIST.md allows dor:pass "only if 1-9 hold", and row 9 is the baseline metric`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * The fitness call has to agree with the rest of the payload that produced it.
+ *
+ * Same shape of rule as everything else here, for the same reason: this cannot
+ * tell you the analyst was wrong about whether a bot could fix the ticket. It
+ * can only tell you the payload contradicts itself, which — twice now, on
+ * SSX-3814 and SSX-3822 — is what a wrong answer has actually looked like.
+ *
+ * The verdict coupling is the load-bearing rule, and it is not an extra
+ * restriction invented here. It falls out of three existing ones meeting:
+ *
+ *   - `assertDorCoherent` already forbids `ready-ish` while placeholders remain,
+ *     so `ready-ish` implies the Definition of Ready held.
+ *   - DoR holding implies acceptance criteria concrete enough to test against,
+ *     which is precisely what an unattended fixer needs and cannot invent.
+ *   - The skill's dev lens — repo, blast radius, the file, the technique, the
+ *     rejected alternative — is only emitted on ACCEPT, and it is most of the
+ *     evidence a fitness call rests on.
+ *
+ * So a `dor:gaps` ticket is never agent-solvable. That reads like a limitation
+ * and is closer to the opposite: it is the same fact stated three ways, and the
+ * gate only has to check the cheapest of them. Note that the placeholder case
+ * needs no rule of its own — `assertDorCoherent` throws before this runs.
+ *
+ * The label rule reads `labels`, never `labelsAdd`, and that distinction was
+ * bought the hard way. `labelsAdd` is a delta holding only labels not already on
+ * the issue, so on the second run over a ticket already marked solvable the
+ * label is legitimately absent from it. A gate keyed on the delta would fire on
+ * exactly the re-runs it should stay quiet for — the same false-positive shape
+ * that got the old prose check withdrawn. `labels` is the full set the verdict
+ * asserts, so it is the honest place to look for an assertion.
+ */
+function checkAgentFitness(payload: TriagePayload): readonly string[] {
+  const fitness = payload.agentFitness;
+  const violations: string[] = [];
+  const labelled = payload.labels.includes("agent:solvable");
+
+  if (fitness.solvable && payload.verdict !== "ready-ish") {
+    violations.push(
+      `agentFitness.solvable is true while the verdict is "${payload.verdict}" — only a ready-ish ticket has passed DoR, and without that there are no acceptance criteria for an agent to verify its own fix against`,
+    );
+  }
+
+  if (fitness.solvable && fitness.blockers.length > 0) {
+    violations.push(
+      `agentFitness.solvable is true while still listing ${fitness.blockers
+        .map((blocker) => `"${blocker}"`)
+        .join(
+          ", ",
+        )} as a blocker — if the blocker is real the ticket is not solvable, and if it is not it should not be listed`,
+    );
+  }
+
+  if (fitness.solvable && fitness.repo.trim() === "") {
+    violations.push(
+      `agentFitness.solvable is true but names no repo — nothing downstream could check it against the allowlist, so there is nowhere to send the fix`,
+    );
+  }
+
+  // Both directions. The field is what a solver reads and the label is what a
+  // human reads, and the whole defect class this gate exists for is those two
+  // disagreeing while each looks reasonable alone.
+  if (fitness.solvable && !labelled) {
+    violations.push(
+      `agentFitness.solvable is true but the verdict's labels omit "agent:solvable" — the assessment would never reach the board`,
+    );
+  }
+
+  if (!fitness.solvable && labelled) {
+    violations.push(
+      `the verdict's labels include "agent:solvable" while agentFitness.solvable is false — the label would authorise work the assessment declined`,
     );
   }
 
