@@ -8,13 +8,21 @@ comment plus labels.
 new SSX ticket  →  discover  →  analyse  →  gate  →  post
                                     ↓
                             groomed/SSX-1234.md
+
+labelled ticket →  solve queue  →  (plans a claim, writes nothing)
 ```
 
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 339 tests, no build step, no deployment
+Status: running end to end against production Jira. 517 tests, no build step, no deployment
 target yet.
+
+A **second queue** exists alongside grooming: tickets a triage assessment marked
+`agent:solvable`, waiting to be fixed by an agent. It is read-only today — it selects the right
+tickets and reports the exact label edit it *would* make, and has no function capable of making
+it. See §4 for the queue and §13 for what is deliberately unbuilt. Nothing runs it from the
+daemon; `pnpm start` is the grooming loop only.
 
 ---
 
@@ -224,6 +232,52 @@ it permanently. This bug was live and would have fired once a year at the DST ro
 on issue key so the resume point is deterministic; an unparseable timestamp throws rather than
 letting `NaN` scramble the order.
 
+### The solve queue — a second, stateless discovery path
+
+`src/solve/` + `buildSolveQueueJql` / `buildInFlightJql`. Selects tickets waiting to be **fixed**
+rather than groomed. It shares the JQL helpers with the above and nothing else, because the two
+queries disagree about the only thing that matters: the first selects on **time**, the second on
+**label state**.
+
+|         | new-issue poller          | solve queue                    |
+| ------- | ------------------------- | ------------------------------ |
+| Selects | `created >= -Nm`          | labels                         |
+| Cursor  | `state/poll.json`         | **none**                       |
+| Dedupe  | local `seenKeys`          | **ticket label state in Jira** |
+| Run by  | the daemon                | `pnpm solve:once`, by hand     |
+
+**It cannot reuse the first poller.** `isUnseen` (`src/state/store.ts:92`) checks a permanent seen
+list, so a ticket triaged in March could never re-enter — but a ticket labelled for solving in
+September must. The queue is a *state*, not a window: running it twice reports the same tickets
+twice, and that repetition is the queue working.
+
+**Dedupe lives in Jira, not on disk**, so the queue survives a restart, a wiped `state/` and a
+second instance with no lock file. The claim is a label transition on the ticket itself.
+
+**`labels NOT IN (...)` also excludes issues whose label field is empty**, which is why the
+positive `labels = "agent:solvable"` clause is load-bearing rather than decorative. Measured on
+this board 2026-09-03 rather than taken on trust: 57 unlabelled issues, **0** of which survive the
+clause; 46 `triaged` issues, all 46 surviving it. Numbers are in the `jql.ts` doc comment.
+
+**The concurrency bound needs its own query.** The queue excludes `agent:solving` by design, so
+the tickets counting against `MAX_CONCURRENT_SOLVES` are precisely the ones the queue cannot see;
+a bound computed from the queue result would cap claims *per cycle* and let the next tick start
+another. `buildInFlightJql` deliberately omits `statusCategory != Done` — a solve whose ticket
+someone closed mid-run is still in flight, and **undercounting** a concurrency limit is the
+failure that lets a second claim through. Over-counting only causes waiting.
+
+**The target repository is read from the ticket, not carried alongside it.** `repoFromLabels`
+reads the existing `svc:<repo>` convention that triage already writes. Every ambiguous reading —
+no `svc:` label, two of them, `impl-uncertain` present, or a name failing
+`/^[A-Za-z0-9][A-Za-z0-9._-]*$/` — resolves to `null` and the ticket is **skipped, not failed**,
+so widening `SOLVE_REPOS` picks it up later with no manual reset. The label proposes; the
+allowlist decides. An earlier pattern accepted `..`, the one string guaranteed to escape any
+directory it is joined to.
+
+**Nothing here can write.** `SolveDeps` has two dependencies and both are readers. The refusal is
+structural rather than promised: granting it means changing that interface, which is where a
+reviewer looks. See §13.
+
 ---
 
 ## 5. State and the correctness rules
@@ -299,9 +353,12 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/index.ts`          | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides    |
 | `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep |
 | `src/poller.ts`         | One cycle. Ordering, dedupe, failure isolation, the three rules above                |
-| `src/wiring.ts`         | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps` |
+| `src/wiring.ts`         | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps` |
 | `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker               |
-| `src/jira/jql.ts`       | Query builder. Validation, id-vs-name quoting, window arithmetic                     |
+| `src/jira/jql.ts`       | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting   |
+| `src/solve/labels.ts`   | The `agent:` state machine as pure functions; `repoFromLabels`                       |
+| `src/solve/poller.ts`   | One solve cycle. **Dry run only** — plans the claim, cannot make it                  |
+| `src/cli/solve-once.ts` | One solve cycle and exit. No `--dry-run` flag, because there is no other mode        |
 | `src/jira/client.ts`    | `/rest/api/3/search/jql`, token pagination, Basic auth                               |
 | `src/jira/types.ts`     | The slice of the Jira payload actually read, plus `TicketRef`                        |
 | `src/state/store.ts`    | Cursor + seen keys, atomic write                                                     |
@@ -424,15 +481,22 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `WRITE_BACK`                 | `false`                            | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed       |
 | `TRIAGE_TIMEOUT_MS`          | `600000`                           |                                                                                                   |
 | `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`      | Both gitignored                                                                                   |
+| `SOLVE_ENABLED`              | `false`                            | Master switch for the solve queue. Strict `"true"`. Checked at composition *and* in the poller    |
+| `SOLVE_MODE`                 | `manual`                           | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback |
+| `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                             | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing |
+| `SOLVE_REPOS`                | — (**no fallback**)                | Repository allowlist. The only solve setting without a default, deliberately: see §14.10          |
+| `MAX_CONCURRENT_SOLVES`      | `1`                                | Counted from the board via `buildInFlightJql`, never from local state                             |
+| `MAX_REVIEW_ITERATIONS`      | `3`                                | Unused until Phase D                                                                              |
 
 Commands:
 
 ```bash
-pnpm start --interval 20s          # the daemon
+pnpm start --interval 20s          # the daemon — grooming only, never the solve queue
 pnpm dev                           # daemon, --watch
 pnpm poll:once --dry-run           # discovery only; free, and the fastest config check
 pnpm poll:once                     # one full cycle
 pnpm triage:once SSX-1234 [--write]
+pnpm solve:once                    # one solve cycle; reads the board, writes nothing
 pnpm check-types && pnpm lint && pnpm test
 ```
 
@@ -515,6 +579,33 @@ is likewise only partly owned, copy that shape rather than widening the prefix l
 - **Unproven paths.** REST pagination and REST error handling (401/429/5xx) are unit-tested only;
   the live board has returned a single clean page every time.
 
+### The solve feature, from the claim onward
+
+Everything that *selects* a ticket is built and was verified against the live board on
+2026-09-03. Everything that *changes* anything is not.
+
+- **The claim write.** The queue reports the edit (`+agent:solving` / `-agent:start`) and cannot
+  perform it. This is the next increment, and it is what makes the queue's dedupe testable at
+  all — *claim one ticket, confirm a second `solve:once` picks nothing up, release it* is the
+  experiment, and it needs a write to run.
+- **Running it from the daemon.** Not wired into `index.ts`, and that is a decision rather than
+  an omission. Wiring it in is the step that makes it **unattended**; if it were already looping
+  when the write landed, whoever landed the write would arm an unattended bot as a side effect of
+  a diff about something else. Keeping them apart keeps "grant the write" and "run it with nobody
+  watching" as two separately reviewable decisions. It also still needs its own slower cadence
+  and a decision about what a solve failure does to `loop.ts` backoff — a failed solve is not the
+  same event as a Jira outage, and the backoff only understands the latter.
+- **The solver itself** — worktree isolation, read-only recon, the diff-bounds gate, mechanical
+  (not model-asserted) verification. No component in this service has ever held `Write`, `Edit`
+  or `Bash`.
+- **Delivery** — draft PR, Copilot review, iterate, undraft. `MAX_REVIEW_ITERATIONS` exists and
+  is read by nothing.
+- **Two probes that gate the above and have not been run:** whether `Bash(pnpm test:*)` scoping
+  is honoured by the local arg parser (if not, Phase C changes shape — the harness runs the
+  commands and the model gets no `Bash` at all), and whether `gh pr edit --add-reviewer @copilot`
+  works for this org. Cost of a solve run is also unmeasured; a triage is $0.11 and a solve is a
+  different order of magnitude.
+
 ---
 
 ## 14. Invariants
@@ -539,3 +630,24 @@ Things that look like details and are not:
 9. **Triage cannot authorise its own downstream work.** It may set `agent:solvable`; `agent:start`
    belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
    attacker-controlled ticket text, so this is a boundary rather than a convention.
+10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
+    value is missing *or blank* (`settings.ts:209`) — the two are indistinguishable to it. So a
+    default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
+    an operator emptying the allowlist to take the solver off a repository would have it handed
+    straight back, revocable only by editing source. It is the one solve setting with no
+    fallback, and unset means nothing is allowed. The same reasoning applies to anything future
+    that names what may be written to. Note this cuts the opposite way from
+    `SOLVE_AUTO_ISSUE_TYPES`, where the fallback *is* the restriction — the test to apply is not
+    "does it have a default" but "does silence widen or narrow what the service may touch."
+11. **Every label write is read-modify-write, and must be verified after the fact.** The
+    available write path — MCP `editJiraIssue` — exposes only `fields`, never Jira's
+    `update.labels.add`/`remove`. There is no compare-and-swap and no way to touch one label in
+    isolation: the whole field is replaced. Two consequences. Concurrent claims cannot be
+    prevented, only made unlikely (`MAX_CONCURRENT_SOLVES=1`, one host). And any label added by
+    anyone between the read and the write is silently dropped — a PM adding `next:to-trio` while
+    a solve claims the ticket loses their edit, with nothing in either history explaining it.
+    The mitigation is to re-read after writing and confirm the set is what was intended, and to
+    keep the window between read and write free of model calls and I/O. This is why invariant 5
+    reads *delta, never a replacement array*: the poster path can honour it because the skill
+    resolves the delta against live inside a single session, and the claim path cannot, which
+    makes the claim the more dangerous of the two writes despite being the smaller one.
