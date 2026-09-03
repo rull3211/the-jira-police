@@ -346,7 +346,7 @@ to a fresh report for the same key claiming both are current.
 | The gate refuses                  | Nothing posted. Rejection artifact written. Same retry path                                                                                         |
 | The poster reports `problems`     | Logged as an error, **not** thrown. Writes already landed; retrying redoes partial work                                                             |
 | The poster reports `skipped`      | Throws. It did nothing, so a retry is right                                                                                                         |
-| Atlassian MCP not connected       | Child killed on the init event, before a turn is spent                                                                                              |
+| Atlassian MCP not connected       | Child killed on the init event, before a turn is spent. **Fired for real on 2026-09-03**, status `pending` — see below                              |
 | A run exceeds `TRIAGE_TIMEOUT_MS` | Child `SIGKILL`ed, run rejected                                                                                                                     |
 | Jira down / credential expired    | Reaches `runLoop`, which backs off exponentially to a 15-min cap. Uncapped backoff would make the service indistinguishable from a dead one         |
 | SIGINT / SIGTERM                  | Current issue finishes, then stop. A second signal exits 130 immediately                                                                            |
@@ -355,6 +355,20 @@ to a fresh report for the same key claiming both are current.
 Retries are safe because the comment is idempotent on its footer sentinel: a re-run **updates in
 place** rather than stacking a second copy. That is why the sentinel is a gate rule and not a
 nicety.
+
+**The MCP guard has now met reality**, and by a cause nobody had predicted. It was written for an
+expired OAuth session; what actually tripped it was `⏸ Pending approval` — both MCP servers waiting
+on an interactive approval that a headless run can never give:
+
+```
+atlassian: https://mcp.atlassian.com/v1/mcp (HTTP) - ⏸ Pending approval (run `claude` to approve)
+```
+
+`assertMcpReady` treats anything other than `connected` as not ready, so `pending` was refused on
+the init event with no turn spent. This is the failure the guard exists for, in its most literal
+form: the tools were absent, the run would have exited 0, and the verdict would have been formed
+without the ticket ever being read. **Recovery is a human step** — run `storecode` interactively
+once and approve the server. Nothing in the service can clear it, and nothing should be able to.
 
 ---
 
@@ -467,12 +481,8 @@ is likewise only partly owned, copy that shape rather than widening the prefix l
 - **Concurrency.** Issues are triaged sequentially. Fine at 4–5/day.
 - **`AND statusCategory != Done`** in the JQL — closed tickets currently get triaged. Small in
   steady state, not small on a first-run backfill. A question of intent, so it is open.
-- **Known trap.** `src/cli/triage-once.ts` only ever _adds_ `WRITE_BACK` when `--write` is passed.
-  Put `WRITE_BACK=true` in `.env` and the safety flag becomes decorative. One-line fix:
-  `WRITE_BACK: argv.includes("--write") ? "true" : "false"`.
 - **Unproven paths.** REST pagination and REST error handling (401/429/5xx) are unit-tested only;
-  the live board has returned a single clean page every time. The MCP guard's _failure_ branch has
-  never met a genuinely expired token.
+  the live board has returned a single clean page every time.
 
 ---
 
