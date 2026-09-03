@@ -1,21 +1,22 @@
 # the-jira-police — auto-triage new SSX tickets into a Slack canvas
 
-> Status: **Phases 0–3 built and green; Phase 4 not started.** 102 tests passing, `check-types`,
-> `lint` and `format` all clean. Nothing committed yet. Written 2026-09-02, revalidated against
-> the working tree the same day, then validated against **live Jira** the same evening.
+> Status: **Phases 0–3 built and green; Phase 4 not started.** 106 tests passing, `check-types`,
+> `lint` and `format` all clean. Initial commit `6e335de` on `main`, not yet pushed. Written
+> 2026-09-02, revalidated against the working tree the same day, validated against **live Jira**
+> that evening, and run **end to end against production Jira** on 2026-09-03.
 >
 > Completed items below are ~~struck through~~. Where the build deviated from the plan, the
 > reason is noted inline — those are the parts worth reading on a cold resume.
 
 ## Progress at a glance
 
-| Phase             | State                | Note                                                                                                                    |
-| ----------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| 0 · Scaffold      | ✅ done              | oxfmt defaults kept instead of the planned format settings                                                              |
-| 1 · Jira trigger  | ✅ JQL live-verified | relative window; DST ordering bug found and fixed. `JiraClient` itself still unproven against real Jira                 |
-| 2 · Triage runner | ✅ live-verified     | `stream-json`; ran against a real ticket over MCP. No worker pool, no budget cap, no `--session-id`, no cost telemetry  |
-| 3 · Output sinks  | 🟡 FileSink done     | canvas payload builders written; no API call yet (blockers 3+4)                                                         |
-| 4 · Operate       | ⬜ not started       | logger exists; no daemon, shutdown or metrics. `pnpm start`, `dev` and `poll:once` all point at files that do not exist |
+| Phase             | State            | Note                                                                                                                                |
+| ----------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 0 · Scaffold      | ✅ done          | oxfmt defaults kept instead of the planned format settings                                                                          |
+| 1 · Jira trigger  | ✅ live-verified | relative window; DST ordering bug found and fixed. `JiraClient` verified against the real API 2026-09-03                            |
+| 2 · Triage runner | ✅ live-verified | `stream-json`; ran against a real ticket over MCP. No worker pool, no budget cap, no `--session-id`, no cost telemetry              |
+| 3 · Output sinks  | 🟡 FileSink done | canvas payload builders written; no API call yet (blockers 3+4)                                                                     |
+| 4 · Operate       | ⬜ not started   | logger exists; no daemon, shutdown or metrics. `poll:once` now runs a full cycle; `start`/`dev` still point at a missing `index.ts` |
 
 **Not in the original plan but built anyway — two test doubles.** Both live in
 `.claude/skills/`, and between them they are the reason anything could be tested at all.
@@ -48,8 +49,8 @@ asserted:
   independent and correct.
 - 📊 **Volume: 25 tickets / 7 days ≈ 3.6/day**, which validates the 4–5/day planning estimate
   used for the cost model.
-- ⚠️ **SSX-3813 does not exist.** It is used as the example key in the canvas payload below.
-  Harmless, but do not treat it as a real reference.
+- ⚠️ ~~**SSX-3813 does not exist.**~~ It did not on 2026-09-02; it was created the next morning.
+  See the 2026-09-03 log below.
 
 ### Verified end-to-end against a real ticket
 
@@ -103,14 +104,50 @@ single-run mode)"`. Cosmetic in the file header, but `renderChecklistItem` build
   tickets. Candidate fix `AND statusCategory != Done` — a question of intent, so it is listed
   under open decisions rather than treated as a bug.
 
-### Still completely untested
+### ~~Still completely untested~~ — closed the next morning
 
-**`JiraClient` has never made a real request.** Every live call this evening went through the
-Atlassian **MCP**, which is an entirely separate code path from the REST + Basic-auth client the
-service will actually use. The client is well unit-tested against a stubbed `fetch`, but base
-URL, auth, pagination and error handling remain unproven against the real API. This is the
-largest remaining unknown and it is gated on a token (blocker 8). `poll-once.ts` — already
-advertised in `package.json` but not written — is the cheapest way to close it.
+~~**`JiraClient` has never made a real request.**~~ ✅ **It has now.** A credential was supplied
+on 2026-09-03 and `poll-once.ts` was written, which closed the last structural unknown in the
+service.
+
+## Session log — 2026-09-03 morning
+
+**The whole loop ran end to end against production Jira for the first time.**
+
+```
+pnpm poll:once --dry-run                      # discovery only, free
+SKILL_NAME=live-triage-probe pnpm poll:once   # discovery + real MCP grooming
+```
+
+Result: discovered SSX-3813 over REST, groomed it over MCP, wrote
+`groomed/SSX-3813.md`, persisted `state/poll.json`. 33 seconds, nothing failed.
+
+Newly proven, none of it previously exercised:
+
+- ✅ **`JiraClient` against the real API** — base URL, Basic auth (`email:token`),
+  `/rest/api/3/search/jql`, and normalisation into `TicketRef`. 417ms round trip.
+- ✅ **The first-run window** — `created >= -60m` with a null cursor found a ticket created
+  24 minutes earlier and nothing older.
+- ✅ **Cursor arithmetic, live** — the second run narrowed the window to `-28m`: 26 minutes
+  elapsed plus the 2-minute overlap, exactly as designed.
+- ✅ **State round-trips** — cursor and `seenKeys` persisted and reloaded.
+- ✅ **Credential redaction** — the settings dump printed `<redacted>`, not the value.
+- ✅ **The placeholder-summary bug does not affect this path.** `runPollCycle` carries the real
+  summary through from discovery; only `triage-once.ts` substitutes a placeholder. That narrows
+  the open bug rather than leaving it ambient.
+- ✅ **Environment isolation** — `childEnv` strips `JIRA_*`, so the grooming subprocess is not
+  handed the REST credential it has no use for.
+
+Fixed in passing: `--dry-run` reported the raw query count, which overstates a real run because
+the query window deliberately overlaps. It now marks each candidate `NEW`/`seen` and reports
+`wouldTriage`, so it can be trusted to predict spend.
+
+⚠️ **`SSX-3813` exists now** — created 2026-09-03 09:05, `Barneforsikring - gjøre klar for
+release`. Yesterday's note that it was a fictional example key is obsolete; the canvas payload
+example below happens to reference a real ticket.
+
+Still unproven on the REST client: **pagination** (one page so far) and **error handling**
+(no 401/429/5xx seen in anger). Both are unit-tested; neither has met the real API.
 
 ## Context
 
@@ -453,8 +490,9 @@ skill, or Slack is still outstanding — that split is exactly the blocker list.
    ordering, sub-task exclusion confirmed against a control group, response shape as expected.
    ✅ Cycle logic verified against an injected fake board (window, dedupe, ordering,
    cursor-advance-on-unbroken-success, restart safety) — and this is where the DST ordering bug
-   was caught. ⬜ **`JiraClient` has still never made a real request**; every live call went via
-   MCP, a different code path. Gated on `JIRA_AUTH` (B8).
+   was caught. ✅ **`JiraClient` verified against the real API on 2026-09-03** — auth, endpoint
+   and normalisation all correct on the first attempt. ⬜ Pagination and error handling remain
+   unit-test-only; the live board returned a single page and no errors.
 6. ⬜ **Canvas** — dry-run the payload against a _scratch_ canvas the bot owns before ever
    touching the real one. _Blocked on B6/B7._
 7. ⬜ **End-to-end** — create a throwaway SSX ticket, watch it appear in `./groomed/` and the
