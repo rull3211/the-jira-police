@@ -13,7 +13,7 @@ new SSX ticket  →  discover  →  analyse  →  gate  →  post
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 288 tests, no build step, no deployment
+Status: running end to end against production Jira. 325 tests, no build step, no deployment
 target yet.
 
 ---
@@ -22,10 +22,10 @@ target yet.
 
 **Two credentials, two jobs, and they never swap.**
 
-| | Credential | Used for | Never used for |
-| --- | --- | --- | --- |
-| Discovery | Jira REST (`JIRA_EMAIL` + `JIRA_AUTH`, HTTP Basic) | Learning *which* issues are new. Returns keys and metadata. | Reading issue bodies. Any write, ever. |
-| Grooming | The Atlassian **MCP session** inside the storecode subprocess | Reading what is *in* an issue, and writing the verdict back. | Discovery. |
+|           | Credential                                                    | Used for                                                     | Never used for                         |
+| --------- | ------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------- |
+| Discovery | Jira REST (`JIRA_EMAIL` + `JIRA_AUTH`, HTTP Basic)            | Learning _which_ issues are new. Returns keys and metadata.  | Reading issue bodies. Any write, ever. |
+| Grooming  | The Atlassian **MCP session** inside the storecode subprocess | Reading what is _in_ an issue, and writing the verdict back. | Discovery.                             |
 
 This is not stylistic. It buys three things:
 
@@ -33,7 +33,7 @@ This is not stylistic. It buys three things:
   the bot says something wrong, a human can see who to ask.
 - **Revocability.** Turning writes off is one setting (`WRITE_BACK=false`), not a token re-scope.
 - **Least privilege, enforced in code.** `childEnv()` in `src/triage/runner.ts` strips `/^JIRA_/`
-  from the subprocess environment. The grooming half is not *asked* to avoid the REST credential;
+  from the subprocess environment. The grooming half is not _asked_ to avoid the REST credential;
   it is not given it. There is a test asserting the absence.
 
 Consequence worth knowing before you change anything: **nothing in this repo may add a REST write
@@ -70,7 +70,7 @@ path.** A second way to mutate a ticket would be a second way to mutate it unche
 ```
 
 Both subprocesses go through `src/triage/session.ts`, which owns everything easy to get subtly
-wrong: line-buffered NDJSON parsing, a timeout that *kills the child* rather than merely
+wrong: line-buffered NDJSON parsing, a timeout that _kills the child_ rather than merely
 rejecting, the MCP connectivity check, and the rule that exit 0 without structured output is a
 failure rather than an empty success.
 
@@ -82,7 +82,7 @@ It used to be one: a single write-enabled session per ticket.
 
 That design cannot be checked. The skill posts its comment **mid-run**, but `structured_output` —
 the only thing this service can inspect — arrives with the terminal result event. So every check
-we could write was a post-mortem. On **SSX-3822** the run wrote *"baseline `[N]` left unfilled"*
+we could write was a post-mortem. On **SSX-3822** the run wrote _"baseline `[N]` left unfilled"_
 into its own scorecard, marked the row green, and emitted `dor:pass` + `ready-ish`. The
 contradiction was detectable. It was also already on the board.
 
@@ -91,8 +91,8 @@ Splitting the run puts the check in the middle, where refusal still costs nothin
 ### analyse — `src/triage/runner.ts`
 
 Always `--no-write`. No write tool in the allowlist. The prompt says dry-run and the permission
-layer enforces it: *the belt is a sentence the model could misread, the braces are a check it
-cannot.*
+layer enforces it: _the belt is a sentence the model could misread, the braces are a check it
+cannot._
 
 `--no-write` is a **pure** dry-run in the skill's own words — it still renders the full §11
 mutation payload, it just declines to send it. The JSON schema (`src/triage/schema.ts`) asks only
@@ -102,8 +102,8 @@ data instead of prose.
 Two fields carry the weight:
 
 - **`mutation`** — the exact §11 payload: comment body, label delta, component, links, and whether
-  the comment is a create or an update. This is what makes *the thing checked* and *the thing
-  posted* the same object.
+  the comment is a create or an update. This is what makes _the thing checked_ and _the thing
+  posted_ the same object.
 - **`dorPlaceholders`** — literal unfilled placeholders still in the ticket (`[N]`, `[TBD]`,
   `<beløp>`). Lets the DoR contradiction be read off a field instead of inferred from prose.
 
@@ -120,16 +120,18 @@ is wrong** — only that it contradicts itself or breaks a rule the skill set fo
 
 Current rules:
 
-| Check | Rule |
-| --- | --- |
-| DoR coherence | `dorPlaceholders` non-empty ⇒ no `dor:pass` label, no `ready-ish` verdict |
-| Comment non-empty | An empty body short-circuits; the follow-on complaints would bury it |
-| Footer sentinel | Body must end with `_🤖 Generated by intake-triage · re-run the command to refresh._` — the skill recognises its own prior comment by this, so a body without it can be posted but never *updated*, and every re-run stacks another copy |
-| Key pairing | Body must mention the issue key. The poster is handed text it did not write; this is the only place body-to-key is checked |
-| Owned namespaces | `labelsRemove` may only touch `route:` `dup:` `dor:` `tier:` `intake:` `next:` |
-| Delta agreement | Every `labelsAdd` entry must also appear in the verdict's own `labels` |
-| `dor:pass` delta | `labelsAdd` may not apply `dor:pass` while placeholders remain |
-| Component | Must be empty or one of the four policy streams |
+| Check             | Rule                                                                                                                                                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DoR coherence     | `dorPlaceholders` non-empty ⇒ no `dor:pass` label, no `ready-ish` verdict                                                                                                                                                                |
+| Comment non-empty | An empty body short-circuits; the follow-on complaints would bury it                                                                                                                                                                     |
+| Footer sentinel   | Body must end with `_🤖 Generated by intake-triage · re-run the command to refresh._` — the skill recognises its own prior comment by this, so a body without it can be posted but never _updated_, and every re-run stacks another copy |
+| Key pairing       | Body must mention the issue key. The poster is handed text it did not write; this is the only place body-to-key is checked                                                                                                               |
+| Owned namespaces  | `labelsRemove` may only touch `route:` `dup:` `dor:` `tier:` `intake:` `next:` `agent:`                                                                                                                                                  |
+| Owned `agent:`    | Narrower than the namespace: neither half of the delta may touch any `agent:` label except `agent:solvable`                                                                                                                              |
+| Delta agreement   | Every `labelsAdd` entry must also appear in the verdict's own `labels`                                                                                                                                                                   |
+| `dor:pass` delta  | `labelsAdd` may not apply `dor:pass` while placeholders remain                                                                                                                                                                           |
+| Component         | Must be empty or one of the four policy streams                                                                                                                                                                                          |
+| Agent fitness     | `agentFitness.solvable` ⇒ verdict is `ready-ish`, no blockers listed, a repo named, and `agent:solvable` present in `labels`; and the label may not appear without the field                                                             |
 
 Every violation is collected, not just the first. A run costs real money; sending the operator
 round the loop once per problem would be miserly with the wrong resource.
@@ -137,14 +139,39 @@ round the loop once per problem would be miserly with the wrong resource.
 **The lesson embedded in these rules.** Two false positives were found while building this, and
 both came from the same mistake: reading **prose** instead of **structured fields**. An early
 version refused any comment body containing the string `dor:pass` while placeholders remained. It
-blocked the *correction* to SSX-3822 — a send-back whose entire purpose was to repudiate a wrongly
+blocked the _correction_ to SSX-3822 — a send-back whose entire purpose was to repudiate a wrongly
 applied `dor:pass`, which it therefore had to name in order to reverse.
 
 > Applying a label is an assertion. Mentioning it is not. Read the delta.
 
 A gate whose false positives cluster on corrective runs is worse than no gate: it blocks exactly
-the runs repairing the damage. The test for any future rule is *can it distinguish asserting a
-thing from mentioning it?*
+the runs repairing the damage. The test for any future rule is _can it distinguish asserting a
+thing from mentioning it?_
+
+**The agent-fitness rules are that lesson applied twice over.** `agentFitness` (`schema.ts`) is
+triage's estimate of whether a coding agent could fix the ticket unattended; when it says yes, the
+label `agent:solvable` goes on the board and a future solver acts on it.
+
+- The label rule reads `labels`, **never `labelsAdd`**. The delta holds only labels not already on
+  the issue, so the second run over an already-marked ticket legitimately omits it. Keying on the
+  delta would reproduce the withdrawn prose check exactly: quiet on first runs, noisy on re-runs.
+- `solvable ⇒ ready-ish` is not a new restriction, it is three existing ones meeting. Only
+  `ready-ish` has passed DoR; DoR passing means acceptance criteria concrete enough to test
+  against; and the skill's dev lens — repo, blast radius, file, technique, rejected alternative —
+  is only emitted on ACCEPT, and is most of the evidence a fitness call rests on. A `dor:gaps`
+  ticket is therefore never agent-solvable, which is the same fact stated a fourth way.
+- The field **fails closed everywhere**: it is absent from the schema's `required` list, and
+  `parseAgentFitness` reads a missing object, a malformed one, or a truthy-but-not-`true` value all
+  as `solvable: false`. A wrong `false` costs a human triaging a ticket they were triaging anyway.
+  A wrong `true` costs an unasked-for pull request.
+
+One rule in the table is a security boundary rather than a coherence check. Triage owns
+`agent:solvable` and nothing else in the namespace: `agent:start` is a human's authorisation for a
+bot to attempt a fix. The analyst's entire input is a Jira ticket, and a ticket is written by
+whoever felt like writing one — so if the skill could emit `agent:start`, a ticket body could ask
+it to, and the human approval step would be one the bot performs for itself. The solver's own
+`agent:solving` / `agent:done` / `agent:failed` are excluded for a different reason: the solve
+queue has no local cursor, and its idempotency rests entirely on those labels having one writer.
 
 ### post — `src/triage/poster.ts`
 
@@ -158,15 +185,15 @@ A second storecode session, arranged to stop it thinking:
 - **No `transitionJiraIssue`.** The skill promises never to change status; withholding the tool
   turns that promise into something the service enforces rather than trusts.
 
-It is not *blind*, though — that would break §11. It gets `getJiraIssue` (current labels to union
+It is not _blind_, though — that would break §11. It gets `getJiraIssue` (current labels to union
 against, existing comments to match the sentinel), `atlassianUserInfo` ("which comment is mine")
 and `getIssueLinkTypes`. The guarantee is not "it cannot see the ticket" but **"it has the finished
 text and no means of researching an alternative."**
 
 The receipt it returns is deliberately small — `commentAction`, `labelsWritten`, `linksCreated`,
-`problems` — because every extra required field is another way for the run to fail *after* the
+`problems` — because every extra required field is another way for the run to fail _after_ the
 writes have landed. `problems` is logged loudly but does **not** throw: the writes already
-happened, so retrying redoes work that partly succeeded. `commentAction: "skipped"` *does* throw —
+happened, so retrying redoes work that partly succeeded. `commentAction: "skipped"` _does_ throw —
 that is the run reporting it did nothing.
 
 ---
@@ -180,7 +207,7 @@ stored cursor, never `created > "<timestamp>"`. Absolute dates in JQL resolve in
 timezone, not ours — a durable source of off-by-hours bugs. A relative offset has no timezone to
 get wrong.
 
-**The window overlaps on purpose.** Jira's date filters are *minute*-precision, so a strict cursor
+**The window overlaps on purpose.** Jira's date filters are _minute_-precision, so a strict cursor
 drops anything created in the same minute as the last issue seen. `CURSOR_OVERLAP_MS` (default 2
 min) re-scans, `lookbackMinutes` rounds **up**, and key-level dedupe is what makes the overlap
 free. The dedupe is mandatory, not an optimisation.
@@ -188,7 +215,7 @@ free. The dedupe is mandatory, not an optimisation.
 **JQL has no parameter binding**, so every interpolated value is validated rather than escaped.
 `jqlValue()` also encodes a real Jira subtlety: a bare number is resolved as an **id**, anything
 quoted as a **name**. `component = 12644` finds the component; `component = "12644"` searches for
-a component *named* "12644" and finds nothing.
+a component _named_ "12644" and finds nothing.
 
 **Ordering compares instants, not strings.** Jira returns `created` with a numeric offset
 (`2026-09-02T09:55:34.178+0200`), not `Z`. A lexicographic sort orders `02:00+0100` (01:00Z) before
@@ -250,7 +277,7 @@ storecode -p "/intake-triage SSX-1234 --no-write --no-html" \
   production bug in the service.
 - **The vault reaches the skill two ways, and neither is the skill's `--vault` flag.** As
   `$INSURANCE_VAULT` (the skill's own second resolution step, so it never hits the "STOP and ask
-  the user" branch a headless run cannot answer) and as `--add-dir` (the vault is a *sibling* of
+  the user" branch a headless run cannot answer) and as `--add-dir` (the vault is a _sibling_ of
   this repo, so `Read` otherwise has no business there). A flag value would have to survive the
   model parsing it out of a prompt string; an environment variable does not.
 - **`CLAUDE_SKIP_HOOKS` is stripped from the child.** It is undocumented and the two plausible
@@ -267,26 +294,26 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-| Path | Role |
-| --- | --- |
-| `src/index.ts` | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides |
-| `src/loop.ts` | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep |
-| `src/poller.ts` | One cycle. Ordering, dedupe, failure isolation, the three rules above |
-| `src/wiring.ts` | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps` |
-| `src/settings.ts` | Declarative settings table + generic reader, with a `sensitive` marker |
-| `src/jira/jql.ts` | Query builder. Validation, id-vs-name quoting, window arithmetic |
-| `src/jira/client.ts` | `/rest/api/3/search/jql`, token pagination, Basic auth |
-| `src/jira/types.ts` | The slice of the Jira payload actually read, plus `TicketRef` |
-| `src/state/store.ts` | Cursor + seen keys, atomic write |
-| `src/triage/schema.ts` | The draft-07 contract handed to the analyst. Descriptions double as instructions |
-| `src/triage/session.ts` | Shared subprocess machinery for both runs |
-| `src/triage/runner.ts` | The analyst |
-| `src/triage/gate.ts` | The check |
-| `src/triage/poster.ts` | The writer |
-| `src/output/sink.ts` | `FileSink` (reports) and the rejection artifacts |
-| `src/output/canvas.ts` | Slack canvas payload builders — **built, never called** (§10) |
-| `src/logger.ts` | JSON lines to stdout/stderr; `console` is banned by lint |
-| `src/duration.ts` | `30s` / `4m` / `1.5h` for CLI flags |
+| Path                    | Role                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `src/index.ts`          | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides    |
+| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep |
+| `src/poller.ts`         | One cycle. Ordering, dedupe, failure isolation, the three rules above                |
+| `src/wiring.ts`         | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps` |
+| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker               |
+| `src/jira/jql.ts`       | Query builder. Validation, id-vs-name quoting, window arithmetic                     |
+| `src/jira/client.ts`    | `/rest/api/3/search/jql`, token pagination, Basic auth                               |
+| `src/jira/types.ts`     | The slice of the Jira payload actually read, plus `TicketRef`                        |
+| `src/state/store.ts`    | Cursor + seen keys, atomic write                                                     |
+| `src/triage/schema.ts`  | The draft-07 contract handed to the analyst. Descriptions double as instructions     |
+| `src/triage/session.ts` | Shared subprocess machinery for both runs                                            |
+| `src/triage/runner.ts`  | The analyst                                                                          |
+| `src/triage/gate.ts`    | The check                                                                            |
+| `src/triage/poster.ts`  | The writer                                                                           |
+| `src/output/sink.ts`    | `FileSink` (reports) and the rejection artifacts                                     |
+| `src/output/canvas.ts`  | Slack canvas payload builders — **built, never called** (§10)                        |
+| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint                             |
+| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                  |
 
 `wiring.ts` exists because there are three entry points — the daemon, `poll:once` and
 `triage:once` — and a difference in how they wire the same pipeline would be a bug that only shows
@@ -301,7 +328,7 @@ When the gate throws, `createGroom` writes `groomed/<KEY>.rejected.md` before re
 violations, the verdict, the labels, the placeholders, and **the comment body it objected to**.
 
 A throw carries only its message. Without the artifact, the one thing an operator needs to decide
-whether a refusal was *correct* is destroyed at the moment it becomes interesting. That matters
+whether a refusal was _correct_ is destroyed at the moment it becomes interesting. That matters
 more than it sounds — these checks are heuristics, and **a heuristic you cannot audit is one you
 end up switching off out of frustration.** Both false positives in §3 were diagnosed from these
 files.
@@ -313,17 +340,17 @@ to a fresh report for the same key claiming both are current.
 
 ## 9. Failure model
 
-| What breaks | What happens |
-| --- | --- |
-| One ticket's triage throws | Key stays unrecorded, cursor stays behind it, next cycle retries. Nothing is written locally either — an incoherent verdict is not a partial result |
-| The gate refuses | Nothing posted. Rejection artifact written. Same retry path |
-| The poster reports `problems` | Logged as an error, **not** thrown. Writes already landed; retrying redoes partial work |
-| The poster reports `skipped` | Throws. It did nothing, so a retry is right |
-| Atlassian MCP not connected | Child killed on the init event, before a turn is spent |
-| A run exceeds `TRIAGE_TIMEOUT_MS` | Child `SIGKILL`ed, run rejected |
-| Jira down / credential expired | Reaches `runLoop`, which backs off exponentially to a 15-min cap. Uncapped backoff would make the service indistinguishable from a dead one |
-| SIGINT / SIGTERM | Current issue finishes, then stop. A second signal exits 130 immediately |
-| Config missing | Every missing setting reported at once, exit 78 (`EX_CONFIG`), no stack trace |
+| What breaks                       | What happens                                                                                                                                        |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One ticket's triage throws        | Key stays unrecorded, cursor stays behind it, next cycle retries. Nothing is written locally either — an incoherent verdict is not a partial result |
+| The gate refuses                  | Nothing posted. Rejection artifact written. Same retry path                                                                                         |
+| The poster reports `problems`     | Logged as an error, **not** thrown. Writes already landed; retrying redoes partial work                                                             |
+| The poster reports `skipped`      | Throws. It did nothing, so a retry is right                                                                                                         |
+| Atlassian MCP not connected       | Child killed on the init event, before a turn is spent                                                                                              |
+| A run exceeds `TRIAGE_TIMEOUT_MS` | Child `SIGKILL`ed, run rejected                                                                                                                     |
+| Jira down / credential expired    | Reaches `runLoop`, which backs off exponentially to a 15-min cap. Uncapped backoff would make the service indistinguishable from a dead one         |
+| SIGINT / SIGTERM                  | Current issue finishes, then stop. A second signal exits 130 immediately                                                                            |
+| Config missing                    | Every missing setting reported at once, exit 78 (`EX_CONFIG`), no stack trace                                                                       |
 
 Retries are safe because the comment is idempotent on its footer sentinel: a re-run **updates in
 place** rather than stacking a second copy. That is why the sentinel is a gate rule and not a
@@ -336,22 +363,22 @@ nicety.
 `.env`, read via `node --env-file-if-exists`. Every setting is declared once in `src/settings.ts`;
 `describeSettings()` masks the sensitive ones so the startup dump is safe to paste.
 
-| Setting | Default | Notes |
-| --- | --- | --- |
-| `JIRA_BASE_URL` | `https://storebrand.atlassian.net` | |
-| `JIRA_EMAIL` | — | **required** |
-| `JIRA_AUTH` | — | **required**, sensitive, discovery only |
-| `JIRA_PROJECT` | `SSX` | |
-| `JIRA_COMPONENTS` | `SSX Advisor` | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets |
-| `JIRA_EXCLUDED_TYPES` | `10009` | Deloppgave / sub-task — arrives attached to a parent already triaged |
-| `POLL_INTERVAL_MS` | `300000` | |
-| `CURSOR_OVERLAP_MS` | `120000` | See §4 |
-| `FIRST_RUN_LOOKBACK_MINUTES` | `60` | Deliberately short — a wide first window means one paid run per historical issue |
-| `SKILL_NAME` | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post real verdicts |
-| `VAULT_PATH` | — | Required for the real skill; checked at wiring time, not first-ticket time |
-| `WRITE_BACK` | `false` | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed |
-| `TRIAGE_TIMEOUT_MS` | `600000` | |
-| `OUTPUT_DIR` / `STATE_PATH` | `groomed` / `state/poll.json` | Both gitignored |
+| Setting                      | Default                            | Notes                                                                                             |
+| ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `JIRA_BASE_URL`              | `https://storebrand.atlassian.net` |                                                                                                   |
+| `JIRA_EMAIL`                 | —                                  | **required**                                                                                      |
+| `JIRA_AUTH`                  | —                                  | **required**, sensitive, discovery only                                                           |
+| `JIRA_PROJECT`               | `SSX`                              |                                                                                                   |
+| `JIRA_COMPONENTS`            | `SSX Advisor`                      | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets |
+| `JIRA_EXCLUDED_TYPES`        | `10009`                            | Deloppgave / sub-task — arrives attached to a parent already triaged                              |
+| `POLL_INTERVAL_MS`           | `300000`                           |                                                                                                   |
+| `CURSOR_OVERLAP_MS`          | `120000`                           | See §4                                                                                            |
+| `FIRST_RUN_LOOKBACK_MINUTES` | `60`                               | Deliberately short — a wide first window means one paid run per historical issue                  |
+| `SKILL_NAME`                 | `mock-triage`                      | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                    |
+| `VAULT_PATH`                 | —                                  | Required for the real skill; checked at wiring time, not first-ticket time                        |
+| `WRITE_BACK`                 | `false`                            | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed       |
+| `TRIAGE_TIMEOUT_MS`          | `600000`                           |                                                                                                   |
+| `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`      | Both gitignored                                                                                   |
 
 Commands:
 
@@ -376,7 +403,7 @@ could be tested before the real skill was available:
 - **`mock-triage`** — derives its verdict from the issue key, reads nothing, calls no tools.
   Exercises the whole pipeline with no Jira and no vault.
 - **`live-triage-probe`** — reads **one real ticket** over MCP and nothing else. Covers exactly
-  what the mock cannot: the MCP session *inside the spawned subprocess* and the real tool
+  what the mock cannot: the MCP session _inside the spawned subprocess_ and the real tool
   allowlist.
 
 Neither ever writes. `shouldPost()` pins both to preview regardless of `WRITE_BACK` — a rehearsal
@@ -401,17 +428,24 @@ with a note saying where it came from.
 
 ## 12. Local divergence from upstream
 
-`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **One local
-change**, flagged in the file itself:
+`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Two local
+changes**, both to §11's label-reconciliation list and both flagged in the file itself:
 
-§11's label-reconciliation list gained **`next:*`**. It is skill vocabulary — the same file defines
-`next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead` — and no human sets
-it, but its omission meant a ticket re-triaged from "send to the Trio" to "send back to the
-reporter" kept the stale `next:to-trio` sitting beside its own contradiction.
+1. **`next:*`.** Skill vocabulary — the same file defines
+   `next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead` — and no human sets
+   it, but its omission meant a ticket re-triaged from "send to the Trio" to "send back to the
+   reporter" kept the stale `next:to-trio` sitting beside its own contradiction.
+2. **`agent:solvable`**, and note it is listed as a single label rather than as `agent:*`. The rest
+   of the namespace is not the skill's: see the security boundary in §3. This is the first
+   namespace shared with a writer other than the skill, so the list is narrower than a prefix.
 
 The gate's `OWNED_LABEL_NAMESPACES` must **match §11 exactly, not be a superset**. A gate looser
 than the contract it enforces has a hole in it. Widen it only by widening §11 first — and tell
-Jacob, because this divergence is not upstream yet.
+Jacob, because neither divergence is upstream yet.
+
+`agent:` is the one entry where the namespace list alone is looser than §11, so it carries a second
+check (`TRIAGE_OWNED_AGENT_LABELS`) rather than being expressed as a prefix. If a future namespace
+is likewise only partly owned, copy that shape rather than widening the prefix list.
 
 ---
 
@@ -433,11 +467,11 @@ Jacob, because this divergence is not upstream yet.
 - **Concurrency.** Issues are triaged sequentially. Fine at 4–5/day.
 - **`AND statusCategory != Done`** in the JQL — closed tickets currently get triaged. Small in
   steady state, not small on a first-run backfill. A question of intent, so it is open.
-- **Known trap.** `src/cli/triage-once.ts` only ever *adds* `WRITE_BACK` when `--write` is passed.
+- **Known trap.** `src/cli/triage-once.ts` only ever _adds_ `WRITE_BACK` when `--write` is passed.
   Put `WRITE_BACK=true` in `.env` and the safety flag becomes decorative. One-line fix:
   `WRITE_BACK: argv.includes("--write") ? "true" : "false"`.
 - **Unproven paths.** REST pagination and REST error handling (401/429/5xx) are unit-tested only;
-  the live board has returned a single clean page every time. The MCP guard's *failure* branch has
+  the live board has returned a single clean page every time. The MCP guard's _failure_ branch has
   never met a genuinely expired token.
 
 ---
@@ -458,3 +492,9 @@ Things that look like details and are not:
 6. **The footer sentinel is verbatim and load-bearing.** Change it and every existing comment
    becomes unrecognisable to its own skill, so re-runs stack instead of refresh.
 7. **`SKILL_NAME` defaults to the mock.** An unconfigured service must not be able to post.
+8. **Anything that grants privilege fails closed.** `agentFitness` is optional in the schema and
+   every ambiguity in `parseAgentFitness` — absent, malformed, truthy-but-not-`true` — resolves to
+   `solvable: false`. Silence is a refusal, never a default yes.
+9. **Triage cannot authorise its own downstream work.** It may set `agent:solvable`; `agent:start`
+   belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
+   attacker-controlled ticket text, so this is a boundary rather than a convention.
