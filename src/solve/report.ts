@@ -160,6 +160,47 @@ function emptyNote(enabled: boolean): readonly string[] {
   ];
 }
 
+function planLine(claim: SolveCycleOutcome["planned"][number]): string {
+  return `PLAN  ${claim.issueKey}  ${claim.repo}  +[${claim.claim.add.join(", ")}]  -[${claim.claim.remove.join(", ")}]`;
+}
+
+/**
+ * The cycle as stdout lines — the same decisions as the artifact, for the
+ * operator watching the run rather than reading it back later.
+ *
+ * `issueKey` narrows to one ticket. The narrowing is a filter over decisions the
+ * cycle already made, never a second query: a single-ticket run reads the same
+ * board as a full one, so what it prints is what the queue would have done, not
+ * what a differently-scoped queue might do.
+ *
+ * A ticket with no decisions gets an explicit `NONE` line rather than silence.
+ * Empty output is the one result an operator cannot act on — it looks identical
+ * to a crash, a typo in the key, and a correctly-working queue that simply does
+ * not want that ticket.
+ */
+export function decisionLines(outcome: SolveCycleOutcome, issueKey?: string): readonly string[] {
+  const mine = (key: string): boolean => issueKey === undefined || key === issueKey;
+  const lines = [
+    ...outcome.planned.filter((claim) => mine(claim.issueKey)).map(planLine),
+    ...outcome.deferred
+      .filter((key) => mine(key))
+      .map((key) => `WAIT  ${key}  eligible, but out of capacity this cycle`),
+    // Printed rather than counted. A skip is the interesting output of a dry
+    // run: it is how you find out that a ticket you expected to be picked up is
+    // missing a label, or names a repository nobody added to SOLVE_REPOS.
+    ...outcome.skipped
+      .filter((skip) => mine(skip.issueKey))
+      .map((skip) => `SKIP  ${skip.issueKey}  ${oneLine(skip.reason)}`),
+  ];
+
+  if (lines.length === 0 && issueKey !== undefined) {
+    return [
+      `NONE  ${issueKey}  not in the queue this cycle — it matched neither the queue query nor the in-flight query`,
+    ];
+  }
+  return lines;
+}
+
 /** Renders the cycle. Pure, so the artifact is testable without a filesystem. */
 export function formatSolveReport(outcome: SolveCycleOutcome, deps: SolveDeps, now: Date): string {
   const byKey = index(outcome.candidates);

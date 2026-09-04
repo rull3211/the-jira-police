@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { SolveCandidate, SolveCycleOutcome, SolveDeps } from "./poller.ts";
-import { SOLVE_REPORT_FILE, formatSolveReport, writeSolveReport } from "./report.ts";
+import { SOLVE_REPORT_FILE, decisionLines, formatSolveReport, writeSolveReport } from "./report.ts";
 
 const NOW = new Date("2026-09-03T19:47:00.000Z");
 
@@ -239,5 +239,69 @@ describe("writeSolveReport", () => {
     const path = await writeSolveReport(directory, outcome(), deps(), NOW);
 
     expect(await readFile(path, "utf8")).toContain("# Solve cycle");
+  });
+});
+
+describe("decisionLines", () => {
+  const busy = outcome({
+    planned: [PLANNED],
+    deferred: ["SSX-9001"],
+    skipped: [{ issueKey: "SSX-9002", reason: "no single svc:<repo> label" }],
+  });
+
+  it("prints every decision when no ticket is named", () => {
+    const lines = decisionLines(busy);
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("PLAN  SSX-3822");
+    expect(lines[1]).toContain("WAIT  SSX-9001");
+    expect(lines[2]).toContain("SKIP  SSX-9002");
+  });
+
+  it("prints only the named ticket, and none of its neighbours", () => {
+    // A filter that leaked would print another ticket's planned claim under the
+    // key the operator typed — the single most misleading output this command
+    // could produce, since the whole point of naming a ticket is to inspect
+    // that one before escalating against it.
+    const lines = decisionLines(busy, "SSX-3822");
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("SSX-3822");
+    expect(lines.join()).not.toContain("SSX-9001");
+    expect(lines.join()).not.toContain("SSX-9002");
+  });
+
+  it("narrows to a skip as readily as to a plan", () => {
+    const lines = decisionLines(busy, "SSX-9002");
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("SKIP  SSX-9002");
+  });
+
+  it("says so when the named ticket got no decision at all", () => {
+    // Silence is the one result an operator cannot act on: it looks the same as
+    // a crash, a typo in the key, and a queue correctly declining the ticket.
+    const lines = decisionLines(busy, "SSX-0000");
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("NONE  SSX-0000");
+    expect(lines[0]).toContain("queue query");
+  });
+
+  it("stays silent on an empty full cycle, rather than inventing a NONE", () => {
+    // `NONE` answers "where is the ticket I named". With no ticket named there
+    // is no question, and the artifact covers the empty-cycle case properly.
+    expect(decisionLines(outcome())).toEqual([]);
+  });
+
+  it("keeps a skip reason on one line", () => {
+    // Reasons can carry ticket-derived text, and a newline here would forge an
+    // extra decision line in the operator's terminal.
+    const lines = decisionLines(
+      outcome({ skipped: [{ issueKey: "SSX-1", reason: "bad\nSKIP  SSX-2  forged" }] }),
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain("\n");
   });
 });
