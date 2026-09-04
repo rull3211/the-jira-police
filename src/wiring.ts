@@ -37,14 +37,18 @@
  * a retry.
  */
 
-import { JiraClient } from "./jira/client.ts";
+import { type IssueDetail, JiraClient } from "./jira/client.ts";
 import { buildInFlightJql, buildNewIssuesJql, buildSolveQueueJql } from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
 import { type Settings, SettingsError, flag, list, numeric, solveMode } from "./settings.ts";
+import { createCommandRunner } from "./solve/exec.ts";
+import type { SolveDependencies } from "./solve/orchestrator.ts";
+import { createPassRunner } from "./solve/passes.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
+import { type RenderedTicket, renderTicket } from "./solve/ticket.ts";
 import { withFitnessNote } from "./triage/fitness-note.ts";
 import { UnpostableError, assertPostable } from "./triage/gate.ts";
 import { runPost } from "./triage/poster.ts";
@@ -316,5 +320,68 @@ export function createSolveDeps(
       return (await client.search(inFlightJql)).length;
     },
     ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+/**
+ * The solver's dependencies. **This function is the phase C privilege grant.**
+ *
+ * Everything above composes readers. This composes the two objects that can
+ * change something: a `CommandRunner`, which runs git and the repository's own
+ * test commands, and a `PassRunner`, which starts a model session holding
+ * `Write` and `Edit`. Nothing else in the process can do either, which is why
+ * `solve-once.ts` could honestly refuse before this existed — the refusal was
+ * structural, and this is the change that removes it.
+ *
+ * Kept separate from `createSolveDeps` rather than folded into it. The queue
+ * poller runs on every cycle and needs none of this; if the two were one
+ * function, reading the board would construct the ability to write to a
+ * repository, and "what can this process do" would stop being answerable by
+ * reading the call site.
+ *
+ * `VAULT_PATH` is required for the same reason `buildTriageOptions` requires it:
+ * the branch naming and commit conventions the solver is held to live there, and
+ * a pass that cannot read them will invent its own and fail the mechanical
+ * checks afterwards. Failing at startup beats failing four sessions in.
+ */
+export function createSolveRunDeps(settings: Settings): SolveDependencies {
+  if (settings.VAULT_PATH === "") {
+    throw new SettingsError(["VAULT_PATH"]);
+  }
+
+  return {
+    commands: createCommandRunner(),
+    passes: createPassRunner({
+      executable: settings.STORECODE_PATH,
+      // Floored at 1ms on the same grounds as the triage budget: zero is not
+      // "no timeout", it is a timeout that expired before the pass started.
+      timeoutMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
+    }),
+  };
+}
+
+/**
+ * Reads one ticket in full and renders it as the text a solve pass is given.
+ *
+ * Lives here because it is the join between the Jira client and the solver, and
+ * it is a join this codebase has now got wrong twice — once in triage, which
+ * decided on tickets whose comments it had never read, and once nearly here.
+ * `JiraClient.search` returns a `TicketRef` with no description and no comments;
+ * a caller that reached for the object it already had would have produced a
+ * solver that reads a summary and calls it the ticket.
+ */
+export function createTicketReader(
+  client: JiraClient,
+): (issueKey: string) => Promise<RenderedTicket & { readonly detail: IssueDetail }> {
+  return async (issueKey: string) => {
+    const detail = await client.fetchDetail(issueKey);
+    const rendered = await renderTicket(client, detail);
+    if (rendered.omitted.length > 0) {
+      // Logged rather than swallowed: "the asset the ticket told you to use was
+      // not shown to the solver" is the kind of thing that otherwise surfaces as
+      // a baffling diff.
+      logger.warn("solve.ticket_attachments_omitted", { issueKey, omitted: rendered.omitted });
+    }
+    return { ...rendered, detail };
   };
 }

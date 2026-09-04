@@ -1,6 +1,6 @@
 import { type Mock, afterEach, describe, expect, it, vi } from "vitest";
 
-import { JiraClient, JiraError } from "./client.ts";
+import { JiraClient, JiraError, isInlineable } from "./client.ts";
 
 /** A value standing in for the credential, so leak assertions have a needle. */
 const NEEDLE = "needle-value-do-not-echo";
@@ -267,5 +267,182 @@ describe("JiraClient.search", () => {
       .catch((e: unknown) => e as JiraError);
 
     expect((error as JiraError).message).not.toContain(NEEDLE);
+  });
+});
+
+/**
+ * A ticket payload shaped like the live SSX-3822 response.
+ *
+ * Built from a real fetch rather than invented, because the two facts these
+ * tests most need to be right about — that `description` is ADF rather than a
+ * string, and that an attachment's Jira id is not the media id a comment
+ * references — are both things a hand-written fixture would get wrong in the
+ * comfortable direction.
+ */
+function detailPayload(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    id: "752401",
+    key: "SSX-3822",
+    fields: {
+      summary: "Distinct favicon for non-production builds",
+      issuetype: { id: "10007", name: "Oppgave", subtask: false },
+      status: { name: "Mottatt" },
+      labels: ["agent:solvable", "svc:buy-insurance-advisor-web"],
+      description: { type: "doc", version: 1, content: [] },
+      comment: {
+        comments: [
+          {
+            id: "1999252",
+            author: { displayName: "Daniel Bence Søke" },
+            created: "2026-09-04T15:38:00.831+0200",
+            body: { type: "doc", version: 1, content: [] },
+          },
+        ],
+      },
+      attachment: [
+        {
+          id: "742005",
+          filename: "svgtest.svg",
+          mimeType: "image/svg+xml",
+          size: 150,
+        },
+      ],
+      ...overrides,
+    },
+  };
+}
+
+describe("JiraClient.fetchDetail", () => {
+  it("asks for the three fields the search deliberately omits", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(detailPayload()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client().fetchDetail("SSX-3822");
+
+    const { url, init } = callArgs(fetchMock, 0);
+    // The whole reason this method exists. A regression here is silent: the
+    // solve still runs, on a ticket with no acceptance criteria in it.
+    expect(url).toContain("description");
+    expect(url).toContain("comment");
+    expect(url).toContain("attachment");
+    expect(init.method).toBe("GET");
+  });
+
+  it("normalises comments and attachments", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse(detailPayload()));
+
+    const detail = await client().fetchDetail("SSX-3822");
+
+    expect(detail.key).toBe("SSX-3822");
+    expect(detail.status).toBe("Mottatt");
+    expect(detail.issueTypeName).toBe("Oppgave");
+    expect(detail.comments).toHaveLength(1);
+    expect(detail.comments[0]?.author).toBe("Daniel Bence Søke");
+    expect(detail.attachments[0]).toEqual({
+      id: "742005",
+      filename: "svgtest.svg",
+      mimeType: "image/svg+xml",
+      size: 150,
+    });
+    expect(detail.url).toBe("https://example.invalid/browse/SSX-3822");
+  });
+
+  it("survives an issue with no description, comments or attachments", async () => {
+    vi.stubGlobal("fetch", async () =>
+      jsonResponse({ id: "1", key: "SSX-1", fields: { summary: "bare" } }),
+    );
+
+    const detail = await client().fetchDetail("SSX-1");
+
+    expect(detail.comments).toEqual([]);
+    expect(detail.attachments).toEqual([]);
+    expect(detail.labels).toEqual([]);
+    expect(detail.description).toBeUndefined();
+  });
+
+  it("refuses an issue key that would escape the endpoint", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(detailPayload()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of [
+      "../../../rest/api/3/myself",
+      "SSX-3822/../../other",
+      "SSX-3822?expand=changelog",
+      "SSX 3822",
+      "",
+      "-1",
+    ]) {
+      await expect(client().fetchDetail(bad)).rejects.toThrow(JiraError);
+    }
+    // Not one request was made. The guard is before the fetch, not after it.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("JiraClient.fetchAttachmentText", () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32"></svg>';
+
+  it("returns the bytes of a small attachment", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(svg));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await client().fetchAttachmentText("742005", 32_768)).toBe(svg);
+    expect(callArgs(fetchMock, 0).url).toContain("/rest/api/3/attachment/content/742005");
+  });
+
+  it("refuses an oversized attachment by its declared length", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response(svg, { headers: { "content-length": "999999" } }),
+    );
+
+    expect(await client().fetchAttachmentText("742005", 10)).toBeNull();
+  });
+
+  it("refuses an oversized attachment that declared no length at all", async () => {
+    // The case a content-length-only check would wave through: chunked
+    // responses carry no length, so the cap has to be re-checked on the bytes.
+    vi.stubGlobal("fetch", async () => new Response("x".repeat(500)));
+
+    expect(await client().fetchAttachmentText("742005", 10)).toBeNull();
+  });
+
+  it("measures the cap in bytes rather than characters", async () => {
+    // Ten multi-byte characters are thirty bytes. A `.length` check would call
+    // this file small enough and blow the budget it was meant to enforce.
+    vi.stubGlobal("fetch", async () => new Response("🙂".repeat(10)));
+
+    expect(await client().fetchAttachmentText("742005", 20)).toBeNull();
+  });
+
+  it("refuses an attachment id that is not an id", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(svg));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of ["../742005", "742005/..", "abc", ""]) {
+      await expect(client().fetchAttachmentText(bad, 100)).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("isInlineable", () => {
+  it("treats SVG as text, because it is", () => {
+    // The case that motivated the function. A `startsWith("image/")` rule would
+    // hide exactly the asset tickets most often attach.
+    expect(isInlineable("image/svg+xml")).toBe(true);
+  });
+
+  it("accepts text types and ignores charset parameters", () => {
+    expect(isInlineable("text/plain")).toBe(true);
+    expect(isInlineable("text/plain; charset=utf-8")).toBe(true);
+    expect(isInlineable("IMAGE/SVG+XML")).toBe(true);
+    expect(isInlineable("application/json")).toBe(true);
+  });
+
+  it("rejects binary types", () => {
+    for (const type of ["image/png", "application/pdf", "application/zip", ""]) {
+      expect(isInlineable(type)).toBe(false);
+    }
   });
 });

@@ -150,6 +150,12 @@ export const SETTINGS = [
     // and buys an allowlist that can actually be emptied.
   },
   {
+    name: "SOLVE_TIMEOUT_MS",
+    description:
+      "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones.",
+    fallback: "1800000",
+  },
+  {
     name: "MAX_CONCURRENT_SOLVES",
     description:
       "How many tickets may be in flight at once, counted from the tickets currently carrying the claim label rather than from anything local. One, for the pilot: a solve is expensive, and a bounded blast radius is worth more than throughput while the fitness call is still being calibrated.",
