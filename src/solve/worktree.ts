@@ -71,8 +71,27 @@ export type WorktreeResult =
   | { readonly outcome: "refused"; readonly issueKey: string; readonly reason: string };
 
 export type RemoveResult =
-  | { readonly outcome: "removed"; readonly path: string }
+  | {
+      readonly outcome: "removed";
+      readonly path: string;
+      /**
+       * Whether the branch went too, and why not when it did not.
+       *
+       * Removing the worktree leaves its branch behind — `git worktree remove`
+       * touches the checkout, not the ref — so every bail used to leak a ref
+       * into the pilot repository, one per run, invisibly. It is reported here
+       * rather than only logged because a leftover branch is the thing that
+       * makes the *next* run of the same ticket fail: the worktree path and the
+       * branch name are both derived from the issue key, so `worktree add -b`
+       * collides with the ref its own predecessor left.
+       */
+      readonly branch: BranchRemoval;
+    }
   | { readonly outcome: "kept"; readonly path: string; readonly reason: string };
+
+export type BranchRemoval =
+  | { readonly outcome: "deleted" }
+  | { readonly outcome: "kept"; readonly reason: string };
 
 export interface WorktreeRequest {
   readonly issueKey: string;
@@ -262,7 +281,24 @@ export async function createWorktree(
 }
 
 /**
- * Removes the worktree — but only when the run succeeded.
+ * What the caller wants done with the checkout.
+ *
+ * This used to be `"succeeded" | "failed"` — the run's verdict — and the two
+ * readings only coincided by luck. They part company at the first
+ * `environment` abandon: the run did not succeed, and its worktree must still
+ * go, because the retry cuts a fresh one at the same path from the same branch
+ * name and would otherwise collide with its own predecessor. Naming the
+ * disposition rather than the verdict means a caller has to say what it wants
+ * instead of encoding it in a word that means something else.
+ */
+export type Disposition =
+  /** Remove it. Only ever safe when nothing was written, or nothing is wanted. */
+  | "discard"
+  /** Leave it on disk; a human is going to read the diff. */
+  | "keep-as-evidence";
+
+/**
+ * Removes the worktree — but only when the caller asks for it gone.
  *
  * A failed run's worktree is the only copy of what the solver actually did, and
  * the diff in it is the evidence a human needs to decide whether the ticket was
@@ -273,14 +309,20 @@ export async function createWorktree(
  * dirty, that is git reporting uncommitted work, and uncommitted work at this
  * point means the run did something the harness did not account for. Keep it
  * and say so.
+ *
+ * Removing the checkout is only half the cleanup: `git worktree remove` leaves
+ * the branch behind. Both names are derived from the issue key, so a leftover
+ * ref is not litter but a landmine — the next run of the same ticket fails at
+ * `worktree add -b` on a branch its own predecessor created. So the branch goes
+ * too, and whether it went is reported rather than only logged.
  */
 export async function removeWorktree(
   runner: CommandRunner,
   worktree: Worktree,
-  outcome: "succeeded" | "failed",
+  disposition: Disposition,
   timeoutMs: number,
 ): Promise<RemoveResult> {
-  if (outcome === "failed") {
+  if (disposition === "keep-as-evidence") {
     logger.info("solve.worktree.kept", { issueKey: worktree.issueKey, path: worktree.path });
     return {
       outcome: "kept",
@@ -302,5 +344,43 @@ export async function removeWorktree(
   }
 
   logger.info("solve.worktree.removed", { issueKey: worktree.issueKey, path: worktree.path });
-  return { outcome: "removed", path: worktree.path };
+
+  const branch = await deleteBranch(runner, worktree, timeoutMs);
+  return { outcome: "removed", path: worktree.path, branch };
+}
+
+/**
+ * Deletes the branch the worktree was on, without forcing.
+ *
+ * `-d`, never `-D`, and the difference is the entire safety argument. `-d`
+ * refuses to delete a branch holding commits that are not reachable from
+ * elsewhere, so this can only ever remove a ref that points at something
+ * already safe — which, for the branch of a run that bailed before writing
+ * anything, is exactly the base commit it was cut from. If a future pass does
+ * commit, git declines and the reason travels back rather than the work going
+ * quietly missing. `-D` would turn this from tidying into deletion.
+ *
+ * Called only after the worktree is gone: git will not delete the branch of a
+ * live worktree, so the order is not stylistic.
+ */
+async function deleteBranch(
+  runner: CommandRunner,
+  worktree: Worktree,
+  timeoutMs: number,
+): Promise<BranchRemoval> {
+  const deleted = await runner.run(
+    ["git", "-C", worktree.repoPath, "branch", "-d", worktree.branch],
+    { cwd: worktree.repoPath, timeoutMs },
+  );
+  if (failed(deleted)) {
+    logger.info("solve.branch.kept", {
+      issueKey: worktree.issueKey,
+      branch: worktree.branch,
+      reason: why(deleted),
+    });
+    return { outcome: "kept", reason: `git would not delete it (${why(deleted)})` };
+  }
+
+  logger.info("solve.branch.deleted", { issueKey: worktree.issueKey, branch: worktree.branch });
+  return { outcome: "deleted" };
 }

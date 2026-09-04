@@ -113,6 +113,7 @@ export const FIX_SCHEMA = {
     "testOmittedReason",
     "residualRisk",
     "abandoned",
+    "abandonedCause",
   ],
   properties: {
     changed: {
@@ -158,6 +159,12 @@ export const FIX_SCHEMA = {
       type: "string",
       description:
         "Non-empty if you made no change and the run should be discarded — for instance because the recon brief turned out to be wrong once you read the files again. Do not substitute a different change from the one the brief described: the diff bound was calculated against that brief. Leave the worktree as you found it.",
+    },
+    abandonedCause: {
+      type: "string",
+      enum: ["none", "judgement", "environment"],
+      description:
+        "Why the run was abandoned. `none` if and only if `abandoned` is empty. `judgement` means you read the code and concluded the change should not be made as briefed — that is a verdict about the ticket, and it is fed back to the triage assessment that called this ticket solvable. `environment` means you were prevented from working: a tool call denied by a safety hook, a file you could not open, a missing dependency. Choose `environment` whenever the obstacle was not about the code, even if you are unsure — an environment cause is retried on a clean worktree and costs only a rerun, whereas a `judgement` cause is recorded as evidence that the ticket was misjudged, and a wrong entry there quietly corrupts a record nobody can audit afterwards.",
     },
   },
 } as const;

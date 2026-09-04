@@ -14,6 +14,7 @@ import {
   type SolveRequest,
   resolveReview,
   solveTicket,
+  solveWithRetry,
 } from "./orchestrator.ts";
 import { logger } from "../logger.ts";
 import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
@@ -77,6 +78,7 @@ const fix = (overrides: Record<string, unknown> = {}): Record<string, unknown> =
   testOmittedReason: "",
   residualRisk: "",
   abandoned: "",
+  abandonedCause: "none",
   ...overrides,
 });
 
@@ -409,6 +411,7 @@ describe("solveTicket, when the fix pass abandons", () => {
       testAdded: false,
       testOmittedReason: "nothing was changed",
       abandoned: "the fix needs a schema migration, which is outside what this may do",
+      abandonedCause: "judgement",
     }),
   };
 
@@ -547,7 +550,13 @@ describe("solveTicket, and what each pass is given", () => {
 
   it.each([
     ["recon", { recon: recon({ proceed: false, bailReason: "the dev lens names a dead file" }) }],
-    ["fix", { ...FULL, fix: fix({ abandoned: "the config contradicts the ticket" }) }],
+    [
+      "fix",
+      {
+        ...FULL,
+        fix: fix({ abandoned: "the config contradicts the ticket", abandonedCause: "judgement" }),
+      },
+    ],
   ] as const)("logs why the %s pass gave up", async (pass, script) => {
     // THE ONE THAT MATTERS about a bail, and it was missing entirely. A bail is
     // the most informative thing a solve produces — triage cannot read source,
@@ -574,7 +583,11 @@ describe("solveTicket, and what each pass is given", () => {
     const info = vi.spyOn(logger, "info").mockImplementation(() => {});
     const { h } = harness({
       ...FULL,
-      fix: fix({ abandoned: "thought better of it", changed: true }),
+      fix: fix({
+        abandoned: "thought better of it",
+        abandonedCause: "judgement",
+        changed: true,
+      }),
     });
 
     await solveTicket(h.deps, request);
@@ -1063,5 +1076,148 @@ describe("the skill root", () => {
     await resolveReview({ ...h.deps, passes }, reviewRequest);
 
     expect(seen).toEqual(["staged"]);
+  });
+});
+
+describe("solveWithRetry", () => {
+  /**
+   * A pipeline whose script changes between attempts.
+   *
+   * The attempt boundary is the `recon` pass, because that is the first thing
+   * `runPipeline` runs. Everything else about the harness is the one above.
+   */
+  function attempts(
+    scripts: readonly Partial<Record<Pass, unknown>>[],
+    rules: readonly Rule[] = [],
+  ): { readonly deps: SolveDependencies; readonly calls: readonly (readonly string[])[] } {
+    let index = -1;
+    const calls: (readonly string[])[] = [];
+    const base = harness({}, rules).h;
+
+    const passes: PassRunner = {
+      run: (pass, options, parse) => {
+        if (pass === "recon") {
+          index += 1;
+        }
+        const script = scripts[index] ?? {};
+        const output = script[pass];
+        if (output === undefined) {
+          throw new Error(`attempt ${String(index + 1)}: the ${pass} pass must not have run`);
+        }
+        return Promise.resolve(parse(output));
+      },
+    };
+
+    const commands: CommandRunner = {
+      run: async (argv, options) => {
+        calls.push([...argv]);
+        return base.deps.commands.run(argv, options);
+      },
+    };
+
+    return { deps: { commands, passes }, calls };
+  }
+
+  const stopped = (cause: "judgement" | "environment"): Partial<Record<Pass, unknown>> => ({
+    recon: recon(),
+    fix: fix({
+      changed: false,
+      filesTouched: [],
+      commitSubject: "",
+      commitBody: "",
+      testAdded: false,
+      testOmittedReason: "nothing was changed",
+      abandoned: cause === "environment" ? "a safety hook denied the write" : "the brief is wrong",
+      abandonedCause: cause,
+    }),
+  });
+
+  it("does not rerun a ticket the model judged", async () => {
+    // A verdict is an answer. Asking the same question again costs a second
+    // four-pass session and gets the same one.
+    const { deps } = attempts([stopped("judgement")]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(1);
+    expect(result.outcome).toMatchObject({ kind: "abandoned", cause: "judgement" });
+  });
+
+  it("reruns a ticket the machine got in the way of", async () => {
+    // Observed 2026-09-04: the host's own safety hook denied a write mid-pass,
+    // twice in eight write-capable sessions, non-deterministically — and the
+    // run that wrote materially identical content to a neighbouring path
+    // succeeded. Nothing about the ticket changed between them.
+    const { deps } = attempts([stopped("environment"), FULL]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(2);
+    expect(result.outcome.kind).toBe("verified");
+  });
+
+  it("stops after one retry, however many times the machine gets in the way", async () => {
+    // An obstacle that survives a clean retry is not transient, and a loop that
+    // keeps paying to find that out turns a blocked host into a bill.
+    const { deps } = attempts([stopped("environment"), stopped("environment")]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(2);
+    expect(result.outcome).toMatchObject({ kind: "abandoned", cause: "environment" });
+  });
+
+  it("clears the first attempt's worktree and branch before cutting a new one", async () => {
+    // Both names are derived from the issue key, so a second `worktree add -b`
+    // collides with its own predecessor unless both are gone.
+    const { deps, calls } = attempts([stopped("environment"), FULL]);
+
+    await solveWithRetry(deps, request);
+
+    const git = calls.filter((argv) => argv.includes("worktree") || argv.includes("branch"));
+    expect(git.map((argv) => argv.slice(3, 5).join(" "))).toEqual([
+      "worktree add",
+      "worktree remove",
+      "branch -d",
+      "worktree add",
+    ]);
+  });
+
+  it("does not retry when the first attempt's worktree survived", async () => {
+    // `git worktree remove` refuses on a dirty checkout, and a dirty checkout
+    // means the blocked attempt left work behind. That is evidence, and the
+    // retry would have to destroy it to proceed.
+    const { deps } = attempts(
+      [stopped("environment"), FULL],
+      [{ match: saw("worktree", "remove"), reply: { exitCode: 1, stderr: "contains modified" } }],
+    );
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(1);
+    expect(result.retryBlocked).toContain("worktree is still there");
+  });
+
+  it("does not retry when the first attempt's branch survived", async () => {
+    // `branch -d` refuses on unmerged commits — same argument, one layer down,
+    // and the case the worktree check alone would miss.
+    const { deps } = attempts(
+      [stopped("environment"), FULL],
+      [{ match: saw("branch", "-d"), reply: { exitCode: 1, stderr: "not fully merged" } }],
+    );
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(1);
+    expect(result.retryBlocked).toContain("branch is still there");
+  });
+
+  it("leaves every other outcome exactly as it found it", async () => {
+    const { deps } = attempts([FULL]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result).toMatchObject({ attempts: 1, retryBlocked: "" });
+    expect(result.outcome.kind).toBe("verified");
   });
 });

@@ -354,6 +354,35 @@ export interface ReconVerdict {
   readonly injectionNoticed: string;
 }
 
+/**
+ * Why a fix pass gave up, and the reason this is not one string.
+ *
+ * `judgement` is a verdict about the ticket: the model read the code and
+ * decided the briefed change should not be made. That is the most valuable
+ * thing a solve produces, because triage called this ticket solvable without
+ * reading a line of source, and this is the correction.
+ *
+ * `environment` is not a verdict about anything. The model was stopped — a
+ * safety hook denied a write, a file would not open, a dependency was absent.
+ * Observed twice on 2026-09-04, when storecode's own `pipelock` hook denied a
+ * `Write` on two of eight write-capable sessions and the identical write
+ * succeeded on retry.
+ *
+ * Collapsing the two, which is what this codebase did until that happened,
+ * costs twice. The run is not retried, though retrying is exactly the right
+ * response to a transient denial. And `dev-lens.md` — the append-only record of
+ * how good triage's blind call is — accumulates infrastructure failures scored
+ * as misjudged tickets, which is the worst kind of wrong: a calibration record
+ * that is confidently miscalibrated.
+ */
+export type AbandonCause = "none" | "judgement" | "environment";
+
+const ABANDON_CAUSES: ReadonlySet<string> = new Set<AbandonCause>([
+  "none",
+  "judgement",
+  "environment",
+]);
+
 export interface FixReport {
   readonly changed: boolean;
   readonly filesTouched: readonly string[];
@@ -364,6 +393,7 @@ export interface FixReport {
   readonly testOmittedReason: string;
   readonly residualRisk: string;
   readonly abandoned: string;
+  readonly abandonedCause: AbandonCause;
 }
 
 const COMMIT_TYPES = "fix|feat|chore|docs|test|refactor|perf|style|build|ci";
@@ -446,6 +476,25 @@ function bool(record: Record<string, unknown>, key: string): boolean {
   return value;
 }
 
+/**
+ * Reads `abandonedCause`, refusing anything not in the enum.
+ *
+ * Not defaulted. An unrecognised value means the model answered a question it
+ * was not asked, and the two legal answers send the run down opposite paths —
+ * one retries, the other is recorded as evidence against the ticket. There is
+ * no safe direction to guess in, so this throws and the run becomes `crashed`,
+ * which is the outcome that means "no verdict was reached".
+ */
+function abandonCause(record: Record<string, unknown>, issueKey: string): AbandonCause {
+  const value = str(record, "abandonedCause");
+  if (!ABANDON_CAUSES.has(value)) {
+    throw new SolveParseError(
+      `${issueKey}: abandonedCause was "${value}", which is not one of none, judgement, environment`,
+    );
+  }
+  return value as AbandonCause;
+}
+
 function strings(record: Record<string, unknown>, key: string): readonly string[] {
   const value = record[key];
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
@@ -519,9 +568,28 @@ export function parseFix(value: unknown, issueKey: string): FixReport {
     testOmittedReason: str(record, "testOmittedReason"),
     residualRisk: str(record, "residualRisk"),
     abandoned: str(record, "abandoned"),
+    abandonedCause: abandonCause(record, issueKey),
   };
 
   const abandoned = report.abandoned.trim() !== "";
+
+  // The coherence the schema cannot state: `enum` can constrain the value and
+  // `required` can demand it, but neither can tie it to another field. Both
+  // directions are rejected rather than repaired, because each repair would be
+  // a guess in the direction that loses information — defaulting a missing
+  // cause to `judgement` invents a verdict about the ticket, and defaulting it
+  // to `none` on an abandoned run silently un-abandons it.
+  if (abandoned && report.abandonedCause === "none") {
+    throw new SolveParseError(
+      `${issueKey}: abandoned the run without saying whether the obstacle was the code or the environment — those are a verdict and a retry respectively, and guessing between them is how a calibration record gets quietly falsified`,
+    );
+  }
+  if (!abandoned && report.abandonedCause !== "none") {
+    throw new SolveParseError(
+      `${issueKey}: gave a cause for abandoning ("${report.abandonedCause}") on a run it did not abandon`,
+    );
+  }
+
   if (abandoned) {
     // Abandoning *after* touching something is legal, and this used to throw.
     //

@@ -35,11 +35,19 @@ const OUTCOMES: readonly SolveOutcome[] = [
     devLens: lens,
     worktree,
     recon: {} as never,
-    cleanup: { outcome: "removed", path: worktree.path },
+    cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
   },
   {
     kind: "abandoned",
     reason: "the fix is larger than the ticket describes",
+    cause: "judgement",
+    devLens: lens,
+    worktree,
+  },
+  {
+    kind: "abandoned",
+    reason: "a safety hook denied the write",
+    cause: "environment",
     devLens: lens,
     worktree,
   },
@@ -61,6 +69,18 @@ const OUTCOMES: readonly SolveOutcome[] = [
   verified,
 ];
 
+/**
+ * A key for the exhaustiveness table, which is `kind` except for `abandoned`.
+ *
+ * That kind is the one place where two rows of the table disagree — an
+ * `environment` cause exits non-zero and a `judgement` cause does not — so
+ * folding them under one key would let whichever came last silently stand in
+ * for both, and the exhaustiveness check would pass while covering one of them.
+ */
+function exitKey(outcome: SolveOutcome): string {
+  return outcome.kind === "abandoned" ? `abandoned:${outcome.cause}` : outcome.kind;
+}
+
 describe("isFailureExit", () => {
   it("does not fail the shell on a bail", () => {
     // A bail is the pipeline working. Recon declining is the honest answer to a
@@ -73,7 +93,7 @@ describe("isFailureExit", () => {
         devLens: lens,
         worktree,
         recon: {} as never,
-        cleanup: { outcome: "removed", path: worktree.path },
+        cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
       }),
     ).toBe(false);
   });
@@ -90,15 +110,46 @@ describe("isFailureExit", () => {
   it("agrees with itself across every outcome kind", () => {
     // Pinned as a whole so that adding a kind forces a decision here rather
     // than defaulting it to zero, which is the direction that fails quietly.
-    expect(Object.fromEntries(OUTCOMES.map((o) => [o.kind, isFailureExit(o)]))).toEqual({
+    expect(Object.fromEntries(OUTCOMES.map((o) => [exitKey(o), isFailureExit(o)]))).toEqual({
       "no-worktree": true,
       bailed: false,
-      abandoned: false,
+      "abandoned:judgement": false,
+      "abandoned:environment": true,
       refused: true,
       failed: true,
       crashed: true,
       verified: false,
     });
+  });
+
+  it("does not fail the shell when a pass read the code and declined", () => {
+    // Same argument as `bailed`: a verdict is an answer, and answering "no" is
+    // the pipeline working.
+    expect(
+      isFailureExit({
+        kind: "abandoned",
+        reason: "the fix needs a schema migration",
+        cause: "judgement",
+        devLens: lens,
+        worktree,
+      }),
+    ).toBe(false);
+  });
+
+  it("fails the shell when the machine got in the way", () => {
+    // And this is why the cause exists. Observed 2026-09-04: a safety hook on
+    // the host denied a write mid-pass. Nothing was learned, the session was
+    // paid for, and reporting it as a clean exit would file a working ticket
+    // as one an agent declined.
+    expect(
+      isFailureExit({
+        kind: "abandoned",
+        reason: "a safety hook denied the write",
+        cause: "environment",
+        devLens: lens,
+        worktree,
+      }),
+    ).toBe(true);
   });
 });
 
@@ -107,6 +158,31 @@ describe("describeSolveOutcome", () => {
     for (const outcome of OUTCOMES) {
       expect(describeSolveOutcome(outcome)).not.toBe("");
     }
+  });
+
+  it("tells an operator which kind of abandon they are looking at", () => {
+    // The next command differs. `judgement` means read the reason and decide
+    // whether the ticket was misjudged; `environment` means find out what
+    // stopped the machine, and re-running is reasonable. One word for both
+    // sends half of them to the wrong place.
+    const machine = describeSolveOutcome({
+      kind: "abandoned",
+      reason: "a safety hook denied the write",
+      cause: "environment",
+      devLens: lens,
+      worktree,
+    });
+    const verdict = describeSolveOutcome({
+      kind: "abandoned",
+      reason: "the fix needs a schema migration",
+      cause: "judgement",
+      devLens: lens,
+      worktree,
+    });
+
+    expect(machine).toContain("says nothing about the ticket");
+    expect(verdict).toContain("read the code and declined");
+    expect(verdict).not.toContain("says nothing about the ticket");
   });
 
   it("does not let a crash read as a statement about the code", () => {
@@ -158,7 +234,7 @@ describe("describeSolveOutcome", () => {
       devLens: lens,
       worktree,
       recon: {} as never,
-      cleanup: { outcome: "removed", path: worktree.path },
+      cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
     });
 
     expect(line).toContain("Worktree removed");

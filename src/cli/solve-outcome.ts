@@ -32,13 +32,20 @@ import type { SolveOutcome } from "../solve/orchestrator.ts";
  * but nothing was learned, the run cost real money, and a person driving this by
  * hand needs `$?` to say so rather than reading past a line of output. The rule
  * is "did this produce a usable answer", not "was the code bad".
+ *
+ * That same rule is what splits `abandoned` down the middle. A `judgement`
+ * abandon is an answer — the model read the code and said no — and exits zero
+ * for the reason `bailed` does. An `environment` abandon is `crashed` wearing a
+ * different word: the machine got in the way, no question was answered, and the
+ * run was paid for. Grouping the whole kind either way would hide one of them.
  */
 export function isFailureExit(outcome: SolveOutcome): boolean {
   return (
     outcome.kind === "failed" ||
     outcome.kind === "refused" ||
     outcome.kind === "no-worktree" ||
-    outcome.kind === "crashed"
+    outcome.kind === "crashed" ||
+    (outcome.kind === "abandoned" && outcome.cause === "environment")
   );
 }
 
@@ -61,7 +68,13 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
       }`;
     }
     case "abandoned": {
-      return `ABANDONED — a pass declined mid-run: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
+      // The operator's next move is different in each case, which is the whole
+      // reason the cause exists: `judgement` means read the reason and decide
+      // whether the ticket was misjudged; `environment` means look at what
+      // stopped the machine, and re-running is a reasonable thing to do.
+      return outcome.cause === "environment"
+        ? `ABANDONED (environment) — the machine got in the way, so this says nothing about the ticket: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`
+        : `ABANDONED (judgement) — a pass read the code and declined: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
     }
     case "refused": {
       return `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nWorktree kept at ${outcome.worktree.path}`;

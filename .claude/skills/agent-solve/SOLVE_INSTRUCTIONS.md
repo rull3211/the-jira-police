@@ -107,12 +107,28 @@ a different change — the brief is what the bound was calculated against.
   "testAdded": true,
   "testOmittedReason": "",
   "residualRisk": "what could still be wrong, or empty",
-  "abandoned": ""
+  "abandoned": "",
+  "abandonedCause": "none"
 }
 ```
 
-`abandoned` non-empty means you made no change and the harness should discard the run. If you set
-it, leave the worktree as you found it.
+`abandoned` non-empty means you stopped and the harness should discard the run. Say what you left
+behind: if you wrote something before stopping, set `changed` and list it in `filesTouched`
+anyway. A pass that says only "I gave up" has not named the debris, and the worktree is the only
+place anyone can find it.
+
+`abandonedCause` is **`none` if and only if `abandoned` is empty**, and otherwise one of:
+
+- **`judgement`** — you read the code and concluded the change should not be made as briefed.
+  That is a verdict about the ticket, and it is fed back to the triage assessment that called
+  this ticket solvable.
+- **`environment`** — you were prevented from working. A tool call denied by a safety hook, a
+  file you could not open, a dependency that is not installed. Nothing about the ticket.
+
+Choose `environment` whenever the obstacle was not about the code, **even if you are unsure**.
+An environment cause is retried on a clean worktree and costs a rerun; a `judgement` cause is
+recorded as evidence that a human's fitness call was wrong, and a wrong entry there quietly
+corrupts a record nobody can audit afterwards.
 
 `residualRisk` is not a disclaimer to fill with boilerplate. Leave it empty when there is none.
 Use it when there genuinely is something — an untested code path you touched, a behaviour change

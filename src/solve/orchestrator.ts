@@ -52,6 +52,7 @@
 import { logger } from "../logger.ts";
 import { checkDiff, type DiffLimits, DEFAULT_LIMITS, parseNumstat } from "./diff-gate.ts";
 import {
+  type AbandonCause,
   type FixReport,
   type Pass,
   type ReconVerdict,
@@ -154,10 +155,26 @@ export type SolveOutcome =
       /** What became of the worktree. `kept` if git refused, with its reason. */
       readonly cleanup: RemoveResult;
     }
-  /** The fix pass declined once it saw the files. */
+  /**
+   * The fix pass stopped once it saw the files.
+   *
+   * `cause` is the whole point of this variant carrying more than a string.
+   * `judgement` means the model read the code and declined — a verdict about
+   * the ticket, and the correction triage's blind fitness call exists to
+   * receive. `environment` means it was prevented from working, which is a
+   * fact about this machine and says nothing whatever about the ticket.
+   *
+   * They are one kind rather than two because everything downstream of the
+   * pipeline treats them identically — no commit, no push, keep the worktree —
+   * and splitting the kind would force every exhaustive switch to handle a
+   * distinction only two callers care about. The two that do are `feedback.ts`,
+   * which must not score an environment failure as a misjudged ticket, and the
+   * retry in `solveWithRetry`.
+   */
   | {
       readonly kind: "abandoned";
       readonly reason: string;
+      readonly cause: Exclude<AbandonCause, "none">;
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
     }
@@ -417,6 +434,81 @@ export async function solveTicket(
   }
 }
 
+/** One run, plus whatever a second one produced. */
+export interface SolveAttempts {
+  readonly outcome: SolveOutcome;
+  /** 1 or 2. Never more — see `solveWithRetry`. */
+  readonly attempts: number;
+  /**
+   * Why a warranted retry did not happen, or "" when none was warranted or one
+   * ran. Returned rather than only logged: a caller reporting "abandoned" for
+   * an environment cause is saying something quite different depending on
+   * whether the pipeline tried twice, and a human reading the ticket comment is
+   * the person who has to know.
+   */
+  readonly retryBlocked: string;
+}
+
+/**
+ * Runs the ticket, and runs it once more if the *machine* got in the way.
+ *
+ * Observed on SSX-3822, 2026-09-04: the host's own safety hook denied a `Write`
+ * mid-pass, twice in eight write-capable sessions, non-deterministically — the
+ * successful run of the same feature wrote materially identical content to a
+ * neighbouring path. Nothing about the ticket changed between those runs, so
+ * recording that as "the fix pass declined" would have written a falsehood into
+ * the calibration record and marked a fixable ticket unfixable.
+ *
+ * Only `environment`, and only once. A `judgement` cause is a verdict about the
+ * ticket and rerunning it is asking the same question twice at full price; an
+ * environment obstacle that survives a clean retry is not transient, and a loop
+ * that keeps trying turns a blocked machine into an unbounded bill.
+ *
+ * The retry is a *fresh worktree*, never a second pass over the first — that
+ * worktree's state is unknown by definition, since the run stopped in the
+ * middle of writing to it. Which makes the cleanup load-bearing rather than
+ * tidy: `createWorktree` derives both the path and the branch from the issue
+ * key, so a second attempt collides with its own predecessor unless both are
+ * gone. If either survives, there is no retry — `git worktree remove` refuses
+ * on a dirty checkout and `branch -d` refuses on unmerged commits, so a refusal
+ * here means the first attempt left work behind, and work left behind is
+ * evidence rather than debris.
+ */
+export async function solveWithRetry(
+  deps: SolveDependencies,
+  request: SolveRequest,
+): Promise<SolveAttempts> {
+  const first = await solveTicket(deps, request);
+  if (first.kind !== "abandoned" || first.cause !== "environment") {
+    return { outcome: first, attempts: 1, retryBlocked: "" };
+  }
+
+  const blocked = (retryBlocked: string): SolveAttempts => {
+    logger.info("solve.retry.blocked", { issueKey: request.issueKey, reason: retryBlocked });
+    return { outcome: first, attempts: 1, retryBlocked };
+  };
+
+  const cleanup = await removeWorktree(
+    deps.commands,
+    first.worktree,
+    "discard",
+    request.gitTimeoutMs,
+  );
+  if (cleanup.outcome !== "removed") {
+    return blocked(`the first attempt's worktree is still there: ${cleanup.reason}`);
+  }
+  if (cleanup.branch.outcome !== "deleted") {
+    return blocked(`the first attempt's branch is still there: ${cleanup.branch.reason}`);
+  }
+
+  logger.info("solve.retry", {
+    issueKey: request.issueKey,
+    cause: "environment",
+    reason: first.reason,
+  });
+  return { outcome: await solveTicket(deps, request), attempts: 2, retryBlocked: "" };
+}
+
 async function runPipeline(
   deps: SolveDependencies,
   request: SolveRequest,
@@ -480,7 +572,7 @@ async function runPipeline(
     // fastest. `removeWorktree` does not force, so if this reasoning is ever
     // wrong — a future recon that can write — git refuses and says so, and the
     // reason travels out on the outcome rather than into a log nobody reads.
-    const cleanup = await removeWorktree(commands, worktree, "succeeded", request.gitTimeoutMs);
+    const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
     return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree, cleanup };
   }
 
@@ -500,14 +592,19 @@ async function runPipeline(
     // caller that printed a one-word outcome, so it reached nobody. `leftFiles`
     // because an abandoned run may still have touched the worktree, and whether
     // there is debris to look at changes what a human does next.
+    // `cause` is narrowed here rather than trusted: `parseFix` has already
+    // rejected `none` on an abandoned run, so this cast documents a check that
+    // has happened rather than performing one.
+    const cause = fix.abandonedCause as Exclude<AbandonCause, "none">;
     logger.info("solve.abandoned", {
       issueKey,
       pass: "fix",
+      cause,
       reason: fix.abandoned,
       leftFiles: fix.changed,
       worktreePath: worktree.path,
     });
-    return { kind: "abandoned", reason: fix.abandoned, devLens, worktree };
+    return { kind: "abandoned", reason: fix.abandoned, cause, devLens, worktree };
   }
 
   // The pass that actually spends the privilege, and until the first verified
@@ -773,6 +870,7 @@ async function runReviewRound(
         testOmittedReason: "",
         residualRisk: report.unresolved,
         abandoned: "",
+        abandonedCause: "none",
       },
       issueKey,
     ),

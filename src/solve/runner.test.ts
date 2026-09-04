@@ -66,6 +66,7 @@ const fix = (overrides: Record<string, unknown> = {}): Record<string, unknown> =
   testOmittedReason: "",
   residualRisk: "",
   abandoned: "",
+  abandonedCause: "none",
   ...overrides,
 });
 
@@ -376,6 +377,7 @@ describe("composeCommitMessage", () => {
 
     expect(composeCommitMessage(report, "SSX-3822").subject).toBe(report.commitSubject);
   });
+
 });
 
 describe("parseFix", () => {
@@ -395,7 +397,11 @@ describe("parseFix", () => {
     // created the asset, abandoned, reported both, and the throw discarded its
     // reason — the one thing the run existed to produce.
     const report = parseFix(
-      fix({ abandoned: "the ticket's build note contradicts the config", changed: true }),
+      fix({
+        abandoned: "the ticket's build note contradicts the config",
+        abandonedCause: "judgement",
+        changed: true,
+      }),
       "SSX-3822",
     );
 
@@ -412,11 +418,56 @@ describe("parseFix", () => {
 
   it("accepts an abandoned run without a commit message", () => {
     const report = parseFix(
-      fix({ abandoned: "the brief named the wrong package", changed: false, commitSubject: "" }),
+      fix({
+        abandoned: "the brief named the wrong package",
+        abandonedCause: "judgement",
+        changed: false,
+        commitSubject: "",
+      }),
       "SSX-3822",
     );
 
     expect(report.abandoned).not.toBe("");
+  });
+
+  it("makes an abandoned run say whether it was the code or the machine", () => {
+    // The distinction the whole enum exists for. `judgement` is a verdict fed
+    // back to a triage call made without reading source; `environment` is a
+    // fact about this host and no evidence about the ticket at all. A run that
+    // abandons without choosing would be filed as one of them by default, and
+    // the default would be wrong roughly half the time.
+    expect(() =>
+      parseFix(fix({ abandoned: "a hook denied the write", abandonedCause: "none" }), "SSX-3822"),
+    ).toThrow(/verdict and a retry/u);
+  });
+
+  it("does not let a cause be given for a run that was not abandoned", () => {
+    // The other direction, and it is not symmetry for its own sake: a report
+    // carrying `judgement` with an empty `abandoned` is a model that meant to
+    // stop and failed to say so, and taking it at its word runs the rest of
+    // the pipeline over a change it disowned.
+    expect(() => parseFix(fix({ abandonedCause: "environment" }), "SSX-3822")).toThrow(
+      /did not abandon/u,
+    );
+  });
+
+  it("refuses a cause outside the enum rather than treating it as judgement", () => {
+    // Anything unrecognised is not quietly a verdict. An unknown word means the
+    // model was not answering the question that was asked.
+    for (const cause of ["", "Environment", "unknown", "judgment"]) {
+      expect(() =>
+        parseFix(fix({ abandoned: "stopped", abandonedCause: cause }), "SSX-3822"),
+      ).toThrow(/not one of none, judgement, environment/u);
+    }
+  });
+
+  it("carries the cause through to the report", () => {
+    expect(
+      parseFix(
+        fix({ abandoned: "a safety hook denied the write", abandonedCause: "environment" }),
+        "SSX-3822",
+      ).abandonedCause,
+    ).toBe("environment");
   });
 
   it("rejects a report of no change and no reason", () => {

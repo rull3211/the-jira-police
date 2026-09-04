@@ -154,7 +154,18 @@ function headline(outcome: SolveOutcome): string {
       )}`;
     }
     case "abandoned": {
-      return `An agent started and stopped once it saw the files: ${safeText(outcome.reason)}`;
+      // The two causes are opposite claims and must not share a sentence. A
+      // `judgement` abandon says the ticket was misjudged; an `environment`
+      // abandon says this machine got in the way and the ticket was never
+      // reached. Phrased in the same register as `crashed` for that reason —
+      // it is the same class of statement.
+      return outcome.cause === "environment"
+        ? `An agent was prevented from working — this is about the machine, not the ticket, and says nothing about whether it is solvable: ${safeText(
+            outcome.reason,
+          )}`
+        : `An agent read the code and judged the change should not be made as briefed: ${safeText(
+            outcome.reason,
+          )}`;
     }
     case "refused": {
       return `An agent made a change, but the harness would not judge it (${outcome.stage}), so nothing here says whether the change was any good: ${outcome.reasons
@@ -227,12 +238,25 @@ const HEADER = [
   "",
 ].join("\n");
 
+/**
+ * The `Outcome` column, which is read down the page as a scoreboard.
+ *
+ * `abandoned` alone is the one kind that means two incompatible things, and the
+ * table is the place where that matters most: a reader counting abandons to
+ * decide whether triage's blind call can be trusted would be counting the
+ * host's safety hook among the ticket's own failures. The cause is appended
+ * rather than folded into a second column so old rows stay readable.
+ */
+function outcomeLabel(outcome: SolveOutcome): string {
+  return outcome.kind === "abandoned" ? `abandoned (${outcome.cause})` : outcome.kind;
+}
+
 /** One table row. Pure. */
 export function calibrationRow(issueKey: string, outcome: SolveOutcome, now: Date): string {
   const lens = lensOf(outcome);
   const verdict = lens === null ? "n/a" : lens.accurate ? "ok" : "**wrong**";
   const correction = lens === null || lens.accurate ? "—" : safeText(lens.correction) || "—";
-  return `| ${now.toISOString()} | ${issueKey} | ${outcome.kind} | ${verdict} | ${correction} |\n`;
+  return `| ${now.toISOString()} | ${issueKey} | ${outcomeLabel(outcome)} | ${verdict} | ${correction} |\n`;
 }
 
 /**
@@ -296,7 +320,7 @@ export async function reportOutcome(
 
   logger.info("solve.feedback", {
     issueKey,
-    outcome: outcome.kind,
+    outcome: outcomeLabel(outcome),
     devLensAccurate: lens?.accurate ?? null,
   });
 

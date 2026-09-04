@@ -313,9 +313,13 @@ describe("removeWorktree", () => {
   it("removes it after a run that succeeded", async () => {
     const runner = fakeRunner();
 
-    const result = await removeWorktree(runner, worktree, "succeeded", 30_000);
+    const result = await removeWorktree(runner, worktree, "discard", 30_000);
 
-    expect(result).toEqual({ outcome: "removed", path: "/tmp/solve/SSX-3822" });
+    expect(result).toEqual({
+      outcome: "removed",
+      path: "/tmp/solve/SSX-3822",
+      branch: { outcome: "deleted" },
+    });
     expect(runner.calls[0]).toEqual([
       "git",
       "-C",
@@ -326,12 +330,94 @@ describe("removeWorktree", () => {
     ]);
   });
 
+  it("deletes the branch too, since removing the checkout does not", async () => {
+    // The path and the branch name are both derived from the issue key, so a
+    // ref left behind does not merely accumulate — it makes the next run of
+    // this same ticket fail at `worktree add -b`.
+    const runner = fakeRunner();
+
+    await removeWorktree(runner, worktree, "discard", 30_000);
+
+    expect(runner.calls[1]).toEqual([
+      "git",
+      "-C",
+      "/repos/buy-insurance-advisor-web",
+      "branch",
+      "-d",
+      "fix/ssx-3822-x",
+    ]);
+  });
+
+  it("never force-deletes the branch", async () => {
+    // `-d` is the whole safety argument: git refuses when the branch holds
+    // commits reachable from nowhere else, and that refusal is wanted. `-D`
+    // would turn cleanup into data loss on exactly the runs that did work.
+    const runner = fakeRunner();
+
+    await removeWorktree(runner, worktree, "discard", 30_000);
+
+    expect(runner.calls[1]).not.toContain("-D");
+    expect(runner.calls[1]).not.toContain("--force");
+  });
+
+  it("deletes the branch only after the worktree is gone", async () => {
+    // git will not delete the branch of a live worktree, so the order is not a
+    // matter of taste — reversed, the delete always fails.
+    const runner = fakeRunner();
+
+    await removeWorktree(runner, worktree, "discard", 30_000);
+
+    expect(runner.calls[0]).toContain("worktree");
+    expect(runner.calls[1]).toContain("branch");
+  });
+
+  it("reports the branch as kept, with git's reason, when git declines", async () => {
+    const runner = fakeRunner([
+      OK,
+      { ...FAIL, exitCode: 1, stderr: "error: the branch 'fix/ssx-3822-x' is not fully merged" },
+    ]);
+
+    const result = await removeWorktree(runner, worktree, "discard", 30_000);
+
+    expect(result).toEqual({
+      outcome: "removed",
+      path: "/tmp/solve/SSX-3822",
+      branch: { outcome: "kept", reason: expect.stringContaining("not fully merged") },
+    });
+  });
+
+  it("still reports the worktree removed when only the branch delete failed", async () => {
+    // The checkout really is gone. Collapsing that into "kept" would send a
+    // human to inspect a directory that no longer exists.
+    const runner = fakeRunner([OK, FAIL]);
+
+    expect((await removeWorktree(runner, worktree, "discard", 30_000)).outcome).toBe("removed");
+  });
+
+  it("does not claim the branch was deleted when the delete timed out", async () => {
+    const runner = fakeRunner([OK, TIMEOUT]);
+
+    const result = await removeWorktree(runner, worktree, "discard", 30_000);
+
+    expect(result.outcome === "removed" && result.branch.outcome).toBe("kept");
+  });
+
+  it("does not touch the branch when git would not remove the worktree", async () => {
+    // Deleting the branch of a worktree that is still there is the one call
+    // that can strand a checkout with no ref pointing at its commits.
+    const runner = fakeRunner([FAIL]);
+
+    await removeWorktree(runner, worktree, "discard", 30_000);
+
+    expect(runner.calls).toHaveLength(1);
+  });
+
   it("keeps the worktree of a failed run, and does not even ask git", async () => {
     // The diff in there is the only record of what the solver did, and it is
     // what a human needs to tell a mis-assessed ticket from a bad fix.
     const runner = fakeRunner();
 
-    const result = await removeWorktree(runner, worktree, "failed", 30_000);
+    const result = await removeWorktree(runner, worktree, "keep-as-evidence", 30_000);
 
     expect(result.outcome).toBe("kept");
     expect(runner.calls).toEqual([]);
@@ -340,7 +426,7 @@ describe("removeWorktree", () => {
   it("does not force a removal git refused", async () => {
     const runner = fakeRunner([{ ...FAIL, stderr: "fatal: contains modified or untracked files" }]);
 
-    const result = await removeWorktree(runner, worktree, "succeeded", 30_000);
+    const result = await removeWorktree(runner, worktree, "discard", 30_000);
 
     expect(result.outcome).toBe("kept");
     expect(runner.calls[0]).not.toContain("--force");
@@ -350,6 +436,6 @@ describe("removeWorktree", () => {
   it("keeps it when the removal times out rather than reporting it gone", async () => {
     const runner = fakeRunner([TIMEOUT]);
 
-    expect((await removeWorktree(runner, worktree, "succeeded", 30_000)).outcome).toBe("kept");
+    expect((await removeWorktree(runner, worktree, "discard", 30_000)).outcome).toBe("kept");
   });
 });
