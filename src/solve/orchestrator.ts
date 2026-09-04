@@ -182,23 +182,73 @@ function lensOf(recon: ReconVerdict): DevLensFeedback {
 }
 
 /**
- * Reads the real diff of the worktree against the base.
+ * The two reads of the worktree, and why they are two.
+ *
+ * These were one function called `realDiff`, whose output went both to the
+ * diff gate and into the simplify pass's prompt. They need opposite things and
+ * the single version served the gate, so the prompt got the gate's format:
+ * `2\t0\0src/bootstrap.tsx\0`, fenced under a heading that said `BEGIN DIFF`.
+ *
+ * It surfaced on 2026-09-04 as a crash — `spawn` rejects a NUL in argv, so the
+ * first real solve died at the simplify pass with `ERR_INVALID_ARG_VALUE`. The
+ * crash was the lucky outcome. Drop the `-z` and it would have run: the model
+ * would have been shown a table of line counts, told it was a patch, and asked
+ * to simplify it. It would have found nothing to simplify, every time, and the
+ * pass would have looked like it was working.
+ *
+ * So the split is not defensive tidying. A comment saying "given the diff" and
+ * a call sending a numstat is the exact prose/behaviour divergence this project
+ * exists to catch, and it was in the code that catches it.
+ */
+
+/**
+ * The machine-readable read, for the gate.
  *
  * `--numstat -z`, and the `-z` is load-bearing: without it a filename
  * containing a newline — which git will happily accept and a ticket can
  * plausibly suggest — forges an extra numstat record and can push a real
  * change out of the gate's view. Documented at length in `diff-gate.ts`.
+ *
+ * Consequence of that same `-z`: this output contains NUL bytes and can
+ * therefore never reach a prompt. `parseNumstat` is its only legitimate
+ * consumer.
  */
-async function realDiff(
+async function readNumstat(
   runner: CommandRunner,
   worktreePath: string,
   baseRef: string,
   timeoutMs: number,
 ): Promise<string | null> {
-  const result = await runner.run(
-    ["git", "-C", worktreePath, "diff", "--numstat", "-z", baseRef, "--"],
-    { cwd: worktreePath, timeoutMs },
-  );
+  return await gitDiff(runner, worktreePath, timeoutMs, ["--numstat", "-z", baseRef]);
+}
+
+/**
+ * The human-readable read, for a prompt.
+ *
+ * A real unified patch, which is what a pass asked to review the change needs
+ * to see. No `-z`: there is nothing to parse here, the text goes to a model,
+ * and the filename-with-a-newline attack that `-z` defends against is a threat
+ * to the *gate's* accounting, not to a model reading prose.
+ */
+async function readPatch(
+  runner: CommandRunner,
+  worktreePath: string,
+  baseRef: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  return await gitDiff(runner, worktreePath, timeoutMs, [baseRef]);
+}
+
+async function gitDiff(
+  runner: CommandRunner,
+  worktreePath: string,
+  timeoutMs: number,
+  args: readonly string[],
+): Promise<string | null> {
+  const result = await runner.run(["git", "-C", worktreePath, "diff", ...args, "--"], {
+    cwd: worktreePath,
+    timeoutMs,
+  });
   if (result.timedOut || result.exitCode !== 0) {
     return null;
   }
@@ -290,7 +340,7 @@ async function runPipeline(
   // Given the diff rather than the brief, because it is not implementing
   // anything and showing it the requirement would invite it to reconsider the
   // change instead of the way the change is written.
-  const diffText = await realDiff(commands, worktree.path, request.baseRef, request.gitTimeoutMs);
+  const diffText = await readPatch(commands, worktree.path, request.baseRef, request.gitTimeoutMs);
   const simplify = await passes.run(
     "simplify",
     { ...base, ...(diffText === null ? {} : { diff: diffText }) },
@@ -303,7 +353,12 @@ async function runPipeline(
   // Read fresh, after simplify, and never from either model's own account of
   // what it touched. `fix.filesTouched` bounded the simplify pass; this bounds
   // both of them against what git actually says happened.
-  const finalDiff = await realDiff(commands, worktree.path, request.baseRef, request.gitTimeoutMs);
+  const finalDiff = await readNumstat(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+  );
   if (finalDiff === null) {
     return {
       kind: "refused",
@@ -443,7 +498,12 @@ async function runReviewRound(
     return { kind: "no-change", report };
   }
 
-  const diffText = await realDiff(commands, worktree.path, request.baseRef, request.gitTimeoutMs);
+  const diffText = await readNumstat(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+  );
   if (diffText === null) {
     return {
       kind: "refused",

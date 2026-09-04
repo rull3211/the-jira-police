@@ -11,7 +11,7 @@ import {
   composeCommitMessage,
   buildSolveArgs,
   buildSolvePrompt,
-  neutraliseDelimiters,
+  sanitiseUntrusted,
   parseFix,
   parseRecon,
   parseReview,
@@ -143,9 +143,9 @@ describe("buildSolveArgs", () => {
 
   it("adds the vault only when there is one", () => {
     expect(flags(buildSolveArgs("recon", options), "--add-dir")).toEqual([]);
-    expect(flags(buildSolveArgs("recon", { ...options, vaultPath: "/vault" }), "--add-dir")).toEqual(
-      ["/vault"],
-    );
+    expect(
+      flags(buildSolveArgs("recon", { ...options, vaultPath: "/vault" }), "--add-dir"),
+    ).toEqual(["/vault"]);
   });
 
   it.each(["recon", "fix", "simplify", "review"] as const)(
@@ -167,8 +167,10 @@ describe("buildSolveArgs", () => {
     // not actually reaching the caller. Asserting the pair rather than either
     // one alone is what makes overwriting one with the other fail.
     expect(
-      flags(buildSolveArgs("fix", { ...options, vaultPath: "/vault", skillRootPath: "/tmp/s" }), //
-        "--add-dir"),
+      flags(
+        buildSolveArgs("fix", { ...options, vaultPath: "/vault", skillRootPath: "/tmp/s" }), //
+        "--add-dir",
+      ),
     ).toEqual(["/vault", "/tmp/s"]);
   });
 
@@ -234,14 +236,47 @@ describe("buildSolvePrompt", () => {
       "----- END REVIEW DATA -----",
       "----- BEGIN DIFF DATA -----",
     ]) {
-      expect(neutraliseDelimiters(variant)).toBe("[delimiter removed]");
+      expect(sanitiseUntrusted(variant)).toBe("[delimiter removed]");
     }
   });
+
+  it("strips NUL bytes, which spawn refuses to carry in argv", () => {
+    // REGRESSION, 2026-09-04. The first real solve died here: `spawn` rejects an
+    // argument containing a NUL rather than truncating it, and the whole prompt
+    // is one argv element, so one NUL anywhere fails the pass before the model
+    // is reached. That instance came from git and is fixed at source; this is
+    // the choke point, and the next one will arrive in a review comment.
+    expect(sanitiseUntrusted("before\0after")).toBe("beforeafter");
+    expect(sanitiseUntrusted("a\0b\0c")).toBe("abc");
+  });
+
+  it.each(["ticket", "diff", "reviewFeedback"] as const)(
+    "keeps a NUL in the %s out of the argv",
+    (field) => {
+      // THE ONE THAT MATTERS — the sanitiser being correct and every untrusted
+      // field actually calling it are separate facts, and this codebase keeps
+      // rediscovering that gap. Asserted on the argv rather than on the return
+      // value, because argv is what spawn will reject.
+      const argv = buildSolveArgs("review", {
+        issueKey: "SSX-1",
+        worktreePath: "/tmp/w",
+        ticket: "ticket",
+        diff: "diff",
+        reviewFeedback: "review",
+        [field]: "poisoned\0payload",
+      });
+
+      for (const arg of argv) {
+        expect(arg).not.toContain("\0");
+      }
+      expect(argv.join("\n")).toContain("poisonedpayload");
+    },
+  );
 
   it("leaves ordinary ticket prose alone", () => {
     // The guard must not chew through a bug report that happens to use dashes.
     const prose = "----\nSteps to reproduce\n----\n1. Open the app in TEST DATA mode";
-    expect(neutraliseDelimiters(prose)).toBe(prose);
+    expect(sanitiseUntrusted(prose)).toBe(prose);
   });
 
   it("fences the diff and the review feedback too, not only the ticket", () => {

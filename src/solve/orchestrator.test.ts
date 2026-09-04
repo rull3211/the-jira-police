@@ -24,6 +24,23 @@ const MANIFEST = JSON.stringify({
 const FILES = ["src/app/head.tsx", "src/app/head.test.tsx"];
 const NUMSTAT = [`12\t3\t${FILES[0] ?? ""}`, `9\t0\t${FILES[1] ?? ""}`, ""].join(NUL);
 
+/**
+ * A real unified patch, which is a different thing from `NUMSTAT`.
+ *
+ * The gate reads counts; a pass reads code. Keeping the two fixtures visibly
+ * unalike is what lets a test tell which read a call site made — when one
+ * function served both, no assertion in this file could distinguish them, and
+ * the one at "gives simplify the diff" asserted the wrong one and passed.
+ */
+const PATCH = [
+  `diff --git a/${FILES[0] ?? ""} b/${FILES[0] ?? ""}`,
+  "@@ -1,3 +1,4 @@",
+  " export function Head() {",
+  '+  return <link rel="icon" href="/favicon-nonprod.svg" />;',
+  "}",
+  "",
+].join("\n");
+
 /** Six files, which is one past `DEFAULT_LIMITS.maxFiles`. */
 const OVER_CAP = [
   ...Array.from({ length: 6 }, (_unused, index) => `1\t0\tsrc/f${String(index)}.ts`),
@@ -120,6 +137,12 @@ function harness(
     { match: saw("show"), reply: { stdout: MANIFEST } },
     { match: saw("--name-only"), reply: { stdout: "" } },
     { match: saw("--numstat"), reply: { stdout: NUMSTAT } },
+    // `git diff` without `--numstat` is the patch read, and it must answer
+    // differently from the one above or the two are indistinguishable here.
+    {
+      match: (argv) => argv.includes("diff") && !argv.includes("--numstat"),
+      reply: { stdout: PATCH },
+    },
   ];
   const all = [...rules, ...defaults];
 
@@ -347,16 +370,60 @@ describe("solveTicket, and what each pass is given", () => {
     expect(JSON.parse(brief)).toMatchObject({ proceed: true, approach: "add the link element" });
   });
 
-  it("gives simplify the diff and withholds the brief", async () => {
+  it("gives simplify a real patch and withholds the brief", async () => {
     // Showing it the requirement would invite it to reconsider the change
     // rather than the way the change is written.
+    //
+    // REGRESSION, 2026-09-04. This test used to assert `toBe(NUMSTAT)` — the
+    // gate's format, a table of line counts — under a name that said "the
+    // diff", and it passed for as long as one function served both reads. The
+    // first real solve crashed here, because the numstat is `-z` separated and
+    // `spawn` refuses a NUL in argv. The crash was the lucky outcome: without
+    // the `-z` the pass would have run, been shown a count table, found nothing
+    // to simplify, and looked like it was working.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
 
     const options = h.seen.find((entry) => entry.pass === "simplify")?.options;
-    expect(options?.diff).toBe(NUMSTAT);
+    expect(options?.diff).toBe(PATCH);
+    expect(options?.diff).toContain("@@");
     expect(options?.brief).toBeUndefined();
+  });
+
+  it("never puts a NUL in front of a pass", async () => {
+    // THE GUARD, stated as the property rather than as one call site. Anything
+    // handed to a pass becomes part of a single argv element, so a NUL anywhere
+    // in it fails the run before the model is reached. Checked across every
+    // string every pass received, so a future field added to `SolveRunOptions`
+    // and wired to a `-z` read is caught here rather than in production.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    expect(h.seen.length).toBeGreaterThan(0);
+    for (const { pass, options } of h.seen) {
+      for (const [field, value] of Object.entries(options)) {
+        if (typeof value === "string") {
+          expect(value, `${pass} pass, ${field}`).not.toContain("\0");
+        }
+      }
+    }
+  });
+
+  it("still reads the numstat for the gate, not the patch", async () => {
+    // The other half of the split. Feeding the gate a unified patch would make
+    // `parseNumstat` return nothing, and an empty file list passes every cap —
+    // the gate would report ok on a diff it never read.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    const gateReads = h.calls.filter((argv) => argv.includes("diff") && argv.includes("--numstat"));
+    expect(gateReads.length).toBeGreaterThan(0);
+    for (const argv of gateReads) {
+      expect(argv).toContain("-z");
+    }
   });
 
   it("points every pass at the worktree, never at the repository", async () => {
