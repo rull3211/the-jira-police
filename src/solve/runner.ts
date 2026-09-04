@@ -146,6 +146,18 @@ export interface SolveRunOptions {
    */
   readonly reviewFeedback?: string;
   readonly vaultPath?: string;
+  /**
+   * Directory holding `.claude/skills/agent-solve/`, and nothing else.
+   *
+   * Without it the `/agent-solve` line every prompt opens with resolves to
+   * nothing — the session's working directory is the worktree, which has no
+   * skills in it. `skill-root.ts` explains why this is a staged read-only copy
+   * rather than this repository, and what the probe showed when it was not.
+   *
+   * Optional so the pure prompt-building tests need not stage a directory, but
+   * a real run without it is the bug being fixed, not a supported mode.
+   */
+  readonly skillRootPath?: string;
 }
 
 /**
@@ -279,6 +291,7 @@ export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
   // schema — is mutation M7 in this module's suite.
   const schema = SCHEMA_FOR[pass];
   const vaultPath = options.vaultPath ?? "";
+  const skillRootPath = options.skillRootPath ?? "";
 
   return [
     "-p",
@@ -294,6 +307,10 @@ export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
     "--disallowedTools",
     denied.join(","),
     ...(vaultPath === "" ? [] : ["--add-dir", vaultPath]),
+    // Not optional in practice: the prompt's first line is `/agent-solve …`,
+    // and the worktree this session runs in contains no skills. See
+    // `skill-root.ts` for why this is a staged copy and not this repository.
+    ...(skillRootPath === "" ? [] : ["--add-dir", skillRootPath]),
     "--json-schema",
     schema,
   ];

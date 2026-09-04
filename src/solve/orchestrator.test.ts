@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { SolveParseError, type Pass, type SolveRunOptions } from "./runner.ts";
@@ -622,5 +625,92 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, reviewRequest);
 
     expect(outcome.kind).toBe("resolved");
+  });
+});
+
+/** The file the `/agent-solve` slash command has to resolve to. */
+function entryPoint(root: string): string {
+  return join(root, ".claude", "skills", "agent-solve", "SKILL.md");
+}
+
+describe("the skill root", () => {
+  it("is staged, on disk, before every pass that runs", async () => {
+    // THE ONE THAT MATTERS. Every prompt opens with `/agent-solve <KEY>
+    // --<pass>`, and the session's working directory is the worktree, which
+    // contains no skills. Probed 2026-09-04 from such a directory:
+    // `Unknown command: /agent-solve`. Checking existence *during* the pass
+    // rather than after is the point — it is deleted on the way out, so an
+    // assertion afterwards would prove nothing about what the pass could see.
+    const { h } = harness(FULL);
+    const staged: boolean[] = [];
+    const passes: PassRunner = {
+      run: (pass, options, parse) => {
+        staged.push(existsSync(entryPoint(options.skillRootPath ?? "")));
+        return h.deps.passes.run(pass, options, parse);
+      },
+    };
+
+    await solveTicket({ ...h.deps, passes }, request);
+
+    expect(staged).toEqual([true, true, true]);
+  });
+
+  it("is the same root for all three passes", async () => {
+    // Restaging per pass would work and would also mean the `fix` pass could be
+    // reading a different copy from the one `recon` read.
+    const { h } = harness(FULL);
+    await solveTicket(h.deps, request);
+
+    const roots = new Set(h.seen.map(({ options }) => options.skillRootPath));
+    expect(roots.size).toBe(1);
+  });
+
+  it("is removed once the run returns", async () => {
+    const { h } = harness(FULL);
+    await solveTicket(h.deps, request);
+
+    const root = h.seen[0]?.options.skillRootPath ?? "";
+    expect(root).not.toBe("");
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it("is removed even when a pass throws", async () => {
+    // The `finally`, and the reason it is one. Unplugging it leaves a
+    // read-only directory per crashed run, which the next run for that ticket
+    // then cannot overwrite — a failure that only shows up after a crash.
+    const { h } = harness({ recon: recon() });
+
+    await expect(solveTicket(h.deps, request)).rejects.toThrow();
+
+    const root = h.seen[0]?.options.skillRootPath ?? "";
+    expect(root).not.toBe("");
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it("does not hand the pass the repository this service lives in", async () => {
+    // `--add-dir` grants write to a pass that pre-approves `Write` (probed
+    // 2026-09-04). The staged root is what keeps the solver away from its own
+    // denylists and its own diff gate.
+    const { h } = harness(FULL);
+    await solveTicket(h.deps, request);
+
+    for (const { pass, options } of h.seen) {
+      expect(options.skillRootPath ?? "", `the ${pass} pass`).not.toContain("the-jira-police");
+    }
+  });
+
+  it("reaches the review pass too", async () => {
+    const { h } = harness({ review: review() });
+    const seen: string[] = [];
+    const passes: PassRunner = {
+      run: (pass, options, parse) => {
+        seen.push(existsSync(entryPoint(options.skillRootPath ?? "")) ? "staged" : "missing");
+        return h.deps.passes.run(pass, options, parse);
+      },
+    };
+
+    await resolveReview({ ...h.deps, passes }, reviewRequest);
+
+    expect(seen).toEqual(["staged"]);
   });
 });

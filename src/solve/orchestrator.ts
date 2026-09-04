@@ -65,6 +65,7 @@ import {
   parseReview,
   parseSimplify,
 } from "./runner.ts";
+import { prepareSkillRoot, removeSkillRoot } from "./skill-root.ts";
 import { verify, type VerificationResult } from "./verify.ts";
 import {
   type CommandRunner,
@@ -216,6 +217,28 @@ export async function solveTicket(
   deps: SolveDependencies,
   request: SolveRequest,
 ): Promise<SolveOutcome> {
+  const staged = await prepareSkillRoot(request.parentDirectory, request.issueKey);
+  if (staged.outcome === "refused") {
+    // `no-worktree` is the right shape even though no worktree was attempted:
+    // it is the outcome that means "the run never started", and starting a run
+    // whose every prompt opens with an unresolvable `/agent-solve` is worse
+    // than not starting one.
+    return { kind: "no-worktree", reason: staged.reason };
+  }
+  try {
+    return await runPipeline(deps, request, staged.path);
+  } finally {
+    // Always, including on the paths that keep the worktree. A failed run's
+    // worktree is evidence; a copy of a skill that is still in git is not.
+    await removeSkillRoot(staged.path);
+  }
+}
+
+async function runPipeline(
+  deps: SolveDependencies,
+  request: SolveRequest,
+  skillRootPath: string,
+): Promise<SolveOutcome> {
   const { issueKey } = request;
   const { commands, passes } = deps;
 
@@ -238,6 +261,7 @@ export async function solveTicket(
     issueKey,
     worktreePath: worktree.path,
     ticket: request.ticket,
+    skillRootPath,
     ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
   };
 
@@ -378,6 +402,22 @@ export async function resolveReview(
   deps: SolveDependencies,
   request: ReviewRoundRequest,
 ): Promise<ReviewRoundOutcome> {
+  const staged = await prepareSkillRoot(request.parentDirectory, `${request.issueKey}-review`);
+  if (staged.outcome === "refused") {
+    return { kind: "abandoned", reason: staged.reason };
+  }
+  try {
+    return await runReviewRound(deps, request, staged.path);
+  } finally {
+    await removeSkillRoot(staged.path);
+  }
+}
+
+async function runReviewRound(
+  deps: SolveDependencies,
+  request: ReviewRoundRequest,
+  skillRootPath: string,
+): Promise<ReviewRoundOutcome> {
   const { issueKey, worktree } = request;
   const { commands, passes } = deps;
 
@@ -388,6 +428,7 @@ export async function resolveReview(
       worktreePath: worktree.path,
       ticket: request.ticket,
       reviewFeedback: request.reviewFeedback,
+      skillRootPath,
       ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
     },
     (output) => parseReview(output, issueKey),

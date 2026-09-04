@@ -30,6 +30,17 @@ function flag(argv: readonly string[], name: string): string {
   return index === -1 ? "" : (argv[index + 1] ?? "");
 }
 
+/**
+ * Every value of a repeatable flag.
+ *
+ * `flag` returns the first, which was fine while `--add-dir` appeared at most
+ * once. Now that two directories can be added, asserting on the first would let
+ * either one go missing without a test noticing.
+ */
+function flags(argv: readonly string[], name: string): string[] {
+  return argv.flatMap((arg, index) => (arg === name ? [argv[index + 1] ?? ""] : []));
+}
+
 const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   proceed: true,
   confidence: "high",
@@ -131,8 +142,50 @@ describe("buildSolveArgs", () => {
   });
 
   it("adds the vault only when there is one", () => {
-    expect(buildSolveArgs("recon", options)).not.toContain("--add-dir");
-    expect(buildSolveArgs("recon", { ...options, vaultPath: "/vault" })).toContain("--add-dir");
+    expect(flags(buildSolveArgs("recon", options), "--add-dir")).toEqual([]);
+    expect(flags(buildSolveArgs("recon", { ...options, vaultPath: "/vault" }), "--add-dir")).toEqual(
+      ["/vault"],
+    );
+  });
+
+  it.each(["recon", "fix", "simplify", "review"] as const)(
+    "adds the skill root on the %s pass",
+    (pass) => {
+      // THE ONE THAT MATTERS, and it is a regression test for a bug that had
+      // already shipped. Every prompt opens with `/agent-solve <KEY> --<pass>`,
+      // and the session's working directory is the worktree, which contains no
+      // skills. Probed 2026-09-04 from a directory without the skill:
+      // `Unknown command: /agent-solve`. All four passes, because the argv is
+      // built once and a pass-specific branch could drop it for one of them.
+      expect(flags(buildSolveArgs(pass, { ...options, skillRootPath: "/tmp/s" }), "--add-dir")) //
+        .toContain("/tmp/s");
+    },
+  );
+
+  it("adds the vault and the skill root as two separate directories", () => {
+    // The join bug this codebase keeps hitting: two correct values, one of them
+    // not actually reaching the caller. Asserting the pair rather than either
+    // one alone is what makes overwriting one with the other fail.
+    expect(
+      flags(buildSolveArgs("fix", { ...options, vaultPath: "/vault", skillRootPath: "/tmp/s" }), //
+        "--add-dir"),
+    ).toEqual(["/vault", "/tmp/s"]);
+  });
+
+  it("does not add the repository the service itself lives in", () => {
+    // `--add-dir` grants write to a pass that pre-approves `Write` — probed
+    // 2026-09-04, it succeeded. Adding this repository would put `runner.ts`
+    // (these denylists) and `diff-gate.ts` (the bound on the change) inside the
+    // solver's reach, and the diff gate only ever inspects the worktree, so
+    // neither edit would show up anywhere.
+    const argv = buildSolveArgs("fix", {
+      ...options,
+      vaultPath: "/vault",
+      skillRootPath: "/tmp/SSX-3822-skill",
+    });
+    for (const dir of flags(argv, "--add-dir")) {
+      expect(dir).not.toContain("the-jira-police");
+    }
   });
 });
 
