@@ -155,6 +155,25 @@ export type SolveOutcome =
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
     }
+  /**
+   * A pass died — timed out, or produced output the parser refused.
+   *
+   * **This is a refusal and must never be reported as a statement about the
+   * code**, for the same reason `verify.ts` keeps `refused` apart from
+   * `failed`: nothing was learned. It is a separate kind rather than another
+   * `refused` stage so that every exhaustive switch has to be edited to admit
+   * it, instead of a crash quietly arriving at a caller that thinks it is
+   * looking at a diff-gate verdict.
+   *
+   * It carries no `devLens` because the pass that produces one may be the pass
+   * that died.
+   */
+  | {
+      readonly kind: "crashed";
+      readonly pass: Pass;
+      readonly reason: string;
+      readonly worktree: Worktree;
+    }
   /** A verification step ran and did not pass. A fact about the code. */
   | {
       readonly kind: "failed";
@@ -306,6 +325,56 @@ async function gitDiff(
 }
 
 /**
+ * A pass that ran, or the reason it did not — never an exception.
+ *
+ * `passes.run` throws two quite different ways: `runSession` rejects when the
+ * session times out or exits non-zero, and the parsers throw `SolveParseError`
+ * when the model's output contradicts itself. Neither was caught. A solve is a
+ * long-running job holding a worktree, so an uncaught throw took the whole
+ * process down and orphaned the worktree — survivable while a human is watching
+ * a single command, fatal once the daemon runs the loop unattended.
+ *
+ * Both become the same thing here, because the caller's decision is identical:
+ * no verdict was reached. Which of the two it was survives in the reason.
+ */
+type PassResult<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+      readonly ok: false;
+      readonly reason: string;
+    };
+
+/**
+ * The outcome for a dead pass, logged on the way out.
+ *
+ * Logged for the same reason the bail reasons are: this is the one record that
+ * a run existed at all, and without it a solve that died mid-pass is
+ * indistinguishable from one that was never started.
+ */
+function crashed(issueKey: string, pass: Pass, reason: string, worktree: Worktree): SolveOutcome {
+  logger.info("solve.crashed", { issueKey, pass, reason, worktreePath: worktree.path });
+  return { kind: "crashed", pass, reason, worktree };
+}
+
+/** Never lets a pass throw past it. */
+async function runPass<T>(
+  passes: PassRunner,
+  pass: Pass,
+  options: SolveRunOptions,
+  parse: (output: unknown) => T,
+): Promise<PassResult<T>> {
+  try {
+    return { ok: true, value: await passes.run(pass, options, parse) };
+  } catch (error) {
+    // The message only. A stack trace here would be the harness's own frames,
+    // which say nothing about why the pass did not produce a verdict, and this
+    // string reaches a ticket comment.
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason };
+  }
+}
+
+/**
  * Runs one ticket through the pipeline.
  *
  * Reads top to bottom as the sequence it is. Each stage either produces the
@@ -366,7 +435,11 @@ async function runPipeline(
   };
 
   // ---- recon -------------------------------------------------------------
-  const recon = await passes.run("recon", base, (output) => parseRecon(output, issueKey));
+  const reconRun = await runPass(passes, "recon", base, (output) => parseRecon(output, issueKey));
+  if (!reconRun.ok) {
+    return crashed(issueKey, "recon", reconRun.reason, worktree);
+  }
+  const recon = reconRun.value;
   const devLens = lensOf(recon);
   logger.info("solve.recon", {
     issueKey,
@@ -391,7 +464,13 @@ async function runPipeline(
 
   // ---- fix ---------------------------------------------------------------
   const brief = JSON.stringify(recon, null, 2);
-  const fix = await passes.run("fix", { ...base, brief }, (output) => parseFix(output, issueKey));
+  const fixRun = await runPass(passes, "fix", { ...base, brief }, (output) =>
+    parseFix(output, issueKey),
+  );
+  if (!fixRun.ok) {
+    return crashed(issueKey, "fix", fixRun.reason, worktree);
+  }
+  const fix = fixRun.value;
   if (fix.abandoned.trim() !== "") {
     // Logged, because it was not. A bail is the most informative thing a solve
     // produces — it is the fitness assessment being corrected by something that
@@ -415,11 +494,21 @@ async function runPipeline(
   // anything and showing it the requirement would invite it to reconsider the
   // change instead of the way the change is written.
   const diffText = await readPatch(commands, worktree.path, request.baseRef, request.gitTimeoutMs);
-  const simplify = await passes.run(
+  const simplifyRun = await runPass(
+    passes,
     "simplify",
     { ...base, ...(diffText === null ? {} : { diff: diffText }) },
     (output) => parseSimplify(output, issueKey, fix.filesTouched),
   );
+  if (!simplifyRun.ok) {
+    // Note this discards a fix that may have been perfectly good. Deliberate:
+    // the diff gate has not run yet, so nothing has bounded what is in the
+    // worktree, and shipping an unbounded diff because the pass that would have
+    // tidied it died is the wrong way to fail. The worktree is kept, so the
+    // work is not lost — it is just not automatically believed.
+    return crashed(issueKey, "simplify", simplifyRun.reason, worktree);
+  }
+  const simplify = simplifyRun.value;
   logger.info("solve.simplify", { issueKey, changed: simplify.changed });
 
   // ---- the diff gate -----------------------------------------------------
@@ -550,7 +639,8 @@ async function runReviewRound(
   const { issueKey, worktree } = request;
   const { commands, passes } = deps;
 
-  const report = await passes.run(
+  const reviewRun = await runPass(
+    passes,
     "review",
     {
       issueKey,
@@ -562,6 +652,19 @@ async function runReviewRound(
     },
     (output) => parseReview(output, issueKey),
   );
+  if (!reviewRun.ok) {
+    // A dead review round is `abandoned` rather than its own kind: unlike the
+    // three passes above, a pull request already exists here, so the loop has
+    // somewhere to put the reason and a human is already on the other end.
+    logger.info("solve.crashed", {
+      issueKey,
+      pass: "review",
+      reason: reviewRun.reason,
+      worktreePath: worktree.path,
+    });
+    return { kind: "abandoned", reason: reviewRun.reason };
+  }
+  const report = reviewRun.value;
 
   if (report.abandoned.trim() !== "") {
     logger.info("solve.abandoned", {

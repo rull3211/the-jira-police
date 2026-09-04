@@ -3,7 +3,11 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { SolveParseError, type Pass, type SolveRunOptions } from "./runner.ts";
+// `SolveParseError` used to be imported here so a test could assert
+// `solveTicket` rejected with it. It does not reject any more — a parser
+// refusing the model's output is a `crashed` outcome now — and the import going
+// unused is the small, real sign of that change.
+import type { Pass, SolveRunOptions } from "./runner.ts";
 import {
   type PassRunner,
   type SolveDependencies,
@@ -99,7 +103,18 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
 
 interface Rule {
   readonly match: (argv: readonly string[]) => boolean;
-  readonly reply: Partial<CommandResult>;
+  /** Omitted when `throws` is set — the command never gets as far as answering. */
+  readonly reply?: Partial<CommandResult>;
+  /**
+   * The command *rejects*, rather than answering with a non-zero exit code.
+   *
+   * Those are different failures and only this one escapes `runPipeline`. A
+   * non-zero exit is a result the pipeline inspects and turns into an outcome;
+   * a rejection is the shell layer itself coming apart, and since pass failures
+   * are now caught by `runPass` it is the only kind of throw left that can
+   * reach `solveTicket`'s `finally`. Which makes it the only way to test it.
+   */
+  readonly throws?: string;
 }
 
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
@@ -129,6 +144,13 @@ interface Harness {
 function harness(
   script: Partial<Record<Pass, unknown>>,
   rules: readonly Rule[] = [],
+  /**
+   * Passes whose `run` rejects, which is what a `SOLVE_TIMEOUT_MS` expiry looks
+   * like from here. Distinct from an unscripted pass — that also throws, but
+   * out of the harness rather than out of the runner, and it means "this test
+   * says the pass must not have run" rather than "the pass ran and died".
+   */
+  dies: Partial<Record<Pass, string>> = {},
 ): { readonly h: Harness } {
   const timeline: string[] = [];
   const calls: (readonly string[])[] = [];
@@ -154,6 +176,9 @@ function harness(
         `cmd:${argv.slice(0, 2).join(" ")}${argv.includes("--numstat") ? " numstat" : ""}`,
       );
       const rule = all.find((candidate) => candidate.match(argv));
+      if (rule?.throws !== undefined) {
+        return Promise.reject(new Error(rule.throws));
+      }
       return Promise.resolve({ ...OK, ...rule?.reply });
     },
   };
@@ -162,6 +187,10 @@ function harness(
     run: (pass, options, parse) => {
       timeline.push(`pass:${pass}`);
       seen.push({ pass, options });
+      const death = dies[pass];
+      if (death !== undefined) {
+        return Promise.reject(new Error(death));
+      }
       const output = script[pass];
       if (output === undefined) {
         throw new Error(`the ${pass} pass ran, and this test says it must not have`);
@@ -533,8 +562,12 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("refuses a simplify pass that strayed outside the fix's files", async () => {
-    // Propagates rather than becoming an outcome: a report that contradicts
-    // its own contract is a broken contract, not a ticket that did not work.
+    // Becomes an outcome rather than propagating. It used to reject, which read
+    // as principled — a broken contract is not a ticket that did not work — but
+    // the caller is a long-running job holding a worktree, and the practical
+    // effect of the throw was that the process died and the worktree leaked.
+    // The contract is still refused; what changed is that the refusal is
+    // something the caller can act on.
     const { h } = harness({
       ...FULL,
       simplify: simplify({
@@ -545,7 +578,52 @@ describe("solveTicket, and what each pass is given", () => {
       }),
     });
 
-    await expect(solveTicket(h.deps, request)).rejects.toThrow(SolveParseError);
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("crashed");
+    expect(outcome.kind === "crashed" ? outcome.pass : null).toBe("simplify");
+    // The parser's complaint survives into the reason rather than being
+    // flattened to "a pass died".
+    expect(outcome.kind === "crashed" ? outcome.reason : "").toContain("unrelated.ts");
+  });
+
+  it("turns a pass that times out into an outcome, not a throw", async () => {
+    // The case this was built for. `SOLVE_TIMEOUT_MS` fires inside `passes.run`,
+    // and until `runPass` existed that rejection went straight past every
+    // caller — `solve:once` printed a stack trace and the daemon that Phase E
+    // adds would have taken the whole loop down with it.
+    const { h } = harness({}, [], { recon: "pass timed out after 900000ms" });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("crashed");
+    expect(outcome.kind === "crashed" ? outcome.pass : null).toBe("recon");
+    expect(outcome.kind === "crashed" ? outcome.reason : "").toContain("timed out");
+  });
+
+  it("does not run the fix pass after recon dies", async () => {
+    // The privilege claim, and the reason this is a separate test from the one
+    // above. `crashed` means no verdict was reached; if the write pass ran
+    // anyway then a run that reports having reached no verdict has still edited
+    // the worktree, which is the one way this outcome could lie.
+    // `fix` is scripted, so a pipeline that wrongly continued would still
+    // satisfy every assertion in the test above and only fail this one.
+    const { h } = harness({ fix: fix() }, [], { recon: "pass timed out after 900000ms" });
+
+    await solveTicket(h.deps, request);
+
+    expect(h.seen.map(({ pass }) => pass)).toEqual(["recon"]);
+  });
+
+  it("carries no dev lens off a crashed run", async () => {
+    // Recon is what produces the lens, so a run that lost recon has no reading
+    // to report. Reporting one anyway would feed the fitness assessment
+    // evidence nobody gathered — see `lensOf` in `feedback.ts`.
+    const { h } = harness({}, [], { recon: "pass timed out" });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).not.toHaveProperty("devLens");
   });
 });
 
@@ -726,6 +804,21 @@ describe("resolveReview", () => {
     expect(h.calls.some((argv) => argv.slice(-2).join(" ") === "run test")).toBe(true);
   });
 
+  it("abandons the round rather than crashing when the review pass dies", async () => {
+    // The one place a dead pass is deliberately *not* `crashed`. By here a pull
+    // request exists, so there is a human on the other end and somewhere to put
+    // the reason; a new outcome kind would only make every caller of
+    // `resolveReview` handle a case that reduces to "this round produced
+    // nothing". The reason still has to survive, or the PR sits there with no
+    // explanation of why the bot stopped answering.
+    const { h } = harness({}, [], { review: "pass timed out after 900000ms" });
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome.kind).toBe("abandoned");
+    expect(outcome.kind === "abandoned" ? outcome.reason : "").toContain("timed out");
+  });
+
   it("gates the whole cumulative diff, not just the round's increment", async () => {
     // The reviewer is looking at the cumulative diff, so that is what has to
     // stay inside the bound.
@@ -839,13 +932,22 @@ describe("the skill root", () => {
     expect(existsSync(root)).toBe(false);
   });
 
-  it("is removed even when a pass throws", async () => {
+  it("is removed even when the run throws", async () => {
     // The `finally`, and the reason it is one. Unplugging it leaves a
     // read-only directory per crashed run, which the next run for that ticket
     // then cannot overwrite — a failure that only shows up after a crash.
-    const { h } = harness({ recon: recon() });
+    //
+    // This used to throw by leaving a pass unscripted, which stopped working
+    // when `runPass` started catching those; the run returns `crashed` now and
+    // a `finally` is indistinguishable from a plain trailing statement on a
+    // path that returns. So the throw has to come from the layer `runPass`
+    // does *not* wrap — the shell — and it has to land after a pass has run,
+    // or there is no staged root recorded to go looking for.
+    const { h } = harness({ recon: recon(), fix: fix(), simplify: simplify() }, [
+      { match: saw("--numstat"), throws: "git died mid-diff" },
+    ]);
 
-    await expect(solveTicket(h.deps, request)).rejects.toThrow();
+    await expect(solveTicket(h.deps, request)).rejects.toThrow("git died mid-diff");
 
     const root = h.seen[0]?.options.skillRootPath ?? "";
     expect(root).not.toBe("");

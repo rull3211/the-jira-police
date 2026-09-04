@@ -147,6 +147,37 @@ describe("renderSolveComment", () => {
     expect(body).not.toContain("triage assessment was off");
   });
 
+  it("does not let a crash read like a verdict on the ticket", () => {
+    // The same defence as the `refused` test above, one step further out.
+    // `crashed` is the outcome most likely to be misread as "an agent tried and
+    // could not do it", and that misreading is expensive: it is a false data
+    // point about fitness, recorded against a run that gathered no evidence.
+    const body = renderSolveComment("SSX-1", {
+      kind: "crashed",
+      pass: "fix",
+      reason: "pass timed out after 900000ms",
+      worktree,
+    });
+
+    expect(body).toContain("did not finish");
+    expect(body).toContain("says nothing about whether the ticket is solvable");
+    expect(body).not.toMatch(/rejected it|would not judge it/u);
+  });
+
+  it("invents no correction for a run whose recon never returned", () => {
+    // `crashed` carries no `devLens` at all, and the pass that would have
+    // produced one is the pass that may have died. Silence is the honest
+    // reading; anything else is a fabricated row in the calibration record.
+    const body = renderSolveComment("SSX-1", {
+      kind: "crashed",
+      pass: "recon",
+      reason: "pass timed out after 900000ms",
+      worktree,
+    });
+
+    expect(body).not.toContain("triage assessment was off");
+  });
+
   it("signs itself with a sentinel that is not triage's", () => {
     const body = renderSolveComment("SSX-1", bailed(true));
 
@@ -205,6 +236,23 @@ describe("calibrationRow", () => {
     const row = calibrationRow("SSX-1", { kind: "no-worktree", reason: "nope" }, NOW);
 
     expect(row).toContain("| n/a |");
+  });
+
+  it("scores a crashed run as no reading, not as a wrong one", () => {
+    // The calibration table is the scoreboard for the blind fitness call, and
+    // it is read by counting down the `Lens` column. Booking a harness timeout
+    // as `**wrong**` would make the assessment look worse the flakier the
+    // harness got — the one bias that would make the table argue for the
+    // opposite of the truth.
+    const row = calibrationRow(
+      "SSX-1",
+      { kind: "crashed", pass: "fix", reason: "pass timed out", worktree },
+      NOW,
+    );
+
+    expect(row).toContain("| n/a |");
+    expect(row).toContain("| crashed |");
+    expect(row).not.toContain("**wrong**");
   });
 
   it("stays one row when the correction contains newlines", () => {

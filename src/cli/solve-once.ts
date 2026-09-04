@@ -56,7 +56,7 @@
 import type { JiraClient } from "../jira/client.ts";
 import { logger } from "../logger.ts";
 import { type Settings, describeSettings, readSettings, withConfigErrors } from "../settings.ts";
-import { type SolveOutcome, type SolveRequest, solveTicket } from "../solve/orchestrator.ts";
+import { type SolveRequest, solveTicket } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import {
@@ -68,6 +68,7 @@ import {
   createTicketReader,
 } from "../wiring.ts";
 import { USAGE, parseSolveArgs, unavailable } from "./solve-args.ts";
+import { describeSolveOutcome, isFailureExit } from "./solve-outcome.ts";
 
 /**
  * Runs the four passes against one named ticket and reports what happened.
@@ -121,41 +122,10 @@ async function runSolver(
   const outcome = await solveTicket(createSolveRunDeps(settings), request);
   process.stdout.write(`\n${describeSolveOutcome(outcome)}\n`);
 
-  // A bail is a success — recon declining is the honest answer to a fitness
-  // call made without source access — so it must not set a failure code.
-  // `refused` and `failed` are different: something is wrong and a human should
-  // look. `no-worktree` means the run never started.
-  if (outcome.kind === "failed" || outcome.kind === "refused" || outcome.kind === "no-worktree") {
+  // Which outcomes count, and why, is `isFailureExit` — kept there rather than
+  // here so it can be tested without spawning this command.
+  if (isFailureExit(outcome)) {
     process.exitCode = 1;
-  }
-}
-
-/** One line an operator can act on, per outcome. */
-function describeSolveOutcome(outcome: SolveOutcome): string {
-  switch (outcome.kind) {
-    case "no-worktree": {
-      return `NO WORKTREE — the run never started: ${outcome.reason}`;
-    }
-    case "bailed": {
-      return `BAILED (this is a success) — recon declined: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
-    }
-    case "abandoned": {
-      return `ABANDONED — a pass declined mid-run: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
-    }
-    case "refused": {
-      return `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nWorktree kept at ${outcome.worktree.path}`;
-    }
-    case "failed": {
-      return `FAILED — ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
-    }
-    case "verified": {
-      return [
-        `VERIFIED — ${outcome.files} file(s), ${outcome.lines} line(s) changed.`,
-        `Commit would be: ${outcome.commit.subject}`,
-        `Nothing was pushed and nothing was written to Jira.`,
-        `Read the diff yourself: git -C ${outcome.worktree.path} diff ${outcome.worktree.branch}`,
-      ].join("\n");
-    }
   }
 }
 

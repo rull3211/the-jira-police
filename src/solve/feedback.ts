@@ -117,7 +117,21 @@ export function safeText(text: string): string {
  * finding with a stack trace about itself.
  */
 function lensOf(outcome: SolveOutcome): { accurate: boolean; correction: string } | null {
-  return outcome.kind === "no-worktree" ? null : (outcome.devLens ?? null);
+  // `crashed` joins `no-worktree` here for a different reason worth keeping
+  // straight: not that no pass ran, but that the pass which produces the lens
+  // may be the one that died. An absent correction is honest; a fabricated one
+  // would feed the fitness assessment evidence nobody gathered.
+  //
+  // Deleting the `crashed` clause kills no test, and the honest reason is that
+  // it cannot: `crashed` carries no `devLens` field, so `?? null` reaches the
+  // same answer by accident. What does catch it is `tsc` — the property does
+  // not exist on that member of the union, so the narrowing is load-bearing at
+  // compile time even though it is inert at run time. Recorded as mechanically
+  // enforced by the type checker rather than by a test, in the same spirit as
+  // the backstop notes in `worktree.ts` and `verify.ts`.
+  return outcome.kind === "no-worktree" || outcome.kind === "crashed"
+    ? null
+    : (outcome.devLens ?? null);
 }
 
 /**
@@ -149,6 +163,14 @@ function headline(outcome: SolveOutcome): string {
     }
     case "failed": {
       return `An agent made a change and this repository's own checks rejected it: ${safeText(
+        outcome.reason,
+      )}`;
+    }
+    case "crashed": {
+      // Phrased to be unmistakably about the harness. This is the outcome most
+      // likely to be misread as "the agent could not do it", which would put a
+      // false data point into the fitness assessment.
+      return `The ${outcome.pass} step did not finish, so nothing was judged and this says nothing about whether the ticket is solvable: ${safeText(
         outcome.reason,
       )}`;
     }

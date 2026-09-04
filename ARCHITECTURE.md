@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1258 tests, no build step, no deployment
+Status: running end to end against production Jira. 1283 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -940,12 +940,48 @@ already in §11 and got its most expensive demonstration here: **a fixture that 
 code proves the two agree, and nothing else.** Running it once was worth more than the five
 hundred tests written since the last time anything ran.
 
-Two known defects remain open, both recorded rather than fixed:
+Of the two defects that were left open when the above was written, one is now fixed:
 
-- **A pass timeout kills the process.** `passes.run` throws on timeout and `solveTicket` has no
-  `try` around it — the two `try` blocks in `orchestrator.ts` are both for skill-root cleanup.
-  Fatal for the daemon phase and harmless while a person is typing the command, which is why it
-  is acceptable now and a blocker for E.
+- **A pass timeout used to kill the process.** `passes.run` throws two ways — `runSession`
+  rejects on a timeout or a non-zero exit, and the parsers throw `SolveParseError` when the
+  model's output contradicts itself — and neither was caught. A solve is a long-running job
+  holding a worktree, so the throw took the process down and orphaned the worktree.
+
+  Fixed by `runPass`, which converts both into the same thing, because the caller's decision is
+  identical: **no verdict was reached.** Which of the two it was survives in the reason string.
+  It produces a new outcome kind, `crashed`, rather than another `refused` stage, so that every
+  exhaustive `switch` had to be edited to admit it — and each of those edits is a place where
+  the difference between "no verdict" and "a verdict of no" had to be decided deliberately:
+
+  |                       | what `crashed` does                                                |
+  | --------------------- | ------------------------------------------------------------------ |
+  | ticket comment        | says the step did not finish and that this says nothing about the ticket's solvability |
+  | calibration record    | scores the lens `n/a`, never `**wrong**`                             |
+  | shell exit code       | `1` — nothing was learned, at full cost                              |
+  | `devLens`             | absent from the type, because the pass that produces it may be the pass that died |
+
+  The calibration row is the sharpest of the four. Booking a harness timeout as a wrong fitness
+  call would make the triage assessment look worse the flakier the harness got, which is the one
+  bias that would make the scoreboard argue for the opposite of the truth.
+
+  The review round is the deliberate exception: a dead review pass returns `abandoned`, not
+  `crashed`, because by then a pull request exists, so there is a human on the other end and
+  somewhere to put the reason.
+
+  Two things the fix does **not** do. `runPass` wraps `passes.run` only — a throw from git, from
+  the verification steps or from the worktree layer still propagates, which is why
+  `solveTicket`'s skill-root cleanup is still a `finally` and why the test for it now has to
+  make *the shell* fail rather than a pass. And the process still dies if the throw comes from
+  there; bounding that is Phase E's problem, not this one's.
+
+  This also cost the CLI's outcome reporting its excuse for being untested. `solve-once.ts` ends
+  in a top-level `await`, so importing it runs the command, and the exit-code rule had therefore
+  never been exercised — the `crashed` clause could be deleted and every test still passed.
+  Split into `src/cli/solve-outcome.ts`, the same move `solve-args.ts` made earlier and for the
+  same reason.
+
+One defect remains open, recorded rather than fixed:
+
 - **`removeWorktree` is never called.** The prose below says a failed run's worktree is kept and
   implies a successful one is removed. Nothing removes either. The prose is the part that is
   wrong; see the note under "Never a protected branch".
@@ -1285,6 +1321,26 @@ verifying almost nothing, so instead the undeclared case is _reported_: `version
 version that actually ran and points at a CI pin as the first thing to check. Diagnosing this the
 first time took four runs and a detour through someone else's `package.json`; the refusal now says
 in one line what that cost an afternoon.
+
+**Verification needs registry credentials, and that is an architectural constraint, not a
+detail.** The install step is the first thing in this whole service that talks to a package
+registry, and the pilot repository's dependencies are private GitHub Packages. So a solve can
+fail for a reason that has nothing to do with the ticket, the model or the repository: an expired
+PAT, or one that was never SSO-authorised for the org. Both were hit while getting the first run
+through, and they present differently — `401 unauthenticated` for the expired token, `403 …
+protected by organization SAML enforcement` for the unauthorised one.
+
+Diagnosing it was harder than it should have been because **a warm pnpm store hides a dead
+token**. pnpm keeps its content-addressable store per major version (`store/v3` for pnpm 9,
+`store/v11` for pnpm 11), so installs that resolve entirely from a warm store make no network
+request at all and succeed with credentials that would be rejected. Switching pnpm major version
+switched to a cold store, and that is what finally surfaced the 401 — the token had in fact been
+expiring for some time, silently, behind a cache.
+
+The consequence for the phases: this is fine for the daemon, which runs as the user's own process
+and inherits `~/.npmrc`, and fine for hand-driving. It is not fine for anything that would run
+this in CI or as another user, and it means a `refused` at the install step should always be read
+as "check the credential" before it is read as anything about the code.
 
 The known limitation is stated rather than solved: if the base itself is already failing lint or
 typecheck, every run on that repository fails through no fault of the solver. Proving otherwise
