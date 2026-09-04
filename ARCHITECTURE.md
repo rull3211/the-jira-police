@@ -668,9 +668,9 @@ with a note saying where it came from.
 
 ## 12. Local divergence from upstream
 
-`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Three local
-changes.** The first two are to §11's label-reconciliation list; the third is to §1's ingest and is
-the only one that changes what the skill reads:
+`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Four local
+changes.** The first three are to §11's label-reconciliation list; the fourth is to §1's ingest and
+is the only one that changes what the skill reads:
 
 1. **`next:*`.** Skill vocabulary — the same file defines
    `next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead` — and no human sets
@@ -680,7 +680,30 @@ the only one that changes what the skill reads:
    of the namespace is not the skill's: see the security boundary in §3. This is the first
    namespace shared with a writer other than the skill, so the list is narrower than a prefix.
 
-3. **Comments are read.** §1 now passes `comment` in the `getJiraIssue` field list and §8 scores
+3. **The taxonomy namespaces — `team:`, `jira:`, `domain:`, `svc:`, `value:`, `effort:` — but only
+   as a swap.** §11's removal list named the skill's *assessments* and not its *facts*, while the
+   skill's label vocabulary (`INTAKE_INSTRUCTIONS.md`, "Labels") sets both. The asymmetry: a
+   re-triage could revise its verdict freely and could never revise a fact. A ticket re-routed to
+   another squad kept the old `team:` beside the new one; a corrected `svc:` left two, which
+   `repoFromLabels` reads as ambiguous and resolves to `null`, taking the ticket out of the solve
+   queue entirely. The skill was the only writer of those labels and the only party unable to fix
+   them.
+
+   They are a **second tier** rather than six more entries in `OWNED_LABEL_NAMESPACES`, because the
+   two kinds fail differently. A missing `dor:` label is a verdict not yet reached. A missing `svc:`
+   is a fact deleted — and the value it decides is which repository a solver may write to. So
+   `REVISABLE_LABEL_NAMESPACES` permits removal only when the same mutation adds at least one label
+   in the same namespace: a replacement, never a bare deletion. A wrong new value is a wrong label
+   the next re-triage corrects; a bare deletion is a hole nothing notices, because the ticket then
+   reads as one that was never triaged. "At least one" and not "exactly one", since `team:` is
+   legitimately multi-valued on dual-owned repos.
+
+   **`impl-uncertain` stays unremovable**, and that is a known limitation rather than an oversight.
+   It is a bare label, not a namespaced one, so there is no namespace for a replacement to arrive in
+   and nothing for the swap rule to check — a ticket whose implementation site later becomes clear
+   keeps it. Fixing that means naming a literal, which is a different decision from this one.
+
+4. **Comments are read.** §1 now passes `comment` in the `getJiraIssue` field list and §8 scores
    DoR against comments as well as the body. Upstream reads the description only, which broke the
    skill's own send-back loop: §11 asks the reporter for what is missing and invites them to
    "reply here", and a reply landed in the one channel the next run could not hear. The re-run
@@ -757,13 +780,18 @@ the only one that changes what the skill reads:
    design already assumed as much in the places that count — the human gate, the recon bail, and
    the dry phase that produced this observation instead of a pull request.
 
-The gate's `OWNED_LABEL_NAMESPACES` must **match §11 exactly, not be a superset**. A gate looser
-than the contract it enforces has a hole in it. Widen it only by widening §11 first — and tell
-Jacob, because neither divergence is upstream yet.
+Both of the gate's lists must **match §11 exactly, not be a superset**. A gate looser than the
+contract it enforces has a hole in it. Widen either only by widening §11 first — and tell Jacob,
+because none of the divergences is upstream yet.
 
-`agent:` is the one entry where the namespace list alone is looser than §11, so it carries a second
-check (`TRIAGE_OWNED_AGENT_LABELS`) rather than being expressed as a prefix. If a future namespace
-is likewise only partly owned, copy that shape rather than widening the prefix list.
+Two entries are looser as a bare prefix than §11 allows, and each carries a second check rather than
+being widened or dropped:
+
+- `agent:` is only partly owned, so `TRIAGE_OWNED_AGENT_LABELS` narrows it to the one label triage
+  writes. If a future namespace is likewise only partly owned, copy that shape.
+- The six `REVISABLE_LABEL_NAMESPACES` are owned but not freely removable, so removal is conditional
+  on a same-namespace add. If a future namespace holds a fact rather than an assessment, copy that
+  shape instead — the test is whether "absent" is a state the ticket may legitimately be in.
 
 ---
 
