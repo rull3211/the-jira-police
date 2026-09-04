@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1004 tests, no build step, no deployment
+Status: running end to end against production Jira. 1258 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -25,14 +25,17 @@ A **second queue** exists alongside grooming: tickets a triage assessment marked
 tickets and reports the exact label edit it _would_ make, and the cycle that runs it holds no
 function capable of making it.
 
-Everything past that queue — the claim, the worktree, the four model passes, the diff bound, the
-verification, the commit, the pull request, the review round-trip — is **built, tested, and wired
-to nothing**. No entry point constructs a `CommandRunner`, a `PassRunner` or a
-`ClaimCapabilities`, so no code path in this repository can reach any of it: the inertness is a
-fact about the composition rather than a promise made in a comment, and granting it is an edit to
-a wiring function, which is where a reviewer looks. Building a capability and granting it are kept
-as separate commits on purpose. See §4 for the queue, §15 for the pipeline, and §13 for what is
-genuinely absent. Nothing runs any of it from the daemon; `pnpm start` is the grooming loop only.
+Past that queue the picture is no longer uniform, and the split is worth stating precisely because
+it used to be a single sentence. **The solver runs.** `pnpm solve:once <KEY> --solve` composes a
+`CommandRunner` and a `PassRunner` and drives the whole first half — worktree, four model passes,
+diff bound, mechanical verification — against a real repository. It has done so, by hand, and §15
+records what that cost. **Everything else is still wired to nothing**: the claim
+(`ClaimCapabilities`), the commit, the pull request and the review round-trip are built, tested,
+and constructed by no entry point. That inertness is a fact about the composition rather than a
+promise made in a comment, and granting it is an edit to a wiring function, which is where a
+reviewer looks. Building a capability and granting it are kept as separate commits on purpose.
+See §4 for the queue, §15 for the pipeline, and §13 for what is genuinely absent. Nothing runs any
+of it from the daemon; `pnpm start` is the grooming loop only.
 
 ---
 
@@ -866,7 +869,16 @@ Things that look like details and are not:
     "does it have a default" but "does silence widen or narrow what the service may touch."
 11. **Every label write is read-modify-write, and must be verified after the fact.** The
     available write path — MCP `editJiraIssue` — exposes only `fields`, never Jira's
-    `update.labels.add`/`remove`. There is no compare-and-swap and no way to touch one label in
+    `update.labels.add`/`remove`. **Probed 2026-09-04 and closed as a known limitation rather than
+    an open question:** the tool's input schema has one field for issue data, `fields`, and is
+    `additionalProperties: false`, so there is no `update` key to pass and no argument that would
+    be honoured if there were. The constraint is structural in the tool surface, not a gap in how
+    we call it. Jira's REST API does support `update.labels.remove`, and using it would mean the
+    label write travelling on the REST credential — which the standing rule reserves for discovery,
+    and which `JiraClient` enforces by having no public write method at all. So closing this hole
+    is a decision about that rule, not a plumbing change, and until someone makes that decision
+    read-back-and-verify is the whole of the mitigation. `claim.ts` documents the same finding at
+    its head and implements it. There is no compare-and-swap and no way to touch one label in
     isolation: the whole field is replaced. Two consequences. Concurrent claims cannot be
     prevented, only made unlikely (`MAX_CONCURRENT_SOLVES=1`, one host). And any label added by
     anyone between the read and the write is silently dropped — a PM adding `next:to-trio` while
@@ -899,10 +911,50 @@ Things that look like details and are not:
 
 ## 15. The solve pipeline
 
-Everything below is built and tested and **has never run**. It is documented here rather than in
-§13 because "not built" and "built, and reachable from nowhere" call for completely different
-things from a reader: the first is a design to argue with, the second is code to review. What is
-still missing is listed in §13; what it _does_ is here.
+Everything below is built and tested. The first half **has now run**, by hand, against a real
+repository; the second half has not, and is reachable from nowhere. That split is documented here
+rather than in §13 because "not built" and "built, and reachable from nowhere" call for completely
+different things from a reader: the first is a design to argue with, the second is code to review.
+What is still missing is listed in §13; what it _does_ is here.
+
+<a id="what-running-it-cost"></a>
+
+### What running it cost
+
+Four solve attempts against one ticket, 2026-09-04. Each got further than the last, and **each
+surfaced a defect that 1245 passing tests did not** — which is the finding, more than any of the
+individual bugs:
+
+| #   | Defect                                                                 | Why no test caught it                                                     |
+| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 1   | `/agent-solve` resolved to nothing from the worktree                   | no test ran a pass from a foreign working directory                       |
+| 2   | `simplify` handed a `--numstat` where the prompt said "diff"           | one function served two callers; the test asserted the value it was given |
+| 3   | the diff gate could not see created files                              | the harness fixture replied to `git diff`; real git has an index          |
+| 4   | an honest "I gave up after touching something" was rejected as invalid | the guard was tested against its own premise                              |
+| 5   | no bail reason was ever logged anywhere                                | nothing asserts on the absence of a log line                              |
+
+Two of the five (2 and 4) were guards behaving exactly as unit-tested while being wrong about
+reality, and two (1 and 3) were the harness's own test doubles agreeing with the code and
+disagreeing with the world — §11's second rule, met again in a new place. The general lesson is
+already in §11 and got its most expensive demonstration here: **a fixture that agrees with the
+code proves the two agree, and nothing else.** Running it once was worth more than the five
+hundred tests written since the last time anything ran.
+
+Two known defects remain open, both recorded rather than fixed:
+
+- **A pass timeout kills the process.** `passes.run` throws on timeout and `solveTicket` has no
+  `try` around it — the two `try` blocks in `orchestrator.ts` are both for skill-root cleanup.
+  Fatal for the daemon phase and harmless while a person is typing the command, which is why it
+  is acceptable now and a blocker for E.
+- **`removeWorktree` is never called.** The prose below says a failed run's worktree is kept and
+  implies a successful one is removed. Nothing removes either. The prose is the part that is
+  wrong; see the note under "Never a protected branch".
+
+And one non-defect worth recording, because diagnosing it wrongly was itself instructive: a run
+appeared to hang for thirty minutes in `recon`. It was not API slowness. **The laptop was
+closed.** `SOLVE_TIMEOUT_MS` bounds elapsed wall-clock time, not time the process spent running,
+so suspending the machine spends the budget. Anything later that treats a timeout as evidence
+about the model has to survive that.
 
 ```
   worktree      cut from origin/<base> after a fetch, on a fresh work branch
@@ -961,6 +1013,32 @@ nothing here should be read as mechanically enforced. It matters less in this di
 solve passes are given no MCP server at all (`requiredMcpServers: []` in `passes.ts`), because a
 solve pass reads the ticket as text handed to it and has no reason to hold a connection to
 something it could also write through.
+
+### The skill root
+
+`skill-root.ts` exists because of defect 1 above, and the shape of the fix is the interesting part.
+
+Every pass sends `/agent-solve <KEY> --<pass>` as its first line. The skill lives in _this_
+repository; the pass runs with its working directory set to the worktree, deliberately, because
+that is `passes.ts`'s first containment property. Claude Code discovers skills from the working
+directory and from `--add-dir`, and neither pointed here — so all four passes would have shipped
+sending a slash command that resolved to nothing. Probed from a foreign directory:
+`Unknown command: /agent-solve`.
+
+The obvious fix is `--add-dir <the-jira-police>`, and it is the wrong one. The same probe
+established that `--add-dir` plus a pre-approved `Write` is write access to everything in the
+added directory — so making the skill readable that way would hand every pass this service's own
+source, its settings and its gates, which is the one directory a solve pass must not be able to
+edit. Instead the harness copies the two skill files into a throwaway directory, adds _that_, and
+deletes it afterwards. The pass gets exactly the text it needs to resolve the command and no path
+back to the repository that wrote it.
+
+Worth generalising: the failure was not that a guard was missing but that **a string was assumed
+to resolve**. Nothing in the type system distinguishes a slash command that dispatches from one
+that is echoed as prose, and no unit test noticed because none of them ran a pass from anywhere
+but this repository's root. The class is the same as §14.12 — an intention with no mechanism under
+it — and the tell was identical: prose describing a skill-driven pipeline, behaviour sending a
+dead string.
 
 **The harness half is `CommandRunner`, and `exec.ts` is its only real implementation.** Every
 other module in `src/solve/` takes one and was written and committed without granting anything;
@@ -1085,6 +1163,13 @@ diff is the evidence a human needs to decide whether the ticket was mis-assessed
 refuses because the worktree is dirty, that is git reporting uncommitted work at a point where
 there should be none.
 
+**That paragraph describes an intention, not the behaviour.** `removeWorktree` is written, tested
+and called by nothing — `solveTicket` leaves every worktree behind, successful or not. The
+practical effect today is disk use and a pile of stale branches on the pilot repository, so it is
+recorded here rather than rushed; the reason it belongs in this document at all is that the two
+sentences above read as a description of a cleanup policy that does not exist. Left as-is, the
+next person to hit a full disk would go looking for a bug in the removal logic.
+
 ### The diff gate
 
 `diff-gate.ts` is `assertPostable` for code — a mechanical check between the model finishing and
@@ -1166,6 +1251,24 @@ One outcome is assigned against intuition on purpose: **a timed-out step is a fa
 refusal.** It ran, it did not pass in the time allowed, and a hang is a plausible thing for a bad
 fix to cause; the other reading is the one that lets an infinite loop through. Conversely a failed
 `install` is a refusal, because nothing was verified and so there is nothing to have failed.
+
+**The package manager's _version_ is discovered from nothing, and that is the limitation the first
+real run hit.** `packageManagerOf` reads `packageManager` from the manifest, splits on `@`, keeps
+the name and discards the version — and when the field is absent, as it is on the pilot
+repository, returns the default name and lets `PATH` decide which binary that is. On this machine
+`PATH` gives pnpm 11; the pilot repo pins pnpm 9 in CI, its lockfile is `lockfileVersion: 9.0`,
+and pnpm 11 no longer reads the `pnpm.overrides` block that lockfile was generated from. So
+`install` died and no verdict was reached.
+
+The outcome was right — `refused`, not `failed`, exactly as the table above requires, and the
+solver's change was never blamed for a toolchain mismatch. But note what the repository's own
+declarations say: `engines.pnpm` is `">=9"`, which pnpm 11 satisfies, while the configuration only
+works on 9. **The machine-readable claim and the machine-readable behaviour disagree, in someone
+else's repository** — the same defect class this service exists to catch, found by running against
+it. Two honest fixes exist and they are not equivalent: the repository can declare the toolchain it
+actually needs (`packageManager`, or a narrower `engines.pnpm`), or this harness can stop treating
+"which pnpm" as a property of `PATH`. The first is a one-line change to a repository we do not own;
+the second is the general fix and is not written.
 
 The known limitation is stated rather than solved: if the base itself is already failing lint or
 typecheck, every run on that repository fails through no fault of the solver. Proving otherwise
@@ -1251,12 +1354,20 @@ undercounts its own passes is a poor thing to leave lying around in this reposit
 
 ### What is inert, and why that is the plan
 
-`orchestrator.ts`, `delivery.ts`, `passes.ts`, `pr.ts`, `exec.ts` and `claim.ts` are all built,
-all tested, and **constructed by nothing**. There is no code path from `src/index.ts` or from any
-`src/cli/` entry point to `solveTicket`, `publish`, `advance` or `claimTicket`, because nothing
-builds the `CommandRunner`, `PassRunner` or `ClaimCapabilities` they require. `pnpm start` is the
-grooming loop and `pnpm solve:once` is the dry queue report; between them that is everything this
-service can currently do.
+`orchestrator.ts`, `passes.ts` and `exec.ts` are now **wired**: `createSolveRunDeps` builds the
+`CommandRunner` and the `PassRunner`, and `pnpm solve:once <KEY> --solve` reaches `solveTicket`.
+That was phase C's privilege grant and it is a real one — this process can now write files in
+another repository's worktree and run `git`, `gh` and a package manager. `delivery.ts`, `pr.ts`
+and `claim.ts` remain **constructed by nothing**: no entry point builds a `ClaimCapabilities`, so
+no code path here can edit a label, open a pull request or push.
+
+**The ladder is not cumulative, and the asymmetry is deliberate rather than an oversight.**
+`--claim` refuses while `--solve` runs, which reads backwards until you see what each flag grants:
+`--solve` writes to a scratch worktree that a human then inspects, and `--claim` writes to the
+shared board. The privileges are not ordered by how far down the pipeline they sit, so the flags
+are not either. `unavailable()` in `solve-args.ts` says so in the refusal text itself, and each
+refusal names the structural reason — which function was not composed — rather than a policy, so
+the claim is checkable by reading `wiring.ts` instead of trusted.
 
 That is a deliberate phase ordering and not an oversight. Each capability was built and reviewed
 before it was granted, and the grant is a separate commit in each case — which is only meaningful
