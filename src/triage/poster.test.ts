@@ -12,6 +12,7 @@ vi.mock("./session.ts", async (importOriginal) => ({
 }));
 
 const {
+  POSTER_DENIED_TOOLS,
   POSTER_TOOLS,
   PostError,
   buildPostArgs,
@@ -198,6 +199,29 @@ describe("buildPostArgs", () => {
     const args = buildPostArgs(options());
 
     expect(args[args.indexOf("--allowedTools") + 1]).toBe(POSTER_TOOLS.join(","));
+  });
+
+  it("withholds the shell from the one component allowed to write", () => {
+    // The poster is supposed to mutate Jira, so it cannot be denied by being
+    // given nothing. What it must not have is a second route: Bash means curl,
+    // and curl means the whole REST API, including the status transition the
+    // prompt promises never to make.
+    const args = buildPostArgs(options());
+    const denied = (args[args.indexOf("--disallowedTools") + 1] ?? "").split(",");
+
+    expect(denied).toContain("Bash");
+    expect(denied).toContain("Write");
+    expect(denied).toContain("Edit");
+  });
+
+  it("does not deny the writes it exists to perform", () => {
+    // The failure this catches is silent and total: deny `editJiraIssue` and
+    // every post still "succeeds", having written nothing, because the poster
+    // reports what it did and what it did is now nothing. Cheaper to assert
+    // than to discover on the board.
+    const overlap = POSTER_DENIED_TOOLS.filter((tool) => POSTER_TOOLS.includes(tool));
+
+    expect(overlap).toEqual([]);
   });
 
   it("gives it no extra working directory", () => {

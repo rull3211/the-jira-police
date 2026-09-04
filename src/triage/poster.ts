@@ -27,7 +27,7 @@
 import { logger } from "../logger.ts";
 import { childEnv } from "./runner.ts";
 import type { Mutation } from "./runner.ts";
-import { runSession } from "./session.ts";
+import { DENIED_BUILTIN_TOOLS, runSession } from "./session.ts";
 
 /**
  * Read tools the write genuinely needs, and no others.
@@ -48,10 +48,14 @@ const POSTER_READ_TOOLS: readonly string[] = [
  * The write tools, exactly as named in §11.
  *
  * Conspicuously absent: `transitionJiraIssue`. The skill promises never to
- * change status — "not after a `y`, not for a close-as-duplicate" — and
- * withholding the tool turns that promise into something the service enforces
- * rather than something it trusts. Absent too is every tool the analyst uses to
- * form a view: no `search`, no Confluence, no filesystem.
+ * change status — "not after a `y`, not for a close-as-duplicate" — and this
+ * list was described as turning that promise into something the service
+ * enforces rather than something it trusts. It did not: absence from
+ * `--allowedTools` denies nothing (see `DENIED_BUILTIN_TOOLS`). The name is now
+ * also in `POSTER_DENIED_TOOLS`, which is where enforcement would come from if
+ * MCP names are honoured there — unverified, so read the promise as trusted,
+ * not enforced. Absent too is every tool the analyst uses to form a view: no
+ * `search`, no Confluence, no filesystem.
  */
 const POSTER_WRITE_TOOLS: readonly string[] = [
   "mcp__atlassian__editJiraIssue",
@@ -60,6 +64,24 @@ const POSTER_WRITE_TOOLS: readonly string[] = [
 ];
 
 export const POSTER_TOOLS: readonly string[] = [...POSTER_READ_TOOLS, ...POSTER_WRITE_TOOLS];
+
+/**
+ * Tools withheld from the poster.
+ *
+ * The poster is the one component that is *supposed* to write, so this is
+ * narrower than the analyst's list — but it still has no business touching the
+ * filesystem or a shell, and the header's claim that it has "no means of
+ * researching an alternative" was resting on an allowlist that denies nothing.
+ * `Bash` alone would have given it `curl`, and therefore the whole Jira API.
+ *
+ * `transitionJiraIssue` and `createJiraIssue` are listed on the same reasoning
+ * as the analyst's Atlassian entries, and with the same caveat: unverified.
+ */
+export const POSTER_DENIED_TOOLS: readonly string[] = [
+  ...DENIED_BUILTIN_TOOLS,
+  "mcp__atlassian__transitionJiraIssue",
+  "mcp__atlassian__createJiraIssue",
+];
 
 /**
  * What the poster reports back.
@@ -194,6 +216,9 @@ export function buildPostArgs(options: PostOptions): string[] {
     "dontAsk",
     "--allowedTools",
     POSTER_TOOLS.join(","),
+    // The allowlist above pre-approves; only this withholds.
+    "--disallowedTools",
+    POSTER_DENIED_TOOLS.join(","),
     "--json-schema",
     JSON.stringify(POST_SCHEMA),
   ];

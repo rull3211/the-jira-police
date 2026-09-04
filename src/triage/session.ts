@@ -18,6 +18,35 @@ import { spawn } from "node:child_process";
 
 import { logger } from "../logger.ts";
 
+/**
+ * Tools withheld from every run this service starts, by name.
+ *
+ * This exists because `--allowedTools` does not do what three comments in
+ * `runner.ts` and one in `poster.ts` said it did. Probed against the local arg
+ * parser 2026-09-04, four ways:
+ *
+ *   --permission-mode dontAsk --allowedTools "Bash(git status:*)"  → both a
+ *       scoped and an unscoped git command ran
+ *   --permission-mode dontAsk --allowedTools "Read"                → Bash ran
+ *   --allowedTools "Read" (no permission-mode at all)              → Bash ran
+ *   the same, from /tmp rather than this repo                      → Bash ran
+ *
+ * So `--allowedTools` is an auto-approve list, not an allowlist: naming a tool
+ * pre-approves it, and omitting a tool restricts nothing. Under `dontAsk`
+ * everything is pre-approved regardless, which is the mode this service uses.
+ * Every triage run it has ever made had `Bash`, `Write` and `Edit` available.
+ *
+ * `--disallowedTools` is the mechanism that actually restricts, and it does it
+ * in the strongest available form — the tool never appears in the model's tool
+ * list, so there is no call to permit or deny. A run given
+ * `--disallowedTools "Bash,Write,Edit"` reported `bash=NO write=NO read=YES`,
+ * which also confirms the comma-separated form parses.
+ *
+ * Keep both flags. The allowlist still suppresses prompts and still documents
+ * intent; it simply is not the guard, and must never again be described as one.
+ */
+export const DENIED_BUILTIN_TOOLS: readonly string[] = ["Bash", "Write", "Edit", "NotebookEdit"];
+
 export class SessionError extends Error {}
 
 /** An MCP server the run depends on was not connected. */

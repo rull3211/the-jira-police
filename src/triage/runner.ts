@@ -48,7 +48,7 @@
 import { logger } from "../logger.ts";
 import type { Verdict } from "../output/sink.ts";
 import { TRIAGE_SCHEMA, TRIAGE_SCHEMA_JSON } from "./schema.ts";
-import { runSession } from "./session.ts";
+import { DENIED_BUILTIN_TOOLS, runSession } from "./session.ts";
 
 // Re-exported so callers and tests that reason about a triage run keep a single
 // import. The machinery moved to `session.ts` when the poster began sharing it;
@@ -59,7 +59,13 @@ export {
   assertMcpReady,
 } from "./session.ts";
 
-/** Tools the skill legitimately needs. Anything absent here will not run. */
+/**
+ * Tools the skill legitimately needs, pre-approved so the run never stalls.
+ *
+ * This list does NOT restrict anything — omission from it is not denial. See
+ * `DENIED_BUILTIN_TOOLS` in `session.ts` for the probe that established that,
+ * and `ANALYST_DENIED_TOOLS` below for the list that does the restricting.
+ */
 export const ALLOWED_TOOLS: readonly string[] = [
   "mcp__atlassian__getJiraIssue",
   "mcp__atlassian__searchJiraIssuesUsingJql",
@@ -76,6 +82,31 @@ export const ALLOWED_TOOLS: readonly string[] = [
   "Read",
   "Grep",
   "Glob",
+];
+
+/**
+ * Tools withheld from the analyst.
+ *
+ * The header says this half "never writes to Jira" and that there is
+ * "deliberately no write path here any more". Until 2026-09-04 both sentences
+ * rested on `--allowedTools`, which enforces nothing; they now rest on this.
+ *
+ * The four built-ins are verified withheld. The Atlassian mutators are listed
+ * on the same principle but are NOT verified: a bare `storecode -p` run has no
+ * MCP server connected, so the probe that would distinguish "denied" from
+ * "absent" returned `edit=NO get=NO` and proved nothing either way. Listing
+ * them cannot hurt — an unrecognised name is inert — but nobody should read
+ * this list as evidence that the analyst is mechanically unable to edit a Jira
+ * issue. What keeps it from doing so today is still `--no-write` in the prompt
+ * plus the fact that `gate.ts` sits between it and the poster.
+ */
+export const ANALYST_DENIED_TOOLS: readonly string[] = [
+  ...DENIED_BUILTIN_TOOLS,
+  "mcp__atlassian__editJiraIssue",
+  "mcp__atlassian__addCommentToJiraIssue",
+  "mcp__atlassian__createJiraIssue",
+  "mcp__atlassian__transitionJiraIssue",
+  "mcp__atlassian__createIssueLink",
 ];
 
 /** MCP servers that must report `connected` before the run is trusted. */
@@ -110,8 +141,13 @@ export interface TriageRunOptions {
   readonly vaultPath?: string;
   /**
    * Suppresses the HTML roll-up dashboard the skill otherwise writes after
-   * every run. This service has a sink of its own, and `Write` is not a tool
-   * the run is granted — so left on, it ends every run with a denied call.
+   * every run. This service has a sink of its own, and `Write` is withheld by
+   * `ANALYST_DENIED_TOOLS` — so left on, it ends every run with a denied call.
+   *
+   * Note that until 2026-09-04 `Write` was *not* in fact withheld, only absent
+   * from the allowlist, which denied nothing. Every run made with `noHtml`
+   * unset could have written that dashboard to disk and, as far as this service
+   * can tell after the fact, some of them did.
    */
   readonly noHtml?: boolean;
   /**
@@ -299,12 +335,13 @@ export function buildPrompt(options: TriageRunOptions): string {
 }
 
 /**
- * The tool allowlist for a run.
+ * The tools pre-approved for a run.
  *
- * No write tool appears here or in anything this function can return by
- * default. The prompt already says `--no-write`, so this is belt and braces —
- * but the belt is a sentence in a prompt the model could misread, and the
- * braces are a permission check it cannot.
+ * The metaphor this comment used to reach for was belt and braces: the prompt
+ * says `--no-write`, and the permission check catches the model misreading it.
+ * The braces were not attached. Omitting a write tool from this list never
+ * denied it — that is `ANALYST_DENIED_TOOLS`, passed alongside as
+ * `--disallowedTools`, and it is the reason the sentence is safe to make now.
  */
 export function toolsFor(options: TriageRunOptions): readonly string[] {
   return options.allowedTools ?? ALLOWED_TOOLS;
@@ -322,6 +359,10 @@ export function buildArgs(options: TriageRunOptions): string[] {
     "dontAsk",
     "--allowedTools",
     toolsFor(options).join(","),
+    // Not a duplicate of the line above. The allowlist pre-approves; only this
+    // withholds. See DENIED_BUILTIN_TOOLS for the probe.
+    "--disallowedTools",
+    ANALYST_DENIED_TOOLS.join(","),
     ...(vaultPath === "" ? [] : ["--add-dir", vaultPath]),
     "--json-schema",
     TRIAGE_SCHEMA_JSON,

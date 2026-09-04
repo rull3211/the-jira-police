@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { DENIED_BUILTIN_TOOLS } from "./session.ts";
 import {
   ALLOWED_TOOLS,
+  ANALYST_DENIED_TOOLS,
   McpUnavailableError,
   type Mutation,
   TriageContradictionError,
@@ -141,9 +143,10 @@ describe("buildArgs", () => {
 
 describe("toolsFor", () => {
   it("grants the analyst no way to mutate a ticket", () => {
-    // The prompt already says --no-write, but that is a sentence the model
-    // could misread. This is a permission check it cannot. Every one of these
-    // is a tool the old write-enabled run was granted.
+    // Every one of these is a tool the old write-enabled run was granted.
+    // Note this asserts only that they are not PRE-APPROVED. Absence from the
+    // allowlist is not denial — that is what `--disallowedTools` is for, and it
+    // is asserted separately below.
     const granted = toolsFor(BASE).join(" ");
 
     for (const tool of [
@@ -167,6 +170,50 @@ describe("toolsFor", () => {
   it("reaches the command line", () => {
     const args = buildArgs(BASE);
     expect(args[args.indexOf("--allowedTools") + 1]).toBe(ALLOWED_TOOLS.join(","));
+  });
+});
+
+describe("the analyst denylist", () => {
+  // Probed 2026-09-04: --allowedTools pre-approves, it does not restrict. A run
+  // given `--allowedTools Read` used Bash, inside this repo and outside it. So
+  // every guarantee this file makes about what the analyst cannot do rests on
+  // these args and not on the allowlist above.
+
+  it("withholds the shell and both write tools", () => {
+    const args = buildArgs(BASE);
+    const denied = (args[args.indexOf("--disallowedTools") + 1] ?? "").split(",");
+
+    // Bash is the load-bearing one: with a shell the run has curl, and with
+    // curl it has the whole Jira REST API regardless of which MCP tools exist.
+    expect(denied).toContain("Bash");
+    expect(denied).toContain("Write");
+    expect(denied).toContain("Edit");
+  });
+
+  it("withholds them even when the caller supplies its own allowlist", () => {
+    // The mock skill passes `allowedTools: []`. That must not be a way to end
+    // up with a run that is denied nothing, which is what would happen if the
+    // denylist were derived from the allowlist rather than fixed.
+    const args = buildArgs({ ...BASE, allowedTools: [] });
+
+    expect(args[args.indexOf("--disallowedTools") + 1]).toBe(ANALYST_DENIED_TOOLS.join(","));
+  });
+
+  it("never pre-approves a tool it also denies", () => {
+    // These two lists reach the same command line. A name in both is a
+    // contradiction the arg parser resolves silently, in a direction nobody
+    // here has checked — so it must not be reachable.
+    const overlap = ANALYST_DENIED_TOOLS.filter((tool) => ALLOWED_TOOLS.includes(tool));
+
+    expect(overlap).toEqual([]);
+  });
+
+  it("denies every built-in the shared list denies", () => {
+    // Guards against a future edit that rebuilds this list by hand and quietly
+    // drops one, which would be invisible: the run would simply succeed.
+    for (const tool of DENIED_BUILTIN_TOOLS) {
+      expect(ANALYST_DENIED_TOOLS).toContain(tool);
+    }
   });
 });
 
