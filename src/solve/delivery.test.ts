@@ -282,9 +282,57 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    expect(outcome).toMatchObject({ kind: "iterated", round: 1 });
+    expect(outcome).toMatchObject({ kind: "iterated", round: 1, reviewerRequested: true });
     expect(ran(h, "push")).toBe(true);
     expect(ran(h, "pr", "edit")).toBe(true);
+  });
+
+  // `publish` already treats a failed reviewer request as its own outcome.
+  // `advance` used to discard the same result while its type said "the reviewer
+  // was asked again", so the one caller that could act on it was never told.
+  it("reports that the re-request failed instead of claiming the reviewer was asked", async () => {
+    const h = harness({ review: review() }, [
+      {
+        match: saw("pr", "edit"),
+        reply: { exitCode: 1, stderr: "HTTP 403: Resource not accessible" },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    // Still an iterated round: the code is pushed and the pull request is
+    // healthy. Only the notification is missing, and a human can supply it.
+    expect(outcome).toMatchObject({ kind: "iterated", round: 1, reviewerRequested: false });
+    expect(ran(h, "push")).toBe(true);
+  });
+
+  it("does not undraft a pull request whose re-request failed", async () => {
+    // The dangerous reading of "the reviewer never came back" is to give up and
+    // mark it ready. There is no cursor over reviews, so a dropped re-request
+    // makes the next tick re-read the same comments; the loop must not convert
+    // that into an undraft on this round.
+    const h = harness({ review: review() }, [
+      { match: saw("pr", "edit"), reply: { exitCode: 1, stderr: "HTTP 403" } },
+    ]);
+
+    await advance(h.deps, advanceRequest);
+
+    expect(ran(h, "pr", "ready")).toBe(false);
+  });
+
+  it("reports the re-request on a round that answered without touching code", async () => {
+    // The no-change branch is a separate call site and was separately silent.
+    // `changed: false` is what routes there — a review that raised only
+    // questions, answered without an edit, so there is nothing to push.
+    const h = harness({ review: review({ changed: false }) }, [
+      { match: saw("pr", "edit"), reply: { exitCode: 1, stderr: "HTTP 403" } },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", reviewerRequested: false });
+    // Proves it took the no-change path rather than duplicating the test above.
+    expect(ran(h, "push")).toBe(false);
   });
 
   it("does not undraft while it is still iterating", async () => {

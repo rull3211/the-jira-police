@@ -755,8 +755,16 @@ before it, so the command line reads as the privilege escalation it is.
     response. Had it keyed off an approving state, the review loop would have waited forever on a
     reviewer that had already spoken.
 
-  Still open, and it genuinely needs one write: whether `gh pr edit --add-reviewer @copilot`
-  succeeds with this token's `repo` scope. Everything downstream of the request is now evidenced.
+  One sub-question genuinely needs a write and is **deliberately deferred to phase D** rather than
+  probed on a throwaway pull request: whether `gh pr edit --add-reviewer @copilot` succeeds with
+  this token's `repo` scope. Phase D opens a real draft pull request anyway, so the probe costs
+  nothing there and costs a junk PR in a team repo here. Deferring is safe because of _where_ the
+  answer lands: the reviewer request happens after the PR exists and before anything is undrafted,
+  so an insufficient scope surfaces as a loud failure on a draft that a human can finish by hand —
+  not as a silent skip. What phase D must therefore **not** do is treat a failed `--add-reviewer`
+  as a warning and carry on to `gh pr ready`: that would undraft a PR nobody has reviewed, turning
+  a missing scope into a merge candidate. Everything downstream of the request is already
+  evidenced above.
 
 - **`main` is protected, and that is a stronger backstop than the plan claimed.**
   `required_approving_review_count: 1` with `require_code_owner_reviews: true`. Since Copilot only

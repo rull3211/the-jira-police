@@ -175,8 +175,32 @@ export type AdvanceOutcome =
   | { readonly kind: "waiting" }
   /** The reviewer responded with nothing to act on. Undrafted. */
   | { readonly kind: "ready"; readonly rounds: number }
-  /** A round of feedback was resolved and pushed; the reviewer was asked again. */
-  | { readonly kind: "iterated"; readonly round: number; readonly responses: readonly string[] }
+  /**
+   * A round of feedback was resolved and pushed.
+   *
+   * `reviewerRequested` is separate from the round succeeding, and saying so is
+   * the point. This comment used to read "the reviewer was asked again" as
+   * though it were a fact about the round; the re-request result was discarded
+   * at both call sites, so it was a description of intent. `publish` already
+   * treats the same failure as its own outcome (`published-unreviewed`) on the
+   * grounds that a missing scope or an uninstalled app is not the pull
+   * request's fault and is recoverable by a human — `advance` now agrees with
+   * it instead of contradicting it.
+   *
+   * False matters because the loop has no cursor over reviews: it cannot tell a
+   * fresh response from the one it already handled. So a silently-dropped
+   * re-request does not stall visibly — the next tick re-reads the *same*
+   * comments, resolves them again, and burns rounds until the cap undrafts the
+   * pull request as `exhausted`. Surfacing the flag lets the caller say "pushed
+   * a fix, could not re-request review" on the ticket, which is the one message
+   * that gets a human to add the reviewer by hand.
+   */
+  | {
+      readonly kind: "iterated";
+      readonly round: number;
+      readonly responses: readonly string[];
+      readonly reviewerRequested: boolean;
+    }
   /**
    * The round cap was reached. Undrafted anyway, and the caller must say so on
    * the ticket — a human is now the only thing standing between this and a
@@ -243,6 +267,31 @@ export async function advance(
       : outcome;
   };
 
+  /**
+   * Asks the reviewer to look again, and reports whether that worked.
+   *
+   * Deliberately not a failure of the round. The code is pushed and the pull
+   * request is fine; what is missing is a notification, and the recovery is a
+   * human clicking the reviewer in. Returning `failed` here would discard a
+   * completed round of work over that.
+   */
+  const reRequest = async (): Promise<boolean> => {
+    const asked = await requestReview(commands, {
+      ...gh,
+      ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
+    });
+    if (asked.outcome === "failed") {
+      logger.warn("solve.review.rerequest_failed", {
+        issueKey: worktree.issueKey,
+        number,
+        round,
+        reason: asked.reason,
+      });
+      return false;
+    }
+    return true;
+  };
+
   const comments = reviewerComments(review, request.identity);
   if (comments.length === 0) {
     // Responded, nothing to act on. The pull request is as good as it is going
@@ -278,11 +327,13 @@ export async function advance(
   if (resolved.kind === "no-change") {
     // Questions answered, no code touched. Nothing to push, and the reviewer
     // is asked again so they can read the answers.
-    await requestReview(commands, {
-      ...gh,
-      ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
-    });
-    return { kind: "iterated", round: round + 1, responses: resolved.report.responses };
+    const reviewerRequested = await reRequest();
+    return {
+      kind: "iterated",
+      round: round + 1,
+      responses: resolved.report.responses,
+      reviewerRequested,
+    };
   }
 
   const committed = await commitAll(commands, {
@@ -307,11 +358,13 @@ export async function advance(
     }
   }
 
-  await requestReview(commands, {
-    ...gh,
-    ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
-  });
-  return { kind: "iterated", round: round + 1, responses: resolved.report.responses };
+  const reviewerRequested = await reRequest();
+  return {
+    kind: "iterated",
+    round: round + 1,
+    responses: resolved.report.responses,
+    reviewerRequested,
+  };
 }
 
 export { COPILOT_REVIEWER };
