@@ -6,7 +6,7 @@ import type { TicketRef } from "./jira/types.ts";
 import { type Settings, SettingsError, readSettings } from "./settings.ts";
 import { buildPrompt, toolsFor } from "./triage/runner.ts";
 import { runSolveCycle } from "./solve/poller.ts";
-import { buildTriageOptions, createSolveDeps, shouldPost } from "./wiring.ts";
+import { buildTriageOptions, createSolveDeps, pollIntervalMs, shouldPost } from "./wiring.ts";
 
 /** Minimum environment that satisfies the required settings. */
 const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
@@ -79,6 +79,56 @@ describe("buildTriageOptions", () => {
 
     expect(options.requiredMcpServers).toEqual(["atlassian"]);
     expect(options.allowedTools).toBeUndefined();
+  });
+
+  // `numeric` grew a floor, but a floor only applies where a caller asks for
+  // it, and "the guard is correct" and "the caller uses it" are separate facts
+  // — the same join that has now bitten this codebase in passes.ts, delivery.ts
+  // and the triage skill. Asserted here, at the seam, because zero is the value
+  // that reads like "no limit" and behaves like "already expired".
+  it("refuses a zero triage timeout rather than expiring every run at once", () => {
+    expect(() =>
+      buildTriageOptions(
+        settingsWith({ SKILL_NAME: "mock-triage", TRIAGE_TIMEOUT_MS: "0" }),
+        "SSX-1",
+      ),
+    ).toThrow(/TRIAGE_TIMEOUT_MS must be at least 1/);
+  });
+
+  it("refuses a negative triage timeout", () => {
+    expect(() =>
+      buildTriageOptions(
+        settingsWith({ SKILL_NAME: "mock-triage", TRIAGE_TIMEOUT_MS: "-1000" }),
+        "SSX-1",
+      ),
+    ).toThrow(/TRIAGE_TIMEOUT_MS must be at least 1/);
+  });
+
+  it("carries the shipped default through unchanged", () => {
+    const options = buildTriageOptions(settingsWith({ SKILL_NAME: "mock-triage" }), "SSX-1");
+
+    expect(options.timeoutMs).toBe(1_200_000);
+  });
+});
+
+describe("pollIntervalMs", () => {
+  it("reads the configured cadence", () => {
+    expect(pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "30000" }))).toBe(30_000);
+  });
+
+  // The daemon's `--interval 0` is a plausible typo for "as fast as possible",
+  // and it would be granted: runLoop would sleep for nothing between cycles and
+  // hammer Jira until something rate-limited it.
+  it("refuses a zero interval, which is an unthrottled loop and not an eager one", () => {
+    expect(() => pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "0" }))).toThrow(
+      /POLL_INTERVAL_MS must be at least 1/,
+    );
+  });
+
+  it("refuses a negative interval", () => {
+    expect(() => pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "-1" }))).toThrow(
+      /POLL_INTERVAL_MS must be at least 1/,
+    );
   });
 });
 

@@ -17,15 +17,9 @@ import { parseDuration } from "./duration.ts";
 import { logger } from "./logger.ts";
 import { runLoop } from "./loop.ts";
 import { runPollCycle } from "./poller.ts";
-import {
-  type Settings,
-  describeSettings,
-  numeric,
-  readSettings,
-  withConfigErrors,
-} from "./settings.ts";
+import { type Settings, describeSettings, readSettings, withConfigErrors } from "./settings.ts";
 import { loadState } from "./state/store.ts";
-import { createJiraClient, createPollDeps } from "./wiring.ts";
+import { createJiraClient, createPollDeps, pollIntervalMs } from "./wiring.ts";
 
 /** Backoff ceiling. Long enough to stop hammering, short enough to recover unattended. */
 const BACKOFF_CAP_MS = 15 * 60 * 1000;
@@ -124,7 +118,7 @@ async function main(): Promise<void> {
 
   const runForRaw = flagValue(argv, "--for");
   const runForMs = runForRaw === undefined ? undefined : parseDuration(runForRaw);
-  const intervalMs = numeric(settings, "POLL_INTERVAL_MS");
+  const intervalMs = pollIntervalMs(settings);
 
   logger.info("service.start", {
     ...describeSettings(settings),

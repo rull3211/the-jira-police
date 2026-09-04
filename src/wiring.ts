@@ -109,7 +109,9 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
     skillName: settings.SKILL_NAME,
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
-    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS"),
+    // At least 1ms: zero is not "no timeout", it is a timeout that has already
+    // expired, so it would kill every run instantly instead of disabling the cap.
+    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
     deep: false,
     // Requiring a live Atlassian session from a skill that reads nothing
     // would fail runs for a reason unrelated to what is being exercised.
@@ -117,6 +119,19 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
     ...(isMock ? { allowedTools: [] as readonly string[] } : {}),
     ...(isStandIn ? {} : { vaultPath: settings.VAULT_PATH, noHtml: true }),
   };
+}
+
+/**
+ * How long the daemon sleeps between polls.
+ *
+ * One line, and it lives here rather than in `index.ts` for the same reason
+ * `buildTriageOptions` does: `index.ts` runs `main` at import, so a value read
+ * inside it cannot be asserted about without starting the service. The floor is
+ * the point of the function — a zero interval is not an eager poll, it is an
+ * unthrottled loop against Jira — and a floor nothing can test is a comment.
+ */
+export function pollIntervalMs(settings: Settings): number {
+  return numeric(settings, "POLL_INTERVAL_MS", 1);
 }
 
 /**

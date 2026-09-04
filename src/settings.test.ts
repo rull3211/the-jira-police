@@ -88,6 +88,50 @@ describe("numeric", () => {
     const settings = readSettings({ ...MINIMAL, POLL_INTERVAL_MS: "soon" });
     expect(() => numeric(settings, "POLL_INTERVAL_MS")).toThrow(/must be a number/);
   });
+
+  // A stray minus sign parses as a perfectly finite number, so the NaN check
+  // above never saw it. It matters most for the settings that become a delay:
+  // setTimeout clamps a negative to zero, so the timeout does not vanish, it
+  // fires at once and kills every run before it starts.
+  it("rejects a negative value, which is finite and still nonsense", () => {
+    const settings = readSettings({ ...MINIMAL, POLL_INTERVAL_MS: "-1" });
+    expect(() => numeric(settings, "POLL_INTERVAL_MS")).toThrow(/must be at least 0/);
+  });
+
+  it("names the setting and the floor, so the message identifies the typo", () => {
+    const settings = readSettings({ ...MINIMAL, TRIAGE_TIMEOUT_MS: "0" });
+    expect(() => numeric(settings, "TRIAGE_TIMEOUT_MS", 1)).toThrow(
+      /Setting TRIAGE_TIMEOUT_MS must be at least 1, got 0/,
+    );
+  });
+
+  // Zero is a real answer for some of these — no cursor overlap, a concurrency
+  // cap of none — so the floor has to be per-setting rather than blanket.
+  it("allows zero where zero is a legitimate choice", () => {
+    const settings = readSettings({ ...MINIMAL, MAX_CONCURRENT_SOLVES: "0" });
+    expect(numeric(settings, "MAX_CONCURRENT_SOLVES")).toBe(0);
+  });
+
+  it("accepts a value sitting exactly on the floor", () => {
+    const settings = readSettings({ ...MINIMAL, TRIAGE_TIMEOUT_MS: "1" });
+    expect(numeric(settings, "TRIAGE_TIMEOUT_MS", 1)).toBe(1);
+  });
+});
+
+describe("shipped fallbacks", () => {
+  // The defaults are what almost every deployment runs on, and nothing else
+  // here reads them through the same floors the wiring applies. A fallback
+  // typed with a stray minus or a stray "ms" would leave this suite green and
+  // break the service on a machine with no .env at all.
+  it("every default parses and clears the floor its caller uses", () => {
+    const settings = readSettings(MINIMAL);
+    expect(numeric(settings, "TRIAGE_TIMEOUT_MS", 1)).toBe(1_200_000);
+    expect(numeric(settings, "POLL_INTERVAL_MS", 1)).toBeGreaterThan(0);
+    expect(numeric(settings, "CURSOR_OVERLAP_MS")).toBeGreaterThanOrEqual(0);
+    expect(numeric(settings, "FIRST_RUN_LOOKBACK_MINUTES")).toBeGreaterThanOrEqual(0);
+    expect(numeric(settings, "MAX_CONCURRENT_SOLVES")).toBeGreaterThanOrEqual(0);
+    expect(numeric(settings, "MAX_REVIEW_ITERATIONS")).toBeGreaterThanOrEqual(0);
+  });
 });
 
 describe("list", () => {

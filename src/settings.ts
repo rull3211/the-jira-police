@@ -113,8 +113,9 @@ export const SETTINGS = [
   },
   {
     name: "TRIAGE_TIMEOUT_MS",
-    description: "Per-issue budget before the run is killed.",
-    fallback: "600000",
+    description:
+      "Per-issue wall-clock budget before the run is killed. Guards against a wedged session blocking the loop forever, and that is the only thing it is for — it is a cap, not a target, so a run that finishes in two minutes costs nothing extra for the headroom above it. Raised from 600000 on 2026-09-04: SSX-3831 blew through ten minutes and then completed in four and a half on an unchanged retry, so the same ticket varied by more than 2x and the shorter budget killed a run that was not stuck. That failure is expensive and silent-looking — the session is billed in full, the artifact is never written, and the operator sees a stack trace rather than a verdict — whereas the cost of overshooting is only that a genuinely hung run holds the queue longer before it is reaped.",
+    fallback: "1200000",
   },
   {
     name: "SOLVE_ENABLED",
@@ -260,10 +261,37 @@ export function describeSettings(settings: Settings): Record<string, string> {
   return described;
 }
 
-export function numeric(settings: Settings, name: SettingName): number {
-  const parsed = Number(settings[name]);
+/**
+ * Reads a numeric setting, with a floor.
+ *
+ * The finite check alone was not enough, and the gap is easy to miss because
+ * every value here is a duration or a count and neither has a meaningful
+ * negative. `Number("-1")` is perfectly finite, so a stray minus sign used to
+ * sail through and land somewhere that reads much worse than it looks:
+ * `setTimeout` treats a negative delay as zero, so a negative
+ * `TRIAGE_TIMEOUT_MS` does not disable the timeout, it fires it immediately and
+ * kills every run at the starting line. A negative poll interval is the same
+ * bug wearing a different hat — a busy loop against Jira.
+ *
+ * `min` defaults to 0 because that is the weakest claim true of every caller.
+ * The two settings where zero is itself nonsense pass `min: 1`; the ones where
+ * zero is a legitimate choice — no cursor overlap, a concurrency cap of none —
+ * keep the default, so the floor stays a statement about each setting rather
+ * than a blanket rule that would have to be argued with.
+ *
+ * Range lives here rather than at the call sites for the reason the whole
+ * module exists: a bad value should stop the process at startup with the
+ * setting's name in the message, not surface later as behaviour nobody
+ * connects back to a typo in `.env`.
+ */
+export function numeric(settings: Settings, name: SettingName, min = 0): number {
+  const raw = settings[name];
+  const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
-    throw new Error(`Setting ${name} must be a number, got "${settings[name]}"`);
+    throw new Error(`Setting ${name} must be a number, got "${raw}"`);
+  }
+  if (parsed < min) {
+    throw new Error(`Setting ${name} must be at least ${min}, got ${parsed}`);
   }
   return parsed;
 }
