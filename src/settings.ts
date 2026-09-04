@@ -190,6 +190,41 @@ export const SETTINGS = [
     fallback: "1800000",
   },
   {
+    name: "SOLVE_GITHUB_OWNER",
+    description:
+      "The GitHub owner or organisation pull requests are opened against; a ticket's repository becomes SOLVE_GITHUB_OWNER/<name>, where the name is the same one SOLVE_REPOS allows and the ticket's svc: label supplies. gh is never left to infer the repository from whatever remote the worktree happens to carry, because a wrong inference here opens a pull request on somebody else's repository and there is no undo that unsends the notifications.",
+    // No fallback, for the same reason as SOLVE_REPOS and SOLVE_REPO_ROOT: this
+    // names a place that gets written to. An owner guessed from the checkout's
+    // remote would be right until the day someone adds a fork as `origin`.
+  },
+  {
+    name: "SOLVE_WORKTREE_ROOT",
+    description:
+      "Directory the solver cuts its worktrees into, one per issue key. Defaults to the system temp directory, which is where a temporary checkout belongs — deliberately nowhere near the repository, so a failed run leaves its evidence somewhere obviously not the working copy. Configurable because a run that fails keeps its worktree for a human to read, and on macOS the default lands under /private/var, which some tooling cannot open; pointing this at a readable directory is the difference between a diff that can be reviewed by hand and one that can only be described.",
+    fallback: "",
+    // Empty means the system temp directory. It cannot default to the literal
+    // path because `tmpdir()` is a function of the environment, and freezing
+    // today's answer into a string would break the first machine that disagrees.
+  },
+  {
+    name: "SOLVE_BOT_NAME",
+    description:
+      "Author name on commits the solver makes. Says a machine wrote it, in the one place every reader of the repository already looks: git blame, the PR author line, and whatever CODEOWNERS automation reads the log. Defaulted rather than required because a missing value here would block a run over a cosmetic field, and unlike the repository settings a wrong name widens nothing.",
+    fallback: "jira-police",
+  },
+  {
+    name: "SOLVE_BOT_EMAIL",
+    description:
+      "Author email on commits the solver makes. A noreply address on purpose: replies to a bot's commits should go to the ticket, and a real mailbox here would collect them silently.",
+    fallback: "jira-police@users.noreply.github.com",
+  },
+  {
+    name: "SOLVE_GH_TIMEOUT_MS",
+    description:
+      "Budget for a single gh invocation — opening the pull request, requesting the review, reading the review back, undrafting. Separate from SOLVE_GIT_TIMEOUT_MS because these are API round trips rather than local work, so they fail differently: a slow one is GitHub being slow or a token being re-authorised, neither of which is helped by the generous budget a cold git fetch needs.",
+    fallback: "60000",
+  },
+  {
     name: "MAX_CONCURRENT_SOLVES",
     description:
       "How many tickets may be in flight at once, counted from the tickets currently carrying the claim label rather than from anything local. One, for the pilot: a solve is expensive, and a bounded blast radius is worth more than throughput while the fitness call is still being calibrated.",

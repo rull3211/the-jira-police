@@ -20,26 +20,31 @@
  * the escalation it is. Passing two is not an error — the highest wins, because
  * `--claim --pr` can only coherently mean "go as far as the pull request".
  *
- * ## `--solve` does not write the claim, and the ladder is not a chain
+ * ## The ladder is cumulative, and this is the change that made it so
  *
- * This used to say each flag implies the ones before it. That was a tidy
- * sentence and it contradicted the line right above it, which promised that
- * `--solve` lets nothing leave the machine: `--claim` writes a label to Jira,
- * which is something leaving the machine. Both could not be true.
+ * `--pr` runs the claim and the solve as well. `includes` is the predicate, and
+ * every caller asks it rather than comparing the phase for equality.
  *
- * Resolved in favour of the safety claim. `--solve` runs the solver against a
- * ticket the operator named and writes nothing to Jira, so a solve can be
- * watched end to end before the board is ever touched. The phases also landed
- * out of order for the same reason — C (the solver) is wired while B2 (the
- * claim) is not — so `--claim` refuses while `--solve` works. That inversion
- * looks wrong until you notice the claim is the only one of the two that is
- * visible to anybody else.
+ * This is the second thing this comment has said, and the history is the useful
+ * part. It first said each flag implies the ones before it; that was rewritten,
+ * because at the time `--solve` also promised that nothing left the machine and
+ * `--claim` writes a label to Jira, so the two sentences could not both be true.
+ * The phases had landed out of order — the solver (C) was wired while the claim
+ * (B2) was not — and the honest description of that state was a ladder of
+ * independent rungs where `--claim` refused and `--solve` worked.
  *
- * What the ordering still means is privilege, read as blast radius: `--solve`
- * can change files in a temporary worktree, `--pr` can put them in front of
- * other people, and `--claim` writes to a board a team reads. They are not
- * cumulative, and a future change that makes them cumulative should say so
- * here rather than leaving this comment to rot.
+ * Both are wired now, so the reason for the inversion is gone and the chain is
+ * back. What went with it is the "nothing leaves the machine" promise: at
+ * `--solve` a label is written to the board before any pass runs, and the
+ * usage text says so. The unchanged part is what the ordering *means* —
+ * privilege read as blast radius. `--claim` writes to a board a team reads,
+ * `--solve` changes files in a temporary worktree, `--pr` puts them in front of
+ * other people. The rung you name is the furthest one you are willing to go.
+ *
+ * A run that stops short of its rung undoes its own claim: `releaseClaim` puts
+ * the labels back exactly as they were found. That is in `solve-once.ts`, not
+ * here, but it is the reason making the ladder cumulative is not a widening of
+ * what a failed `--pr` leaves behind.
  *
  * ## Two refusals, and the second is the one that matters
  *
@@ -72,9 +77,11 @@ export const USAGE =
   "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr]\n" +
   "  (no arguments)          the whole queue, reporting the claims it would make\n" +
   "  <ISSUE-KEY>             one ticket, same reporting\n" +
-  "  <ISSUE-KEY> --claim     writes the claim label (not wired yet)\n" +
-  "  <ISSUE-KEY> --solve     runs the solver; no Jira write, nothing pushed\n" +
-  "  <ISSUE-KEY> --pr        ... and opens the draft pull request\n";
+  "  <ISSUE-KEY> --claim     writes the claim label, then releases it\n" +
+  "  <ISSUE-KEY> --solve     ... and runs the solver; nothing is pushed\n" +
+  "  <ISSUE-KEY> --pr        ... and opens the draft pull request\n" +
+  "Each flag does everything the ones above it do. A run that does not reach a\n" +
+  "pull request puts the labels back where it found them.\n";
 
 export interface SolveInvocation {
   /** `null` means the whole queue. Only ever null at the `plan` phase. */
@@ -97,36 +104,57 @@ export function writes(phase: SolvePhase): boolean {
 }
 
 /**
- * Why a phase cannot run yet, or `null` when it can.
+ * Whether asking for `phase` also means doing `step`.
  *
- * The ladder is fully parsed and only its bottom rung is wired, so every rung
- * above it has to refuse. Kept in one function so the answer to "what is
- * missing" is a sentence an operator can read rather than an archaeology
- * exercise, and so landing a phase means deleting one branch here instead of
- * hunting for the guard.
- *
- * Each reason names the *structural* reason rather than a policy: nothing in
- * this process can make the edit, because no function capable of it was
- * composed. That is the same claim the phase table in the plan makes, and it is
- * checkable by reading `wiring.ts`.
+ * The whole of the ladder's cumulativeness, in one place. Call sites ask
+ * `includes(phase, "claim")` rather than `phase === "claim"`, and the difference
+ * is not stylistic: an equality check skips the claim on a `--pr` run, leaving
+ * the solver working on a ticket the board still shows as unclaimed. Comparing
+ * ranks rules that out, and makes inserting a rung a change to `PHASES` alone.
  */
-export function unavailable(phase: SolvePhase): string | null {
-  switch (phase) {
-    case "plan": {
-      return null;
-    }
-    case "claim": {
-      return "the label write path is not wired (phase B2) — `createSolveDeps` composes readers only, so no function in this process can edit a label. Note this refuses while --solve does not; see the header, the ladder is not cumulative";
-    }
-    case "solve": {
-      // Wired. `createSolveRunDeps` composes the `CommandRunner` and the
-      // `PassRunner`, which is the whole of phase C's privilege.
-      return null;
-    }
-    case "pr": {
-      return "delivery is not wired (phase D) — `src/solve/delivery.ts` exists but nothing constructs its dependencies";
-    }
+export function includes(phase: SolvePhase, step: SolvePhase): boolean {
+  return rank(phase) >= rank(step);
+}
+
+/**
+ * Why a rung cannot run, or `null` when it can.
+ *
+ * ## What this used to be, and what it is now
+ *
+ * It used to answer "is that phase built yet". Every rung above `plan` returned
+ * a sentence naming the function nobody had composed, and landing a phase meant
+ * deleting a branch. All four are built, so that version of the function would
+ * now return `null` four times — a switch that has stopped asking anything.
+ *
+ * It is kept because the question it should have been asking all along is a
+ * different one and does not go away: **is this rung configured**. `--pr` names
+ * a GitHub owner that has no fallback, on purpose, and without this check the
+ * missing setting would surface from `buildPublishRequest` — after the claim was
+ * written and the solver had run. An operator would then have a labelled ticket,
+ * a worktree full of edits and a settings error, for a mistake visible before
+ * anything started.
+ *
+ * So it takes settings now, and it is still checked before the first write.
+ * `buildPublishRequest` throws on the same condition and that duplication is
+ * deliberate: this one exists to fail early and legibly, the other exists so the
+ * privilege cannot be granted by a caller who skipped the check.
+ */
+export function unavailable(phase: SolvePhase, settings: LadderSettings): string | null {
+  if (includes(phase, "pr") && settings.SOLVE_GITHUB_OWNER.trim() === "") {
+    return "SOLVE_GITHUB_OWNER is not set, and it has no default — it names the GitHub account a pull request would be opened against, which is not a thing to guess";
   }
+  return null;
+}
+
+/**
+ * The settings this module reads, named structurally rather than imported whole.
+ *
+ * `Settings` is every key the service has; depending on it here would make the
+ * argument parser's test fixtures grow every time an unrelated setting is added,
+ * and would obscure that this file reads exactly one.
+ */
+export interface LadderSettings {
+  readonly SOLVE_GITHUB_OWNER: string;
 }
 
 export function parseSolveArgs(argv: readonly string[]): ParsedArgs {

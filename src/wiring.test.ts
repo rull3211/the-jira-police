@@ -7,8 +7,11 @@ import { type Settings, SettingsError, readSettings } from "./settings.ts";
 import { buildPrompt, toolsFor } from "./triage/runner.ts";
 import { runSolveCycle } from "./solve/poller.ts";
 import type { IssueDetail } from "./jira/client.ts";
+import type { SolveOutcome } from "./solve/orchestrator.ts";
 import {
   NotSolvableError,
+  baseBranchOf,
+  buildPublishRequest,
   buildSolveRequest,
   buildTriageOptions,
   createSolveDeps,
@@ -566,6 +569,203 @@ describe("buildSolveRequest", () => {
         ),
       ).toThrow();
     }
+  });
+});
+
+describe("worktree root", () => {
+  it("uses the configured directory when there is one", () => {
+    // It exists because the system temp directory on macOS lands under
+    // /private/var, which some tooling cannot open — and the C phase mandates a
+    // human reading the diff before anything leaves the machine.
+    const request = buildSolveRequest(
+      settingsWith({ ...SOLVE_ENV, SOLVE_WORKTREE_ROOT: "/Users/me/solves" }),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.parentDirectory).toBe("/Users/me/solves");
+  });
+
+  it("treats whitespace as unset rather than as a directory named space", () => {
+    // The trimming is `readSettings`', not this function's — asserted here
+    // because this is where it would be noticed if it stopped happening, and
+    // because a worktree root of "   " creates a directory nobody can find.
+    const request = buildSolveRequest(
+      settingsWith({ ...SOLVE_ENV, SOLVE_WORKTREE_ROOT: "   " }),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.parentDirectory).toContain("jira-police-solve");
+  });
+
+  it("names the service in the fallback path", () => {
+    // A leaked worktree under the system temp directory should be attributable
+    // to whatever left it there.
+    const request = buildSolveRequest(
+      settingsWith(SOLVE_ENV),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.parentDirectory).toContain("jira-police-solve");
+  });
+});
+
+describe("baseBranchOf", () => {
+  it("strips the remote from a remote-tracking ref", () => {
+    expect(baseBranchOf("origin/main")).toBe("main");
+  });
+
+  it("leaves a plain branch name alone", () => {
+    expect(baseBranchOf("main")).toBe("main");
+  });
+
+  it("strips only the leading remote, and only one", () => {
+    // A branch genuinely called `release/origin/x` must not be mangled, and
+    // `origin/origin/x` means the branch `origin/x` on the remote `origin`.
+    expect(baseBranchOf("release/origin/x")).toBe("release/origin/x");
+    expect(baseBranchOf("origin/origin/x")).toBe("origin/x");
+  });
+
+  it("does not mistake a branch that merely starts with the word", () => {
+    expect(baseBranchOf("originals")).toBe("originals");
+  });
+});
+
+/** A `verified` outcome, which is the only kind `buildPublishRequest` accepts. */
+function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
+  return {
+    kind: "verified",
+    worktree: {
+      issueKey: "SSX-3822",
+      path: "/tmp/solve/SSX-3822",
+      branch: "fix/ssx-3822-favicon",
+      repoPath: "/repos/buy-insurance-advisor-web",
+    },
+    commit: { subject: "fix(advisor): distinct favicon", body: "why" },
+    recon: {
+      proceed: true,
+      confidence: "high",
+      rootCause: "",
+      devLensAccurate: true,
+      devLensCorrection: "",
+      plannedFiles: [],
+      approach: "",
+      testPlan: "",
+      estimatedLines: 1,
+      bailReason: "",
+      injectionNoticed: "",
+    },
+    fix: {
+      changed: true,
+      filesTouched: [],
+      summary: "did it",
+      commitSubject: "fix(advisor): distinct favicon",
+      commitBody: "why",
+      testAdded: true,
+      testOmittedReason: "",
+      residualRisk: "",
+      abandoned: "",
+      abandonedCause: "none",
+    },
+    simplify: { changed: false, filesTouched: [], changes: [], declined: "nothing to remove" },
+    verification: { outcome: "passed", steps: [] },
+    devLens: { accurate: true, correction: "" },
+    files: 1,
+    lines: 4,
+  };
+}
+
+const PUBLISH_ENV = { ...SOLVE_ENV, SOLVE_GITHUB_OWNER: "storebrand-digital" };
+
+describe("buildPublishRequest", () => {
+  it("names the repository from configuration, not from the checkout", () => {
+    // THE PHASE D PRIVILEGE GRANT. The owner is configured because an owner
+    // inferred from the checkout's remote is right until somebody adds a fork
+    // as `origin`, at which point a bot opens a pull request somewhere else.
+    const request = buildPublishRequest(settingsWith(PUBLISH_ENV), verifiedOutcome(), "SSX-3822");
+
+    expect(request.repo).toBe("storebrand-digital/buy-insurance-advisor-web");
+  });
+
+  it("refuses when no owner is configured rather than guessing one", () => {
+    expect(() =>
+      buildPublishRequest(
+        settingsWith({ ...PUBLISH_ENV, SOLVE_GITHUB_OWNER: "" }),
+        verifiedOutcome(),
+        "SSX-3822",
+      ),
+    ).toThrow(SettingsError);
+  });
+
+  it("refuses an owner that is only whitespace", () => {
+    // Also `readSettings`' trimming rather than this function's. Worth pinning
+    // where the consequence is: a repo of "  /name" is a pull request opened
+    // against a target that does not exist, discovered by gh and not by us.
+    expect(() =>
+      buildPublishRequest(
+        settingsWith({ ...PUBLISH_ENV, SOLVE_GITHUB_OWNER: "  " }),
+        verifiedOutcome(),
+        "SSX-3822",
+      ),
+    ).toThrow(SettingsError);
+  });
+
+  it("targets the branch the worktree was cut from, without its remote", () => {
+    const request = buildPublishRequest(settingsWith(PUBLISH_ENV), verifiedOutcome(), "SSX-3822");
+
+    expect(request.baseBranch).toBe("main");
+  });
+
+  it("carries the worktree and the commit through untouched", () => {
+    const outcome = verifiedOutcome();
+
+    const request = buildPublishRequest(settingsWith(PUBLISH_ENV), outcome, "SSX-3822");
+
+    expect(request.worktree).toBe(outcome.worktree);
+    expect(request.commit).toBe(outcome.commit);
+  });
+
+  it("composes a title and a body that name the ticket", () => {
+    const request = buildPublishRequest(settingsWith(PUBLISH_ENV), verifiedOutcome(), "SSX-3822");
+
+    expect(request.title).toContain("(SSX-3822)");
+    expect(request.body).toContain("SSX-3822");
+  });
+
+  it("does not name a reviewer, so the delivery default applies", () => {
+    // `exactOptionalPropertyTypes` makes absence real, and `requestReview` falls
+    // back to @copilot. Passing an empty string here would ask for a reviewer
+    // called "".
+    expect(
+      "reviewer" in buildPublishRequest(settingsWith(PUBLISH_ENV), verifiedOutcome(), "SSX-3822"),
+    ).toBe(false);
+  });
+
+  it("floors the gh timeout above zero", () => {
+    // Zero is a timeout that expired before the command began.
+    expect(() =>
+      buildPublishRequest(
+        settingsWith({ ...PUBLISH_ENV, SOLVE_GH_TIMEOUT_MS: "0" }),
+        verifiedOutcome(),
+        "SSX-3822",
+      ),
+    ).toThrow();
+  });
+
+  it("commits as the configured identity", () => {
+    const request = buildPublishRequest(
+      settingsWith({
+        ...PUBLISH_ENV,
+        SOLVE_BOT_NAME: "jira-police",
+        SOLVE_BOT_EMAIL: "jp@x.invalid",
+      }),
+      verifiedOutcome(),
+      "SSX-3822",
+    );
+
+    expect(request.identity).toEqual({ name: "jira-police", email: "jp@x.invalid" });
   });
 });
 
