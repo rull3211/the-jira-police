@@ -150,6 +150,40 @@ export const SETTINGS = [
     // and buys an allowlist that can actually be emptied.
   },
   {
+    name: "SOLVE_REPO_ROOT",
+    description:
+      "Directory holding the local checkouts the solver works from; a ticket's repository is resolved as SOLVE_REPO_ROOT/<name> where the name comes from the ticket's own svc: label. The solver never edits these checkouts — it creates a git worktree from one — but it does read and fetch in them, so this points at real repositories and is deliberately not guessed.",
+    // No fallback, for the same reason as SOLVE_REPOS. A default of "the
+    // directory above this one" would be right on this machine and silently
+    // wrong on any other, and the way it would be wrong is by finding some
+    // other checkout with a matching name. Naming the path costs one line and
+    // makes the answer to "which code can this touch" readable.
+  },
+  {
+    name: "SOLVE_BASE_REF",
+    description:
+      "The ref a solve branches from and targets. origin/main by default, and fetched immediately before branching so a solve never starts from a stale local ref. Configurable because not every repository calls it main; changing it does not widen anything, since the branch created from it is still a fresh implementation branch and the push guard still refuses protected names.",
+    fallback: "origin/main",
+  },
+  {
+    name: "SOLVE_GIT_TIMEOUT_MS",
+    description:
+      "Budget for a single git invocation — fetch, worktree add, commit, push. Generous next to how long git usually takes, because the one that is slow is the first fetch of a repository nobody has fetched today, and killing that produces a confusing failure a long way from its cause.",
+    fallback: "120000",
+  },
+  {
+    name: "SOLVE_STEP_TIMEOUT_MS",
+    description:
+      "Budget for one verification step: the repository's own test, typecheck or lint command. Per step rather than per run, because a repository may define several and the slow one should not be charged for the fast ones.",
+    fallback: "600000",
+  },
+  {
+    name: "SOLVE_INSTALL_TIMEOUT_MS",
+    description:
+      "Budget for installing dependencies in a fresh worktree. Separate from SOLVE_STEP_TIMEOUT_MS and larger, because a new worktree has no node_modules and the first install in a repository is the slowest thing the solver does. Later installs are much faster — pnpm's store is content-addressable — so this is sized for the cold case and rarely reached.",
+    fallback: "900000",
+  },
+  {
     name: "SOLVE_TIMEOUT_MS",
     description:
       "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones.",

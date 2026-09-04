@@ -37,6 +37,9 @@
  * a retry.
  */
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { type IssueDetail, JiraClient } from "./jira/client.ts";
 import { buildInFlightJql, buildNewIssuesJql, buildSolveQueueJql } from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
@@ -45,7 +48,8 @@ import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
 import { type Settings, SettingsError, flag, list, numeric, solveMode } from "./settings.ts";
 import { createCommandRunner } from "./solve/exec.ts";
-import type { SolveDependencies } from "./solve/orchestrator.ts";
+import { repoFromLabels } from "./solve/labels.ts";
+import type { SolveDependencies, SolveRequest } from "./solve/orchestrator.ts";
 import { createPassRunner } from "./solve/passes.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
 import { type RenderedTicket, renderTicket } from "./solve/ticket.ts";
@@ -357,6 +361,65 @@ export function createSolveRunDeps(settings: Settings): SolveDependencies {
       // "no timeout", it is a timeout that expired before the pass started.
       timeoutMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
     }),
+  };
+}
+
+/** Why a ticket cannot be solved, as a sentence rather than a null. */
+export class NotSolvableError extends Error {}
+
+/**
+ * Turns one ticket into the request `solveTicket` runs.
+ *
+ * The repository is derived from the ticket's own `svc:` label and then checked
+ * against `SOLVE_REPOS`, and both halves matter. `repoFromLabels` answers "which
+ * repository is this ticket about" and returns `null` for every ambiguous
+ * reading; `SOLVE_REPOS` answers "which repositories may be written to at all".
+ * A ticket that names a repository nobody allowed is refused here rather than
+ * discovered four sessions later, and the refusal names the repository so
+ * widening the allowlist is an obvious next step rather than a guess.
+ *
+ * The two checks are deliberately not collapsed. One is about the ticket and
+ * one is about the operator's configuration, and a single combined "is this
+ * solvable" boolean would report a missing label and a forbidden repository as
+ * the same event.
+ */
+export function buildSolveRequest(
+  settings: Settings,
+  detail: IssueDetail,
+  ticket: string,
+): SolveRequest {
+  if (settings.SOLVE_REPO_ROOT === "") {
+    throw new SettingsError(["SOLVE_REPO_ROOT"]);
+  }
+
+  const repo = repoFromLabels(detail.labels);
+  if (repo === null) {
+    throw new NotSolvableError(
+      `${detail.key} does not name exactly one repository. Labels: ${detail.labels.join(", ") || "(none)"}. The solver reads the svc: label and refuses to guess between none and several.`,
+    );
+  }
+
+  const allowed = list(settings, "SOLVE_REPOS");
+  if (!allowed.includes(repo)) {
+    throw new NotSolvableError(
+      `${detail.key} is about "${repo}", which is not in SOLVE_REPOS (${allowed.join(", ") || "empty"}). Nothing was touched.`,
+    );
+  }
+
+  return {
+    issueKey: detail.key,
+    ticket,
+    summary: detail.summary,
+    repoPath: join(settings.SOLVE_REPO_ROOT, repo),
+    // Worktrees are temporary by construction and are removed on success. The
+    // system temp directory rather than anywhere near the checkout, so a failed
+    // run leaves its evidence somewhere that is obviously not the repository.
+    parentDirectory: join(tmpdir(), "jira-police-solve"),
+    baseRef: settings.SOLVE_BASE_REF,
+    vaultPath: settings.VAULT_PATH,
+    gitTimeoutMs: numeric(settings, "SOLVE_GIT_TIMEOUT_MS", 1),
+    stepTimeoutMs: numeric(settings, "SOLVE_STEP_TIMEOUT_MS", 1),
+    installTimeoutMs: numeric(settings, "SOLVE_INSTALL_TIMEOUT_MS", 1),
   };
 }
 

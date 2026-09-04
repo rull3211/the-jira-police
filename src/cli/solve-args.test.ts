@@ -100,31 +100,43 @@ describe("unavailable", () => {
     expect(unavailable("plan")).toBeNull();
   });
 
-  it("blocks every phase that would write, so far", () => {
-    // The inertness the plan promises, asserted rather than described. When a
-    // phase is wired this test is what forces the claim in the header to be
-    // updated in the same change — which is the whole habit this repo is built
-    // around.
-    for (const phase of PHASES.filter((candidate) => candidate !== "plan")) {
-      expect(unavailable(phase)).toBeTruthy();
-    }
+  it("lets the solver through, now that it is wired", () => {
+    // This block used to assert that every phase above `plan` refused, and it
+    // did its job: wiring phase C broke it, which is what forced the header and
+    // the usage text to be corrected in the same change rather than left
+    // describing a service that no longer exists.
+    expect(unavailable("solve")).toBeNull();
+  });
+
+  it("still blocks the two phases that are visible to other people", () => {
+    // `--claim` writes to the board a team reads; `--pr` puts code in front of
+    // reviewers. Neither is wired, and both refuse.
+    expect(unavailable("claim")).toBeTruthy();
+    expect(unavailable("pr")).toBeTruthy();
   });
 
   it("names the missing wiring rather than saying no", () => {
     // An operator who types `--claim` and reads "refused" learns nothing. One
     // who reads which module is missing can check the claim themselves.
     expect(unavailable("claim")).toContain("B2");
-    expect(unavailable("solve")).toContain("orchestrator.ts");
     expect(unavailable("pr")).toContain("delivery.ts");
   });
 
-  it("agrees with `writes` about which phases are dangerous", () => {
-    // Two lists that must stay in step: one decides what the parser demands an
-    // issue key for, the other decides what refuses to run. They are derived
-    // from the same ordering, and this is the assertion that keeps a future
-    // phase from being added to one and forgotten in the other.
+  it("warns that the ladder is not cumulative", () => {
+    // The confusing bit, said out loud where an operator meets it: `--solve`
+    // runs while the rung below it refuses. Without this the obvious reading is
+    // that something is broken.
+    expect(unavailable("claim")).toContain("not cumulative");
+  });
+
+  it("still demands an issue key for everything that can change anything", () => {
+    // `unavailable` and `writes` used to be required to agree, on the grounds
+    // that every writing phase was also unwired. Wiring `--solve` separated
+    // them: it writes — to a worktree — and is available. The property worth
+    // keeping is the parser's, and it is unchanged.
     for (const phase of PHASES) {
-      expect(unavailable(phase) !== null).toBe(writes(phase));
+      expect(writes(phase)).toBe(phase !== "plan");
     }
+    expect(parseSolveArgs(["--solve"]).ok).toBe(false);
   });
 });

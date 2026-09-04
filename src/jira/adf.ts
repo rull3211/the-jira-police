@@ -53,10 +53,16 @@
  *    than rendering it without its wrapper's formatting, so the default case is
  *    "render the children" and not "return nothing".
  *
- * 2. **Recursion is depth-capped.** A hand-built payload can nest a thousand
- *    blockquotes and blow the call stack, and a `RangeError` is still a throw.
- *    The cap also makes a reference cycle — impossible from `JSON.parse`, quite
- *    possible from a caller passing a live object — terminate instead of hang.
+ * 2. **Recursion is depth-capped**, and a subtree below the cap renders as
+ *    nothing. The catch above would already turn the `RangeError` from a
+ *    stack-busting payload into an empty string — measured: twenty thousand
+ *    nested blockquotes overflow, and the catch holds. The cap is for the two
+ *    failures the catch cannot help with. One is cost: without it, a few
+ *    kilobytes of nested JSON make this module build a string of tens of
+ *    megabytes, quadratically, before anyone notices. The other is a reference
+ *    cycle — impossible out of `JSON.parse`, quite possible from a caller
+ *    passing a live object — which does not throw at all. It hangs, and a hung
+ *    poller is the one failure nothing downstream reports.
  */
 
 import { logger } from "../logger.ts";
@@ -67,7 +73,8 @@ import { logger } from "../logger.ts";
  * Real ADF from a human nests a handful of levels: a list inside a list inside
  * a table cell is already unusual. A hundred is far past anything a person
  * writes and far short of anything that endangers the stack, so the cap only
- * ever bites on input that was constructed to make it bite.
+ * ever bites on input that was constructed to make it bite — at which point
+ * losing the content below it is the intended outcome, not a regression.
  */
 const MAX_DEPTH = 100;
 
@@ -352,6 +359,10 @@ function renderRow(node: AdfObject, depth: number): string {
  * wrapper around its children.
  */
 function renderNode(value: unknown, depth: number): string {
+  if (depth > MAX_DEPTH) {
+    return "";
+  }
+
   // A bare array is not a node, but it is a perfectly reasonable thing for a
   // caller to hold — `doc.content` handed over on its own, say — and reading it
   // as a sequence of blocks costs one line and removes a sharp edge.

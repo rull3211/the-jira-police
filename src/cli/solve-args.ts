@@ -16,10 +16,30 @@
  *   solve:once SSX-3822 --pr      ... and opens the draft pull request
  * ```
  *
- * Each flag implies the ones before it, and each is a whole phase's worth of
- * privilege, so the command line reads as the escalation it is. Passing two is
- * not an error — the highest wins, because `--claim --pr` can only coherently
- * mean "go as far as the pull request".
+ * Each flag is a whole phase's worth of privilege, so the command line reads as
+ * the escalation it is. Passing two is not an error — the highest wins, because
+ * `--claim --pr` can only coherently mean "go as far as the pull request".
+ *
+ * ## `--solve` does not write the claim, and the ladder is not a chain
+ *
+ * This used to say each flag implies the ones before it. That was a tidy
+ * sentence and it contradicted the line right above it, which promised that
+ * `--solve` lets nothing leave the machine: `--claim` writes a label to Jira,
+ * which is something leaving the machine. Both could not be true.
+ *
+ * Resolved in favour of the safety claim. `--solve` runs the solver against a
+ * ticket the operator named and writes nothing to Jira, so a solve can be
+ * watched end to end before the board is ever touched. The phases also landed
+ * out of order for the same reason — C (the solver) is wired while B2 (the
+ * claim) is not — so `--claim` refuses while `--solve` works. That inversion
+ * looks wrong until you notice the claim is the only one of the two that is
+ * visible to anybody else.
+ *
+ * What the ordering still means is privilege, read as blast radius: `--solve`
+ * can change files in a temporary worktree, `--pr` can put them in front of
+ * other people, and `--claim` writes to a board a team reads. They are not
+ * cumulative, and a future change that makes them cumulative should say so
+ * here rather than leaving this comment to rot.
  *
  * ## Two refusals, and the second is the one that matters
  *
@@ -52,8 +72,8 @@ export const USAGE =
   "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr]\n" +
   "  (no arguments)          the whole queue, reporting the claims it would make\n" +
   "  <ISSUE-KEY>             one ticket, same reporting\n" +
-  "  <ISSUE-KEY> --claim     writes the claim label\n" +
-  "  <ISSUE-KEY> --solve     ... and runs the solver; nothing leaves the machine\n" +
+  "  <ISSUE-KEY> --claim     writes the claim label (not wired yet)\n" +
+  "  <ISSUE-KEY> --solve     runs the solver; no Jira write, nothing pushed\n" +
   "  <ISSUE-KEY> --pr        ... and opens the draft pull request\n";
 
 export interface SolveInvocation {
@@ -96,10 +116,12 @@ export function unavailable(phase: SolvePhase): string | null {
       return null;
     }
     case "claim": {
-      return "the label write path is not wired (phase B2) — `createSolveDeps` composes readers only, so no function in this process can edit a label";
+      return "the label write path is not wired (phase B2) — `createSolveDeps` composes readers only, so no function in this process can edit a label. Note this refuses while --solve does not; see the header, the ladder is not cumulative";
     }
     case "solve": {
-      return "the solver is not wired (phase C) — `src/solve/orchestrator.ts` exists but nothing constructs its dependencies";
+      // Wired. `createSolveRunDeps` composes the `CommandRunner` and the
+      // `PassRunner`, which is the whole of phase C's privilege.
+      return null;
     }
     case "pr": {
       return "delivery is not wired (phase D) — `src/solve/delivery.ts` exists but nothing constructs its dependencies";

@@ -6,7 +6,16 @@ import type { TicketRef } from "./jira/types.ts";
 import { type Settings, SettingsError, readSettings } from "./settings.ts";
 import { buildPrompt, toolsFor } from "./triage/runner.ts";
 import { runSolveCycle } from "./solve/poller.ts";
-import { buildTriageOptions, createSolveDeps, pollIntervalMs, shouldPost } from "./wiring.ts";
+import type { IssueDetail } from "./jira/client.ts";
+import {
+  NotSolvableError,
+  buildSolveRequest,
+  buildTriageOptions,
+  createSolveDeps,
+  createSolveRunDeps,
+  pollIntervalMs,
+  shouldPost,
+} from "./wiring.ts";
 
 /** Minimum environment that satisfies the required settings. */
 const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
@@ -449,5 +458,150 @@ describe("createSolveDeps", () => {
     const deps = createSolveDeps(solveSettings(), fakeClient().client, controller.signal);
 
     expect(deps.signal).toBe(controller.signal);
+  });
+});
+
+/** The settings a real solve needs, so each test can remove exactly one. */
+const SOLVE_ENV = {
+  VAULT_PATH: "/vault",
+  SOLVE_REPO_ROOT: "/repos",
+  SOLVE_REPOS: "buy-insurance-advisor-web",
+};
+
+function detailWith(labels: readonly string[]): IssueDetail {
+  return {
+    key: "SSX-3822",
+    summary: "Distinct favicon",
+    issueTypeName: "Oppgave",
+    status: "Mottatt",
+    labels,
+    description: undefined,
+    comments: [],
+    attachments: [],
+    url: "https://example.invalid/browse/SSX-3822",
+  };
+}
+
+describe("buildSolveRequest", () => {
+  it("resolves the repository from the ticket's own svc: label", () => {
+    const request = buildSolveRequest(
+      settingsWith(SOLVE_ENV),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "ticket text",
+    );
+
+    expect(request.repoPath).toBe("/repos/buy-insurance-advisor-web");
+    expect(request.issueKey).toBe("SSX-3822");
+    expect(request.ticket).toBe("ticket text");
+    expect(request.baseRef).toBe("origin/main");
+  });
+
+  it("refuses a repository that is not on the allowlist", () => {
+    // The write-privilege gate. A ticket naming any other repository is refused
+    // here rather than discovered after four model sessions.
+    expect(() =>
+      buildSolveRequest(
+        settingsWith(SOLVE_ENV),
+        detailWith(["svc:some-other-repo"]),
+        "ticket text",
+      ),
+    ).toThrow(NotSolvableError);
+  });
+
+  it("refuses when SOLVE_REPOS is empty rather than defaulting to everything", () => {
+    expect(() =>
+      buildSolveRequest(
+        settingsWith({ ...SOLVE_ENV, SOLVE_REPOS: "" }),
+        detailWith(["svc:buy-insurance-advisor-web"]),
+        "ticket text",
+      ),
+    ).toThrow(NotSolvableError);
+  });
+
+  it("refuses a ticket that names no repository, or two", () => {
+    // `repoFromLabels` resolves every ambiguous reading to null. Both ends of
+    // that are refusals here, because the value decides what gets written to.
+    for (const labels of [[], ["triaged"], ["svc:one", "svc:two"]]) {
+      expect(() => buildSolveRequest(settingsWith(SOLVE_ENV), detailWith(labels), "t")).toThrow(
+        NotSolvableError,
+      );
+    }
+  });
+
+  it("refuses to guess where the checkouts live", () => {
+    expect(() =>
+      buildSolveRequest(
+        settingsWith({ ...SOLVE_ENV, SOLVE_REPO_ROOT: "" }),
+        detailWith(["svc:buy-insurance-advisor-web"]),
+        "t",
+      ),
+    ).toThrow(SettingsError);
+  });
+
+  it("puts the worktree somewhere that is obviously not the repository", () => {
+    // A failed run keeps its worktree for inspection. It should be findable and
+    // it should not be sitting inside a checkout somebody works in.
+    const request = buildSolveRequest(
+      settingsWith(SOLVE_ENV),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.parentDirectory).not.toContain("/repos");
+  });
+
+  it("floors every timeout above zero", () => {
+    // Zero is not "no timeout"; it is a timeout that expired before the step
+    // began, which would kill each one instantly.
+    for (const name of [
+      "SOLVE_GIT_TIMEOUT_MS",
+      "SOLVE_STEP_TIMEOUT_MS",
+      "SOLVE_INSTALL_TIMEOUT_MS",
+    ]) {
+      expect(() =>
+        buildSolveRequest(
+          settingsWith({ ...SOLVE_ENV, [name]: "0" }),
+          detailWith(["svc:buy-insurance-advisor-web"]),
+          "t",
+        ),
+      ).toThrow();
+    }
+  });
+});
+
+describe("createSolveRunDeps", () => {
+  it("composes the two objects that can change something", () => {
+    // This function is the phase C privilege grant. Asserting its shape is
+    // asserting that the grant is exactly these two and no more.
+    const deps = createSolveRunDeps(settingsWith(SOLVE_ENV));
+
+    expect(Object.keys(deps).toSorted()).toEqual(["commands", "passes"]);
+    expect(typeof deps.commands.run).toBe("function");
+    expect(typeof deps.passes.run).toBe("function");
+  });
+
+  it("refuses to build a solver with no vault", () => {
+    // Same reason triage refuses: the branch and commit conventions the solver
+    // is held to live in the vault, and failing now beats failing four sessions
+    // in on a mechanical check.
+    expect(() => createSolveRunDeps(settingsWith({ ...SOLVE_ENV, VAULT_PATH: "" }))).toThrow(
+      SettingsError,
+    );
+  });
+
+  it("floors the per-pass timeout above zero", () => {
+    expect(() =>
+      createSolveRunDeps(settingsWith({ ...SOLVE_ENV, SOLVE_TIMEOUT_MS: "0" })),
+    ).toThrow();
+  });
+
+  it("does not construct a solver as a side effect of reading the board", () => {
+    // The queue poller runs on every cycle and needs none of this. If the two
+    // were one function, reading the board would build the ability to write to
+    // a repository.
+    const readers = createSolveDeps(settingsWith(SOLVE_ENV), {} as JiraClient);
+
+    expect(readers).not.toHaveProperty("commands");
+    expect(readers).not.toHaveProperty("passes");
   });
 });

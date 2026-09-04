@@ -274,6 +274,14 @@ describe("renderAdf, lists", () => {
     expect(renderAdf(list)).toBe("- intro\n  more");
   });
 
+  it("skips an empty block inside an item rather than starting it a line late", () => {
+    const list = {
+      type: "bulletList",
+      content: [listItem(paragraph(), paragraph(text("the actual text")))],
+    };
+    expect(renderAdf(list)).toBe("- the actual text");
+  });
+
   it("keeps a marker for an empty item, so later items keep their numbers", () => {
     // Dropping the empty item would renumber everything after it, and "step 3"
     // in the output would no longer be step 3 on the ticket.
@@ -397,6 +405,17 @@ describe("renderAdf, headings, code and quotes", () => {
     expect(renderAdf(quote)).toBe("> first\n>\n> second");
   });
 
+  it("does not quote a blank line for an empty paragraph inside a quote", () => {
+    // The one place the empty-block filter is visible: tidy() cannot clean this
+    // up afterwards, because the blank lines are no longer blank once every
+    // line has been prefixed with a marker.
+    const quote = {
+      type: "blockquote",
+      content: [paragraph(text("first")), paragraph(), paragraph(text("second"))],
+    };
+    expect(renderAdf(quote)).toBe("> first\n>\n> second");
+  });
+
   it("renders an empty blockquote as nothing", () => {
     expect(renderAdf(doc({ type: "blockquote" }, paragraph(text("body"))))).toBe("body");
   });
@@ -440,6 +459,20 @@ describe("renderAdf, tables", () => {
       ],
     };
     expect(renderAdf(table)).toBe("a |  | c");
+  });
+
+  it("drops a row with nothing in it instead of breaking the table in two", () => {
+    // An empty line in the middle of a table reads as the end of the table and
+    // the start of a paragraph.
+    const table = {
+      type: "table",
+      content: [
+        row("tableCell", "a", "b"),
+        { type: "tableRow", content: [] },
+        row("tableCell", "c", "d"),
+      ],
+    };
+    expect(renderAdf(table)).toBe("a | b\nc | d");
   });
 
   it("flattens a multi-block cell onto one line", () => {
@@ -572,12 +605,24 @@ describe("renderAdf, totality", () => {
     expect(renderAdf({ type: "text" })).toBe("");
   });
 
-  it("does not throw or hang on a pathologically deep document", () => {
-    // Deep enough to overflow the stack without the depth cap, which is the
-    // point: a RangeError is still a throw, and this input is one line of
-    // attacker-written JSON. The cap answers a reference cycle the same way.
+  it("truncates a document nested past the depth cap", () => {
+    // Five hundred is past the cap and nowhere near the stack limit, which is
+    // what makes this an assertion about the cap rather than about the catch.
+    // Nothing below the cap is rendered, so the whole thing comes back empty.
     let nested: unknown = paragraph(text("bottom"));
-    for (let i = 0; i < 10_000; i += 1) {
+    for (let i = 0; i < 500; i += 1) {
+      nested = { type: "blockquote", content: [nested] };
+    }
+
+    expect(renderAdf(nested)).toBe("");
+  });
+
+  it("does not throw on a document deep enough to overflow the stack", () => {
+    // The catch is the backstop under the cap. Both have to hold: remove the
+    // cap and this input still costs tens of megabytes of "> " prefixes,
+    // built quadratically out of a few kilobytes of JSON.
+    let nested: unknown = paragraph(text("bottom"));
+    for (let i = 0; i < 50_000; i += 1) {
       nested = { type: "blockquote", content: [nested] };
     }
 
@@ -700,12 +745,28 @@ describe("referencedAttachments", () => {
     ]);
   });
 
-  it("does not throw on a pathologically deep document", () => {
+  it("stops at the depth cap rather than walking a pathologically deep document", () => {
     let nested: unknown = mediaNode("bottom.png");
-    for (let i = 0; i < 10_000; i += 1) {
+    for (let i = 0; i < 500; i += 1) {
+      nested = { type: "blockquote", content: [nested] };
+    }
+    expect(referencedAttachments(nested)).toEqual([]);
+  });
+
+  it("does not throw on a document deep enough to overflow the stack", () => {
+    let nested: unknown = mediaNode("bottom.png");
+    for (let i = 0; i < 50_000; i += 1) {
       nested = { type: "blockquote", content: [nested] };
     }
     expect(() => referencedAttachments(nested)).not.toThrow();
+  });
+
+  it("finds an attachment nested as deeply as a human would nest one", () => {
+    let nested: unknown = mediaNode("bottom.png");
+    for (let i = 0; i < 8; i += 1) {
+      nested = { type: "blockquote", content: [nested] };
+    }
+    expect(referencedAttachments(nested)).toEqual(["bottom.png"]);
   });
 
   it("does not throw when a property access itself throws", () => {
