@@ -127,6 +127,10 @@ const saw =
   (argv: readonly string[]): boolean =>
     needles.every((needle) => argv.includes(needle));
 
+/** `git show <ref>:pom.xml`, whatever the ref is. */
+const SHOWS_POM = (argv: readonly string[]): boolean =>
+  argv.includes("show") && argv.some((arg) => arg.endsWith(":pom.xml"));
+
 interface Harness {
   readonly deps: SolveDependencies;
   /** Passes and commands interleaved, so ordering assertions are about order. */
@@ -159,6 +163,10 @@ function harness(
   const seen: { pass: Pass; options: SolveRunOptions }[] = [];
 
   const defaults: readonly Rule[] = [
+    // The pilot repo is a Node one, so `pom.xml` is not in its base tree.
+    // Answering every `git show` with the manifest would put both toolchains in
+    // the base and `verify` would refuse before running a step.
+    { match: SHOWS_POM, reply: { exitCode: 128 } },
     { match: saw("show"), reply: { stdout: MANIFEST } },
     { match: saw("--name-only"), reply: { stdout: "" } },
     { match: saw("--numstat"), reply: { stdout: NUMSTAT } },

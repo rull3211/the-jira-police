@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1469 tests, no build step, no deployment
+Status: running end to end against production Jira. 1505 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -681,7 +681,7 @@ is the only one that changes what the skill reads:
    namespace shared with a writer other than the skill, so the list is narrower than a prefix.
 
 3. **The taxonomy namespaces — `team:`, `jira:`, `domain:`, `svc:`, `value:`, `effort:` — but only
-   as a swap.** §11's removal list named the skill's *assessments* and not its *facts*, while the
+   as a swap.** §11's removal list named the skill's _assessments_ and not its _facts_, while the
    skill's label vocabulary (`INTAKE_INSTRUCTIONS.md`, "Labels") sets both. The asymmetry: a
    re-triage could revise its verdict freely and could never revise a fact. A ticket re-routed to
    another squad kept the old `team:` beside the new one; a corrected `svc:` left two, which
@@ -906,6 +906,10 @@ before it, so the command line reads as the privilege escalation it is.
   failed: `Resource not accessible by integration` on `GET /repos/…/pulls/2657`, because the
   Copilot installation lacks `pull_requests: read` on that repository. That is an org
   configuration, not something this codebase can fix, and re-requesting produced the same result.
+
+  **Granted since.** On PR #2658, 2026-09-05, Copilot reviewed for real. `reviewerErrored` stays:
+  the permission can be revoked, and a guard removed because the thing it caught stopped happening
+  is a guard removed at exactly the wrong time.
 
   The part that is ours is **how the failure came back**: as an ordinary `COMMENTED` review whose
   whole body was "Copilot encountered an error and was unable to review this pull request." Read
@@ -1280,6 +1284,32 @@ about the model has to survive that.
 takes a Jira client: labels and comments belong to the caller, which keeps the whole thing
 runnable by hand against one ticket with nothing on the board changing.
 
+### The first end-to-end run, 2026-09-05
+
+`bot:once SSX-3822 --pr`, 15 minutes wall clock: triage 3½ min → poster → claim → recon 7 min →
+fix → install → vitest → commit → push → **draft PR #2658**, five files, +70/-1. Every stage ran
+as designed and nothing needed a hand on it.
+
+Three things it settled:
+
+- **Copilot review works in this org.** It reviewed #2658 (`COMMENTED`), closing the last open
+  verification item. Nothing acted on the review — `advance` is unbuilt — so the ticket ends on
+  `agent:solving`.
+- **The fitness call refused a ticket for the first time.** A second run, `bot:once SSX-3801`,
+  stopped before the claim: DoR row 9 unmet, so the verdict could not be `ready-ish`, so
+  `solvable` had to be false. Two further guards would have caught it independently — the change
+  is consumed by an external partner, and its repo is not on `SOLVE_REPOS` — and the cheapest
+  fired first, which is the ordering the ladder is for. Nothing was claimed and no worktree cut.
+- **A stale solve comment steered a verdict.** SSX-3822 had been label-reset but still carried the
+  previous run's comment, and triage's `recommendedNextStep` came back asking why a branch and PR
+  already existed. Harmless here, and it is the §1-reads-comments divergence working as specified
+  — solve comments are excluded from _satisfying_ DoR, not from being read as context. Worth
+  knowing before reading any re-run's verdict as independent of the run before it.
+
+One gap the refusal exposed and no label yet expresses: **"not ready yet" and "not ever" both land
+as `solvable: false`.** SSX-3801's DoR gap is fixable by a reporter; its partner-contract blast
+radius is not. The distinction survives only in `rationale` prose.
+
 ### The two actors
 
 The important structural fact about this phase is that there are two of them and only one has a
@@ -1539,8 +1569,9 @@ them.
 The model is never asked whether the tests passed. The harness runs them and reads exit codes,
 because "did it work" is the one question the thing being judged must not answer about itself.
 
-The commands are discovered from `git show <base>:package.json` — the pristine manifest — never
-from the worktree. The header is blunt that this is necessary and **insufficient**, which is the
+The commands are discovered from the pristine manifest — `git show <base>:package.json`, or
+`git show <base>:pom.xml` for a Java repository, per _Two toolchains_ below — never from the
+worktree. The header is blunt that this is necessary and **insufficient**, which is the
 part it would be easy to stop at: knowing the base said `"test": "vitest run"` does not help if the
 command executes in a worktree where `package.json` now says something else, because the package
 manager reads the manifest on disk and not the one we consulted. So there are two halves, and the
@@ -1549,7 +1580,7 @@ are still byte-identical to the base. That list is shared with the diff gate on 
 refuses such a diff after the fact, this refuses to produce a verdict about it, and if the list
 grows it grows for both.
 
-The package manager comes from an allowlist keyed with `Object.hasOwn` rather than `in` — `in`
+For a Node base, the package manager comes from an allowlist keyed with `Object.hasOwn` rather than `in` — `in`
 walks the prototype chain, so a manifest declaring `constructor@1` would satisfy an allowlist that
 was never given that name. The step names (`check-types`/`typecheck`, `lint`, `test`) are literals
 from a table and never keys read out of the manifest, which is why nothing here has to sanitise a
@@ -1634,6 +1665,79 @@ typecheck, every run on that repository fails through no fault of the solver. Pr
 would mean verifying the base too and doubling the runtime of every solve. The cheaper mitigation
 is that per-step results are kept and reported, so a step failing identically on every ticket is
 visible as the repository problem it is rather than looking like a run of bad luck.
+
+### Two toolchains, and why the second one looks nothing like the first
+
+Added 2026-09-05, after a run against `insurance-commerce-rest-api` — a Java service — refused at
+verification. The refusal was correct and it was predicted before the run: `discoverPlan` read
+`git show <base>:package.json`, got nothing, and said so. But "this service can only verify
+JavaScript" is a limit of the harness, not of the idea, and half the board's bugs are in Java.
+
+The toolchain is now chosen by which manifest the **base** carries: `package.json` ⇒ Node,
+`pom.xml` ⇒ Maven. The base and not the worktree, for the reason the whole module exists — a run
+that added a `pom.xml` would otherwise get to pick which build system grades it.
+
+**A base carrying both is refused rather than resolved.** Two build systems define what passing
+means, and whichever were checked first would win, which would make the verdict a property of the
+order of two lines in this file. This is the same shape as `repoFromLabels` refusing a ticket with
+two `svc:` labels: a contradiction must not be resolved into a decision. The cost is real —
+a polyglot repository cannot be verified here at all — and it is the cost worth paying, because
+the alternative failure is silent and this one is a sentence in an artifact.
+
+Four things about the Maven plan are deliberately unlike the Node one:
+
+**No install step.** `mvn test` resolves its own dependencies; a separate install phase would
+either be a no-op or a second full download. So `VerificationPlan.install` became nullable, and
+`verify` skips the phase rather than running something harmless. An "install" line in the report
+that never ran is a step a reader would count as evidence.
+
+**The single test step is marked `cold`, and a cold step is charged the _install_ budget.** A first
+Java build on a machine downloads most of Maven Central. On the step budget it times out, and a
+timed-out step is `failed` — so the machine's empty `~/.m2` would be reported as the change being
+wrong. That is exactly the `refused`/`failed` confusion the outcome table exists to prevent,
+arriving through the timeout instead of through the outcome mapping. `Step.cold` is what keeps the
+two apart, and it is a property of the step rather than of the toolchain so that the budget rule
+stays readable in `verify` without a `toolchain === "maven"` test.
+
+**`mvn` from `PATH`, and deliberately never `./mvnw`.** Running the wrapper is the conventional
+thing to do and it pins the version, which is the one thing `PATH` cannot do. It is also a file
+inside the repository being verified, which a solve run has write access to — so executing it
+would make "which program verifies this change" answerable by the change. That is the single
+property `ALLOWED_EXECUTABLES` exists to deny, and the same reason `sh` and `make` are excluded by
+name. The accepted cost is a possible version mismatch with the repository's CI; it is a mismatch
+rather than an execution channel, and `plan.note` says so on every Maven refusal and on the cold
+step's failure. The wrapper is refused by the diff gate all the same, for a different reason: this
+harness will not run it, but everyone else's CI will.
+
+**Exactly one flag, `-B`.** The temptation is `--no-transfer-progress`, `-q`, `-Dstyle.color=none`.
+Each is a way for the _test_ step to exit non-zero because Maven did not recognise a flag — and a
+non-zero test step is reported as `failed`, which is a harness mistake printed as a verdict about
+the model's code. `-B` (batch mode) has been in Maven since 2.0 and does the one necessary thing:
+stops it waiting on a terminal that is not there.
+
+The same logic ruled out a Maven warm-up step. `mvn -DskipTests test-compile` before the real run
+would separate "downloading the world" from "the tests", which is what the Node split buys — but
+it also compiles the model's code, and an install failure maps to `refused`. A fix that does not
+compile would then be booked as "no verdict reached" instead of `failed`, which is the worst
+single error this module can make. So Maven gets one step that does everything, and the budget
+does the work the split would have done.
+
+What _is_ checked before planning is that Maven exists: `mvn -v` at plan time, and a refusal
+naming the harness if it does not. Without that probe an absent Maven makes `mvn -B test` exit
+non-zero, and a machine with no Java installed reports every Java fix as broken.
+
+One repair fell out of the rewrite. `git show` failing used to mean one thing, "could not read the
+manifest"; with two manifests, non-zero legitimately means "this one is not here". So `Shown`
+distinguishes `found`, `absent` and `unreadable`, and only the timeout can be told apart
+mechanically — `git show` exits 128 both for a missing path and for a missing ref. A wrong base ref
+therefore reads as both manifests absent, and that refusal names the ref rather than asserting the
+repository has no build system.
+
+Nothing else in the pipeline branches on language. The `agent-solve` skill was checked line by
+line for it and needed no change: it never names TypeScript, React, pnpm or vitest, and asks the
+model to find the project's own conventions rather than supplying any. The Node-versus-Maven split
+lives entirely in `discoverPlan`, and the tests assert the negative in both directions — no Node
+command is ever issued against a Maven base, and no `mvn` against a Node one.
 
 ### Delivery
 

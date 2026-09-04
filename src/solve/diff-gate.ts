@@ -138,6 +138,19 @@ export const VERIFICATION_PATHS: readonly Rule[] = [
     pattern: /(^|\/)vitest\.config\.[\w.]+$|(^|\/)vite\.config\.[\w.]+$/u,
     why: "test configuration decides which tests run at all; excluding a file is indistinguishable from fixing it",
   },
+  {
+    pattern: /(^|\/)pom\.xml$/u,
+    why: "the Maven build is defined here — a skipped test, a dropped module or a relaxed plugin makes the build pass without making the code correct",
+  },
+  {
+    // Matched even though `verify.ts` runs `mvn` from PATH and never the
+    // wrapper. The rule is about what a diff may contain, not about what this
+    // harness happens to execute today: a run that rewrites `mvnw` has edited
+    // the command the repository's own CI and every developer will run, and
+    // that is a change nobody asked a bug fix to make.
+    pattern: /(^|\/)mvnw(\.cmd)?$|(^|\/)\.mvn\//u,
+    why: "the Maven wrapper and its configuration decide which build actually runs for everyone else, even though this harness invokes mvn directly",
+  },
 ];
 
 export type DiffVerdict =

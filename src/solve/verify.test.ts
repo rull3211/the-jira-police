@@ -25,12 +25,25 @@ const MANIFEST = JSON.stringify({
   scripts: { test: "vitest run", "check-types": "tsc --noEmit", lint: "oxlint", dev: "vite" },
 });
 
+const POM = `<?xml version="1.0"?><project><artifactId>insurance-commerce-rest-api</artifactId></project>`;
+
+/** `git show` of a path that is not in the tree. */
+const ABSENT: CommandResult = { ...OK, exitCode: 128, stderr: "fatal: path does not exist" };
+
 /**
  * Replies by matching on the command, not by position.
  *
  * Position-keyed fakes were tried first and made the tests lie: a mutation that
  * removed a step shifted every later reply onto the wrong command, so tests
  * failed for the wrong reason and the mutation looked caught when it was not.
+ *
+ * The default world is a Node repository: `package.json` is in the base tree
+ * and `pom.xml` is not. That default is what makes the Maven tests below mean
+ * something — a fake that answered every `git show` identically would put both
+ * manifests in every base, so every test would take the both-toolchains
+ * refusal and no Node assertion would ever be reached. Keys match a substring
+ * of the joined argv, so a test picks a toolchain by keying on the manifest it
+ * wants: `"package.json"` or `"pom.xml"`.
  */
 function fakeRunner(replies: Record<string, CommandResult> = {}): CommandRunner & {
   calls: string[][];
@@ -40,12 +53,16 @@ function fakeRunner(replies: Record<string, CommandResult> = {}): CommandRunner 
     calls,
     run: (argv) => {
       calls.push([...argv]);
+      const line = argv.join(" ");
       for (const [needle, reply] of Object.entries(replies)) {
-        if (argv.join(" ").includes(needle)) {
+        if (line.includes(needle)) {
           return Promise.resolve(reply);
         }
       }
-      return Promise.resolve(argv.includes("show") ? out(MANIFEST) : OK);
+      if (line.includes(" show ")) {
+        return Promise.resolve(line.endsWith(":package.json") ? out(MANIFEST) : ABSENT);
+      }
+      return Promise.resolve(OK);
     },
   };
 }
@@ -191,9 +208,9 @@ describe("discoverPlan", () => {
       "origin/main:package.json",
     ]);
     expect(result.outcome === "planned" ? result.plan.steps : []).toEqual([
-      { name: "typecheck", argv: ["corepack", "pnpm@11.20.0", "run", "check-types"] },
-      { name: "lint", argv: ["corepack", "pnpm@11.20.0", "run", "lint"] },
-      { name: "test", argv: ["corepack", "pnpm@11.20.0", "run", "test"] },
+      { name: "typecheck", argv: ["corepack", "pnpm@11.20.0", "run", "check-types"], cold: false },
+      { name: "lint", argv: ["corepack", "pnpm@11.20.0", "run", "lint"], cold: false },
+      { name: "test", argv: ["corepack", "pnpm@11.20.0", "run", "test"], cold: false },
     ]);
   });
 
@@ -219,7 +236,7 @@ describe("discoverPlan", () => {
 
   it("accepts either spelling of the typecheck script", async () => {
     const runner = fakeRunner({
-      show: out(`{"scripts":{"test":"vitest","typecheck":"tsc --noEmit"}}`),
+      "package.json": out(`{"scripts":{"test":"vitest","typecheck":"tsc --noEmit"}}`),
     });
 
     const result = await discoverPlan(runner, request());
@@ -228,11 +245,12 @@ describe("discoverPlan", () => {
     expect(result.outcome === "planned" ? result.plan.steps[0] : null).toEqual({
       name: "typecheck",
       argv: ["pnpm", "run", "typecheck"],
+      cold: false,
     });
   });
 
   it("runs only what the repository has", async () => {
-    const runner = fakeRunner({ show: out(`{"scripts":{"test":"vitest"}}`) });
+    const runner = fakeRunner({ "package.json": out(`{"scripts":{"test":"vitest"}}`) });
 
     const result = await discoverPlan(runner, request());
 
@@ -242,25 +260,36 @@ describe("discoverPlan", () => {
   });
 
   it("refuses a repository with no test script", async () => {
-    const runner = fakeRunner({ show: out(`{"scripts":{"lint":"oxlint"}}`) });
+    const runner = fakeRunner({ "package.json": out(`{"scripts":{"lint":"oxlint"}}`) });
 
     expect(reason(await discoverPlan(runner, request()))).toContain("no test script");
   });
 
   it("refuses a manifest it cannot parse, distinctly from one without tests", async () => {
     for (const raw of ["not json", "[]", `{"scripts":"nope"}`, "null"]) {
-      const result = await discoverPlan(fakeRunner({ show: out(raw) }), request());
+      const result = await discoverPlan(fakeRunner({ "package.json": out(raw) }), request());
       expect(reason(result)).toContain("could not be parsed");
     }
   });
 
-  it("refuses when the base manifest cannot be read at all", async () => {
-    expect(reason(await discoverPlan(fakeRunner({ show: bad(128) }), request()))).toContain(
-      "could not read",
-    );
-    expect(reason(await discoverPlan(fakeRunner({ show: TIMEOUT }), request()))).toContain(
-      "could not read",
-    );
+  it("refuses when neither manifest is in the base, and names the ref", async () => {
+    // Both manifests absent has two causes this cannot tell apart — an
+    // unrecognised build system, or a base ref that does not exist — so the
+    // refusal has to name the ref rather than assert the first reading.
+    const result = await discoverPlan(fakeRunner({ "package.json": bad(128) }), request());
+
+    expect(reason(result)).toContain("could not read");
+    expect(reason(result)).toContain("origin/main");
+  });
+
+  it("keeps a read that timed out apart from a manifest that is not there", async () => {
+    // Same outcome, deliberately different reason. A timed-out `git show` is
+    // this machine failing, and reporting it as "no manifest here" would send
+    // the reader to the repository to look for a build system it already has.
+    const result = await discoverPlan(fakeRunner({ "package.json": TIMEOUT }), request());
+
+    expect(reason(result)).toContain("timed out");
+    expect(reason(result)).not.toContain("does not recognise");
   });
 
   it("refuses a base manifest declaring a manager it will not execute", async () => {
@@ -268,7 +297,7 @@ describe("discoverPlan", () => {
     // parser says null. This proves the caller acts on it — without which the
     // plan is built with `null` as the command and the refusal is decorative.
     const runner = fakeRunner({
-      show: out(`{"packageManager":"bun@1","scripts":{"test":"vitest"}}`),
+      "package.json": out(`{"packageManager":"bun@1","scripts":{"test":"vitest"}}`),
     });
 
     const result = await discoverPlan(runner, request());
@@ -281,7 +310,7 @@ describe("discoverPlan", () => {
     // The keys of `scripts` are attacker-adjacent; the arguments must come from
     // this module's own table. A manifest full of hostile keys yields nothing.
     const runner = fakeRunner({
-      show: out(
+      "package.json": out(
         JSON.stringify({ scripts: { test: "vitest", "--version": "x", "; rm -rf /": "x" } }),
       ),
     });
@@ -334,6 +363,7 @@ describe("verify", () => {
     expect(runner.calls.map((argv) => argv.join(" "))).toEqual([
       "git -C /tmp/solve/SSX-3822 diff --name-only -z origin/main --",
       "git -C /repos/advisor show origin/main:package.json",
+      "git -C /repos/advisor show origin/main:pom.xml",
       "corepack pnpm@11.20.0 install --frozen-lockfile",
       "corepack pnpm@11.20.0 run check-types",
       "corepack pnpm@11.20.0 run lint",
@@ -439,7 +469,10 @@ describe("verify", () => {
   });
 
   it("refuses rather than passing when the base has no test script", async () => {
-    const runner = fakeRunner({ diff: out(""), show: out(`{"scripts":{"lint":"oxlint"}}`) });
+    const runner = fakeRunner({
+      diff: out(""),
+      "package.json": out(`{"scripts":{"lint":"oxlint"}}`),
+    });
 
     const result = await verify(runner, request());
 
@@ -451,17 +484,19 @@ describe("verify", () => {
 
   it("gives install a longer timeout than the steps it precedes", async () => {
     const seen: number[] = [];
+    const inner = fakeRunner({ diff: out("") });
     const runner: CommandRunner = {
       run: (argv, options) => {
         seen.push(options.timeoutMs);
-        return Promise.resolve(argv.includes("show") ? out(MANIFEST) : OK);
+        return inner.run(argv, options);
       },
     };
 
     await verify(runner, request({ installTimeoutMs: 999, stepTimeoutMs: 111 }));
 
-    expect(seen[2]).toBe(999);
-    expect(seen.slice(3)).toEqual([111, 111, 111]);
+    // diff, two manifest reads, install, then the three warm steps.
+    expect(seen.slice(0, 4)).toEqual([111, 111, 111, 999]);
+    expect(seen.slice(4)).toEqual([111, 111, 111]);
   });
 
   it("keeps a bounded tail of output for the report", async () => {
@@ -472,5 +507,125 @@ describe("verify", () => {
     const last = result.outcome === "failed" ? result.steps.at(-1) : undefined;
 
     expect(last?.output.length).toBeLessThanOrEqual(4000);
+  });
+});
+
+/**
+ * A base whose only manifest is a POM.
+ *
+ * `package.json` is answered as absent explicitly rather than left to the
+ * default, because the default is the Node world and a Maven test that quietly
+ * inherited it would take the both-toolchains refusal instead of the branch it
+ * is about.
+ */
+const mavenRunner = (replies: Record<string, CommandResult> = {}): ReturnType<typeof fakeRunner> =>
+  fakeRunner({ "package.json": ABSENT, "pom.xml": out(POM), ...replies });
+
+describe("the Maven toolchain", () => {
+  it("plans one cold test step and no install", async () => {
+    const result = await discoverPlan(mavenRunner(), request());
+
+    expect(result.outcome === "planned" ? result.plan : null).toEqual({
+      // No install phase at all, rather than an install that does nothing:
+      // `mvn test` resolves its own dependencies, so a separate step would
+      // either be a no-op line in the report or a second full download.
+      install: null,
+      steps: [{ name: "test", argv: ["mvn", "-B", "test"], cold: true }],
+      toolchain: "maven",
+      note: expect.stringContaining("wrapper is deliberately not executed") as unknown as string,
+    });
+  });
+
+  it("never runs a Node command against a Maven base", async () => {
+    const runner = mavenRunner({ diff: out("") });
+
+    await verify(runner, request());
+
+    const line = runner.calls.map((argv) => argv.join(" ")).join("\n");
+    for (const nodeism of ["pnpm", "npm", "yarn", "corepack", "run test", "--frozen-lockfile"]) {
+      expect(line).not.toContain(nodeism);
+    }
+  });
+
+  it("never runs a Maven command against a Node base", async () => {
+    // The mirror of the test above, and the one that would catch a toolchain
+    // dispatch that fell through to Maven on an unrecognised manifest.
+    const runner = fakeRunner({ diff: out("") });
+
+    await verify(runner, request());
+
+    expect(runner.calls.map((argv) => argv[0])).not.toContain("mvn");
+  });
+
+  it("charges the cold step the install budget, not the step budget", async () => {
+    // A first Java build downloads the world. On the step budget it times out
+    // and is reported as `failed` — the machine's cold cache printed as a
+    // verdict about the change.
+    const seen: number[] = [];
+    const inner = mavenRunner({ diff: out("") });
+    const runner: CommandRunner = {
+      run: (argv, options) => {
+        seen.push(options.timeoutMs);
+        return inner.run(argv, options);
+      },
+    };
+
+    await verify(runner, request({ installTimeoutMs: 999, stepTimeoutMs: 111 }));
+
+    expect(seen.at(-1)).toBe(999);
+  });
+
+  it("refuses when there is no working mvn, rather than failing the change", async () => {
+    // The distinction this probe exists for. Without it the missing tool makes
+    // `mvn -B test` exit non-zero, and a harness with no Java installed reports
+    // every Java fix as broken.
+    const result = await discoverPlan(mavenRunner({ "mvn -v": bad(127) }), request());
+
+    expect(result.outcome).toBe("refused");
+    expect(reason(result)).toContain("not the change being wrong");
+  });
+
+  it("probes for mvn before planning, not after the plan is handed out", async () => {
+    const runner = mavenRunner({ "mvn -v": TIMEOUT });
+
+    expect((await discoverPlan(runner, request())).outcome).toBe("refused");
+    expect(runner.calls.map((argv) => argv.join(" "))).toContain("mvn -v");
+  });
+
+  it("refuses a pom.xml that is not a POM", async () => {
+    const result = await discoverPlan(mavenRunner({ "pom.xml": out("not xml") }), request());
+
+    expect(result.outcome).toBe("refused");
+    expect(reason(result)).toContain("does not look like a POM");
+  });
+
+  it("refuses a base carrying both manifests instead of picking one", async () => {
+    // Two build systems disagree about what passing means here. Resolving that
+    // into a choice would make the verdict a property of which file this
+    // function happens to read first.
+    const runner = fakeRunner({ "pom.xml": out(POM) });
+
+    const result = await discoverPlan(runner, request());
+
+    expect(result.outcome).toBe("refused");
+    expect(reason(result)).toContain("choosing one would be a guess");
+    expect(runner.calls.map((argv) => argv[0])).not.toContain("mvn");
+  });
+
+  it("carries the wrapper note into a failed Maven run", async () => {
+    // The cold step is also the install, so there is no install refusal to hang
+    // the note on. Without this the "mvnw was not executed" hint — the first
+    // thing to check on a version mismatch — could never be printed.
+    const result = await verify(mavenRunner({ diff: out(""), "-B test": bad(1) }), request());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("wrapper is deliberately not executed");
+  });
+
+  it("names an executable the runner allows", async () => {
+    const result = await discoverPlan(mavenRunner(), request());
+    const argv0 = result.outcome === "planned" ? (result.plan.steps[0]?.argv[0] ?? "") : "";
+
+    expect(ALLOWED_EXECUTABLES).toContain(argv0);
   });
 });

@@ -28,6 +28,13 @@
  * verdict about it at all. Two mechanisms, one list — and if the list grows, it
  * grows for both.
  *
+ * ## Two toolchains, chosen by the base
+ *
+ * Node (`package.json`) and Maven (`pom.xml`). The base decides which applies.
+ * A base carrying both is refused rather than resolved — see ARCHITECTURE.md
+ * §15 for that argument and for why Maven has no install step, no typecheck
+ * step, no lint step, and exactly one flag.
+ *
  * ## Known limitation, deliberately not solved here
  *
  * If the base itself is already failing lint or typecheck, every run on that
@@ -120,17 +127,52 @@ const STEPS = [
 
 export type StepName = (typeof STEPS)[number]["name"];
 
+/** Which build system the base declares. Never inferred from file contents. */
+export type Toolchain = "node" | "maven";
+
+/** The manifest that selects each toolchain, read from the base ref. */
+const MANIFESTS: Record<Toolchain, string> = {
+  node: "package.json",
+  maven: "pom.xml",
+};
+
+/** Maven, as a PATH-resolved name. The repo's own `mvnw` is never executed. */
+const MAVEN = "mvn";
+
+/**
+ * One manifest's presence in the base tree.
+ *
+ * `absent` and `unreadable` are separate because they lead to different
+ * refusals: no recognised manifest is a fact about the repository, while a read
+ * that timed out is a fact about this machine. Only the timeout can be told
+ * apart mechanically — `git show` exits non-zero both for a path that is not in
+ * the tree and for a ref that does not exist, so a wrong base ref reads as both
+ * manifests absent, and that refusal names the ref for exactly this reason.
+ */
+type Shown =
+  | { readonly kind: "found"; readonly raw: string }
+  | { readonly kind: "absent" }
+  | { readonly kind: "unreadable" };
+
 export interface Step {
   readonly name: StepName;
   readonly argv: readonly string[];
+  /**
+   * Charged the install budget rather than the step budget.
+   *
+   * True when the step resolves its own dependencies, so its first run on a
+   * machine is dominated by downloading rather than by the work being measured.
+   */
+  readonly cold: boolean;
 }
 
 export interface VerificationPlan {
-  /** Fresh worktrees have no `node_modules`, so this always runs first. */
-  readonly install: readonly string[];
+  /** `null` when the toolchain has no separate install phase. */
+  readonly install: readonly string[] | null;
   readonly steps: readonly Step[];
-  /** Carried so a refusal can say which toolchain produced it. See `versionNote`. */
-  readonly manager: PackageManager;
+  readonly toolchain: Toolchain;
+  /** Appended to a refusal so it says which toolchain produced it. */
+  readonly note: string;
 }
 
 /**
@@ -286,15 +328,94 @@ export async function discoverPlan(
 ): Promise<PlanResult> {
   const { repoPath, baseRef, stepTimeoutMs } = request;
 
-  const shown = await runner.run(["git", "-C", repoPath, "show", `${baseRef}:package.json`], {
-    cwd: repoPath,
-    timeoutMs: stepTimeoutMs,
-  });
-  if (shown.timedOut || shown.exitCode !== 0) {
-    return { outcome: "refused", reason: `could not read ${baseRef}:package.json` };
+  const show = async (path: string): Promise<Shown> => {
+    const shown = await runner.run(["git", "-C", repoPath, "show", `${baseRef}:${path}`], {
+      cwd: repoPath,
+      timeoutMs: stepTimeoutMs,
+    });
+    if (shown.timedOut) {
+      return { kind: "unreadable" };
+    }
+    return shown.exitCode === 0 ? { kind: "found", raw: shown.stdout } : { kind: "absent" };
+  };
+
+  const node = await show(MANIFESTS.node);
+  const maven = await show(MANIFESTS.maven);
+
+  if (node.kind === "unreadable" || maven.kind === "unreadable") {
+    return {
+      outcome: "refused",
+      reason: `could not read the base manifests at ${baseRef} — the read timed out, which is a fact about this machine and not about the change`,
+    };
   }
 
-  const scripts = scriptsOf(shown.stdout);
+  // Both is a contradiction, not a preference. Two build systems disagree about
+  // what passing means here, and whichever were checked first would win — which
+  // would make the verdict a property of this function's line order.
+  if (node.kind === "found" && maven.kind === "found") {
+    return {
+      outcome: "refused",
+      reason: `the base has both ${MANIFESTS.node} and ${MANIFESTS.maven} — two toolchains define what passing means here, and choosing one would be a guess`,
+    };
+  }
+  if (node.kind === "found") {
+    return nodePlan(node.raw);
+  }
+  if (maven.kind === "found") {
+    return await mavenPlan(runner, maven.raw, request);
+  }
+  return {
+    outcome: "refused",
+    reason: `could not read ${MANIFESTS.node} or ${MANIFESTS.maven} at ${baseRef} — either this repository's build is one this service does not recognise, or the base ref is wrong, and \`git show\` reports both the same way`,
+  };
+}
+
+/**
+ * Maven's plan: one step, cold, and only after proving Maven exists.
+ *
+ * The `mvn -v` probe is the point of this being separate. Without it an absent
+ * Maven makes the test step exit non-zero, which is reported as `failed` — the
+ * harness's own missing dependency, printed as a verdict about the model's code.
+ */
+async function mavenPlan(
+  runner: CommandRunner,
+  raw: string,
+  request: Pick<VerifyRequest, "repoPath" | "baseRef" | "stepTimeoutMs">,
+): Promise<PlanResult> {
+  // The same rule the Node manifest gets: unreadable is not the same as
+  // untested, so it refuses rather than proceeding.
+  if (!raw.includes("<project")) {
+    return {
+      outcome: "refused",
+      reason: `the base ${MANIFESTS.maven} does not look like a POM — that is a repository this cannot make a statement about, not one without tests`,
+    };
+  }
+
+  const probed = await runner.run([MAVEN, "-v"], {
+    cwd: request.repoPath,
+    timeoutMs: request.stepTimeoutMs,
+  });
+  if (probed.timedOut || probed.exitCode !== 0) {
+    return {
+      outcome: "refused",
+      reason: `no working ${MAVEN} on PATH, so a Java build cannot be verified here — this is the harness missing a tool, not the change being wrong`,
+    };
+  }
+
+  return {
+    outcome: "planned",
+    plan: {
+      install: null,
+      steps: [{ name: "test", argv: [MAVEN, "-B", "test"], cold: true }],
+      toolchain: "maven",
+      note: ` — using ${MAVEN} from PATH; the repository's own wrapper is deliberately not executed, so a version mismatch with its CI is the first thing to check`,
+    },
+  };
+}
+
+/** Node's plan: discovered scripts, run through the declared package manager. */
+function nodePlan(raw: string): PlanResult {
+  const scripts = scriptsOf(raw);
   if (scripts === null) {
     return {
       outcome: "refused",
@@ -303,7 +424,7 @@ export async function discoverPlan(
     };
   }
 
-  const manager = packageManagerOf(shown.stdout);
+  const manager = packageManagerOf(raw);
   if (manager === null) {
     return {
       outcome: "refused",
@@ -317,7 +438,7 @@ export async function discoverPlan(
   for (const step of STEPS) {
     const found = step.scripts.find((name) => Object.hasOwn(scripts, name));
     if (found !== undefined) {
-      steps.push({ name: step.name, argv: [...invocation, "run", found] });
+      steps.push({ name: step.name, argv: [...invocation, "run", found], cold: false });
     }
   }
 
@@ -334,7 +455,8 @@ export async function discoverPlan(
     plan: {
       install: [...invocation, ...(PACKAGE_MANAGERS[manager.name] ?? [])],
       steps,
-      manager,
+      toolchain: "node",
+      note: versionNote(manager),
     },
   };
 }
@@ -403,40 +525,49 @@ export async function verify(
 
   const results: StepResult[] = [];
 
-  const installed = await runner.run(plan.install, {
-    cwd: worktreePath,
-    timeoutMs: installTimeoutMs,
-  });
-  results.push({
-    name: "install",
-    passed: !installed.timedOut && installed.exitCode === 0,
-    exitCode: installed.exitCode,
-    timedOut: installed.timedOut,
-    output: tail(installed),
-  });
-  if (installed.timedOut || installed.exitCode !== 0) {
-    // Not a failure: nothing was verified, so there is nothing to have failed.
-    //
-    // The last of the install's own output is quoted, and it was missing here
-    // until a live run went without it. The refusal said `exit 1` and named the
-    // unpinned `packageManager` as a thing to check, which is a hypothesis; the
-    // install had printed `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, which is the
-    // answer. `results` already held it and this branch returned before anyone
-    // could read it — the output was captured and then thrown away, which is
-    // the most annoying shape a diagnostic bug takes.
-    const said = tail(installed);
-    return {
-      outcome: "refused",
-      reason:
-        `dependency install did not complete, so no step ran ` +
-        `(${installed.timedOut ? "timed out" : `exit ${String(installed.exitCode)}`})` +
-        `${versionNote(plan.manager)}` +
-        `${said === "" ? "" : ` — it said: ${said}`}`,
-    };
+  // Skipped entirely when the toolchain has no install phase, rather than run
+  // as a no-op: an "install" line in the artifact that never ran is a step a
+  // reader would count as evidence.
+  if (plan.install !== null) {
+    const installed = await runner.run(plan.install, {
+      cwd: worktreePath,
+      timeoutMs: installTimeoutMs,
+    });
+    results.push({
+      name: "install",
+      passed: !installed.timedOut && installed.exitCode === 0,
+      exitCode: installed.exitCode,
+      timedOut: installed.timedOut,
+      output: tail(installed),
+    });
+    if (installed.timedOut || installed.exitCode !== 0) {
+      // Not a failure: nothing was verified, so there is nothing to have failed.
+      //
+      // The last of the install's own output is quoted, and it was missing here
+      // until a live run went without it. The refusal said `exit 1` and named
+      // the unpinned `packageManager` as a thing to check, which is a
+      // hypothesis; the install had printed `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`,
+      // which is the answer. `results` already held it and this branch returned
+      // before anyone could read it — the output was captured and then thrown
+      // away, which is the most annoying shape a diagnostic bug takes.
+      const said = tail(installed);
+      return {
+        outcome: "refused",
+        reason:
+          `dependency install did not complete, so no step ran ` +
+          `(${installed.timedOut ? "timed out" : `exit ${String(installed.exitCode)}`})` +
+          `${plan.note}` +
+          `${said === "" ? "" : ` — it said: ${said}`}`,
+      };
+    }
   }
 
   for (const step of plan.steps) {
-    const result = await runner.run(step.argv, { cwd: worktreePath, timeoutMs: stepTimeoutMs });
+    // A cold step resolves its own dependencies, so charging it the step budget
+    // would time out the first Java build on a machine and report that as the
+    // change being wrong.
+    const budget = step.cold ? installTimeoutMs : stepTimeoutMs;
+    const result = await runner.run(step.argv, { cwd: worktreePath, timeoutMs: budget });
     const passed = !result.timedOut && result.exitCode === 0;
     results.push({
       name: step.name,
@@ -450,7 +581,12 @@ export async function verify(
       return {
         outcome: "failed",
         steps: results,
-        reason: `${step.name} did not pass (${result.timedOut ? "timed out" : `exit ${String(result.exitCode)}`})`,
+        // The note rides on the cold step because that step is also the
+        // install, so there is no install refusal to carry it. Without this,
+        // Maven's "the wrapper was not executed" hint could never be printed.
+        reason:
+          `${step.name} did not pass (${result.timedOut ? "timed out" : `exit ${String(result.exitCode)}`})` +
+          `${step.cold ? plan.note : ""}`,
       };
     }
   }
