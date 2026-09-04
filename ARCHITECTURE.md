@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1435 tests, no build step, no deployment
+Status: running end to end against production Jira. 1469 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -427,9 +427,11 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/logger.ts`              | JSON lines to stdout/stderr; `console` is banned by lint                                                |
 | `src/duration.ts`            | `30s` / `4m` / `1.5h` for CLI flags                                                                     |
 
-`wiring.ts` exists because there are four entry points — the daemon, `poll:once`, `triage:once`
-and `solve:once` — and a difference in how they wire the same pipeline would be a bug that only
-shows up in production. `triage:once` used to build its options by hand; the copy drifted the
+`wiring.ts` exists because there are five entry points — the daemon, `poll:once`, `triage:once`,
+`solve:once` and `bot:once` — and a difference in how they wire the same pipeline would be a bug
+that only shows up in production. The two solve commands go further than sharing `wiring.ts`: their
+write rungs are literally the same functions, in `src/cli/solve-run.ts`, so a command file is now
+argument parsing plus a call into the one module that writes to Jira, a worktree or GitHub. `triage:once` used to build its options by hand; the copy drifted the
 moment the real skill grew requirements. Note which modules are absent from that list of callers:
 nothing in `wiring.ts` composes the solve pipeline, which is what §15 means by inert.
 
@@ -562,6 +564,10 @@ pnpm solve:once SSX-1234           # the same, narrowed to one ticket
 pnpm solve:once SSX-1234 --claim   # B2 — claims, proves the queue drops it, releases
 pnpm solve:once SSX-1234 --solve   # C  — ... and runs the solver; nothing is pushed
 pnpm solve:once SSX-1234 --pr      # D  — ... and opens the draft PR, reviewer @copilot
+pnpm bot:once SSX-1234             # triage + the fitness call; writes nothing
+pnpm bot:once SSX-1234 --claim     # ... writes the verdict, then claims the ticket
+pnpm bot:once SSX-1234 --solve     # ... and runs the solver; nothing is pushed
+pnpm bot:once SSX-1234 --pr        # ... and opens the draft PR — the whole bot, one command
 pnpm check-types && pnpm lint && pnpm test
 ```
 
@@ -582,6 +588,44 @@ command line one character shorter than the safe one, at the moment an operator 
 A run that does not reach a pull request releases its own claim on the way out, in a `finally`, so
 a ticket is not left claimed by a run that crashed. A run that _did_ open one keeps `agent:solving`:
 releasing there would return a solved ticket to the queue for a second solver to duplicate.
+
+### `bot:once` — the same ladder with triage on the front
+
+`solve:once` starts from a ticket the board has already assessed. `bot:once` assesses it first: it
+runs triage, reads `agentFitness`, and escalates only if that call says the ticket is agent-fixable.
+The rungs are the same four functions — they were extracted into `src/cli/solve-run.ts` so that both
+commands run the same code rather than two copies that drift.
+
+Three things about it are worth stating, because each is a boundary being moved rather than reused.
+
+**It is the first thing that acts on `agentFitness`.** Until now the fitness call was recorded — in
+the artifact, in a label — and consumed by nothing, which meant a wrong `solvable` cost nothing and
+therefore taught nothing. Here `solvable: false` ends the run before the claim and prints the
+blockers. That also gives the calibration period its other half: `devLensAccurate` says how often
+recon disagreed with triage on tickets that ran, and the refusals now say how often triage declined.
+
+**`agent:start` is satisfied by argv rather than by the board.** `ClaimAuthority` (`src/solve/
+labels.ts`) is `SolveMode | "named"`, and `"named"` skips the human-label check the way `auto` does.
+It is deliberately not a third `SolveMode`: `solveMode` refuses any value that is not `manual` or
+`auto`, so `"named"` cannot arrive from `.env` or from the daemon, which has no argv. Widening
+`SolveMode` instead would have turned "skip the human" into a setting. What `"named"` does **not**
+skip is `agent:solvable`, the blocking lifecycle labels, or `SOLVE_REPOS` — naming a ticket answers
+"may this run", not "can an agent fix this", and the second question is triage's.
+
+**It is broader than auto mode in exactly one way: no issue-type filter.** `SOLVE_AUTO_ISSUE_TYPES`
+narrows a poller choosing its own work to `Feil`. A named ticket has already been chosen, so the
+filter has nothing left to protect — and the pilot ticket is an `Oppgave`, so applying it would have
+made the command refuse the only ticket it was built to run.
+
+Triage always runs, and always first, even on a recently-triaged ticket. The claim reads
+`agent:solvable` off the board, so escalating past the free rung implies a triage write — not as a
+convenience but because the alternative is a claim that cannot succeed. That coupling is why there
+is no separate `--write` flag here.
+
+**Untested, and named as such:** `bot-once.ts`'s `main` passes the literal `"named"` to
+`runWriteRungs`, and no test covers `main` — the same gap `solve-once.ts` has, for the same reason
+(a module that runs on import). The pure parts either side of it, `resolveSettings` and
+`fitnessRefusal`, are tested and mutation-tested; the wiring between them is read, not asserted.
 
 Numeric settings carry a floor as well as a type. `numeric` rejects a negative everywhere, and the
 two values that become a delay — `TRIAGE_TIMEOUT_MS` and `POLL_INTERVAL_MS` — additionally refuse
