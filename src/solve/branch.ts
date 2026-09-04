@@ -46,7 +46,7 @@
  * CI configuration is refused by the diff gate long before it needs a branch
  * name for it.
  */
-export const WORK_BRANCH_PREFIXES: readonly string[] = [
+export const WORK_BRANCH_PREFIXES: ReadonlySet<string> = new Set([
   "fix",
   "feat",
   "chore",
@@ -54,7 +54,7 @@ export const WORK_BRANCH_PREFIXES: readonly string[] = [
   "test",
   "refactor",
   "perf",
-];
+]);
 
 /**
  * Names that are never a valid target, in any position.
@@ -63,7 +63,7 @@ export const WORK_BRANCH_PREFIXES: readonly string[] = [
  * case-insensitive filesystem, which is what this laptop has, and treating
  * them as different names is how a denylist gets walked around by accident.
  */
-const PROTECTED_NAMES: readonly string[] = [
+const PROTECTED_NAMES: ReadonlySet<string> = new Set([
   "main",
   "master",
   "develop",
@@ -76,7 +76,7 @@ const PROTECTED_NAMES: readonly string[] = [
   "release",
   "next",
   "head",
-];
+]);
 
 /** Prefixes whose entire subtree is protected, e.g. `release/2026-09`. */
 const PROTECTED_PREFIXES: readonly string[] = ["release/", "hotfix/", "support/"];
@@ -97,7 +97,7 @@ function withoutRemote(ref: string): string {
   // A remote name will not be one of our work prefixes; a branch will not be
   // named after a remote. Where the two could collide, prefer reading it as a
   // branch, because that is the reading that keeps the protected check strict.
-  return WORK_BRANCH_PREFIXES.includes(head) ? ref : ref.slice(slash + 1);
+  return WORK_BRANCH_PREFIXES.has(head) ? ref : ref.slice(slash + 1);
 }
 
 /**
@@ -136,7 +136,7 @@ export function isProtectedRef(ref: string): boolean {
     // its whole text, which can then only fail the comparisons below —
     // refusing, not allowing, on the unrecognised case.
     const bare = candidate.split(/[\^~@:]/u)[0] ?? candidate;
-    if (PROTECTED_NAMES.includes(bare)) {
+    if (PROTECTED_NAMES.has(bare)) {
       return true;
     }
     if (PROTECTED_PREFIXES.some((prefix) => bare.startsWith(prefix))) {
@@ -160,7 +160,7 @@ export function isWorkBranch(branch: string): boolean {
   }
   const prefix = branch.slice(0, slash);
   const rest = branch.slice(slash + 1);
-  if (!WORK_BRANCH_PREFIXES.includes(prefix)) {
+  if (!WORK_BRANCH_PREFIXES.has(prefix)) {
     return false;
   }
   if (rest === "") {
@@ -181,7 +181,7 @@ export function isWorkBranch(branch: string): boolean {
 export function assertWorkBranch(branch: string, what: string): void {
   if (!isWorkBranch(branch)) {
     throw new Error(
-      `${what} ${JSON.stringify(branch)} is not an implementation branch — this service writes only to ${WORK_BRANCH_PREFIXES.join("/")}-prefixed branches, and never to a protected ref`,
+      `${what} ${JSON.stringify(branch)} is not an implementation branch — this service writes only to ${[...WORK_BRANCH_PREFIXES].join("/")}-prefixed branches, and never to a protected ref`,
     );
   }
 }

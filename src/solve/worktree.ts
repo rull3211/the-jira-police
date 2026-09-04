@@ -158,7 +158,7 @@ export function branchNameFor(issueKey: string, summary: string, prefix = "fix")
   if (!ISSUE_KEY.test(issueKey)) {
     return null;
   }
-  if (!WORK_BRANCH_PREFIXES.includes(prefix)) {
+  if (!WORK_BRANCH_PREFIXES.has(prefix)) {
     return null;
   }
   const slug = slugify(summary);
