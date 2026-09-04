@@ -93,7 +93,7 @@ pnpm start --skill mock-triage --interval 10s --for 1m
 ```
 
 **Grooming only.** The daemon does not run the solve queue and is not meant to yet — see
-*Phases* below. The next section is how to work up to a real run.
+_Phases_ below. The next section is how to work up to a real run.
 
 ---
 
@@ -102,11 +102,11 @@ pnpm start --skill mock-triage --interval 10s --for 1m
 `pnpm start` polls, triages and repeats until told to stop. Three flags override settings **for a
 single run**, so a smoke test needs no edit to `.env` and leaves nothing behind in it:
 
-| Flag | Overrides | Example |
-| --- | --- | --- |
-| `--skill <name>` | `SKILL_NAME` | `--skill live-triage-probe` |
-| `--interval <duration>` | `POLL_INTERVAL_MS` | `--interval 30s` |
-| `--for <duration>` | nothing — bounds the whole run | `--for 4m` |
+| Flag                    | Overrides                      | Example                     |
+| ----------------------- | ------------------------------ | --------------------------- |
+| `--skill <name>`        | `SKILL_NAME`                   | `--skill live-triage-probe` |
+| `--interval <duration>` | `POLL_INTERVAL_MS`             | `--interval 30s`            |
+| `--for <duration>`      | nothing — bounds the whole run | `--for 4m`                  |
 
 Durations take `ms`, `s`, `m`, `h`, or a bare millisecond count: `30s`, `4m`, `1.5m`, `2h`.
 
@@ -127,7 +127,7 @@ pnpm start --skill mock-triage --interval 10s --for 1m
 
 `mock-triage` reads nothing and is given an empty tool allowlist. This exercises cadence, the
 cursor, the state file, backoff and graceful shutdown, and costs nothing. If something is wrong
-with the *service*, it is wrong here.
+with the _service_, it is wrong here.
 
 Expect one `cycle.done` per interval and a clean stop:
 
@@ -141,7 +141,7 @@ Expect one `cycle.done` per interval and a clean stop:
 ```
 
 `found: 1, triaged: 0` is the normal result on a repeat run — the ticket was found and then
-skipped because it is already in `seenKeys`. See *the cursor persists* below.
+skipped because it is already in `seenKeys`. See _the cursor persists_ below.
 
 **2 — a real subprocess and a real Atlassian session, still no verdicts.**
 
@@ -167,7 +167,7 @@ Name the skill on the command line even if `.env` already sets it. `SKILL_NAME` 
 omits the flag on a machine without that setting quietly produces mock verdicts, and mock output
 is plausible enough to be believed. Stating it makes each step of this ladder self-contained.
 
-Note `--interval` is the gap *between* cycles, not a rate limit on triages: a cycle takes as long
+Note `--interval` is the gap _between_ cycles, not a rate limit on triages: a cycle takes as long
 as its tickets do, so `--interval 20s` with the real skill does not mean three triages a minute.
 
 **4 — writing to the board.**
@@ -179,14 +179,14 @@ WRITE_BACK=true pnpm start --skill intake-triage --for 20m
 Everything above, plus comments and labels on real tickets, as your own Jira user.
 
 Both halves are required and neither is enough alone: a stand-in skill ignores `WRITE_BACK`
-entirely, and the real skill with `WRITE_BACK=false` previews. Posting needs the real skill *and*
+entirely, and the real skill with `WRITE_BACK=false` previews. Posting needs the real skill _and_
 the setting.
 
 ### The two things that catch people out
 
 **The lookback window on a first run.** With no state file the service looks back
-`FIRST_RUN_LOOKBACK_MINUTES` (default 60). Widen it and you get *one paid triage per historical
-issue* in the window. Narrow it for a demo:
+`FIRST_RUN_LOOKBACK_MINUTES` (default 60). Widen it and you get _one paid triage per historical
+issue_ in the window. Narrow it for a demo:
 
 ```bash
 FIRST_RUN_LOOKBACK_MINUTES=5 pnpm start --for 10m
@@ -226,12 +226,12 @@ something.
 Pick a ticket in `SSX` / component `SSX Advisor`, not Done, carrying a `svc:<repo>` label naming
 a repo on `SOLVE_REPOS`.
 
-| Step | Do | Expect in `groomed/solve-cycle.md` |
-| --- | --- | --- |
-| 0 | Nothing — run it as a control | `## The queue was empty` |
-| 1 | Add `agent:solvable` in the Jira UI | Still empty — the human gate is holding |
-| 2 | Add `agent:start` | `## PLAN — SSX-1234` with the claim `+agent:solving` `-agent:start` |
-| 3 | Remove both labels | Empty again |
+| Step | Do                                  | Expect in `groomed/solve-cycle.md`                                  |
+| ---- | ----------------------------------- | ------------------------------------------------------------------- |
+| 0    | Nothing — run it as a control       | `## The queue was empty`                                            |
+| 1    | Add `agent:solvable` in the Jira UI | Still empty — the human gate is holding                             |
+| 2    | Add `agent:start`                   | `## PLAN — SSX-1234` with the claim `+agent:solving` `-agent:start` |
+| 3    | Remove both labels                  | Empty again                                                         |
 
 Re-run `SOLVE_ENABLED=true pnpm solve:once` after each step.
 
@@ -256,17 +256,17 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 
 ## Commands
 
-| Command | What it does | Writes? |
-| --- | --- | --- |
-| `pnpm poll:once --dry-run` | Discovery only. Free | no |
-| `pnpm poll:once` | One full grooming cycle | only with `WRITE_BACK=true` |
-| `pnpm triage:once <KEY> --skill intake-triage` | Triage one ticket, preview the result | `groomed/<KEY>.md` |
-| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own | Jira |
-| `pnpm triage:once <KEY>` | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock** | `groomed/<KEY>.md` |
-| `pnpm solve:once` | One solve cycle. Needs `SOLVE_ENABLED=true` | `groomed/solve-cycle.md` |
-| `pnpm start` | The daemon — **grooming only**. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
-| `pnpm dev` | The daemon with `--watch`; same flags | as above |
-| `pnpm check-types && pnpm lint && pnpm test` | The full check | no |
+| Command                                                | What it does                                                                 | Writes?                     |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------------------- |
+| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                         | no                          |
+| `pnpm poll:once`                                       | One full grooming cycle                                                      | only with `WRITE_BACK=true` |
+| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                        | `groomed/<KEY>.md`          |
+| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                       | Jira                        |
+| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock** | `groomed/<KEY>.md`          |
+| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                  | `groomed/solve-cycle.md`    |
+| `pnpm start`                                           | The daemon — **grooming only**. Takes `--skill`, `--interval`, `--for`       | only with `WRITE_BACK=true` |
+| `pnpm dev`                                             | The daemon with `--watch`; same flags                                        | as above                    |
+| `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                               | no                          |
 
 The typecheck script is **`check-types`**, not `typecheck`.
 
@@ -289,15 +289,15 @@ pnpm solve:once SSX-1234 --pr      # opens the draft PR
 
 Full table in `ARCHITECTURE.md` §10. The ones that matter for a demo:
 
-| Setting | Default | Notes |
-| --- | --- | --- |
-| `JIRA_EMAIL`, `JIRA_AUTH` | — | Required. Discovery only — this credential never writes |
-| `VAULT_PATH` | — | Required by the real skill; checked at startup, not on the first ticket |
-| `SKILL_NAME` | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post |
-| `WRITE_BACK` | `false` | The only setting the whole team can see the effect of. Strict `"true"` |
-| `SOLVE_ENABLED` | `false` | Master switch for the solve queue. Strict `"true"` |
-| `SOLVE_MODE` | `manual` | `manual` also requires the human's `agent:start` label |
-| `SOLVE_REPOS` | — | Repository allowlist, **no default**. Unset means nothing is allowed |
+| Setting                   | Default       | Notes                                                                   |
+| ------------------------- | ------------- | ----------------------------------------------------------------------- |
+| `JIRA_EMAIL`, `JIRA_AUTH` | —             | Required. Discovery only — this credential never writes                 |
+| `VAULT_PATH`              | —             | Required by the real skill; checked at startup, not on the first ticket |
+| `SKILL_NAME`              | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post        |
+| `WRITE_BACK`              | `false`       | The only setting the whole team can see the effect of. Strict `"true"`  |
+| `SOLVE_ENABLED`           | `false`       | Master switch for the solve queue. Strict `"true"`                      |
+| `SOLVE_MODE`              | `manual`      | `manual` also requires the human's `agent:start` label                  |
+| `SOLVE_REPOS`             | —             | Repository allowlist, **no default**. Unset means nothing is allowed    |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository.
@@ -307,19 +307,19 @@ post; an empty `SOLVE_REPOS` allows no repository.
 ## Phases
 
 The bug-fixing feature ships in stages, so the fitness assessment can be judged before anything
-acts on it. Triage cannot read source code, so `agent:solvable` is a *candidate* signal.
+acts on it. Triage cannot read source code, so `agent:solvable` is a _candidate_ signal.
 
-| Phase | Scope | State |
-| --- | --- | --- |
-| A | Fitness assessment in triage, `agent:solvable` | **built** |
-| B1 | The picker: solve queue, claim planning, cycle report | **built** |
-| B2 | The claim write, verified by re-reading, plus release | not started |
-| C | The solver: worktree, recon, edit, verification, diff gate | not started |
-| D | Push, draft PR, Copilot review loop, undraft | not started |
-| E | Run it from the daemon | **last, on purpose** |
+| Phase | Scope                                                      | State                |
+| ----- | ---------------------------------------------------------- | -------------------- |
+| A     | Fitness assessment in triage, `agent:solvable`             | **built**            |
+| B1    | The picker: solve queue, claim planning, cycle report      | **built**            |
+| B2    | The claim write, verified by re-reading, plus release      | not started          |
+| C     | The solver: worktree, recon, edit, verification, diff gate | not started          |
+| D     | Push, draft PR, Copilot review loop, undraft               | not started          |
+| E     | Run it from the daemon                                     | **last, on purpose** |
 
 Every phase owes two hand-operated commands before it counts as done: a dry run that reports what
-it *would* change, and a single run against one named ticket. The daemon is last because the only
+it _would_ change, and a single run against one named ticket. The daemon is last because the only
 thing it adds is that nobody is watching — a ticket claimed, solved and PR'd by hand is a
 demonstration; the same sequence on a five-minute timer is a deployment.
 

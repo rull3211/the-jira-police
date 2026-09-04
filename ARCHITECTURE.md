@@ -386,32 +386,32 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-| Path                    | Role                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`          | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides                       |
-| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                    |
-| `src/poller.ts`         | One cycle. Ordering, dedupe, failure isolation, the three rules above                                   |
-| `src/wiring.ts`         | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps` |
-| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                  |
-| `src/jira/jql.ts`       | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting                      |
-| `src/solve/labels.ts`   | The `agent:` state machine as pure functions; `repoFromLabels`                                          |
-| `src/solve/poller.ts`   | One solve cycle. **Dry run only** — plans the claim, cannot make it                                     |
-| `src/solve/report.ts`   | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                      |
-| `src/solve/claim.ts`    | The claim and its release. **Built, wired to nothing** — no caller constructs its capabilities          |
-| `src/solve/diff-gate.ts`| The bound on what a solve run may have changed. Pure. **Built, called by nothing**                      |
-| `src/cli/solve-once.ts` | One solve cycle and exit. No `--dry-run` flag, because there is no other mode                           |
-| `src/jira/client.ts`    | `/rest/api/3/search/jql`, token pagination, Basic auth                                                  |
-| `src/jira/types.ts`     | The slice of the Jira payload actually read, plus `TicketRef`                                           |
-| `src/state/store.ts`    | Cursor + seen keys, atomic write                                                                        |
-| `src/triage/schema.ts`  | The draft-07 contract handed to the analyst. Descriptions double as instructions                        |
-| `src/triage/session.ts` | Shared subprocess machinery for both runs                                                               |
-| `src/triage/runner.ts`  | The analyst                                                                                             |
-| `src/triage/gate.ts`    | The check                                                                                               |
-| `src/triage/poster.ts`  | The writer                                                                                              |
-| `src/output/sink.ts`    | `FileSink` (reports) and the rejection artifacts                                                        |
-| `src/output/canvas.ts`  | Slack canvas payload builders — **built, never called** (§10)                                           |
-| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint                                                |
-| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                     |
+| Path                     | Role                                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`           | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides                       |
+| `src/loop.ts`            | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                    |
+| `src/poller.ts`          | One cycle. Ordering, dedupe, failure isolation, the three rules above                                   |
+| `src/wiring.ts`          | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps` |
+| `src/settings.ts`        | Declarative settings table + generic reader, with a `sensitive` marker                                  |
+| `src/jira/jql.ts`        | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting                      |
+| `src/solve/labels.ts`    | The `agent:` state machine as pure functions; `repoFromLabels`                                          |
+| `src/solve/poller.ts`    | One solve cycle. **Dry run only** — plans the claim, cannot make it                                     |
+| `src/solve/report.ts`    | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                      |
+| `src/solve/claim.ts`     | The claim and its release. **Built, wired to nothing** — no caller constructs its capabilities          |
+| `src/solve/diff-gate.ts` | The bound on what a solve run may have changed. Pure. **Built, called by nothing**                      |
+| `src/cli/solve-once.ts`  | One solve cycle and exit. No `--dry-run` flag, because there is no other mode                           |
+| `src/jira/client.ts`     | `/rest/api/3/search/jql`, token pagination, Basic auth                                                  |
+| `src/jira/types.ts`      | The slice of the Jira payload actually read, plus `TicketRef`                                           |
+| `src/state/store.ts`     | Cursor + seen keys, atomic write                                                                        |
+| `src/triage/schema.ts`   | The draft-07 contract handed to the analyst. Descriptions double as instructions                        |
+| `src/triage/session.ts`  | Shared subprocess machinery for both runs                                                               |
+| `src/triage/runner.ts`   | The analyst                                                                                             |
+| `src/triage/gate.ts`     | The check                                                                                               |
+| `src/triage/poster.ts`   | The writer                                                                                              |
+| `src/output/sink.ts`     | `FileSink` (reports) and the rejection artifacts                                                        |
+| `src/output/canvas.ts`   | Slack canvas payload builders — **built, never called** (§10)                                           |
+| `src/logger.ts`          | JSON lines to stdout/stderr; `console` is banned by lint                                                |
+| `src/duration.ts`        | `30s` / `4m` / `1.5h` for CLI flags                                                                     |
 
 `wiring.ts` exists because there are three entry points — the daemon, `poll:once` and
 `triage:once` — and a difference in how they wire the same pipeline would be a bug that only shows
@@ -645,11 +645,12 @@ Everything that _selects_ a ticket is built and was verified against the live bo
   which every check succeeds, is honestly reported, and has verified nothing. Same for
   `tsconfig.json`, the lint config and the vitest config. Refused unconditionally, exempt from
   any size cap — a one-line edit there is the dangerous size, not the safe one.
+
 - **Delivery** — draft PR, Copilot review, iterate, undraft. `MAX_REVIEW_ITERATIONS` exists and
   is read by nothing.
-- **Running it from the daemon, and this one is deliberately *last*.** Not wired into `index.ts`;
+- **Running it from the daemon, and this one is deliberately _last_.** Not wired into `index.ts`;
   `pnpm start` is the grooming loop and must stay that way until everything above has been driven
-  by hand. The property the daemon adds is *nobody is watching*, which is the last property you
+  by hand. The property the daemon adds is _nobody is watching_, which is the last property you
   want to add rather than an early one: every phase before it can be verified by a person typing
   a command and reading the output, and wiring the loop converts all of them at once into things
   that happen on a timer whether or not anyone looks. It also adds no capability — by then the
@@ -661,10 +662,11 @@ Everything that _selects_ a ticket is built and was verified against the live bo
   demonstration; the same sequence on a five-minute timer is a deployment.**
 
 Each phase is expected to ship two hand-operated commands before it counts as done — a dry run
-that reports what it *would* change, and a single run against one named ticket, chosen by the
+that reports what it _would_ change, and a single run against one named ticket, chosen by the
 operator rather than by the queue. `triage:once SSX-1234 [--write]` is the shape being copied.
 `solve:once` grows one flag per phase (`--claim`, `--solve`, `--pr`), each implying the ones
 before it, so the command line reads as the privilege escalation it is.
+
 - **Probes.** The `Bash(pnpm test:*)` scoping question was run 2026-09-04 and answered in the
   worst available way — see §6 and §14.12. Phase C took the shape the fallback described, not
   because that was preferred but because the alternative turned out not to exist. Still open:

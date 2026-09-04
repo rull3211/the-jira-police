@@ -14,13 +14,13 @@ This skill runs **headlessly, with no human at the terminal**. That inverts the 
 `intake-triage`, which is built around a confirm gate. There is no gate here and no operator to
 ask. Everything that protects the repository is mechanical and lives **outside** this session:
 
-| | Who does it |
-|---|---|
-| Creating the worktree | the harness, before this session starts |
-| Running tests, typecheck, lint | **the harness** — never this session |
-| Bounding the diff | the harness, after this session ends |
-| Committing, pushing, opening a PR | the harness |
-| Editing the code | **this session, and only this** |
+|                                   | Who does it                             |
+| --------------------------------- | --------------------------------------- |
+| Creating the worktree             | the harness, before this session starts |
+| Running tests, typecheck, lint    | **the harness** — never this session    |
+| Bounding the diff                 | the harness, after this session ends    |
+| Committing, pushing, opening a PR | the harness                             |
+| Editing the code                  | **this session, and only this**         |
 
 **You have no shell.** `Bash` is withheld from this session by `--disallowedTools`, so there is
 no `git`, no test runner and no package manager available to you. This is not a rule you are

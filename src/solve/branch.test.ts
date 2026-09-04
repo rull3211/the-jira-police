@@ -88,9 +88,12 @@ describe("isWorkBranch", () => {
     },
   );
 
-  it.each(["fix/", "/main", "ci/pipeline", "build/output"])("refuses the malformed %s", (branch) => {
-    expect(isWorkBranch(branch)).toBe(false);
-  });
+  it.each(["fix/", "/main", "ci/pipeline", "build/output"])(
+    "refuses the malformed %s",
+    (branch) => {
+      expect(isWorkBranch(branch)).toBe(false);
+    },
+  );
 });
 
 describe("assertWorkBranch", () => {
