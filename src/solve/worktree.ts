@@ -83,6 +83,13 @@ export interface WorktreeRequest {
   readonly parentDirectory: string;
   /** Remote-tracking ref to cut from, e.g. `origin/main`. */
   readonly baseRef: string;
+  /**
+   * Branch type — `fix` for a `Feil`, `feat` for an `Oppgave`. Defaults to
+   * `fix`. Must be on `WORK_BRANCH_PREFIXES`; anything else refuses the
+   * worktree rather than falling back, because a caller passing `main` here
+   * has made a mistake that must not be resolved into a working branch.
+   */
+  readonly branchPrefix?: string;
   readonly timeoutMs: number;
 }
 
@@ -219,10 +226,10 @@ export async function createWorktree(
       `${JSON.stringify(baseRef)} is not a remote-tracking ref — the base is configuration, and a malformed one is a misconfiguration rather than something to interpret`,
     );
   }
-  const branch = branchNameFor(issueKey, summary);
+  const branch = branchNameFor(issueKey, summary, request.branchPrefix);
   if (branch === null) {
     return refuse(
-      "the summary yields no usable branch slug — refused rather than substituted, since two tickets sharing a placeholder would race for one branch",
+      `the summary yields no usable ${String(request.branchPrefix ?? "fix")}/ branch name — refused rather than substituted, since two tickets sharing a placeholder would race for one branch, and an unrecognised prefix is a caller mistake rather than a naming preference`,
     );
   }
 
