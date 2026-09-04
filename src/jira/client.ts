@@ -1,12 +1,40 @@
 /**
- * Minimal Jira Cloud client — discovery reads only.
+ * Minimal Jira Cloud client — discovery reads, and one narrow write.
  *
- * Three operations: a JQL search, one issue's full detail, and one
- * attachment's bytes. All three are reads. **Nothing in this file writes to
- * Jira, and nothing should be added that does** — the standing rule is that
- * this REST credential discovers work and the storecode MCP session performs
- * every mutation, so that the credential which lives in a `.env` file cannot
- * change a ticket even if it leaks.
+ * Four operations: a JQL search, one issue's full detail, one attachment's
+ * bytes, and `updateLabels`.
+ *
+ * ## The rule this file used to state, and what replaced it
+ *
+ * It said: *"Nothing in this file writes to Jira, and nothing should be added
+ * that does"* — the REST credential discovers work, the storecode MCP session
+ * performs every mutation, so a credential living in a `.env` file cannot
+ * change a ticket even if it leaks. That was true and it is now false in one
+ * specific way, so it is rewritten here rather than left to rot into the exact
+ * prose/behaviour divergence this project exists to catch.
+ *
+ * The amendment is `updateLabels`, and it exists because the MCP tool surface
+ * cannot express the operation the solve claim needs. `editJiraIssue` takes
+ * `fields` — **set** semantics — so adding one label means reading all N,
+ * appending, and writing all N back. Any label a human added in between is
+ * silently destroyed, and nothing in either party's history explains it. Jira's
+ * REST API has supported `update.labels` with atomic `add`/`remove` operations
+ * the whole time; the constraint was never Jira's, it was the tool's. So the
+ * claim moves here, where the race can be *eliminated* rather than narrowed.
+ *
+ * Three things keep the amendment narrow, and all three are mechanical:
+ *
+ * 1. **Labels only.** This is a `labels`-shaped method, not a general issue
+ *    edit. There is no way to spend this credential on a status transition, a
+ *    field value or a comment.
+ * 2. **The `agent:` namespace only.** `assertOwnedLabel` refuses anything else,
+ *    so the write cannot touch `triaged`, `svc:*`, `dor:*` or a human's
+ *    `next:*` even by accident. That is the same set `gate.ts` calls owned, for
+ *    the same reason: these are the labels this service put there.
+ * 3. **Comments stay on the MCP path.** Not an oversight — a Jira comment is
+ *    ADF, and the MCP tool does the markdown→ADF conversion. Reimplementing
+ *    that here to save one round trip would be trading a solved problem for an
+ *    unsolved one, and comments have no clobber risk to fix.
  *
  * `search` uses `/rest/api/3/search/jql`, the token-paginated replacement for
  * the removed `/rest/api/3/search`. Pagination is by opaque `nextPageToken`;
@@ -51,6 +79,40 @@ export function assertIssueKey(key: string): void {
 export function assertAttachmentId(id: string): void {
   if (!ATTACHMENT_ID_PATTERN.test(id)) {
     throw new JiraError(0, `Refusing to fetch a malformed attachment id: ${JSON.stringify(id)}`);
+  }
+}
+
+/**
+ * The only namespace this credential may write.
+ *
+ * Kept here rather than imported from `gate.ts` deliberately. `gate.ts` decides
+ * what the *triage bot* may replace in a labels array it is rewriting whole;
+ * this decides what a *credential* may touch at all, and the two would drift
+ * apart the first time one of them widened for a reason that did not apply to
+ * the other. A duplicated four-character string is a cheaper coupling than a
+ * shared constant whose two readers mean different things by it.
+ */
+const WRITABLE_LABEL_PREFIX = "agent:";
+
+/**
+ * Jira accepts a label of almost anything without whitespace; this is stricter.
+ *
+ * The value reaches a JSON body rather than a URL, so this is not injection
+ * defence — it is a check that the caller is passing a label and not, say, a
+ * whole array stringified by accident. Bounded, because Jira's own limit is 255
+ * and a value near it is a bug on this side.
+ */
+const LABEL_PATTERN = /^agent:[a-z][a-z0-9-]{0,60}$/;
+
+export function assertOwnedLabel(label: string): void {
+  if (!label.startsWith(WRITABLE_LABEL_PREFIX)) {
+    throw new JiraError(
+      0,
+      `Refusing to write ${JSON.stringify(label)}: this credential may only touch ${WRITABLE_LABEL_PREFIX}* labels, and everything else on the ticket belongs to somebody else`,
+    );
+  }
+  if (!LABEL_PATTERN.test(label)) {
+    throw new JiraError(0, `Refusing to write a malformed label: ${JSON.stringify(label)}`);
   }
 }
 
@@ -215,6 +277,36 @@ export class JiraClient {
     throw new JiraError(response.status, `Jira returned ${response.status}: ${detail}`);
   }
 
+  /**
+   * The one verb that changes anything, kept separate from `#post` on purpose.
+   *
+   * A reader auditing what this credential can do should be able to find every
+   * write by grepping for one method name. Folding it into `#post` with a
+   * `method` parameter would make that grep return the searches too.
+   */
+  async #put(path: string, body: unknown): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.#baseUrl}${path}`, {
+        method: "PUT",
+        headers: {
+          Authorization: this.#authHeader,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch (error) {
+      throw new JiraError(0, `Request to ${path} failed: ${(error as Error).message}`);
+    }
+
+    if (!response.ok) {
+      await this.#raise(response);
+    }
+    // A successful issue edit is 204 with no body. Reading one would throw.
+  }
+
   async #get(path: string, accept: string): Promise<Response> {
     let response: Response;
     try {
@@ -314,6 +406,60 @@ export class JiraClient {
       attachments,
       url: `${this.#baseUrl}/browse/${key}`,
     };
+  }
+
+  /**
+   * Adds and removes labels atomically, touching nothing else on the issue.
+   *
+   * `update.labels` with per-label `add`/`remove` operations, which is Jira
+   * applying a delta on the server rather than this process shipping a
+   * replacement array. That is the whole point: the read-modify-write the MCP
+   * tool forces has a window in which a human's edit is destroyed, and no
+   * amount of reading back afterwards closes it — read-back can catch a racer
+   * who wrote *after* us and structurally cannot catch one we overwrote. This
+   * has no window to close, because there is no read.
+   *
+   * Both lists are validated before the request is built, so a rejected label
+   * means nothing was sent at all. A partial application would be the worst
+   * outcome available: half a claim leaves the ticket in a state no reader of
+   * the state machine can name.
+   *
+   * Overlapping `add` and `remove` is refused rather than resolved. Jira would
+   * apply them in order and produce an answer, but which answer depends on
+   * argument order, and a caller that has asked for both has a bug that a
+   * defined-but-arbitrary result would hide.
+   */
+  async updateLabels(
+    key: string,
+    change: { readonly add?: readonly string[]; readonly remove?: readonly string[] },
+  ): Promise<void> {
+    assertIssueKey(key);
+    const add = change.add ?? [];
+    const remove = change.remove ?? [];
+
+    for (const label of [...add, ...remove]) {
+      assertOwnedLabel(label);
+    }
+    const both = add.filter((label) => remove.includes(label));
+    if (both.length > 0) {
+      throw new JiraError(0, `Asked to both add and remove ${both.join(", ")} on ${key}`);
+    }
+    if (add.length === 0 && remove.length === 0) {
+      // Not an error, and not a request either. Sending an empty `update` would
+      // still bump the issue's `updated` timestamp, which the solve queue
+      // orders by.
+      return;
+    }
+
+    await this.#put(`/rest/api/3/issue/${key}`, {
+      update: {
+        labels: [
+          ...add.map((label) => ({ add: label })),
+          ...remove.map((label) => ({ remove: label })),
+        ],
+      },
+    });
+    logger.info("jira.labels_updated", { key, add, remove });
   }
 
   /**

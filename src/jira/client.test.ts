@@ -1,6 +1,6 @@
 import { type Mock, afterEach, describe, expect, it, vi } from "vitest";
 
-import { JiraClient, JiraError, isInlineable } from "./client.ts";
+import { JiraClient, JiraError, assertOwnedLabel, isInlineable } from "./client.ts";
 
 /** A value standing in for the credential, so leak assertions have a needle. */
 const NEEDLE = "needle-value-do-not-echo";
@@ -444,5 +444,171 @@ describe("isInlineable", () => {
     for (const type of ["image/png", "application/pdf", "application/zip", ""]) {
       expect(isInlineable(type)).toBe(false);
     }
+  });
+});
+
+/** A 204 with no body, which is what a successful Jira issue edit returns. */
+function putMock(status = 204): FetchMock {
+  return vi.fn<typeof fetch>(async () => new Response(null, { status }));
+}
+
+/**
+ * The one write this credential can make.
+ *
+ * The standing rule for the Jira REST credential is discovery-only, and this is
+ * the single, deliberately-narrow amendment to it. Every test below is about a
+ * boundary of that narrowness rather than about labels working — the happy path
+ * gets one test, and the refusals get the rest, because the refusals are the
+ * reason the amendment was acceptable.
+ */
+describe("JiraClient.updateLabels", () => {
+  it("sends add and remove as a delta, not as a field", async () => {
+    // The whole point. `fields: { labels: [...] }` would be a full-field write
+    // and would clobber anything a human added between the read and this call.
+    const fetchMock = putMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client().updateLabels("SSX-3822", {
+      add: ["agent:solving"],
+      remove: ["agent:start"],
+    });
+
+    const { url, init } = callArgs(fetchMock, 0);
+    expect(url).toBe("https://example.invalid/rest/api/3/issue/SSX-3822");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toEqual({
+      update: { labels: [{ add: "agent:solving" }, { remove: "agent:start" }] },
+    });
+  });
+
+  it("does not read a body from the 204 an issue edit returns", async () => {
+    // A `.json()` on an empty body throws, and the throw would be reported as a
+    // failed write of a write that in fact landed.
+    vi.stubGlobal("fetch", putMock());
+
+    await expect(
+      client().updateLabels("SSX-3822", { add: ["agent:done"] }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses every label outside the agent: namespace", async () => {
+    const fetchMock = putMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const label of ["triaged", "next:to-trio", "svc:web", "dor:pass", "", "agentx:solving"]) {
+      await expect(client().updateLabels("SSX-3822", { add: [label] })).rejects.toThrow(JiraError);
+      await expect(client().updateLabels("SSX-3822", { remove: [label] })).rejects.toThrow(
+        JiraError,
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed label inside the namespace", async () => {
+    // `agent:` is necessary and not sufficient. A label carrying a quote, a
+    // space or a newline is the thing that turns a later JQL clause built from
+    // the board's own labels into something else.
+    const fetchMock = putMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const label of [
+      "agent:",
+      "agent:Solving",
+      "agent:sol ving",
+      'agent:sol"ving',
+      "agent:sol\nving",
+      "agent:1solving",
+      "agent:-solving",
+      // 61 after the prefix is the last accepted length, so 62 is the first
+      // rejected one. Testing the boundary rather than a wildly long string:
+      // an off-by-one in the quantifier is the mistake a 500-character fixture
+      // would wave through.
+      `agent:${"x".repeat(62)}`,
+    ]) {
+      await expect(client().updateLabels("SSX-3822", { add: [label] })).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to both add and remove the same label", async () => {
+    // Jira applies the operations in order and the result depends on which came
+    // last, so this is a caller bug with a silently plausible outcome. Refusing
+    // is cheaper than working out what Jira decided.
+    const fetchMock = putMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      client().updateLabels("SSX-3822", { add: ["agent:done"], remove: ["agent:done"] }),
+    ).rejects.toThrow(JiraError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses an issue key that is not an issue key", async () => {
+    // The key goes into the path. A traversal here would aim the one write verb
+    // at an endpoint nobody reviewed.
+    const fetchMock = putMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of ["../SSX-1", "SSX-1/comment", "SSX", "", "SSX-1 OR 1=1"]) {
+      await expect(client().updateLabels(bad, { add: ["agent:done"] })).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("makes no request at all when there is nothing to change", async () => {
+    const fetchMock = putMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client().updateLabels("SSX-3822", {});
+    await client().updateLabels("SSX-3822", { add: [], remove: [] });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("raises on a rejected write rather than reporting success", async () => {
+    vi.stubGlobal("fetch", putMock(403));
+
+    await expect(client().updateLabels("SSX-3822", { add: ["agent:done"] })).rejects.toThrow(
+      JiraError,
+    );
+  });
+
+  it("does not put the credential in the error when the write fails", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new Error(`connect ECONNREFUSED ${NEEDLE}`);
+    });
+
+    await expect(client().updateLabels("SSX-3822", { add: ["agent:done"] })).rejects.toThrow(
+      JiraError,
+    );
+  });
+});
+
+describe("assertOwnedLabel", () => {
+  it("accepts the labels this service actually writes", () => {
+    for (const label of [
+      "agent:solvable",
+      "agent:start",
+      "agent:solving",
+      "agent:reviewing",
+      "agent:done",
+      "agent:failed",
+    ]) {
+      expect(() => {
+        assertOwnedLabel(label);
+      }).not.toThrow();
+    }
+  });
+
+  it("says which rule refused, because the two mean different things", () => {
+    // "not ours" is a caller aiming at somebody else's label; "malformed" is a
+    // caller aiming at ours and getting it wrong. Collapsing them would send
+    // whoever reads the message looking in the wrong place.
+    expect(() => {
+      assertOwnedLabel("triaged");
+    }).toThrow(/may only touch agent:\*/);
+    expect(() => {
+      assertOwnedLabel("agent:Solving");
+    }).toThrow(/malformed/);
   });
 });
