@@ -70,6 +70,8 @@ import { verify, type VerificationResult } from "./verify.ts";
 import {
   type CommandRunner,
   createWorktree,
+  removeWorktree,
+  type RemoveResult,
   type Worktree,
   type WorktreeRequest,
 } from "./worktree.ts";
@@ -132,13 +134,25 @@ export interface DevLensFeedback {
 export type SolveOutcome =
   /** Never got as far as a session. */
   | { readonly kind: "no-worktree"; readonly reason: string }
-  /** Recon read the code and declined. Not a failure. */
+  /**
+   * Recon read the code and declined. Not a failure.
+   *
+   * The only outcome that cleans up after itself, and the reason is narrow:
+   * recon is the one pass with no `Write` and no `Edit`, so a bailed run's
+   * worktree is a pristine checkout that cost disk and holds nothing. Every
+   * other outcome keeps its worktree because **nothing in this phase commits** —
+   * `composeCommitMessage` composes a message that no `git commit` ever
+   * consumes — so the worktree is the only copy of the work, and removing it
+   * would be the destructive reading of "clean up on success".
+   */
   | {
       readonly kind: "bailed";
       readonly reason: string;
       readonly recon: ReconVerdict;
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
+      /** What became of the worktree. `kept` if git refused, with its reason. */
+      readonly cleanup: RemoveResult;
     }
   /** The fix pass declined once it saw the files. */
   | {
@@ -459,7 +473,15 @@ async function runPipeline(
       leftFiles: false,
       worktreePath: worktree.path,
     });
-    return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree };
+    // The one place a worktree is removed, and the one place it is provably
+    // safe to. Recon holds no `Write` and no `Edit`, so there is nothing in
+    // there to lose; and a bail is the *expected* outcome for a ticket triage
+    // called wrong, so leaking a full checkout per bail is the leak that grows
+    // fastest. `removeWorktree` does not force, so if this reasoning is ever
+    // wrong — a future recon that can write — git refuses and says so, and the
+    // reason travels out on the outcome rather than into a log nobody reads.
+    const cleanup = await removeWorktree(commands, worktree, "succeeded", request.gitTimeoutMs);
+    return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree, cleanup };
   }
 
   // ---- fix ---------------------------------------------------------------

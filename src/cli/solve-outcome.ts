@@ -49,7 +49,16 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
       return `NO WORKTREE — the run never started: ${outcome.reason}`;
     }
     case "bailed": {
-      return `BAILED (this is a success) — recon declined: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
+      // The one outcome whose worktree may be gone, so this is the one line
+      // that has to read the cleanup result rather than assume. Printing
+      // "Worktree kept at <path>" for a directory that no longer exists is
+      // exactly the prose/behaviour divergence this project exists to catch,
+      // and it would send an operator to an empty path to find out why.
+      return `BAILED (this is a success) — recon declined: ${outcome.reason}\n${
+        outcome.cleanup.outcome === "removed"
+          ? `Worktree removed — recon writes nothing, so there was nothing in it`
+          : `Worktree kept at ${outcome.cleanup.path} — ${outcome.cleanup.reason}`
+      }`;
     }
     case "abandoned": {
       return `ABANDONED — a pass declined mid-run: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;

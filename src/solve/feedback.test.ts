@@ -42,6 +42,10 @@ function bailed(accurate: boolean, correction = ""): SolveOutcome {
     } as unknown as Extract<SolveOutcome, { kind: "bailed" }>["recon"],
     devLens: { accurate, correction },
     worktree,
+    // Nothing in this module reads it — a ticket comment is about the code, not
+    // about the harness's disk — but the type carries it, and defaulting it
+    // here rather than in the type is what keeps that a deliberate choice.
+    cleanup: { outcome: "removed", path: worktree.path },
   };
 }
 

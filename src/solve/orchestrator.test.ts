@@ -323,6 +323,57 @@ describe("solveTicket, when recon declines", () => {
     expect(outcome).toMatchObject({ kind: "bailed", reason: expect.stringContaining("dead code") });
   });
 
+  it("removes the worktree, because recon cannot have written to it", async () => {
+    // The only outcome that cleans up. Recon holds no `Write` and no `Edit`, so
+    // the checkout is pristine; and a bail is the *expected* result whenever
+    // triage's blind fitness call was optimistic, which makes this the leak
+    // that would have grown fastest.
+    const { h } = harness(bailed);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("removed");
+    expect(
+      h.calls.some(
+        (argv) => argv[0] === "git" && argv.includes("worktree") && argv.includes("remove"),
+      ),
+    ).toBe(true);
+  });
+
+  it("never forces the removal", async () => {
+    // `--force` would turn "tidy up after a read-only pass" into "delete
+    // whatever is in there". The whole safety of removing on this path rests on
+    // git refusing when the assumption is wrong, and `--force` removes exactly
+    // that backstop.
+    const { h } = harness(bailed);
+
+    await solveTicket(h.deps, request);
+
+    const removal = h.calls.find((argv) => argv.includes("worktree") && argv.includes("remove"));
+    expect(removal).toBeDefined();
+    expect(removal).not.toContain("--force");
+    expect(removal).not.toContain("-f");
+  });
+
+  it("keeps the worktree, and says why, when git refuses to remove it", async () => {
+    // If recon ever gains a write, or something else dirties the checkout, git
+    // declines and the reason has to reach the operator rather than a log.
+    const { h } = harness(bailed, [
+      {
+        match: (argv) => argv.includes("worktree") && argv.includes("remove"),
+        reply: { exitCode: 1, stderr: "contains modified or untracked files" },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("bailed");
+    expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("kept");
+    expect(
+      outcome.kind === "bailed" && outcome.cleanup.outcome === "kept" ? outcome.cleanup.reason : "",
+    ).toContain("uncommitted");
+  });
+
   it("still carries the dev-lens correction, which is the point of bailing", async () => {
     const { h } = harness({
       recon: recon({

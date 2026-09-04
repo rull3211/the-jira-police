@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1283 tests, no build step, no deployment
+Status: running end to end against production Jira. 1288 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -953,12 +953,12 @@ Of the two defects that were left open when the above was written, one is now fi
   exhaustive `switch` had to be edited to admit it — and each of those edits is a place where
   the difference between "no verdict" and "a verdict of no" had to be decided deliberately:
 
-  |                       | what `crashed` does                                                |
-  | --------------------- | ------------------------------------------------------------------ |
-  | ticket comment        | says the step did not finish and that this says nothing about the ticket's solvability |
-  | calibration record    | scores the lens `n/a`, never `**wrong**`                             |
-  | shell exit code       | `1` — nothing was learned, at full cost                              |
-  | `devLens`             | absent from the type, because the pass that produces it may be the pass that died |
+  |                    | what `crashed` does                                                                    |
+  | ------------------ | -------------------------------------------------------------------------------------- |
+  | ticket comment     | says the step did not finish and that this says nothing about the ticket's solvability |
+  | calibration record | scores the lens `n/a`, never `**wrong**`                                               |
+  | shell exit code    | `1` — nothing was learned, at full cost                                                |
+  | `devLens`          | absent from the type, because the pass that produces it may be the pass that died      |
 
   The calibration row is the sharpest of the four. Booking a harness timeout as a wrong fitness
   call would make the triage assessment look worse the flakier the harness got, which is the one
@@ -971,7 +971,7 @@ Of the two defects that were left open when the above was written, one is now fi
   Two things the fix does **not** do. `runPass` wraps `passes.run` only — a throw from git, from
   the verification steps or from the worktree layer still propagates, which is why
   `solveTicket`'s skill-root cleanup is still a `finally` and why the test for it now has to
-  make *the shell* fail rather than a pass. And the process still dies if the throw comes from
+  make _the shell_ fail rather than a pass. And the process still dies if the throw comes from
   there; bounding that is Phase E's problem, not this one's.
 
   This also cost the CLI's outcome reporting its excuse for being untested. `solve-once.ts` ends
@@ -980,11 +980,12 @@ Of the two defects that were left open when the above was written, one is now fi
   Split into `src/cli/solve-outcome.ts`, the same move `solve-args.ts` made earlier and for the
   same reason.
 
-One defect remains open, recorded rather than fixed:
+The second is fixed too, though not in the shape it was filed in:
 
-- **`removeWorktree` is never called.** The prose below says a failed run's worktree is kept and
-  implies a successful one is removed. Nothing removes either. The prose is the part that is
-  wrong; see the note under "Never a protected branch".
+- **`removeWorktree` was never called.** Filed as "call it on success". That would have been data
+  loss — nothing in this phase commits, so a successful run's worktree is the only copy of the
+  work. It is now called on `bailed` only, which is the one outcome whose worktree is provably
+  empty. The full reasoning, and what is still not cleaned up, is under "Never a protected branch".
 
 And one non-defect worth recording, because diagnosing it wrongly was itself instructive: a run
 appeared to hang for thirty minutes in `recon`. It was not API slowness. **The laptop was
@@ -1199,12 +1200,33 @@ diff is the evidence a human needs to decide whether the ticket was mis-assessed
 refuses because the worktree is dirty, that is git reporting uncommitted work at a point where
 there should be none.
 
-**That paragraph describes an intention, not the behaviour.** `removeWorktree` is written, tested
-and called by nothing — `solveTicket` leaves every worktree behind, successful or not. The
-practical effect today is disk use and a pile of stale branches on the pilot repository, so it is
-recorded here rather than rushed; the reason it belongs in this document at all is that the two
-sentences above read as a description of a cleanup policy that does not exist. Left as-is, the
-next person to hit a full disk would go looking for a bug in the removal logic.
+**Which run gets cleaned up is narrower than "on success", and the narrowing is the point.**
+`removeWorktree` used to be called by nothing at all; the obvious fix — call it whenever the run
+succeeded — is wrong, and working out why produced the better rule.
+
+Nothing in this phase commits. `composeCommitMessage` composes a message and no `git commit` ever
+consumes it, so the worktree of a `verified` run holds uncommitted work that exists in exactly one
+place. Removing it on success would delete the artifact the run was for, and `describeSolveOutcome`
+would still be telling the operator to go and read it. "Clean up on success" reads as tidiness and
+would have been data loss.
+
+So the rule is **remove when the run cannot have written anything**, which today means exactly one
+outcome: `bailed`. Recon is the only pass with neither `Write` nor `Edit`, so its checkout is
+pristine, and a bail is the _expected_ result whenever triage's blind fitness call was optimistic —
+making it both the safest worktree to remove and the one that would otherwise accumulate fastest.
+Every other outcome keeps its worktree, and now says so accurately.
+
+Three things hold that reasoning in place rather than leaving it as a comment. The removal is not
+forced, so if the assumption is ever falsified — a future recon that can write, or anything else
+dirtying the checkout — git refuses and the run keeps the evidence. The refusal is not swallowed:
+`RemoveResult` rides out on the outcome, so the CLI prints either "removed" or the path plus git's
+reason, and cannot claim a directory is waiting when it is not. And the field is **required** on
+the outcome type, so the compiler made every construction site state what happened to the worktree
+instead of letting the question go unasked.
+
+Still not cleaned up: the branch. `git worktree remove` leaves it behind, so a bailed run still
+costs one empty ref on the pilot repository. Deleting it is a separate privilege and is not taken
+here.
 
 ### The diff gate
 

@@ -35,6 +35,7 @@ const OUTCOMES: readonly SolveOutcome[] = [
     devLens: lens,
     worktree,
     recon: {} as never,
+    cleanup: { outcome: "removed", path: worktree.path },
   },
   {
     kind: "abandoned",
@@ -72,6 +73,7 @@ describe("isFailureExit", () => {
         devLens: lens,
         worktree,
         recon: {} as never,
+        cleanup: { outcome: "removed", path: worktree.path },
       }),
     ).toBe(false);
   });
@@ -135,10 +137,53 @@ describe("describeSolveOutcome", () => {
 
   it("points at the kept worktree on every outcome that keeps one", () => {
     // The worktree is the evidence, and a path an operator has to reconstruct
-    // by hand is one they will not look at.
-    for (const outcome of OUTCOMES.filter((o) => o.kind !== "no-worktree")) {
+    // by hand is one they will not look at. `bailed` is excluded because it is
+    // the one outcome that removes its own worktree — and `no-worktree` never
+    // had one.
+    const keeps = OUTCOMES.filter((o) => o.kind !== "no-worktree" && o.kind !== "bailed");
+    expect(keeps.length).toBeGreaterThan(3);
+    for (const outcome of keeps) {
       expect(describeSolveOutcome(outcome)).toContain(worktree.path);
     }
+  });
+
+  it("does not send an operator to a worktree it just deleted", () => {
+    // The prose/behaviour divergence this whole project exists to catch, in
+    // miniature: the line used to say "Worktree kept at <path>" on every
+    // outcome, and a bail now removes it. Printing the path anyway would send
+    // someone to an empty directory to work out why it was empty.
+    const line = describeSolveOutcome({
+      kind: "bailed",
+      reason: "the described file does not exist",
+      devLens: lens,
+      worktree,
+      recon: {} as never,
+      cleanup: { outcome: "removed", path: worktree.path },
+    });
+
+    expect(line).toContain("Worktree removed");
+    expect(line).not.toContain(worktree.path);
+  });
+
+  it("still points at the worktree when git refused to remove it", () => {
+    // `removeWorktree` does not force, so a bail whose worktree is somehow
+    // dirty keeps it — and that is precisely the case an operator most needs
+    // the path for, because something wrote to a read-only pass's checkout.
+    const line = describeSolveOutcome({
+      kind: "bailed",
+      reason: "the described file does not exist",
+      devLens: lens,
+      worktree,
+      recon: {} as never,
+      cleanup: {
+        outcome: "kept",
+        path: worktree.path,
+        reason: "git would not remove it (exit 1) — not forced",
+      },
+    });
+
+    expect(line).toContain(worktree.path);
+    expect(line).toContain("not forced");
   });
 
   it("says plainly that a verified run pushed nothing", () => {
