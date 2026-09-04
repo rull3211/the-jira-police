@@ -17,14 +17,22 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 532 tests, no build step, no deployment
+Status: running end to end against production Jira. 618 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
 `agent:solvable`, waiting to be fixed by an agent. It is read-only today — it selects the right
-tickets and reports the exact label edit it _would_ make, and has no function capable of making
-it. See §4 for the queue and §13 for what is deliberately unbuilt. Nothing runs it from the
-daemon; `pnpm start` is the grooming loop only.
+tickets and reports the exact label edit it _would_ make, and the cycle that runs it holds no
+function capable of making it.
+
+Two pieces of the machinery beyond it now exist and are **wired to nothing**: `solve/claim.ts`,
+which can perform and verify that label edit, and `solve/diff-gate.ts`, which bounds what a solve
+run may have changed. Neither has a caller — no code constructs the claim's capabilities and
+nothing invokes the gate — so the queue's inertness is still structural rather than promised, and
+granting either is a visible change to a composition function rather than a flag. Building a
+capability and granting it are kept as separate commits on purpose. See §4 for the queue and §13
+for what remains unbuilt. Nothing runs any of it from the daemon; `pnpm start` is the grooming
+loop only.
 
 ---
 
@@ -326,9 +334,26 @@ storecode -p "/intake-triage SSX-1234 --no-write --no-html" \
   --output-format stream-json --verbose \
   --permission-mode dontAsk \
   --allowedTools "<explicit list>" \
+  --disallowedTools "<explicit list>" \
   --add-dir "<vault>" \
   --json-schema '<inline draft-07>'
 ```
+
+- **`--allowedTools` does not restrict anything, and this document used to say it did.** It is an
+  auto-approve list: naming a tool pre-approves it, omitting a tool denies nothing. Probed four
+  ways 2026-09-04 — `--allowedTools "Bash(git status:*)"` ran an unscoped `git log`;
+  `--allowedTools "Read"` ran `Bash`, with `dontAsk` and without it, inside this repo and from
+  `/tmp`. So every triage run this service made before that date had `Bash`, `Write` and `Edit`
+  available. **`--disallowedTools` is the guard**, and it is the strongest available form: the
+  tool never enters the model's tool list, so there is no call to permit. Comma-separated form
+  verified (`bash=NO write=NO read=YES`). Both flags are passed — the allowlist still suppresses
+  prompts and documents intent — but only one of them is load-bearing. See §14.12.
+- **Whether MCP tool names are honoured by `--disallowedTools` is _unverified_.** A bare
+  `storecode -p` run has no MCP server connected, so the probe returned `edit=NO get=NO` and
+  distinguished nothing. The Atlassian mutators are named in both denylists on principle, and an
+  unrecognised name is inert, but nothing in this service should be described as mechanically
+  unable to edit a Jira issue on that basis. What actually keeps the analyst from writing is
+  `--no-write` in the prompt plus `gate.ts` sitting between it and the poster.
 
 - **`stream-json`, not `json`** — the MCP status guard needs the `system`/`init` event, which only
   the streaming format emits. Requires `--verbose`.
@@ -372,6 +397,8 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/solve/labels.ts`   | The `agent:` state machine as pure functions; `repoFromLabels`                                          |
 | `src/solve/poller.ts`   | One solve cycle. **Dry run only** — plans the claim, cannot make it                                     |
 | `src/solve/report.ts`   | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                      |
+| `src/solve/claim.ts`    | The claim and its release. **Built, wired to nothing** — no caller constructs its capabilities          |
+| `src/solve/diff-gate.ts`| The bound on what a solve run may have changed. Pure. **Built, called by nothing**                      |
 | `src/cli/solve-once.ts` | One solve cycle and exit. No `--dry-run` flag, because there is no other mode                           |
 | `src/jira/client.ts`    | `/rest/api/3/search/jql`, token pagination, Basic auth                                                  |
 | `src/jira/types.ts`     | The slice of the Jira payload actually read, plus `TicketRef`                                           |
@@ -598,13 +625,26 @@ is likewise only partly owned, copy that shape rather than widening the prefix l
 Everything that _selects_ a ticket is built and was verified against the live board on
 2026-09-03. Everything that _changes_ anything is not.
 
-- **The claim write.** The queue reports the edit (`+agent:solving` / `-agent:start`) and cannot
-  perform it. This is the next increment, and it is what makes the queue's dedupe testable at
-  all — _claim one ticket, confirm a second `solve:once` picks nothing up, release it_ is the
-  experiment, and it needs a write to run.
-- **The solver itself** — worktree isolation, read-only recon, the diff-bounds gate, mechanical
-  (not model-asserted) verification. No component in this service has ever held `Write`, `Edit`
-  or `Bash`.
+- **The claim write.** `src/solve/claim.ts` now exists and is **wired to nothing** — no caller
+  constructs a `ClaimCapabilities`, so the refusal remains structural rather than promised. The
+  experiment it unlocks — _claim one ticket, confirm a second `solve:once` picks nothing up,
+  release it, confirm the ticket ends exactly where it started_ — still has not been run, because
+  running it means granting the write. Deliberately deferred until every read-only path has been
+  driven by hand: the grooming pipeline works, and only finished pieces get wired in.
+- **The solver itself** — worktree isolation, read-only recon, mechanical (not model-asserted)
+  verification. The **diff-bounds gate is built** (`src/solve/diff-gate.ts`) and called by
+  nothing; it was written first on purpose, because shipping a solver and then its bound would
+  leave a window in which an unbounded solver exists. No component in this service has ever held
+  `Write` or `Edit`, and — see §6 — **none will hold `Bash`**: the model cannot be given a scoped
+  shell, so the harness runs every command itself.
+
+  The gate carries one rule the plan did not anticipate and that generalises past this feature:
+  **a run must not be able to edit the definition of whether it passed.** Verification is
+  mechanical, but the harness discovers the test, typecheck and lint commands _from the repo_,
+  out of `package.json`. A run permitted to edit that file can point `test` at `true`, after
+  which every check succeeds, is honestly reported, and has verified nothing. Same for
+  `tsconfig.json`, the lint config and the vitest config. Refused unconditionally, exempt from
+  any size cap — a one-line edit there is the dangerous size, not the safe one.
 - **Delivery** — draft PR, Copilot review, iterate, undraft. `MAX_REVIEW_ITERATIONS` exists and
   is read by nothing.
 - **Running it from the daemon, and this one is deliberately *last*.** Not wired into `index.ts`;
@@ -625,11 +665,12 @@ that reports what it *would* change, and a single run against one named ticket, 
 operator rather than by the queue. `triage:once SSX-1234 [--write]` is the shape being copied.
 `solve:once` grows one flag per phase (`--claim`, `--solve`, `--pr`), each implying the ones
 before it, so the command line reads as the privilege escalation it is.
-- **Two probes that gate the above and have not been run:** whether `Bash(pnpm test:*)` scoping
-  is honoured by the local arg parser (if not, Phase C changes shape — the harness runs the
-  commands and the model gets no `Bash` at all), and whether `gh pr edit --add-reviewer @copilot`
-  works for this org. Cost of a solve run is also unmeasured; a triage is $0.11 and a solve is a
-  different order of magnitude.
+- **Probes.** The `Bash(pnpm test:*)` scoping question was run 2026-09-04 and answered in the
+  worst available way — see §6 and §14.12. Phase C took the shape the fallback described, not
+  because that was preferred but because the alternative turned out not to exist. Still open:
+  whether `gh pr edit --add-reviewer @copilot` works for this org, and whether MCP tool names are
+  honoured by `--disallowedTools`. Cost of a solve run is also unmeasured; a triage is $0.11 and
+  a solve is a different order of magnitude.
 
 ---
 
@@ -676,3 +717,21 @@ Things that look like details and are not:
     reads _delta, never a replacement array_: the poster path can honour it because the skill
     resolves the delta against live inside a single session, and the claim path cannot, which
     makes the claim the more dangerous of the two writes despite being the smaller one.
+12. **A capability is only withheld if something withholds it.** `--allowedTools` pre-approves;
+    it does not restrict. This service ran for its whole life with three comments in
+    `runner.ts` and one in `poster.ts` asserting that omission from that list was denial, and it
+    never was — every triage run had `Bash`, `Write` and `Edit`. The general form is worth more
+    than the specific bug: **an absence is not a control.** A list of what is permitted restricts
+    nothing unless the mechanism reading it denies the complement, and whether it does is a fact
+    about the tool, not about the intention of whoever wrote the list. Probe it, and write down
+    what the probe showed rather than what the flag is named. The corollary for reviewers: a
+    comment claiming something is prevented should name the mechanism, so the claim can be
+    checked against it.
+13. **Nothing may edit the definition of whether it passed.** Mechanical verification is only
+    worth anything if the thing being verified cannot move the goalposts — and the harness reads
+    its test, typecheck and lint commands out of the repository it is checking. So the diff gate
+    refuses `package.json`, `tsconfig*.json` and the lint and test configs unconditionally, and
+    exempts them from every size cap. The reasoning generalises to anything later that discovers
+    behaviour from data an agent can write: **discover from the pristine base, not from what the
+    run produced**, and treat "the check passed" as meaningless until you know the check was the
+    one you meant.
