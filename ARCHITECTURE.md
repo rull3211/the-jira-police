@@ -660,6 +660,42 @@ the only one that changes what the skill reads:
      by design: DoR passing is necessary for solvability and not sufficient, and this is the first
      live case that distinguishes the two.
 
+   A write-back run followed at 13:02 and posted to the ticket. It **updated its own comment in
+   place** rather than adding a second — the idempotency test found the earlier report by its
+   sentinel — and reconciled the labels, including retiring `next:to-reporter` in favour of
+   `next:to-trio`, which is divergence 1 above doing the job it was added for.
+
+   <a id="fitness-nondeterminism"></a>
+   **And the fitness call disagreed with itself.** The 12:48 run returned `solvable: false`; the
+   13:02 run returned `solvable: true` and wrote `agent:solvable` to the board. Same ticket, same
+   two comments, same skill at the same commit, fourteen minutes apart. Both runs identified the
+   same AK6 problem — the receipt already prefers the registration number, so the empty field has a
+   root cause nobody has located, possibly outside this repository — and they disagreed only about
+   whether that is a blocker or a caveat. Neither reading is unreasonable, which is the point: this
+   is a judgement call sitting on a boolean.
+
+   Three consequences, in descending order of how much they should change behaviour:
+
+   1. **`SOLVE_MODE=manual` is not a starter setting to be graduated from.** The label that
+      autosolve keys on is, on this evidence, not reproducible for tickets near the line. A human
+      adding `agent:start` is not ceremony around a reliable signal; it is the thing making the call
+      deterministic. Revisit `auto` only with a measured flip rate, not with a run of good results.
+   2. **The queue must not read `agent:solvable` as a fact about the ticket.** It is one sample of
+      a distribution, and phase A exists precisely to find out how wide that distribution is —
+      "how often the fitness call is right before anything acts on it". This is the first datum and
+      it is a disagreement, so the sample of runs matters more than the sample of tickets: re-run
+      the same ticket, not only new ones.
+   3. **The recon pass matters more than the plan gave it credit for.** It was justified as the
+      check on triage having no source access. It is also the check on triage having been unlucky,
+      and it is the only one, because nothing between the label and the worktree re-examines the
+      call. `devLensCorrection` (`src/solve/feedback.ts`) is the channel that carries the
+      disagreement back, and the append-only `dev-lens.md` is where a flip rate becomes visible.
+
+   What this does **not** show is a bug. Nothing malfunctioned, no guard failed, and the ticket
+   ended in a defensible state. It shows that a model's boolean is not a measurement, and that the
+   design already assumed as much in the places that count — the human gate, the recon bail, and
+   the dry phase that produced this observation instead of a pull request.
+
 The gate's `OWNED_LABEL_NAMESPACES` must **match §11 exactly, not be a superset**. A gate looser
 than the contract it enforces has a hole in it. Widen it only by widening §11 first — and tell
 Jacob, because neither divergence is upstream yet.
