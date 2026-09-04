@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SolveParseError, type Pass, type SolveRunOptions } from "./runner.ts";
 import {
@@ -11,6 +11,7 @@ import {
   resolveReview,
   solveTicket,
 } from "./orchestrator.ts";
+import { logger } from "../logger.ts";
 import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
 
 /** The escape, not the byte, so this file stays greppable. See `verify.ts`. */
@@ -462,6 +463,47 @@ describe("solveTicket, and what each pass is given", () => {
     if (outcome.kind === "refused") {
       expect(outcome.stage).toBe("diff-gate");
     }
+  });
+
+  it.each([
+    ["recon", { recon: recon({ proceed: false, bailReason: "the dev lens names a dead file" }) }],
+    ["fix", { ...FULL, fix: fix({ abandoned: "the config contradicts the ticket" }) }],
+  ] as const)("logs why the %s pass gave up", async (pass, script) => {
+    // THE ONE THAT MATTERS about a bail, and it was missing entirely. A bail is
+    // the most informative thing a solve produces — triage cannot read source,
+    // so this is the first time anything with the code in front of it has had
+    // an opinion — and the reason was returned to a caller that prints a
+    // one-word outcome. Both real bails so far were diagnosed by reading a
+    // stack trace, because the sentence explaining them reached nobody.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness(script);
+
+    await solveTicket(h.deps, request);
+
+    expect(info).toHaveBeenCalledWith(
+      "solve.abandoned",
+      expect.objectContaining({ pass, reason: expect.stringMatching(/\S/u) }),
+    );
+    info.mockRestore();
+  });
+
+  it("says whether an abandoned run left files behind", async () => {
+    // Changes what a human does next: debris in the worktree needs looking at,
+    // a clean bail does not. Only representable at all since the coherence rule
+    // forbidding "abandoned and changed" was corrected — see `parseFix`.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness({
+      ...FULL,
+      fix: fix({ abandoned: "thought better of it", changed: true }),
+    });
+
+    await solveTicket(h.deps, request);
+
+    expect(info).toHaveBeenCalledWith(
+      "solve.abandoned",
+      expect.objectContaining({ leftFiles: true }),
+    );
+    info.mockRestore();
   });
 
   it("still reads the numstat for the gate, not the patch", async () => {

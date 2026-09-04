@@ -522,13 +522,31 @@ export function parseFix(value: unknown, issueKey: string): FixReport {
   };
 
   const abandoned = report.abandoned.trim() !== "";
-  if (abandoned && report.changed) {
-    throw new SolveParseError(
-      `${issueKey}: reported both an abandoned run and a change — the worktree state is then unknown, which is the one thing the caller cannot work around`,
-    );
-  }
   if (abandoned) {
-    // Nothing further to check: there is no commit to make and no diff to bound.
+    // Abandoning *after* touching something is legal, and this used to throw.
+    //
+    // The rejected message said the worktree state was then unknown. It had it
+    // backwards. A pass reporting "I gave up, and I left something behind" has
+    // said more than one reporting "I gave up" — it has named the debris. What
+    // the old rule actually did was make the honest answer unrepresentable, so
+    // a model that had written a file and then thought better of it had to
+    // misreport one field or the other:
+    //
+    //   changed: false    → the caller believes the worktree is pristine
+    //   abandoned: ""     → the caller runs the whole pipeline on half a change
+    //
+    // The second is the dangerous one, and it is the one the schema pushed
+    // toward, since `changed` has an obvious "nothing worth counting" reading
+    // and `abandoned` does not. Observed on SSX-3822, 2026-09-04: the pass
+    // created the asset, abandoned, reported both, and the throw discarded its
+    // reason — the single thing the run existed to produce.
+    //
+    // Nothing downstream is weakened by allowing it. `abandoned` returns from
+    // the orchestrator before the diff gate, verification, the commit and the
+    // push; the worktree is disposable and is kept only so a human can look at
+    // it. Partial changes on a stopped run are debris, not risk.
+    //
+    // Still checked below: an abandoned run must say why.
     return report;
   }
   if (!report.changed) {
@@ -668,11 +686,11 @@ export function parseReview(value: unknown, issueKey: string): ReviewReport {
     injectionNoticed: str(record, "injectionNoticed"),
   };
 
-  if (report.abandoned.trim() !== "" && report.changed) {
-    throw new SolveParseError(
-      `${issueKey}: review round reported both an abandoned run and a change — the worktree state is then unknown`,
-    );
-  }
+  // Abandoning after touching something is legal here too, and for the same
+  // reason as in `parseFix` — see the long note there. A review round that
+  // starts a change and thinks better of it must be able to say so, and the
+  // orchestrator returns `abandoned` before anything is re-verified or pushed.
+  //
   // Unlike the fix pass, "no change" is a legitimate outcome here with nothing
   // abandoned: a review can raise only questions, and answering them without
   // touching code is the right response. What is never acceptable is a round

@@ -375,6 +375,17 @@ async function runPipeline(
     devLensAccurate: recon.devLensAccurate,
   });
   if (!recon.proceed) {
+    // The bail reason is the whole product of a read-only pass. It is the only
+    // calibration the fitness assessment ever gets — triage cannot read source,
+    // so this is the first time anything with the code in front of it has had
+    // an opinion — and it was going nowhere.
+    logger.info("solve.abandoned", {
+      issueKey,
+      pass: "recon",
+      reason: recon.bailReason,
+      leftFiles: false,
+      worktreePath: worktree.path,
+    });
     return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree };
   }
 
@@ -382,6 +393,19 @@ async function runPipeline(
   const brief = JSON.stringify(recon, null, 2);
   const fix = await passes.run("fix", { ...base, brief }, (output) => parseFix(output, issueKey));
   if (fix.abandoned.trim() !== "") {
+    // Logged, because it was not. A bail is the most informative thing a solve
+    // produces — it is the fitness assessment being corrected by something that
+    // can actually read the code — and until now the reason was returned to a
+    // caller that printed a one-word outcome, so it reached nobody. `leftFiles`
+    // because an abandoned run may still have touched the worktree, and whether
+    // there is debris to look at changes what a human does next.
+    logger.info("solve.abandoned", {
+      issueKey,
+      pass: "fix",
+      reason: fix.abandoned,
+      leftFiles: fix.changed,
+      worktreePath: worktree.path,
+    });
     return { kind: "abandoned", reason: fix.abandoned, devLens, worktree };
   }
 
@@ -540,6 +564,13 @@ async function runReviewRound(
   );
 
   if (report.abandoned.trim() !== "") {
+    logger.info("solve.abandoned", {
+      issueKey,
+      pass: "review",
+      reason: report.abandoned,
+      leftFiles: report.changed,
+      worktreePath: worktree.path,
+    });
     return { kind: "abandoned", reason: report.abandoned };
   }
   if (!report.changed) {

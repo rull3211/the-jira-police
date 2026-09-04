@@ -383,11 +383,30 @@ describe("parseFix", () => {
     expect(parseFix(fix(), "SSX-3822").changed).toBe(true);
   });
 
-  it("rejects a run that both abandoned and changed something", () => {
-    // The worktree state is then unknown, which is the one thing the caller
-    // cannot work around.
-    expect(() => parseFix(fix({ abandoned: "brief was wrong" }), "SSX-3822")).toThrow(
-      /worktree state/u,
+  it("accepts a run that abandoned after touching something", () => {
+    // REGRESSION, 2026-09-04. This used to throw, on the grounds that the
+    // worktree state was then unknown. It had it backwards: a pass saying "I
+    // gave up and I left something behind" has named the debris, where one
+    // saying only "I gave up" has not.
+    //
+    // What the old rule really did was make the honest answer unrepresentable,
+    // so a model that wrote a file and then thought better of it had to
+    // misreport `changed` or `abandoned`. Observed on SSX-3822: the fix pass
+    // created the asset, abandoned, reported both, and the throw discarded its
+    // reason — the one thing the run existed to produce.
+    const report = parseFix(
+      fix({ abandoned: "the ticket's build note contradicts the config", changed: true }),
+      "SSX-3822",
+    );
+
+    expect(report.abandoned).not.toBe("");
+    expect(report.changed).toBe(true);
+  });
+
+  it("still requires an abandoned run to say why", () => {
+    // The loosening above is narrow. Silence is not an outcome.
+    expect(() => parseFix(fix({ abandoned: "", changed: false }), "SSX-3822")).toThrow(
+      /no reason for abandoning/u,
     );
   });
 
@@ -646,10 +665,13 @@ describe("parseReview", () => {
     );
   });
 
-  it("rejects a round that both abandoned and changed something", () => {
-    expect(() => parseReview(review({ abandoned: "too large" }), "SSX-3822")).toThrow(
-      /worktree state is then unknown/u,
-    );
+  it("accepts a round that abandoned after touching something", () => {
+    // Same correction as in the fix pass, and it has to be made in both places
+    // or a review round is still forced to misreport one of the two fields.
+    const report = parseReview(review({ abandoned: "too large", changed: true }), "SSX-3822");
+
+    expect(report.abandoned).not.toBe("");
+    expect(report.changed).toBe(true);
   });
 
   it("rejects a change with no files", () => {
