@@ -13,16 +13,23 @@
  * A reviewer asking "what can this service change from a terminal" reads this
  * file, rather than two entry points that had already begun to drift apart.
  *
- *
  * ## Authority is a parameter, not a setting read here
  *
  * `runClaim` takes a `ClaimAuthority` and does not consult `SOLVE_MODE`. The
- * queue-driven command passes `solveMode(settings)`; a command that names its
- * own ticket can pass something the settings cannot express. Reading the setting
- * in here would mean such a caller could not say what it means without also
- * changing the operator's configuration — and a caller that cannot express its
- * own authority ends up editing `.env` to get a run through, which is the worst
- * possible place for that decision to be recorded.
+ * queue-driven command passes `solveMode(settings)`; the singleton command
+ * passes `"named"`. Reading the setting in here would have meant the singleton
+ * command could not say what it means without also changing the operator's
+ * configuration — and a caller that cannot express its own authority ends up
+ * editing `.env` to get a run through, which is the worst possible place for
+ * that decision to be recorded.
+ *
+ * ## `cycle` is nullable, and that is the queue being optional
+ *
+ * A queue cycle is a JQL round trip whose only contribution to a named-ticket
+ * run is a line of commentary and, at the `--claim` rung, the dedupe check. The
+ * singleton command has no queue to consult and passes `null`. The line then
+ * says the queue was not consulted, rather than reporting the ticket as absent
+ * from it — two different facts that a single boolean had made into one string.
  */
 
 import type { JiraClient } from "../jira/client.ts";
@@ -46,6 +53,24 @@ import { type SolvePhase, includes } from "./solve-args.ts";
 import { describeSolveOutcome, isFailureExit } from "./solve-outcome.ts";
 
 /**
+ * What the queue thinks of this ticket, or that there was no queue to ask.
+ *
+ * Three outcomes and not two. "Not in the queue" is a fact about the board — the
+ * ticket is missing a label, or somebody else has claimed it — and is worth
+ * overriding out loud. "No queue was consulted" is a fact about the command, and
+ * reporting it as the first would tell an operator their labels were wrong when
+ * nothing had looked at them.
+ */
+function queueNote(issueKey: string, cycle: SolveCycleOutcome | null): string {
+  if (cycle === null) {
+    return `\n${issueKey} was named directly; the queue was not consulted.\n`;
+  }
+  return cycle.planned.some((candidate) => candidate.issueKey === issueKey)
+    ? `\n${issueKey} is in the queue; solving it.\n`
+    : `\n${issueKey} is NOT in the queue right now — solving it anyway because you named it.\n`;
+}
+
+/**
  * Runs the four passes against one named ticket and reports what happened.
  *
  * Everything it does to code is confined to a temporary worktree: it does not
@@ -67,14 +92,9 @@ export async function runSolver(
   settings: Settings,
   client: JiraClient,
   issueKey: string,
-  cycle: SolveCycleOutcome,
+  cycle: SolveCycleOutcome | null,
 ): Promise<SolveOutcome | null> {
-  const planned = cycle.planned.some((candidate) => candidate.issueKey === issueKey);
-  process.stdout.write(
-    planned
-      ? `\n${issueKey} is in the queue; solving it.\n`
-      : `\n${issueKey} is NOT in the queue right now — solving it anyway because you named it.\n`,
-  );
+  process.stdout.write(queueNote(issueKey, cycle));
 
   const read = createTicketReader(client);
   const { text, detail, inlined, omitted } = await read(issueKey);
@@ -278,7 +298,7 @@ export async function runWriteRungs(
   client: JiraClient,
   issueKey: string,
   phase: SolvePhase,
-  cycle: SolveCycleOutcome,
+  cycle: SolveCycleOutcome | null,
   authority: ClaimAuthority,
 ): Promise<void> {
   const receipt = await runClaim(client, issueKey, authority);

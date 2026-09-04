@@ -9,9 +9,8 @@
  *
  * The ladder is `solve-args.ts`, including why anything past the first two rungs
  * refuses to run without an issue key. The rungs themselves are `solve-run.ts`,
- * which this file used to contain: they moved out because a second command needs
- * the same four steps, and a module that runs `main()` on import cannot be
- * imported to get at them.
+ * which this file used to contain: they moved out when `bot-once.ts` needed the
+ * same four steps, and a module that runs `main()` on import cannot be imported.
  * What is left here is this command's own shape — parse, configure, read the
  * queue, report it, and hand a named ticket to the rungs.
  *
