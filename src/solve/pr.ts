@@ -204,6 +204,26 @@ export interface ReviewComment {
 export interface ReviewState {
   /** Whether the requested reviewer has said anything at all yet. */
   readonly reviewerResponded: boolean;
+  /**
+   * Whether the reviewer answered by saying it could not review.
+   *
+   * A third state between "no response" and "a review", and it exists because
+   * the second one swallowed it. Observed live on PR #2657: the Copilot app was
+   * requested, ran, could not read the pull request (`Resource not accessible
+   * by integration` — its installation lacked `pull_requests: read` on that
+   * repository) and posted **a normal `COMMENTED` review** whose entire body
+   * was "Copilot encountered an error and was unable to review this pull
+   * request."
+   *
+   * Without this flag that is indistinguishable from a reviewer with an
+   * opinion, and both readings of it are wrong. As a comment it is feedback,
+   * so a review round would spend a paid pass asking a model to address an
+   * error message. As an empty review it is approval, so the loop would
+   * undraft and mark the ticket `agent:done` on the strength of a review that
+   * never happened — a bot telling a human the code was reviewed when it was
+   * not, which is the worst outcome this pipeline can produce.
+   */
+  readonly reviewerErrored: boolean;
   /** Every comment with usable text, from reviews and issue comments alike. */
   readonly comments: readonly ReviewComment[];
   readonly state: string;
@@ -710,15 +730,26 @@ export async function readReview(
   }
 
   const entries = [...reviews, ...comments];
+  const fromReviewer = entries.filter((entry) => matchesReviewer(entry.login, reviewer));
   return {
     outcome: "read",
     review: {
-      reviewerResponded: entries.some((entry) => matchesReviewer(entry.login, reviewer)),
+      reviewerResponded: fromReviewer.length > 0,
+      reviewerErrored: fromReviewer.some((entry) => isReviewerError(entry.body)),
       // Whitespace-only bodies are dropped here and not above: they are a
       // response for the purpose of "has the reviewer spoken", and nothing at
-      // all for the purpose of "what should the model change".
+      // all for the purpose of "what should the model change". The reviewer's
+      // own error notice goes the same way and for the same reason — there is
+      // nothing in it to change.
+      //
+      // That second drop is scoped to the reviewer, not applied to every entry.
+      // A human quoting the failure in a comment is asking for something, and
+      // matching on text alone would delete a person's message because a bot
+      // had used the same words.
       comments: entries.flatMap((entry) =>
-        entry.body === null || entry.body.trim() === ""
+        entry.body === null ||
+        entry.body.trim() === "" ||
+        (matchesReviewer(entry.login, reviewer) && isReviewerError(entry.body))
           ? []
           : [{ author: entry.login === "" ? "unknown" : entry.login, body: entry.body }],
       ),
@@ -726,6 +757,28 @@ export async function readReview(
       isDraft,
     },
   };
+}
+
+/**
+ * Phrases a reviewer uses to say it could not review.
+ *
+ * Matching a vendor's error prose is brittle and this is the narrowest form of
+ * it available: the app posts the failure as an ordinary review, so its text is
+ * the only thing distinguishing "I could not read this" from "I read it and had
+ * nothing to say". Both fragments are required to appear together, which is
+ * what keeps a review *about* an error — "this encountered an error and was
+ * unable to parse the config" — from matching.
+ *
+ * If GitHub rewords it, this stops matching and the loop goes back to treating
+ * an error as feedback. That is the failure direction to be in: it wastes a
+ * review round and says so in the pull request, where the next person to look
+ * will see an error message quoted as a review comment and come back here.
+ */
+const REVIEWER_ERROR = [/encountered an error/iu, /unable to review/iu];
+
+/** Whether a review body is the reviewer saying it failed rather than a review. */
+function isReviewerError(body: string | null): boolean {
+  return body !== null && REVIEWER_ERROR.every((phrase) => phrase.test(body));
 }
 
 /**

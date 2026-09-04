@@ -518,6 +518,7 @@ describe("reviewerComments", () => {
   it("drops our own comments, so a round is not fed its own replies", async () => {
     const state: ReviewState = {
       reviewerResponded: true,
+      reviewerErrored: false,
       state: "OPEN",
       isDraft: true,
       comments: [
@@ -535,6 +536,7 @@ describe("reviewerComments", () => {
   it("matches our identity regardless of case", () => {
     const state: ReviewState = {
       reviewerResponded: true,
+      reviewerErrored: false,
       state: "OPEN",
       isDraft: true,
       comments: [{ author: "JIRA-Police", body: "mine" }],
@@ -546,6 +548,7 @@ describe("reviewerComments", () => {
   it("keeps everything when none of it is ours", () => {
     const state: ReviewState = {
       reviewerResponded: true,
+      reviewerErrored: false,
       state: "OPEN",
       isDraft: true,
       comments: [{ author: "copilot", body: "a" }],
