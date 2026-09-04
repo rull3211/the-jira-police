@@ -26,9 +26,9 @@ ask. Everything that protects the repository is mechanical and lives **outside**
 no `git`, no test runner and no package manager available to you. This is not a rule you are
 being asked to follow — it is the absence of a tool. Do not plan around it or ask for it.
 
-## The two passes
+## The four passes
 
-One skill, two invocations, with different capabilities. **The capability difference is enforced
+One skill, four invocations, with different capabilities. **The capability difference is enforced
 by the harness's flags, not by this file** — a skill file cannot restrict itself, and text here
 saying "do not edit" would be a description of intent, not a control.
 
@@ -37,14 +37,30 @@ saying "do not edit" would be a description of intent, not a control.
    to proceed. Emits a structured verdict.
 2. **`--fix`** — `Write` and `Edit` added. Make the change the recon pass described, and nothing
    else. Emits a structured summary and a commit subject.
+3. **`--simplify`** — a cold read of the diff, bounded to the files the fix pass touched. Given
+   the diff and **not** the ticket, deliberately: showing it the requirement would invite it to
+   reconsider the change instead of the way the change is written. Usually changes nothing, and
+   that is a good outcome. Simpler means clearer, not shorter.
+4. **`--review`** — one round of resolving reviewer feedback. May answer without touching code;
+   a review that raised only questions is legitimately resolved by answering them.
+
+Each pass is its own session rather than four turns of one, so a pass cannot carry a capability
+past the point it was granted for, and so a pass that dies cannot leave a later one reasoning
+from half a conversation.
 
 Recon runs first and its verdict is honoured: if it says stop, the fix pass never starts and no
 model ever gets write access for that ticket.
+
+`SOLVE_INSTRUCTIONS.md` §1, §2, §2a and §2b are the contracts for the four, in that order. This
+list must match them and the argument builder in `src/solve/runner.ts`; it previously said "two
+passes" and named only the first two, while both of those already had four.
 
 ## Usage
 
 - `/agent-solve <ISSUE-KEY> --recon` — read-only assessment, structured verdict
 - `/agent-solve <ISSUE-KEY> --fix` — make the change described by the recon verdict
+- `/agent-solve <ISSUE-KEY> --simplify` — a cold read of the diff, bounded to the fix's files
+- `/agent-solve <ISSUE-KEY> --review` — resolve one round of reviewer feedback
 - `--brief <path>` — the recon verdict, passed into the fix pass
 - `--vault <path>` — vault location, for conventions and domain terms
 
