@@ -109,6 +109,70 @@ export function assertMcpReady(
 }
 
 /**
+ * What one run cost, as far as the result event is willing to say.
+ *
+ * Every field is `number | null`, and the null is load-bearing: **absent is not
+ * zero.** A run that did not report a cost and a run that was free are
+ * different facts, and collapsing them to `0` would quietly understate a total
+ * that someone is going to sum over a day of solves.
+ *
+ * Extraction is total — it cannot throw. This is telemetry attached to a run
+ * whose verdict has already been decided, and a malformed usage block must not
+ * be able to turn a successful solve into a failed one. Anything that is not a
+ * finite number reads as "not reported".
+ */
+export interface SessionCost {
+  readonly costUsd: number | null;
+  readonly durationMs: number | null;
+  readonly turns: number | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  /** Cache reads are the cheap ones; cache *writes* are where the money goes. */
+  readonly cacheReadTokens: number | null;
+  readonly cacheWriteTokens: number | null;
+}
+
+/**
+ * A finite number, or nothing.
+ *
+ * `Number.isFinite` rather than `typeof === "number"` because `NaN` is a
+ * number and would propagate through any sum it touched, turning one
+ * malformed run into a whole day's total reading `NaN`. Strings are not
+ * coerced: a cost arriving as `"0.12"` means the shape changed, and guessing
+ * would hide that.
+ */
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Pulls the cost fields out of a `result` event.
+ *
+ * Exported for testing against recorded events, in the same spirit as
+ * `assertMcpReady` — the alternative is spending real money per assertion.
+ *
+ * Confirmed present under Vertex 2026-09-04: a `storecode -p "say ok"` run
+ * reported `total_cost_usd: 0.127` on 20,351 cache-creation tokens. Worth
+ * writing down, because it means the per-run floor is roughly a tenth of a
+ * dollar before the model does anything at all, and a solve is four sessions.
+ */
+export function sessionCost(event: Record<string, unknown>): SessionCost {
+  const usage = event["usage"];
+  const tokens: Record<string, unknown> =
+    typeof usage === "object" && usage !== null ? (usage as Record<string, unknown>) : {};
+
+  return {
+    costUsd: finiteNumber(event["total_cost_usd"]),
+    durationMs: finiteNumber(event["duration_ms"]),
+    turns: finiteNumber(event["num_turns"]),
+    inputTokens: finiteNumber(tokens["input_tokens"]),
+    outputTokens: finiteNumber(tokens["output_tokens"]),
+    cacheReadTokens: finiteNumber(tokens["cache_read_input_tokens"]),
+    cacheWriteTokens: finiteNumber(tokens["cache_creation_input_tokens"]),
+  };
+}
+
+/**
  * Runs the child and hands its `structured_output` to `parse`.
  *
  * `parse` may throw to reject the run — that is how the analyst refuses an
@@ -166,6 +230,12 @@ export async function runSession<T>(
       }
 
       if (event["type"] === "result") {
+        // Before the success check, deliberately. A run that failed, refused or
+        // timed out has already been paid for, and those are exactly the runs
+        // whose cost would otherwise never be counted — which would make the
+        // per-ticket total look best on the days it went worst.
+        logger.info("session.cost", { label: options.label, ...sessionCost(event) });
+
         if (event["subtype"] !== "success" || event["is_error"] === true) {
           failure ??= new SessionError(`${options.label} failed: ${String(event["subtype"])}`);
           return;

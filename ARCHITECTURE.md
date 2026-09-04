@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1288 tests, no build step, no deployment
+Status: running end to end against production Jira. 1310 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -717,11 +717,21 @@ is likewise only partly owned, copy that shape rather than widening the prefix l
   access and an Enterprise Grid app install, both human-gated. Constraints already researched and
   encoded in that module's header: one operation per call, markdown must end with `\n`, no
   "append to list X", section ids are unstable and must be re-looked-up every edit.
-- **Cost telemetry.** `total_cost_usd`, `usage` and `num_turns` are in the stream and never read.
-  A trivial mock run measured **$0.11** on `claude-opus-5`; a real triage reads the ticket,
-  searches for duplicates and consults the vault, so it is several times that. At ~4–5 tickets/day
-  the floor is real money. This blocks the "should triage run on a cheaper model?" decision.
-- **`--max-budget-usd` / `--max-turns` / per-job `--session-id`.**
+- ~~**Cost telemetry.**~~ **Done 2026-09-04.** `sessionCost` in `session.ts` reads
+  `total_cost_usd`, `duration_ms`, `num_turns` and the four token counts off the `result` event
+  and logs them as `session.cost`. One place, so it prices everything: triage, the poster and all
+  four solve passes. Two properties are load-bearing and both are mutation-tested — every field is
+  `number | null` because **an unreported cost is not a free one**, and the log line sits *above*
+  the success check because a failed run has still been paid for, so a total that skipped failures
+  would look best on the days that went worst.
+
+  The measurement that motivated it: `storecode -p "say ok"` — a two-word answer — cost
+  **$0.127**, on 2 input tokens, 4 output tokens and **20,351 cache-creation tokens** billed at
+  list. So the old "$0.11 per triage" figure was almost entirely fixed overhead rather than the
+  cost of reading a ticket, and the per-invocation floor is about a tenth of a dollar before the
+  model does any work. A solve is four such sessions.
+- **`--max-budget-usd` / `--max-turns` / per-job `--session-id`.** Now actionable: `session.cost`
+  supplies the number a cap would be set from.
 - **Deployment.** No launchd job, no container, no metrics. `pnpm start` in a terminal is the
   current answer.
 - **Concurrency.** Issues are triaged sequentially. Fine at 4–5/day.
@@ -818,8 +828,36 @@ before it, so the command line reads as the privilege escalation it is.
   of verification being mechanical and of the diff gate refusing edits to the files that define
   what verification means.
 
-- **Cost of a solve is still unmeasured.** A triage was measured at $0.11 and a solve is several
-  passes of a larger context, so it is a different order of magnitude.
+- **Cost of a solve is still unmeasured — but no longer unmeasurable.** The instrumentation
+  landed 2026-09-04 (see §14); what is missing is a solve run made *after* it, since both runs so
+  far predate it. The next one prices the four passes individually, which is the reading that
+  matters: recon takes ~4.5 minutes of a large context and may well cost more than the fix.
+
+- **The host's own safety hook can abandon a fix pass, non-deterministically.** Observed
+  2026-09-04 on the second solve of SSX-3822. The fix pass tried to write
+  `src/utils/setFavicon.ts` and storecode's `pipelock` PreToolUse hook denied it —
+  `pipelock: blocked (Credential Path Directive)`. The likely trigger is content, not path: this
+  ticket is about detecting non-production environments, and the Credential Path Directive fires
+  on text containing the `.env` substring, which `import.meta.env.PROD` contains. **The first
+  solve of the same ticket wrote the same feature and was not blocked**, so this varies with
+  whatever the model happens to write, not with the ticket.
+
+  Three things to take from it, in order of importance:
+
+  1. **The refusal contract held under real pressure.** The pass did not retry a variation, did
+     not look for a way around the hook, and — the part worth keeping — **declined to ship the
+     half of the change that had succeeded**, on the grounds that a lone `favicon-test.svg` would
+     read as a complete fix. That is the failure mode the pass contract names, refused
+     unprompted.
+  2. **`abandoned` is now known to be overloaded.** It currently means both "the model judged
+     this ticket unfixable" and "the environment would not let the model write", which are
+     different facts with different remedies — the first is feedback about triage, the second is
+     a host misconfiguration and says nothing about the ticket. The calibration record cannot
+     currently tell them apart, so `dev-lens.md` will slowly accumulate environment failures
+     scored as ticket assessments.
+  3. **It is not this service's bug to fix.** The hook lives in `~/.storecode/`, a protected path,
+     and editing a safety hook so that this project's own agent can write is exactly the move the
+     operating rules forbid. It needs a human to decide whether the directive is over-matching.
 
 - **Triage duration is high-variance, and the first reading of that was wrong.** On 2026-09-04 a
   triage of SSX-3831 exceeded the 600 s `TRIAGE_TIMEOUT_MS`. The obvious inference — that the
