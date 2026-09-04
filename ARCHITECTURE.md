@@ -532,7 +532,7 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `SKILL_NAME`                 | `mock-triage`                      | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                                                                         |
 | `VAULT_PATH`                 | —                                  | Required for the real skill; checked at wiring time, not first-ticket time                                                                             |
 | `WRITE_BACK`                 | `false`                            | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed                                                            |
-| `TRIAGE_TIMEOUT_MS`          | `600000`                           |                                                                                                                                                        |
+| `TRIAGE_TIMEOUT_MS`          | `1200000`                          | Raised from `600000` on 2026-09-04 after a run was killed that was slow rather than stuck (§13). Floor of 1 — zero is a timer that has already expired |
 | `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`      | Both gitignored                                                                                                                                        |
 | `SOLVE_ENABLED`              | `false`                            | Master switch for the solve queue. Strict `"true"`. Checked at composition _and_ in the poller                                                         |
 | `SOLVE_MODE`                 | `manual`                           | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback                              |
@@ -549,11 +549,28 @@ pnpm dev                           # daemon, --watch
 pnpm poll:once --dry-run           # discovery only; free, and the fastest config check
 pnpm poll:once                     # one full cycle
 pnpm triage:once SSX-1234 [--write]
-pnpm solve:once                    # one solve cycle; reads the board, changes nothing
+pnpm solve:once                    # whole queue; reads the board, changes nothing
+pnpm solve:once SSX-1234           # the same, narrowed to one ticket
+pnpm solve:once SSX-1234 --claim   # B2 — writes the claim label      (refuses: not wired)
+pnpm solve:once SSX-1234 --solve   # C  — ... and runs the solver     (refuses: not wired)
+pnpm solve:once SSX-1234 --pr      # D  — ... and opens the draft PR  (refuses: not wired)
 pnpm check-types && pnpm lint && pnpm test
 ```
 
 Note the script is **`check-types`**, not `typecheck`.
+
+The three escalating flags are parsed today and refuse today, each naming the module that would
+have to be composed for it to work (`src/cli/solve-args.ts`). Dry is the default, so there is no
+`--dry-run`: the flag that has to be typed is the one that escalates. Every flag past the first
+**requires an issue key**, because `solve:once --pr` would otherwise mean "open a pull request for
+every ticket in the queue" — an unbounded write from a command line one character shorter than the
+safe one, at the moment an operator is experimenting.
+
+Numeric settings carry a floor as well as a type. `numeric` rejects a negative everywhere, and the
+two values that become a delay — `TRIAGE_TIMEOUT_MS` and `POLL_INTERVAL_MS` — additionally refuse
+zero. Neither is pedantry: `setTimeout` clamps a negative delay to zero, so a stray minus sign does
+not disable a timeout, it fires it immediately and kills every run at the starting line, while a
+zero poll interval is an unthrottled loop against Jira rather than an eager one.
 
 ---
 
@@ -620,6 +637,28 @@ the only one that changes what the skill reads:
    wider than the description's — anyone with a Jira account can comment on any ticket — so §1
    states that comment text is input data and never instruction, and that the description stays
    authoritative for scope where the two conflict.
+
+   **Verified on the live board, 2026-09-04, against the send-back loop it was written to close.**
+   SSX-3831 had been sent back by an earlier run for two named gaps — acceptance criteria and a
+   metric baseline — and both were supplied as a comment rather than as a description edit, which
+   is the case that used to be invisible. The re-run moved the ticket from `dor:gaps` to
+   `dor:pass`, cited the comment by date for the rows it satisfied, and named the reporter
+   confirmation still outstanding. Three things about the run are worth more than the verdict:
+
+   - It **excluded its own prior comment** and said which test it used. The author half of the §11
+     idempotency check could not help here, because this deployment posts under the same Jira
+     account as the operator — so the footer sentinel was doing the work alone, which is the
+     narrow case the guard was written for and the one least likely to have been exercised by
+     accident. That is also why `safeText` in `src/solve/feedback.ts` strips the sentinel out of
+     any text it embeds: the sentinel is load-bearing, and forging it is the way to be mistaken
+     for a bot.
+   - It **volunteered the account collision** as a caveat on its own verdict rather than reporting
+     a clean pass — the criteria came from the technical side, not from the reporter, so the scope
+     decision is proposed rather than confirmed and the description still contradicts it.
+   - `agentFitness.solvable` came back **false on a `ready-ish` ticket**, blocked on one criterion
+     whose root cause may not be in this repository. The gate in §2 of the plan is one-directional
+     by design: DoR passing is necessary for solvability and not sufficient, and this is the first
+     live case that distinguishes the two.
 
 The gate's `OWNED_LABEL_NAMESPACES` must **match §11 exactly, not be a superset**. A gate looser
 than the contract it enforces has a hole in it. Widen it only by widening §11 first — and tell
@@ -733,10 +772,20 @@ before it, so the command line reads as the privilege escalation it is.
   what verification means.
 
 - **Cost of a solve is still unmeasured.** A triage was measured at $0.11 and a solve is several
-  passes of a larger context, so it is a different order of magnitude. Note a second datum from
-  2026-09-04: a triage of SSX-3831 — a ticket carrying two long comments — **exceeded the 600 s
-  `TRIAGE_TIMEOUT_MS`** and had to be re-run with a larger budget. Reading comments is not free,
-  and the default per-issue budget was set when the skill read only the description.
+  passes of a larger context, so it is a different order of magnitude.
+
+- **Triage duration is high-variance, and the first reading of that was wrong.** On 2026-09-04 a
+  triage of SSX-3831 exceeded the 600 s `TRIAGE_TIMEOUT_MS`. The obvious inference — that the
+  ticket's two long comments had made the run expensive, comments having just been added to §1 —
+  was recorded here and then falsified by the retry: the same ticket, the same comments, the same
+  skill, **266 s**. More than 2x apart on identical input, so the cause is variance in the session
+  and not the size of what it reads. Worth keeping as an example of the failure this document
+  exists to catch, in the document itself: a plausible cause arrived at the same moment as a
+  change that would explain it, and it took one more measurement to notice the two were unrelated.
+
+  `TRIAGE_TIMEOUT_MS` was raised to 1 200 000 all the same. The asymmetry decides it rather than
+  the diagnosis: a cap that fires early costs a fully-billed session and produces no artifact,
+  while a cap set too high costs only that a genuinely wedged run is reaped later. See §10.
 
 ---
 
