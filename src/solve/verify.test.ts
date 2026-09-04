@@ -413,6 +413,31 @@ describe("verify", () => {
     expect(reason(result)).toContain("no step ran");
   });
 
+  it("quotes what the install actually said", async () => {
+    // REGRESSION, 2026-09-04. A live run refused with `exit 1` and a note about
+    // the unpinned `packageManager` — a hypothesis. The install had printed
+    // `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, which is the answer, and this branch
+    // returned before anyone could read it. The output was captured into
+    // `results` and then discarded by the early return.
+    const runner = fakeRunner({
+      diff: out(""),
+      install: { ...bad(), stderr: "ERR_PNPM_LOCKFILE_CONFIG_MISMATCH: overrides do not match" },
+    });
+
+    const result = await verify(runner, request());
+
+    expect(reason(result)).toContain("ERR_PNPM_LOCKFILE_CONFIG_MISMATCH");
+  });
+
+  it("does not invent a quote when the install said nothing", async () => {
+    const runner = fakeRunner({ diff: out(""), install: { ...bad(), stdout: "", stderr: "" } });
+
+    const result = await verify(runner, request());
+
+    expect(reason(result)).toContain("no step ran");
+    expect(reason(result)).not.toContain("it said:");
+  });
+
   it("refuses rather than passing when the base has no test script", async () => {
     const runner = fakeRunner({ diff: out(""), show: out(`{"scripts":{"lint":"oxlint"}}`) });
 

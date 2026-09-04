@@ -416,9 +416,22 @@ export async function verify(
   });
   if (installed.timedOut || installed.exitCode !== 0) {
     // Not a failure: nothing was verified, so there is nothing to have failed.
+    //
+    // The last of the install's own output is quoted, and it was missing here
+    // until a live run went without it. The refusal said `exit 1` and named the
+    // unpinned `packageManager` as a thing to check, which is a hypothesis; the
+    // install had printed `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, which is the
+    // answer. `results` already held it and this branch returned before anyone
+    // could read it — the output was captured and then thrown away, which is
+    // the most annoying shape a diagnostic bug takes.
+    const said = tail(installed);
     return {
       outcome: "refused",
-      reason: `dependency install did not complete, so no step ran (${installed.timedOut ? "timed out" : `exit ${String(installed.exitCode)}`})${versionNote(plan.manager)}`,
+      reason:
+        `dependency install did not complete, so no step ran ` +
+        `(${installed.timedOut ? "timed out" : `exit ${String(installed.exitCode)}`})` +
+        `${versionNote(plan.manager)}` +
+        `${said === "" ? "" : ` — it said: ${said}`}`,
     };
   }
 
