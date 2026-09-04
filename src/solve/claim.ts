@@ -76,9 +76,9 @@
  */
 
 import { logger } from "../logger.ts";
-import type { SolveMode } from "../settings.ts";
 import {
   AGENT_LABELS,
+  type ClaimAuthority,
   type LabelEdit,
   applyEdit,
   claimTransition,
@@ -107,15 +107,21 @@ export interface ClaimCapabilities {
 }
 
 /**
- * What to claim, and under which mode.
+ * What to claim, and on whose authority.
  *
  * Note what is missing: the ticket's labels. They are read here, once, at the
  * last possible moment. A `labels` field would be an invitation to pass the ones
  * the queue fetched, which are exactly the stale ones.
+ *
+ * The field was called `mode` and held a `SolveMode`, which was accurate while
+ * the poller was the only caller. It is `authority` now because a CLI run
+ * naming one ticket is not a mode the service is in — nothing is configured, no
+ * loop is running, and the value cannot come from settings. Reading `mode:
+ * "named"` at a call site would have suggested all three.
  */
 export interface ClaimRequest {
   readonly issueKey: string;
-  readonly mode: SolveMode;
+  readonly authority: ClaimAuthority;
 }
 
 /**
@@ -386,7 +392,7 @@ export async function claimTicket(
   capabilities: ClaimCapabilities,
   request: ClaimRequest,
 ): Promise<ClaimResult> {
-  const { issueKey, mode } = request;
+  const { issueKey, authority } = request;
 
   // ---- the window opens here -------------------------------------------------
   // Nothing below this line until `writeLabels` may do I/O, call a model, or log.
@@ -397,7 +403,7 @@ export async function claimTicket(
 
   const labelsBefore = read.labels;
 
-  const verdict = eligibility(labelsBefore, mode);
+  const verdict = eligibility(labelsBefore, authority);
   if (!verdict.eligible) {
     return refusedClaim(
       issueKey,
@@ -405,7 +411,7 @@ export async function claimTicket(
     );
   }
 
-  const change = claimTransition(labelsBefore, mode);
+  const change = claimTransition(labelsBefore, authority);
   // What the ticket should read afterwards, computed locally and used only to
   // check the read-back against. It is not what is sent — `change` is — and
   // conflating the two is the mistake this module used to be built around.

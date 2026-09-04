@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import type { SolveMode } from "../settings.ts";
 import {
   type ClaimCapabilities,
   type ClaimReceipt,
@@ -10,7 +9,7 @@ import {
   claimTicket,
   releaseClaim,
 } from "./claim.ts";
-import { AGENT_LABELS, type LabelEdit, applyEdit } from "./labels.ts";
+import { AGENT_LABELS, type ClaimAuthority, type LabelEdit, applyEdit } from "./labels.ts";
 
 const KEY = "SSX-3822";
 
@@ -162,8 +161,11 @@ function unverifiedRelease(result: ReleaseResult) {
   return result;
 }
 
-function request(mode: SolveMode = "manual"): { issueKey: string; mode: SolveMode } {
-  return { issueKey: KEY, mode };
+function request(authority: ClaimAuthority = "manual"): {
+  issueKey: string;
+  authority: ClaimAuthority;
+} {
+  return { issueKey: KEY, authority };
 }
 
 // `diffLabels` had two unit tests here and is gone with it — the comparison is
@@ -242,7 +244,7 @@ describe("claimTicket", () => {
     it("takes no label snapshot from its caller at all", () => {
       // A type-level guarantee, asserted here so that adding a `labels` field to
       // `ClaimRequest` — the obvious "optimisation" — trips something.
-      expect(Object.keys(request())).toEqual(["issueKey", "mode"]);
+      expect(Object.keys(request())).toEqual(["issueKey", "authority"]);
     });
 
     it("writes the labels it just read, not the ones the queue saw", async () => {
@@ -371,7 +373,7 @@ describe("claimTicket", () => {
       // only the exact value that grants it may.
       const jira = board([AGENT_LABELS.solvable, "triaged"]);
 
-      const result = await claimTicket(jira.capabilities, request("AUTO" as SolveMode));
+      const result = await claimTicket(jira.capabilities, request("AUTO" as ClaimAuthority));
 
       expect(result.outcome).toBe("refused");
       expect(jira.writes).toEqual([]);

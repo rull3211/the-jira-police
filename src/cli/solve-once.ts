@@ -63,7 +63,7 @@
  */
 
 import { logger } from "../logger.ts";
-import { describeSettings, readSettings, withConfigErrors } from "../settings.ts";
+import { describeSettings, readSettings, solveMode, withConfigErrors } from "../settings.ts";
 import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
   // parser already rejects that, so this narrows a type rather than guarding.
   const attemptedWrites = writes(phase) && issueKey !== null;
   if (attemptedWrites) {
-    await runWriteRungs(settings, client, issueKey, phase, outcome);
+    await runWriteRungs(settings, client, issueKey, phase, outcome, solveMode(settings));
   }
 
   // `cycleDryRun`, not `dryRun`. The field used to carry the shorter name and it

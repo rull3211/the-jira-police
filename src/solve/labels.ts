@@ -4,6 +4,9 @@
  * ```
  * agent:solvable          triage's call; set by the grooming poster
  *    + agent:start        the human go-ahead (manual mode) — the only human step
+ *                         a *running service* takes. See `ClaimAuthority`: an
+ *                         operator naming one ticket is the same authorisation
+ *                         arriving through argv instead of the board.
  *    → agent:solving      claimed; agent:start removed in the same edit
  *    → agent:reviewing    draft PR open, review requested
  *    → agent:done | agent:failed
@@ -54,6 +57,45 @@ export const AGENT_LABELS = {
 } as const;
 
 export type AgentLabel = (typeof AGENT_LABELS)[keyof typeof AGENT_LABELS];
+
+/**
+ * Who is vouching for a claim.
+ *
+ * The two `SolveMode` values describe a *running service*: `manual` waits for a
+ * human's `agent:start`, `auto` does not. `named` is neither, and it is the
+ * reason this is a wider type rather than one more `SolveMode` value.
+ *
+ * `named` means an operator typed one issue key at a terminal. That is a human
+ * authorisation — a stronger one than the label, since a label can be added by
+ * anyone with a Jira account at any time and then sit there, whereas this one
+ * exists for the length of one process and names its ticket. So it satisfies
+ * the same requirement `agent:start` satisfies, and consumes nothing, because
+ * there was no standing approval to consume.
+ *
+ * **It is deliberately not a `SolveMode`.** `solveMode` parses `SOLVE_MODE` and
+ * refuses any value that is not `manual` or `auto`, so `named` cannot arrive
+ * from `.env`, from a config file, or from the daemon — which has no argv. The
+ * only way to produce it is the CLI, and that is the property the separation
+ * buys: widening `SolveMode` instead would have made "skip the human" a setting.
+ *
+ * What `named` does **not** skip is the assessment. `agent:solvable` is still
+ * required, and that is the whole check in singleton mode — an operator naming
+ * a ticket is answering "may this run", not "is this fixable", and the second
+ * question is triage's.
+ */
+export type ClaimAuthority = SolveMode | "named";
+
+/**
+ * The authorities that need no `agent:start` label.
+ *
+ * An allowlist rather than a comparison against `manual`, and the direction is
+ * the point: any value reaching here that is not named below — a widened union
+ * someone forgot to consider, a string cast past the type system — lands on the
+ * side that asks a person first. This replaces an earlier `mode !== "auto"`
+ * test, which had the same defaulting property and stopped having it the moment
+ * a third value existed.
+ */
+const SELF_AUTHORISING: ReadonlySet<string> = new Set(["auto", "named"]);
 
 /**
  * The labels the queue query excludes, and the reason it can.
@@ -209,9 +251,12 @@ export type Eligibility =
  * CLI, a test. The predicate is the thing that decides; the query is an
  * optimisation that stops most of the board being fetched.
  */
-export function eligibility(labels: readonly string[], mode: SolveMode): Eligibility {
+export function eligibility(labels: readonly string[], authority: ClaimAuthority): Eligibility {
   const present = new Set(labels);
 
+  // Checked for every authority, including `named`. This is the one question an
+  // operator typing a key has not answered: they decided the run may happen,
+  // not that the ticket is fixable, and only triage has made that call.
   if (!present.has(AGENT_LABELS.solvable)) {
     return {
       eligible: false,
@@ -219,11 +264,7 @@ export function eligibility(labels: readonly string[], mode: SolveMode): Eligibi
     };
   }
 
-  // Not `mode === "manual"`. The privilege granted by `auto` is running without
-  // a human, so the test is for the single value that grants it and everything
-  // else — including a value that reached here without passing `solveMode` —
-  // lands on the side that asks a person first.
-  if (mode !== "auto" && !present.has(AGENT_LABELS.start)) {
+  if (!SELF_AUTHORISING.has(authority) && !present.has(AGENT_LABELS.start)) {
     return {
       eligible: false,
       reason: `no ${AGENT_LABELS.start} label — manual mode waits for a human`,
@@ -238,8 +279,8 @@ export function eligibility(labels: readonly string[], mode: SolveMode): Eligibi
   return { eligible: true };
 }
 
-export function isEligible(labels: readonly string[], mode: SolveMode): boolean {
-  return eligibility(labels, mode).eligible;
+export function isEligible(labels: readonly string[], authority: ClaimAuthority): boolean {
+  return eligibility(labels, authority).eligible;
 }
 
 /**
@@ -253,17 +294,20 @@ export function isEligible(labels: readonly string[], mode: SolveMode): boolean 
  * survives the thing it approved is not an approval, it is a standing
  * permission.
  *
- * It is removed only when present, because in auto mode it never was, and an
- * edit listing a removal that does nothing makes the log harder to read for no
- * gain.
+ * It is removed only when present, because under `auto` and `named` it usually
+ * never was, and an edit listing a removal that does nothing makes the log
+ * harder to read for no gain. Note "usually": a ticket a human already
+ * authorised can still be picked up by a named run, and then the label is there
+ * and is consumed — which is right, since leaving it would hand the queue a
+ * standing approval for work that has already been done.
  *
  * Refuses outright on an ineligible ticket rather than returning an empty edit.
  * A caller that got the eligibility check wrong should find out here, where the
  * ticket is still untouched, rather than by writing a claim over somebody
  * else's.
  */
-export function claimTransition(labels: readonly string[], mode: SolveMode): LabelEdit {
-  const verdict = eligibility(labels, mode);
+export function claimTransition(labels: readonly string[], authority: ClaimAuthority): LabelEdit {
+  const verdict = eligibility(labels, authority);
   if (!verdict.eligible) {
     throw new LabelStateError(`refusing to claim a ticket that is not eligible: ${verdict.reason}`);
   }

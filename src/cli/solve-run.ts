@@ -13,13 +13,24 @@
  * A reviewer asking "what can this service change from a terminal" reads this
  * file, rather than two entry points that had already begun to drift apart.
  *
+ *
+ * ## Authority is a parameter, not a setting read here
+ *
+ * `runClaim` takes a `ClaimAuthority` and does not consult `SOLVE_MODE`. The
+ * queue-driven command passes `solveMode(settings)`; a command that names its
+ * own ticket can pass something the settings cannot express. Reading the setting
+ * in here would mean such a caller could not say what it means without also
+ * changing the operator's configuration — and a caller that cannot express its
+ * own authority ends up editing `.env` to get a run through, which is the worst
+ * possible place for that decision to be recorded.
  */
 
 import type { JiraClient } from "../jira/client.ts";
-import { type Settings, solveMode } from "../settings.ts";
+import type { Settings } from "../settings.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
 import { publish } from "../solve/delivery.ts";
 import { reportOutcome } from "../solve/feedback.ts";
+import type { ClaimAuthority } from "../solve/labels.ts";
 import { type SolveOutcome, type SolveRequest, solveWithRetry } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
 import {
@@ -159,14 +170,11 @@ export async function runSolver(
  *   with its own restore point attached, which is the right handling for a fault.
  */
 export async function runClaim(
-  settings: Settings,
   client: JiraClient,
   issueKey: string,
+  authority: ClaimAuthority,
 ): Promise<ClaimReceipt | null> {
-  const result = await claimTicket(createClaimCapabilities(client), {
-    issueKey,
-    mode: solveMode(settings),
-  });
+  const result = await claimTicket(createClaimCapabilities(client), { issueKey, authority });
 
   if (result.outcome === "refused") {
     process.stdout.write(`\nNot claimed: ${result.reason}\n`);
@@ -271,8 +279,9 @@ export async function runWriteRungs(
   issueKey: string,
   phase: SolvePhase,
   cycle: SolveCycleOutcome,
+  authority: ClaimAuthority,
 ): Promise<void> {
-  const receipt = await runClaim(settings, client, issueKey);
+  const receipt = await runClaim(client, issueKey, authority);
   if (receipt === null) {
     return;
   }
