@@ -31,6 +31,7 @@
  */
 
 import { logger } from "../logger.ts";
+import { isWorkBranch, WORK_BRANCH_PREFIXES } from "./branch.ts";
 
 export interface CommandResult {
   readonly exitCode: number;
@@ -92,7 +93,7 @@ const ISSUE_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/u;
 const BASE_REF = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 
 /** What a finished branch name is allowed to look like, checked as a whole. */
-const BRANCH = /^fix\/[a-z][a-z0-9]*-\d{1,7}-[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const BRANCH = /^[a-z]+\/[a-z][a-z0-9]*-\d{1,7}-[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 const MAX_SLUG_LENGTH = 40;
 
@@ -139,19 +140,36 @@ export function slugify(summary: string): string {
  * whose test passes when you unplug it is exactly the thing this codebase
  * distrusts, and the honest version of that is to say which one it is.
  *
- * Follows the vault convention `fix/{jira-id}-{slug}`
+ * Follows the vault convention `{type}/{jira-id}-{slug}`
  * (`insurance-knowledge-vault/.ai-rules/git-conventions.md`), lowercased.
+ * `prefix` defaults to `fix` because that is what the pilot queue is made of;
+ * the skill solves `Oppgave` as readily as `Feil`, and calling that `fix/` too
+ * would be a small lie told a hundred times.
+ *
+ * The `isWorkBranch` call at the end is the standing rule *"never main, never a
+ * protected branch"* applied at the point of construction. It cannot fire while
+ * `BRANCH` holds and `prefix` is on the allowlist — `BRANCH` requires a
+ * `-<digits>-` segment that no protected name has. It is here because that
+ * argument depends on the shape of a regex three constants away, and the rule
+ * is absolute enough not to rest on that. Stated plainly rather than presented
+ * as active defence.
  */
-export function branchNameFor(issueKey: string, summary: string): string | null {
+export function branchNameFor(issueKey: string, summary: string, prefix = "fix"): string | null {
   if (!ISSUE_KEY.test(issueKey)) {
+    return null;
+  }
+  if (!WORK_BRANCH_PREFIXES.includes(prefix)) {
     return null;
   }
   const slug = slugify(summary);
   if (slug === "") {
     return null;
   }
-  const branch = `fix/${issueKey.toLowerCase()}-${slug}`;
-  return BRANCH.test(branch) ? branch : null;
+  const branch = `${prefix}/${issueKey.toLowerCase()}-${slug}`;
+  if (!BRANCH.test(branch)) {
+    return null;
+  }
+  return isWorkBranch(branch) ? branch : null;
 }
 
 function failed(result: CommandResult): boolean {
