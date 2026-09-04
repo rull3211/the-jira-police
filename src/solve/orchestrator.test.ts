@@ -586,6 +586,39 @@ describe("solveTicket, and what each pass is given", () => {
     info.mockRestore();
   });
 
+  it("logs that the write pass ran, since it is the one that spends the privilege", async () => {
+    // Recon, simplify and verify all logged; `fix` did not, which left the only
+    // pass holding `Write` and `Edit` as the single step with no record it had
+    // run. On the first verified run that showed up as a six-minute hole in the
+    // log between two lines, with no way to tell a slow fix from a hung one.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    expect(info).toHaveBeenCalledWith(
+      "solve.fix",
+      expect.objectContaining({ issueKey: "SSX-3822", changed: true, files: FILES.length }),
+    );
+    info.mockRestore();
+  });
+
+  it("keeps model-claimed file paths out of the fix log", async () => {
+    // `filesTouched` is model-authored, derived from a ticket anyone with a
+    // Jira account can edit, and the diff gate is what checks it against git's
+    // own account. Printing the claim into a log a human skims invites reading
+    // the claim as the finding — so the log carries the count and the gate
+    // keeps the paths.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    const logged = info.mock.calls.find(([event]) => event === "solve.fix")?.[1];
+    expect(JSON.stringify(logged)).not.toContain(FILES[0] ?? "");
+    info.mockRestore();
+  });
+
   it("still reads the numstat for the gate, not the patch", async () => {
     // The other half of the split. Feeding the gate a unified patch would make
     // `parseNumstat` return nothing, and an empty file list passes every cap —

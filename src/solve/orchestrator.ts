@@ -510,6 +510,29 @@ async function runPipeline(
     return { kind: "abandoned", reason: fix.abandoned, devLens, worktree };
   }
 
+  // The pass that actually spends the privilege, and until the first verified
+  // run it was the only one that logged nothing — recon, simplify and verify
+  // each did. So the write pass was the single step with no record that it had
+  // run, which is precisely backwards: in a six-minute gap between two log
+  // lines there was no way to tell a slow fix from a hung one, and afterwards
+  // no way to tell what it had claimed to touch.
+  //
+  // Counts and flags only. `filesTouched` is model-authored text derived from a
+  // ticket anyone can edit, and the diff gate is what checks those paths
+  // against git's own account a few lines below; putting them in a log line
+  // that a human skims would invite trusting the claim instead of the check.
+  logger.info("solve.fix", {
+    issueKey,
+    changed: fix.changed,
+    files: fix.filesTouched.length,
+    testAdded: fix.testAdded,
+    // Empty on a healthy run. Non-empty means the pass shipped a change while
+    // telling us why it might not hold, and that is worth having in the log
+    // next to the outcome rather than only inside a returned object.
+    residualRisk: fix.residualRisk,
+    testOmittedReason: fix.testOmittedReason,
+  });
+
   // ---- simplify ----------------------------------------------------------
   //
   // Given the diff rather than the brief, because it is not implementing

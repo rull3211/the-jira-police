@@ -56,6 +56,7 @@
 import type { JiraClient } from "../jira/client.ts";
 import { logger } from "../logger.ts";
 import { type Settings, describeSettings, readSettings, withConfigErrors } from "../settings.ts";
+import { reportOutcome } from "../solve/feedback.ts";
 import { type SolveRequest, solveTicket } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
@@ -121,6 +122,31 @@ async function runSolver(
 
   const outcome = await solveTicket(createSolveRunDeps(settings), request);
   process.stdout.write(`\n${describeSolveOutcome(outcome)}\n`);
+
+  // The calibration row, and the reason this call is here rather than left for
+  // a later phase. Triage makes the `agent:solvable` call **without reading a
+  // line of source**; recon is the first thing that opens the repository, so
+  // its `devLensAccurate` reading is the only feedback that assessment ever
+  // gets. `feedback.ts` was written to accumulate exactly that and was wired to
+  // nothing, so the first run ever to reach `verified` reported
+  // `devLensAccurate: false` — triage's lens was wrong, the single most useful
+  // thing the pipeline had produced — and the process exited and lost it.
+  //
+  // **No commenter is passed, and that is the phase gate, not an oversight.**
+  // `reportOutcome` posts only if given a `TicketCommenter`; with none it
+  // writes the local record and says the comment was not posted. So this adds a
+  // local artifact and no Jira write, which is the same posture as the rest of
+  // the command.
+  const feedback = await reportOutcome(
+    { outputDirectory: settings.OUTPUT_DIR },
+    issueKey,
+    outcome,
+    new Date(),
+  );
+  process.stdout.write(
+    `\nCalibration row appended to ${feedback.recordPath}` +
+      `${feedback.posted ? "" : ` — ${feedback.reason ?? "not posted"}`}\n`,
+  );
 
   // Which outcomes count, and why, is `isFailureExit` — kept there rather than
   // here so it can be tested without spawning this command.
