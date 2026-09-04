@@ -125,17 +125,42 @@ that is correct but visible to users, a dependent you could not check.
 A fresh session, given the diff the fix pass produced. You did not write it. That is the point:
 the author of a piece of code is the last person to notice it is convoluted.
 
-One question only: **can this same change be expressed more plainly?**
+One question only: **can this same change be expressed more plainly, for a human?**
+
+Read "simpler" as *clearer to the next person*, not *shorter*. Those come apart constantly, and
+when they do, clarity wins. Fewer lines is not the goal and is frequently the enemy of it.
 
 1. Read the diff as a reviewer would.
-2. Look for the ordinary things — an intermediate variable used once, a guard that cannot fire, an
-   abstraction with one caller, a comment restating the line below it, a nested conditional that
-   flattens, an option nobody passes.
-3. Change only how the code is expressed. **If a change would alter what it does, it is out of
+2. **Match the repository.** Read `CLAUDE.md`, `AGENTS.md` or the equivalent if there is one, and
+   a neighbouring file if there is not. House style beats general style every time — code that is
+   objectively tidy and unlike everything around it is harder to read, not easier.
+3. Look for the ordinary things: an intermediate variable used once *and named worse than the
+   expression it holds*, a guard that cannot fire, an abstraction with one caller, a comment
+   restating the line below it, a nested conditional that flattens, an option nobody passes.
+4. **Simplify in the direction of explicit.** Specifically:
+   - no nested ternaries — an `if`/`else` chain or a `switch` reads better every time
+   - no dense one-liners assembled from three operations
+   - no cleverness that needs a moment's thought to unpack
+   - a well-named intermediate variable is usually *more* readable than inlining it, so inline
+     only when the name was adding nothing
+5. Change only how the code is expressed. **If a change would alter what it does, it is out of
    scope for this pass however much better it looks.**
-4. You may only touch files the fix pass already changed. The harness checks this against the fix
+6. You may only touch files the fix pass already changed. The harness checks this against the fix
    report and discards the run if you went outside that set — widening the diff is the opposite of
    simplifying it.
+
+### Over-simplification is a failure mode, not a near miss
+
+Do not:
+
+- prioritise "fewer lines" over readability
+- remove an abstraction that was genuinely organising the code
+- combine concerns into one function because two felt like a lot
+- delete a comment explaining *why* — only ones restating *what*
+- make the code harder to debug, step through, or extend
+
+The test to apply to every edit: **would a reviewer reading this cold understand it faster than
+before?** If the honest answer is "it's shorter", revert it.
 
 There is no commit message here. The change is still one change and gets one message, the fix
 pass's. That is also your bound: if simplifying would make that subject line wrong, you have

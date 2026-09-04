@@ -173,6 +173,16 @@ export const FIX_SCHEMA = {
  * Smaller than `FIX_SCHEMA` on purpose. This pass has the narrowest question
  * in the pipeline — *can this same change be expressed more plainly* — and a
  * schema that invited it to reconsider the change would get it reconsidered.
+ *
+ * ## "Simpler" means clearer, not shorter
+ *
+ * Worth stating in the schema and not only in the skill file, because the
+ * field descriptions are what the model reads while filling each value in, and
+ * this is the instruction most likely to be inverted. The obvious reading of
+ * "simplify" is "make smaller", which produces dense one-liners and nested
+ * ternaries — objectively fewer lines and worse to read. The intent, taken
+ * from the `code-simplifier` agent this pass replaces, is the opposite:
+ * *prioritise readable, explicit code over overly compact solutions.*
  */
 export const SIMPLIFY_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -195,7 +205,7 @@ export const SIMPLIFY_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "One line per simplification, each naming what was removed or collapsed — a dropped intermediate variable, a redundant guard, a needless abstraction, a comment restating the code. Empty when `changed` is false.",
+        "One line per simplification, each naming what changed and why it reads better — a redundant guard removed, a nested ternary turned into an if/else, a comment restating the code deleted, a cryptic name replaced. Empty when `changed` is false. Simpler means CLEARER TO A HUMAN, not shorter: prefer explicit code over compact code, never introduce a nested ternary or a dense one-liner, and leave an abstraction alone if it was genuinely organising the code. If your only honest justification for an edit is that it is fewer lines, do not make it.",
     },
     declined: {
       type: "string",
