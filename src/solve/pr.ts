@@ -274,12 +274,38 @@ function failed(result: CommandResult): boolean {
   return result.timedOut || result.exitCode !== 0;
 }
 
+/** How much of a failed command's output is kept, from each end. */
+const DETAIL_HALF = 200;
+
+/**
+ * A failed command, in one line a person can act on.
+ *
+ * **Both ends are kept, and the middle is dropped.** This used to keep the
+ * first 300 characters, and the first live pull-request run showed why that is
+ * the wrong end. Commitlint echoes the message it was given before it prints
+ * its verdict, so 300 characters of head was 300 characters of our own commit
+ * body and the rule name — the only part that says what to change — was cut.
+ *
+ * Head alone is wrong, and tail alone would be too: a tool that fails on the
+ * third of five steps says which step at the top and prints the stack at the
+ * bottom. Keeping both ends costs a few hundred characters in a log line and
+ * removes a whole class of "the error message did not contain the error".
+ */
 function why(result: CommandResult): string {
   if (result.timedOut) {
     return "timed out";
   }
   const detail = (result.stderr.trim() === "" ? result.stdout : result.stderr).trim();
-  return `exit ${String(result.exitCode)}${detail === "" ? "" : `: ${detail.slice(0, 300)}`}`;
+  return `exit ${String(result.exitCode)}${detail === "" ? "" : `: ${bothEnds(detail)}`}`;
+}
+
+/** `text`, or its first and last `DETAIL_HALF` characters with the gap marked. */
+function bothEnds(text: string, half = DETAIL_HALF): string {
+  if (text.length <= half * 2) {
+    return text;
+  }
+  const cut = text.length - half * 2;
+  return `${text.slice(0, half)} […${String(cut)} chars…] ${text.slice(-half)}`;
 }
 
 /**

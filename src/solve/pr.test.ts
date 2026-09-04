@@ -245,6 +245,45 @@ describe("commitAll", () => {
     expect(reason(result)).toContain("pathspec did not match");
   });
 
+  it("keeps the end of a long failure, where the verdict is", async () => {
+    // REGRESSION, 2026-09-04. The first live `--pr` run was rejected by the
+    // target repo's commit-msg hook, and the log said nothing useful: commitlint
+    // echoes the message it was handed *before* printing its verdict, so a
+    // head-only truncation kept 300 characters of our own commit body and cut
+    // the rule name — the one part that says what to change.
+    const echo = `⧗   input: fix(advisor): add a favicon\n\n${"padding ".repeat(60)}`;
+    const runner = fakeRunner({
+      commit: { exitCode: 1, stdout: `${echo}\n✖   body's lines must not be longer than 100` },
+    });
+
+    const result = await commitAll(runner, commitRequest());
+
+    expect(reason(result)).toContain("body's lines must not be longer than 100");
+  });
+
+  it("keeps the start of a long failure too, and marks what it dropped", async () => {
+    // Tail-only would be the same mistake facing the other way: a tool that
+    // fails on step three of five names the step at the top.
+    const runner = fakeRunner({
+      commit: { exitCode: 1, stderr: `step 3 of 5 failed\n${"x".repeat(900)}\ntrailing detail` },
+    });
+
+    const result = await commitAll(runner, commitRequest());
+
+    expect(reason(result)).toContain("step 3 of 5 failed");
+    expect(reason(result)).toContain("trailing detail");
+    expect(reason(result)).toMatch(/\[…\d+ chars…\]/u);
+  });
+
+  it("does not mangle a failure short enough to print whole", async () => {
+    const runner = fakeRunner({ commit: { exitCode: 1, stderr: "error: pathspec did not match" } });
+
+    const result = await commitAll(runner, commitRequest());
+
+    expect(reason(result)).toContain("exit 1: error: pathspec did not match");
+    expect(reason(result)).not.toContain("chars…");
+  });
+
   it("treats a timed-out commit as a failure even though the exit code is zero", async () => {
     // The runner reports a killed command as exit 0 plus `timedOut`, and it
     // could plausibly have printed "nothing to commit" before it hung.
