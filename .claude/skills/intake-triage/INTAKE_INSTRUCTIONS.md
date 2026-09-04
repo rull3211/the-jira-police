@@ -302,6 +302,15 @@ On a confirmed `y`, perform these writes (only these):
   `dor:*`, `tier:*`, `intake:*`, `next:*`, `agent:solvable`); never touch a human label. The
   preview's LABEL DELTA is exactly this reconciliation.
 
+  **Revisable taxonomy — remove only as part of a swap.** `team:*`, `jira:*`, `domain:*`, `svc:*`,
+  `value:*` and `effort:*` are also set by this skill, and were previously unremovable, so a wrong
+  one outlived every re-triage: a ticket re-routed to another squad kept the old `team:`, and a
+  corrected `svc:` left two of them on the ticket, which is the reading downstream tooling refuses
+  as ambiguous. They may now be removed, but ONLY when the same mutation adds a replacement from
+  the same namespace. A bare removal is refused. These are facts about the ticket rather than
+  assessments of it — the answer can be wrong, but it is never absent, so "no value" is not a state
+  this skill may put a ticket into. Added 2026-09-05. Local change; not yet upstream.
+
   `next:*` was added to that list on 2026-09-03. It is set by this skill (§ vocabulary below:
   `next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead`) and never by a
   human, but its omission here meant a verdict change had to leave the previous routing label in
