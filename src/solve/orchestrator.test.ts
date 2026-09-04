@@ -411,6 +411,59 @@ describe("solveTicket, and what each pass is given", () => {
     }
   });
 
+  it("makes files the pass created visible before reading any diff", async () => {
+    // THE GUARD, and it closes a hole rather than tidying one. `git diff <base>`
+    // reports tracked files only, so a pass that *creates* a file did not appear
+    // in it at all. Measured on the first real solve: the gate passed a
+    // five-file change having read two files and four lines — the whole
+    // implementation, its test and a new asset were invisible to it.
+    //
+    // Every categorical refusal the gate makes names a path that must not be
+    // touched, and each was evadable by writing a new file instead of editing
+    // one. A fresh `.github/workflows/*.yml` would have passed and then run.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    const staged = h.calls.findIndex((argv) => argv.includes("--intent-to-add"));
+    const firstDiff = h.calls.findIndex((argv) => argv.includes("diff"));
+    expect(staged).toBeGreaterThanOrEqual(0);
+    expect(staged).toBeLessThan(firstDiff);
+  });
+
+  it("stages before every diff, not only the first", async () => {
+    // A pass can create a file after an earlier read. Staging once at the top
+    // would bound the fix pass's new files and miss simplify's.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    for (const [index, argv] of h.calls.entries()) {
+      if (!argv.includes("diff")) {
+        continue;
+      }
+      const preceding = h.calls.slice(0, index);
+      expect(
+        preceding.some((earlier) => earlier.includes("--intent-to-add")),
+        `the diff at call ${String(index)} was not preceded by a staging call`,
+      ).toBe(true);
+    }
+  });
+
+  it("refuses when it cannot stage, rather than reading a partial diff", async () => {
+    // Falling back to the tracked-only diff would report "nothing else changed"
+    // about a change it could not see, which is the failure being fixed. An
+    // unbounded diff has to stop the run.
+    const { h } = harness(FULL, [{ match: saw("--intent-to-add"), reply: { exitCode: 128 } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") {
+      expect(outcome.stage).toBe("diff-gate");
+    }
+  });
+
   it("still reads the numstat for the gate, not the patch", async () => {
     // The other half of the split. Feeding the gate a unified patch would make
     // `parseNumstat` return nothing, and an empty file list passes every cap —

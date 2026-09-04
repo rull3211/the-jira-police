@@ -239,12 +239,62 @@ async function readPatch(
   return await gitDiff(runner, worktreePath, timeoutMs, [baseRef]);
 }
 
+/**
+ * Makes new files visible to `git diff`, and it is a security fix.
+ *
+ * `git diff <base>` reports tracked files only. A pass that *creates* a file
+ * does not appear in it at all, so before this the gate bounded a change it
+ * could not see: measured on the first real solve, it passed a five-file change
+ * having read two files and four lines. The implementation, its test and a new
+ * asset were all invisible.
+ *
+ * That is not a reporting inaccuracy, it is a hole through every categorical
+ * refusal the gate makes. Each one — `.github/`, CI config, lockfiles, the
+ * files that define what verification means — names a path that must not be
+ * *touched*, and each was evadable by writing a new file rather than editing an
+ * existing one. A fresh `.github/workflows/*.yml` would have passed the gate
+ * and then run on push. The caps were equally hollow: fifty new files counted
+ * as zero.
+ *
+ * `--intent-to-add` rather than a real `add`: it records the path in the index
+ * and nothing else, so the content still shows as a pending change and the
+ * worktree is left in the state a human inspecting it would expect.
+ *
+ * Ignored files stay invisible, which is correct — they are not part of the
+ * change and cannot be pushed — but it does mean the gate's bound is on what
+ * git would carry, not on every byte the pass wrote to disk. The worktree is
+ * disposable, so that is the right line.
+ */
+async function stageIntentToAdd(
+  runner: CommandRunner,
+  worktreePath: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const result = await runner.run(["git", "-C", worktreePath, "add", "--intent-to-add", "-A"], {
+    cwd: worktreePath,
+    timeoutMs,
+  });
+  return !result.timedOut && result.exitCode === 0;
+}
+
+/**
+ * Both reads go through here, and that is the point.
+ *
+ * The gate and the simplify prompt must be looking at the same set of files. If
+ * only one of them staged, a pass could be shown a change the gate never
+ * bounded, or bounded against a change it was never shown.
+ */
 async function gitDiff(
   runner: CommandRunner,
   worktreePath: string,
   timeoutMs: number,
   args: readonly string[],
 ): Promise<string | null> {
+  // Refuse rather than fall back to the tracked-only diff. A partial answer
+  // here reads as "nothing else changed", which is the failure being fixed.
+  if (!(await stageIntentToAdd(runner, worktreePath, timeoutMs))) {
+    return null;
+  }
   const result = await runner.run(["git", "-C", worktreePath, "diff", ...args, "--"], {
     cwd: worktreePath,
     timeoutMs,
