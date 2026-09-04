@@ -698,10 +698,45 @@ before it, so the command line reads as the privilege escalation it is.
 
 - **Probes.** The `Bash(pnpm test:*)` scoping question was run 2026-09-04 and answered in the
   worst available way — see §6 and §14.12. Phase C took the shape the fallback described, not
-  because that was preferred but because the alternative turned out not to exist. Still open:
-  whether `gh pr edit --add-reviewer @copilot` works for this org, and whether MCP tool names are
-  honoured by `--disallowedTools`. Cost of a solve run is also unmeasured; a triage is $0.11 and
-  a solve is a different order of magnitude.
+  because that was preferred but because the alternative turned out not to exist.
+
+  **Copilot review — answered 2026-09-04, with no write.** The plan called for a throwaway pull
+  request; the org's own history answers most of it for free. In
+  `storebrand-digital/buy-insurance-advisor-web`, **8 of the last 60 pull requests carry a review
+  by `copilot-pull-request-reviewer[bot]`**, the most recent the day before. So the feature is
+  enabled for this org and this repo, and it posts substantive findings rather than a rubber
+  stamp. Two details that matter to `pr.ts`, both already handled and now confirmed against
+  reality rather than assumed:
+
+  - The login that answers is `copilot-pull-request-reviewer[bot]`, not `copilot`. This is why
+    `matchesReviewer` is a prefix match on the requested handle; the case is pinned in
+    `pr.test.ts`.
+  - Copilot's review state is **`COMMENTED`**, never `APPROVED`. `readReview` computes
+    `reviewerResponded` from the login alone and never from `state`, so the loop sees the
+    response. Had it keyed off an approving state, the review loop would have waited forever on a
+    reviewer that had already spoken.
+
+  Still open, and it genuinely needs one write: whether `gh pr edit --add-reviewer @copilot`
+  succeeds with this token's `repo` scope. Everything downstream of the request is now evidenced.
+
+- **`main` is protected, and that is a stronger backstop than the plan claimed.**
+  `required_approving_review_count: 1` with `require_code_owner_reviews: true`. Since Copilot only
+  ever `COMMENTED` and a bot is not a code owner, **a human code owner must approve before
+  anything merges** — enforced by GitHub, not by this codebase. "A human merges, always" therefore
+  holds even if every guard here were removed. Worth knowing precisely because it means the guards
+  here are not the only thing standing between a bot and `main`.
+
+  The other half is less comfortable: `required_status_checks.contexts` is **empty**. There is no
+  CI gate on that repo, so the harness's own `verify` run is the only mechanical check a
+  bot-authored change passes before a person looks at it. That raises rather than lowers the value
+  of verification being mechanical and of the diff gate refusing edits to the files that define
+  what verification means.
+
+- **Cost of a solve is still unmeasured.** A triage was measured at $0.11 and a solve is several
+  passes of a larger context, so it is a different order of magnitude. Note a second datum from
+  2026-09-04: a triage of SSX-3831 — a ticket carrying two long comments — **exceeded the 600 s
+  `TRIAGE_TIMEOUT_MS`** and had to be re-run with a larger budget. Reading comments is not free,
+  and the default per-issue budget was set when the skill read only the description.
 
 ---
 
