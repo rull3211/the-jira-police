@@ -103,7 +103,7 @@ a different change — the brief is what the bound was calculated against.
   "filesTouched": ["src/…"],
   "summary": "what was changed, in the imperative, for a reviewer",
   "commitSubject": "fix(scope): …",
-  "commitBody": "why, and anything a reviewer must check by hand",
+  "commitBody": "why, in one or two sentences — only the first two survive",
   "testAdded": true,
   "testOmittedReason": "",
   "residualRisk": "what could still be wrong, or empty",
@@ -240,6 +240,9 @@ so a malformed one discards the run.
 - `<type>(<scope>): <subject>` — type from `fix|feat|chore|docs|test|refactor|perf|style|build|ci`
 - subject in the imperative, lower case, no trailing full stop, under 72 characters
 - the body explains **why**, not what — the diff shows what
+- **one or two sentences, no more.** Write what a person writes. The harness keeps the first two
+  sentences and drops the rest, so lead with the reason; anything longer belongs in `summary` and
+  `residualRisk`, which are what a reviewer reads on the pull request
 - **do not** reference the issue key. The harness appends `Refs: <KEY>` itself. It knows the key;
   asking you to remember it would only invent a way for the run to fail.
 
@@ -248,6 +251,13 @@ so a malformed one discards the run.
 > this project exists to catch, and it was sitting in our own contract. It is now derived rather
 > than requested, which is the general fix: **ask the model only for what requires judgement,
 > and compute everything else.**
+>
+> The length rule has the same shape and arrived the same way. The first live pull-request run
+> reached the commit and was rejected by the target repository's `commit-msg` hook, which caps
+> body lines at 100 characters; the fix pass had written one 190-character paragraph. So the
+> rule is stated here _and_ enforced in `composeCommitMessage`. Asking alone would not do —
+> this is arithmetic about text, which a model gets right most of the time, and "most of the
+> time" is how a solve dies at the last step after three paid passes.
 
 Do not claim a result. `fix(advisor): handle missing postcode in quote form` is right;
 `fix(advisor): fix broken form, all tests passing` is two kinds of wrong in one line.

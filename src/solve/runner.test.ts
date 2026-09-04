@@ -12,6 +12,7 @@ import {
   buildSolveArgs,
   buildSolvePrompt,
   sanitiseUntrusted,
+  shortCommitBody,
   parseFix,
   parseRecon,
   parseReview,
@@ -378,6 +379,109 @@ describe("composeCommitMessage", () => {
     expect(composeCommitMessage(report, "SSX-3822").subject).toBe(report.commitSubject);
   });
 
+  it("shortens the body on the way through", () => {
+    // The wiring, not the arithmetic — `shortCommitBody` owns the rules and is
+    // tested below. What this pins is that `composeCommitMessage` calls it,
+    // which is the whole reason the pilot repo's hook stopped rejecting us.
+    const report = parseFix(
+      fix({ commitBody: "One. Two. Three is the sentence that must not survive." }),
+      "SSX-1",
+    );
+
+    expect(composeCommitMessage(report, "SSX-1").body).toBe("One. Two.\n\nRefs: SSX-1");
+  });
+});
+
+describe("shortCommitBody", () => {
+  // Named for what went wrong: the first `--pr` run reached the commit and was
+  // rejected by `@commitlint/config-conventional`, whose `body-max-line-length`
+  // is 100. The model had written one 190-character paragraph.
+  const ESSAY = [
+    "Advisors and QA keep the test and production builds open in adjacent tabs.",
+    "Both show the portal origin's icon and near-identical titles, so at 16px they",
+    "are indistinguishable and work lands in the wrong environment.",
+    "The existing entry point already sets the title, so the favicon is the gap.",
+  ].join(" ");
+
+  it("keeps at most two sentences", () => {
+    expect(shortCommitBody(ESSAY)).toBe(
+      [
+        "Advisors and QA keep the test and production builds open in adjacent",
+        "tabs. Both show the portal origin's icon and near-identical titles, so",
+        "at 16px they are indistinguishable and work lands in the wrong",
+        "environment.",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps a one-sentence body whole", () => {
+    // The common case, and the one the instruction actually asks for. A cut
+    // that fires here would be shortening something already short.
+    const one = "The favicon was inherited from the portal origin in every environment.";
+
+    expect(shortCommitBody(one)).toBe(one);
+  });
+
+  it("keeps text that never punctuates a sentence end", () => {
+    // No `.`, so no cut. Falling through to "keep everything" is right: a body
+    // with no sentence boundary has no second sentence to drop, and inventing
+    // one by cutting at a width would truncate mid-thought.
+    expect(shortCommitBody("no full stop anywhere in here", 100)).toBe(
+      "no full stop anywhere in here",
+    );
+  });
+
+  it("does not read a version number or a file path as a sentence end", () => {
+    // The dots in `v2.0.1` and `favicon.ts` have no space after them, which is
+    // the whole reason the lookahead is there.
+    const written = "Bumped to v2.0.1 in src/utils/favicon.ts and nowhere else. Dropped later.";
+
+    expect(shortCommitBody(written, 100)).toBe(written);
+  });
+
+  it("does not count an abbreviation's full stop", () => {
+    // "e.g." ends a word, not a sentence. Without the exception list this cuts
+    // after "e.g." and ships a commit body that stops mid-clause.
+    const written = "Non-production hosts, e.g. test and staging, now differ. Second. Third.";
+
+    expect(shortCommitBody(written, 100)).toBe(
+      "Non-production hosts, e.g. test and staging, now differ. Second.",
+    );
+  });
+
+  it("wraps a long line without breaking a word", () => {
+    const url = "https://storebrand.atlassian.net/browse/SSX-3822-and-then-some-more-path";
+
+    expect(shortCommitBody(`See ${url} for the trail.`, 40)).toBe(`See\n${url}\nfor the trail.`);
+  });
+
+  it("never joins two lines that the model kept apart", () => {
+    // Reflowing would read as tidier and would turn a list into a run-on
+    // sentence. Each of these is under the width, so each stays on its own line.
+    const written = "- the icon is inherited\n- the title is near-identical";
+
+    expect(shortCommitBody(written, 72)).toBe(written);
+  });
+
+  it("counts a sentence that ends at a newline", () => {
+    // `(?=\s|$)` covers `\n`, not just a space, so a body written as one
+    // sentence per line is cut on the same rule as one written as a paragraph.
+    expect(shortCommitBody("First.\nSecond.\nThird.", 72)).toBe("First.\nSecond.");
+  });
+
+  it("strips trailing whitespace from every kept line, not just the last", () => {
+    // `.trim()` at the end only reaches the outside of the whole string, so a
+    // line with trailing spaces in the middle keeps them — and they count
+    // against `body-max-line-length`, which is the rule that rejected the first
+    // real run. Mutation testing found this: dropping the per-line `trimEnd`
+    // left every other assertion green.
+    expect(shortCommitBody("first line   \nsecond line\t", 72)).toBe("first line\nsecond line");
+  });
+
+  it("returns nothing for a body that was only whitespace", () => {
+    // `composeCommitMessage` reads the empty string as "trailer only".
+    expect(shortCommitBody("  \n\n  ")).toBe("");
+  });
 });
 
 describe("parseFix", () => {

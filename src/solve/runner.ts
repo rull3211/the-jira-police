@@ -445,12 +445,135 @@ export interface CommitMessage {
  * failure this codebase exists to catch. Enforcing it would have been the
  * obvious fix and the worse one: a check that can fail a run over a value we
  * could simply have written ourselves.
+ *
+ * ## The body is shortened here, and that is the same lesson again
+ *
+ * The first real `--pr` run got as far as the commit and was rejected by the
+ * pilot repository's own `commit-msg` hook: `@commitlint/config-conventional`
+ * caps body lines at 100 characters, and the model had written one 190-character
+ * paragraph. Everything upstream was green — the harness's own Conventional
+ * Commits check passed, because it checks the subject.
+ *
+ * The instruction is now "short and descriptive, always", and it is asked for in
+ * the schema *and* guaranteed here. Asking alone would not do: the request is
+ * arithmetic about characters, which is the kind of thing a model gets right
+ * most of the time, and "most of the time" is how a solve dies at the last step
+ * after three paid passes.
+ *
+ * Nothing is lost by shortening. The long-form reasoning is `fix.summary` and
+ * `fix.residualRisk`, both of which reach the pull request body, which is where
+ * a reviewer reads prose. A commit message is read in `git log --oneline` and in
+ * a blame annotation.
  */
 export function composeCommitMessage(report: FixReport, issueKey: string): CommitMessage {
   const trailer = `Refs: ${issueKey}`;
-  const written = report.commitBody.trim();
+  const written = shortCommitBody(report.commitBody);
   const body = written === "" ? trailer : `${written}\n\n${trailer}`;
   return { subject: report.commitSubject, body };
+}
+
+/**
+ * Commit body line width.
+ *
+ * 72, the git convention, rather than the 100 commitlint happens to allow. The
+ * limit that matters is whichever the target repository configures, this service
+ * does not read that configuration, and 72 is under every value anyone sets —
+ * so the margin is deliberate rather than an approximation of the real rule.
+ */
+const BODY_WIDTH = 72;
+
+/**
+ * How many sentences of the model's reasoning survive into the commit.
+ *
+ * Two, because that is what a person writes. The standing instruction is "short
+ * and descriptive, always", and the shape a human commit takes is a subject line
+ * and a sentence or two saying why — not the essay a model produces when asked
+ * an open question about its own work.
+ */
+const BODY_SENTENCES = 2;
+
+/**
+ * The model's commit body, cut to its first sentences and wrapped.
+ *
+ * Three rules: how much to keep, where a sentence ends, and what to do with a
+ * kept line that is still too long.
+ *
+ * **At most two sentences.** The rest of what the fix pass wanted to say is not
+ * discarded — it is `summary` and `residualRisk`, both of which reach the pull
+ * request body, which is where a reviewer reads prose. This is a cut, and it is
+ * made here rather than trusted to the schema because the request is arithmetic
+ * about text and the cost of getting it wrong is a solve that dies at the last
+ * step after three paid passes.
+ *
+ * **A sentence ends at `.`, `!` or `?` followed by a space.** Deliberately naive,
+ * with one exception list for the abbreviations that end in a full stop. The
+ * lookahead does most of the work for free: `1.5`, `src/utils/favicon.ts` and
+ * `v2.0.1` have no space after the dot, so they are not sentence ends. What the
+ * naivety costs is an occasional early cut, which produces a shorter commit
+ * message — the failure direction to prefer, given what this function is for.
+ *
+ * **Wrap, never reflow.** Long lines are broken; short ones are left exactly as
+ * they are and no two lines are ever joined. Reflowing would read as the tidier
+ * implementation and would turn a bullet list into one run-on sentence, and an
+ * indented code sample into prose. A word longer than the width gets a line to
+ * itself rather than being cut in half, because the things that are one long
+ * word are URLs, file paths and identifiers — precisely the tokens a reviewer
+ * needs intact. That leaves a residue: a 120-character URL still fails a
+ * 100-character rule. It fails loudly at the hook, with the worktree kept and
+ * the claim released, which is a better outcome than a corrupted link.
+ */
+export function shortCommitBody(written: string, width = BODY_WIDTH): string {
+  return firstSentences(written.trim(), BODY_SENTENCES)
+    .split("\n")
+    .flatMap((line) => wrapLine(line.trimEnd(), width))
+    .join("\n")
+    .trim();
+}
+
+/** Abbreviations whose full stop does not end a sentence. */
+const ABBREVIATIONS = new Set(["e.g.", "i.e.", "etc.", "vs.", "cf.", "approx.", "no."]);
+
+/** The first `count` sentences of `text`, or all of it if there are fewer. */
+function firstSentences(text: string, count: number): string {
+  let found = 0;
+  for (const match of text.matchAll(/[.!?](?=\s|$)/gu)) {
+    const end = (match.index ?? 0) + 1;
+    const word = text.slice(0, end).split(/\s/u).at(-1)?.toLowerCase() ?? "";
+    if (ABBREVIATIONS.has(word)) {
+      continue;
+    }
+    found += 1;
+    if (found === count) {
+      return text.slice(0, end);
+    }
+  }
+  return text;
+}
+
+/** One line, broken on spaces at `width`. Never breaks inside a word. */
+function wrapLine(line: string, width: number): readonly string[] {
+  if (line.length <= width) {
+    return [line];
+  }
+
+  const lines: string[] = [];
+  let current = "";
+  for (const word of line.split(" ")) {
+    if (current === "") {
+      current = word;
+      continue;
+    }
+    if (`${current} ${word}`.length <= width) {
+      current = `${current} ${word}`;
+      continue;
+    }
+    lines.push(current);
+    current = word;
+  }
+  if (current !== "") {
+    lines.push(current);
+  }
+  return lines;
 }
 
 function asRecord(value: unknown, what: string): Record<string, unknown> {
