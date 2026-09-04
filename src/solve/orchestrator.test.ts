@@ -720,7 +720,10 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, reviewRequest);
 
     expect(outcome.kind).toBe("resolved");
-    expect(h.calls.some((argv) => argv[1] === "run" && argv[2] === "test")).toBe(true);
+    // Matched on the tail rather than fixed indices: a declared
+    // `packageManager` puts `corepack <pm>@<version>` in front of `run`, so
+    // position-keyed assertions here break for a reason unrelated to the claim.
+    expect(h.calls.some((argv) => argv.slice(-2).join(" ") === "run test")).toBe(true);
   });
 
   it("gates the whole cumulative diff, not just the round's increment", async () => {

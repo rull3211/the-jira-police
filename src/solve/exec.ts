@@ -62,8 +62,26 @@ import type { CommandOptions, CommandResult, CommandRunner } from "./worktree.ts
  * `bash`, `env`, `xargs`, `make`, `node`, `npx`, `pnpx`, `dlx`. Each is a way
  * to run something else, which is precisely what an allowlist of programs is
  * for.
+ *
+ * **`corepack` is on the list and is also a way to run something else**, so it
+ * is the one entry that contradicts the paragraph above and has to earn its
+ * place. Two things distinguish it from `npx`. It shims exactly the three
+ * managers already on this list and cannot be asked for a fourth, so the set of
+ * programs reachable through it is the set reachable without it. And the
+ * argument it takes is validated before it is built: `PACKAGE_MANAGER_VERSION`
+ * in `verify.ts` admits plain semver only, which is what stops
+ * `packageManager: "pnpm@https://…/x.tgz"` — a perfectly valid thing to say to
+ * corepack — from turning a manifest into a download-and-execute. That guard is
+ * load-bearing for this list entry, so the two must not drift apart either.
  */
-export const ALLOWED_EXECUTABLES: readonly string[] = ["git", "gh", "pnpm", "npm", "yarn"];
+export const ALLOWED_EXECUTABLES: readonly string[] = [
+  "git",
+  "gh",
+  "pnpm",
+  "npm",
+  "yarn",
+  "corepack",
+];
 
 /**
  * Environment variables passed through to children.

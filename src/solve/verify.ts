@@ -43,20 +43,64 @@ import { VERIFICATION_PATHS } from "./diff-gate.ts";
 import type { CommandRunner } from "./worktree.ts";
 
 /**
- * Package managers this service will execute, and the invocation each needs.
+ * Package managers this service will execute, and the install each needs.
  *
  * An allowlist because this value decides which binary runs. `packageManager`
  * in a manifest is a string like `pnpm@11.20.0`; treating the part before the
  * `@` as a command name without checking it against a fixed set would make
  * "what do we execute" a property of a file, which is the wrong place for it.
+ *
+ * These are the arguments only. The command in front of them comes from
+ * `invocationOf`, because it depends on whether a version was declared.
  */
 const PACKAGE_MANAGERS: Record<string, readonly string[]> = {
-  pnpm: ["pnpm", "install", "--frozen-lockfile"],
-  npm: ["npm", "ci"],
-  yarn: ["yarn", "install", "--immutable"],
+  pnpm: ["install", "--frozen-lockfile"],
+  npm: ["ci"],
+  yarn: ["install", "--immutable"],
 };
 
 const DEFAULT_PACKAGE_MANAGER = "pnpm";
+
+/**
+ * Versions this service will hand to corepack. **Plain semver and nothing else.**
+ *
+ * This is the guard that makes honouring the declared version safe rather than
+ * merely useful, and it is narrow on purpose. Corepack resolves far more than
+ * version numbers: `pnpm@https://example.com/x.tgz` is valid input to it and
+ * means "download this tarball and execute it". The manifest is a file in a
+ * repository a solve run has already been allowed to check out, so a value that
+ * reaches corepack unvalidated is arbitrary code execution sourced from the
+ * thing being verified.
+ *
+ * Ranges and dist-tags (`^9`, `latest`) are refused as well as URLs, for a
+ * different reason: they are not reproducible. The point of reading the field
+ * at all is to run the exact toolchain the repository pins, and a range makes
+ * "which pnpm ran" a fact about the day rather than about the manifest.
+ *
+ * The optional `+sha…` suffix is corepack's integrity hash and is allowed
+ * precisely because it narrows what can be fetched.
+ */
+const PACKAGE_MANAGER_VERSION = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+sha\d+\.[0-9a-f]+)?$/;
+
+export interface PackageManager {
+  readonly name: string;
+  /** `null` means the manifest declared no version, so `PATH` decides. */
+  readonly version: string | null;
+}
+
+/**
+ * How to invoke this package manager: the argv prefix, and nothing after it.
+ *
+ * A declared version goes through `corepack`, which is Node's own shim for
+ * exactly this and is why the version does not have to be installed first. No
+ * declared version means the bare name, resolved from `PATH` — see
+ * `versionNote` for why that case is reported rather than silently accepted.
+ */
+export function invocationOf(manager: PackageManager): readonly string[] {
+  return manager.version === null
+    ? [manager.name]
+    : ["corepack", `${manager.name}@${manager.version}`];
+}
 
 /**
  * Steps, cheapest first, and the script names each will accept.
@@ -85,6 +129,24 @@ export interface VerificationPlan {
   /** Fresh worktrees have no `node_modules`, so this always runs first. */
   readonly install: readonly string[];
   readonly steps: readonly Step[];
+  /** Carried so a refusal can say which toolchain produced it. See `versionNote`. */
+  readonly manager: PackageManager;
+}
+
+/**
+ * What to append to an install refusal about where the toolchain came from.
+ *
+ * An undeclared version is not an error — most repositories do not pin one, and
+ * refusing them all would mean verifying nothing. But it is the single most
+ * likely explanation for an install that dies on a repository whose own CI is
+ * green, so the refusal says so instead of leaving a package manager's stack
+ * trace to be interpreted. The first time this mattered, the diagnosis took
+ * four runs and a detour through someone else's `package.json`.
+ */
+export function versionNote(manager: PackageManager): string {
+  return manager.version === null
+    ? ` — note the manifest pins no \`packageManager\` version, so this ran whichever ${manager.name} is on PATH; if the repository's CI pins one, that mismatch is the first thing to check`
+    : ` — using the declared ${manager.name}@${manager.version}`;
 }
 
 export interface StepResult {
@@ -165,8 +227,16 @@ function scriptsOf(raw: string): Record<string, string> | null {
   return out;
 }
 
-/** The declared package manager, or the default. Never an unvetted name. */
-export function packageManagerOf(raw: string): string | null {
+/**
+ * The declared package manager and version, or the default. Never unvetted.
+ *
+ * The version used to be parsed and thrown away, which made "which pnpm runs" a
+ * property of whatever was on `PATH` on the day. That is how the first real
+ * solve run died: the pilot repository's lockfile was written by pnpm 9 and the
+ * machine had pnpm 11, which no longer reads the `pnpm.overrides` block the
+ * lockfile was generated from, so install refused and no verdict was reached.
+ */
+export function packageManagerOf(raw: string): PackageManager | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -175,17 +245,32 @@ export function packageManagerOf(raw: string): string | null {
   }
   const declared = (parsed as { packageManager?: unknown } | null)?.packageManager;
   if (declared === undefined) {
-    return DEFAULT_PACKAGE_MANAGER;
+    return { name: DEFAULT_PACKAGE_MANAGER, version: null };
   }
   if (typeof declared !== "string") {
     return null;
   }
-  const name = declared.split("@")[0] ?? "";
+  // The *first* `@`, which is what `name@version` means. Being straight about
+  // this one: switching it to `lastIndexOf` kills no test and cannot while the
+  // other two checks hold, because every string the two readings disagree about
+  // puts an `@` in the name half and no allowlisted name contains one. So it is
+  // a backstop against a future edit loosening the allowlist, not active
+  // defence — recorded as such rather than dressed up, same as the whole-string
+  // ref check in `worktree.ts`.
+  const at = declared.indexOf("@");
+  const name = at === -1 ? declared : declared.slice(0, at);
+  const version = at === -1 ? null : declared.slice(at + 1);
   // `Object.hasOwn` and not `in`. `in` walks the prototype chain, so a manifest
   // declaring `constructor@1` or `toString@1` would satisfy `name in
   // PACKAGE_MANAGERS` and be treated as an allowed package manager — an
   // allowlist that admits three names it was never given.
-  return Object.hasOwn(PACKAGE_MANAGERS, name) ? name : null;
+  if (!Object.hasOwn(PACKAGE_MANAGERS, name)) {
+    return null;
+  }
+  if (version !== null && !PACKAGE_MANAGER_VERSION.test(version)) {
+    return null;
+  }
+  return { name, version };
 }
 
 /**
@@ -226,11 +311,13 @@ export async function discoverPlan(
     };
   }
 
+  const invocation = invocationOf(manager);
+
   const steps: Step[] = [];
   for (const step of STEPS) {
     const found = step.scripts.find((name) => Object.hasOwn(scripts, name));
     if (found !== undefined) {
-      steps.push({ name: step.name, argv: [manager, "run", found] });
+      steps.push({ name: step.name, argv: [...invocation, "run", found] });
     }
   }
 
@@ -244,7 +331,11 @@ export async function discoverPlan(
 
   return {
     outcome: "planned",
-    plan: { install: PACKAGE_MANAGERS[manager] ?? [], steps },
+    plan: {
+      install: [...invocation, ...(PACKAGE_MANAGERS[manager.name] ?? [])],
+      steps,
+      manager,
+    },
   };
 }
 
@@ -327,7 +418,7 @@ export async function verify(
     // Not a failure: nothing was verified, so there is nothing to have failed.
     return {
       outcome: "refused",
-      reason: `dependency install did not complete, so no step ran (${installed.timedOut ? "timed out" : `exit ${String(installed.exitCode)}`})`,
+      reason: `dependency install did not complete, so no step ran (${installed.timedOut ? "timed out" : `exit ${String(installed.exitCode)}`})${versionNote(plan.manager)}`,
     };
   }
 

