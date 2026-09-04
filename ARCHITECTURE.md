@@ -1252,23 +1252,39 @@ refusal.** It ran, it did not pass in the time allowed, and a hang is a plausibl
 fix to cause; the other reading is the one that lets an infinite loop through. Conversely a failed
 `install` is a refusal, because nothing was verified and so there is nothing to have failed.
 
-**The package manager's _version_ is discovered from nothing, and that is the limitation the first
-real run hit.** `packageManagerOf` reads `packageManager` from the manifest, splits on `@`, keeps
-the name and discards the version — and when the field is absent, as it is on the pilot
-repository, returns the default name and lets `PATH` decide which binary that is. On this machine
-`PATH` gives pnpm 11; the pilot repo pins pnpm 9 in CI, its lockfile is `lockfileVersion: 9.0`,
-and pnpm 11 no longer reads the `pnpm.overrides` block that lockfile was generated from. So
-`install` died and no verdict was reached.
+**The package manager's _version_ used to be discovered from nothing, and that is the limitation
+the first real run hit.** `packageManagerOf` read `packageManager` from the manifest, split on `@`,
+kept the name and threw the version away — so which binary ran was a property of `PATH`. On this
+machine `PATH` gives pnpm 11; the pilot repo pins pnpm 9 in CI, its lockfile is
+`lockfileVersion: 9.0`, and pnpm 11 no longer reads the `pnpm.overrides` block that lockfile was
+generated from. So `install` died and no verdict was reached.
 
 The outcome was right — `refused`, not `failed`, exactly as the table above requires, and the
-solver's change was never blamed for a toolchain mismatch. But note what the repository's own
+solver's change was never blamed for a toolchain mismatch. Note also what the repository's own
 declarations say: `engines.pnpm` is `">=9"`, which pnpm 11 satisfies, while the configuration only
 works on 9. **The machine-readable claim and the machine-readable behaviour disagree, in someone
 else's repository** — the same defect class this service exists to catch, found by running against
-it. Two honest fixes exist and they are not equivalent: the repository can declare the toolchain it
-actually needs (`packageManager`, or a narrower `engines.pnpm`), or this harness can stop treating
-"which pnpm" as a property of `PATH`. The first is a one-line change to a repository we do not own;
-the second is the general fix and is not written.
+it.
+
+The harness half is now fixed, and the shape of the fix is worth more than the bug. A declared
+version is kept and the invocation becomes `corepack <name>@<version>`, which is Node's own shim
+for this and needs nothing pre-installed. That immediately creates a new hole, because
+**`packageManager: "pnpm@https://example.com/x.tgz"` is valid input to corepack** and means
+"download this and execute it" — sourced from a manifest belonging to the repository under
+verification. So `PACKAGE_MANAGER_VERSION` admits plain semver and nothing else: no URLs, no
+ranges, no dist-tags. Ranges are refused for a second reason — they make "which pnpm ran" a fact
+about the day rather than about the manifest, which defeats the point of reading the field.
+`corepack` had to join `ALLOWED_EXECUTABLES`, where it is the one entry that contradicts that
+list's own rule against programs that run other programs; it earns the place because it shims only
+the three managers already listed, and because that version pattern is what stops it being
+general. The two are coupled and must not drift apart.
+
+**What this does not fix is the pilot repository**, which declares no `packageManager` at all and
+so still gets whatever `PATH` offers. Refusing every repository without the field would mean
+verifying almost nothing, so instead the undeclared case is _reported_: `versionNote` appends the
+version that actually ran and points at a CI pin as the first thing to check. Diagnosing this the
+first time took four runs and a detour through someone else's `package.json`; the refusal now says
+in one line what that cost an afternoon.
 
 The known limitation is stated rather than solved: if the base itself is already failing lint or
 typecheck, every run on that repository fails through no fault of the solver. Proving otherwise
