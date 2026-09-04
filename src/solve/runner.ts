@@ -226,6 +226,38 @@ export const COMMIT_SUBJECT = new RegExp(
 );
 
 const MAX_SUBJECT = 72;
+const MIN_DESCRIPTION = 10;
+
+export interface CommitMessage {
+  readonly subject: string;
+  readonly body: string;
+}
+
+/**
+ * Assembles the commit message from the part that needs judgement and the part
+ * that does not.
+ *
+ * The subject and the reasoning are the model's — it just made the change and
+ * is the only thing that knows why. The traceability trailer is ours, because
+ * we already know the issue key and asking a model to repeat a value we hold
+ * would be inventing a way for the run to fail. That split is the general rule
+ * worth stating: **derive everything derivable, and ask the model only for what
+ * requires judgement.** Every field we ask for is a field that can come back
+ * wrong.
+ *
+ * This replaced a real defect. The schema description used to instruct the
+ * model to reference the issue key in the body, and nothing checked that it
+ * had — a promise in prose with no mechanism behind it, which is the exact
+ * failure this codebase exists to catch. Enforcing it would have been the
+ * obvious fix and the worse one: a check that can fail a run over a value we
+ * could simply have written ourselves.
+ */
+export function composeCommitMessage(report: FixReport, issueKey: string): CommitMessage {
+  const trailer = `Refs: ${issueKey}`;
+  const written = report.commitBody.trim();
+  const body = written === "" ? trailer : `${written}\n\n${trailer}`;
+  return { subject: report.commitSubject, body };
+}
 
 function asRecord(value: unknown, what: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -356,6 +388,18 @@ export function parseFix(value: unknown, issueKey: string): FixReport {
   if (!COMMIT_SUBJECT.test(report.commitSubject)) {
     throw new SolveParseError(
       `${issueKey}: commit subject ${JSON.stringify(report.commitSubject)} is not Conventional Commits`,
+    );
+  }
+  // A floor, not a quality check, and the difference matters. This refuses
+  // output too short to be a description at all; it does nothing about output
+  // that is long enough and still says nothing — `fix(advisor): update code`
+  // passes it. Judging whether a message is meaningful is what the human
+  // reading the draft PR is for. Stated plainly so nobody later reads this as
+  // a guarantee of message quality and stops reviewing them.
+  const description = report.commitSubject.slice(report.commitSubject.indexOf(": ") + 2);
+  if (description.length < MIN_DESCRIPTION) {
+    throw new SolveParseError(
+      `${issueKey}: commit subject describes the change in ${String(description.length)} characters, which is too few to be a description`,
     );
   }
   return report;

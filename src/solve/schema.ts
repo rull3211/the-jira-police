@@ -138,7 +138,7 @@ export const FIX_SCHEMA = {
     commitBody: {
       type: "string",
       description:
-        "Why the change was made, referencing the issue key. The diff already shows what changed. Must not claim tests pass or that the fix is verified.",
+        "Why the change was made. The diff already shows what changed, so do not narrate it. Do NOT include the issue key or a tracking reference — the harness appends that itself, because it knows the key and asking you to remember it would only invent a way for the run to fail. Must not claim tests pass or that the fix is verified.",
     },
     testAdded: {
       type: "boolean",

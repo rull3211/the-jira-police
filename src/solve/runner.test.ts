@@ -8,6 +8,7 @@ import {
   RECON_DENIED_TOOLS,
   type SolveRunOptions,
   SolveParseError,
+  composeCommitMessage,
   buildSolveArgs,
   buildSolvePrompt,
   parseFix,
@@ -211,6 +212,42 @@ describe("parseRecon", () => {
   });
 });
 
+describe("composeCommitMessage", () => {
+  it("appends the traceability trailer the harness already knows", () => {
+    // Derived rather than requested. The old schema asked the model to include
+    // the key and nothing checked that it had — a promise with no mechanism.
+    const message = composeCommitMessage(parseFix(fix(), "SSX-3822"), "SSX-3822");
+
+    expect(message.body.endsWith("Refs: SSX-3822")).toBe(true);
+    expect(message.body).toContain("The head component never rendered");
+  });
+
+  it("still produces a trailer when the model wrote no body", () => {
+    const message = composeCommitMessage(parseFix(fix({ commitBody: "  " }), "X-1"), "SSX-1");
+
+    expect(message.body).toBe("Refs: SSX-1");
+  });
+
+  it("puts the trailer in its own paragraph, where git will parse it", () => {
+    // Not cosmetic. A trailer is only a trailer if it is on its own line in the
+    // last paragraph; `…component\n\nRefs: SSX-1` is machine-readable and
+    // `…component Refs: SSX-1` is a sentence that happens to contain a key.
+    // Mutation testing caught this: joining with a space kept every other
+    // assertion green.
+    const message = composeCommitMessage(parseFix(fix(), "SSX-3822"), "SSX-3822");
+    const lines = message.body.split("\n");
+
+    expect(lines.at(-1)).toBe("Refs: SSX-3822");
+    expect(lines.at(-2)).toBe("");
+  });
+
+  it("leaves the subject exactly as validated", () => {
+    const report = parseFix(fix(), "SSX-3822");
+
+    expect(composeCommitMessage(report, "SSX-3822").subject).toBe(report.commitSubject);
+  });
+});
+
 describe("parseFix", () => {
   it("accepts a coherent report", () => {
     expect(parseFix(fix(), "SSX-3822").changed).toBe(true);
@@ -280,6 +317,20 @@ describe("parseFix", () => {
     expect(() => parseFix(fix({ commitSubject: `fix: ${"x".repeat(80)}` }), "SSX-3822")).toThrow(
       /over 72/u,
     );
+  });
+
+  it("rejects a subject too short to be a description", () => {
+    // A floor, not a quality check — see the comment at the call site.
+    expect(() => parseFix(fix({ commitSubject: "fix: typo" }), "SSX-3822")).toThrow(
+      /too few to be a description/u,
+    );
+  });
+
+  it("does not pretend to judge whether a message says anything", () => {
+    // This passes the floor and communicates nothing. Catching it is the job of
+    // the human who reads the draft PR, and claiming otherwise here would stop
+    // them looking.
+    expect(parseFix(fix({ commitSubject: "fix(advisor): update code" }), "X-1").changed).toBe(true);
   });
 
   it("does not attempt to detect a claim that the tests passed", () => {
