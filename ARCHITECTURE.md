@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1841 tests, no build step, no deployment
+Status: running end to end against production Jira. 1872 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -556,7 +556,7 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                                 | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing                                                           |
 | `SOLVE_REPOS`                | — (**no fallback**)                    | Repository allowlist. The only solve setting without a default, deliberately: see §14.10                                                                                                                         |
 | `MAX_CONCURRENT_SOLVES`      | `1`                                    | Counted from the board via `buildInFlightJql`, never from local state                                                                                                                                            |
-| `MAX_REVIEW_ITERATIONS`      | `3`                                    | Quoted in the pull request body so a reader knows what undrafts it. A policy about how much argument a bot reviewer is worth                                                                                     |
+| `MAX_REVIEW_ITERATIONS`      | `3`                                    | Counts **reviewer rounds only**, from the marker's third line, which is appended after the high-water mark so markers written before the split still parse. A person's request is the outside information the cap exists to protect against the absence of, so it is exempt; a mixed batch counts as human. Reaching it undrafts and keeps listening |
 | `MAX_PR_ROUNDS_TOTAL`        | `20`                                   | The absolute per-pull-request stop, deliberately **not** the same number as above. One is a policy, this is a brake, and conflating them lets a policy change disable a safety stop. Hitting it does not undraft |
 | `SOLVE_WORKTREE_ROOT`        | — (blank means the temp dir)           | Grants nothing. Exists because macOS `tmpdir()` lands under `/private/var`, and the by-hand diff review phase C depends on needs a path a person can open                                                        |
 | `SOLVE_GITHUB_OWNER`         | — (**no fallback**)                    | The account a pull request is opened against. No default for the same reason as `SOLVE_REPOS`, plus one of its own: an owner inferred from the checkout's remote is right until somebody adds a fork as `origin` |
@@ -883,11 +883,15 @@ who remembers them should be able to see that they were retired rather than quie
   `agent:failed` on a bail. `state` (`OPEN`/`CLOSED`/`MERGED`) is read, and the loop no longer
   ends at the undraft. **The poller's review step is still absent, but it moved rather than
   stalled** — it belongs to the daemon below, since nothing runs on a timer to call it.
-- **Both reviewers.** `advance` still gates `waiting` on the _requested_ reviewer having spoken,
-  so a human who comments first is collected — `readReview` filters no authors — and then
-  discarded by a check asking a different question. A human's request also burns
-  `MAX_REVIEW_ITERATIONS`, which exists to stop two machines talking to each other and has no
-  business bounding a person. The last slice before the daemon; see PLAN.md §6.2.
+- **Retired, 2026-09-05.** _Both reviewers._ `waiting` now asks whether anyone actionable spoke,
+  not whether the requested reviewer did, so a human who comments first is acted on rather than
+  collected and discarded. Every `ReviewComment` and every `ThreadComment` carries an `origin`
+  (`reviewer` | `human`), the marker carries a second count, and `MAX_REVIEW_ITERATIONS` reads
+  only the reviewer's half — a person's request no longer burns a budget invented to bound two
+  machines talking to each other. A mixed batch counts as human, a thread's origin is its first
+  comment's, and `exhausted` became `reviewer-exhausted` because it stopped being an ending: the
+  pull request undrafts and the loop keeps listening. `MAX_PR_ROUNDS_TOTAL` still counts
+  everything, since a brake a person's comment could step past is not a brake.
 - **Running it from the daemon, and this one is deliberately _last_.** Not wired into `index.ts`;
   `pnpm start` is the grooming loop and must stay that way until everything above has been driven
   by hand. The property the daemon adds is _nobody is watching_, which is the last property you
@@ -922,10 +926,11 @@ before it, so the command line reads as the privilege escalation it is.
   - The login that answers is `copilot-pull-request-reviewer[bot]`, not `copilot`. This is why
     `matchesReviewer` is a prefix match on the requested handle; the case is pinned in
     `pr.test.ts`.
-  - Copilot's review state is **`COMMENTED`**, never `APPROVED`. `readReview` computes
-    `reviewerResponded` from the login alone and never from `state`, so the loop sees the
-    response. Had it keyed off an approving state, the review loop would have waited forever on a
-    reviewer that had already spoken.
+  - Copilot's review state is **`COMMENTED`**, never `APPROVED`. `readReview` never reads
+    `state` to decide whether anyone spoke — today `anyoneResponded` asks only whether a
+    non-ours entry exists at all, and the login decides `origin` rather than whether the loop
+    wakes. Had either keyed off an approving state, the review loop would have waited forever on
+    a reviewer that had already spoken.
 
   One sub-question genuinely needed a write and was **deferred to phase D** rather than probed on
   a throwaway pull request: whether `gh pr edit --add-reviewer @copilot` succeeds with this token's

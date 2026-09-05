@@ -6,6 +6,7 @@ import {
   type MarkReadyRequest,
   type PushRequest,
   type ReviewComment,
+  type ReviewOrigin,
   type ReviewRequest,
   type ReviewThread,
   type ThreadReply,
@@ -24,6 +25,7 @@ import {
   readReview,
   readReviewThreads,
   replyToThread,
+  reviewOrigin,
   requestReview,
   resolveThread,
 } from "./pr.ts";
@@ -144,11 +146,16 @@ const view = (stdout: string): Record<string, Partial<CommandResult>> => ({
   "pr view": { stdout },
 });
 
-const comment = (body: string, author = "copilot"): ReviewComment => ({
+const comment = (
+  body: string,
+  author = "copilot",
+  origin: ReviewOrigin = "reviewer",
+): ReviewComment => ({
   author,
   body,
   createdAt: "",
   id: "",
+  origin,
 });
 
 describe("commitAll", () => {
@@ -641,7 +648,7 @@ describe("readReview", () => {
     expect(result).toEqual({
       outcome: "read",
       review: {
-        reviewerResponded: false,
+        anyoneResponded: false,
         reviewerErrored: false,
         comments: [],
         state: "OPEN",
@@ -681,7 +688,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review : null).toEqual({
-      reviewerResponded: true,
+      anyoneResponded: true,
       reviewerErrored: false,
       comments: [
         {
@@ -689,12 +696,14 @@ describe("readReview", () => {
           body: "Two things below.",
           createdAt: "2026-09-05T11:00:49Z",
           id: "PRR_1",
+          origin: "reviewer",
         },
         {
           author: "copilot",
           body: "Nit: rename this.",
           createdAt: "2026-09-05T11:04:00Z",
           id: "IC_1",
+          origin: "reviewer",
         },
       ],
       state: "OPEN",
@@ -760,7 +769,7 @@ describe("readReview", () => {
   });
 
   it("does not read a reviewer's own error as a clean review either", async () => {
-    // The worse of the two. An empty comment list plus `reviewerResponded` is
+    // The worse of the two. An empty comment list plus `anyoneResponded` is
     // indistinguishable from an approval, so the loop would undraft and mark
     // the ticket done on the strength of a review that never happened.
     const runner = fakeRunner(
@@ -782,7 +791,7 @@ describe("readReview", () => {
 
     const result = await readReview(runner, reviewRequest());
 
-    expect(result.outcome === "read" ? result.review.reviewerResponded : null).toBe(true);
+    expect(result.outcome === "read" ? result.review.anyoneResponded : null).toBe(true);
   });
 
   it("does not mistake a review that discusses an error for a failed review", async () => {
@@ -821,7 +830,7 @@ describe("readReview", () => {
     // something; deleting their message because a bot used the same words would
     // be the recogniser reaching past what it knows.
     expect(result.outcome === "read" ? result.review.comments : []).toEqual([
-      { author: "a-human", body: COPILOT_ERROR, createdAt: "", id: "" },
+      { author: "a-human", body: COPILOT_ERROR, createdAt: "", id: "", origin: "human" },
     ]);
   });
 
@@ -839,7 +848,7 @@ describe("readReview", () => {
 
     const result = await readReview(runner, reviewRequest());
 
-    expect(result.outcome === "read" && result.review.reviewerResponded).toBe(true);
+    expect(result.outcome === "read" && result.review.anyoneResponded).toBe(true);
   });
 
   it.each(["some-human", "not-copilot", "dependabot[bot]", ""])(
@@ -849,9 +858,13 @@ describe("readReview", () => {
 
       const result = await readReview(runner, reviewRequest());
 
-      expect(result.outcome === "read" && result.review.reviewerResponded).toBe(false);
-      // Still collected: a human's comment is feedback the next pass should see.
-      expect(result.outcome === "read" && result.review.comments).toHaveLength(1);
+      // Not the reviewer, so `human` — and `origin` is what exempts a round from
+      // `MAX_REVIEW_ITERATIONS`, so a login misread as the reviewer here spends a
+      // person's request out of a budget that was never meant to bound them.
+      expect(result.outcome === "read" ? result.review.comments[0]?.origin : null).toBe("human");
+      // And the loop still wakes for it. The gate asks whether anyone actionable
+      // spoke, not whether the requested reviewer did.
+      expect(result.outcome === "read" && result.review.anyoneResponded).toBe(true);
     },
   );
 
@@ -864,7 +877,7 @@ describe("readReview", () => {
 
     const result = await readReview(runner, reviewRequest());
 
-    expect(result.outcome === "read" && result.review.reviewerResponded).toBe(true);
+    expect(result.outcome === "read" && result.review.anyoneResponded).toBe(true);
     expect(result.outcome === "read" && result.review.comments).toEqual([]);
   });
 
@@ -887,7 +900,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "d", body: "real feedback", createdAt: "", id: "" },
+      { author: "d", body: "real feedback", createdAt: "", id: "", origin: "human" },
     ]);
   });
 
@@ -942,7 +955,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     // Still a response — the reviewer spoke — but there is nothing in it to act on.
-    expect(result.outcome === "read" && result.review.reviewerResponded).toBe(true);
+    expect(result.outcome === "read" && result.review.anyoneResponded).toBe(true);
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
   });
 
@@ -952,7 +965,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "unknown", body: "still feedback", createdAt: "", id: "" },
+      { author: "unknown", body: "still feedback", createdAt: "", id: "", origin: "human" },
     ]);
   });
 
@@ -964,7 +977,7 @@ describe("readReview", () => {
     expect(result).toEqual({
       outcome: "read",
       review: {
-        reviewerResponded: false,
+        anyoneResponded: false,
         reviewerErrored: false,
         comments: [],
         state: "OPEN",
@@ -1034,14 +1047,16 @@ describe("readReview", () => {
     expect(reason(result)).toContain("no pull requests found");
   });
 
-  it("never matches every login when the reviewer name is empty", async () => {
-    // `"".startsWith("")` is true, so without the guard an empty reviewer would
-    // report a response from whoever happened to comment.
+  it("calls everyone the reviewer when the reviewer name is empty", async () => {
+    // The blank setting cannot tell anybody apart, and the two directions are not
+    // symmetric: reading everyone as `human` would exempt every comment on every
+    // pull request from `MAX_REVIEW_ITERATIONS` at once, on a typo in `.env`.
+    // Reading everyone as `reviewer` only spends the cap sooner than it need be.
     const runner = fakeRunner(view(payload({ comments: [{ author: { login: "x" }, body: "y" }] })));
 
     const result = await readReview(runner, reviewRequest({ reviewer: "@" }));
 
-    expect(result.outcome === "read" && result.review.reviewerResponded).toBe(false);
+    expect(result.outcome === "read" ? result.review.comments[0]?.origin : null).toBe("reviewer");
   });
 });
 
@@ -1100,6 +1115,7 @@ describe("readReviewThreads", () => {
               author: "copilot-pull-request-reviewer",
               body: "not idempotent",
               createdAt: "2026-09-04T23:05:36Z",
+              origin: "reviewer",
             },
           ],
         },
@@ -1289,6 +1305,37 @@ describe("readReviewThreads", () => {
     const result = await readReviewThreads(runner, reviewRequest());
 
     expect(result.outcome === "read" && result.threads[0]?.comments[0]?.author).toBe("unknown");
+    // And an author it could not read is not the reviewer. `human` exempts a
+    // round from the reviewer's cap, so the guess has to go the other way from
+    // the safe direction elsewhere in this file: a login nobody can identify
+    // must not be handed the reviewer's budget, and must not be handed the
+    // exemption either. It is only ever the *first* comment on a thread that
+    // decides a round, and an unreadable one there is not a reviewer speaking.
+    expect(result.outcome === "read" && result.threads[0]?.comments[0]?.origin).toBe("human");
+  });
+
+  it("classifies each thread comment by who wrote it", async () => {
+    const runner = fakeRunner(
+      graphql(
+        threadsPayload([
+          thread({
+            comments: {
+              pageInfo: { hasNextPage: false },
+              nodes: [
+                { author: { login: "copilot-pull-request-reviewer" }, body: "a", createdAt: "" },
+                { author: { login: "a-colleague" }, body: "b", createdAt: "" },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    const result = await readReviewThreads(runner, reviewRequest());
+    const origins =
+      result.outcome === "read" ? result.threads[0]?.comments.map((c) => c.origin) : null;
+
+    expect(origins).toEqual(["reviewer", "human"]);
   });
 
   it("keeps the null line an outdated thread comes back with", async () => {
@@ -1700,7 +1747,7 @@ const inlineThread = (overrides: Partial<ReviewThread> = {}): ReviewThread => ({
   isOutdated: false,
   path: "src/setNonProductionFavicon.ts",
   line: 19,
-  comments: [{ author: "copilot", body: "this is not idempotent", createdAt: "" }],
+  comments: [{ author: "copilot", body: "this is not idempotent", createdAt: "", origin: "reviewer" }],
   ...overrides,
 });
 
@@ -1736,8 +1783,8 @@ describe("formatThreads", () => {
     const block = formatThreads([
       inlineThread({
         comments: [
-          { author: "copilot", body: "this is not idempotent", createdAt: "" },
-          { author: "rull3211", body: "bot: appended only when absent", createdAt: "" },
+          { author: "copilot", body: "this is not idempotent", createdAt: "", origin: "reviewer" },
+          { author: "rull3211", body: "bot: appended only when absent", createdAt: "", origin: "human" },
         ],
       }),
     ]);
@@ -1749,7 +1796,7 @@ describe("formatThreads", () => {
     const long = Array.from({ length: 200 }, (_unused, index) =>
       inlineThread({
         id: `PRRT_${String(index)}`,
-        comments: [{ author: "copilot", body: `${String(index)} `.repeat(400), createdAt: "" }],
+        comments: [{ author: "copilot", body: `${String(index)} `.repeat(400), createdAt: "", origin: "reviewer" }],
       }),
     );
 
@@ -1881,4 +1928,36 @@ describe("findPullRequest", () => {
 
     expect(result).toMatchObject({ outcome: "failed" });
   });
+});
+
+describe("reviewOrigin", () => {
+  it.each([
+    "copilot",
+    "Copilot",
+    "copilot-pull-request-reviewer",
+    "copilot-pull-request-reviewer[bot]",
+  ])("calls %j the reviewer", (login) => {
+    expect(reviewOrigin(login, COPILOT_REVIEWER)).toBe("reviewer");
+  });
+
+  it.each(["a-colleague", "rull3211", "dependabot[bot]", "unknown", ""])(
+    "calls %j a human",
+    (login) => {
+      expect(reviewOrigin(login, COPILOT_REVIEWER)).toBe("human");
+    },
+  );
+
+  it.each(["", "@", "   ", "@ "])(
+    "calls everyone the reviewer when the reviewer setting is %j",
+    (reviewer) => {
+      // The one asymmetry in this function, and the reason it is written as an
+      // early return rather than falling through to `matchesReviewer`. Nothing
+      // matches an empty name, so the natural reading makes every comment
+      // `human` — and `human` is the exemption from `MAX_REVIEW_ITERATIONS`, so
+      // a blank setting would lift the spend cap on every open pull request at
+      // once. The exemption is something a reviewer name grants; never
+      // something its absence does.
+      expect(reviewOrigin("a-colleague", reviewer)).toBe("reviewer");
+    },
+  );
 });

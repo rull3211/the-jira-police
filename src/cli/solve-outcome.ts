@@ -237,12 +237,12 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  *   declined to act on it. A human takes the pull request from there, which is
  *   the outcome the review round exists to be able to reach.
  *
- * `exhausted` also exits zero: the cap firing is the cap working. The caller
+ * `reviewer-exhausted` also exits zero: the cap firing is the cap working. The caller
  * still has to say so on the ticket, which is a different obligation from an
  * exit code.
  *
  * `capped` exits zero for the same reason and it is the one worth arguing
- * about, because unlike `exhausted` it means a pull request has cost twenty
+ * about, because unlike `reviewer-exhausted` it means a pull request has cost twenty
  * rounds and is being abandoned mid-review. That is a bad state and it is
  * tempting to make `$?` say so. It must not: the brake firing is the brake
  * working, and a non-zero exit would teach a daemon's backoff to treat the
@@ -280,7 +280,7 @@ export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
  * different loop with a different operator, and conflating them would make this
  * command's ending depend on somebody else's calendar.
  *
- * So `ready` stops, `exhausted` stops — both undrafted — and `iterated` stops
+ * So `ready` stops, `reviewer-exhausted` stops — both undrafted — and `iterated` stops
  * when it undrafted itself, which is §6.1c's rule that a round changing nothing
  * has finished. An `iterated` round that pushed stays a draft and goes round
  * again.
@@ -327,7 +327,7 @@ export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
     case "ready": {
       return { stop: true, silent: false, why: "nothing left to act on — undrafted" };
     }
-    case "exhausted": {
+    case "reviewer-exhausted": {
       return {
         stop: true,
         silent: false,
@@ -379,13 +379,13 @@ export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
 export function reviewStageAfter(outcome: AdvanceOutcome): ReviewStage | null {
   switch (outcome.kind) {
     // Undrafted, so the agentic cycle is over and a human is the only thing
-    // left. `exhausted` reaches the same place by a different road — the
+    // left. `reviewer-exhausted` reaches the same place by a different road — the
     // reviewer's budget ran out rather than the reviewer running out of things
     // to say — and the ticket cannot tell the difference because the pull
     // request cannot either. The comment on the ticket is where that difference
     // is recorded, and it already is.
     case "ready":
-    case "exhausted": {
+    case "reviewer-exhausted": {
       return "review-done";
     }
     // The only outcome that can go either way, and it is decided by the draft
@@ -477,14 +477,15 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         (outcome.unresolved === "" ? "" : `\nUnresolved:\n${outcome.unresolved}`)
       );
     }
-    case "exhausted": {
+    case "reviewer-exhausted": {
       return (
-        `EXHAUSTED — ${String(outcome.rounds)} round(s) spent and the reviewer still has comments open. ` +
-        `Undrafted anyway; a human decides from here.\nUnresolved:\n${outcome.unresolved}`
+        `REVIEWER EXHAUSTED — ${String(outcome.rounds)} round(s) spent and the reviewer still has comments open. ` +
+        `Undrafted anyway; a human decides from here, and a human's comment still gets a round.` +
+        `\nUnresolved:\n${outcome.unresolved}`
       );
     }
     case "capped": {
-      // Deliberately does not say "undrafted", because it is not. `exhausted`
+      // Deliberately does not say "undrafted", because it is not. `reviewer-exhausted`
       // is a reviewer running out of turns on a pull request the loop still
       // believes in; this is the machinery hitting a stop, which says nothing
       // about whether the code is ready.

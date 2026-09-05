@@ -15,6 +15,7 @@ import {
 function marker(overrides: Partial<Marker> = {}): Marker {
   return {
     count: 3,
+    reviewerCount: 3,
     lastRead: "2026-09-05T10:22:31Z",
     rounds: ["narrowed the type", "answered without changing code", "split the helper"],
     ...overrides,
@@ -58,7 +59,7 @@ describe("renderMarker", () => {
   });
 
   it("round-trips a marker with no rounds on it yet", () => {
-    const empty = marker({ count: 0, rounds: [] });
+    const empty = marker({ count: 0, reviewerCount: 0, rounds: [] });
     expect(parseMarker(renderMarker(empty))).toEqual({ outcome: "parsed", marker: empty });
   });
 
@@ -67,10 +68,27 @@ describe("renderMarker", () => {
     expect(lines[0]).toBe("bot: iteration count 3");
     expect(lines[1]).toBe("Last read: 2026-09-05T10:22:31Z");
   });
+
+  it("writes the reviewer count after the high-water mark, not before it", () => {
+    // Position is the compatibility guarantee. The first two lines are read
+    // positionally, and markers written before this line existed are sitting on
+    // open pull requests right now; inserting it above would make every one of
+    // them unreadable, which by this file's own rule means unadvanceable.
+    const lines = renderMarker(marker({ reviewerCount: 2 })).split("\n");
+    expect(lines[2]).toBe("Reviewer rounds: 2");
+  });
+
+  it("round-trips a marker whose rounds were not all the reviewer's", () => {
+    const mixed = marker({ count: 5, reviewerCount: 2 });
+    expect(parseMarker(renderMarker(mixed))).toEqual({ outcome: "parsed", marker: mixed });
+  });
 });
 
 describe("parseMarker", () => {
   it("reads back a marker written by an earlier process", () => {
+    // Note this body predates the reviewer count: two open pull requests carry
+    // markers in exactly this shape. A missing line reads as `count`, which is
+    // the conservative direction — the reviewer cap can only fire sooner.
     const result = parseMarker(
       "bot: iteration count 2\nLast read: 2026-09-05T10:22:31Z\n\n- narrowed the type\n- split the helper",
     );
@@ -78,6 +96,7 @@ describe("parseMarker", () => {
       outcome: "parsed",
       marker: {
         count: 2,
+        reviewerCount: 2,
         lastRead: "2026-09-05T10:22:31Z",
         rounds: ["narrowed the type", "split the helper"],
       },
@@ -132,6 +151,51 @@ describe("parseMarker", () => {
     expect(unreadable("bot: iteration count 3\nLast read: yesterday")).toContain(
       "not a readable instant",
     );
+  });
+
+  it("reads a missing reviewer line as every round, not as none of them", () => {
+    // The two guesses are not symmetric. Reading a pre-split marker's rounds as
+    // the reviewer's can only make `MAX_REVIEW_ITERATIONS` fire sooner; reading
+    // them as human rounds hands the whole budget back on every pull request
+    // currently open, which is the direction that costs money.
+    const result = parseMarker("bot: iteration count 4\nLast read: 2026-09-05T10:00:00Z");
+    expect(result.outcome === "parsed" && result.marker.reviewerCount).toBe(4);
+  });
+
+  it("finds the reviewer line wherever it sits, since only two lines are positional", () => {
+    const result = parseMarker(
+      "bot: iteration count 3\nLast read: 2026-09-05T10:00:00Z\n\n- narrowed the type\n\nReviewer rounds: 1",
+    );
+    expect(result.outcome === "parsed" && result.marker.reviewerCount).toBe(1);
+  });
+
+  it("refuses a reviewer count that is not a whole number, and does not read it as zero", () => {
+    // Same rule as the total, and for the same reason: zero here is a fresh
+    // reviewer budget on a pull request that has already spent one.
+    expect(
+      unreadable("bot: iteration count 3\nLast read: 2026-09-05T10:00:00Z\nReviewer rounds: two"),
+    ).toContain("not a whole number of reviewer rounds");
+    expect(
+      unreadable("bot: iteration count 3\nLast read: 2026-09-05T10:00:00Z\nReviewer rounds: -1"),
+    ).toContain("not a whole number of reviewer rounds");
+  });
+
+  it("refuses a reviewer count too large to be one", () => {
+    expect(
+      unreadable(
+        "bot: iteration count 3\nLast read: 2026-09-05T10:00:00Z\nReviewer rounds: 99999999999999999999",
+      ),
+    ).toContain("too large");
+  });
+
+  it("refuses more reviewer rounds than rounds rather than clamping them", () => {
+    // The repair — `min(a, b)` — is the tempting one and it is wrong. A marker
+    // in this state was edited by something that did not understand it, so the
+    // count it resumes from is one nobody can vouch for, on the single pull
+    // request where the state is known to be broken.
+    expect(
+      unreadable("bot: iteration count 2\nLast read: 2026-09-05T10:00:00Z\nReviewer rounds: 3"),
+    ).toContain("3 reviewer rounds out of 2 rounds");
   });
 
   it("keeps only the round lines, so trailing prose cannot become a round", () => {

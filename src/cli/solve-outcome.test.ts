@@ -321,7 +321,7 @@ const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
   waiting: null,
   ready: null,
   iterated: null,
-  exhausted: null,
+  "reviewer-exhausted": null,
   capped: null,
   abandoned: null,
   refused: null,
@@ -354,7 +354,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     threads: NO_THREADS,
     unresolved: "",
   },
-  { kind: "exhausted", rounds: 3, unresolved: "this still allocates on every render" },
+  { kind: "reviewer-exhausted", rounds: 3, unresolved: "this still allocates on every render" },
   { kind: "capped", rounds: 20, unresolved: "the reviewer and the pass disagree about the type" },
   { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
@@ -398,7 +398,7 @@ describe("reviewStageAfter", () => {
     // `exhausted` undrafts the pull request, so it reaches the same label by a
     // different road. What made it different — the loop gave up rather than
     // agreed — is recorded in the comment on the ticket, not in this label.
-    expect(reviewStageAfter({ kind: "exhausted", rounds: 3, unresolved: "still slow" })).toBe(
+    expect(reviewStageAfter({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" })).toBe(
       "review-done",
     );
   });
@@ -433,7 +433,7 @@ describe("reviewStageAfter", () => {
       ["ready", "review-done"],
       ["iterated", "reviewing"],
       ["iterated", "review-done"],
-      ["exhausted", "review-done"],
+      ["reviewer-exhausted", "review-done"],
       ["capped", null],
       ["abandoned", null],
       ["refused", null],
@@ -459,7 +459,7 @@ describe("isAdvanceFailureExit", () => {
   it("does not fail the shell when the round cap fires", () => {
     // The cap working is not the command failing. What it owes the operator is
     // the line saying so, which `describeAdvanceOutcome` is tested for below.
-    expect(isAdvanceFailureExit({ kind: "exhausted", rounds: 3, unresolved: "still slow" })).toBe(
+    expect(isAdvanceFailureExit({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" })).toBe(
       false,
     );
   });
@@ -472,7 +472,7 @@ describe("isAdvanceFailureExit", () => {
       waiting: false,
       ready: false,
       iterated: false,
-      exhausted: false,
+      "reviewer-exhausted": false,
       capped: false,
       abandoned: false,
       refused: true,
@@ -493,7 +493,7 @@ describe("chainDecision", () => {
       ["ready", true],
       ["iterated", false],
       ["iterated", true],
-      ["exhausted", true],
+      ["reviewer-exhausted", true],
       ["capped", true],
       ["abandoned", true],
       ["refused", true],
@@ -527,7 +527,7 @@ describe("chainDecision", () => {
     // They stop the chain identically and mean opposite things: one is a policy
     // about how much argument a bot reviewer is worth, the other a brake on the
     // machinery. An operator reading only "stopped" cannot tell which to relax.
-    const budget = chainDecision({ kind: "exhausted", rounds: 3, unresolved: "" }).why;
+    const budget = chainDecision({ kind: "reviewer-exhausted", rounds: 3, unresolved: "" }).why;
     const brake = chainDecision({ kind: "capped", rounds: 20, unresolved: "" }).why;
 
     expect(budget).toContain("budget");
@@ -664,16 +664,28 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("says the cap fired rather than that the reviewer was satisfied", () => {
-    // `ready` and `exhausted` both undraft, and reading one as the other would
-    // tell a human the bot and the reviewer agreed when they did not.
+    // `ready` and `reviewer-exhausted` both undraft, and reading one as the
+    // other would tell a human the bot and the reviewer agreed when they did
+    // not.
     const text = describeAdvanceOutcome({
-      kind: "exhausted",
+      kind: "reviewer-exhausted",
       rounds: 3,
       unresolved: "this still allocates on every render",
     });
     expect(text).toContain("EXHAUSTED");
     expect(text).toContain("still allocates on every render");
     expect(text).not.toContain("nothing to act on");
+  });
+
+  it("says which budget ran out, and that the other one has not", () => {
+    // The rename is the whole of it. This used to be an ending: undraft, report,
+    // stop. It is now a statement about one of two channels, and an operator who
+    // reads it as a terminal will go and do by hand the thing the loop is still
+    // willing to do — answer the next human comment.
+    const text = describeAdvanceOutcome({ kind: "reviewer-exhausted", rounds: 3, unresolved: "x" });
+
+    expect(text).toContain("REVIEWER EXHAUSTED");
+    expect(text).toContain("human");
   });
 
   it("does not describe waiting as work that happened", () => {

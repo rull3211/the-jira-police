@@ -233,7 +233,7 @@ export const SETTINGS = [
   {
     name: "MAX_REVIEW_ITERATIONS",
     description:
-      "How many times a solve may respond to a review before the pull request is marked ready anyway, with the ticket comment saying the cap was hit. A cap rather than a loop, because a reviewer and a fixer that disagree can trade comments indefinitely and neither of them is paying.",
+      "How many times a solve may respond to the requested REVIEWER before the pull request is marked ready anyway, with the ticket comment saying the cap was hit. A cap rather than a loop, because a bot reviewer and a fixer that disagree can trade comments indefinitely and neither of them is paying. It counts reviewer rounds only: a round answering a human does not spend one, because the whole reason to bound this conversation is that nothing in it brings in information from outside it, and a person asking for a change is exactly that information. A batch holding both counts as human. Reaching this undrafts the pull request and keeps listening — it is the reviewer running out of turns, not the loop ending. MAX_PR_ROUNDS_TOTAL is what bounds every round regardless of who asked.",
     fallback: "3",
   },
   {

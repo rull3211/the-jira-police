@@ -346,17 +346,28 @@ export type AdvanceOutcome =
       readonly unresolved: string;
     }
   /**
-   * The round cap was reached. Undrafted anyway, and the caller must say so on
-   * the ticket — a human is now the only thing standing between this and a
-   * merge, and they need to know the loop gave up rather than agreed.
+   * The **reviewer's** budget is spent. Undrafted anyway, and the caller must
+   * say so on the ticket — a human is now the only thing standing between this
+   * and a merge, and they need to know the loop gave up rather than agreed.
+   *
+   * **Renamed from `exhausted` because it stopped being an ending.** The human
+   * channel is still open: a person can comment after this and the next round
+   * runs, since `MAX_REVIEW_ITERATIONS` no longer counts their request. A
+   * reader who took this for a terminal would conclude the pull request was
+   * finished with, which is now exactly wrong — it is finished arguing with one
+   * of its two reviewers.
    */
-  | { readonly kind: "exhausted"; readonly rounds: number; readonly unresolved: string }
+  | {
+      readonly kind: "reviewer-exhausted";
+      readonly rounds: number;
+      readonly unresolved: string;
+    }
   /**
    * `MAX_PR_ROUNDS_TOTAL` reached. Nothing ran, and **the pull request is left
    * as it is** — not undrafted.
    *
-   * That is the difference from `exhausted` and the reason this is not the same
-   * outcome with a bigger number. Exhaustion is a reviewer running out of turns
+   * That is the difference from `reviewer-exhausted` and the reason this is not
+   * the same outcome with a bigger number. Exhaustion is a reviewer running out of turns
    * on a pull request the loop still believes in, so undrafting it is the right
    * end. This is the machinery hitting a stop, which says nothing about whether
    * the code is ready; undrafting on it would be the loop reporting a verdict it
@@ -615,7 +626,11 @@ export async function advance(
   }
   const { review } = read;
 
-  if (!review.reviewerResponded) {
+  // "Has anyone actionable spoken", not "has the reviewer spoken". A human who
+  // comments before the bot reviewer does was always collected and was thrown
+  // away here, by a gate asking a narrower question than the list behind it
+  // answered.
+  if (!review.anyoneResponded) {
     return { kind: "waiting" };
   }
 
@@ -644,6 +659,7 @@ export async function advance(
   }
   const marker = previous?.outcome === "parsed" ? previous.marker : null;
   const round = marker?.count ?? 0;
+  const reviewerRound = marker?.reviewerCount ?? 0;
 
   const undraft = async (outcome: AdvanceOutcome): Promise<AdvanceOutcome> => {
     const marked = await markReady(commands, gh);
@@ -716,18 +732,40 @@ export async function advance(
 
   if (round >= maxTotalRounds) {
     // Checked before the reviewer's own cap, because it outranks it: a policy
-    // change to `maxRounds` must not be able to step past the brake. Nothing is
-    // undrafted — see the outcome's doc comment.
+    // change to `maxRounds` must not be able to step past the brake. It counts
+    // human rounds too, for the same reason — the brake is on the machinery,
+    // and one a person's comment could step past is not a brake. Nothing is
+    // undrafted; see the outcome's doc comment.
     logger.error("solve.review.capped", { issueKey: worktree.issueKey, number, rounds: round });
     return { kind: "capped", rounds: round, unresolved: unresolved() };
   }
 
-  if (round >= maxRounds) {
-    // Undrafted anyway, per the plan: a stalled draft helps nobody. The caller
-    // owns saying on the ticket that the cap was hit rather than the reviewer
-    // being satisfied.
-    logger.warn("solve.review.exhausted", { issueKey: worktree.issueKey, number, rounds: round });
-    return undraft({ kind: "exhausted", rounds: round, unresolved: unresolved() });
+  // **A mixed batch is a human round**, and the asymmetry is the argument. The
+  // alternative refuses a person's request because a bot happened to comment in
+  // the same window: over-counting silently declines work a human asked for,
+  // under-counting spends one more round. Only one of those is recoverable by
+  // the person who notices.
+  //
+  // A thread's origin is its *first* comment's, since that is who raised the
+  // point the round is being asked to answer. Later replies on the thread are
+  // the argument about it, and ours are already filtered out upstream.
+  const humanRound =
+    comments.some((comment) => comment.origin === "human") ||
+    threads.some((thread) => thread.comments[0]?.origin === "human");
+
+  if (!humanRound && reviewerRound >= maxRounds) {
+    // Undrafted, and the loop keeps listening. The reviewer has run out of
+    // turns; a person has not, so this is checked only when the batch is
+    // reviewer-only. A human comment arriving after this runs a round as
+    // normal, which is what stops `MAX_REVIEW_ITERATIONS` from becoming the bot
+    // telling a reviewer it is out of turns.
+    logger.warn("solve.review.reviewer_exhausted", {
+      issueKey: worktree.issueKey,
+      number,
+      rounds: round,
+      reviewerRounds: reviewerRound,
+    });
+    return undraft({ kind: "reviewer-exhausted", rounds: round, unresolved: unresolved() });
   }
 
   // **The reservation, and it comes before the pass on purpose.** Bump the
@@ -744,10 +782,14 @@ export async function advance(
     ...gh,
     marker: {
       count: round + 1,
+      // The half of the reservation that human feedback does not move. Both
+      // numbers are written together, so a round can never advance one and lose
+      // the other to a second failed write.
+      reviewerCount: humanRound ? reviewerRound : reviewerRound + 1,
       lastRead: newestOf(comments, marker?.lastRead ?? NEVER_READ),
       rounds: [
         ...(marker?.rounds ?? []),
-        `round ${String(round + 1)} — reading ${String(comments.length)} comment(s) and ${String(threads.length)} thread(s)`,
+        `round ${String(round + 1)} — ${humanRound ? "human" : "reviewer"}, reading ${String(comments.length)} comment(s) and ${String(threads.length)} thread(s)`,
       ],
     },
     ...(located.outcome === "found" ? { commentId: located.comment.id } : {}),

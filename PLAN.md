@@ -2,8 +2,8 @@
 
 > **Progress, 2026-09-05.** Phases A through D4e are built and merged; the service claims a
 > ticket, solves it in an isolated worktree, opens a pull request, answers the reviewer, and
-> labels the ticket for whatever happened. 1841 tests, no build step. **D4b is the last slice
-> before the daemon**, and the daemon (E) is deliberately last. A human always merges.
+> labels the ticket for whatever happened. 1872 tests, no build step. **D4b is built and the
+> daemon (E) is next**, and it is deliberately last. A human always merges.
 
 ## Context
 
@@ -332,12 +332,12 @@ with itself.
 changed nothing has done all it can and undrafts — gated on the answer being *visible*, because
 undrafting after a failed post shows a human an objection with the rebuttal nowhere.
 
-#### 6.2 Both reviewers, and only one of them is on a budget — **D4b, not yet built**
+#### 6.2 Both reviewers, and only one of them is on a budget — **D4b, built 2026-09-05**
 
-The comments are already there: `readReview` builds its list from `[...reviews, ...comments]` with
+The comments were already there: `readReview` builds its list from `[...reviews, ...comments]` with
 no author filter, and `reviewerComments` drops only our own. Human feedback has been collected all
-along. What discards it is `reviewerResponded`, computed from logins matching the *requested*
-reviewer, which gates `waiting`. A human who comments before the bot reviewer does is read, found,
+along. What discarded it was `reviewerResponded`, computed from logins matching the *requested*
+reviewer, which gated `waiting`. A human who commented before the bot reviewer did was read, found,
 and thrown away by a gate asking a different question.
 
 So the fix is a classification, not a new data source. `matchesReviewer` already draws the line;
@@ -354,8 +354,36 @@ push its result into the payload as `origin: "reviewer" | "human"` on `ReviewCom
 - **Exhaustion stops being an ending.** `exhausted` becomes `reviewer-exhausted`: undraft, say so
   on the ticket, and keep listening on the human channel.
 
-`MAX_REVIEW_ITERATIONS` keeps its name but not its meaning; its doc comment now describes half the
-reviews and must be rewritten in the same commit.
+`MAX_REVIEW_ITERATIONS` keeps its name but not its meaning; its doc comment described half the
+reviews and was rewritten in the same commit.
+
+**Splitting the cap forced a marker format change, and the compatibility argument decided its
+shape.** Two counts cannot live in one number, so `Marker` gained `reviewerCount` and the comment
+gained a third line — appended *after* the high-water mark, never inserted above it, because the
+first two lines are read positionally and markers written before the split are sitting on open
+pull requests right now. Inserting would have made every one of them unreadable, which by
+`marker.ts`'s own rule means unadvanceable. A **missing** line reads as `count`, not as zero: a
+pre-split marker cannot say which of its rounds were human, and the two guesses are not
+symmetric — reading them as the reviewer's can only make the cap fire sooner, reading them as
+human hands the whole budget back on every open pull request. `reviewerCount > count` is
+**refused rather than clamped**, for the reason the file already refuses an unparseable count:
+`min(a, b)` quietly resumes a number nobody can vouch for, on the one pull request where the
+state is known to be wrong.
+
+**The blank-reviewer case is the one asymmetry in `reviewOrigin` and it is deliberate.** Nothing
+matches an empty name, so the natural reading makes every comment `human` — and `human` is the
+exemption from the cap, so a typo in `.env` would lift the spend brake on every open pull request
+at once. A blank setting therefore reads as `reviewer`. The exemption is something a reviewer name
+grants; never something its absence does. A thread comment whose author could not be read goes the
+same way for the same reason, except that it lands on `human`, since an unidentifiable login is
+not the reviewer speaking and must not be handed the reviewer's budget either.
+
+Twelve mutations caught: the human exemption removed, the mixed batch read with `every` instead of
+`some`, a thread's origin taken from its newest comment rather than its first, the reservation
+advancing the reviewer count on a human round, the `waiting` gate narrowed back to the reviewer,
+the blank-reviewer early return deleted, both origin call sites hardcoded to `reviewer`, the
+missing marker line read as zero, the over-count clamped, the line rendered above the high-water
+mark, and a non-numeric reviewer count read as zero.
 
 #### 6.3 A cursor over reviews
 
@@ -440,7 +468,7 @@ of the feature.
 | **D2** | Wire `advance` — the `--advance` mode | the bot pushes to an existing PR unprompted | done |
 | **D3** | Inline comments + review cursor + reply comment + thread resolution | the bot answers and closes a reviewer's comment | done |
 | **D4a** | The label slice — the four coordinated edits | the bot moves a ticket through its whole lifecycle | done |
-| **D4b** | **Both reviewers (§6.2)** | none beyond D2 | **next** |
+| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2 | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request |
 | **D4c** | The bail terminal — `agent:failed` plus the reason | the bot closes a ticket against itself | done |
 | **D4d** | `--review`, the fifth rung — the whole chain in one command | the first loop with nobody between iterations | done |
 | **D4e** | Every outcome reports on the ticket | none; removes a silence | done |
@@ -524,9 +552,11 @@ recurring charge rather than a wrong answer:
 - **the operator's comment is not ours** — a human comment from the same GitHub account the bot
   posts through must be treated as feedback and must never be the comment we edit. This is the one
   whose failure destroys somebody's words rather than costing money.
-- **round classification (D4b)** — make a human comment count against `MAX_REVIEW_ITERATIONS` and
-  a test must fail; the mixed-batch case separately, since that is where the rule is easiest to
-  get subtly wrong.
+- ~~**round classification (D4b)** — make a human comment count against `MAX_REVIEW_ITERATIONS`
+  and a test must fail; the mixed-batch case separately, since that is where the rule is easiest
+  to get subtly wrong.~~ **Done, and the mixed batch needed the separate mutation it was promised:
+  `some` → `every` leaves every other classification test green.** Ten more alongside it; see
+  §6.2.
 - **terminal** — a `MERGED` or `CLOSED` pull request must not produce another round.
 - **label pairing** — moving `agent:done` without making `agent:reviewing` replace `agent:solving`
   must fail a test, and so must the reverse. Two mutations, because the half-changes fail in
@@ -568,8 +598,16 @@ isolation.
 claim/release~~ → ~~C on one ticket, diff inspected by hand~~ → ~~D1, draft PR read by a human~~ →
 ~~D2 one `--advance` round~~ → ~~D3 threads read, answered and resolved~~ → ~~D4c a bail written to
 the ticket~~ → ~~D4d the whole chain in one command~~ → **D4b, a PR with one human review and an
-exhausted reviewer budget, confirming the round still runs** → the `MERGED → agent:done` arrow,
-which needs a human to merge → **E** → **F**.
+exhausted reviewer budget, confirming the round still runs — built but not yet driven, and it is
+the next thing a person does** → the `MERGED → agent:done` arrow, which needs a human to merge →
+**E** → **F**.
+
+**What D4b's live run has to show, since a green suite cannot.** A pull request whose marker
+already reads `Reviewer rounds: 3` at `MAX_REVIEW_ITERATIONS=3`, and a human comment on it. The
+round must run rather than report `reviewer-exhausted`, and the marker afterwards must read one
+higher on the total and unchanged on the reviewer's half. PRs #1413 and #2661 both carry pre-split
+markers, so either of them also exercises the missing-line default on the way through — the
+compatibility case that only exists once.
 
 ## Out of scope
 
