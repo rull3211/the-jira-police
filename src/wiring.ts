@@ -585,17 +585,15 @@ export function buildFindPrRequest(
  * and the same shape — a reader asking "what can rewrite an open pull request"
  * greps for one name and reads its call sites.
  *
- * ## `round` is zero on every hand-driven invocation, and that is a known gap
+ * ## There is no `round` here any more, and there used to be a zero
  *
- * `advance` compares `round` against `maxRounds` and stops when the reviewer's
- * budget is spent. There is nothing here to count from: each invocation is a
- * fresh process with no memory of the last, so a run started by an operator
- * always claims to be on its first round and `MAX_REVIEW_ITERATIONS` never
- * fires. That is tolerable only while a person is the loop — they can see how
- * many times they have typed the command. It stops being tolerable the moment
- * the daemon drives this, and the count has to come from the pull request
- * itself, which is what the review cursor (D3) exists to read. Recorded here
- * rather than hidden behind a plausible-looking `0`.
+ * This function passed `round: 0` on every invocation, because a fresh process
+ * has nothing to count from — so `MAX_REVIEW_ITERATIONS` could not fire from
+ * the command line at all and the person typing it was the only thing counting.
+ * `advance` now reads the count off the marker comment on the pull request,
+ * which is the one place that survives the process. The field is gone from
+ * `AdvanceRequest` rather than left here holding a plausible-looking zero: a
+ * caller that cannot supply the number cannot supply a wrong one.
  */
 export function buildAdvanceRequest(
   settings: Settings,
@@ -609,8 +607,8 @@ export function buildAdvanceRequest(
     repo: githubRepoFor(settings, worktree.repoPath),
     number,
     identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
-    round: 0,
     maxRounds: numeric(settings, "MAX_REVIEW_ITERATIONS", 0),
+    maxTotalRounds: numeric(settings, "MAX_PR_ROUNDS_TOTAL", 1),
     ghTimeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
   };
 }

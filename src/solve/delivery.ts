@@ -40,16 +40,27 @@ import {
   type BotIdentity,
   type ReviewComment,
   type ReviewState,
+  type WriteCommentResult,
   COPILOT_REVIEWER,
   commitAll,
   createDraftPr,
+  editComment,
   formatReviewFeedback,
   markReady,
+  postComment,
   push,
   readReview,
   requestReview,
 } from "./pr.ts";
-import { isOurs } from "./marker.ts";
+import {
+  type Marker,
+  NEVER_READ,
+  findMarker,
+  isNewer,
+  isOurs,
+  parseMarker,
+  renderMarker,
+} from "./marker.ts";
 import { type ReviewRoundRequest, type SolveDependencies, resolveReview } from "./orchestrator.ts";
 import type { CommitMessage } from "./runner.ts";
 import type { Worktree } from "./worktree.ts";
@@ -165,9 +176,24 @@ export interface AdvanceRequest extends Omit<ReviewRoundRequest, "reviewFeedback
   readonly number: number;
   readonly identity: BotIdentity;
   readonly reviewer?: string;
-  /** Rounds already spent on this pull request. */
-  readonly round: number;
+  /**
+   * The reviewer's argument budget, `MAX_REVIEW_ITERATIONS`.
+   *
+   * **There is no `round` beside it any more, and its absence is the feature.**
+   * It used to be passed in, and `buildAdvanceRequest` passed `0` on every
+   * invocation because a fresh process has nothing to count from — so the cap
+   * could not fire from the command line at all. Rounds already spent are now
+   * read off the marker comment on the pull request, which is the only place
+   * that survives the process. A caller cannot supply the number, so a caller
+   * cannot supply a wrong one.
+   */
   readonly maxRounds: number;
+  /**
+   * The absolute stop, `MAX_PR_ROUNDS_TOTAL`. Not `maxRounds` under a second
+   * name: that one is a policy about how much argument a bot reviewer is worth
+   * and is expected to be relaxed, this one is a brake on the machinery.
+   */
+  readonly maxTotalRounds: number;
   readonly ghTimeoutMs: number;
 }
 
@@ -188,13 +214,19 @@ export type AdvanceOutcome =
    * request's fault and is recoverable by a human — `advance` now agrees with
    * it instead of contradicting it.
    *
-   * False matters because the loop has no cursor over reviews: it cannot tell a
-   * fresh response from the one it already handled. So a silently-dropped
-   * re-request does not stall visibly — the next tick re-reads the *same*
-   * comments, resolves them again, and burns rounds until the cap undrafts the
-   * pull request as `exhausted`. Surfacing the flag lets the caller say "pushed
-   * a fix, could not re-request review" on the ticket, which is the one message
-   * that gets a human to add the reviewer by hand.
+   * False used to matter because the loop had no cursor: it could not tell a
+   * fresh response from one it had already handled, so a silently-dropped
+   * re-request did not stall visibly — the next tick re-read the same comments,
+   * resolved them again, and burned rounds until the cap undrafted the pull
+   * request as `exhausted`. **The cursor inverted that failure and did not
+   * remove it.** The marker now recognises those comments as already read, so
+   * the next tick returns `ready` and *undrafts* — which is worse in a quieter
+   * way: a pull request goes to a reviewer who was never told to look at it,
+   * and nothing anywhere says the notification was the missing step.
+   *
+   * So surfacing the flag is what lets the caller say "pushed a fix, could not
+   * re-request review" on the ticket, which is the one message that gets a
+   * human to add the reviewer by hand.
    */
   | {
       readonly kind: "iterated";
@@ -222,6 +254,19 @@ export type AdvanceOutcome =
    * merge, and they need to know the loop gave up rather than agreed.
    */
   | { readonly kind: "exhausted"; readonly rounds: number; readonly unresolved: string }
+  /**
+   * `MAX_PR_ROUNDS_TOTAL` reached. Nothing ran, and **the pull request is left
+   * as it is** — not undrafted.
+   *
+   * That is the difference from `exhausted` and the reason this is not the same
+   * outcome with a bigger number. Exhaustion is a reviewer running out of turns
+   * on a pull request the loop still believes in, so undrafting it is the right
+   * end. This is the machinery hitting a stop, which says nothing about whether
+   * the code is ready; undrafting on it would be the loop reporting a verdict it
+   * did not reach, on the one path taken when something has gone wrong enough to
+   * cost twenty rounds.
+   */
+  | { readonly kind: "capped"; readonly rounds: number; readonly unresolved: string }
   /** The resolution pass declined. A human takes the pull request from here. */
   | { readonly kind: "abandoned"; readonly reason: string }
   | {
@@ -230,8 +275,14 @@ export type AdvanceOutcome =
       readonly reasons: readonly string[];
     }
   | {
+      /**
+       * `cursor` is the stage that must not be recovered from by guessing. A
+       * marker that will not parse, two of them, or a reservation that would not
+       * write all mean the round cannot be counted — and a round that runs
+       * uncounted is the unbounded loop the marker exists to prevent.
+       */
       readonly kind: "failed";
-      readonly stage: "read" | "verification" | "commit" | "push" | "undraft";
+      readonly stage: "read" | "cursor" | "verification" | "commit" | "push" | "undraft";
       readonly reason: string;
     };
 
@@ -270,6 +321,60 @@ export function reviewerComments(review: ReviewState): readonly ReviewComment[] 
 }
 
 /**
+ * The newest instant among the comments this round is about to handle.
+ *
+ * Falls back to the mark already recorded, which is what keeps the cursor
+ * monotonic: a batch whose comments all came back undated must not move the
+ * high-water mark *backwards* to the epoch and re-open everything before it.
+ * An undated comment is still handled — `isNewer` lets it through — it just
+ * does not get to say when.
+ */
+export function newestOf(comments: readonly ReviewComment[], fallback: string): string {
+  let newest = fallback;
+  for (const comment of comments) {
+    if (comment.createdAt !== "" && isNewer(comment.createdAt, newest)) {
+      newest = comment.createdAt;
+    }
+  }
+  return newest;
+}
+
+interface ReserveRequest {
+  readonly worktreePath: string;
+  readonly repo: string;
+  readonly number: number;
+  readonly timeoutMs: number;
+  readonly marker: Marker;
+  /** Absent on the first round of a pull request, which posts rather than edits. */
+  readonly commentId?: string;
+}
+
+/** Writes the marker: an edit when there is one to edit, a post when there is not. */
+async function reserve(
+  runner: SolveDependencies["commands"],
+  request: ReserveRequest,
+): Promise<WriteCommentResult> {
+  const body = renderMarker(request.marker);
+  const shared = { cwd: request.worktreePath, body, timeoutMs: request.timeoutMs };
+  return request.commentId === undefined
+    ? postComment(runner, { ...shared, repo: request.repo, number: request.number })
+    : editComment(runner, { ...shared, commentId: request.commentId });
+}
+
+/**
+ * The round could not be counted, so it does not run.
+ *
+ * Every caller is a place where guessing would release the brake rather than
+ * apply it, which is why they all funnel through one constructor instead of
+ * each deciding what a missing count means.
+ */
+const cursorFailed = (reason: string): AdvanceOutcome => ({
+  kind: "failed",
+  stage: "cursor",
+  reason,
+});
+
+/**
  * Looks once at the review and moves the pull request forward if it can.
  *
  * Returns rather than waits. See the header.
@@ -279,7 +384,7 @@ export async function advance(
   request: AdvanceRequest,
 ): Promise<AdvanceOutcome> {
   const { commands } = deps;
-  const { worktree, repo, number, round, maxRounds } = request;
+  const { worktree, repo, number, maxRounds, maxTotalRounds } = request;
   const gh = { worktreePath: worktree.path, repo, number, timeoutMs: request.ghTimeoutMs };
 
   const read = await readReview(commands, gh);
@@ -291,6 +396,22 @@ export async function advance(
   if (!review.reviewerResponded) {
     return { kind: "waiting" };
   }
+
+  // The marker is read before anything else is decided, because everything else
+  // is decided from it: how many rounds this pull request has already cost, and
+  // which of the comments below have already been answered.
+  const located = findMarker(review.comments);
+  if (located.outcome === "unusable") {
+    return cursorFailed(located.reason);
+  }
+  const previous = located.outcome === "found" ? parseMarker(located.comment.body) : null;
+  if (previous?.outcome === "unreadable") {
+    // Not zero. The whole point of the marker is that losing the count releases
+    // the brake, so an unreadable one stops the round and says why.
+    return cursorFailed(`the marker on #${String(number)} will not parse — ${previous.reason}`);
+  }
+  const marker = previous?.outcome === "parsed" ? previous.marker : null;
+  const round = marker?.count ?? 0;
 
   const undraft = async (outcome: AdvanceOutcome): Promise<AdvanceOutcome> => {
     const marked = await markReady(commands, gh);
@@ -324,11 +445,32 @@ export async function advance(
     return true;
   };
 
-  const comments = reviewerComments(review);
+  // The high-water-mark filter, and the single most important line in this
+  // function. Without it the loop cannot tell a comment it already handled from
+  // a new one, so a review left in place while its author waits for a reply is
+  // re-read, re-resolved and re-pushed on every tick at full solve cost, until
+  // somebody merges the pull request. The round cap bounds that today; §6.2
+  // removes the cap for human feedback, which is exactly the feedback that will
+  // sit unanswered the longest.
+  const comments = reviewerComments(review).filter(
+    (comment) => marker === null || isNewer(comment.createdAt, marker.lastRead),
+  );
   if (comments.length === 0) {
-    // Responded, nothing to act on. The pull request is as good as it is going
-    // to get from this side.
+    // Responded, nothing *new* to act on. Reached both on a pull request whose
+    // reviewer never had a complaint and on one whose comments were all
+    // answered by an earlier round, and those are the same state: there is
+    // nothing left for this side to do.
     return undraft({ kind: "ready", rounds: round });
+  }
+
+  const unresolved = (): string => comments.map((comment) => comment.body).join("\n\n");
+
+  if (round >= maxTotalRounds) {
+    // Checked before the reviewer's own cap, because it outranks it: a policy
+    // change to `maxRounds` must not be able to step past the brake. Nothing is
+    // undrafted — see the outcome's doc comment.
+    logger.error("solve.review.capped", { issueKey: worktree.issueKey, number, rounds: round });
+    return { kind: "capped", rounds: round, unresolved: unresolved() };
   }
 
   if (round >= maxRounds) {
@@ -336,11 +478,33 @@ export async function advance(
     // owns saying on the ticket that the cap was hit rather than the reviewer
     // being satisfied.
     logger.warn("solve.review.exhausted", { issueKey: worktree.issueKey, number, rounds: round });
-    return undraft({
-      kind: "exhausted",
-      rounds: round,
-      unresolved: comments.map((comment) => comment.body).join("\n\n"),
-    });
+    return undraft({ kind: "exhausted", rounds: round, unresolved: unresolved() });
+  }
+
+  // **The reservation, and it comes before the pass on purpose.** Bump the
+  // count and move the high-water mark first; if the write fails, the round
+  // does not run. Writing it afterwards means a failed write hands back a free
+  // round — every tick, forever — which is the runaway this whole mechanism
+  // exists to close, reintroduced by an ordering.
+  //
+  // The cost is accepted deliberately: a round that reserves and then fails has
+  // spent a round on feedback it will not retry. `advance` already makes that
+  // trade for `refused`, and here the spend is visible in the marker rather
+  // than silent.
+  const reserved = await reserve(commands, {
+    ...gh,
+    marker: {
+      count: round + 1,
+      lastRead: newestOf(comments, marker?.lastRead ?? NEVER_READ),
+      rounds: [
+        ...(marker?.rounds ?? []),
+        `round ${String(round + 1)} — reading ${String(comments.length)} comment(s)`,
+      ],
+    },
+    ...(located.outcome === "found" ? { commentId: located.comment.id } : {}),
+  });
+  if (reserved.outcome === "failed") {
+    return cursorFailed(`the round was not reserved, so it did not run — ${reserved.reason}`);
   }
 
   const resolved = await resolveReview(deps, {

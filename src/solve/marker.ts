@@ -3,10 +3,11 @@
  *
  * Two numbers have to survive between processes: how many rounds this pull
  * request has cost, and how far through the review the loop has already read.
- * `buildAdvanceRequest` passes `round: 0` on every invocation today, so
- * `MAX_REVIEW_ITERATIONS` cannot fire from the command line at all — the person
- * typing the command is the only thing counting. That is tolerable while a
- * person *is* the loop and stops being tolerable the moment a daemon drives it.
+ * Before this file existed, `buildAdvanceRequest` passed `round: 0` on every
+ * invocation, because a fresh process had nothing to count from — so
+ * `MAX_REVIEW_ITERATIONS` could not fire from the command line at all and the
+ * person typing it was the only thing counting. Tolerable while a person *is*
+ * the loop, and not for a second after a daemon drives it.
  *
  * ## Why the state is on the pull request and not in `state/`
  *
@@ -74,6 +75,23 @@ export interface Marker {
   /** One line per round, oldest first. What the edit gives up in notifications. */
   readonly rounds: readonly string[];
 }
+
+/**
+ * The high-water mark to write when there is no date to write.
+ *
+ * Reached when a round's whole batch came back undated and there was no earlier
+ * mark to keep — rare, since `dateOf` reads both of the two field names the API
+ * uses, but not impossible. The obvious thing is to write the empty string, and
+ * it is a trap: `parseMarker` would refuse the result on the next round, so the
+ * pull request would be permanently unadvanceable by a marker this code wrote
+ * itself. **A round must never render a marker it cannot read back.**
+ *
+ * An explicit "never" instead. `isNewer` treats every comment as newer than it,
+ * so the next round behaves exactly as though there were no mark at all, which
+ * is the honest reading and the safe direction — re-reading a comment costs a
+ * round, dropping one loses a reviewer's request silently.
+ */
+export const NEVER_READ = "1970-01-01T00:00:00.000Z";
 
 export type ParseMarkerResult =
   | { readonly outcome: "parsed"; readonly marker: Marker }

@@ -7,6 +7,7 @@ import {
   publish,
   reviewerComments,
 } from "./delivery.ts";
+import { NEVER_READ, parseMarker } from "./marker.ts";
 import type { PassRunner, SolveDependencies } from "./orchestrator.ts";
 import type { BotIdentity, ReviewComment, ReviewState } from "./pr.ts";
 import type { Pass, SolveRunOptions } from "./runner.ts";
@@ -62,10 +63,43 @@ const reviewJson = (overrides: Partial<ReviewState> = {}): string => {
   return JSON.stringify(base);
 };
 
+/**
+ * A marker comment as `gh pr view --json comments` returns it.
+ *
+ * Carries an `id`, because `findMarker` refuses a marker it could not edit and
+ * a fixture without one would exercise that refusal rather than the cursor.
+ */
+const markerComment = (count: number, lastRead: string, id = "IC_marker"): unknown => ({
+  author: { login: "rull3211" },
+  body: `bot: iteration count ${String(count)}\nLast read: ${lastRead}\n`,
+  createdAt: "2026-09-05T09:00:00Z",
+  id,
+});
+
+/** A reviewer comment with a date on it, which is what the cursor sorts on. */
+const dated = (body: string, createdAt: string): unknown => ({
+  author: { login: "copilot" },
+  body,
+  createdAt,
+  id: `IC_${createdAt}`,
+});
+
 interface Rule {
   readonly match: (argv: readonly string[]) => boolean;
   readonly reply: Partial<CommandResult>;
 }
+
+/** Matches a GraphQL call by the operation named in its query text. */
+const asked =
+  (operation: string) =>
+  (argv: readonly string[]): boolean =>
+    argv.includes("graphql") && argv.some((arg) => arg.includes(operation));
+
+/** A pull request that already carries a marker saying `count` rounds are gone. */
+const spent = (count: number, lastRead = "2026-09-05T08:00:00Z"): Rule => ({
+  match: saw("pr", "view"),
+  reply: { stdout: reviewJson({ comments: [markerComment(count, lastRead)] } as never) },
+});
 
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
 
@@ -75,6 +109,8 @@ const saw =
     needles.every((needle) => argv.includes(needle));
 
 const PR_URL = "https://github.com/acme/advisor/pull/42";
+const PR_NODE = "PR_kwDOnode";
+const POSTED = "IC_marker";
 
 interface Harness {
   readonly deps: SolveDependencies;
@@ -103,6 +139,25 @@ function harness(
     { match: saw("rev-parse"), reply: { stdout: "a1b2c3d4e5f6" } },
     { match: saw("pr", "create"), reply: { stdout: PR_URL } },
     { match: saw("pr", "view"), reply: { stdout: reviewJson() } },
+    // The marker's three GraphQL calls. All succeed by default, so a test that
+    // wants a failed reservation has to say so — the reservation refusing is
+    // the interesting case and must not be reachable by forgetting a fixture.
+    {
+      match: asked("pullRequest(number:"),
+      reply: { stdout: JSON.stringify({ data: { repository: { pullRequest: { id: PR_NODE } } } }) },
+    },
+    {
+      match: asked("addComment"),
+      reply: {
+        stdout: JSON.stringify({ data: { addComment: { commentEdge: { node: { id: POSTED } } } } }),
+      },
+    },
+    {
+      match: asked("updateIssueComment"),
+      reply: {
+        stdout: JSON.stringify({ data: { updateIssueComment: { issueComment: { id: POSTED } } } }),
+      },
+    },
   ];
   const all = [...rules, ...defaults];
 
@@ -244,8 +299,8 @@ const advanceRequest: AdvanceRequest = {
   repo: "acme/advisor",
   number: 42,
   identity: IDENTITY,
-  round: 0,
   maxRounds: 3,
+  maxTotalRounds: 20,
   ghTimeoutMs: 60_000,
 };
 
@@ -341,9 +396,10 @@ describe("advance", () => {
 
   it("does not undraft a pull request whose re-request failed", async () => {
     // The dangerous reading of "the reviewer never came back" is to give up and
-    // mark it ready. There is no cursor over reviews, so a dropped re-request
-    // makes the next tick re-read the same comments; the loop must not convert
-    // that into an undraft on this round.
+    // mark it ready. With the cursor in place the next tick sees nothing new
+    // and undrafts by itself, which is bad enough; doing it on the very round
+    // that failed to notify anyone would put an unreviewed pull request in
+    // front of a reviewer who was never asked.
     const h = harness({ review: review() }, [
       { match: saw("pr", "edit"), reply: { exitCode: 1, stderr: "HTTP 403" } },
     ]);
@@ -442,9 +498,9 @@ describe("advance", () => {
   });
 
   it("stops resolving at the round cap and undrafts, saying so", async () => {
-    const h = harness({}, []);
+    const h = harness({}, [spent(3)]);
 
-    const outcome = await advance(h.deps, { ...advanceRequest, round: 3, maxRounds: 3 });
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
 
     expect(outcome).toMatchObject({ kind: "exhausted", rounds: 3 });
     expect(h.seen).toEqual([]);
@@ -452,14 +508,25 @@ describe("advance", () => {
   });
 
   it("carries the unanswered comments out when it gives up", async () => {
-    const h = harness({}, []);
+    const h = harness({}, [spent(3)]);
 
-    const outcome = await advance(h.deps, { ...advanceRequest, round: 3, maxRounds: 3 });
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
 
     if (outcome.kind !== "exhausted") {
       throw new Error(`expected exhausted, got ${outcome.kind}`);
     }
     expect(outcome.unresolved).toContain("wrapper element");
+  });
+
+  it("does not reserve a round it is not going to run", async () => {
+    // The reservation comes before the pass, so the cap has to come before the
+    // reservation. Bumping the count on a round that stops immediately would
+    // charge a pull request for the ticks that report it is out of rounds.
+    const h = harness({}, [spent(3)]);
+
+    await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
+
+    expect(ran(h, "graphql")).toBe(false);
   });
 
   it("pushes nothing when the round only answered questions", async () => {
@@ -548,6 +615,303 @@ describe("advance", () => {
     await advance(h.deps, advanceRequest);
 
     expect(ran(h, "pr", "merge")).toBe(false);
+  });
+});
+
+/** The body of the marker this run wrote, or `""` if it wrote none. */
+const wrote = (h: Harness): string => {
+  const call = h.calls.find(
+    (argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv),
+  );
+  return (call ?? []).find((arg) => arg.startsWith("body="))?.slice("body=".length) ?? "";
+};
+
+describe("advance's review cursor", () => {
+  /** A pull request with a marker and one dated reviewer comment on it. */
+  const withComment = (markCount: number, lastRead: string, commentAt: string): Rule => ({
+    match: saw("pr", "view"),
+    reply: {
+      stdout: JSON.stringify({
+        state: "OPEN",
+        isDraft: true,
+        // Dateless, so the review body itself cannot be what makes the round
+        // run — otherwise every test below would pass with no cursor at all.
+        reviews: [{ author: { login: "copilot" }, body: "" }],
+        comments: [
+          markerComment(markCount, lastRead),
+          dated("the wrapper element looks unnecessary", commentAt),
+        ],
+        reviewRequests: [],
+      }),
+    },
+  });
+
+  it("does not act twice on a comment an earlier round already read", async () => {
+    // **The mutation that matters most in the whole feature.** Unplug the
+    // high-water mark and this fails: the same comment is resolved on every
+    // tick, at full solve cost, until somebody merges the pull request. The
+    // round cap bounds that today and D4 removes the cap for human feedback,
+    // which is exactly the feedback that sits unanswered the longest.
+    const h = harness({}, [withComment(1, "2026-09-05T10:00:00Z", "2026-09-05T09:00:00Z")]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(h.seen).toEqual([]);
+    expect(ran(h, "push")).toBe(false);
+  });
+
+  it("acts on a comment written after the mark", async () => {
+    // The other half of the same mutation. A cursor that never lets anything
+    // through is a loop that has stopped, and it would look identical to the
+    // test above.
+    const h = harness({ review: review() }, [
+      withComment(1, "2026-09-05T09:00:00Z", "2026-09-05T10:00:00Z"),
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", round: 2 });
+  });
+
+  it("treats a comment written at exactly the mark as already read", async () => {
+    // Strictly newer. Equality here re-handles the newest comment of the
+    // previous round on every tick — the same runaway, arriving as an
+    // off-by-one rather than as a missing feature.
+    const h = harness({}, [withComment(1, "2026-09-05T10:00:00Z", "2026-09-05T10:00:00Z")]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(h.seen).toEqual([]);
+  });
+
+  it("counts the round from the marker rather than from zero", async () => {
+    const h = harness({ review: review() }, [spent(2)]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 5 });
+
+    expect(outcome).toMatchObject({ kind: "iterated", round: 3 });
+  });
+
+  it("refuses the round when the marker will not parse, and does not read it as zero", async () => {
+    // Losing the count is how a bounded loop becomes an unbounded one, quietly,
+    // on the one pull request whose marker got mangled — which is also the one
+    // nobody is watching. Make the parse failure fall back to zero and this
+    // fails: the round runs, and it runs again every tick after that.
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            comments: [
+              { author: { login: "rull3211" }, body: "bot: iteration count nine", id: "IC_bad" },
+            ],
+          } as never),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "cursor" });
+    expect(h.seen).toEqual([]);
+    expect(ran(h, "graphql")).toBe(false);
+  });
+
+  it("refuses the round when there are two markers, rather than picking one", async () => {
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            comments: [
+              markerComment(1, "2026-09-05T08:00:00Z", "IC_a"),
+              markerComment(7, "2026-09-05T08:00:00Z", "IC_b"),
+            ],
+          } as never),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "cursor" });
+    expect(h.seen).toEqual([]);
+  });
+
+  it("reserves the round before running the pass", async () => {
+    // Reverse this ordering and a failed write hands back a free round, every
+    // tick, forever. The count is a reservation, not a receipt.
+    const h = harness({ review: review() });
+
+    await advance(h.deps, advanceRequest);
+
+    const reserved = h.calls.findIndex((argv) => asked("addComment")(argv));
+    expect(reserved).toBeGreaterThanOrEqual(0);
+    // Every command the pass causes comes after it. `git show` reading the
+    // manifest is the first thing `resolveReview` does.
+    expect(h.calls.findIndex((argv) => saw("show")(argv))).toBeGreaterThan(reserved);
+  });
+
+  it("does not run the pass when the reservation could not be written", async () => {
+    const h = harness({}, [
+      { match: asked("addComment"), reply: { exitCode: 1, stderr: "HTTP 403" } },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "cursor" });
+    expect(h.seen).toEqual([]);
+    expect(ran(h, "push")).toBe(false);
+  });
+
+  it("posts a marker on a pull request that has none, and edits the one that has", async () => {
+    const first = harness({ review: review() });
+    await advance(first.deps, advanceRequest);
+    expect(ran(first, "graphql")).toBe(true);
+    expect(first.calls.some((argv) => asked("updateIssueComment")(argv))).toBe(false);
+
+    const later = harness({ review: review() }, [spent(1)]);
+    await advance(later.deps, advanceRequest);
+    expect(later.calls.some((argv) => asked("updateIssueComment")(argv))).toBe(true);
+    expect(later.calls.some((argv) => asked("addComment")(argv))).toBe(false);
+  });
+
+  it("edits the marker by its node id, and never with --edit-last", async () => {
+    // `gh pr comment --edit-last` edits the last comment of the *current user*,
+    // and the current user is the operator. A round running after a human
+    // commented would overwrite that person's words with machine state.
+    const h = harness({ review: review() }, [spent(1)]);
+
+    await advance(h.deps, advanceRequest);
+
+    const edit = h.calls.find((argv) => asked("updateIssueComment")(argv)) ?? [];
+    expect(edit).toContain("id=IC_marker");
+    for (const argv of h.calls) {
+      expect(argv).not.toContain("--edit-last");
+    }
+  });
+
+  it("never treats a human's comment as the marker to overwrite", async () => {
+    // The operator's own comment arrives under the same login the bot posts as,
+    // so nothing but the prefix separates them. Getting this wrong destroys
+    // somebody's words rather than costing money.
+    const h = harness({ review: review() }, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            comments: [
+              {
+                author: { login: "rull3211" },
+                body: "Can you also handle the empty case?",
+                createdAt: "2026-09-05T10:00:00Z",
+                id: "IC_human",
+              },
+            ],
+          } as never),
+        },
+      },
+    ]);
+
+    await advance(h.deps, advanceRequest);
+
+    expect(h.calls.some((argv) => asked("updateIssueComment")(argv))).toBe(false);
+    for (const argv of h.calls) {
+      expect(argv).not.toContain("id=IC_human");
+    }
+  });
+
+  it("moves the mark to the newest comment it read", async () => {
+    const h = harness({ review: review() }, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: JSON.stringify({
+            state: "OPEN",
+            isDraft: true,
+            reviews: [{ author: { login: "copilot" }, body: "" }],
+            comments: [
+              markerComment(1, "2026-09-05T08:00:00Z"),
+              dated("the first point", "2026-09-05T09:00:00Z"),
+              dated("the second point", "2026-09-05T11:00:00Z"),
+              dated("the third point", "2026-09-05T10:00:00Z"),
+            ],
+            reviewRequests: [],
+          }),
+        },
+      },
+    ]);
+
+    await advance(h.deps, advanceRequest);
+
+    expect(wrote(h)).toContain("Last read: 2026-09-05T11:00:00Z");
+    expect(wrote(h)).toContain("bot: iteration count 2");
+  });
+
+  it("does not move the mark backwards when the batch came back undated", async () => {
+    // An all-undated batch must not reset the cursor to the epoch and re-open
+    // every comment before it. The comments are still handled; they just do not
+    // get to say when.
+    const h = harness({ review: review() }, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            comments: [markerComment(1, "2026-09-05T08:00:00Z")],
+          } as never),
+        },
+      },
+    ]);
+
+    await advance(h.deps, advanceRequest);
+
+    expect(wrote(h)).toContain("Last read: 2026-09-05T08:00:00Z");
+  });
+
+  it("writes a marker the next round can read back", async () => {
+    // A round that renders something `parseMarker` refuses makes the pull
+    // request permanently unadvanceable, by its own hand. The first round has
+    // no mark to keep and its comments may be undated, which is where the
+    // tempting empty string would land.
+    const h = harness({ review: review() });
+
+    await advance(h.deps, advanceRequest);
+    const body = wrote(h);
+    const reread = parseMarker(body);
+
+    expect(reread.outcome).toBe("parsed");
+    expect(body).toContain(`Last read: ${NEVER_READ}`);
+  });
+
+  it("stops at the absolute cap without undrafting", async () => {
+    // Unlike `exhausted`. A pull request that has cost twenty rounds says
+    // nothing about whether the code is ready, and undrafting on it would be
+    // the loop reporting a verdict it did not reach.
+    const h = harness({}, [spent(20)]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3, maxTotalRounds: 20 });
+
+    expect(outcome).toMatchObject({ kind: "capped", rounds: 20 });
+    expect(ran(h, "pr", "ready")).toBe(false);
+    expect(h.seen).toEqual([]);
+  });
+
+  it("lets the absolute cap outrank a relaxed reviewer cap", async () => {
+    // The two caps are separate so that raising the policy one cannot step past
+    // the brake. Check the reviewer's budget first and this returns `exhausted`
+    // — or worse, runs — on a pull request the brake has already stopped.
+    const h = harness({}, [spent(20)]);
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      maxRounds: 500,
+      maxTotalRounds: 20,
+    });
+
+    expect(outcome).toMatchObject({ kind: "capped" });
+    expect(h.seen).toEqual([]);
   });
 });
 

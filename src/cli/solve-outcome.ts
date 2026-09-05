@@ -126,6 +126,14 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  * `exhausted` also exits zero: the cap firing is the cap working. The caller
  * still has to say so on the ticket, which is a different obligation from an
  * exit code.
+ *
+ * `capped` exits zero for the same reason and it is the one worth arguing
+ * about, because unlike `exhausted` it means a pull request has cost twenty
+ * rounds and is being abandoned mid-review. That is a bad state and it is
+ * tempting to make `$?` say so. It must not: the brake firing is the brake
+ * working, and a non-zero exit would teach a daemon's backoff to treat the
+ * safety stop as an outage — retrying the one pull request that has already
+ * proved it should be left alone.
  */
 export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
   return outcome.kind === "failed" || outcome.kind === "refused";
@@ -161,6 +169,18 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       return (
         `EXHAUSTED — ${String(outcome.rounds)} round(s) spent and the reviewer still has comments open. ` +
         `Undrafted anyway; a human decides from here.\nUnresolved:\n${outcome.unresolved}`
+      );
+    }
+    case "capped": {
+      // Deliberately does not say "undrafted", because it is not. `exhausted`
+      // is a reviewer running out of turns on a pull request the loop still
+      // believes in; this is the machinery hitting a stop, which says nothing
+      // about whether the code is ready.
+      return (
+        `CAPPED — ${String(outcome.rounds)} round(s) on this pull request, the absolute limit. ` +
+        `Nothing ran and the pull request was left as it is, still a draft if it was one. ` +
+        `Something is wrong for this to have cost twenty rounds; read it before raising the cap.` +
+        `\nUnresolved:\n${outcome.unresolved}`
       );
     }
     case "abandoned": {
