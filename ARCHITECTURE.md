@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1700 tests, no build step, no deployment
+Status: running end to end against production Jira. 1719 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -1893,7 +1893,14 @@ places is how the two answers start disagreeing.
   belongs to a human, and inheriting that identity would attribute machine-written commits to
   them — in `git blame`, in the PR author line, and in whatever reads CODEOWNERS.
 - **The pull request is a draft, and nothing merges.** There is no merge call in `pr.ts` or
-  `delivery.ts`. `markReady` undrafts exactly once, at the end. A human merges, always.
+  `delivery.ts`. A human merges, always. Undrafting is a _transition_, not the end — see below.
+- **Reviewer chrome is dropped before the pass sees it.** Copilot ends every review with a
+  promotional block, and the pass answered it as though it were a request. `stripReviewerChrome`
+  needs two signals together — a trailing rule _and_ a link to GitHub's own Copilot docs — for the
+  same reason `isReviewerError` needs two phrases: a rule alone, or a 💡 alone, is something a
+  reviewer writes when making a real point, and swallowing feedback is the one failure here nobody
+  recovers from by noticing. It is scoped to the reviewer, so quoting the block back does not get a
+  person's own words edited.
 
 `delivery.ts` splits the round-trip into `publish` and `advance`, and `advance` **looks once and
 returns** rather than polling. The caller decides when to look again, which is what lets the review
@@ -1912,6 +1919,35 @@ both miss every comment we wrote and, worse, mistake a person's comment for mach
 overwrite. The threads use the same rule in a different shape: `unansweredThreads` drops a thread
 whose **last** comment is ours, which answers a bot reviewer restating a settled point without
 needing a timestamp, and retries by itself when a reply failed to post.
+
+#### A round reports what it did, in four fields that used to be one boolean
+
+Each of these replaced a value that was wrong in a way the renderer then repeated out loud, which
+is this project's own defect class committed inside it. They are worth keeping apart because each
+answers a different person's question.
+
+| field               | says                                          | why it is not inferable                                                                                                                                                        |
+| ------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pushed`            | did this round commit anything                | a round that only answers questions is a _successful_ round, and the headline used to call it a push — sending an operator to look for a commit that does not exist            |
+| `reviewerRequested` | `asked` / `failed` / `unnecessary`            | the old boolean's `false` meant "add the reviewer by hand", so a round with nothing to show printed a call to action whose only effect is a second review of an unchanged diff |
+| `spoken`            | did the round's answer reach the pull request | a review body has no thread, so `answerThreads` cannot reply to one; without this the argument reaches a terminal and nobody else                                              |
+| `undrafted`         | `undrafted` / `failed` / `still-drafting`     | undrafting is now a transition, and the reason it did _not_ happen is ordinary rather than a fault                                                                             |
+
+Two rules connect them, and both were learned by running the loop rather than by reading it.
+
+**The re-request is for a commit, not for a round.** `reRequest` is gated on `pushed`. Asking a
+reviewer to re-read a byte-identical tree buys a paid review whose only possible content is the
+previous review again — and then the instability rule has to spend the _next_ round recognising it.
+That rule exists for a reviewer that changes its mind unprompted; the loop was provoking it.
+
+**Draft means _this side is still working_.** A round that pushed stays a draft. A round that
+changed nothing has done all it can, so it undrafts and hands over — but only once the answer is
+**visible**: a failed comment post or a failed thread reply holds the draft, because undrafting
+there shows a human an objection with the rebuttal nowhere. The tempting justification for this is
+that it saves a round, and that is false — `ready` is decided before the pass runs, so an empty
+inbox costs nothing. The real reason is that the wait is unbounded: on a pull request people are
+still commenting on, the draft flag never clears, and a human reviews something whose own flag says
+it is unfinished.
 
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is
