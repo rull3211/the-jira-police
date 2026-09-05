@@ -514,8 +514,18 @@ a demonstration; the same sequence on a five-minute timer is a deployment.
 ### What E needs that does not exist yet
 
 - Its own cadence, slower than `POLL_INTERVAL_MS`.
-- The review-advance step running **before** any new claim, selecting on `agent:reviewing` **or**
-  `agent:review-done`.
+- ~~The review-advance step running **before** any new claim, selecting on `agent:reviewing` **or**
+  `agent:review-done`.~~ **Built as `buildReviewQueueJql` and `runReviewCycle`, 2026-09-06,
+  `feat/review-cycle`.** The step itself exists and is tested; what E still owes it is a caller and
+  a cadence. Two things it settled that the plan had left open. The look/act split is the shape the
+  whole cycle rests on — everything decidable about a pull request costs two `gh` reads and no
+  checkout, so watching the whole set every minute is cheap and only the actionable few cost
+  anything. And the cycle needed a bound the plan did not have: `maxRounds` on one _tick_, because
+  a reviewer that answered twenty pull requests while the machine slept would otherwise buy twenty
+  rounds in the first tick after it wakes — the largest single spend this service can make, and the
+  one nobody would be watching. Deferred rather than skipped, oldest-updated first, so the same
+  pull request cannot be starved. It writes nothing, so the ordering rule holds: granting the write
+  is a change to an interface rather than a line inside a loop.
 - **Cost per ticket per day.** A triage run was long quoted at $0.11 and that is wrong by 14×: a
   single bailed ticket measured **$3.99**, and a review round $0.94. A _completed_ solve has never
   been costed at all. Three changes turned single-shot costs into recurring ones, so a per-run

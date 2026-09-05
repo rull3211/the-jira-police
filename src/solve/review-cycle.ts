@@ -1,0 +1,322 @@
+/**
+ * One pass over every pull request this service is still watching.
+ *
+ * `advance` answers "what should happen to this pull request"; this answers
+ * "which pull requests should I ask that about". It is the review half of the
+ * daemon's tick, written so that it can be driven by hand first — the same
+ * ordering rule every other phase followed.
+ *
+ * ## The rule the whole file is built on
+ *
+ * **Cadence is set by the cheap read; the expensive action is gated by a
+ * change-detector that lives in the remote system.**
+ *
+ * The cheap read is `look`: two `gh` calls that name their own repository, so
+ * they need no checkout, no fetch and no install. A pull request nobody has
+ * commented on costs exactly that and stops. The expensive action is `act`: a
+ * worktree, an install, a model pass, a push — the thing measured at $0.94 a
+ * round. Splitting them is what makes looking at every watched pull request
+ * every minute a reasonable thing to do rather than an invoice.
+ *
+ * The change-detector is the pull request itself. Nothing here remembers what it
+ * saw last tick: the marker comment carries the round counts and the high-water
+ * mark, the pull request's own timestamps carry the silence clock, and the
+ * ticket's labels carry the subscription. That is §1's rule — state in the
+ * remote system, not on disk — applied to the one loop that spends the most
+ * money per mistake. A cursor in `state/` would reintroduce every failure §1
+ * avoided, and losing it *releases* a spend brake rather than tightening one.
+ *
+ * ## Three consequences worth naming, because each is a bug avoided
+ *
+ * **One unreadable pull request must not end the cycle.** `look` shells out, and
+ * a repository that was renamed, a pull request that was deleted, or a `gh`
+ * that timed out is a fact about one ticket. Nineteen healthy pull requests
+ * going unlooked-at because the twentieth is broken is a much worse failure than
+ * the one that caused it, and it is silent — the cycle just does less each tick.
+ * So every look is caught, recorded with its reason, and the loop continues.
+ *
+ * **A cycle may act a bounded number of times.** `maxRounds` is not
+ * `MAX_CONCURRENT_SOLVES` and is not `MAX_PR_ROUNDS_TOTAL`. Those bound one
+ * ticket's whole life; this bounds one *tick*. Without it, a reviewer that
+ * answered twenty pull requests while the machine was asleep produces twenty
+ * paid rounds in the first tick after it wakes, which is the largest single
+ * spend this service can make and the one nobody would be watching. Tickets
+ * over the bound are **deferred, not skipped**: they are still actionable, the
+ * next tick takes them, and because the queue is ordered oldest-updated first
+ * the same one cannot be starved twice.
+ *
+ * **The bound is counted against rounds, not against looks.** Every watched
+ * ticket is looked at every tick regardless, because a look is what notices a
+ * pull request was merged — and a merged pull request left unnoticed keeps its
+ * `agent:review-done` label, stays in this query, and is looked at forever.
+ *
+ * ## What it deliberately does not do
+ *
+ * It does not claim, solve, or open anything. The set it reads is the set that
+ * already has a pull request, and the only thing it can do to a member of that
+ * set is one review round. Starting new work is the other half of the daemon's
+ * tick and is deliberately a different function, running after this one, so a
+ * board full of review work cannot be interrupted by a new claim halfway
+ * through.
+ */
+
+import { logger } from "../logger.ts";
+import type { AdvanceOutcome, PendingRound } from "./delivery.ts";
+
+/**
+ * A ticket carrying `agent:reviewing` or `agent:review-done`.
+ *
+ * Its own type rather than `SolveCandidate` for the reason `SolveCandidate` is
+ * not `TicketRef`: the two queues select on different facts and a shared type
+ * would carry a field one of them must never read. This one has a pull request
+ * behind it and no claim to make; the solve queue is the mirror image.
+ */
+export interface WatchedTicket {
+  readonly key: string;
+  readonly summary: string;
+  readonly url: string;
+  /** Every label live on the ticket. Which of the two is on it decides nothing here. */
+  readonly labels: readonly string[];
+  /** ISO-8601 with offset, as Jira returns it. Only used for ordering. */
+  readonly updated: string;
+}
+
+/**
+ * What one cheap look concluded.
+ *
+ * The three arms are the three things that can be true of a watched ticket, and
+ * they are kept apart because they call for three different responses: nothing,
+ * a note to a human, and a paid round.
+ */
+export type ReviewLook =
+  /**
+   * There is no pull request to look at.
+   *
+   * Not an error, and not a terminal either. A ticket can carry the label with
+   * no pull request behind it for reasons that are all somebody else's — a
+   * branch deleted by hand, a repository renamed, a label added by a person who
+   * meant something by it. The honest response is to say so once per cycle and
+   * change nothing, because every write available here is wrong: labelling it
+   * `agent:closed` asserts a pull request was declined, and clearing the label
+   * silently drops a ticket somebody put on this list.
+   */
+  | { readonly outcome: "no-pull-request"; readonly reason: string }
+  /**
+   * The pull request's life is over, and this ticket should leave the set.
+   *
+   * Reported rather than acted on. Writing `agent:done` or `agent:closed` is a
+   * label edit, and this module writes nothing — the same refusal
+   * `runSolveCycle` makes and for the same reason: the write is a visible change
+   * to an interface a reviewer would look at, not a line inside a loop. The
+   * caller composing `look` and `act` already holds the label path.
+   *
+   * It is separate from `settled` because it is not an `AdvanceOutcome` at all.
+   * A merged pull request never reaches `advance`; `findPullRequest` answers it
+   * from `state`, which is why this arm carries that word verbatim rather than a
+   * kind invented here.
+   */
+  | { readonly outcome: "ended"; readonly number: number; readonly state: "MERGED" | "CLOSED" }
+  /** The look reached a final answer with no checkout behind it. */
+  | { readonly outcome: "settled"; readonly number: number; readonly result: AdvanceOutcome }
+  /** There is work. Only this arm costs anything to answer. */
+  | { readonly outcome: "round"; readonly number: number; readonly pending: PendingRound };
+
+export interface ReviewCycleDeps {
+  /**
+   * `SOLVE_ENABLED`, checked here as well as wherever the cycle is composed.
+   *
+   * Twice, for the reason `SolveDeps` gives: a loop that is safe only because
+   * its caller remembers not to call it is one careless wiring change away from
+   * running unattended, and the wiring is the part of this service most likely
+   * to be edited by someone thinking about something else.
+   */
+  readonly enabled: boolean;
+  /** The watched set, oldest-updated first — though this module re-sorts anyway. */
+  readonly fetchWatched: () => Promise<readonly WatchedTicket[]>;
+  /**
+   * The cheap half: find the pull request and survey it, no checkout.
+   *
+   * Allowed to reject. A rejected promise is one ticket's problem and is caught
+   * below; it must not be the cycle's.
+   */
+  readonly look: (ticket: WatchedTicket) => Promise<ReviewLook>;
+  /**
+   * The expensive half, called only for the `round` arm.
+   *
+   * Separate from `look` in the dependency list and not just in the flow, so
+   * that a test can count how many times money would have been spent without
+   * needing a worktree, and so a caller composing this cannot accidentally do
+   * the expensive thing first.
+   */
+  readonly act: (
+    ticket: WatchedTicket,
+    pending: PendingRound,
+    number: number,
+  ) => Promise<AdvanceOutcome>;
+  /**
+   * How many tickets one cycle may run a round for. See the header.
+   *
+   * Zero is meaningful and is not a mistake: look at everything, act on nothing.
+   * That is the dry run for this cycle, and it is the honest one — a review
+   * round's whole effect is on a pull request, so "report what you would do" is
+   * exactly "do the reads and stop before the spend".
+   */
+  readonly maxRounds: number;
+  /** Aborted to request a graceful stop; checked between tickets. */
+  readonly signal?: AbortSignal;
+  /**
+   * The query this cycle read, verbatim, for a report.
+   *
+   * Unused by the logic, and optional for the same reason `SolveDeps.queueJql`
+   * is: a hand-built fake has no query behind it, and absent means "these deps
+   * were not composed from settings", which is the truth in a test and never
+   * the truth in a wiring function.
+   */
+  readonly watchJql?: string;
+}
+
+/** A ticket a round was actually run for. */
+export interface ActedReview {
+  readonly issueKey: string;
+  readonly number: number;
+  readonly outcome: AdvanceOutcome;
+}
+
+/** A ticket the look settled without spending anything. */
+export interface SettledReview {
+  readonly issueKey: string;
+  readonly number: number;
+  readonly outcome: AdvanceOutcome;
+}
+
+/** A ticket whose pull request has been merged or closed. */
+export interface EndedReview {
+  readonly issueKey: string;
+  readonly number: number;
+  readonly state: "MERGED" | "CLOSED";
+}
+
+/** A ticket the cycle could not look at, or found no pull request for. */
+export interface UnlookedReview {
+  readonly issueKey: string;
+  readonly reason: string;
+}
+
+export interface ReviewCycleOutcome {
+  /** Every ticket the query returned. */
+  readonly watched: number;
+  readonly acted: readonly ActedReview[];
+  readonly settled: readonly SettledReview[];
+  /** The caller writes the terminal label for these; see `ReviewLook`. */
+  readonly ended: readonly EndedReview[];
+  readonly unlooked: readonly UnlookedReview[];
+  /** Actionable, but over `maxRounds` or interrupted. The next tick takes them. */
+  readonly deferred: readonly string[];
+}
+
+const NOTHING: ReviewCycleOutcome = {
+  watched: 0,
+  acted: [],
+  settled: [],
+  ended: [],
+  unlooked: [],
+  deferred: [],
+};
+
+/** Oldest touched first, so the same pull request cannot be starved twice. */
+function byUpdatedAscending(a: WatchedTicket, b: WatchedTicket): number {
+  return Date.parse(a.updated) - Date.parse(b.updated);
+}
+
+function stopRequested(signal: AbortSignal | undefined): boolean {
+  if (signal?.aborted !== true) {
+    return false;
+  }
+  logger.info("review.cycle.stopped", { note: "abort requested; the rest of the set waits" });
+  return true;
+}
+
+/** The message off an unknown throw, without asserting it was an `Error`. */
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycleOutcome> {
+  if (!deps.enabled) {
+    logger.info("review.disabled", {
+      note: "SOLVE_ENABLED is off; the watched set was not read",
+    });
+    return NOTHING;
+  }
+
+  if (stopRequested(deps.signal)) {
+    return NOTHING;
+  }
+
+  const tickets = (await deps.fetchWatched()).toSorted(byUpdatedAscending);
+
+  const acted: ActedReview[] = [];
+  const settled: SettledReview[] = [];
+  const ended: EndedReview[] = [];
+  const unlooked: UnlookedReview[] = [];
+  const deferred: string[] = [];
+
+  for (const ticket of tickets) {
+    // Deliberately not `stopRequested` before the look. A look is two reads and
+    // no writes, and stopping before them buys nothing while losing the one
+    // thing this cycle exists to notice.
+    let look: ReviewLook;
+    try {
+      look = await deps.look(ticket);
+    } catch (error) {
+      unlooked.push({ issueKey: ticket.key, reason: reasonOf(error) });
+      continue;
+    }
+
+    if (look.outcome === "no-pull-request") {
+      unlooked.push({ issueKey: ticket.key, reason: look.reason });
+      continue;
+    }
+
+    if (look.outcome === "ended") {
+      ended.push({ issueKey: ticket.key, number: look.number, state: look.state });
+      continue;
+    }
+
+    if (look.outcome === "settled") {
+      settled.push({ issueKey: ticket.key, number: look.number, outcome: look.result });
+      continue;
+    }
+
+    // The bound is checked here and not at the top of the loop, so a cycle at
+    // its limit still looks at the rest of the set and still notices a merge.
+    if (acted.length >= deps.maxRounds || stopRequested(deps.signal)) {
+      deferred.push(ticket.key);
+      continue;
+    }
+
+    try {
+      acted.push({
+        issueKey: ticket.key,
+        number: look.number,
+        outcome: await deps.act(ticket, look.pending, look.number),
+      });
+    } catch (error) {
+      // A round that threw has still spent whatever it spent — the reservation
+      // is written before the pass runs, on purpose — so this is reported and
+      // never retried inside the same cycle.
+      unlooked.push({ issueKey: ticket.key, reason: reasonOf(error) });
+    }
+  }
+
+  logger.info("review.cycle", {
+    watched: tickets.length,
+    acted: acted.map((entry) => entry.issueKey),
+    settled: settled.length,
+    ended: ended.map((entry) => `${entry.issueKey} ${entry.state}`),
+    unlooked: unlooked.length,
+    deferred: deferred.length,
+  });
+
+  return { watched: tickets.length, acted, settled, ended, unlooked, deferred };
+}

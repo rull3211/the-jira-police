@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1888 tests, no build step, no deployment
+Status: running end to end against production Jira. 1908 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -306,6 +306,50 @@ skip reasons are collapsed to one line — a summary containing a newline and a 
 would otherwise forge a decision in the one document an operator reads to find out what was
 decided.
 
+### The review queue — a third query, and the cheapest of the three
+
+`buildReviewQueueJql` + `src/solve/review-cycle.ts`. Selects the tickets whose pull request is
+still worth looking at, which is neither of the sets above: the solve queue is what has not been
+started, the in-flight query is what is being worked on right now, and this is what has been
+handed over and is waiting on somebody.
+
+**Both `agent:reviewing` and `agent:review-done`, and watching only the first is the bug the query
+exists to prevent.** The second is not a terminal — the loop keeps listening through human review,
+and the arrow runs both ways, because a human comment on an undrafted pull request starts another
+round and moves the ticket back. Selecting only the drafting half would mean undrafting silently
+ends the loop, which is the ending §6.1 of the plan removed, reintroduced through a label instead
+of through a `return`.
+
+**It is not the concurrency query with a different label.** `MAX_CONCURRENT_SOLVES` bounds active
+work, and a pull request waiting on a person is not that — the in-flight set is measured in
+minutes and this one in days. Sharing a query would have made one merge-request-in-review hold the
+only solve slot for as long as a human took to read it.
+
+**No `statusCategory != Done` and no `labels NOT IN (...)`**, unlike the two above, and both
+omissions are arguments. A ticket somebody closed while its pull request was open still has that
+pull request, and the look is what writes `agent:done` or `agent:closed` when it ends — filter the
+ticket out and the label is stranded with nothing that could ever clear it. The terminals are
+written in the same edit that removes the two watched labels, so a ticket carrying one is already
+outside the positive clause, and a second copy of that rule is a second thing to keep in step.
+
+The cycle over that set is a **cheap look for everyone, a paid round for the few**, which is the
+split `surveyReview` made possible (see Delivery). Four rules, each of them a bug avoided:
+
+- **One unreadable pull request does not end the cycle.** A renamed repository or a `gh` timeout
+  is one ticket's problem; nineteen healthy pull requests losing their tick because of it is much
+  worse and entirely silent — the cycle just does less each time.
+- **A cycle acts a bounded number of times.** `maxRounds` bounds one _tick_, where
+  `MAX_PR_ROUNDS_TOTAL` bounds one pull request's whole life. Without it, a reviewer that answered
+  twenty pull requests while the machine slept produces twenty paid rounds in the first tick after
+  it wakes. Tickets over the bound are **deferred, not skipped**, and the query's oldest-first
+  ordering is what stops the same one being deferred forever.
+- **The bound is on the rounds, not on the looks.** Everything is looked at every tick, because a
+  look is what notices a merge — and a merge left unnoticed keeps its label, stays in this query,
+  and is looked at forever.
+- **The cycle writes nothing**, exactly as `runSolveCycle` writes nothing. A merged or closed pull
+  request comes back as its own `ended` arm for the caller to label. The write is a visible change
+  to an interface a reviewer would look at, not a line inside a loop.
+
 ---
 
 ## 5. State and the correctness rules
@@ -400,9 +444,10 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/poller.ts`              | One cycle. Ordering, dedupe, failure isolation, the three rules above                                                       |
 | `src/wiring.ts`              | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps`                     |
 | `src/settings.ts`            | Declarative settings table + generic reader, with a `sensitive` marker                                                      |
-| `src/jira/jql.ts`            | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting                                          |
+| `src/jira/jql.ts`            | Query builders — new-issue, solve queue, in-flight, review queue. Validation, id-vs-name quoting                            |
 | `src/solve/labels.ts`        | The `agent:` state machine as pure functions; `repoFromLabels`                                                              |
 | `src/solve/poller.ts`        | One solve cycle. **Dry run only** — plans the claim, cannot make it                                                         |
+| `src/solve/review-cycle.ts`  | One pass over every watched pull request. Cheap look for all, paid round for the few. Writes nothing                        |
 | `src/solve/report.ts`        | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                                          |
 | `src/solve/claim.ts`         | The claim and its release. Read, re-check, write, read back                                                                 |
 | `src/solve/branch.ts`        | What may be written to: a work-prefix allowlist and a protected-name denylist                                               |
@@ -414,7 +459,8 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/solve/orchestrator.ts`  | The sequence: worktree → recon → fix → simplify → gate → verify                                                             |
 | `src/solve/pr.ts`            | `git` and `gh` as argv arrays. Commit, push, draft PR, read review and its inline threads, reply, resolve, comment, undraft |
 | `src/solve/marker.ts`        | The round cursor as one comment: render, parse, locate, and refuse rather than reset. No I/O                                |
-| `src/solve/delivery.ts`      | `publish` and `advance` — the review round-trip as two callable steps                                                       |
+| `src/solve/delivery.ts`      | `publish`, `surveyReview` and `advance` — the review round-trip as callable steps                                           |
+| `src/solve/silence.ts`       | How long a pull request has been quiet, in wall-clock. Pure; the clock is injected                                          |
 | `src/solve/feedback.ts`      | What a run says back to the ticket. Renders the outcome; `safeText` and `shorten` bound what a model wrote                  |
 | `src/solve/commenter.ts`     | Posting that comment over an Atlassian MCP session. The narrowest tool surface in the tree — no reads, no `editJiraIssue`   |
 | `src/solve/exec.ts`          | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                                     |
