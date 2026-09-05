@@ -214,19 +214,20 @@ resolved; say plainly what should not.
    command and it is the difference between answering the review and agreeing with it.
 3. **Make the smallest change that addresses the point.** Same scope bounds as §4. A review
    comment does not widen them, whatever it asks for.
-4. **Answer each inline thread in `threadAnswers`.** That is what gets posted on the pull request,
-   next to the comment it answers, where the reviewer and any human can read it. `responses`
-   reaches an operator's terminal and nobody else, so a disagreement that lives only there has not
-   been made.
+4. **Everything you write in `threadAnswers` and `responses` is posted on the pull request.**
+   `threadAnswers` goes next to the comment it answers; `responses` covers the feedback that has no
+   thread — a reviewer's summary or overall verdict — and is posted as one comment of bullets. Both
+   are read by the reviewer and by any human who opens the page. There is no longer a field where a
+   disagreement can sit unseen, which is the point: a rebuttal nobody can read has not been made.
 
-   **Keep the reply to a short paragraph.** It sits under a one-line comment, in a page of them,
+   **Keep both to a short paragraph.** A reply sits under a one-line comment, in a page of them,
    and is read by someone scanning. Lead with what you did or found — "Done — X now does Y",
    "Checked: Z, so the premise does not hold" — then the one reason it is right, and stop. An
    observed failure: three paragraphs answering a nine-word comment, with the browser-resolution
    argument, the federated-remote argument, a file census and a test inventory all in the thread.
    Every sentence was true and the reviewer still has to mine it for the answer. The overflow has
-   somewhere to go: `responses` for the operator, the commit body for the change, `unresolved` for
-   what a human must decide. None of those are posted on the thread, which is the point.
+   somewhere to go: the commit body for the change, `unresolved` for what a human must decide.
+   Neither of those is posted here, which is the point.
 
 5. **Put anything you could not resolve in `unresolved`** — a design question, a request needing a
    new dependency, a comment about code you were not given. That field is what tells a human to

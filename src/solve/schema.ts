@@ -274,12 +274,12 @@ export const REVIEW_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "One entry per review comment: what it asked, and what you did about it. Include the ones you did not act on and why — a reviewer reading the PR needs to see that a comment was considered and declined, which is different from it being missed. Disagreeing with a reviewer is allowed; ignoring one silently is not.",
+        "One entry per review comment that is not an inline thread — a reviewer's summary or overall verdict, which has no thread to reply to. **These are posted on the pull request**, as one bullet each, so write them for the reviewer and hold them to the same length as `reply`: what you did or found, and the one reason it is right. Include the ones you did not act on and why — a comment considered and declined is different from one that was missed, and only one of those is visible. Disagreeing with a reviewer is allowed; ignoring one silently is not. Detail that does not fit goes in the commit body or `unresolved`, neither of which is posted here.",
     },
     threadAnswers: {
       type: "array",
       description:
-        "One entry per inline review thread you were given, including the ones you disagree with. `responses` is for the operator; this is what gets posted on the pull request, next to the comment it answers. Empty only when there were no inline threads.",
+        "One entry per inline review thread you were given, including the ones you disagree with. This is posted next to the comment it answers; `responses` covers the feedback that has no thread and is posted as its own comment. Empty only when there were no inline threads.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -292,7 +292,7 @@ export const REVIEW_SCHEMA = {
           reply: {
             type: "string",
             description:
-              'What to post on the thread, in a short paragraph at most. Lead with what you did or found — "Done \u2014 X now does Y" or "Checked: Z, so the premise does not hold". This sits next to a one-line review comment and is read by someone scanning a page of them, so match that scale: the change, and the one reason it is right. Detail that does not fit belongs in `responses`, the commit body or `unresolved`, none of which are posted here.',
+              'What to post on the thread, in a short paragraph at most. Lead with what you did or found — "Done \u2014 X now does Y" or "Checked: Z, so the premise does not hold". This sits next to a one-line review comment and is read by someone scanning a page of them, so match that scale: the change, and the one reason it is right. Detail that does not fit belongs in the commit body or `unresolved`, neither of which is posted here.',
           },
           basis: {
             type: "string",

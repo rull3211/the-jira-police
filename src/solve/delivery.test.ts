@@ -7,7 +7,7 @@ import {
   publish,
   reviewerComments,
 } from "./delivery.ts";
-import { NEVER_READ, parseMarker } from "./marker.ts";
+import { BOT_PREFIX, MARKER_PREFIX, NEVER_READ, parseMarker } from "./marker.ts";
 import type { PassRunner, SolveDependencies } from "./orchestrator.ts";
 import type { BotIdentity, ReviewComment, ReviewState } from "./pr.ts";
 import type { Pass, SolveRunOptions } from "./runner.ts";
@@ -146,6 +146,20 @@ const inline = (...nodes: readonly unknown[]): Rule => ({
   reply: { stdout: threadsJson(...nodes) },
 });
 
+/** The bodies of every comment the run posted, in order. */
+const posts = (h: Harness): readonly string[] =>
+  h.calls
+    .filter((argv) => asked("addComment")(argv))
+    // `gh api graphql` passes each variable as its own `-f key=value`, and the
+    // last element is the query, not the body. Reading `at(-1)` returns the
+    // mutation text for every call and silently matches nothing.
+    .map((argv) => argv.find((element) => element.startsWith("body=")) ?? "")
+    .map((body) => body.slice("body=".length));
+
+/** Does any of these bodies claim to be the iteration marker? */
+const marker = (bodies: readonly string[]): boolean =>
+  bodies.some((body) => body.startsWith(MARKER_PREFIX));
+
 /** Did the run write the marker at all — either the first post or a later edit? */
 const markerWritten = (h: Harness): boolean =>
   h.calls.some((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv));
@@ -162,6 +176,20 @@ const saw =
   (...needles: readonly string[]) =>
   (argv: readonly string[]): boolean =>
     needles.every((needle) => argv.includes(needle));
+
+/**
+ * A pull request whose reviewer has spoken and left no issue comment at all.
+ *
+ * Lets a test distinguish "the round ran because of the thread" from "the round
+ * ran because of a comment", and — since `advance` now posts its answer to the
+ * comment channel — "it said nothing because there was nothing to say".
+ */
+const QUIET: Rule = {
+  match: saw("pr", "view"),
+  reply: {
+    stdout: reviewJson({ reviews: [{ author: { login: "copilot" }, body: "" }] } as never),
+  },
+};
 
 const PR_URL = "https://github.com/acme/advisor/pull/42";
 const PR_NODE = "PR_kwDOnode";
@@ -553,6 +581,112 @@ describe("advance", () => {
     expect(outcome).toMatchObject({ kind: "iterated", pushed: false });
   });
 
+  it("puts its answer to a review body on the pull request", async () => {
+    // Round 3 of PR #2658: Copilot's feedback was a summary review, which has
+    // no thread to reply to, so the pass's refutation went to the operator's
+    // terminal and the reviewer's objection stood unanswered in public.
+    const h = harness({ review: review({ changed: false, responses: ["Checked: no icon link"] }) });
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ spoken: { outcome: "posted" } });
+    expect(posts(h).some((body) => body.includes("Checked: no icon link"))).toBe(true);
+  });
+
+  it("prefixes what it posts, so the next round does not read it as feedback", async () => {
+    // There is no login to key on — `gh` posts as the operator — so `bot: ` is
+    // the only thing separating our own words from a reviewer's. Without it the
+    // loop is handed its own last answer and argues with itself.
+    const h = harness({ review: review({ changed: false, responses: ["answered"] }) });
+
+    await advance(h.deps, advanceRequest);
+
+    const spoken = posts(h).filter((body) => !body.startsWith(MARKER_PREFIX));
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]?.startsWith(BOT_PREFIX)).toBe(true);
+    expect(reviewerComments({ comments: [{ body: spoken[0] ?? "" }] } as never)).toEqual([]);
+  });
+
+  it("says nothing on the pull request when every comment had a thread", async () => {
+    // The bot chatter the marker section refuses to add. A round whose input
+    // was entirely inline has already answered in the right place.
+    const h = harness({ review: review({ changed: false }) }, [QUIET, inline(thread())]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ spoken: { outcome: "nothing-to-say" } });
+    expect(posts(h).filter((body) => !body.startsWith(MARKER_PREFIX))).toEqual([]);
+  });
+
+  it("takes the pull request out of draft when the round changed nothing", async () => {
+    // This side is finished: nothing new to re-read, nothing more the loop can
+    // do. Holding the draft buys one more paid round to discover an empty inbox.
+    const h = harness({ review: review({ changed: false }) });
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ undrafted: "undrafted" });
+    expect(ran(h, "pr", "ready")).toBe(true);
+  });
+
+  it("stays a draft when the answer did not reach the pull request", async () => {
+    // The gate is the answer being *visible*, not merely produced. Undrafting
+    // here hands a human a reviewer's objection with the rebuttal nowhere.
+    const h = harness({ review: review({ changed: false, responses: ["answered"] }) }, [
+      { match: asked("addComment"), reply: { exitCode: 1, stderr: "HTTP 403" } },
+      spent(1),
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ spoken: { outcome: "failed" }, undrafted: "still-drafting" });
+    expect(ran(h, "pr", "ready")).toBe(false);
+  });
+
+  it("stays a draft when a thread reply would not post", async () => {
+    // Same rule through the other channel, and a separate call site.
+    const h = harness(
+      {
+        review: review({
+          changed: false,
+          threadAnswers: [
+            {
+              threadId: "PRRT_1",
+              reply: "checked, and the premise holds",
+              basis: "checked",
+              resolve: false,
+            },
+          ],
+        }),
+      },
+      [
+        {
+          match: asked("addPullRequestReviewThreadReply"),
+          reply: { exitCode: 1, stderr: "HTTP 403" },
+        },
+        QUIET,
+        inline(thread()),
+      ],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ undrafted: "still-drafting" });
+    expect(ran(h, "pr", "ready")).toBe(false);
+  });
+
+  it("keeps the round when it cannot leave draft, and says so out loud", async () => {
+    // The round did its work. Discarding it over a failed transition would
+    // throw away a paid pass; hiding the failure sends nobody to the button.
+    const h = harness({ review: review({ changed: false }) }, [
+      { match: saw("pr", "ready"), reply: { exitCode: 1, stderr: "HTTP 403" } },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", undrafted: "failed" });
+  });
+
   it("does not undraft while it is still iterating", async () => {
     // Undrafting mid-loop puts a half-answered pull request in front of a
     // human as though it were finished.
@@ -906,7 +1040,11 @@ describe("advance's review cursor", () => {
     const later = harness({ review: review() }, [spent(1)]);
     await advance(later.deps, advanceRequest);
     expect(later.calls.some((argv) => asked("updateIssueComment")(argv))).toBe(true);
-    expect(later.calls.some((argv) => asked("addComment")(argv))).toBe(false);
+    // Not "posted no comment at all" — a round also posts its answer to the
+    // review bodies, which is an `addComment` too. The claim is narrower and
+    // is the one that matters: no *second marker*, because two markers is a
+    // refusal on the next round and a person has to delete one by hand.
+    expect(marker(posts(later))).toBe(false);
   });
 
   it("edits the marker by its node id, and never with --edit-last", async () => {
@@ -1047,20 +1185,6 @@ describe("advance's review cursor", () => {
 });
 
 describe("advance's inline threads", () => {
-  /**
-   * A pull request whose reviewer has spoken and left no issue comment at all.
-   *
-   * Every test here has to distinguish "the round ran because of the thread"
-   * from "the round ran because of a comment", so the comment channel is empty
-   * in all of them.
-   */
-  const QUIET: Rule = {
-    match: saw("pr", "view"),
-    reply: {
-      stdout: reviewJson({ reviews: [{ author: { login: "copilot" }, body: "" }] } as never),
-    },
-  };
-
   const ANSWER = {
     threadId: "PRRT_1",
     reply: "appended only when there is no icon link already — 8235cae",

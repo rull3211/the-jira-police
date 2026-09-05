@@ -60,6 +60,7 @@ import {
 import {
   type Marker,
   NEVER_READ,
+  BOT_PREFIX,
   findMarker,
   isNewer,
   isOurs,
@@ -225,6 +226,40 @@ export type ReRequest =
    */
   | "unnecessary";
 
+/**
+ * What happened to the round's answer to feedback that has no thread.
+ *
+ * A review body — Copilot's summary, a human's overall verdict — is not an
+ * inline comment and has nothing to reply *to*. `answerThreads` therefore never
+ * sees it, so before this existed the round's whole argument went to
+ * `responses`, which reaches an operator's terminal and nobody else. Observed
+ * on round 3 of PR #2658: the pass refuted the reviewer's premise with file and
+ * line references, and on the pull request the last visible word was still the
+ * reviewer's objection. §6.1c's "push back in public" had been built for
+ * threads only.
+ */
+export type Spoken =
+  /** The round's answer is on the pull request. */
+  | { readonly outcome: "posted" }
+  /** All the feedback was inline, so the thread replies already carry it. */
+  | { readonly outcome: "nothing-to-say" }
+  /** The comment did not post. The argument exists nowhere a reviewer can see. */
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/**
+ * Whether the round took the pull request out of draft, and why not if not.
+ *
+ * Draft means *this side is still working*. A round that pushed a commit is
+ * still working — the reviewer has something new to read — so it stays a draft.
+ * A round that changed nothing has done everything it can, and leaving it in
+ * draft buys another full round whose only discovery is an empty inbox.
+ *
+ * `failed` is separate from `still-drafting` because they are opposite
+ * instructions. One is a person clicking "Ready for review"; the other is
+ * nothing to do.
+ */
+export type Undraft = "undrafted" | "failed" | "still-drafting";
+
 export type AdvanceOutcome =
   /** The reviewer has not said anything yet. Look again later; nothing ran. */
   | { readonly kind: "waiting" }
@@ -274,6 +309,10 @@ export type AdvanceOutcome =
        * a commit, and the next thing they doubt is the marker.
        */
       readonly pushed: boolean;
+      /** Where the answer to non-thread feedback went. See `Spoken`. */
+      readonly spoken: Spoken;
+      /** Whether the round left the pull request in draft. See `Undraft`. */
+      readonly undrafted: Undraft;
       /**
        * What was posted on the inline threads, and what would not post.
        *
@@ -732,19 +771,72 @@ export async function advance(
       threads,
     );
 
+  /**
+   * Puts the round's answer to the review bodies on the pull request.
+   *
+   * Only when there was feedback with no thread to reply to. A round whose
+   * input was entirely inline has already answered in the right place, and a
+   * summary comment restating it is the bot chatter §6.3 refuses to add.
+   *
+   * The `bot: ` prefix is not decoration. `reviewerComments` drops our own by
+   * that prefix — there is no login to key on, since `gh` posts as the operator
+   * — so a comment written without it is read back next round as a reviewer
+   * asking for something, and the loop argues with itself. It is deliberately
+   * not the marker's prefix, which is longer and matched separately.
+   */
+  const say = async (): Promise<Spoken> => {
+    if (comments.length === 0 || resolved.report.responses.length === 0) {
+      return { outcome: "nothing-to-say" };
+    }
+    const posted = await postComment(commands, {
+      cwd: worktree.path,
+      repo,
+      number,
+      body: `${BOT_PREFIX}round ${String(round + 1)}\n\n${resolved.report.responses
+        .map((response) => `- ${response}`)
+        .join("\n")}`,
+      timeoutMs: request.ghTimeoutMs,
+    });
+    return posted.outcome === "failed"
+      ? { outcome: "failed", reason: posted.reason }
+      : { outcome: "posted" };
+  };
+
+  /**
+   * Takes the pull request out of draft when the round has nothing left to do.
+   *
+   * Gated on the answer being *visible*, not merely produced. Undrafting hands
+   * the pull request to a human, and doing that while the round's reply sits in
+   * a terminal — or failed to post — shows them a reviewer's objection with no
+   * answer next to it, which is the state round 3 of #2658 would have created.
+   */
+  const leaveDraft = async (spoken: Spoken, posted: ThreadOutcome): Promise<Undraft> => {
+    if (spoken.outcome === "failed" || posted.failures.length > 0) {
+      return "still-drafting";
+    }
+    const marked = await markReady(commands, gh);
+    return marked.outcome === "failed" ? "failed" : "undrafted";
+  };
+
   if (resolved.kind === "no-change") {
-    // Questions answered, no code touched. Nothing to push, and the reviewer
-    // is asked again so they can read the answers. The thread replies still go
-    // out: a round that answered without editing has answered, and its argument
-    // belongs next to the comment it answers rather than only in a terminal.
+    // Questions answered, no code touched. The replies still go out: a round
+    // that answered without editing has answered, and its argument belongs next
+    // to the comment it answers rather than only in a terminal.
+    //
+    // Then the pull request leaves draft. This side is finished with it — there
+    // is nothing for the reviewer to re-read and nothing more this loop can do
+    // — so holding the draft only buys another paid round to discover an empty
+    // inbox, on every tick once E is driving.
     const threadOutcome = await answer();
-    const reviewerRequested = await reRequest(false);
+    const spoken = await say();
     return {
       kind: "iterated",
       round: round + 1,
       responses: resolved.report.responses,
-      reviewerRequested,
+      reviewerRequested: await reRequest(false),
       pushed: false,
+      spoken,
+      undrafted: await leaveDraft(spoken, threadOutcome),
       threads: threadOutcome,
       unresolved: resolved.report.unresolved,
     };
@@ -775,6 +867,7 @@ export async function advance(
   // After the push, never before. A reply claiming what changed must not be
   // standing in public on a round that pushed nothing.
   const threadOutcome = await answer();
+  const spoken = await say();
   const pushed = committed.outcome === "committed";
   const reviewerRequested = await reRequest(pushed);
   return {
@@ -782,6 +875,11 @@ export async function advance(
     round: round + 1,
     responses: resolved.report.responses,
     reviewerRequested,
+    spoken,
+    // A round with a commit on it stays a draft even though it is the same
+    // `iterated` kind: the reviewer has something new to read, and undrafting
+    // now would put a half-answered pull request in front of a human.
+    undrafted: pushed ? "still-drafting" : await leaveDraft(spoken, threadOutcome),
     // The commit, not the model's `changed` flag. A pass can report an edit
     // that `commitAll` then finds nothing to commit in — a rewrite that
     // reproduced the file byte for byte — and the branch is the only honest

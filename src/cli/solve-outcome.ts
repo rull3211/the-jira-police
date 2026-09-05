@@ -17,7 +17,7 @@
  * register. Both have a test saying so.
  */
 
-import type { AdvanceOutcome, ReRequest } from "../solve/delivery.ts";
+import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -153,6 +153,18 @@ const REREQUEST_LINE = {
   unnecessary: `\nThe reviewer was not asked again — nothing was pushed, so there is nothing new to re-read.`,
 } as const satisfies Record<ReRequest, string>;
 
+/**
+ * One line per draft transition, and again only one is a call to act.
+ *
+ * `still-drafting` is the ordinary case on a round that pushed, so it says why
+ * rather than reading as a thing that went wrong.
+ */
+const UNDRAFT_LINE = {
+  undrafted: `\nThe pull request is out of draft — this side is done with it, a human takes it from here.`,
+  failed: `\nThe pull request could NOT be taken out of draft — do it by hand, or nobody will review this.`,
+  "still-drafting": `\nStill a draft: there is something new for the reviewer to read first.`,
+} as const satisfies Record<Undraft, string>;
+
 /** One line an operator can act on, per review-round outcome. */
 export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
   switch (outcome.kind) {
@@ -179,6 +191,13 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         ` Responses:\n` +
         outcome.responses.map((response) => `  - ${response}`).join("\n") +
         REREQUEST_LINE[outcome.reviewerRequested] +
+        UNDRAFT_LINE[outcome.undrafted] +
+        // A review body has no thread, so this is the only channel the round's
+        // answer to it has. Losing it silently leaves a reviewer's objection
+        // standing with the rebuttal in a terminal nobody will read again.
+        (outcome.spoken.outcome === "failed"
+          ? `\nThe answer did NOT reach the pull request — ${outcome.spoken.reason}`
+          : "") +
         `\nInline threads: ${String(outcome.threads.answered)} answered, ${String(outcome.threads.resolved)} resolved.` +
         // Same reasoning as the re-request line above. A reply that would not
         // post is a decline nobody can see, which on the pull request is
