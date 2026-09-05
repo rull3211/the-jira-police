@@ -199,6 +199,24 @@ export type RequestReviewResult =
 export interface ReviewComment {
   readonly author: string;
   readonly body: string;
+  /**
+   * When it was written, or `""` when the entry carried no readable date.
+   *
+   * Empty rather than absent so the cursor has to decide what to do about it
+   * rather than being able to forget the case exists. `isNewer` treats it as
+   * new, which costs a round and does not lose a reviewer's request.
+   */
+  readonly createdAt: string;
+  /**
+   * The GraphQL node id, or `""` for an entry that has none.
+   *
+   * Only an issue comment can be edited by id, which is how the marker is
+   * rewritten each round without `gh pr comment --edit-last` — that flag edits
+   * the last comment of the *current user*, and the current user is the
+   * operator, so a round running after a human commented would overwrite their
+   * words with machine state.
+   */
+  readonly id: string;
 }
 
 export interface ReviewState {
@@ -692,6 +710,36 @@ interface RawEntry {
   readonly login: string;
   /** `null` when gh gave something that is not a string, including for an approval. */
   readonly body: string | null;
+  /** `null` when the entry carries no readable date. See `dateOf`. */
+  readonly createdAt: string | null;
+  /** The GraphQL node id, `""` when absent. Only an issue comment can be edited. */
+  readonly id: string;
+}
+
+/**
+ * When an entry was written, and the two field names that answer it.
+ *
+ * **A review does not have `createdAt`.** Probed against PR #2658 on 2026-09-05,
+ * after the plan flagged this as the half of the question that mattered: a
+ * review's key list is `author, authorAssociation, body, commit, id,
+ * includesCreatedEdit, reactionGroups, state, submittedAt`, and asking for
+ * `createdAt` on one returns `null` for every entry. An issue comment has
+ * `createdAt` and no `submittedAt`. `readReview` merges the two lists, so a
+ * cursor reading only `createdAt` would date every issue comment and no review
+ * at all — and an undated entry is treated as new, which turns the cursor into
+ * "everything is new" for exactly the feedback the loop is bounded on. That is
+ * the runaway the cursor exists to prevent, arriving through a field name.
+ *
+ * Both are read, neither is required to be the one present. Nothing checks they
+ * agree, because they never co-occur.
+ */
+function dateOf(record: Record<string, unknown>): string | null {
+  const submitted = record["submittedAt"];
+  if (typeof submitted === "string" && submitted !== "") {
+    return submitted;
+  }
+  const created = record["createdAt"];
+  return typeof created === "string" && created !== "" ? created : null;
 }
 
 /**
@@ -724,9 +772,12 @@ function entriesOf(value: unknown): readonly RawEntry[] | null {
     }
     const login = asRecord(record["author"])?.["login"];
     const body = record["body"];
+    const id = record["id"];
     entries.push({
       login: typeof login === "string" ? login : "",
       body: typeof body === "string" ? body : null,
+      createdAt: dateOf(record),
+      id: typeof id === "string" ? id : "",
     });
   }
   return entries;
@@ -938,6 +989,11 @@ export async function readReview(
       "--repo",
       repo,
       "--json",
+      // The field list is unchanged, and that is worth a line rather than a
+      // silent omission: `--json` selects top-level fields only, and each entry
+      // in `reviews` and `comments` already arrives whole — with its own `id`,
+      // and with `submittedAt` or `createdAt` depending on which list it came
+      // from. Adding `id` here would ask for the pull request's id, not theirs.
       "reviews,comments,state,isDraft",
     ],
     { cwd: worktreePath, timeoutMs },
@@ -1003,7 +1059,14 @@ export async function readReview(
         entry.body.trim() === "" ||
         (matchesReviewer(entry.login, reviewer) && isReviewerError(entry.body))
           ? []
-          : [{ author: entry.login === "" ? "unknown" : entry.login, body: entry.body }],
+          : [
+              {
+                author: entry.login === "" ? "unknown" : entry.login,
+                body: entry.body,
+                createdAt: entry.createdAt ?? "",
+                id: entry.id,
+              },
+            ],
       ),
       state,
       isDraft,

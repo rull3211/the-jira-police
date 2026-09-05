@@ -8,7 +8,7 @@ import {
   reviewerComments,
 } from "./delivery.ts";
 import type { PassRunner, SolveDependencies } from "./orchestrator.ts";
-import type { BotIdentity, ReviewState } from "./pr.ts";
+import type { BotIdentity, ReviewComment, ReviewState } from "./pr.ts";
 import type { Pass, SolveRunOptions } from "./runner.ts";
 import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
 
@@ -391,6 +391,9 @@ describe("advance", () => {
     // `reviewerComments` is tested on its own below; this asserts `advance`
     // actually routes through it. A pass answering its own last answer is a
     // loop with no new information in it, and it burns a round each time.
+    //
+    // Note the author: our own comment arrives under the operator's login,
+    // because that is who `gh` is authenticated as. Only the prefix marks it.
     const h = harness({ review: review() }, [
       {
         match: saw("pr", "view"),
@@ -399,7 +402,7 @@ describe("advance", () => {
             state: "OPEN",
             isDraft: true,
             reviews: [{ author: { login: "copilot" }, body: "the wrapper looks unnecessary" }],
-            comments: [{ author: { login: "jira-police" }, body: "moved it, as you suggested" }],
+            comments: [{ author: { login: "rull3211" }, body: "bot: moved it, as you suggested" }],
             reviewRequests: [],
           }),
         },
@@ -416,6 +419,7 @@ describe("advance", () => {
   it("does not give up when the only comment left is our own", async () => {
     // Our reply is not feedback. Counting it would spend rounds answering
     // ourselves, and here it would undraft while the reviewer is still typing.
+    // Again under the operator's login, and again told apart by the prefix.
     const h = harness({}, [
       {
         match: saw("pr", "view"),
@@ -424,7 +428,7 @@ describe("advance", () => {
             state: "OPEN",
             isDraft: true,
             reviews: [{ author: { login: "copilot" }, body: "" }],
-            comments: [{ author: { login: "jira-police" }, body: "pushed a fix" }],
+            comments: [{ author: { login: "rull3211" }, body: "bot: pushed a fix" }],
             reviewRequests: [],
           }),
         },
@@ -547,46 +551,46 @@ describe("advance", () => {
   });
 });
 
-describe("reviewerComments", () => {
-  it("drops our own comments, so a round is not fed its own replies", async () => {
-    const state: ReviewState = {
-      reviewerResponded: true,
-      reviewerErrored: false,
-      state: "OPEN",
-      isDraft: true,
-      comments: [
-        { author: "copilot", body: "the wrapper looks unnecessary" },
-        { author: "jira-police", body: "moved it, as suggested" },
-      ],
-    };
+const said = (author: string, body: string): ReviewComment => ({
+  author,
+  body,
+  createdAt: "2026-09-05T10:00:00Z",
+  id: "IC_1",
+});
 
-    expect(reviewerComments(state, IDENTITY)).toEqual([
-      { author: "copilot", body: "the wrapper looks unnecessary" },
-    ]);
-    await Promise.resolve();
+const stateWith = (...comments: readonly ReviewComment[]): ReviewState => ({
+  reviewerResponded: true,
+  reviewerErrored: false,
+  state: "OPEN",
+  isDraft: true,
+  comments,
+});
+
+describe("reviewerComments", () => {
+  it("drops our own comments, so a round is not fed its own replies", () => {
+    const theirs = said("copilot", "the wrapper looks unnecessary");
+    const state = stateWith(theirs, said("rull3211", "bot: moved it, as suggested"));
+
+    expect(reviewerComments(state)).toEqual([theirs]);
   });
 
-  it("matches our identity regardless of case", () => {
-    const state: ReviewState = {
-      reviewerResponded: true,
-      reviewerErrored: false,
-      state: "OPEN",
-      isDraft: true,
-      comments: [{ author: "JIRA-Police", body: "mine" }],
-    };
+  it("keeps a comment posted from the account the bot posts under", () => {
+    // The mutation whose failure destroys somebody's words rather than costing
+    // money. `gh` is authenticated as the operator, so this human comment and
+    // the bot's own arrive with the same author — verified on PR #2658. Only
+    // the prefix separates them.
+    const human = said("rull3211", "Can you also handle the empty case?");
 
-    expect(reviewerComments(state, IDENTITY)).toEqual([]);
+    expect(reviewerComments(stateWith(human))).toEqual([human]);
+  });
+
+  it("does not claim a comment that merely mentions the prefix", () => {
+    const human = said("copilot", "The `bot: ` prefix is missing from this reply.");
+
+    expect(reviewerComments(stateWith(human))).toEqual([human]);
   });
 
   it("keeps everything when none of it is ours", () => {
-    const state: ReviewState = {
-      reviewerResponded: true,
-      reviewerErrored: false,
-      state: "OPEN",
-      isDraft: true,
-      comments: [{ author: "copilot", body: "a" }],
-    };
-
-    expect(reviewerComments(state, IDENTITY)).toHaveLength(1);
+    expect(reviewerComments(stateWith(said("copilot", "a")))).toHaveLength(1);
   });
 });

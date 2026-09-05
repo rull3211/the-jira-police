@@ -49,6 +49,7 @@ import {
   readReview,
   requestReview,
 } from "./pr.ts";
+import { isOurs } from "./marker.ts";
 import { type ReviewRoundRequest, type SolveDependencies, resolveReview } from "./orchestrator.ts";
 import type { CommitMessage } from "./runner.ts";
 import type { Worktree } from "./worktree.ts";
@@ -240,15 +241,32 @@ export type AdvanceOutcome =
  * Our own comments are dropped. Without this the second round is handed the
  * first round's replies as though a reviewer had written them, and a pass
  * responding to its own previous answers is a loop with no new information in
- * it. Matching on the identity we commit under, because that is the only name
- * we can be sure is ours.
+ * it.
+ *
+ * ## This used to match on the author, and that was a bug
+ *
+ * It compared `ReviewComment.author` — a GitHub **login**, parsed out of
+ * `author.login` — against `BotIdentity.name`, which is `SOLVE_BOT_NAME` and
+ * defaults to the git author string `jira-police`. Those never match, so the
+ * filter dropped nothing. It was inert only because nothing posted a comment
+ * yet, and wrong the moment something did.
+ *
+ * There is no login to fix it to, either. `gh` is authenticated as **the
+ * operator**, so a comment this service posts is authored by a human's account
+ * and is indistinguishable *by author* from that human's own review — verified
+ * on PR #2658, where two hand-driven thread replies came back authored
+ * `rull3211`, the same login as the operator's own reviews. So ours is what
+ * carries the `bot: ` prefix, not what carries a name, and `BotIdentity` goes
+ * back to meaning only what it says: the name on a commit.
+ *
+ * The failure this protects against is not symmetric with the one above.
+ * Getting it wrong in this direction feeds the pass its own last answer and
+ * burns a round; getting it wrong in the other direction discards a person's
+ * comment because they happened to open it with the same three characters,
+ * which is why the prefix is checked at the start of the body and nowhere else.
  */
-export function reviewerComments(
-  review: ReviewState,
-  identity: BotIdentity,
-): readonly ReviewComment[] {
-  const ours = identity.name.toLowerCase();
-  return review.comments.filter((comment) => comment.author.toLowerCase() !== ours);
+export function reviewerComments(review: ReviewState): readonly ReviewComment[] {
+  return review.comments.filter((comment) => !isOurs(comment.body));
 }
 
 /**
@@ -306,7 +324,7 @@ export async function advance(
     return true;
   };
 
-  const comments = reviewerComments(review, request.identity);
+  const comments = reviewerComments(review);
   if (comments.length === 0) {
     // Responded, nothing to act on. The pull request is as good as it is going
     // to get from this side.

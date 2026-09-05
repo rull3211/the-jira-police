@@ -128,7 +128,12 @@ const view = (stdout: string): Record<string, Partial<CommandResult>> => ({
   "pr view": { stdout },
 });
 
-const comment = (body: string, author = "copilot"): ReviewComment => ({ author, body });
+const comment = (body: string, author = "copilot"): ReviewComment => ({
+  author,
+  body,
+  createdAt: "",
+  id: "",
+});
 
 describe("commitAll", () => {
   it("stages the whole worktree before committing", async () => {
@@ -630,11 +635,29 @@ describe("readReview", () => {
   });
 
   it("collects a Copilot review and its comments", async () => {
+    // The two lists name the same fact differently and this fixture says so:
+    // a review dates itself with `submittedAt`, an issue comment with
+    // `createdAt`. Probed against PR #2658 — a review has no `createdAt` at
+    // all, and asking for one returns null.
     const runner = fakeRunner(
       view(
         payload({
-          reviews: [{ author: { login: "copilot" }, body: "Two things below." }],
-          comments: [{ author: { login: "copilot" }, body: "Nit: rename this." }],
+          reviews: [
+            {
+              author: { login: "copilot" },
+              body: "Two things below.",
+              submittedAt: "2026-09-05T11:00:49Z",
+              id: "PRR_1",
+            },
+          ],
+          comments: [
+            {
+              author: { login: "copilot" },
+              body: "Nit: rename this.",
+              createdAt: "2026-09-05T11:04:00Z",
+              id: "IC_1",
+            },
+          ],
         }),
       ),
     );
@@ -645,12 +668,59 @@ describe("readReview", () => {
       reviewerResponded: true,
       reviewerErrored: false,
       comments: [
-        { author: "copilot", body: "Two things below." },
-        { author: "copilot", body: "Nit: rename this." },
+        {
+          author: "copilot",
+          body: "Two things below.",
+          createdAt: "2026-09-05T11:00:49Z",
+          id: "PRR_1",
+        },
+        {
+          author: "copilot",
+          body: "Nit: rename this.",
+          createdAt: "2026-09-05T11:04:00Z",
+          id: "IC_1",
+        },
       ],
       state: "OPEN",
       isDraft: true,
     });
+  });
+
+  it("dates a review even though a review has no createdAt", async () => {
+    // The mutation this pins: read only `createdAt` and every review comes
+    // back undated, an undated comment is treated as new, and the cursor
+    // degrades into "everything is new" — which is the runaway it exists to
+    // prevent, arriving through a field name rather than a missing feature.
+    const runner = fakeRunner(
+      view(
+        payload({
+          reviews: [
+            {
+              author: { login: "copilot" },
+              body: "Two things below.",
+              submittedAt: "2026-09-05T11:00:49Z",
+              createdAt: null,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.createdAt : null).toBe(
+      "2026-09-05T11:00:49Z",
+    );
+  });
+
+  it("leaves the date empty rather than guessing when the entry carries none", async () => {
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: "No date on this one." }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.createdAt : null).toBe("");
   });
 
   // The exact body GitHub posted on PR #2657, 2026-09-04. The Copilot app was
@@ -735,7 +805,7 @@ describe("readReview", () => {
     // something; deleting their message because a bot used the same words would
     // be the recogniser reaching past what it knows.
     expect(result.outcome === "read" ? result.review.comments : []).toEqual([
-      { author: "a-human", body: COPILOT_ERROR },
+      { author: "a-human", body: COPILOT_ERROR, createdAt: "", id: "" },
     ]);
   });
 
@@ -801,7 +871,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "d", body: "real feedback" },
+      { author: "d", body: "real feedback", createdAt: "", id: "" },
     ]);
   });
 
@@ -811,7 +881,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "unknown", body: "still feedback" },
+      { author: "unknown", body: "still feedback", createdAt: "", id: "" },
     ]);
   });
 
