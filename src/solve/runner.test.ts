@@ -662,12 +662,21 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   changed: true,
   filesTouched: ["src/app/head.tsx"],
   responses: ["Asked for a null check on the config lookup; added one."],
+  threadAnswers: [],
   summary: "guard the config lookup against a missing entry",
   commitSubject: "fix(advisor): guard the favicon config lookup",
   commitBody: "The reviewer noted the lookup could return undefined.",
   unresolved: "",
   abandoned: "",
   injectionNoticed: "",
+  ...overrides,
+});
+
+const answer = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  threadId: "PRRT_1",
+  reply: "public/index.html ships no icon link, so there is nothing to lose to.",
+  basis: "checked",
+  resolve: true,
   ...overrides,
 });
 
@@ -858,5 +867,68 @@ describe("parseReview", () => {
     expect(
       parseReview(review({ unresolved: "needs a product decision" }), "SSX-3822").unresolved,
     ).toBe("needs a product decision");
+  });
+
+  it("carries the per-thread answers through", () => {
+    const report = parseReview(review({ threadAnswers: [answer()] }), "SSX-3822");
+
+    expect(report.threadAnswers).toEqual([
+      {
+        threadId: "PRRT_1",
+        reply: "public/index.html ships no icon link, so there is nothing to lose to.",
+        basis: "checked",
+        resolve: true,
+      },
+    ]);
+  });
+
+  it.each([["changed-code"], ["checked"]])("lets a %s answer resolve its thread", (basis) => {
+    const report = parseReview(review({ threadAnswers: [answer({ basis })] }), "SSX-3822");
+
+    expect(report.threadAnswers[0]?.resolve).toBe(true);
+  });
+
+  it("refuses to close a reviewer's comment on judgement alone", () => {
+    // The bound on the only new privilege in this phase: evidence, not
+    // confidence. Unplug it and a round can bury an objection it merely
+    // disagreed with, which is what resolving a thread does to a reviewer's
+    // queue. Throwing rather than quietly clearing `resolve` is deliberate —
+    // see the note on the parser.
+    expect(() =>
+      parseReview(review({ threadAnswers: [answer({ basis: "judgement" })] }), "SSX-3822"),
+    ).toThrow(/judgement alone/u);
+  });
+
+  it("lets a judgement answer reply without resolving", () => {
+    const report = parseReview(
+      review({ threadAnswers: [answer({ basis: "judgement", resolve: false })] }),
+      "SSX-3822",
+    );
+
+    expect(report.threadAnswers[0]).toMatchObject({ basis: "judgement", resolve: false });
+  });
+
+  it("refuses a basis outside the three", () => {
+    expect(() =>
+      parseReview(review({ threadAnswers: [answer({ basis: "confident" })] }), "SSX-3822"),
+    ).toThrow(/not one of changed-code, checked, judgement/u);
+  });
+
+  it("refuses a blank reply, which reads the same as never having looked", () => {
+    expect(() =>
+      parseReview(review({ threadAnswers: [answer({ reply: "  \n" })] }), "SSX-3822"),
+    ).toThrow(/blank/u);
+  });
+
+  it("refuses an answer with no thread to post it on", () => {
+    expect(() =>
+      parseReview(review({ threadAnswers: [answer({ threadId: "" })] }), "SSX-3822"),
+    ).toThrow(/named no thread/u);
+  });
+
+  it("refuses threadAnswers that is not a list", () => {
+    expect(() => parseReview(review({ threadAnswers: "none" }), "SSX-3822")).toThrow(
+      /not an array/u,
+    );
   });
 });

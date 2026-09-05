@@ -250,6 +250,7 @@ export const REVIEW_SCHEMA = {
     "changed",
     "filesTouched",
     "responses",
+    "threadAnswers",
     "summary",
     "commitSubject",
     "commitBody",
@@ -274,6 +275,38 @@ export const REVIEW_SCHEMA = {
       items: { type: "string" },
       description:
         "One entry per review comment: what it asked, and what you did about it. Include the ones you did not act on and why — a reviewer reading the PR needs to see that a comment was considered and declined, which is different from it being missed. Disagreeing with a reviewer is allowed; ignoring one silently is not.",
+    },
+    threadAnswers: {
+      type: "array",
+      description:
+        "One entry per inline review thread you were given, including the ones you disagree with. `responses` is for the operator; this is what gets posted on the pull request, next to the comment it answers. Empty only when there were no inline threads.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["threadId", "reply", "basis", "resolve"],
+        properties: {
+          threadId: {
+            type: "string",
+            description: "The thread's id, copied exactly from the feedback you were given.",
+          },
+          reply: {
+            type: "string",
+            description:
+              "What to post on the thread. A reviewer and a human will read it, so give the reasoning, not a verdict. If you are declining the comment, say what you checked and what you found.",
+          },
+          basis: {
+            type: "string",
+            enum: ["changed-code", "checked", "judgement"],
+            description:
+              "What your answer rests on. `changed-code` — you edited a file for this comment. `checked` — you verified something against the repository and can name it in the reply. `judgement` — you think the comment is wrong or not worth acting on, but nothing in the repository settles it. Answer honestly; the harness reads this rather than your confidence.",
+          },
+          resolve: {
+            type: "boolean",
+            description:
+              "Whether to mark the thread resolved. Only legal with basis `changed-code` or `checked` — a judgement call stays open for a human, and the harness rejects the round if you ask to resolve one. Resolving is how a reviewer's queue gets shorter, so a thread closed on an opinion buries the objection.",
+          },
+        },
+      },
     },
     summary: {
       type: "string",
