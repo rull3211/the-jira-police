@@ -7,6 +7,7 @@ import {
   type PushRequest,
   type ReviewComment,
   type ReviewRequest,
+  type ThreadReply,
   COPILOT_REVIEWER,
   MAX_FEEDBACK_CHARS,
   commitAll,
@@ -18,7 +19,9 @@ import {
   push,
   readReview,
   readReviewThreads,
+  replyToThread,
   requestReview,
+  resolveThread,
 } from "./pr.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
@@ -1154,6 +1157,199 @@ describe("readReviewThreads", () => {
 
     expect(result.outcome === "read" && result.threads[0]?.line).toBe(null);
     expect(result.outcome === "read" && result.threads[0]?.isResolved).toBe(false);
+  });
+});
+
+const THREAD_ID = "PRRT_kwDOE4J7MM6fduiU";
+const REPLY_URL = "https://github.com/o/r/pull/2658#discussion_r1";
+
+const replied = (url: string = REPLY_URL): Record<string, Partial<CommandResult>> => ({
+  "api graphql": {
+    stdout: JSON.stringify({
+      data: { addPullRequestReviewThreadReply: { comment: { url } } },
+    }),
+  },
+});
+
+const resolved = (isResolved = true): Record<string, Partial<CommandResult>> => ({
+  "api graphql": {
+    stdout: JSON.stringify({ data: { resolveReviewThread: { thread: { isResolved } } } }),
+  },
+});
+
+const receipt = (overrides: Partial<ThreadReply> = {}): ThreadReply => ({
+  threadId: THREAD_ID,
+  commentUrl: REPLY_URL,
+  ...overrides,
+});
+
+describe("replyToThread", () => {
+  it("posts the answer on the thread and hands back a receipt", async () => {
+    const runner = fakeRunner(replied());
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "Checked: public/index.html ships no icon link.",
+      timeoutMs: 60_000,
+    });
+
+    expect(result).toEqual({
+      outcome: "replied",
+      reply: { threadId: THREAD_ID, commentUrl: REPLY_URL },
+    });
+    const argv = runner.calls[0] ?? [];
+    expect(argv.slice(0, 3)).toEqual(["gh", "api", "graphql"]);
+    expect(argv).toContain(`threadId=${THREAD_ID}`);
+    expect(argv).toContain("body=Checked: public/index.html ships no icon link.");
+  });
+
+  it("passes the body raw, so an @ in it is not read as a filename", async () => {
+    const runner = fakeRunner(replied());
+
+    await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      // A reply body is model-written from a ticket anyone with a board account
+      // can edit. gh's typed `-F` would read this out of a file.
+      body: "@copilot this is the argument",
+      timeoutMs: 60_000,
+    });
+
+    const argv = runner.calls[0] ?? [];
+    expect(argv[argv.indexOf("body=@copilot this is the argument") - 1]).toBe("-f");
+  });
+
+  it("refuses a blank reply", async () => {
+    const runner = fakeRunner(replied());
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "   \n ",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("blank reply");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("refuses a reply with no thread to address", async () => {
+    const runner = fakeRunner(replied());
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: "",
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("fails when gh fails", async () => {
+    const runner = fakeRunner({ "api graphql": { exitCode: 1, stderr: "Not Found" } });
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("Not Found");
+  });
+
+  it("fails on GraphQL errors even when gh exits zero", async () => {
+    const runner = fakeRunner({
+      "api graphql": {
+        stdout: JSON.stringify({ errors: [{ message: "Resource not accessible" }] }),
+      },
+    });
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("Resource not accessible");
+  });
+
+  it("issues no receipt when nothing came back to prove the reply posted", async () => {
+    const runner = fakeRunner(replied(""));
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    // No URL, no receipt, and therefore nothing that can resolve the thread.
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("nothing proves it posted");
+  });
+});
+
+describe("resolveThread", () => {
+  it("resolves a thread that has just been answered", async () => {
+    const runner = fakeRunner(resolved());
+
+    const result = await resolveThread(runner, {
+      cwd: WORKTREE,
+      reply: receipt(),
+      timeoutMs: 60_000,
+    });
+
+    expect(result).toEqual({ outcome: "resolved" });
+    expect(runner.calls[0]).toContain(`threadId=${THREAD_ID}`);
+  });
+
+  it.each([
+    ["no comment URL", receipt({ commentUrl: "" })],
+    ["no thread id", receipt({ threadId: "" })],
+  ])("refuses a receipt with %s", async (_case, reply) => {
+    const runner = fakeRunner(resolved());
+
+    const result = await resolveThread(runner, { cwd: WORKTREE, reply, timeoutMs: 60_000 });
+
+    // The type already makes a bare thread id unusable here. This is the same
+    // rule at runtime, for a caller that hand-built the receipt to get around it.
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("with an answer attached");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("does not report a thread resolved when GitHub says it is still open", async () => {
+    const runner = fakeRunner(resolved(false));
+
+    const result = await resolveThread(runner, {
+      cwd: WORKTREE,
+      reply: receipt(),
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("still open");
+  });
+
+  it("fails when gh fails", async () => {
+    const runner = fakeRunner({ "api graphql": { exitCode: 1, stderr: "Bad credentials" } });
+
+    const result = await resolveThread(runner, {
+      cwd: WORKTREE,
+      reply: receipt(),
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("Bad credentials");
   });
 });
 

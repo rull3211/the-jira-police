@@ -274,6 +274,48 @@ export type ReadThreadsResult =
   | { readonly outcome: "read"; readonly threads: readonly ReviewThread[] }
   | { readonly outcome: "failed"; readonly reason: string };
 
+export interface ThreadReplyRequest {
+  /** Where `gh` runs. Any checkout of the repository will do; GraphQL takes the ids. */
+  readonly cwd: string;
+  readonly threadId: string;
+  /** The answer. Refused when blank — a reply nobody can read is not a reply. */
+  readonly body: string;
+  readonly timeoutMs: number;
+}
+
+/**
+ * Proof that a reply was posted, and the only way to get one.
+ *
+ * `resolveThread` takes this rather than a thread id, so there is no code path
+ * that resolves a thread without having just answered it. That is §6.1c's bound
+ * expressed in the type system rather than in a comment asking nicely.
+ *
+ * Resolving is a bigger privilege than it looks: it is how a reviewer's queue
+ * gets shorter, so a bot that can resolve silently can bury an objection it
+ * merely disagreed with. Requiring the receipt means every thread this service
+ * closes has the argument for closing it sitting in public, next to the comment
+ * it answers, where the reviewer and any human can read it and reopen.
+ */
+export interface ThreadReply {
+  readonly threadId: string;
+  /** The posted comment's URL. Empty means nothing was posted, and blocks the resolve. */
+  readonly commentUrl: string;
+}
+
+export type ReplyToThreadResult =
+  | { readonly outcome: "replied"; readonly reply: ThreadReply }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+export interface ResolveThreadRequest {
+  readonly cwd: string;
+  readonly reply: ThreadReply;
+  readonly timeoutMs: number;
+}
+
+export type ResolveThreadResult =
+  | { readonly outcome: "resolved" }
+  | { readonly outcome: "failed"; readonly reason: string };
+
 export interface MarkReadyRequest {
   readonly worktreePath: string;
   readonly repo: string;
@@ -1198,6 +1240,157 @@ export async function readReviewThreads(
     open: threads.filter((thread) => !thread.isResolved).length,
   });
   return { outcome: "read", threads };
+}
+
+const REPLY_MUTATION = `mutation($threadId:ID!,$body:String!){
+  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){
+    comment{ url }
+  }
+}`;
+
+const RESOLVE_MUTATION = `mutation($threadId:ID!){
+  resolveReviewThread(input:{threadId:$threadId}){ thread{ isResolved } }
+}`;
+
+/** Runs a GraphQL mutation and hands back its parsed payload, or a reason. */
+async function mutate(
+  runner: CommandRunner,
+  what: string,
+  query: string,
+  fields: readonly (readonly [string, string])[],
+  opts: { readonly cwd: string; readonly timeoutMs: number },
+): Promise<{ readonly data: unknown } | { readonly reason: string }> {
+  const argv = ["gh", "api", "graphql"];
+  for (const [key, value] of fields) {
+    // Raw, not typed: `-F` would read a value beginning with `@` out of a file,
+    // and a reply body is written by a model from a ticket anyone can edit.
+    argv.push("-f", `${key}=${value}`);
+  }
+  argv.push("-f", `query=${query}`);
+
+  const ran = await runner.run(argv, opts);
+  if (failed(ran)) {
+    return { reason: `gh could not ${what} (${why(ran)})` };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(ran.stdout);
+  } catch {
+    return { reason: `gh printed something that is not JSON when asked to ${what}` };
+  }
+  if (dig(parsed, "errors") !== undefined) {
+    return { reason: `GraphQL refused to ${what} (${bothEnds(ran.stdout)})` };
+  }
+  return { data: parsed };
+}
+
+/**
+ * Answers one inline review thread, in public.
+ *
+ * The disagreements this service has with a reviewer used to live in
+ * `responses`, which reaches an operator's terminal and nobody else. A reply on
+ * the thread puts the argument next to the comment it answers, where the
+ * reviewer sees it on the next pass and a human sees it without being told to
+ * go looking. That matters most for the comments the round *declines*: a
+ * decline nobody can see is indistinguishable from not having read it.
+ *
+ * The body is bounded by GitHub rather than here. There is no truncation,
+ * because a half-posted argument is worse than a long one.
+ */
+export async function replyToThread(
+  runner: CommandRunner,
+  request: ThreadReplyRequest,
+): Promise<ReplyToThreadResult> {
+  const { cwd, threadId, body, timeoutMs } = request;
+
+  if (threadId === "") {
+    return { outcome: "failed", reason: "a reply needs a thread to be addressed to" };
+  }
+  if (body.trim() === "") {
+    return { outcome: "failed", reason: "a blank reply says nothing and resolves nothing" };
+  }
+
+  const result = await mutate(
+    runner,
+    `reply to thread ${threadId}`,
+    REPLY_MUTATION,
+    [
+      ["threadId", threadId],
+      ["body", body],
+    ],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in result) {
+    return { outcome: "failed", reason: result.reason };
+  }
+
+  const url = dig(result.data, "data", "addPullRequestReviewThreadReply", "comment", "url");
+  // No URL, no receipt, and therefore no resolve. GitHub accepting the mutation
+  // without saying where the comment landed is not a posted reply.
+  if (typeof url !== "string" || url === "") {
+    return {
+      outcome: "failed",
+      reason: `the reply to thread ${threadId} came back without a comment URL, so nothing proves it posted`,
+    };
+  }
+
+  logger.info("solve.pr.thread_replied", { threadId, url });
+  return { outcome: "replied", reply: { threadId, commentUrl: url } };
+}
+
+/**
+ * Marks a thread resolved, and only one that has just been answered.
+ *
+ * Takes the receipt `replyToThread` returns instead of a thread id, so the
+ * argument for closing the thread is already public by the time this runs.
+ * The receipt is checked at runtime too, not only by the type: a hand-built
+ * `ThreadReply` with an empty URL is a caller reaching around the rule, and it
+ * is refused for the same reason the type exists.
+ *
+ * What this cannot enforce is the other half of §6.1c — resolve only when the
+ * round changed code for the thread or cited something checkable against it,
+ * and send anything resting on judgement alone to `unresolved`. That is a
+ * judgement about the argument, so it lives in the instructions. This enforces
+ * that the argument was made at all.
+ */
+export async function resolveThread(
+  runner: CommandRunner,
+  request: ResolveThreadRequest,
+): Promise<ResolveThreadResult> {
+  const { cwd, reply, timeoutMs } = request;
+
+  if (reply.threadId === "" || reply.commentUrl === "") {
+    return {
+      outcome: "failed",
+      reason:
+        "a thread is resolved only with an answer attached, and this receipt does not carry one",
+    };
+  }
+
+  const result = await mutate(
+    runner,
+    `resolve thread ${reply.threadId}`,
+    RESOLVE_MUTATION,
+    [["threadId", reply.threadId]],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in result) {
+    return { outcome: "failed", reason: result.reason };
+  }
+
+  // Read back rather than trust the exit code, as the claim does. A mutation
+  // that returns a thread still open has not resolved it, and reporting it
+  // resolved is how the reviewer's queue and this loop's idea of it diverge.
+  if (dig(result.data, "data", "resolveReviewThread", "thread", "isResolved") !== true) {
+    return {
+      outcome: "failed",
+      reason: `thread ${reply.threadId} is still open after the resolve was accepted`,
+    };
+  }
+
+  logger.info("solve.pr.thread_resolved", { threadId: reply.threadId, reply: reply.commentUrl });
+  return { outcome: "resolved" };
 }
 
 /**
