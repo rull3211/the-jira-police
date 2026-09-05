@@ -310,6 +310,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     round: 1,
     responses: ["renamed the helper"],
     reviewerRequested: true,
+    pushed: true,
     threads: NO_THREADS,
     unresolved: "",
   },
@@ -318,6 +319,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     round: 2,
     responses: ["answered in a comment"],
     reviewerRequested: false,
+    pushed: false,
     threads: NO_THREADS,
     unresolved: "",
   },
@@ -390,6 +392,7 @@ describe("describeAdvanceOutcome", () => {
       kind: "iterated",
       round: 2,
       responses: ["fixed"],
+      pushed: true,
       reviewerRequested: false,
       threads: NO_THREADS,
       unresolved: "",
@@ -403,6 +406,7 @@ describe("describeAdvanceOutcome", () => {
       kind: "iterated",
       round: 2,
       responses: ["fixed"],
+      pushed: true,
       reviewerRequested: true,
       threads: NO_THREADS,
       unresolved: "",
@@ -416,6 +420,7 @@ describe("describeAdvanceOutcome", () => {
       kind: "iterated",
       round: 2,
       responses: ["fixed"],
+      pushed: true,
       reviewerRequested: true,
       threads: NO_THREADS,
       unresolved: "the second point needs a product decision",
@@ -430,6 +435,7 @@ describe("describeAdvanceOutcome", () => {
       kind: "iterated",
       round: 2,
       responses: ["fixed"],
+      pushed: true,
       reviewerRequested: true,
       threads: NO_THREADS,
       unresolved: "",
@@ -438,6 +444,42 @@ describe("describeAdvanceOutcome", () => {
     // The common case, and a bare "Unresolved:" heading over nothing trains a
     // reader to skip the line on the round where it matters.
     expect(text).not.toContain("Unresolved");
+  });
+
+  it("does not claim a push on a round that only answered", () => {
+    // The bug this pins was found on a live pull request: round 2 of #2658
+    // deliberately changed nothing, and the headline still read "round 2
+    // pushed". An operator who goes looking for that commit and does not find
+    // it has no way to tell which half of the line is wrong.
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["checked the claim; the premise does not hold"],
+      pushed: false,
+      reviewerRequested: true,
+      threads: NO_THREADS,
+      unresolved: "",
+    });
+
+    expect(text).not.toContain("round 2 pushed");
+    expect(text).toContain("nothing was pushed");
+    expect(text).toContain("round 2");
+  });
+
+  it("says the round pushed when it did", () => {
+    // The other half, so the fix cannot be "never say pushed", which would
+    // lose the fact rather than report it correctly.
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      pushed: true,
+      reviewerRequested: true,
+      threads: NO_THREADS,
+      unresolved: "",
+    });
+
+    expect(text).toContain("round 2 pushed.");
   });
 
   it("says the cap fired rather than that the reviewer was satisfied", () => {

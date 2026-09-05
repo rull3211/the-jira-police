@@ -154,7 +154,15 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       // succeeded and is nobody's problem, while a reviewer who was not asked
       // again is a human clicking one button.
       return (
-        `ITERATED — round ${String(outcome.round)} pushed. Responses:\n` +
+        // Whether anything was pushed is read off the round, not assumed from
+        // the kind. A round that answers a reviewer without touching code is a
+        // successful round, and the headline used to call it a push — sending
+        // an operator to look for a commit that does not exist, and teaching
+        // them to distrust the rest of the line.
+        (outcome.pushed
+          ? `ITERATED — round ${String(outcome.round)} pushed.`
+          : `ITERATED — round ${String(outcome.round)} answered without changing code, so nothing was pushed.`) +
+        ` Responses:\n` +
         outcome.responses.map((response) => `  - ${response}`).join("\n") +
         (outcome.reviewerRequested
           ? `\nThe reviewer was asked to look again.`

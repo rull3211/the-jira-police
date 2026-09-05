@@ -239,6 +239,19 @@ export type AdvanceOutcome =
       readonly responses: readonly string[];
       readonly reviewerRequested: boolean;
       /**
+       * Whether a commit actually reached the branch this round.
+       *
+       * Not implied by `iterated`, which is the mistake this field exists to
+       * stop. Two of the three paths to this outcome push nothing — a round
+       * that answered the review without touching code, and one whose edits
+       * `commitAll` found nothing to commit in — and the headline said
+       * "round N pushed" on all three. Observed on round 2 of PR #2658, where
+       * the round deliberately changed nothing and the terminal announced a
+       * push that had not happened. An operator reading that goes looking for
+       * a commit, and the next thing they doubt is the marker.
+       */
+      readonly pushed: boolean;
+      /**
        * What was posted on the inline threads, and what would not post.
        *
        * Beside `responses` rather than folded into it, because they have
@@ -701,6 +714,7 @@ export async function advance(
       round: round + 1,
       responses: resolved.report.responses,
       reviewerRequested,
+      pushed: false,
       threads: threadOutcome,
       unresolved: resolved.report.unresolved,
     };
@@ -718,13 +732,13 @@ export async function advance(
   }
 
   if (committed.outcome === "committed") {
-    const pushed = await push(commands, {
+    const sent = await push(commands, {
       worktreePath: worktree.path,
       branch: worktree.branch,
       timeoutMs: request.gitTimeoutMs,
     });
-    if (pushed.outcome === "failed") {
-      return { kind: "failed", stage: "push", reason: pushed.reason };
+    if (sent.outcome === "failed") {
+      return { kind: "failed", stage: "push", reason: sent.reason };
     }
   }
 
@@ -737,6 +751,11 @@ export async function advance(
     round: round + 1,
     responses: resolved.report.responses,
     reviewerRequested,
+    // The commit, not the model's `changed` flag. A pass can report an edit
+    // that `commitAll` then finds nothing to commit in — a rewrite that
+    // reproduced the file byte for byte — and the branch is the only honest
+    // witness to what a reviewer will see.
+    pushed: committed.outcome === "committed",
     threads: threadOutcome,
     unresolved: resolved.report.unresolved,
   };

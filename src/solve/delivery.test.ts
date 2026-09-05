@@ -498,6 +498,45 @@ describe("advance", () => {
     expect(ran(h, "push")).toBe(false);
   });
 
+  it("does not claim to have pushed on a round that changed nothing", async () => {
+    // Found on round 2 of PR #2658: the round deliberately changed no code and
+    // the headline still read "round 2 pushed". The kind does not imply the
+    // push, so the round has to carry the fact.
+    const h = harness({ review: review({ changed: false, filesTouched: [] }) });
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", pushed: false });
+    expect(ran(h, "push")).toBe(false);
+  });
+
+  it("says it pushed on a round that did", async () => {
+    const h = harness({ review: review() });
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", pushed: true });
+    expect(ran(h, "push")).toBe(true);
+  });
+
+  it("does not claim a push when the edits turned out to commit to nothing", async () => {
+    // The path between the other two, and the one a reader would miss: the pass
+    // says it changed files, and `git commit` then finds the tree identical —
+    // a rewrite that reproduced the file byte for byte. Nothing reaches the
+    // branch, so nothing may be claimed, and the model's own `changed` flag is
+    // the wrong thing to have believed.
+    const h = harness({ review: review() }, [
+      {
+        match: saw("commit"),
+        reply: { exitCode: 1, stdout: "nothing to commit, working tree clean" },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", pushed: false });
+  });
+
   it("does not undraft while it is still iterating", async () => {
     // Undrafting mid-loop puts a half-answered pull request in front of a
     // human as though it were finished.
