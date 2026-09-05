@@ -322,6 +322,39 @@ export interface AttachRequest {
  * `fix/ssx-3822-thing` and checking out `main`, and *"the agent may never work
  * on main or any protected branch, never"* is not a rule that can rest on one
  * call site being right.
+ *
+ * ## The checkout is usually already there, and that is not a leftover
+ *
+ * Found by running `--advance` for the first time against a real pull request,
+ * 2026-09-05. This function used to go straight to `worktree add --track -b`
+ * and refuse when it collided, calling the collision *"a leftover from an
+ * earlier run rather than something to work around"*. That sentence was wrong,
+ * and wrong about the ordinary case: publishing a pull request **keeps** its
+ * worktree so a human can read the diff, and `git worktree remove` never
+ * deletes a branch. So every successful `--pr` leaves a clean checkout of
+ * exactly the right branch at exactly the path a review round wants, and the
+ * review round refused it. On the machine that opened the pull request — which
+ * is every hand-driven run — attaching could not succeed even once.
+ *
+ * So an existing worktree is reused, but only after it has been *proved* to be
+ * the thing we would have built. Three checks, and each refuses rather than
+ * repairs, because each failure means somebody else is holding this checkout:
+ *
+ * - **on the expected branch**, or it is a different piece of work at a
+ *   coincidental path,
+ * - **clean**, or the round would sweep a human's uncommitted edits into a
+ *   commit answering a code review — the single worst thing this module could
+ *   do, and it would be attributed to them,
+ * - **not ahead of `origin`**, or there are commits here the reviewer has never
+ *   seen and a fast-forward would be a lie about what was reviewed.
+ *
+ * Behind is the one state that is repaired instead of refused, with
+ * `merge --ff-only`: it is what a checkout looks like after somebody pushed to
+ * the branch, the merge cannot invent a commit, and refusing would put us back
+ * where this started. Nothing here ever discards a commit or an edit; every
+ * destructive resolution (`-B`, `reset --hard`, `add --force`) was considered
+ * and rejected for that reason, since the value being protected is work a
+ * person did and did not tell us about.
  */
 export async function attachWorktree(
   runner: CommandRunner,
@@ -363,17 +396,147 @@ export async function attachWorktree(
     );
   }
 
+  const listed = await runner.run(["git", "-C", repoPath, "worktree", "list", "--porcelain"], opts);
+  if (failed(listed)) {
+    return refuse(`could not list the repository's worktrees (${why(listed)})`);
+  }
+
+  const existing = worktreeAt(listed.stdout, path);
+  if (existing.present) {
+    return reuseWorktree(runner, request, existing.branch, opts);
+  }
+
   const added = await runner.run(
     ["git", "-C", repoPath, "worktree", "add", path, "--track", "-b", branch, remote],
     opts,
   );
   if (failed(added)) {
+    // No worktree is at the path — that was just checked — so the collision is
+    // the branch, and a branch with no worktree on it is genuinely a leftover.
     return refuse(
-      `could not attach a worktree to ${branch} (${why(added)}) — a local branch of that name, or a worktree already at ${path}, is the usual cause, and both are leftovers from an earlier run rather than something to work around`,
+      `could not attach a worktree to ${branch} (${why(added)}) — a local branch of that name with no worktree on it is the usual cause, and that is a leftover from an earlier run rather than something to work around`,
     );
   }
 
-  logger.info("solve.worktree.attached", { issueKey, path, branch, remote });
+  logger.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: false });
+  return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
+}
+
+/**
+ * The worktree registered at `path`, read from `git worktree list --porcelain`.
+ *
+ * Pure, and separate from the command that feeds it, because the interesting
+ * cases are all shapes of text: a record for a *different* path whose branch
+ * line would otherwise be read as ours, a detached checkout with no branch line
+ * at all, and the last record in the output, which has no blank line after it.
+ *
+ * Porcelain rather than the human format on purpose — the plain listing prints
+ * `<path> <sha> [<branch>]` with the branch in brackets, and a path containing
+ * a space would make that ambiguous. Matching is exact string equality on the
+ * path: git prints the resolved path, so a caller passing one that differs by a
+ * symlink falls through to the cold path and gets a refusal naming the path,
+ * which is a readable failure rather than a silent reuse of the wrong checkout.
+ */
+export function worktreeAt(
+  porcelain: string,
+  path: string,
+): { readonly present: false } | { readonly present: true; readonly branch: string | null } {
+  const marker = "worktree ";
+  const head = "branch refs/heads/";
+  let ours = false;
+  for (const line of porcelain.split("\n")) {
+    const text = line.trim();
+    if (text.startsWith(marker)) {
+      // A new record begins. If we were inside ours it ended without naming a
+      // branch, which is a detached or bare checkout.
+      if (ours) {
+        return { present: true, branch: null };
+      }
+      ours = text.slice(marker.length) === path;
+      continue;
+    }
+    if (!ours) {
+      continue;
+    }
+    if (text.startsWith(head)) {
+      return { present: true, branch: text.slice(head.length) };
+    }
+    if (text === "") {
+      return { present: true, branch: null };
+    }
+  }
+  return ours ? { present: true, branch: null } : { present: false };
+}
+
+/**
+ * Reuses the checkout already at the path, or refuses and touches nothing.
+ *
+ * The three refusals and the one repair are argued in `attachWorktree`'s
+ * header. What is worth saying here is the ordering: cleanliness is checked
+ * before the fast-forward, so a worktree somebody is working in is never
+ * merged into, and the ahead/behind counts are read in one command so the two
+ * numbers describe the same instant.
+ */
+async function reuseWorktree(
+  runner: CommandRunner,
+  request: AttachRequest,
+  branchAt: string | null,
+  opts: CommandOptions,
+): Promise<WorktreeResult> {
+  const { issueKey, branch, repoPath, parentDirectory } = request;
+  const path = `${parentDirectory}/${issueKey}`;
+  const remote = `origin/${branch}`;
+  const refuse = (reason: string): WorktreeResult => ({ outcome: "refused", issueKey, reason });
+
+  if (branchAt !== branch) {
+    return refuse(
+      `a worktree is already at ${path}, on ${branchAt === null ? "a detached HEAD" : branchAt} rather than ${branch} — that is somebody else's checkout at a path we derive from the issue key, and moving it is not this command's decision`,
+    );
+  }
+
+  const status = await runner.run(["git", "-C", path, "status", "--porcelain"], opts);
+  if (failed(status)) {
+    return refuse(`could not read the state of the worktree at ${path} (${why(status)})`);
+  }
+  if (status.stdout.trim() !== "") {
+    return refuse(
+      `the worktree at ${path} has uncommitted changes — a review round commits everything it finds, so continuing would answer the reviewer with somebody else's work in progress, under our name`,
+    );
+  }
+
+  const counts = await runner.run(
+    ["git", "-C", path, "rev-list", "--left-right", "--count", `HEAD...${remote}`],
+    opts,
+  );
+  if (failed(counts)) {
+    return refuse(`could not compare ${path} with ${remote} (${why(counts)})`);
+  }
+  const [aheadText, behindText] = counts.stdout.trim().split(/\s+/u);
+  const ahead = Number(aheadText);
+  const behind = Number(behindText);
+  if (!Number.isInteger(ahead) || !Number.isInteger(behind)) {
+    // Refused rather than assumed zero. Reading an unparseable count as "in
+    // sync" is how a checkout carrying unpushed commits gets committed on top
+    // of and pushed to a pull request under review.
+    return refuse(
+      `could not read how ${path} compares with ${remote} — git answered ${JSON.stringify(counts.stdout.trim().slice(0, 100))}`,
+    );
+  }
+
+  if (ahead > 0) {
+    return refuse(
+      `the worktree at ${path} is ${String(ahead)} commit(s) ahead of ${remote} — the reviewer has not seen them, and a round that built on them would push work nobody asked to review`,
+    );
+  }
+
+  if (behind > 0) {
+    const merged = await runner.run(["git", "-C", path, "merge", "--ff-only", remote], opts);
+    if (failed(merged)) {
+      return refuse(`could not fast-forward ${path} to ${remote} (${why(merged)})`);
+    }
+  }
+
+  logger.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: true, behind });
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
 }
 

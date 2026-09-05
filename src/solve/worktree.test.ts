@@ -10,6 +10,7 @@ import {
   createWorktree,
   removeWorktree,
   slugify,
+  worktreeAt,
 } from "./worktree.ts";
 
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
@@ -555,7 +556,8 @@ describe("attachWorktree", () => {
   });
 
   it("refuses when git will not create the worktree", async () => {
-    const runner = fakeRunner([OK, OK, FAIL]);
+    // fetch, rev-parse, worktree list, worktree add.
+    const runner = fakeRunner([OK, OK, OK, FAIL]);
 
     expect(refused(await attachWorktree(runner, attach()))).toContain(
       "could not attach a worktree",
@@ -566,5 +568,185 @@ describe("attachWorktree", () => {
     const runner = fakeRunner([TIMEOUT]);
 
     expect(refused(await attachWorktree(runner, attach()))).toContain("could not fetch origin");
+  });
+});
+
+describe("attachWorktree, when the checkout is already there", () => {
+  /**
+   * The state a successful `--pr` leaves behind: a clean worktree at the
+   * derived path, on the branch, level with the remote. Found in production on
+   * the first real `--advance`, which refused it.
+   */
+  const listing = (branch: string | null = "fix/ssx-3822-favicon-is-missing"): CommandResult => ({
+    ...OK,
+    stdout: [
+      "worktree /repos/buy-insurance-advisor-web",
+      "HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "branch refs/heads/main",
+      "",
+      "worktree /tmp/solve/SSX-3822",
+      "HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      branch === null ? "detached" : `branch refs/heads/${branch}`,
+      "",
+    ].join("\n"),
+  });
+
+  const counts = (ahead: number, behind: number): CommandResult => ({
+    ...OK,
+    stdout: `${String(ahead)}\t${String(behind)}\n`,
+  });
+
+  /** fetch, rev-parse, worktree list, status, rev-list — then whatever follows. */
+  const upTo = (
+    list: CommandResult,
+    status: CommandResult = OK,
+    ...rest: readonly CommandResult[]
+  ): readonly CommandResult[] => [OK, OK, list, status, ...rest];
+
+  it("reuses it instead of trying to build a second one", async () => {
+    const runner = fakeRunner(upTo(listing(), OK, counts(0, 0)));
+
+    const result = await attachWorktree(runner, attach());
+
+    expect(result).toEqual({
+      outcome: "created",
+      worktree: {
+        issueKey: "SSX-3822",
+        path: "/tmp/solve/SSX-3822",
+        branch: "fix/ssx-3822-favicon-is-missing",
+        repoPath: "/repos/buy-insurance-advisor-web",
+      },
+    });
+    // The mutation this catches is the whole of the bug: go straight to
+    // `worktree add` and every run on the machine that opened the pull request
+    // refuses, because publishing keeps its worktree and removing a worktree
+    // does not remove its branch.
+    expect(runner.calls.some((argv) => argv.includes("add"))).toBe(false);
+  });
+
+  it("fast-forwards a checkout that is behind the remote", async () => {
+    const runner = fakeRunner(upTo(listing(), OK, counts(0, 2), OK));
+
+    expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
+    expect(runner.calls.at(-1)).toEqual([
+      "git",
+      "-C",
+      "/tmp/solve/SSX-3822",
+      "merge",
+      "--ff-only",
+      "origin/fix/ssx-3822-favicon-is-missing",
+    ]);
+  });
+
+  it("does not merge into a checkout that is already level", async () => {
+    const runner = fakeRunner(upTo(listing(), OK, counts(0, 0)));
+
+    await attachWorktree(runner, attach());
+
+    expect(runner.calls.some((argv) => argv.includes("merge"))).toBe(false);
+  });
+
+  it("refuses a checkout with uncommitted changes, before comparing anything", async () => {
+    // The worst thing this module could do: a review round commits everything
+    // it finds, so reusing a dirty worktree answers a reviewer with a human's
+    // work in progress, pushed under our name.
+    const dirty: CommandResult = { ...OK, stdout: " M src/app/page.tsx\n?? notes.txt\n" };
+    const runner = fakeRunner(upTo(listing(), dirty));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain("uncommitted changes");
+    expect(runner.calls.some((argv) => argv.includes("rev-list"))).toBe(false);
+  });
+
+  it("refuses a checkout that is ahead of the remote", async () => {
+    const runner = fakeRunner(upTo(listing(), OK, counts(1, 0)));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain("1 commit(s) ahead");
+  });
+
+  it("refuses a count it cannot read rather than assuming zero", async () => {
+    // Unplug this and an unparseable answer reads as "in sync", which is the
+    // ahead case wearing a disguise: commits nobody reviewed, built on and
+    // pushed to an open pull request.
+    const runner = fakeRunner(upTo(listing(), OK, { ...OK, stdout: "warning: no upstream\n" }));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain("could not read how");
+  });
+
+  it("refuses a worktree at the path that is on some other branch", async () => {
+    const runner = fakeRunner(upTo(listing("fix/ssx-9999-something-else")));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain(
+      "on fix/ssx-9999-something-else rather than fix/ssx-3822-favicon-is-missing",
+    );
+  });
+
+  it("refuses a detached checkout at the path", async () => {
+    const runner = fakeRunner(upTo(listing(null)));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain("on a detached HEAD");
+  });
+
+  it("refuses when the worktree listing cannot be read", async () => {
+    const runner = fakeRunner([OK, OK, FAIL]);
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain(
+      "could not list the repository's worktrees",
+    );
+  });
+});
+
+describe("worktreeAt", () => {
+  const porcelain = [
+    "worktree /repos/app",
+    "HEAD aaaa",
+    "branch refs/heads/main",
+    "",
+    "worktree /tmp/solve/SSX-3822",
+    "HEAD bbbb",
+    "branch refs/heads/fix/ssx-3822-x",
+    "",
+  ].join("\n");
+
+  it("finds the branch of the record with the matching path", () => {
+    expect(worktreeAt(porcelain, "/tmp/solve/SSX-3822")).toEqual({
+      present: true,
+      branch: "fix/ssx-3822-x",
+    });
+  });
+
+  it("reads no branch from a record that is not ours", () => {
+    // The mutation: drop the path comparison and the first record's branch is
+    // returned for every query, so a review round reuses `main`'s checkout.
+    expect(worktreeAt(porcelain, "/tmp/solve/SSX-9999")).toEqual({ present: false });
+  });
+
+  it("reports a detached record as present with no branch", () => {
+    const detached = ["worktree /tmp/solve/SSX-3822", "HEAD bbbb", "detached", ""].join("\n");
+
+    expect(worktreeAt(detached, "/tmp/solve/SSX-3822")).toEqual({ present: true, branch: null });
+  });
+
+  it("handles the last record, which has no blank line after it", () => {
+    const last = ["worktree /tmp/solve/SSX-3822", "HEAD bbbb", "branch refs/heads/fix/a-1-b"].join(
+      "\n",
+    );
+
+    expect(worktreeAt(last, "/tmp/solve/SSX-3822")).toEqual({ present: true, branch: "fix/a-1-b" });
+  });
+
+  it("does not read the next record's branch when ours names none", () => {
+    const bare = [
+      "worktree /tmp/solve/SSX-3822",
+      "HEAD bbbb",
+      "bare",
+      "worktree /repos/app",
+      "branch refs/heads/main",
+    ].join("\n");
+
+    expect(worktreeAt(bare, "/tmp/solve/SSX-3822")).toEqual({ present: true, branch: null });
+  });
+
+  it("finds nothing in an empty listing", () => {
+    expect(worktreeAt("", "/tmp/solve/SSX-3822")).toEqual({ present: false });
   });
 });
