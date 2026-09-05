@@ -199,6 +199,59 @@ Every setting fails closed except one, and the exception is argued rather than a
 A ticket whose repository is not on `SOLVE_REPOS` is skipped, not failed — widening the allowlist
 picks it up later with no manual reset.
 
+#### 4a. Which model runs which task, and nothing chooses today
+
+Requested 2026-09-06, and **the first fact is that there is no setting to change.** `--model`
+appears nowhere in this tree. Six task kinds spawn a subprocess — the triage analyst and the
+poster (`triage/runner.ts`, `triage/poster.ts`), the four solve passes `recon`, `fix`, `simplify`
+and `review` (`solve/runner.ts`), and the ticket commenter (`solve/commenter.ts`) — and every one
+of them inherits whatever `storecode` happens to default to. Three argument builders, one flag
+each: the mechanism is trivial and the policy is the whole of the work.
+
+**Two changes, and only the second is the feature.** _Recording_ which model a pass ran under costs
+nothing and should not wait for the choosing. Every cost figure in this file — triage $1.56, poster
+$0.45, recon $1.58, the ticket comment $0.40, a review round $0.94 — is a measurement of an unnamed
+model. None of them can be reproduced, compared, or defended, and the cost-per-ticket-per-day
+number E is blocked on would inherit that at a larger scale and with nobody watching.
+
+**Where a cheaper model is safe is decided by the gate, not by the price.** The rule: downgrade
+where a mechanical gate checks the whole output, and do not downgrade where the gate only bounds a
+judgement it cannot check. Four consequences, and three of them cut against the obvious answer:
+
+- **The solve passes take the strongest, and this is measured rather than asserted.** `recon`,
+  `fix` and `review` are bounded by the diff gate and by mechanical verification — and neither can
+  tell a right fix from a plausible wrong one. SSX-3833 is the worked example: `setMonth(month - 1)`
+  is the tempting one-character change, it is wrong, and the fail-first replay put a number on how
+  little the machinery would have noticed — **1 of 7 new assertions went red against it, against 7
+  of 7 for the original bug.** The gates bound the blast radius; they do not bound the quality of
+  the judgement, and the judgement is what is being bought.
+- **The analyst is where cheap looks safest and is not.** Its output is schema-checked and
+  gate-checked, which by the rule above argues for a downgrade — except the fitness call inside it
+  decides whether a paid solve happens at all, and neither the schema nor the gate can tell a right
+  call from a wrong one. SSX-3822 cost roughly **$6 to be refused three times for two reasons that
+  were both wrong**, which is more than the runs that produced it.
+- **The poster is the honest candidate.** Its whole output is a label set and a comment shape, and
+  `assertPostable` and `checkLabels` check it mechanically, so a weaker model fails the gate rather
+  than posting something wrong. That is the case the rule was written for.
+- **The commenter is the cheapest task and the least guarded, which is not the same as safe.** It
+  is handed finished prose and asked to post it verbatim; there is no gate, and nothing compares
+  what was posted against what was handed over. Its known failure is already recorded — the API
+  re-serialised the text server-side — so a weaker model rewording the text would land in the one
+  channel this service does not check.
+
+**Shape, and the fail-closed direction is not the obvious one.** One setting per task rather than
+one global knob, because a global knob is how everything ends up on the cheap model or everything
+on the expensive one, which is the choice this section exists to stop making by accident. The map
+copies `SCHEMA_FOR`'s `Record<Pass, …>` so that adding a pass fails to compile instead of
+inheriting its neighbour's model — the same bug that map already caught once. **Unset means today's
+behaviour**, whatever the CLI defaults to, because defaulting to "the strongest" would change the
+cost of every run on the day the setting lands, with nothing in the diff saying so; an
+_unrecognised_ name is a startup error, like `SOLVE_MODE`, and not a fallback. A downgrade has to
+be typed out against the task it applies to.
+
+Not a blocker for E. The recording half is, in the weak sense that E's own cost item is
+unanswerable without it.
+
 ### 5. The solver
 
 **Isolation is mandatory.** Of five SSX repos checked out locally, three are dirty and on feature
