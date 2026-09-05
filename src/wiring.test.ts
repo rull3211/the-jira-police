@@ -8,6 +8,7 @@ import { buildPrompt, toolsFor } from "./triage/runner.ts";
 import { runSolveCycle } from "./solve/poller.ts";
 import type { IssueDetail } from "./jira/client.ts";
 import type { SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
+import type { WorktreeResult } from "./solve/worktree.ts";
 import {
   NotSolvableError,
   baseBranchOf,
@@ -845,6 +846,16 @@ const attachedWorktree = {
   repoPath: "/repos/buy-insurance-advisor-web",
 };
 
+/**
+ * The worktree as a promise of one, which is the shape `advance` now takes.
+ *
+ * It is never called in these tests, and that is the point of the type: cutting
+ * a checkout is work the request describes rather than work it has already
+ * done, so building a request costs nothing.
+ */
+const attachSource = (): Promise<WorktreeResult> =>
+  Promise.resolve({ outcome: "created", worktree: attachedWorktree } as const);
+
 describe("buildFindPrRequest", () => {
   it("searches from the repository checkout, not from a worktree", () => {
     // The order this encodes: whether a pull request exists is what decides
@@ -880,13 +891,17 @@ describe("buildAdvanceRequest", () => {
     const request = buildAdvanceRequest(
       settingsWith(PUBLISH_ENV),
       advanceBase(),
-      attachedWorktree,
+      attachSource,
       2657,
     );
 
     expect(request.repo).toBe("storebrand-digital/buy-insurance-advisor-web");
     expect(request.number).toBe(2657);
-    expect(request.worktree).toBe(attachedWorktree);
+    expect(request.attach).toBe(attachSource);
+    // `gh` runs in the repository until a round is actually decided on. Every
+    // read the survey makes names its repository explicitly, so this is a
+    // working directory and not a target.
+    expect(request.cwd).toBe("/repos/buy-insurance-advisor-web");
   });
 
   it("refuses when no owner is configured", () => {
@@ -894,7 +909,7 @@ describe("buildAdvanceRequest", () => {
       buildAdvanceRequest(
         settingsWith({ ...PUBLISH_ENV, SOLVE_GITHUB_OWNER: "" }),
         advanceBase(),
-        attachedWorktree,
+        attachSource,
         2657,
       ),
     ).toThrow(SettingsError);
@@ -906,7 +921,7 @@ describe("buildAdvanceRequest", () => {
     // verifies differently from the run that opened the pull request.
     const base = advanceBase();
 
-    const request = buildAdvanceRequest(settingsWith(PUBLISH_ENV), base, attachedWorktree, 1);
+    const request = buildAdvanceRequest(settingsWith(PUBLISH_ENV), base, attachSource, 1);
 
     expect(request.issueKey).toBe(base.issueKey);
     expect(request.repoPath).toBe(base.repoPath);
@@ -924,7 +939,7 @@ describe("buildAdvanceRequest", () => {
     const request = buildAdvanceRequest(
       settingsWith({ ...PUBLISH_ENV, MAX_REVIEW_ITERATIONS: "3" }),
       advanceBase(),
-      attachedWorktree,
+      attachSource,
       1,
     );
 
@@ -938,7 +953,7 @@ describe("buildAdvanceRequest", () => {
     const request = buildAdvanceRequest(
       settingsWith({ ...PUBLISH_ENV, MAX_REVIEW_ITERATIONS: "9", MAX_PR_ROUNDS_TOTAL: "20" }),
       advanceBase(),
-      attachedWorktree,
+      attachSource,
       1,
     );
 
@@ -948,8 +963,7 @@ describe("buildAdvanceRequest", () => {
 
   it("does not name a reviewer, so the delivery default applies", () => {
     expect(
-      "reviewer" in
-        buildAdvanceRequest(settingsWith(PUBLISH_ENV), advanceBase(), attachedWorktree, 1),
+      "reviewer" in buildAdvanceRequest(settingsWith(PUBLISH_ENV), advanceBase(), attachSource, 1),
     ).toBe(false);
   });
 
@@ -961,7 +975,7 @@ describe("buildAdvanceRequest", () => {
         SOLVE_BOT_EMAIL: "jp@x.invalid",
       }),
       advanceBase(),
-      attachedWorktree,
+      attachSource,
       1,
     );
 

@@ -59,9 +59,8 @@ import type { ClaimCapabilities } from "./solve/claim.ts";
 import { createCommandRunner } from "./solve/exec.ts";
 import { repoFromLabels } from "./solve/labels.ts";
 import type { SolveDependencies, SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
-import type { AdvanceRequest, PublishRequest } from "./solve/delivery.ts";
+import type { AdvanceRequest, PublishRequest, WorktreeSource } from "./solve/delivery.ts";
 import type { FindPrRequest } from "./solve/pr.ts";
-import type { Worktree } from "./solve/worktree.ts";
 import { createPassRunner } from "./solve/passes.ts";
 import { composePullRequest } from "./solve/pr-text.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
@@ -630,17 +629,28 @@ export function buildFindPrRequest(
  * which is the one place that survives the process. The field is gone from
  * `AdvanceRequest` rather than left here holding a plausible-looking zero: a
  * caller that cannot supply the number cannot supply a wrong one.
+ *
+ * ## The worktree became a function, and that is the poll-cycle change
+ *
+ * This took a `Worktree` — an argument that could only be supplied by cutting a
+ * checkout and installing into it *before* anyone had asked whether there was
+ * anything to answer. `advance` now reads the pull request first and calls
+ * `attach` only for the rounds that will actually run, so the checkout is the
+ * caller's to make, on demand, and the caller keeps ownership of removing it.
+ * `cwd` is what `gh` runs in until then: the repository itself, which is enough
+ * because every request `surveyReview` makes names its repository explicitly.
  */
 export function buildAdvanceRequest(
   settings: Settings,
   base: SolveRequest,
-  worktree: Worktree,
+  attach: WorktreeSource,
   number: number,
 ): AdvanceRequest {
   return {
     ...base,
-    worktree,
-    repo: githubRepoFor(settings, worktree.repoPath),
+    attach,
+    cwd: base.repoPath,
+    repo: githubRepoFor(settings, base.repoPath),
     number,
     identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
     maxRounds: numeric(settings, "MAX_REVIEW_ITERATIONS", 0),

@@ -11,7 +11,7 @@ import { BOT_PREFIX, MARKER_PREFIX, NEVER_READ, parseMarker } from "./marker.ts"
 import type { PassRunner, SolveDependencies } from "./orchestrator.ts";
 import type { BotIdentity, ReviewComment, ReviewOrigin, ReviewState } from "./pr.ts";
 import type { Pass, SolveRunOptions } from "./runner.ts";
-import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
+import type { CommandResult, CommandRunner, Worktree, WorktreeResult } from "./worktree.ts";
 
 /** The escape, not the byte, so this file stays greppable. See `verify.ts`. */
 const NUL = "\u0000";
@@ -55,6 +55,9 @@ const reviewJson = (overrides: Partial<ReviewState> = {}): string => {
   const base = {
     state: "OPEN",
     isDraft: true,
+    // The pull request's own creation, which is the floor under the silence
+    // clock: a payload without it is refused rather than read as quiet.
+    createdAt: "2026-09-05T09:00:00Z",
     reviews: [{ author: { login: "copilot" }, body: "The wrapper element looks unnecessary." }],
     comments: [] as unknown[],
     reviewRequests: [] as unknown[],
@@ -436,7 +439,9 @@ const advanceRequest: AdvanceRequest = {
   gitTimeoutMs: 30_000,
   stepTimeoutMs: 300_000,
   installTimeoutMs: 600_000,
-  worktree,
+  attach: () => Promise.resolve({ outcome: "created", worktree } as const),
+  cwd: "/repos/buy-insurance-advisor-web",
+  now: Date.parse("2026-09-05T10:00:00Z"),
   repo: "acme/advisor",
   number: 42,
   identity: IDENTITY,
@@ -453,7 +458,12 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    expect(outcome).toEqual({ kind: "waiting" });
+    // An hour, measured from the pull request's own creation because nothing
+    // else on it carries a date. The number is the outcome's whole contribution
+    // to the silence bound — `advance` measures and the caller decides, so a
+    // foreground command and a daemon can be patient by different amounts
+    // without either of them counting ticks.
+    expect(outcome).toEqual({ kind: "waiting", quietMs: 3_600_000 });
     expect(h.seen).toEqual([]);
     expect(ran(h, "pr", "ready")).toBe(false);
   });
@@ -466,6 +476,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [],
             reviewRequests: [],
@@ -761,6 +772,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "the wrapper looks unnecessary" }],
             comments: [{ author: { login: "rull3211" }, body: "bot: moved it, as you suggested" }],
             reviewRequests: [],
@@ -787,6 +799,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [{ author: { login: "rull3211" }, body: "bot: pushed a fix" }],
             reviewRequests: [],
@@ -831,6 +844,97 @@ describe("advance", () => {
     await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
 
     expect(markerWritten(h)).toBe(false);
+  });
+
+  it("cuts no checkout on any outcome decided before a round runs", async () => {
+    // The poll-cycle guard, and the one with a price on it. `advance` used to
+    // be handed a worktree, so every tick paid a fetch, a checkout and an
+    // install before anyone had asked whether there was anything to answer —
+    // at one tick a minute across a watched set, that is the whole cost of the
+    // cycle spent on pull requests nobody had touched. The survey is two `gh`
+    // reads and names its repository explicitly, so it needs no checkout at
+    // all. Unplug this and the cheap half of the cycle stops being cheap.
+    const cases: readonly { readonly why: string; readonly rules: readonly Rule[] }[] = [
+      {
+        why: "waiting",
+        rules: [
+          { match: saw("pr", "view"), reply: { stdout: reviewJson({ reviews: [] } as never) } },
+        ],
+      },
+      {
+        why: "ready",
+        rules: [
+          {
+            match: saw("pr", "view"),
+            reply: {
+              stdout: reviewJson({
+                reviews: [{ author: { login: "copilot" }, body: "" }],
+              } as never),
+            },
+          },
+        ],
+      },
+      { why: "reviewer-exhausted", rules: [spent(3)] },
+      { why: "capped", rules: [spent(20)] },
+    ];
+
+    for (const { why, rules } of cases) {
+      const h = harness({}, rules);
+      let attached = 0;
+      const attach = (): Promise<WorktreeResult> => {
+        attached += 1;
+        return Promise.resolve({ outcome: "created", worktree } as const);
+      };
+
+      await advance(h.deps, { ...advanceRequest, attach, maxRounds: 3, maxTotalRounds: 20 });
+
+      expect(`${why}: ${String(attached)}`).toBe(`${why}: 0`);
+    }
+  });
+
+  it("reports a refused checkout as its own stage, before anything is spent", async () => {
+    // Its own stage rather than `read` or `resolve`, because of where it now
+    // happens: after the round has been decided and before it is reserved. No
+    // marker has moved and no pass has run, so the honest report is that the
+    // machine could not get to the work — not that the work failed.
+    const h = harness({}, []);
+    const refusal: WorktreeResult = {
+      outcome: "refused",
+      issueKey: "SSX-1",
+      reason: "the branch is checked out elsewhere",
+    };
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      attach: () => Promise.resolve(refusal),
+    });
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "worktree" });
+    expect(markerWritten(h)).toBe(false);
+    expect(h.seen).toEqual([]);
+  });
+
+  it("does not re-mark a pull request ready that is already out of draft", async () => {
+    // Not an optimisation. `ready` is the outcome of every tick on an undrafted
+    // pull request waiting for a human to merge it, and that wait is measured
+    // in days — so an unconditional `gh pr ready` is a write per pull request
+    // per tick, forever, on the pull requests where nothing is happening.
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            isDraft: false,
+            reviews: [{ author: { login: "copilot" }, body: "" }],
+          } as never),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(ran(h, "pr", "ready")).toBe(false);
   });
 
   it("pushes nothing when the round only answered questions", async () => {
@@ -902,6 +1006,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [],
             reviewRequests: [],
@@ -940,6 +1045,7 @@ describe("advance's review cursor", () => {
       stdout: JSON.stringify({
         state: "OPEN",
         isDraft: true,
+        createdAt: "2026-09-05T09:00:00Z",
         // Dateless, so the review body itself cannot be what makes the round
         // run — otherwise every test below would pass with no cursor at all.
         reviews: [{ author: { login: "copilot" }, body: "" }],
@@ -1141,6 +1247,7 @@ describe("advance's review cursor", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [
               markerComment(1, "2026-09-05T08:00:00Z"),
@@ -1419,11 +1526,7 @@ describe("advance's inline threads", () => {
   });
 });
 
-const said = (
-  author: string,
-  body: string,
-  origin: ReviewOrigin = "reviewer",
-): ReviewComment => ({
+const said = (author: string, body: string, origin: ReviewOrigin = "reviewer"): ReviewComment => ({
   author,
   body,
   createdAt: "2026-09-05T10:00:00Z",
@@ -1436,6 +1539,8 @@ const stateWith = (...comments: readonly ReviewComment[]): ReviewState => ({
   reviewerErrored: false,
   state: "OPEN",
   isDraft: true,
+  createdAt: "2026-09-05T09:00:00Z",
+  newestAt: "2026-09-05T10:00:00Z",
   comments,
 });
 

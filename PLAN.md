@@ -22,7 +22,7 @@ Two things make this different from the grooming service, and both drive the des
    That is a real privilege escalation and gets isolation and mechanical — not model-asserted —
    verification.
 2. **Triage cannot read source code.** The fitness call is made from the ticket plus the
-   knowledge vault only. It is a *candidate* signal, not a guarantee, so the solver re-checks
+   knowledge vault only. It is a _candidate_ signal, not a guarantee, so the solver re-checks
    against real code and is allowed to bail before writing anything.
 
 Default posture is **manual**: nothing is solved until a human adds a label.
@@ -38,12 +38,12 @@ permanent `seenKeys` list, so a ticket triaged on Monday can never re-enter — 
 labelled for solving on Friday must. And the solve queue has no time dimension at all: it cares
 about label state, not recency.
 
-| | new-issue poller | solve-queue poller |
-|---|---|---|
-| Selects on | `created >= -Nm` | labels |
-| Cursor | yes, `state/poll.json` | **none** |
-| Dedupe | local `seenKeys` | **ticket label state in Jira** |
-| Cadence | `POLL_INTERVAL_MS` | its own, slower |
+|            | new-issue poller       | solve-queue poller             |
+| ---------- | ---------------------- | ------------------------------ |
+| Selects on | `created >= -Nm`       | labels                         |
+| Cursor     | yes, `state/poll.json` | **none**                       |
+| Dedupe     | local `seenKeys`       | **ticket label state in Jira** |
+| Cadence    | `POLL_INTERVAL_MS`     | its own, slower                |
 
 Dedupe living in Jira rather than on disk is the important half: the queue survives a restart, a
 wiped `state/`, and a second instance, without a lock file.
@@ -141,8 +141,8 @@ replacing and the queue stalls.
 
 **`agent:done` is merged-only because it is a metric.** A comment is enough for a reader and not
 for a count. Closed-unmerged gets `agent:closed` — not `agent:failed`, because the agent did the
-job and a person declined it, and not folded into `agent:done`, because *work the tool completed
-that nobody wanted* is the more interesting of the two numbers and is invisible if the buckets
+job and a person declined it, and not folded into `agent:done`, because _work the tool completed
+that nobody wanted_ is the more interesting of the two numbers and is invisible if the buckets
 are merged.
 
 #### 3a. The claim writes a delta, and getting there took a decision about the credential
@@ -190,11 +190,11 @@ Every setting fails closed except one, and the exception is argued rather than a
   distinguish blank from unset, so a default would be a write privilege that survives being
   deleted from `.env`. Unset ⇒ nothing is allowed.
 - `MAX_CONCURRENT_SOLVES` (1), `MAX_REVIEW_ITERATIONS` (3), `MAX_PR_ROUNDS_TOTAL` (20),
-  `REVIEW_POLL_MS`, `MAX_REVIEW_WAITS`.
+  `REVIEW_POLL_MS`, `REVIEW_SILENCE_MS`.
 - **`FAIL_FIRST_CHECK` (default `true`) — the one setting that defaults on.** Deliberately the
   mirror of `flag()`: it reads `!== "false"` rather than `=== "true"`. Every other switch fails
   closed so a typo cannot arm a privilege; this one grants nothing and writes nothing, so a typo
-  must not silently *withdraw a guard*.
+  must not silently _withdraw a guard_.
 
 A ticket whose repository is not on `SOLVE_REPOS` is skipped, not failed — widening the allowlist
 picks it up later with no manual reset.
@@ -254,14 +254,14 @@ a `vacuous`.
 **The mechanical tier is much weaker than it sounds, and the measurement says so.** Replaying the
 seven new assertions from the SSX-3833 pull request:
 
-| the new assertions go red against | count |
-|---|---|
-| the **original** bug | **7 of 7** |
-| the **plausible wrong fix** | **1 of 7** |
+| the new assertions go red against | count      |
+| --------------------------------- | ---------- |
+| the **original** bug              | **7 of 7** |
+| the **plausible wrong fix**       | **1 of 7** |
 
 Classic fail-first was already fully satisfied by a suite that was six-sevenths decorative. So the
-house rule and red-green are different rules: red-green unplugs the *defect*, this repository's
-rule unplugs the *plausible wrong implementation*, and only the second catches that case. That
+house rule and red-green are different rules: red-green unplugs the _defect_, this repository's
+rule unplugs the _plausible wrong implementation_, and only the second catches that case. That
 half cannot be mechanised — "the obvious wrong fix" is not a thing a diff gate can enumerate — so
 it lives in `SOLVE_INSTRUCTIONS.md` §2 as an instruction to name the wrong fix and check the test
 catches it.
@@ -316,7 +316,7 @@ the diff. Three rules:
    the code. Say in `responses` what was checked.
 2. **Push back in public**, on the thread, where the reviewer and any human can see the argument
    next to the comment it answers.
-3. **Resolve the thread — including the ones it rejects**, bounded by *evidence, not confidence*:
+3. **Resolve the thread — including the ones it rejects**, bounded by _evidence, not confidence_:
    a thread may be resolved only with a reply attached, and only when the pass either changed code
    for it or cited something checkable. Anything resting on judgement alone stays open.
 
@@ -328,15 +328,15 @@ The `bot: ` prefix is load-bearing: `reviewerComments` drops our own by that pre
 posted without it is read back next round as a reviewer asking for something and the loop argues
 with itself.
 
-**Draft means *this side is still working*.** A round that pushed stays a draft; a round that
-changed nothing has done all it can and undrafts — gated on the answer being *visible*, because
+**Draft means _this side is still working_.** A round that pushed stays a draft; a round that
+changed nothing has done all it can and undrafts — gated on the answer being _visible_, because
 undrafting after a failed post shows a human an objection with the rebuttal nowhere.
 
 #### 6.2 Both reviewers, and only one of them is on a budget — **D4b, built 2026-09-05**
 
 The comments were already there: `readReview` builds its list from `[...reviews, ...comments]` with
 no author filter, and `reviewerComments` drops only our own. Human feedback has been collected all
-along. What discarded it was `reviewerResponded`, computed from logins matching the *requested*
+along. What discarded it was `reviewerResponded`, computed from logins matching the _requested_
 reviewer, which gated `waiting`. A human who commented before the bot reviewer did was read, found,
 and thrown away by a gate asking a different question.
 
@@ -347,7 +347,7 @@ push its result into the payload as `origin: "reviewer" | "human"` on `ReviewCom
   list is empty after dropping our own.
 - **Count rounds only against `reviewer` feedback.** `MAX_REVIEW_ITERATIONS` exists to stop two
   machines talking to each other forever, because nothing in that conversation brings in
-  information from outside it. A person asking for a change *is* that outside information.
+  information from outside it. A person asking for a change _is_ that outside information.
   Capping it would mean the bot telling a reviewer it had run out of turns.
 - **A mixed batch is a human round.** The failure directions are not symmetric: over-counting
   silently declines work a human asked for, under-counting spends one more round.
@@ -359,7 +359,7 @@ reviews and was rewritten in the same commit.
 
 **Splitting the cap forced a marker format change, and the compatibility argument decided its
 shape.** Two counts cannot live in one number, so `Marker` gained `reviewerCount` and the comment
-gained a third line — appended *after* the high-water mark, never inserted above it, because the
+gained a third line — appended _after_ the high-water mark, never inserted above it, because the
 first two lines are read positionally and markers written before the split are sitting on open
 pull requests right now. Inserting would have made every one of them unreadable, which by
 `marker.ts`'s own rule means unadvanceable. A **missing** line reads as `count`, not as zero: a
@@ -422,12 +422,12 @@ Mechanics, all three forced by what the API returns:
 the operator. Ours is what carries the `bot: ` prefix, not what carries a name.
 
 **The write comes before the work.** The count is a reservation, not a receipt: bump it and write
-the cursor *before* running the pass, because posting afterwards means a failed post hands back a
+the cursor _before_ running the pass, because posting afterwards means a failed post hands back a
 free round, every tick, forever.
 
 **`reRequest` is gated on the round having pushed something.** A reviewer handed a byte-identical
 diff can only restate itself, so pinging after a no-op round buys a paid review whose content is
-already on the pull request — and then the instability rule spends the *next* round recognising
+already on the pull request — and then the instability rule spends the _next_ round recognising
 it. The loop was manufacturing the instability it is written to survive.
 
 A human always merges. The bot has no merge path.
@@ -437,14 +437,14 @@ A human always merges. The bot has no merge path.
 A ticket triaged SEND BACK is not a rejection; it is a ticket with a fixable gap, and the reporter
 is usually told exactly what to add. When they add it, nothing looks again.
 
-`agentFitness` gains `plausible: boolean` — *would be solvable if the named blockers were filled
-in* — with two coherence rules: `plausible` may be true only when `solvable` is false, and it
+`agentFitness` gains `plausible: boolean` — _would be solvable if the named blockers were filled
+in_ — with two coherence rules: `plausible` may be true only when `solvable` is false, and it
 requires non-empty `blockers`. "Nearly solvable, but I cannot say what is missing" is a guess, and
 it would put a ticket on a paid watch list with no condition that could ever clear it.
 
 `plausible: true` writes **`agent:watching`**, and a third JQL selects on it.
 
-**The obvious implementation is an infinite paid loop.** Posting a triage comment *is* an update
+**The obvious implementation is an infinite paid loop.** Posting a triage comment _is_ an update
 to the ticket, so `updated > ourLastComment` is true the instant we finish writing. The answer is
 the same shape as the review cursor: **compare against what someone else did, not against what
 changed** — re-triage only when the newest non-bot comment or field change is newer than our own.
@@ -458,22 +458,22 @@ of the feature.
 
 ## Phasing
 
-| Phase | Scope | New privilege | State |
-|---|---|---|---|
-| **A** | `agentFitness` schema + gate rule + `agent:solvable` | none | built |
-| **B1** | Second poller, both queries, label machine, `solve:once` | none | built, verified live |
-| **B2** | The claim write + read-back-and-verify, release, comment | Jira label writes | built, driven by hand |
-| **C** | Real solver: worktree, recon, edit, mechanical verification, diff gate | `Write`/`Edit` — **not `Bash`** | built, driven by hand |
-| **D1** | Push, draft PR, request review | `git push`, `gh` | built; real PRs merged |
-| **D2** | Wire `advance` — the `--advance` mode | the bot pushes to an existing PR unprompted | done |
-| **D3** | Inline comments + review cursor + reply comment + thread resolution | the bot answers and closes a reviewer's comment | done |
-| **D4a** | The label slice — the four coordinated edits | the bot moves a ticket through its whole lifecycle | done |
-| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2 | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request |
-| **D4c** | The bail terminal — `agent:failed` plus the reason | the bot closes a ticket against itself | done |
-| **D4d** | `--review`, the fifth rung — the whole chain in one command | the first loop with nobody between iterations | done |
-| **D4e** | Every outcome reports on the ticket | none; removes a silence | done |
-| **E** | **Run it from the daemon** | **runs unattended** | not started, deliberately last |
-| **F** | Sendback subscription (§7) | re-triage spend with nobody asking | not started; after E |
+| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                             |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                             |
+| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                              |
+| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                             |
+| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                             |
+| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                            |
+| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                              |
+| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                              |
+| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                              |
+| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request |
+| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                              |
+| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                              |
+| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                              |
+| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | not started, deliberately last                                                                                                    |
+| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | not started; after E                                                                                                              |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the
 privilege each grants is reviewable on its own. Later branches stack rather than fan out, because
@@ -502,7 +502,7 @@ separate mode, and the parser refuses to combine it with a rung.
 the pull request's branch rather than remembering one, because a worktree registry on disk is
 exactly the state §1 spent the whole design avoiding.
 
-**Why the daemon is last.** The property it adds is *nobody is watching*, and that is the one
+**Why the daemon is last.** The property it adds is _nobody is watching_, and that is the one
 property to add after everything else has been watched. Every phase before it is verifiable by a
 person typing a command and reading the result; wiring the loop converts all of them at once into
 things that happen on a timer whether or not anyone looks. It is also the only phase that adds no
@@ -517,7 +517,7 @@ a demonstration; the same sequence on a five-minute timer is a deployment.
 - The review-advance step running **before** any new claim, selecting on `agent:reviewing` **or**
   `agent:review-done`.
 - **Cost per ticket per day.** A triage run was long quoted at $0.11 and that is wrong by 14×: a
-  single bailed ticket measured **$3.99**, and a review round $0.94. A *completed* solve has never
+  single bailed ticket measured **$3.99**, and a review round $0.94. A _completed_ solve has never
   been costed at all. Three changes turned single-shot costs into recurring ones, so a per-run
   number is no longer enough. **The most overdue item here.**
 - A decision about what a failed solve cycle does to the daemon's backoff — a solve failure is not
@@ -529,7 +529,7 @@ a demonstration; the same sequence on a five-minute timer is a deployment.
   hooks, and one denied a write pass its `Write` tool. `runner.ts` reasons about
   `--allowedTools`/`--disallowedTools` and concludes the solver has `Write`; a hook this harness
   never sees can veto that per call. It is content-based rather than path-based, and it degraded a
-  *read* tool in the same session before any write was attempted — a pass that cannot `Grep`
+  _read_ tool in the same session before any write was attempted — a pass that cannot `Grep`
   produces a worse answer rather than an error.
 - **A transient/deterministic split plus a per-ticket attempt count.** `refused` and `failed`
   still release, so auto mode can spend repeatedly on a ticket whose diff the harness would not
@@ -575,11 +575,11 @@ recurring charge rather than a wrong answer:
    available to the same session. Two different rules for two kinds of tool.
 2. **`labels NOT IN (...)`** — measured with a control group; numbers in §1.
 3. **`--add-reviewer @copilot`** — answered in production. It also produced a finding no throwaway
-   PR would have: Copilot can reply *"Copilot encountered an error and was unable to review this
-   pull request"* as an ordinary `COMMENTED` review, indistinguishable from feedback.
+   PR would have: Copilot can reply _"Copilot encountered an error and was unable to review this
+   pull request"_ as an ordinary `COMMENTED` review, indistinguishable from feedback.
    `reviewerErrored` exists because of it.
 4. **Cost** — see E's blockers above. Open, and the most overdue item in this file.
-5. **Label write mechanics** — answered, and the answer changed the design. No *MCP* path supports
+5. **Label write mechanics** — answered, and the answer changed the design. No _MCP_ path supports
    `update.labels.remove`; Jira's REST API always has. Resolved by amending the discovery-only
    rule for one narrow method rather than by living with the clobber. See §3a.
 6. **Review vs. comment field shapes** — settled, and the fear was justified. Comments carry

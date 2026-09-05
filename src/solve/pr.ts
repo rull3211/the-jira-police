@@ -106,6 +106,7 @@ import { assertWorkBranch, isProtectedRef } from "./branch.ts";
 // from `marker.ts` rather than restated here: two copies of a sentinel is one
 // sentinel and one silent bug the day somebody changes the other.
 import { isOurs } from "./marker.ts";
+import { newestInstant } from "./silence.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
 /**
@@ -295,6 +296,32 @@ export interface ReviewState {
   readonly comments: readonly ReviewComment[];
   readonly state: string;
   readonly isDraft: boolean;
+  /**
+   * When the pull request itself was opened.
+   *
+   * The floor under the silence clock, and the only instant that is guaranteed
+   * to exist. A pull request nobody has reviewed, commented on or marked has no
+   * other date on it at all, and that is exactly the pull request the silence
+   * bound is for — a reviewer that was never really requested. Without this the
+   * one case the bound exists to catch is the one case it cannot measure.
+   */
+  readonly createdAt: string;
+  /**
+   * The newest instant among *all* entries, including the ones dropped below.
+   *
+   * Computed before the filtering, which is the point. `comments` drops
+   * whitespace-only bodies, the reviewer's own error notice, and anything that
+   * was pure boilerplate — every one of which is still something that happened,
+   * and an approving review with an empty body is the commonest of them. A
+   * silence clock reading the filtered list would report a pull request as
+   * untouched for hours because the only thing on it was an approval.
+   *
+   * Our own comments are counted too. See `silence.ts`: the asymmetry between
+   * waiting too long and giving up too early decides it.
+   *
+   * `""` when no entry carried a readable date.
+   */
+  readonly newestAt: string;
 }
 
 export type ReadReviewResult =
@@ -1052,7 +1079,11 @@ export async function readReview(
       // in `reviews` and `comments` already arrives whole — with its own `id`,
       // and with `submittedAt` or `createdAt` depending on which list it came
       // from. Adding `id` here would ask for the pull request's id, not theirs.
-      "reviews,comments,state,isDraft",
+      //
+      // `createdAt` *is* asked for at this level and does mean the pull
+      // request's own, which is the floor under the silence clock. See
+      // `ReviewState.createdAt`.
+      "reviews,comments,state,isDraft,createdAt",
     ],
     { cwd: worktreePath, timeoutMs },
   );
@@ -1092,6 +1123,21 @@ export async function readReview(
       outcome: "failed",
       reason:
         "the payload is missing state or isDraft — those decide whether the pull request may be marked ready, and a default there would be a guess made immediately before an irreversible action",
+    };
+  }
+
+  // Refused rather than defaulted, for a narrower reason than the pair above.
+  // Nothing irreversible hangs off it; what hangs off it is the loop's ability
+  // to tell "quiet for ten minutes" from "quiet since it was opened", and a
+  // default of `""` disables the silence bound on exactly the pull requests
+  // that have nothing else dated on them — which is every pull request the
+  // bound was written for.
+  const createdAt = root["createdAt"];
+  if (typeof createdAt !== "string") {
+    return {
+      outcome: "failed",
+      reason:
+        "the payload is missing the pull request's createdAt, so there is no floor under the silence clock and a quiet pull request could not be told from a new one",
     };
   }
 
@@ -1141,6 +1187,9 @@ export async function readReview(
       }),
       state,
       isDraft,
+      createdAt,
+      // Every entry, before the filtering above. See `ReviewState.newestAt`.
+      newestAt: newestInstant(entries.map((entry) => entry.createdAt ?? "")) ?? "",
     },
   };
 }

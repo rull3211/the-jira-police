@@ -245,14 +245,14 @@ export const SETTINGS = [
   {
     name: "REVIEW_POLL_MS",
     description:
-      "How long --review waits before looking at the pull request again. Two minutes, from measurement rather than taste: every Copilot review on PR #2658 landed two and a half to four minutes after the review was requested, so a shorter interval buys nothing but git churn and a longer one adds dead time to every round. A poll that finds nothing costs one gh read and no model call — waiting is free, which is why the bound that matters is MAX_REVIEW_WAITS rather than this.",
+      "How often to look at a pull request under review. Two minutes, from measurement rather than taste: every Copilot review on PR #2658 landed two and a half to four minutes after the review was requested, so a shorter interval buys nothing and a longer one adds dead time to every round. A look that finds nothing costs two gh reads, no checkout and no model call, so this is cheap to lower — and lowering it no longer shortens the service's patience, which it used to, because that is now REVIEW_SILENCE_MS in wall-clock time rather than a count of ticks.",
     fallback: "120000",
   },
   {
-    name: "MAX_REVIEW_WAITS",
+    name: "REVIEW_SILENCE_MS",
     description:
-      "How many consecutive silent polls --review tolerates before it stops and hands the pull request to a human. Ten, which at the default interval is twenty minutes of nothing. This is the bound on the one thing the round caps cannot see: a reviewer that never answers produces no rounds, so MAX_REVIEW_ITERATIONS and MAX_PR_ROUNDS_TOTAL both stay at zero while the loop spins forever. Counted consecutively and reset by any round that runs, because a slow reviewer and an absent one differ only in whether they eventually speak.",
-    fallback: "10",
+      "How long a pull request may go with nothing happening on it before the loop stops waiting and hands it to a human. Twenty minutes, which is what the old count of ten silent polls came to at the default interval. It is the bound on the one thing the round caps cannot see: a reviewer that never answers produces no rounds, so MAX_REVIEW_ITERATIONS and MAX_PR_ROUNDS_TOTAL both stay at zero while the loop spins. Measured from the newest dated thing on the pull request itself — its own creation if there is nothing else — so it survives a restart and means the same number of minutes whatever REVIEW_POLL_MS is set to. Counting ticks instead made a cadence change silently a policy change.",
+    fallback: "1200000",
   },
   {
     name: "FAIL_FIRST_CHECK",

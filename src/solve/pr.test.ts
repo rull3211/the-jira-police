@@ -123,6 +123,10 @@ function payload(overrides: Record<string, unknown> = {}): string {
     comments: [],
     state: "OPEN",
     isDraft: true,
+    // The pull request's own creation instant. Present unless a test removes
+    // it, because the refusal without it is its own test — a payload missing
+    // this has no floor under the silence clock.
+    createdAt: "2026-09-05T08:00:00Z",
     ...overrides,
   });
 }
@@ -623,7 +627,7 @@ describe("requestReview", () => {
 });
 
 describe("readReview", () => {
-  it("asks gh for exactly the four fields it reads", async () => {
+  it("asks gh for exactly the five fields it reads", async () => {
     const runner = fakeRunner(view(payload()));
 
     await readReview(runner, reviewRequest());
@@ -636,7 +640,7 @@ describe("readReview", () => {
       "--repo",
       REPO,
       "--json",
-      "reviews,comments,state,isDraft",
+      "reviews,comments,state,isDraft,createdAt",
     ]);
   });
 
@@ -653,6 +657,10 @@ describe("readReview", () => {
         comments: [],
         state: "OPEN",
         isDraft: true,
+        createdAt: "2026-09-05T08:00:00Z",
+        // Nothing has happened, so the silence clock has only the pull
+        // request's own creation to run from — which is the floor, not a gap.
+        newestAt: "",
       },
     });
   });
@@ -706,6 +714,8 @@ describe("readReview", () => {
           origin: "reviewer",
         },
       ],
+      createdAt: "2026-09-05T08:00:00Z",
+      newestAt: "2026-09-05T11:04:00Z",
       state: "OPEN",
       isDraft: true,
     });
@@ -970,7 +980,9 @@ describe("readReview", () => {
   });
 
   it("treats missing reviews and comments keys as empty, not as an error", async () => {
-    const runner = fakeRunner(view(JSON.stringify({ state: "OPEN", isDraft: true })));
+    const runner = fakeRunner(
+      view(JSON.stringify({ state: "OPEN", isDraft: true, createdAt: "2026-09-05T08:00:00Z" })),
+    );
 
     const result = await readReview(runner, reviewRequest());
 
@@ -982,8 +994,49 @@ describe("readReview", () => {
         comments: [],
         state: "OPEN",
         isDraft: true,
+        createdAt: "2026-09-05T08:00:00Z",
+        newestAt: "",
       },
     });
+  });
+
+  it("dates an approving empty review, which the comment list drops", async () => {
+    // `newestAt` is computed before the filtering and this is why. The
+    // commonest thing a reviewer does that leaves no comment is approve, and
+    // `comments` drops it — an empty body is nothing to act on. But it is
+    // something that *happened*, so the silence clock has to see it. Compute
+    // the field after the filter and an approved pull request looks abandoned,
+    // which is the one state a person is most likely to be waiting on.
+    const runner = fakeRunner(
+      view(
+        payload({
+          reviews: [
+            { author: { login: "copilot" }, body: "", submittedAt: "2026-09-05T11:30:00Z" },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
+    expect(result.outcome === "read" ? result.review.newestAt : null).toBe("2026-09-05T11:30:00Z");
+  });
+
+  it("refuses a payload with no creation instant on the pull request", async () => {
+    // Rather than defaulting it to nothing, which is the tempting shape because
+    // every other missing field here reads as empty. It cannot: the creation
+    // instant is the floor under the silence clock, so a default disables the
+    // bound on exactly the pull requests the bound exists for — the ones where
+    // nothing has happened and nothing carries a date.
+    const runner = fakeRunner(
+      view(JSON.stringify({ state: "OPEN", isDraft: true, reviews: [], comments: [] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("createdAt");
   });
 
   it("treats a null reviews key as empty too", async () => {
@@ -1747,7 +1800,9 @@ const inlineThread = (overrides: Partial<ReviewThread> = {}): ReviewThread => ({
   isOutdated: false,
   path: "src/setNonProductionFavicon.ts",
   line: 19,
-  comments: [{ author: "copilot", body: "this is not idempotent", createdAt: "", origin: "reviewer" }],
+  comments: [
+    { author: "copilot", body: "this is not idempotent", createdAt: "", origin: "reviewer" },
+  ],
   ...overrides,
 });
 
@@ -1784,7 +1839,12 @@ describe("formatThreads", () => {
       inlineThread({
         comments: [
           { author: "copilot", body: "this is not idempotent", createdAt: "", origin: "reviewer" },
-          { author: "rull3211", body: "bot: appended only when absent", createdAt: "", origin: "human" },
+          {
+            author: "rull3211",
+            body: "bot: appended only when absent",
+            createdAt: "",
+            origin: "human",
+          },
         ],
       }),
     ]);
@@ -1796,7 +1856,14 @@ describe("formatThreads", () => {
     const long = Array.from({ length: 200 }, (_unused, index) =>
       inlineThread({
         id: `PRRT_${String(index)}`,
-        comments: [{ author: "copilot", body: `${String(index)} `.repeat(400), createdAt: "", origin: "reviewer" }],
+        comments: [
+          {
+            author: "copilot",
+            body: `${String(index)} `.repeat(400),
+            createdAt: "",
+            origin: "reviewer",
+          },
+        ],
       }),
     );
 

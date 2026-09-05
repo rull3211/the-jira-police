@@ -69,7 +69,8 @@ import {
 } from "./marker.ts";
 import { type ReviewRoundRequest, type SolveDependencies, resolveReview } from "./orchestrator.ts";
 import type { CommitMessage, ThreadAnswer } from "./runner.ts";
-import type { Worktree } from "./worktree.ts";
+import { quietFor } from "./silence.ts";
+import type { Worktree, WorktreeResult } from "./worktree.ts";
 
 export interface PublishRequest {
   readonly worktree: Worktree;
@@ -177,11 +178,63 @@ export async function publish(
   return { kind: "published", number, url };
 }
 
-export interface AdvanceRequest extends Omit<ReviewRoundRequest, "reviewFeedback"> {
+/**
+ * Cuts the checkout a round needs, and is called only when a round will run.
+ *
+ * **A function rather than a `Worktree`, and that is the whole of the poll-cycle
+ * change.** `advance` used to be handed a checkout that its caller had already
+ * built, so every look at a pull request paid a fetch and a `worktree add`
+ * before anything had read the review — including the looks that end in
+ * `waiting`, which are the overwhelming majority once this runs on a timer
+ * rather than under a person's finger. At one tick a minute across N pull
+ * requests that is N checkouts a minute to discover that nobody has said
+ * anything.
+ *
+ * Everything up to and including the decision to spend a round is `gh` over
+ * `--repo`, which needs no checkout at all — only a directory to run in. So the
+ * survey runs first, and this is invoked afterwards, on the one path that has
+ * something to build.
+ *
+ * The caller keeps ownership of what it returns: `advance` never removes a
+ * worktree, because the caller also has to remove the ones it kept as evidence
+ * and two owners of one directory is worse than one owner and a long function.
+ */
+export type WorktreeSource = () => Promise<WorktreeResult>;
+
+/**
+ * Everything needed to look at a pull request, and nothing needed to act on one.
+ *
+ * Split out from `AdvanceRequest` because the split is the point: a caller that
+ * only wants to know whether a pull request has anything to say can build one of
+ * these and never think about worktrees, identities or git timeouts. That is the
+ * shape a poll cycle over N pull requests wants — N cheap reads, then a request
+ * of the fuller kind for the few that came back with work.
+ */
+export interface SurveyRequest {
   readonly repo: string;
   readonly number: number;
-  readonly identity: BotIdentity;
-  readonly reviewer?: string;
+  /** The ticket this pull request belongs to. Logging only; nothing reads it back. */
+  readonly issueKey: string;
+  /**
+   * Where `gh` runs while there is no checkout.
+   *
+   * Every read and every write the survey makes names its repository
+   * explicitly — `--repo owner/name`, or owner and name as separate GraphQL
+   * variables — so this is a working directory and nothing else. The base
+   * clone is the obvious thing to pass, and any directory would do.
+   */
+  readonly cwd: string;
+  /**
+   * Injected so the silence boundary can be tested without faking a clock.
+   *
+   * The threshold itself is deliberately *not* here. `advance` reports how long
+   * the pull request has been quiet and never decides what that is worth: a
+   * foreground command holds somebody's terminal and should give up, and a
+   * daemon reading N pull requests for free has no reason to. One measurement,
+   * two policies, the same split `MAX_PR_ROUNDS_TOTAL` and
+   * `MAX_REVIEW_ITERATIONS` already make over one marker.
+   */
+  readonly now?: number;
   /**
    * The reviewer's argument budget, `MAX_REVIEW_ITERATIONS`.
    *
@@ -201,6 +254,14 @@ export interface AdvanceRequest extends Omit<ReviewRoundRequest, "reviewFeedback
    */
   readonly maxTotalRounds: number;
   readonly ghTimeoutMs: number;
+}
+
+export interface AdvanceRequest
+  extends SurveyRequest, Omit<ReviewRoundRequest, "reviewFeedback" | "worktree"> {
+  readonly identity: BotIdentity;
+  readonly reviewer?: string;
+  /** See `WorktreeSource`. Not called on a look that finds nothing to do. */
+  readonly attach: WorktreeSource;
 }
 
 /**
@@ -271,7 +332,25 @@ export type Undraft = "undrafted" | "failed" | "still-drafting";
 
 export type AdvanceOutcome =
   /** The reviewer has not said anything yet. Look again later; nothing ran. */
-  | { readonly kind: "waiting" }
+  | {
+      readonly kind: "waiting";
+      /**
+       * Milliseconds since the last dated thing on the pull request, or `null`
+       * when nothing on it carries a date.
+       *
+       * **This replaces a counter that lived on the caller's stack.** The chain
+       * used to count consecutive silent polls itself, which made patience a
+       * product of the poll interval — halve the cadence and the loop becomes
+       * half as patient, with nothing in either setting saying so — and gave a
+       * poll cycle over many pull requests nowhere to keep the count, since the
+       * thing being measured belongs to each pull request rather than to the
+       * loop. Measured from the pull request, it survives a restart for the
+       * same reason the round counts do.
+       *
+       * `null` means unmeasurable, not zero and not forever. See `silence.ts`.
+       */
+      readonly quietMs: number | null;
+    }
   /** The reviewer responded with nothing to act on. Undrafted. */
   | { readonly kind: "ready"; readonly rounds: number }
   /**
@@ -390,7 +469,23 @@ export type AdvanceOutcome =
        * uncounted is the unbounded loop the marker exists to prevent.
        */
       readonly kind: "failed";
-      readonly stage: "read" | "cursor" | "verification" | "commit" | "push" | "undraft";
+      readonly stage:
+        | "read"
+        | "cursor"
+        /**
+         * The survey found a round to run and the checkout could not be cut.
+         *
+         * Its own stage rather than folded into `read`, because it is the one
+         * failure that happens *after* the round has been decided on and
+         * before it has been reserved — so nothing has been spent and nothing
+         * has been counted, and the honest report is that the pull request is
+         * still exactly where the survey found it.
+         */
+        | "worktree"
+        | "verification"
+        | "commit"
+        | "push"
+        | "undraft";
       readonly reason: string;
     };
 
@@ -608,30 +703,96 @@ const cursorFailed = (reason: string): AdvanceOutcome => ({
 });
 
 /**
- * Looks once at the review and moves the pull request forward if it can.
+ * What the survey found when it found work.
  *
- * Returns rather than waits. See the header.
+ * Carried forward rather than re-read, and that is deliberate: the round runs
+ * against the review the survey decided on. Reading it again after the checkout
+ * would let a comment posted in those few seconds arrive *after* the reservation
+ * that was supposed to account for it, so the marker would say the round had
+ * read something it never saw.
  */
-export async function advance(
-  deps: SolveDependencies,
-  request: AdvanceRequest,
-): Promise<AdvanceOutcome> {
-  const { commands } = deps;
-  const { worktree, repo, number, maxRounds, maxTotalRounds } = request;
-  const gh = { worktreePath: worktree.path, repo, number, timeoutMs: request.ghTimeoutMs };
+export interface PendingRound {
+  /** Feedback newer than the high-water mark, ours already dropped. */
+  readonly comments: readonly ReviewComment[];
+  /** Inline threads whose last word is not ours. */
+  readonly threads: readonly ReviewThread[];
+  /** The marker as it stands, or `null` on the first round of this pull request. */
+  readonly marker: Marker | null;
+  /** The marker comment's node id, or `null` when there is nothing to edit yet. */
+  readonly markerId: string | null;
+  readonly round: number;
+  readonly reviewerRound: number;
+  /** Whether a person is in this batch. See the classification below. */
+  readonly humanRound: boolean;
+  /**
+   * Whether the pull request is still a draft.
+   *
+   * Read once, in the survey, and carried rather than asked again — because the
+   * one thing it is used for is *not* re-marking a pull request ready that
+   * already is. See `undraft`.
+   */
+  readonly isDraft: boolean;
+}
+
+export type SurveyOutcome =
+  /** Nothing to cut a checkout for. The answer is final and is the round's. */
+  | { readonly outcome: "settled"; readonly result: AdvanceOutcome }
+  /** There is work. The caller attaches a worktree and calls `runRound`. */
+  | { readonly outcome: "round"; readonly pending: PendingRound };
+
+/** An answer the survey reached on its own, with no checkout behind it. */
+const settled = (result: AdvanceOutcome): SurveyOutcome => ({ outcome: "settled", result });
+
+/**
+ * Everything that can be decided about a pull request without a checkout.
+ *
+ * ## Which is nearly all of it, and that was not obvious
+ *
+ * Every read here is `gh` naming its repository explicitly — `--repo
+ * owner/name` for `pr view` and `pr ready`, owner and name as separate GraphQL
+ * variables for the threads — so none of them care what directory they run in.
+ * The checkout was never needed to *look*; it was needed to run the pass, which
+ * is the last thing to happen and the only expensive one. `advance` simply had
+ * them in the wrong order, which cost nothing while a person was typing the
+ * command once every two minutes and costs a fetch per pull request per tick
+ * the moment a loop is doing it.
+ *
+ * So the survey ends at the point where money starts: it decides, it undrafts if
+ * the answer is a handover, and it stops immediately before the reservation.
+ * **The reservation stays on the far side of the checkout on purpose.** It is a
+ * spend brake that has to be written before the pass runs and after the round is
+ * certain to run — reserving here and then failing to attach would spend a round
+ * on a pull request nothing had touched.
+ */
+export async function surveyReview(
+  commands: SolveDependencies["commands"],
+  request: SurveyRequest,
+): Promise<SurveyOutcome> {
+  const { repo, number, issueKey, maxRounds, maxTotalRounds } = request;
+  const gh = { worktreePath: request.cwd, repo, number, timeoutMs: request.ghTimeoutMs };
 
   const read = await readReview(commands, gh);
   if (read.outcome === "failed") {
-    return { kind: "failed", stage: "read", reason: read.reason };
+    return settled({ kind: "failed", stage: "read", reason: read.reason });
   }
   const { review } = read;
+
+  /**
+   * How long the pull request has been quiet, and the marker is not in it.
+   *
+   * `lastRead` looks like it belongs here and is redundant: it is always some
+   * entry's own `createdAt`, or an older mark, so it can never be newer than
+   * `newestAt`. Adding it would read as a third source and contribute nothing,
+   * which is worse than leaving it out.
+   */
+  const quietMs = quietFor(request.now ?? Date.now(), [review.createdAt, review.newestAt]);
 
   // "Has anyone actionable spoken", not "has the reviewer spoken". A human who
   // comments before the bot reviewer does was always collected and was thrown
   // away here, by a gate asking a narrower question than the list behind it
   // answered.
   if (!review.anyoneResponded) {
-    return { kind: "waiting" };
+    return settled({ kind: "waiting", quietMs });
   }
 
   // The inline comments, over the transport that can reach them. A failure here
@@ -640,7 +801,7 @@ export async function advance(
   // on with half a review, resolve what it did see, and undraft.
   const inline = await readReviewThreads(commands, gh);
   if (inline.outcome === "failed") {
-    return { kind: "failed", stage: "read", reason: inline.reason };
+    return settled({ kind: "failed", stage: "read", reason: inline.reason });
   }
   const threads = unansweredThreads(inline.threads);
 
@@ -649,55 +810,39 @@ export async function advance(
   // which of the comments below have already been answered.
   const located = findMarker(review.comments);
   if (located.outcome === "unusable") {
-    return cursorFailed(located.reason);
+    return settled(cursorFailed(located.reason));
   }
   const previous = located.outcome === "found" ? parseMarker(located.comment.body) : null;
   if (previous?.outcome === "unreadable") {
     // Not zero. The whole point of the marker is that losing the count releases
     // the brake, so an unreadable one stops the round and says why.
-    return cursorFailed(`the marker on #${String(number)} will not parse — ${previous.reason}`);
+    return settled(
+      cursorFailed(`the marker on #${String(number)} will not parse — ${previous.reason}`),
+    );
   }
   const marker = previous?.outcome === "parsed" ? previous.marker : null;
   const round = marker?.count ?? 0;
   const reviewerRound = marker?.reviewerCount ?? 0;
 
+  /**
+   * Hands the pull request to a human, if it is not already in their hands.
+   *
+   * **The `isDraft` check is not an optimisation.** Undrafting used to be
+   * unconditional, which was invisible while `advance` ran once per command and
+   * the chain stopped at the first handover: the second `gh pr ready` never
+   * happened because nothing looked again. A poll cycle *does* look again — a
+   * pull request that is out of draft and waiting for a person to merge it
+   * returns here on every tick — so unconditional meant a write per pull request
+   * per minute, forever, saying nothing and each one a chance to fail.
+   */
   const undraft = async (outcome: AdvanceOutcome): Promise<AdvanceOutcome> => {
+    if (!review.isDraft) {
+      return outcome;
+    }
     const marked = await markReady(commands, gh);
     return marked.outcome === "failed"
       ? { kind: "failed", stage: "undraft", reason: marked.reason }
       : outcome;
-  };
-
-  /**
-   * Asks the reviewer to look again, and reports whether that worked.
-   *
-   * Deliberately not a failure of the round. The code is pushed and the pull
-   * request is fine; what is missing is a notification, and the recovery is a
-   * human clicking the reviewer in. Returning `failed` here would discard a
-   * completed round of work over that.
-   */
-  const reRequest = async (pushed: boolean): Promise<ReRequest> => {
-    // The ping is for a commit, not for a round. Skipping it when there is no
-    // commit is what stops the loop asking a reviewer to re-read a tree it has
-    // already read — see `ReRequest`. A reply we posted on a thread notifies on
-    // its own, so nothing goes unheard by leaving this out.
-    if (!pushed) {
-      return "unnecessary";
-    }
-    const asked = await requestReview(commands, {
-      ...gh,
-      ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
-    });
-    if (asked.outcome === "failed") {
-      logger.warn("solve.review.rerequest_failed", {
-        issueKey: worktree.issueKey,
-        number,
-        round,
-        reason: asked.reason,
-      });
-      return "failed";
-    }
-    return "asked";
   };
 
   // The high-water-mark filter, and the single most important line in this
@@ -721,7 +866,7 @@ export async function advance(
     // empty comment list would do to every pull request what the loop did to
     // #2658 once — mark it reviewed while the substance of the review sat
     // somewhere `--json` cannot see.
-    return undraft({ kind: "ready", rounds: round });
+    return settled(await undraft({ kind: "ready", rounds: round }));
   }
 
   const unresolved = (): string =>
@@ -736,8 +881,8 @@ export async function advance(
     // human rounds too, for the same reason — the brake is on the machinery,
     // and one a person's comment could step past is not a brake. Nothing is
     // undrafted; see the outcome's doc comment.
-    logger.error("solve.review.capped", { issueKey: worktree.issueKey, number, rounds: round });
-    return { kind: "capped", rounds: round, unresolved: unresolved() };
+    logger.error("solve.review.capped", { issueKey, number, rounds: round });
+    return settled({ kind: "capped", rounds: round, unresolved: unresolved() });
   }
 
   // **A mixed batch is a human round**, and the asymmetry is the argument. The
@@ -760,13 +905,111 @@ export async function advance(
     // normal, which is what stops `MAX_REVIEW_ITERATIONS` from becoming the bot
     // telling a reviewer it is out of turns.
     logger.warn("solve.review.reviewer_exhausted", {
-      issueKey: worktree.issueKey,
+      issueKey,
       number,
       rounds: round,
       reviewerRounds: reviewerRound,
     });
-    return undraft({ kind: "reviewer-exhausted", rounds: round, unresolved: unresolved() });
+    return settled(
+      await undraft({ kind: "reviewer-exhausted", rounds: round, unresolved: unresolved() }),
+    );
   }
+
+  return {
+    outcome: "round",
+    pending: {
+      comments,
+      threads,
+      marker,
+      markerId: located.outcome === "found" ? located.comment.id : null,
+      round,
+      reviewerRound,
+      humanRound,
+      isDraft: review.isDraft,
+    },
+  };
+}
+
+/**
+ * Looks once at the review and moves the pull request forward if it can.
+ *
+ * Returns rather than waits. See the header.
+ *
+ * Three steps, and the middle one is the change: survey with no checkout, cut a
+ * checkout only if the survey found work, then run the round. A pull request
+ * nobody has commented on costs two `gh` reads and nothing else — no fetch, no
+ * `worktree add`, no install — which is what makes looking at every watched pull
+ * request every minute a reasonable thing to do.
+ */
+export async function advance(
+  deps: SolveDependencies,
+  request: AdvanceRequest,
+): Promise<AdvanceOutcome> {
+  const surveyed = await surveyReview(deps.commands, request);
+  if (surveyed.outcome === "settled") {
+    return surveyed.result;
+  }
+
+  const attached = await request.attach();
+  if (attached.outcome === "refused") {
+    // Before the reservation, so nothing has been counted. The pull request is
+    // exactly as the survey found it and the next look will decide the same
+    // thing again, which is the right behaviour for a checkout that failed for
+    // a local reason.
+    return { kind: "failed", stage: "worktree", reason: attached.reason };
+  }
+
+  return runRound(deps, request, attached.worktree, surveyed.pending);
+}
+
+/**
+ * Spends the round the survey decided on.
+ *
+ * Everything from here needs the checkout: the reservation is the last thing
+ * before the pass, and the pass, the commit and the push all run in it.
+ */
+async function runRound(
+  deps: SolveDependencies,
+  request: AdvanceRequest,
+  worktree: Worktree,
+  pending: PendingRound,
+): Promise<AdvanceOutcome> {
+  const { commands } = deps;
+  const { repo, number, issueKey } = request;
+  const { comments, threads, marker, round, reviewerRound, humanRound } = pending;
+  const gh = { worktreePath: worktree.path, repo, number, timeoutMs: request.ghTimeoutMs };
+
+  /**
+   * Asks the reviewer to look again, and reports whether that worked.
+   *
+   * Deliberately not a failure of the round. The code is pushed and the pull
+   * request is fine; what is missing is a notification, and the recovery is a
+   * human clicking the reviewer in. Returning `failed` here would discard a
+   * completed round of work over that.
+   */
+  const reRequest = async (pushed: boolean): Promise<ReRequest> => {
+    // The ping is for a commit, not for a round. Skipping it when there is no
+    // commit is what stops the loop asking a reviewer to re-read a tree it has
+    // already read — see `ReRequest`. A reply we posted on a thread notifies on
+    // its own, so nothing goes unheard by leaving this out.
+    if (!pushed) {
+      return "unnecessary";
+    }
+    const asked = await requestReview(commands, {
+      ...gh,
+      ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
+    });
+    if (asked.outcome === "failed") {
+      logger.warn("solve.review.rerequest_failed", {
+        issueKey,
+        number,
+        round,
+        reason: asked.reason,
+      });
+      return "failed";
+    }
+    return "asked";
+  };
 
   // **The reservation, and it comes before the pass on purpose.** Bump the
   // count and move the high-water mark first; if the write fails, the round
@@ -792,7 +1035,7 @@ export async function advance(
         `round ${String(round + 1)} — ${humanRound ? "human" : "reviewer"}, reading ${String(comments.length)} comment(s) and ${String(threads.length)} thread(s)`,
       ],
     },
-    ...(located.outcome === "found" ? { commentId: located.comment.id } : {}),
+    ...(pending.markerId === null ? {} : { commentId: pending.markerId }),
   });
   if (reserved.outcome === "failed") {
     return cursorFailed(`the round was not reserved, so it did not run — ${reserved.reason}`);
@@ -800,6 +1043,7 @@ export async function advance(
 
   const resolved = await resolveReview(deps, {
     ...request,
+    worktree,
     // One block, so both halves land inside the single untrusted-data fence
     // `runner.ts` puts around review feedback. A thread body is exactly as
     // attacker-influenced as a review body and must not get a quieter frame.
@@ -864,6 +1108,14 @@ export async function advance(
   const leaveDraft = async (spoken: Spoken, posted: ThreadOutcome): Promise<Undraft> => {
     if (spoken.outcome === "failed" || posted.failures.length > 0) {
       return "still-drafting";
+    }
+    // Already out of draft — a round after an earlier handover, which is the
+    // ordinary case once a human is commenting on an undrafted pull request.
+    // `undrafted` rather than a fourth state: the fact the caller acts on is
+    // where the pull request *is*, and marking a ready pull request ready again
+    // is a write that can only fail.
+    if (!pending.isDraft) {
+      return "undrafted";
     }
     const marked = await markReady(commands, gh);
     return marked.outcome === "failed" ? "failed" : "undrafted";

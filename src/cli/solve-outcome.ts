@@ -19,6 +19,7 @@
 
 import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
 import type { ReviewStage, SolveOutcomeLabel } from "../solve/labels.ts";
+import { hasGoneQuiet } from "../solve/silence.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -287,26 +288,46 @@ export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
  *
  * ## `silent` is a separate question from `stop`
  *
- * It marks the one outcome that means *the reviewer said nothing*, and it is
- * what `MAX_REVIEW_WAITS` counts. It has to be separate because the round caps
- * cannot see this failure at all: a reviewer that never answers produces no
- * rounds, so `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` both sit at zero
- * while the loop spins. Silence is the unbounded case, and it is unbounded
- * precisely because it is free — which is why it needs its own counter rather
- * than a share of somebody else's.
+ * It marks the one outcome that means *the reviewer said nothing*, and it is the
+ * one the round caps cannot see at all: a reviewer that never answers produces
+ * no rounds, so `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` both sit at
+ * zero while the loop spins. Silence is the unbounded case, and it is unbounded
+ * precisely because it is free.
+ *
+ * ## The silence bound is read, not counted
+ *
+ * This used to be `MAX_REVIEW_WAITS` and the chain counted its own consecutive
+ * silent polls. Two things were wrong with that, and `silence.ts` sets both out:
+ * the count lived on a stack, and it made patience a product of the poll
+ * interval. So the outcome now carries how long the pull request has actually
+ * been quiet, and the only thing left to decide here is what that is worth — a
+ * decision this function makes for a foreground command and a daemon will make
+ * differently for itself.
+ *
+ * `silenceMs` is a parameter rather than a closed-over setting for the same
+ * reason: two callers, one measurement, two policies.
  */
 export interface ChainDecision {
   readonly stop: boolean;
-  /** True only when the reviewer has not spoken. Counts against `MAX_REVIEW_WAITS`. */
+  /** True only when the reviewer has not spoken. */
   readonly silent: boolean;
   /** One line, for the operator, naming why the chain did what it did next. */
   readonly why: string;
 }
 
-export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
+export function chainDecision(outcome: AdvanceOutcome, silenceMs: number): ChainDecision {
   switch (outcome.kind) {
     case "waiting": {
-      return { stop: false, silent: true, why: "the reviewer has not said anything yet" };
+      // Unmeasurable reads as "keep looking", which is `hasGoneQuiet`'s rule and
+      // not this function's guess. A bound that fires when it cannot measure
+      // would end the chain on a payload it failed to understand.
+      return hasGoneQuiet(outcome.quietMs, silenceMs)
+        ? {
+            stop: true,
+            silent: true,
+            why: `nothing has happened on the pull request for ${String(Math.round((outcome.quietMs ?? 0) / 60000))} minutes — leaving it as it is; run --advance later, or check the reviewer was actually requested`,
+          }
+        : { stop: false, silent: true, why: "the reviewer has not said anything yet" };
     }
     case "iterated": {
       // The draft flag, not `pushed` — the same choice `reviewStageAfter` makes

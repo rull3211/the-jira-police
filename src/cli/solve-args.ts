@@ -119,7 +119,7 @@ export const USAGE =
  * against whatever the reviewer says, until something ends it. That is E's
  * defining capability arriving early, and the thing that keeps it honest is that
  * it is bounded on four sides — `MAX_PR_ROUNDS_TOTAL` on the machinery,
- * `MAX_REVIEW_ITERATIONS` on the reviewer, `MAX_REVIEW_WAITS` on silence, and
+ * `MAX_REVIEW_ITERATIONS` on the reviewer, `REVIEW_SILENCE_MS` on silence, and
  * every non-continuing outcome — and that a person typed one ticket key and is
  * watching it. `chainDecision` is where the first and last of those live.
  */

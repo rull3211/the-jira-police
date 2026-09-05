@@ -330,7 +330,7 @@ const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
 
 /** One of every review-round kind, so the tables below are about all of them. */
 const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
-  { kind: "waiting" },
+  { kind: "waiting", quietMs: 60_000 },
   { kind: "ready", rounds: 2 },
   {
     kind: "iterated",
@@ -398,16 +398,16 @@ describe("reviewStageAfter", () => {
     // `exhausted` undrafts the pull request, so it reaches the same label by a
     // different road. What made it different — the loop gave up rather than
     // agreed — is recorded in the comment on the ticket, not in this label.
-    expect(reviewStageAfter({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" })).toBe(
-      "review-done",
-    );
+    expect(
+      reviewStageAfter({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" }),
+    ).toBe("review-done");
   });
 
   it("writes nothing while the reviewer has said nothing", () => {
     // The mutation this pins is the expensive one. Once the advance step runs on
     // a timer this is the outcome of almost every tick, so a stage here is a
     // Jira write per tick per pull request under review, forever.
-    expect(reviewStageAfter({ kind: "waiting" })).toBe(null);
+    expect(reviewStageAfter({ kind: "waiting", quietMs: 60_000 })).toBe(null);
   });
 
   it("leaves the label alone for every round that left the draft flag alone", () => {
@@ -447,7 +447,7 @@ describe("isAdvanceFailureExit", () => {
     // The common case by a wide margin: most ticks find no new comment. A
     // non-zero code here would make an idle loop indistinguishable from a
     // broken one, which is the reading a daemon's backoff would act on.
-    expect(isAdvanceFailureExit({ kind: "waiting" })).toBe(false);
+    expect(isAdvanceFailureExit({ kind: "waiting", quietMs: 60_000 })).toBe(false);
   });
 
   it("does not fail the shell when a pass read the review and declined", () => {
@@ -459,9 +459,9 @@ describe("isAdvanceFailureExit", () => {
   it("does not fail the shell when the round cap fires", () => {
     // The cap working is not the command failing. What it owes the operator is
     // the line saying so, which `describeAdvanceOutcome` is tested for below.
-    expect(isAdvanceFailureExit({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" })).toBe(
-      false,
-    );
+    expect(
+      isAdvanceFailureExit({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" }),
+    ).toBe(false);
   });
 
   it("agrees with itself across every review-round kind", () => {
@@ -481,13 +481,19 @@ describe("isAdvanceFailureExit", () => {
   });
 });
 
+/** Twenty minutes, the `REVIEW_SILENCE_MS` default, so the tables read as production would. */
+const SILENCE_MS = 1_200_000;
+
 describe("chainDecision", () => {
   it("keeps going only while the reviewer is still in the conversation", () => {
     // Pinned whole, and the direction matters: an outcome this function has not
     // been taught about must stop the chain, not join it. `--review` is the one
     // loop in this service with nobody between the iterations, so a new kind
     // defaulting to `continue` is a new way to spend money unattended.
-    const table = ADVANCE_OUTCOMES.map((outcome) => [outcome.kind, chainDecision(outcome).stop]);
+    const table = ADVANCE_OUTCOMES.map((outcome) => [
+      outcome.kind,
+      chainDecision(outcome, SILENCE_MS).stop,
+    ]);
     expect(table).toEqual([
       ["waiting", false],
       ["ready", true],
@@ -505,30 +511,60 @@ describe("chainDecision", () => {
     // Undrafting means this side has finished (§6.1c). The loop keeping watch
     // afterwards is right for a daemon and wrong for a foreground command,
     // which would hold a terminal open for as long as a review takes.
-    expect(chainDecision(ITERATED_UNDRAFTED).stop).toBe(true);
-    expect(chainDecision(ITERATED_DRAFTING).stop).toBe(false);
+    expect(chainDecision(ITERATED_UNDRAFTED, SILENCE_MS).stop).toBe(true);
+    expect(chainDecision(ITERATED_DRAFTING, SILENCE_MS).stop).toBe(false);
   });
 
   it("counts a silence only when the reviewer has actually said nothing", () => {
-    // `silent` is what `MAX_REVIEW_WAITS` counts, and it is deliberately not
-    // `!stop`. A round that ran and pushed is the loop working; folding it in
-    // here would let a productive pull request trip the absent-reviewer brake.
-    const silent = ADVANCE_OUTCOMES.filter((outcome) => chainDecision(outcome).silent);
+    // `silent` marks the one outcome where nobody said anything, and it is
+    // deliberately not `!stop`. A round that ran and pushed is the loop
+    // working; folding it in here would let a productive pull request trip the
+    // absent-reviewer brake.
+    const silent = ADVANCE_OUTCOMES.filter((outcome) => chainDecision(outcome, SILENCE_MS).silent);
     expect(silent.map((outcome) => outcome.kind)).toEqual(["waiting"]);
   });
 
   it("names a reason for every kind, because the operator is watching this one", () => {
     for (const outcome of ADVANCE_OUTCOMES) {
-      expect(chainDecision(outcome).why).not.toBe("");
+      expect(chainDecision(outcome, SILENCE_MS).why).not.toBe("");
     }
+  });
+
+  it("stops once the pull request has been quiet for longer than the bound", () => {
+    // The bound that used to be a counter on the chain's own stack. It is a
+    // duration now, read off the pull request, so it means the same number of
+    // minutes whatever `REVIEW_POLL_MS` is — and unplugging it gives back the
+    // one loop in this service that polls forever with nobody watching.
+    const decision = chainDecision({ kind: "waiting", quietMs: SILENCE_MS }, SILENCE_MS);
+
+    expect(decision.stop).toBe(true);
+    expect(decision.silent).toBe(true);
+    expect(decision.why).toContain("20 minutes");
+  });
+
+  it("keeps waiting while the pull request is still fresh", () => {
+    expect(chainDecision({ kind: "waiting", quietMs: SILENCE_MS - 1 }, SILENCE_MS).stop).toBe(
+      false,
+    );
+  });
+
+  it("keeps waiting when it could not measure how quiet the pull request is", () => {
+    // `null` is "the question cannot be answered from this payload", and the
+    // safe reading of that is to look again. Making it stop would end a live
+    // pull request on a parse failure, which is unrecoverable in the direction
+    // that matters: one more free `gh` read against an abandoned review.
+    expect(chainDecision({ kind: "waiting", quietMs: null }, 0).stop).toBe(false);
   });
 
   it("distinguishes the two caps in the sentence it prints", () => {
     // They stop the chain identically and mean opposite things: one is a policy
     // about how much argument a bot reviewer is worth, the other a brake on the
     // machinery. An operator reading only "stopped" cannot tell which to relax.
-    const budget = chainDecision({ kind: "reviewer-exhausted", rounds: 3, unresolved: "" }).why;
-    const brake = chainDecision({ kind: "capped", rounds: 20, unresolved: "" }).why;
+    const budget = chainDecision(
+      { kind: "reviewer-exhausted", rounds: 3, unresolved: "" },
+      SILENCE_MS,
+    ).why;
+    const brake = chainDecision({ kind: "capped", rounds: 20, unresolved: "" }, SILENCE_MS).why;
 
     expect(budget).toContain("budget");
     expect(brake).toContain("MAX_PR_ROUNDS_TOTAL");
@@ -689,7 +725,7 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("does not describe waiting as work that happened", () => {
-    const text = describeAdvanceOutcome({ kind: "waiting" });
+    const text = describeAdvanceOutcome({ kind: "waiting", quietMs: 60_000 });
     expect(text).toContain("WAITING");
     expect(text).toContain("nothing was pushed");
   });

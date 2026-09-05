@@ -54,7 +54,13 @@ import {
 import { type SolveOutcome, type SolveRequest, solveWithRetry } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
 import { findPullRequest } from "../solve/pr.ts";
-import { attachWorktree, branchNameFor, removeWorktree } from "../solve/worktree.ts";
+import {
+  type Worktree,
+  type WorktreeResult,
+  attachWorktree,
+  branchNameFor,
+  removeWorktree,
+} from "../solve/worktree.ts";
 import {
   NotSolvableError,
   buildAdvanceRequest,
@@ -547,22 +553,27 @@ export async function runAdvance(
     return null;
   }
 
-  const attached = await attachWorktree(deps.commands, {
-    issueKey,
-    branch,
-    repoPath: base.repoPath,
-    parentDirectory: base.parentDirectory,
-    timeoutMs: base.gitTimeoutMs,
-  });
-  if (attached.outcome === "refused") {
-    process.stderr.write(`\nNo worktree, so no review round: ${attached.reason}\n`);
-    process.exitCode = 1;
-    return null;
-  }
-  const { worktree } = attached;
-  process.stdout.write(`\nAdvancing #${String(found.number)} in ${worktree.path}\n`);
+  // Held outside the callback so the cleanup below can see whether one was ever
+  // cut. `null` here is the ordinary case on a quiet pull request and is not a
+  // failure: `advance` decides there is nothing to answer and never calls the
+  // source, so there is no checkout, no install, and nothing to remove.
+  let worktree: Worktree | null = null;
+  const attach = async (): Promise<WorktreeResult> => {
+    const attached = await attachWorktree(deps.commands, {
+      issueKey,
+      branch,
+      repoPath: base.repoPath,
+      parentDirectory: base.parentDirectory,
+      timeoutMs: base.gitTimeoutMs,
+    });
+    if (attached.outcome === "created") {
+      worktree = attached.worktree;
+      process.stdout.write(`\nAdvancing #${String(found.number)} in ${attached.worktree.path}\n`);
+    }
+    return attached;
+  };
 
-  const result = await advance(deps, buildAdvanceRequest(settings, base, worktree, found.number));
+  const result = await advance(deps, buildAdvanceRequest(settings, base, attach, found.number));
   process.stdout.write(`\n${describeAdvanceOutcome(result)}\n`);
   if (isAdvanceFailureExit(result)) {
     process.exitCode = 1;
@@ -578,17 +589,19 @@ export async function runAdvance(
   // too large or too wide, and reading it is how an operator decides whether the
   // gate or the pass was wrong. Everything else either pushed its work or wrote
   // nothing, so the checkout is a copy of the remote and holds no evidence.
-  const cleanup = await removeWorktree(
-    deps.commands,
-    worktree,
-    result.kind === "refused" ? "keep-as-evidence" : "discard",
-    base.gitTimeoutMs,
-  );
-  process.stdout.write(
-    cleanup.outcome === "removed"
-      ? `Worktree removed.\n`
-      : `Worktree kept at ${cleanup.path} — ${cleanup.reason}\n`,
-  );
+  if (worktree !== null) {
+    const cleanup = await removeWorktree(
+      deps.commands,
+      worktree,
+      result.kind === "refused" ? "keep-as-evidence" : "discard",
+      base.gitTimeoutMs,
+    );
+    process.stdout.write(
+      cleanup.outcome === "removed"
+        ? `Worktree removed.\n`
+        : `Worktree kept at ${cleanup.path} — ${cleanup.reason}\n`,
+    );
+  }
 
   return result;
 }
@@ -638,9 +651,16 @@ export function sleep(ms: number): Promise<void> {
  * `advance` against the marker on the pull request, so they bound this loop
  * without it doing anything — and they keep bounding it across restarts, which a
  * counter in this function would not. Every non-continuing outcome ends it, via
- * `chainDecision`. What is new is `MAX_REVIEW_WAITS`, because the other three
+ * `chainDecision`. What is new is `REVIEW_SILENCE_MS`, because the other three
  * are all counts of *rounds* and the failure this loop adds is a reviewer who
  * never produces one.
+ *
+ * **That fourth bound is not counted here, and it used to be.** `MAX_REVIEW_WAITS`
+ * was a `let silences` on this stack: the only bound in the service that did not
+ * live in the remote system, and one whose length changed whenever the poll
+ * interval did. `silence.ts` sets out the whole argument. What is left in this
+ * function is a number read from settings and handed to `chainDecision`, so the
+ * loop no longer has any memory of its own.
  *
  * ## It reports before it spends, because the operator is the fifth bound
  *
@@ -655,17 +675,17 @@ export async function runReviewChain(
   issueKey: string,
 ): Promise<void> {
   const pollMs = numeric(settings, "REVIEW_POLL_MS", 1);
-  const maxWaits = numeric(settings, "MAX_REVIEW_WAITS", 1);
+  const silenceMs = numeric(settings, "REVIEW_SILENCE_MS", 1);
   const maxRounds = numeric(settings, "MAX_PR_ROUNDS_TOTAL", 1);
 
   process.stdout.write(
     `\n── review chain ──────────────────────────────────────────\n` +
-      `Polling every ${String(Math.round(pollMs / 1000))}s, giving up after ${String(maxWaits)} silent polls.\n` +
+      `Polling every ${String(Math.round(pollMs / 1000))}s, giving up once the pull request ` +
+      `has been quiet for ${String(Math.round(silenceMs / 60000))} minutes.\n` +
       `At most ${String(maxRounds)} rounds, roughly $${(maxRounds * 0.94).toFixed(2)} if it runs to the cap.\n` +
       `Ctrl-C is safe: nothing is held open between rounds.\n\n`,
   );
 
-  let silences = 0;
   let rounds = 0;
 
   for (;;) {
@@ -678,20 +698,23 @@ export async function runReviewChain(
       return;
     }
 
-    const decision = chainDecision(outcome);
+    const decision = chainDecision(outcome, silenceMs);
     if (!decision.silent) {
       rounds += 1;
-      // Reset rather than decrement. A reviewer that answers once has proved it
-      // is there, and carrying old silence forward would end a healthy chain on
-      // the strength of a slow start.
-      silences = 0;
     }
 
     if (decision.stop) {
       process.stdout.write(
         `\n── chain finished after ${String(rounds)} round${rounds === 1 ? "" : "s"} ──\n${decision.why}\n`,
       );
-      logger.info("solve.chain.finished", {
+      // A chain that ends on silence is warned rather than informed, and it is
+      // the one ending nobody asked for: every other stop is a decision
+      // somebody made. It is still not an error exit — a quiet reviewer is not
+      // a malfunction, and a non-zero code would teach a future daemon's
+      // backoff to treat "nobody has looked yet" as an outage worth retrying
+      // harder.
+      const record = decision.silent ? logger.warn : logger.info;
+      record("solve.chain.finished", {
         issueKey,
         rounds,
         outcome: outcome.kind,
@@ -700,26 +723,7 @@ export async function runReviewChain(
       return;
     }
 
-    if (decision.silent) {
-      silences += 1;
-      if (silences >= maxWaits) {
-        // Not an error exit. A quiet reviewer is not a malfunction, and a
-        // non-zero code here would teach a future daemon's backoff to treat
-        // "nobody has looked yet" as an outage worth retrying harder.
-        process.stdout.write(
-          `\n── chain finished after ${String(rounds)} rounds ──\n` +
-            `The reviewer said nothing for ${String(silences)} polls (${String(Math.round((silences * pollMs) / 60000))} minutes). ` +
-            `Leaving the pull request as it is; run --advance later, or check the reviewer was actually requested.\n`,
-        );
-        logger.warn("solve.chain.silent", { issueKey, rounds, silences });
-        return;
-      }
-    }
-
-    process.stdout.write(
-      `\n${decision.why} — waiting ${String(Math.round(pollMs / 1000))}s` +
-        `${decision.silent ? ` (${String(silences)}/${String(maxWaits)})` : ""}\n`,
-    );
+    process.stdout.write(`\n${decision.why} — waiting ${String(Math.round(pollMs / 1000))}s\n`);
     await sleep(pollMs);
   }
 }
