@@ -596,14 +596,29 @@ export async function runAdvance(
 /**
  * Sleep, as a named function so the loop below reads as a loop.
  *
- * `unref` is deliberate: a Ctrl-C during the two-minute wait should end the
- * process, not be queued behind the timer. The chain holds no lock and writes
- * nothing while it waits, so being killed here is safe — the pull request and
- * the ticket are both in a state some earlier round already committed to.
+ * **This called `.unref()` until 2026-09-05, and it made `--review` incapable of
+ * waiting.** An unref'd timer does not hold the event loop open, so the first
+ * time the chain found the reviewer silent and settled in to poll, Node saw
+ * nothing left to do and exited — `Detected unsettled top-level await at
+ * solve-once.ts:167`, exit code 13. The whole of D4d is one loop that waits, and
+ * the one line that does the waiting had opted out of it. Observed on SSX-3789:
+ * claim, solve, push, pull request #2660, `agent:reviewing`, then death 120ms
+ * into a 120s wait.
+ *
+ * The argument for the unref was Ctrl-C, and it was never true. SIGINT
+ * terminates the process whatever timers are pending; a `setTimeout` does not
+ * queue ahead of a signal. So the unref bought nothing and cost the feature.
+ *
+ * The banner `runReviewChain` prints one line above the first call still says
+ * *"Ctrl-C is safe: nothing is held open between rounds"*, and that sentence
+ * stays, because it was describing the right thing for the wrong reason: what
+ * makes an interrupt safe here is that the worktree is removed and no lock is
+ * held between rounds, not that a timer was unref'd. This project's defect class
+ * again — prose that happened to be true of the behaviour it was not describing.
  */
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
-    setTimeout(resolve, ms).unref();
+    setTimeout(resolve, ms);
   });
 }
 
