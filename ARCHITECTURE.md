@@ -30,8 +30,9 @@ Past that queue **the whole pipeline is wired and has been driven by hand, one r
 cuts a worktree and runs the model passes under a diff bound and mechanical verification, `--pr`
 commits, pushes and opens a draft pull request, `--review` then works the review to a handover —
 and `--advance`, a separate mode rather than a rung, runs one review round against a pull request
-an earlier run left open. Real tickets have been claimed, solved, pushed, reviewed and merged this
-way; §15 records what each step cost.
+an earlier run left open. `--watch` polls the whole set of them on a cadence, which is the daemon's
+review step with a person still watching it. Real tickets have been claimed, solved, pushed,
+reviewed and merged this way; §15 records what each step cost.
 
 What that sentence used to say, and said for two months, was that all of it was "wired to
 nothing". That was the honest description while it held, and each grant was its own commit so a
@@ -350,6 +351,29 @@ split `surveyReview` made possible (see Delivery). Four rules, each of them a bu
   request comes back as its own `ended` arm for the caller to label. The write is a visible change
   to an interface a reviewer would look at, not a line inside a loop.
 
+**Its caller is `solve:once --watch`**, which is the cycle on a timer with a person watching it —
+the hand-driven rehearsal every phase gets before the daemon runs the same thing unattended.
+`runReviewSweep` supplies the two halves and does the labelling the cycle refuses to do; `runWatch`
+adds only the loop, the cadence (`REVIEW_POLL_MS`) and the terminal. Three things in it are worth
+knowing:
+
+- **The look and the act share one `SolveDependencies`, built before the cycle rather than inside
+  the look.** Not for the saving — it is a command runner and a clock — but because it throws
+  `SettingsError` on a missing `VAULT_PATH`, and a throw inside the look is caught by the cycle and
+  filed as *that ticket's* problem. Built per ticket, one absent setting would report every ticket
+  as unlookable, every pass, forever.
+- **`act` is `advance`'s tail spelled out rather than a call to `advance`.** Calling it would
+  survey a second time, and the second survey reads a comment posted in the intervening seconds —
+  so the round would run against a batch the per-tick bound never counted. The bound only means
+  anything if it sits between the survey and the round.
+- **Watching one named ticket is a filter after the query, not a different query.** The
+  subscription *is* the label pair, so a named ticket carrying neither is genuinely not under
+  review; it reports an empty watched set and the loop ends rather than polling something that will
+  never arrive. For the same reason the loop **refuses to start when `SOLVE_ENABLED` is off**: the
+  cycle would return an empty set without running a query at all, and "nothing is under review" is
+  then a true sentence about a question nobody asked, which sends an operator to the board to debug
+  their `.env`.
+
 ---
 
 ## 5. State and the correctness rules
@@ -615,8 +639,9 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `SOLVE_TIMEOUT_MS`           | `1800000`                              | One model pass. The setting that machine sleep defeats: a pass killed here did nothing wrong and is deliberately not retried (§13)                                                                                                                                                                                                                           |
 | `SOLVE_BASE_REF`             | `origin/main`                          | What a worktree is cut from and what `verifyBase` and the fail-first probe are judged against                                                                                                                                                                                                                                                                |
 | `SOLVE_REPO_ROOT`            | — (**no fallback**)                    | Where the pilot checkouts live. No default for the same reason as `SOLVE_REPOS`: a path that survives being deleted from `.env` is a write privilege that cannot be revoked without editing source                                                                                                                                                           |
-| `REVIEW_POLL_MS`             | `120000`                               | How long `--review` waits between rounds. Two minutes from measurement, not taste — every Copilot review on #2658 landed two and a half to four minutes after the request. A look that finds nothing costs two `gh` reads and no checkout, so lowering it is cheap — and no longer shortens the service's patience                                           |
+| `REVIEW_POLL_MS`             | `120000`                               | How long `--review` waits between rounds, and `--watch` between passes. Two minutes from measurement, not taste — every Copilot review on #2658 landed two and a half to four minutes after the request. A look that finds nothing costs two `gh` reads and no checkout, so lowering it is cheap — and no longer shortens the service's patience                                           |
 | `REVIEW_SILENCE_MS`          | `1200000`                              | How long a pull request may go with nothing happening on it before the loop hands it to a human. The only bound that catches a reviewer who never answers: every other cap reads the marker, and the marker only moves when a round runs. Measured in wall-clock from the newest dated thing on the pull request, so a cadence change is not a policy change |
+| `MAX_REVIEW_ROUNDS_PER_TICK` | `3`                                    | How many paid rounds one `--watch` pass may run across the whole watched set. The only bound in this table that bounds a _tick_ rather than a pull request, and the one that stops a reviewer who answered twenty pull requests while the machine slept from buying twenty rounds in the first pass after it wakes. Over the bound a ticket is deferred, not skipped; `0` looks at everything and acts on nothing            |
 | `FAIL_FIRST_CHECK`           | `true`                                 | **The one setting that defaults on**, and the mirror of `flag()` on purpose — `!== "false"`. Every other switch fails closed so a typo cannot arm a privilege; this one grants nothing, so a typo must not silently withdraw a guard                                                                                                                         |
 | `STORECODE_PATH`             | `storecode`                            | The subprocess binary. Overridable so a probe can point at a different build without editing source                                                                                                                                                                                                                                                          |
 | `LOG_LEVEL`                  | `info`                                 | Widens nothing                                                                                                                                                                                                                                                                                                                                               |
@@ -636,6 +661,8 @@ pnpm solve:once SSX-1234 --solve   # C  — ... and runs the solver; nothing is 
 pnpm solve:once SSX-1234 --pr      # D  — ... and opens the draft PR, reviewer @copilot
 pnpm solve:once SSX-1234 --review  # ... and works the review to a handover
 pnpm solve:once SSX-1234 --advance # one review round on the PR a previous run opened
+pnpm solve:once --watch            # poll every watched PR until the queue empties
+pnpm solve:once SSX-1234 --watch   # ... or poll just that ticket's PR
 pnpm bot:once SSX-1234             # triage + the fitness call; writes nothing
 pnpm bot:once SSX-1234 --claim     # ... writes the verdict, then claims the ticket
 pnpm bot:once SSX-1234 --solve     # ... and runs the solver; nothing is pushed
@@ -649,9 +676,11 @@ Note the script is **`check-types`**, not `typecheck`.
 All four escalating flags are wired, and **the ladder is cumulative** — `--review` claims, solves,
 opens the pull request and then works the review. This paragraph used to say they refused, each
 naming the module that would have to be composed; that was accurate for two phases and is now
-history. `--advance` is the one thing on the list that is not a rung, and the parser refuses to
-combine it with one: it acts on a pull request an earlier run opened, so implying `--solve` would
-mean re-solving the ticket from scratch before touching the review. What `unavailable`
+history. `--advance` and `--watch` are the two things on the list that are not rungs, and the
+parser refuses to combine either with one — or with each other. `--advance` acts on a pull request
+an earlier run opened, so implying `--solve` would mean re-solving the ticket from scratch before
+touching the review; `--watch` is the review cycle on a timer over a whole set of them, and is the
+only mode here that runs at all without a ticket key. What `unavailable`
 (`src/cli/solve-args.ts`) still does is refuse a rung that is not _configured_, which today means
 `--pr` without a `SOLVE_GITHUB_OWNER` — checked before the claim rather than discovered after the
 solver has run.

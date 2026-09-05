@@ -190,7 +190,7 @@ Every setting fails closed except one, and the exception is argued rather than a
   distinguish blank from unset, so a default would be a write privilege that survives being
   deleted from `.env`. Unset ⇒ nothing is allowed.
 - `MAX_CONCURRENT_SOLVES` (1), `MAX_REVIEW_ITERATIONS` (3), `MAX_PR_ROUNDS_TOTAL` (20),
-  `REVIEW_POLL_MS`, `REVIEW_SILENCE_MS`.
+  `REVIEW_POLL_MS`, `REVIEW_SILENCE_MS`, `MAX_REVIEW_ROUNDS_PER_TICK` (3).
 - **`FAIL_FIRST_CHECK` (default `true`) — the one setting that defaults on.** Deliberately the
   mirror of `flag()`: it reads `!== "false"` rather than `=== "true"`. Every other switch fails
   closed so a typo cannot arm a privilege; this one grants nothing and writes nothing, so a typo
@@ -489,6 +489,8 @@ pnpm solve:once SSX-3822 --solve   # ... and runs the solver, no push
 pnpm solve:once SSX-3822 --pr      # ... and opens the draft PR
 pnpm solve:once SSX-3822 --review  # ... and works the review to a handover
 pnpm solve:once SSX-3822 --advance # one review round on an existing PR
+pnpm solve:once --watch            # poll the whole review queue until it empties
+pnpm solve:once SSX-3822 --watch   # ... or just that ticket
 ```
 
 Each flag implies the ones before it, so the command line reads as the escalation it is.
@@ -497,6 +499,17 @@ Each flag implies the ones before it, so the command line reads as the escalatio
 a pull request a previous run created. Implying `--solve` would mean re-solving the ticket from
 scratch before touching the review, which is the opposite of what the word says. So it is a
 separate mode, and the parser refuses to combine it with a rung.
+
+**`--watch` is a mode for the same reason, and bare is its ordinary form.** It is the review cycle
+on a timer with a person watching, so it takes no rung and refuses to be combined with one. Without
+a key it polls the whole watched set the review query returns; with a key it polls that ticket
+alone — a filter applied after the query rather than a second query, because **the subscription is
+the label pair**, so a named ticket carrying neither correctly reads as not under review and the
+loop ends rather than waiting for something that will never arrive. It exits when the watched set
+is empty, which is the honest terminal: everything it was watching has been merged, closed, or
+handed to a human. It refuses up front when `SOLVE_ENABLED` is off, because an empty watched set
+would otherwise report as _nothing is under review_ — a true sentence about a query that was never
+run, and this project's own defect class pointing an operator at labels for a fault in their `.env`.
 
 **There is no resume.** Each invocation re-runs from scratch. `--advance` rebuilds a worktree from
 the pull request's branch rather than remembering one, because a worktree registry on disk is
@@ -516,8 +529,9 @@ a demonstration; the same sequence on a five-minute timer is a deployment.
 - Its own cadence, slower than `POLL_INTERVAL_MS`.
 - ~~The review-advance step running **before** any new claim, selecting on `agent:reviewing` **or**
   `agent:review-done`.~~ **Built as `buildReviewQueueJql` and `runReviewCycle`, 2026-09-06,
-  `feat/review-cycle`.** The step itself exists and is tested; what E still owes it is a caller and
-  a cadence. Two things it settled that the plan had left open. The look/act split is the shape the
+  `feat/review-cycle`,** and given a hand-driven caller the same day as `solve:once --watch`. So
+  what E still owes it is not a caller but a cadence it does not have to be told, alongside the
+  daemon's other unanswered questions below. Two things it settled that the plan had left open. The look/act split is the shape the
   whole cycle rests on — everything decidable about a pull request costs two `gh` reads and no
   checkout, so watching the whole set every minute is cheap and only the actionable few cost
   anything. And the cycle needed a bound the plan did not have: `maxRounds` on one _tick_, because
