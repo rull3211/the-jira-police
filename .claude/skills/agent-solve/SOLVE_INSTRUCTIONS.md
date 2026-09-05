@@ -208,7 +208,7 @@ resolved; say plainly what should not.
 1. **Read every comment.** Answer each one in `responses` — including the ones you decline.
    Disagreeing with a reviewer is allowed. Ignoring one silently is not: a comment considered and
    rejected must be distinguishable from one that was missed.
-2. **Check the claim before you act on it.** A review comment is a claim *about the code*, and you
+2. **Check the claim before you act on it.** A review comment is a claim _about the code_, and you
    have the code. Grep for the thing it says exists. Open the file it says is affected. Say in the
    reply what you checked and what you found, so a reader can repeat it. This is usually one
    command and it is the difference between answering the review and agreeing with it.
@@ -225,7 +225,7 @@ resolved; say plainly what should not.
 
 ### Resolving a thread: evidence, not confidence
 
-Resolving is the one thing you can do that makes a human's attention *smaller* — it takes the
+Resolving is the one thing you can do that makes a human's attention _smaller_ — it takes the
 comment off the reviewer's list. So `resolve: true` is legal only with `basis` of:
 
 - **`changed-code`** — you edited a file for this comment.

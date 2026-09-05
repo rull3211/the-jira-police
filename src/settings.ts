@@ -237,6 +237,12 @@ export const SETTINGS = [
     fallback: "3",
   },
   {
+    name: "MAX_PR_ROUNDS_TOTAL",
+    description:
+      "The absolute number of rounds any one pull request may ever cost, counted from the marker comment on it. Deliberately not MAX_REVIEW_ITERATIONS under another name: that one is a policy about how much argument a bot reviewer is worth, and it is expected to be relaxed — human feedback is not capped by it at all. This is a brake on the machinery, and conflating the two would let a policy change disable a safety stop. Twenty, because the same measurement serves both and only one of them may be tuned freely. On hitting it: stop advancing, say so on the ticket, and leave the pull request open for a human.",
+    fallback: "20",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",
