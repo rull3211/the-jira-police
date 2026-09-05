@@ -10,9 +10,11 @@ import {
   completionTransition,
   eligibility,
   isEligible,
+  isNoopEdit,
   isTerminal,
   labelEdit,
   repoFromLabels,
+  reviewStageTransition,
   reviewTransition,
 } from "./labels.ts";
 
@@ -102,11 +104,26 @@ describe("eligibility", () => {
     },
   );
 
-  it("blocks locally on agent:reviewing even though the query does not", () => {
-    // The query gets away with omitting it only because a reviewing ticket
-    // still carries the claim. This check does not depend on that holding.
-    expect(SOLVE_QUEUE_EXCLUDED_LABELS).not.toContain(AGENT_LABELS.reviewing);
+  it("blocks on both review stages, which the query now also excludes", () => {
+    // The assertion here used to be `not.toContain(AGENT_LABELS.reviewing)`,
+    // because a reviewing ticket still carried the claim and the query got the
+    // exclusion for free. D4 spent that, so the query has to name them and this
+    // check has to agree with it — the two are one list now, and the test that
+    // would catch them drifting apart is the one below.
+    expect(SOLVE_QUEUE_EXCLUDED_LABELS).toContain(AGENT_LABELS.reviewing);
+    expect(SOLVE_QUEUE_EXCLUDED_LABELS).toContain(AGENT_LABELS.reviewDone);
     expect(isEligible([...AUTHORISED, AGENT_LABELS.reviewing], "manual")).toBe(false);
+    expect(isEligible([...AUTHORISED, AGENT_LABELS.reviewDone], "manual")).toBe(false);
+  });
+
+  it("refuses a claim on every label the queue query excludes", () => {
+    // The local check is the one that decides; the query is an optimisation. So
+    // anything the query filters must also be refused here, or a ticket arriving
+    // from a retry, a CLI or a hand-written query walks straight past the guard.
+    for (const blocker of SOLVE_QUEUE_EXCLUDED_LABELS) {
+      expect(isEligible([...AUTHORISED, blocker], "manual")).toBe(false);
+      expect(isEligible([AGENT_LABELS.solvable, blocker], "auto")).toBe(false);
+    }
   });
 
   it("names every blocking label it found, not just the first", () => {
@@ -176,12 +193,27 @@ describe("claimTransition", () => {
 });
 
 describe("reviewTransition", () => {
-  it("adds agent:reviewing while keeping the claim", () => {
-    // Dropping agent:solving here would put a ticket with an open pull request
-    // straight back into the queue to be solved a second time.
+  it("hands the claim in, because the claim is a concurrency slot", () => {
+    // This assertion was the exact opposite until D4, and the inversion is the
+    // point of the phase: agent:solving is counted against MAX_CONCURRENT_SOLVES
+    // by buildInFlightJql, so a ticket that kept it until merge would hold the
+    // only slot for as long as a human took to review.
     const claimed = [AGENT_LABELS.solvable, AGENT_LABELS.solving];
-    expect(reviewTransition(claimed)).toEqual({ add: [AGENT_LABELS.reviewing], remove: [] });
-    expect(applyEdit(claimed, reviewTransition(claimed))).toContain(AGENT_LABELS.solving);
+    expect(reviewTransition(claimed)).toEqual({
+      add: [AGENT_LABELS.reviewing],
+      remove: [AGENT_LABELS.solving],
+    });
+    expect(applyEdit(claimed, reviewTransition(claimed))).not.toContain(AGENT_LABELS.solving);
+  });
+
+  it("frees the slot it was holding, which is the whole reason for the change", () => {
+    // Read against buildInFlightJql, which counts agent:solving and nothing
+    // else. Unplug the removal above and this fails with a queue that delivers
+    // one pull request and then stops until somebody merges it.
+    const claimed = [AGENT_LABELS.solvable, AGENT_LABELS.solving];
+    const reviewing = applyEdit(claimed, reviewTransition(claimed));
+    expect(reviewing).not.toContain(AGENT_LABELS.solving);
+    expect(reviewing).toContain(AGENT_LABELS.reviewing);
   });
 
   it("keeps a reviewing ticket out of the queue in both modes", () => {
@@ -193,6 +225,72 @@ describe("reviewTransition", () => {
 
   it("refuses to move to review without the claim", () => {
     expect(() => reviewTransition([AGENT_LABELS.solvable])).toThrow(LabelStateError);
+  });
+});
+
+describe("reviewStageTransition", () => {
+  const REVIEWING = [AGENT_LABELS.solvable, AGENT_LABELS.reviewing];
+  const REVIEW_DONE = [AGENT_LABELS.solvable, AGENT_LABELS.reviewDone];
+
+  it("swaps reviewing for review-done when a round undrafts", () => {
+    expect(reviewStageTransition(REVIEWING, "review-done")).toEqual({
+      add: [AGENT_LABELS.reviewDone],
+      remove: [AGENT_LABELS.reviewing],
+    });
+  });
+
+  it("swaps back when a later round pushes, because the arrow goes both ways", () => {
+    // Undrafting is a transition, not an ending. While a round is pushing, "only
+    // human approval is left" is false, and the label has to say so.
+    expect(reviewStageTransition(REVIEW_DONE, "reviewing")).toEqual({
+      add: [AGENT_LABELS.reviewing],
+      remove: [AGENT_LABELS.reviewDone],
+    });
+  });
+
+  it("asks for no write when the ticket is already in the stage", () => {
+    // The advance step runs on a timer and most rounds change neither the pull
+    // request's draft status nor this label. A non-empty edit here would be a
+    // Jira write per tick per ticket under review, forever.
+    expect(isNoopEdit(reviewStageTransition(REVIEWING, "reviewing"))).toBe(true);
+    expect(isNoopEdit(reviewStageTransition(REVIEW_DONE, "review-done"))).toBe(true);
+  });
+
+  it("reports a real move as a write worth making", () => {
+    // The other half of the assertion above: isNoopEdit must distinguish, not
+    // just return true. Unplug the comparison in reviewStageTransition and one
+    // of these two tests fails whichever way it is broken.
+    expect(isNoopEdit(reviewStageTransition(REVIEWING, "review-done"))).toBe(false);
+    expect(isNoopEdit(reviewStageTransition(REVIEW_DONE, "reviewing"))).toBe(false);
+  });
+
+  it("refuses a ticket that is under review in neither sense", () => {
+    // The stage comes from a pull request; whether the ticket is still under
+    // review is a fact about the board, and a person can have moved it between
+    // the two reads. Writing agent:reviewing onto a finished ticket would
+    // resurrect it into a state the queue excludes and nothing else clears.
+    expect(() => reviewStageTransition([AGENT_LABELS.solvable], "reviewing")).toThrow(
+      LabelStateError,
+    );
+    expect(() =>
+      reviewStageTransition([AGENT_LABELS.solvable, AGENT_LABELS.done], "review-done"),
+    ).toThrow(LabelStateError);
+  });
+
+  it("refuses a ticket still on the claim, so the phases cannot be skipped", () => {
+    // agent:solving to agent:review-done is not a transition this machine has.
+    // reviewTransition is how a ticket enters the review phase, and it is the
+    // one that checks the claim.
+    expect(() =>
+      reviewStageTransition([AGENT_LABELS.solvable, AGENT_LABELS.solving], "review-done"),
+    ).toThrow(LabelStateError);
+  });
+
+  it("keeps a ticket out of the queue in either stage", () => {
+    for (const labels of [REVIEWING, REVIEW_DONE]) {
+      expect(isEligible(labels, "manual")).toBe(false);
+      expect(isEligible(labels, "auto")).toBe(false);
+    }
   });
 });
 
@@ -210,6 +308,28 @@ describe("completionTransition", () => {
     expect(completionTransition(REVIEWING, "failed").add).toEqual([AGENT_LABELS.failed]);
   });
 
+  it("gives a closed pull request its own label, not agent:done", () => {
+    // This is the mutation guarding a number rather than a behaviour, and it is
+    // the only one here whose absence shows up as a plausible-looking figure in
+    // a report instead of as a malfunction. agent:done is the count of bugs this
+    // tool fixed; a pull request a person closed unmerged is not one.
+    expect(completionTransition(REVIEWING, "closed").add).toEqual([AGENT_LABELS.closed]);
+    expect(applyEdit(REVIEWING, completionTransition(REVIEWING, "closed"))).not.toContain(
+      AGENT_LABELS.done,
+    );
+  });
+
+  it("sweeps agent:review-done, which is where a finished pull request waits", () => {
+    // The state a merge is overwhelmingly likely to arrive from — the loop
+    // undrafted, a human read it, a human merged it. Leaving it behind would
+    // mark a ticket done while it still claimed to be awaiting approval.
+    const waiting = [AGENT_LABELS.solvable, AGENT_LABELS.reviewDone];
+    expect(completionTransition(waiting, "done")).toEqual({
+      add: [AGENT_LABELS.done],
+      remove: [AGENT_LABELS.reviewDone],
+    });
+  });
+
   it("works from agent:solving alone, for a solve that bailed before opening a PR", () => {
     // Recon can conclude triage was wrong about the ticket, which is a
     // legitimate ending and not an error.
@@ -225,7 +345,7 @@ describe("completionTransition", () => {
   });
 
   it("leaves a terminal ticket the queue will never pick up again", () => {
-    for (const outcome of ["done", "failed"] as const) {
+    for (const outcome of ["done", "closed", "failed"] as const) {
       const after = applyEdit(REVIEWING, completionTransition(REVIEWING, outcome));
       expect(isTerminal(after)).toBe(true);
       expect(isEligible(after, "auto")).toBe(false);
@@ -270,6 +390,20 @@ describe("isTerminal", () => {
     expect(isTerminal([AGENT_LABELS.solvable, AGENT_LABELS.solving])).toBe(false);
     expect(isTerminal([AGENT_LABELS.done])).toBe(true);
     expect(isTerminal([AGENT_LABELS.failed])).toBe(true);
+  });
+
+  it("counts a pull request somebody closed, which is over without being done", () => {
+    // agent:closed asks a different question from agent:done and gets the same
+    // answer here. "Did the tool fix a bug" is no; "is there anything left to
+    // do" is also no, and this function is the second question.
+    expect(isTerminal([AGENT_LABELS.closed])).toBe(true);
+  });
+
+  it("does not treat a ticket waiting on a human as finished", () => {
+    // agent:review-done is the closest thing to an ending that is not one: the
+    // loop is still listening, and a human review can still send it back to
+    // agent:reviewing. Reading it as terminal would stop the advance step.
+    expect(isTerminal([AGENT_LABELS.solvable, AGENT_LABELS.reviewDone])).toBe(false);
   });
 });
 
