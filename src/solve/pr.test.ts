@@ -11,6 +11,7 @@ import {
   MAX_FEEDBACK_CHARS,
   commitAll,
   createDraftPr,
+  findPullRequest,
   formatReviewFeedback,
   markReady,
   parsePrUrl,
@@ -955,5 +956,128 @@ describe("formatReviewFeedback", () => {
 
     expect(block.length).toBeLessThan(MAX_FEEDBACK_CHARS);
     expect(block).not.toContain("truncated");
+  });
+});
+
+describe("findPullRequest", () => {
+  const find = (rows: unknown) =>
+    findPullRequest(fakeRunner({ "pr list": { stdout: JSON.stringify(rows) } }), {
+      cwd: "/repos/buy-insurance-advisor-web",
+      repo: REPO,
+      branch: BRANCH,
+      timeoutMs: 30_000,
+    });
+
+  it("asks gh for the branch, in every state", async () => {
+    const runner = fakeRunner({ "pr list": { stdout: "[]" } });
+
+    await findPullRequest(runner, {
+      cwd: "/repos/buy-insurance-advisor-web",
+      repo: REPO,
+      branch: BRANCH,
+      timeoutMs: 30_000,
+    });
+
+    const argv = runner.calls[0] ?? [];
+    expect(argv).toContain("--head");
+    expect(argv).toContain(BRANCH);
+    // `--state all` is the load-bearing one. Restricted to open pull requests,
+    // a merged one comes back as "none" and the caller reads that as "nothing
+    // published yet" at the exact moment the loop is meant to stop.
+    expect(argv.join(" ")).toContain("--state all");
+  });
+
+  it("finds the open pull request", async () => {
+    expect(await find([{ number: 12, state: "OPEN", isDraft: true }])).toEqual({
+      outcome: "found",
+      number: 12,
+      state: "OPEN",
+      isDraft: true,
+    });
+  });
+
+  it("reports a merged pull request rather than an absence", async () => {
+    expect(await find([{ number: 12, state: "MERGED", isDraft: false }])).toMatchObject({
+      outcome: "found",
+      state: "MERGED",
+    });
+  });
+
+  it("prefers the open one when a closed attempt shares the branch", async () => {
+    // The ordinary shape of a reused branch: someone closed the first attempt.
+    // Both orderings, because gh does not document the order it returns rows in
+    // and a rule that depends on it would pass here and fail in production.
+    for (const rows of [
+      [
+        { number: 9, state: "CLOSED", isDraft: false },
+        { number: 12, state: "OPEN", isDraft: true },
+      ],
+      [
+        { number: 12, state: "OPEN", isDraft: true },
+        { number: 9, state: "CLOSED", isDraft: false },
+      ],
+    ]) {
+      expect(await find(rows)).toMatchObject({ outcome: "found", number: 12 });
+    }
+  });
+
+  it("reports a merge whichever row carried it", async () => {
+    for (const rows of [
+      [
+        { number: 9, state: "CLOSED", isDraft: false },
+        { number: 12, state: "MERGED", isDraft: false },
+      ],
+      [
+        { number: 12, state: "MERGED", isDraft: false },
+        { number: 9, state: "CLOSED", isDraft: false },
+      ],
+    ]) {
+      expect(await find(rows)).toMatchObject({ outcome: "found", number: 12, state: "MERGED" });
+    }
+  });
+
+  it("refuses to choose between two open pull requests", async () => {
+    const result = await find([
+      { number: 12, state: "OPEN", isDraft: false },
+      { number: 13, state: "OPEN", isDraft: true },
+    ]);
+
+    expect(result).toMatchObject({ outcome: "failed" });
+    // Both numbers named: the recovery is a person looking, so the message has
+    // to be enough to look with.
+    expect(result.outcome === "failed" ? result.reason : "").toContain("#12, #13");
+  });
+
+  it("says none when the branch has no pull request", async () => {
+    expect(await find([])).toEqual({ outcome: "none" });
+  });
+
+  it("fails rather than reading an unreadable row as an absence", async () => {
+    // A dropped row is how a merged pull request turns into "none", which is
+    // the one wrong answer that lets the loop start work it should not.
+    for (const rows of [[{ number: 12 }], [{ state: "OPEN", isDraft: false }], [null], ["12"]]) {
+      expect(await find(rows)).toMatchObject({ outcome: "failed" });
+    }
+  });
+
+  it("fails on output that is not a JSON list", async () => {
+    for (const stdout of ["not json", '{"number":12}', "null"]) {
+      const result = await findPullRequest(fakeRunner({ "pr list": { stdout } }), {
+        cwd: "/repos/x",
+        repo: REPO,
+        branch: BRANCH,
+        timeoutMs: 30_000,
+      });
+      expect(result).toMatchObject({ outcome: "failed" });
+    }
+  });
+
+  it("fails when gh does", async () => {
+    const result = await findPullRequest(
+      fakeRunner({ "pr list": { exitCode: 1, stderr: "gh: no auth" } }),
+      { cwd: "/repos/x", repo: REPO, branch: BRANCH, timeoutMs: 30_000 },
+    );
+
+    expect(result).toMatchObject({ outcome: "failed" });
   });
 });
