@@ -7,6 +7,7 @@ import {
   describeSolveOutcome,
   isAdvanceFailureExit,
   isFailureExit,
+  reviewStageAfter,
 } from "./solve-outcome.ts";
 
 const worktree = {
@@ -332,6 +333,75 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
   { kind: "failed", stage: "push", reason: "the remote rejected the push" },
 ];
+
+/** The two `iterated` shapes above, by the only field this mapping reads. */
+const ITERATED_DRAFTING = ADVANCE_OUTCOMES[2] as Extract<AdvanceOutcome, { kind: "iterated" }>;
+const ITERATED_UNDRAFTED = ADVANCE_OUTCOMES[3] as Extract<AdvanceOutcome, { kind: "iterated" }>;
+
+describe("reviewStageAfter", () => {
+  it("writes review-done only for a round that took the pull request out of draft", () => {
+    expect(reviewStageAfter({ kind: "ready", rounds: 2 })).toBe("review-done");
+    expect(reviewStageAfter(ITERATED_UNDRAFTED)).toBe("review-done");
+  });
+
+  it("keeps a pushing round on agent:reviewing, because it is still working", () => {
+    // The label mirrors the draft flag, and a round that pushed stays a draft.
+    expect(reviewStageAfter(ITERATED_DRAFTING)).toBe("reviewing");
+  });
+
+  it("says reviewing when the undraft failed, which is the truth about the PR", () => {
+    // Not pessimism. The pull request really is still a draft, and a ticket
+    // claiming otherwise would send a human to review something whose own flag
+    // says it is unfinished.
+    expect(reviewStageAfter({ ...ITERATED_UNDRAFTED, undrafted: "failed" })).toBe("reviewing");
+  });
+
+  it("undrafts the ticket when the reviewer's budget runs out", () => {
+    // `exhausted` undrafts the pull request, so it reaches the same label by a
+    // different road. What made it different — the loop gave up rather than
+    // agreed — is recorded in the comment on the ticket, not in this label.
+    expect(reviewStageAfter({ kind: "exhausted", rounds: 3, unresolved: "still slow" })).toBe(
+      "review-done",
+    );
+  });
+
+  it("writes nothing while the reviewer has said nothing", () => {
+    // The mutation this pins is the expensive one. Once the advance step runs on
+    // a timer this is the outcome of almost every tick, so a stage here is a
+    // Jira write per tick per pull request under review, forever.
+    expect(reviewStageAfter({ kind: "waiting" })).toBe(null);
+  });
+
+  it("leaves the label alone for every round that left the draft flag alone", () => {
+    // `capped`, `abandoned`, `refused` and the error kinds all deliberately
+    // return a pull request exactly as they found it. Writing a label after
+    // changing nothing overrides an earlier, better-informed decision with a
+    // default.
+    expect(reviewStageAfter({ kind: "capped", rounds: 20, unresolved: "" })).toBe(null);
+    expect(reviewStageAfter({ kind: "abandoned", reason: "needs a migration" })).toBe(null);
+    expect(reviewStageAfter({ kind: "refused", stage: "diff-gate", reasons: ["lockfile"] })).toBe(
+      null,
+    );
+    expect(reviewStageAfter({ kind: "failed", stage: "push", reason: "rejected" })).toBe(null);
+  });
+
+  it("agrees with itself across every review-round kind", () => {
+    // Pinned whole, for the reason the exit-code table below is: a new outcome
+    // has to force a decision rather than defaulting to null, which is the
+    // direction that fails quietly.
+    const table = ADVANCE_OUTCOMES.map((outcome) => [outcome.kind, reviewStageAfter(outcome)]);
+    expect(table).toEqual([
+      ["waiting", null],
+      ["ready", "review-done"],
+      ["iterated", "reviewing"],
+      ["iterated", "review-done"],
+      ["exhausted", "review-done"],
+      ["abandoned", null],
+      ["refused", null],
+      ["failed", null],
+    ]);
+  });
+});
 
 describe("isAdvanceFailureExit", () => {
   it("does not fail the shell while the reviewer has said nothing", () => {

@@ -37,7 +37,18 @@ import type { Settings } from "../settings.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
 import { advance, publish } from "../solve/delivery.ts";
 import { reportOutcome } from "../solve/feedback.ts";
-import type { ClaimAuthority } from "../solve/labels.ts";
+import {
+  type ClaimAuthority,
+  type LabelEdit,
+  LabelStateError,
+  type ReviewStage,
+  completionTransition,
+  isNoopEdit,
+  isTerminal,
+  labelEdit,
+  reviewStageTransition,
+  reviewTransition,
+} from "../solve/labels.ts";
 import { type SolveOutcome, type SolveRequest, solveWithRetry } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
 import { findPullRequest } from "../solve/pr.ts";
@@ -59,6 +70,7 @@ import {
   describeSolveOutcome,
   isAdvanceFailureExit,
   isFailureExit,
+  reviewStageAfter,
 } from "./solve-outcome.ts";
 
 /**
@@ -206,6 +218,96 @@ export async function runSolver(
   }
 
   return outcome;
+}
+
+/**
+ * Moves a ticket's `agent:` labels, and says plainly when it could not.
+ *
+ * Every caller is *after the fact*. The pull request is already open, or the
+ * round has already pushed and replied; this is the board catching up with
+ * something that has happened on GitHub. So nothing here sets an exit code and
+ * nothing throws — the run succeeded, and turning a bookkeeping failure into a
+ * command failure would tell an operator the wrong thing about the work.
+ *
+ * What it does instead is print the exact repair, because a label this service
+ * failed to write is a label a person now has to write. The failure directions
+ * are both survivable and worth knowing:
+ *
+ * - **A failed `reviewTransition` leaves `agent:solving` on.** The ticket keeps
+ *   holding its concurrency slot, which stalls the queue and is visible; it does
+ *   not become claimable twice, which would not be.
+ * - **A failed stage move leaves the old stage on.** Both stages are excluded
+ *   from the queue, so the only cost is a ticket that disagrees with its own
+ *   pull request about whether a human is wanted yet.
+ *
+ * `LabelStateError` is caught rather than propagated for one specific reason:
+ * `reviewStageTransition` throws when the ticket is under review in neither
+ * sense, which is not a fault. It is a person having moved the ticket while the
+ * round ran, and the correct response to that is to leave their decision alone
+ * and report it.
+ *
+ * The read-back is not the claim's read-back-and-verify and does not need to be.
+ * `updateLabels` sends one atomic REST call carrying both the additions and the
+ * removals, so there is no window between them to lose a label in. This confirms
+ * the write landed at all.
+ */
+async function moveLabels(
+  client: JiraClient,
+  issueKey: string,
+  plan: (labels: readonly string[]) => LabelEdit,
+): Promise<void> {
+  const capabilities = createClaimCapabilities(client);
+
+  let change: LabelEdit;
+  try {
+    change = plan(await capabilities.readLabels(issueKey));
+  } catch (error) {
+    if (error instanceof LabelStateError) {
+      process.stdout.write(`\n${issueKey}'s labels were left alone: ${error.message}\n`);
+      return;
+    }
+    throw error;
+  }
+
+  if (isNoopEdit(change)) {
+    return;
+  }
+
+  const wanted = `+${change.add.join(", +")}${change.remove.length === 0 ? "" : ` -${change.remove.join(", -")}`}`;
+  try {
+    await capabilities.applyLabels(issueKey, change);
+  } catch (error) {
+    process.stderr.write(
+      `\nCould not move ${issueKey}'s labels (${wanted}): ${error instanceof Error ? error.message : String(error)}\n` +
+        `Do it by hand; the pull request is unaffected.\n`,
+    );
+    return;
+  }
+
+  const after = await capabilities.readLabels(issueKey);
+  const missing = change.add.filter((label) => !after.includes(label));
+  const lingering = change.remove.filter((label) => after.includes(label));
+  if (missing.length > 0 || lingering.length > 0) {
+    process.stderr.write(
+      `\n${issueKey}'s labels did not come back as written (${wanted}); they are: ${after.join(", ")}\n` +
+        `Fix them by hand — the queue reads these.\n`,
+    );
+    return;
+  }
+
+  process.stdout.write(`\n${issueKey} is now: ${after.join(", ")}\n`);
+}
+
+/** The label half of a finished round: mirror the pull request's draft flag. */
+async function moveReviewStage(
+  client: JiraClient,
+  issueKey: string,
+  stage: ReviewStage | null,
+): Promise<void> {
+  if (stage === null) {
+    return;
+  }
+  await moveLabels(client, issueKey, (labels) => reviewStageTransition(labels, stage));
 }
 
 /**
@@ -387,10 +489,28 @@ export async function runAdvance(
   if (found.state !== "OPEN") {
     // Reported and not an error. A merged pull request is the happy ending, and
     // a closed one is a person's decision; neither is something to push to.
-    // Moving the ticket's labels on the strength of this is D4's job, and until
-    // then saying so is the whole of the handling.
     process.stdout.write(
       `\n#${String(found.number)} on ${branch} is ${found.state}. Nothing to advance.\n`,
+    );
+    // §6.1's terminal, and it had to land in the same change as the label move
+    // rather than after it. Until D4 this branch printed the line above and
+    // stopped, which was survivable because the ticket still carried
+    // `agent:solving` and the publish step said out loud that a person had to
+    // move it on. Both of those are now gone: the ticket sits in
+    // `agent:review-done`, excluded from the queue, with nothing left that would
+    // ever clear it. Shipping the label move without this would not be an
+    // unfinished feature, it would be a leak.
+    //
+    // **`MERGED` and `CLOSED` do not share a label**, for the reason `AGENT_LABELS`
+    // gives: `agent:done` is the count of bugs this tool fixed, and a pull request
+    // a person closed unmerged is work the tool completed that nobody wanted. That
+    // is a different number and an interesting one, and it disappears the moment
+    // the two are folded together — a distinction drawn in a comment is a
+    // distinction no report can read.
+    await moveLabels(client, issueKey, (labels) =>
+      isTerminal(labels)
+        ? labelEdit([], [])
+        : completionTransition(labels, found.state === "MERGED" ? "done" : "closed"),
     );
     return;
   }
@@ -415,6 +535,12 @@ export async function runAdvance(
   if (isAdvanceFailureExit(result)) {
     process.exitCode = 1;
   }
+
+  // Before the worktree is cleaned up, so a failure here is reported next to the
+  // round it belongs to rather than after a paragraph about directories. The
+  // stage is `null` for every outcome that left the draft flag alone, which is
+  // most of them, and then this is one read and no write.
+  await moveReviewStage(client, issueKey, reviewStageAfter(result));
 
   // Kept when a human would want the diff — a refusal is a diff that was judged
   // too large or too wide, and reading it is how an operator decides whether the
@@ -481,13 +607,18 @@ export async function runWriteRungs(
 
     keepClaim = await runPublish(settings, outcome, issueKey);
     if (keepClaim) {
-      // Said out loud because the rest of the label state machine — `agent:reviewing`,
-      // `agent:done` — is not built. The ticket stays on `agent:solving`, which is
-      // accurate about the work and wrong about the stage, and a person moving it
-      // on is currently the only thing that will.
-      process.stdout.write(
-        `\n${issueKey} keeps agent:solving. Nothing here writes agent:reviewing yet; move it by hand.\n`,
-      );
+      // The claim is handed in here rather than released, and the difference
+      // matters. `runRelease` restores the labels this run found — including the
+      // `agent:start` the claim consumed — which is right for a run that
+      // achieved nothing and wrong for one that left a pull request open: it
+      // would put the ticket back in the queue with a human's go-ahead still on
+      // it, to be solved a second time.
+      //
+      // So `keepClaim` still means "do not release", and what it now also means
+      // is that the ticket moves on instead of sitting on a claim it no longer
+      // needs. `agent:solving` is a concurrency slot, and the work it was
+      // counting is finished the moment the pull request exists.
+      await moveLabels(client, issueKey, reviewTransition);
     }
   } finally {
     if (!keepClaim) {

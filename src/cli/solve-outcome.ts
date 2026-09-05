@@ -18,6 +18,7 @@
  */
 
 import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
+import type { ReviewStage } from "../solve/labels.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -137,6 +138,54 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  */
 export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
   return outcome.kind === "failed" || outcome.kind === "refused";
+}
+
+/**
+ * Which review stage the ticket should be in after this round, or `null`.
+ *
+ * The pull request's draft flag is the source of truth and the ticket's label is
+ * a mirror of it, so this reads only what the round did to the draft — never
+ * what it concluded, and never whether it succeeded. `agent:review-done` means
+ * *the pull request is out of draft*, which is a fact anyone can check.
+ *
+ * **`null` is the answer for every outcome that left the draft flag alone**, and
+ * it is the majority of them. Saying "leave the label as it is" is not the same
+ * as saying "the ticket is still under review": `capped`, `abandoned`, `refused`
+ * and the error kinds all deliberately leave a pull request exactly as they
+ * found it, and a round that writes a label after changing nothing is a round
+ * that overrides an earlier, better-informed decision with a default.
+ *
+ * `waiting` is the one worth naming separately even though it shares the answer.
+ * It is the *most common* outcome by a wide margin once the advance step runs on
+ * a timer, and it costs nothing today only because it also returns `null` here.
+ * Give it a stage and every quiet pull request becomes a Jira write per tick.
+ */
+export function reviewStageAfter(outcome: AdvanceOutcome): ReviewStage | null {
+  switch (outcome.kind) {
+    // Undrafted, so the agentic cycle is over and a human is the only thing
+    // left. `exhausted` reaches the same place by a different road — the
+    // reviewer's budget ran out rather than the reviewer running out of things
+    // to say — and the ticket cannot tell the difference because the pull
+    // request cannot either. The comment on the ticket is where that difference
+    // is recorded, and it already is.
+    case "ready":
+    case "exhausted": {
+      return "review-done";
+    }
+    // The only outcome that can go either way, and it is decided by the draft
+    // flag rather than by `pushed`. Those agree today — §6.1c's rule is that a
+    // round which pushed stays a draft — but they are two different facts, and
+    // reading the one this label mirrors means a future change to that rule
+    // cannot silently desynchronise the board from the pull request. A `failed`
+    // undraft is `reviewing`, which is correct rather than pessimistic: the pull
+    // request really is still a draft.
+    case "iterated": {
+      return outcome.undrafted === "undrafted" ? "review-done" : "reviewing";
+    }
+    default: {
+      return null;
+    }
+  }
 }
 
 /**
