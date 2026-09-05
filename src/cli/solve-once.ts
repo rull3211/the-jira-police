@@ -68,7 +68,7 @@ import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
 import { USAGE, parseSolveArgs, unavailable, writes } from "./solve-args.ts";
-import { runWriteRungs } from "./solve-run.ts";
+import { runAdvance, runWriteRungs } from "./solve-run.ts";
 
 async function main(): Promise<void> {
   const args = parseSolveArgs(process.argv.slice(2));
@@ -80,16 +80,24 @@ async function main(): Promise<void> {
   const settings = readSettings();
 
   if (args.invocation.mode === "advance") {
-    // Parsed, refused, and deliberately in that order. `--advance` is a flag an
-    // operator can type from this commit and a review round they cannot run
-    // until the next one — the same shape every other capability here shipped
-    // in, because the reviewable event is the wiring rather than the code.
-    // Replacing this branch with the call is the whole of that commit.
-    process.stderr.write(
-      "--advance is not wired yet — the review round exists but nothing calls it\n",
-    );
-    logger.warn("solve-once.refused", { mode: "advance", issueKey: args.invocation.issueKey });
-    process.exitCode = 3;
+    // The whole of the advance mode, and it is short because it shares nothing
+    // with the ladder below: no queue is read, no claim is written, no report is
+    // produced. It acts on a pull request, and the ticket is only how it finds
+    // one. `--pr`'s configuration check still applies — the same GitHub owner
+    // names the repository this talks to — so it is asked for by rung name even
+    // though no rung is being climbed.
+    const { issueKey } = args.invocation;
+    const missing = unavailable("pr", settings);
+    if (missing !== null) {
+      process.stderr.write(`refusing --advance: ${missing}\n`);
+      logger.warn("solve-once.refused", { mode: "advance", issueKey, reason: missing });
+      process.exitCode = 3;
+      return;
+    }
+
+    logger.info("solve-once.settings", { ...describeSettings(settings), mode: "advance" });
+    await runAdvance(settings, createJiraClient(settings), issueKey);
+    logger.info("solve-once.done", { mode: "advance", issueKey });
     return;
   }
 

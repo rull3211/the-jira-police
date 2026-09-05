@@ -17,6 +17,7 @@
  * register. Both have a test saying so.
  */
 
+import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -105,6 +106,67 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
         `Nothing was pushed and nothing was written to Jira.`,
         `Read the diff yourself: git -C ${outcome.worktree.path} diff ${outcome.worktree.branch}`,
       ].join("\n");
+    }
+  }
+}
+
+/**
+ * Whether a review round should set `$?`.
+ *
+ * The same rule as `isFailureExit` — *did this produce a usable answer* — and
+ * the same two cases it is easy to get wrong, in a new shape:
+ *
+ * - **`waiting` is a success.** Nobody has commented yet. That is the loop
+ *   working, and it is what most invocations will return; exiting non-zero for
+ *   it would make a correctly idle poller look like a broken one.
+ * - **`abandoned` is a success.** A pass read the reviewer's comment and
+ *   declined to act on it. A human takes the pull request from there, which is
+ *   the outcome the review round exists to be able to reach.
+ *
+ * `exhausted` also exits zero: the cap firing is the cap working. The caller
+ * still has to say so on the ticket, which is a different obligation from an
+ * exit code.
+ */
+export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
+  return outcome.kind === "failed" || outcome.kind === "refused";
+}
+
+/** One line an operator can act on, per review-round outcome. */
+export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
+  switch (outcome.kind) {
+    case "waiting": {
+      return `WAITING — the reviewer has not said anything yet, so nothing ran and nothing was pushed`;
+    }
+    case "ready": {
+      return `READY — the reviewer left nothing to act on after ${String(outcome.rounds)} round(s); the pull request is out of draft`;
+    }
+    case "iterated": {
+      // The re-request is reported on its own line rather than folded into the
+      // headline, because the two facts have different owners: the round
+      // succeeded and is nobody's problem, while a reviewer who was not asked
+      // again is a human clicking one button.
+      return (
+        `ITERATED — round ${String(outcome.round)} pushed. Responses:\n` +
+        outcome.responses.map((response) => `  - ${response}`).join("\n") +
+        (outcome.reviewerRequested
+          ? `\nThe reviewer was asked to look again.`
+          : `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`)
+      );
+    }
+    case "exhausted": {
+      return (
+        `EXHAUSTED — ${String(outcome.rounds)} round(s) spent and the reviewer still has comments open. ` +
+        `Undrafted anyway; a human decides from here.\nUnresolved:\n${outcome.unresolved}`
+      );
+    }
+    case "abandoned": {
+      return `ABANDONED (this is not a failure) — a pass read the review and declined: ${outcome.reason}`;
+    }
+    case "refused": {
+      return `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nNothing was pushed.`;
+    }
+    case "failed": {
+      return `FAILED at the ${outcome.stage} stage — ${outcome.reason}`;
     }
   }
 }

@@ -32,16 +32,20 @@
  * from it — two different facts that a single boolean had made into one string.
  */
 
-import type { JiraClient } from "../jira/client.ts";
+import type { IssueDetail, JiraClient } from "../jira/client.ts";
 import type { Settings } from "../settings.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
-import { publish } from "../solve/delivery.ts";
+import { advance, publish } from "../solve/delivery.ts";
 import { reportOutcome } from "../solve/feedback.ts";
 import type { ClaimAuthority } from "../solve/labels.ts";
 import { type SolveOutcome, type SolveRequest, solveWithRetry } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
+import { findPullRequest } from "../solve/pr.ts";
+import { attachWorktree, branchNameFor, removeWorktree } from "../solve/worktree.ts";
 import {
   NotSolvableError,
+  buildAdvanceRequest,
+  buildFindPrRequest,
   buildPublishRequest,
   buildSolveRequest,
   createClaimCapabilities,
@@ -50,7 +54,12 @@ import {
   createTicketReader,
 } from "../wiring.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
-import { describeSolveOutcome, isFailureExit } from "./solve-outcome.ts";
+import {
+  describeAdvanceOutcome,
+  describeSolveOutcome,
+  isAdvanceFailureExit,
+  isFailureExit,
+} from "./solve-outcome.ts";
 
 /**
  * What the queue thinks of this ticket, or that there was no queue to ask.
@@ -68,6 +77,39 @@ function queueNote(issueKey: string, cycle: SolveCycleOutcome | null): string {
   return cycle.planned.some((candidate) => candidate.issueKey === issueKey)
     ? `\n${issueKey} is in the queue; solving it.\n`
     : `\n${issueKey} is NOT in the queue right now — solving it anyway because you named it.\n`;
+}
+
+/**
+ * The solve request, or `null` after saying why there is not one.
+ *
+ * `NotSolvableError` is caught and every other error is rethrown, and the
+ * difference is the whole reason this is not a bare `try`. "This ticket names a
+ * repository the operator has not allowed" is an answer, and the operator's
+ * fix is to widen `SOLVE_REPOS` or leave the ticket alone; anything else
+ * reaching here is a fault, and swallowing it would report a misconfigured
+ * service as a ticket problem.
+ *
+ * `rung` is the flag being refused, and it is a parameter because both callers
+ * ask the same question about a different privilege — an operator told
+ * "refusing --solve" after typing `--advance` would go looking in the wrong
+ * place.
+ */
+function requestOrRefusal(
+  settings: Settings,
+  detail: IssueDetail,
+  ticket: string,
+  rung: string,
+): SolveRequest | null {
+  try {
+    return buildSolveRequest(settings, detail, ticket);
+  } catch (error) {
+    if (error instanceof NotSolvableError) {
+      process.stderr.write(`refusing ${rung}: ${error.message}\n`);
+      process.exitCode = 3;
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -104,16 +146,9 @@ export async function runSolver(
       `${omitted.length > 0 ? `, omitted ${omitted.length}` : ""}\n`,
   );
 
-  let request: SolveRequest;
-  try {
-    request = buildSolveRequest(settings, detail, text);
-  } catch (error) {
-    if (error instanceof NotSolvableError) {
-      process.stderr.write(`refusing --solve: ${error.message}\n`);
-      process.exitCode = 3;
-      return null;
-    }
-    throw error;
+  const request = requestOrRefusal(settings, detail, text, "--solve");
+  if (request === null) {
+    return null;
   }
 
   process.stdout.write(`Repository: ${request.repoPath} @ ${request.baseRef}\n\n`);
@@ -283,6 +318,119 @@ export async function runPublish(
       return false;
     }
   }
+}
+
+/**
+ * One review round against the pull request a previous run left open.
+ *
+ * ## It rebuilds the worktree rather than remembering one
+ *
+ * There is no resume in this harness — every invocation starts from nothing —
+ * and this is the first command that needs a checkout it did not create. The
+ * two ways out were to start recording worktrees on disk, or to cut a fresh one
+ * from the branch the pull request is on. It cuts a fresh one: the queue's whole
+ * dedupe design keeps state in the remote system rather than in `state/`, and a
+ * worktree registry would be the first thing to break after a restart, a wiped
+ * temp directory, or a second host. The cost is a fetch and a checkout per
+ * round, which is nothing next to the passes that follow.
+ *
+ * The worktree is removed on the way out for the same reason it is rebuilt on
+ * the way in: `git worktree add -b` refuses when the branch or the path already
+ * exists, so a round that left its checkout behind would make the next round
+ * impossible. It is kept only when there is a diff a human would want to read.
+ *
+ * ## The branch name comes from the ticket, and the pull request is looked up
+ *
+ * Not the other way around. `branchNameFor` is the same function the solver used
+ * to create the branch, so asking it again reproduces the name without trusting
+ * anything GitHub says about it — and `attachWorktree` still refuses any name
+ * that is not an implementation branch, because that guard protects the standing
+ * rule rather than this call site's assumptions.
+ */
+export async function runAdvance(
+  settings: Settings,
+  client: JiraClient,
+  issueKey: string,
+): Promise<void> {
+  const read = createTicketReader(client);
+  const { text, detail } = await read(issueKey);
+
+  const base = requestOrRefusal(settings, detail, text, "--advance");
+  if (base === null) {
+    return;
+  }
+
+  const branch = branchNameFor(issueKey, detail.summary);
+  if (branch === null) {
+    process.stderr.write(
+      `refusing --advance: ${issueKey}'s summary yields no usable branch name, so there is nothing to look for.\n`,
+    );
+    process.exitCode = 3;
+    return;
+  }
+
+  const deps = createSolveRunDeps(settings);
+  const found = await findPullRequest(deps.commands, buildFindPrRequest(settings, base, branch));
+
+  if (found.outcome === "failed") {
+    process.stderr.write(`\nCould not tell whether a pull request exists: ${found.reason}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  if (found.outcome === "none") {
+    process.stdout.write(
+      `\nNo pull request on ${branch}. --advance acts on one that already exists; run --pr first.\n`,
+    );
+    process.exitCode = 3;
+    return;
+  }
+  if (found.state !== "OPEN") {
+    // Reported and not an error. A merged pull request is the happy ending, and
+    // a closed one is a person's decision; neither is something to push to.
+    // Moving the ticket's labels on the strength of this is D4's job, and until
+    // then saying so is the whole of the handling.
+    process.stdout.write(
+      `\n#${String(found.number)} on ${branch} is ${found.state}. Nothing to advance.\n`,
+    );
+    return;
+  }
+
+  const attached = await attachWorktree(deps.commands, {
+    issueKey,
+    branch,
+    repoPath: base.repoPath,
+    parentDirectory: base.parentDirectory,
+    timeoutMs: base.gitTimeoutMs,
+  });
+  if (attached.outcome === "refused") {
+    process.stderr.write(`\nNo worktree, so no review round: ${attached.reason}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const { worktree } = attached;
+  process.stdout.write(`\nAdvancing #${String(found.number)} in ${worktree.path}\n`);
+
+  const result = await advance(deps, buildAdvanceRequest(settings, base, worktree, found.number));
+  process.stdout.write(`\n${describeAdvanceOutcome(result)}\n`);
+  if (isAdvanceFailureExit(result)) {
+    process.exitCode = 1;
+  }
+
+  // Kept when a human would want the diff — a refusal is a diff that was judged
+  // too large or too wide, and reading it is how an operator decides whether the
+  // gate or the pass was wrong. Everything else either pushed its work or wrote
+  // nothing, so the checkout is a copy of the remote and holds no evidence.
+  const cleanup = await removeWorktree(
+    deps.commands,
+    worktree,
+    result.kind === "refused" ? "keep-as-evidence" : "discard",
+    base.gitTimeoutMs,
+  );
+  process.stdout.write(
+    cleanup.outcome === "removed"
+      ? `Worktree removed.\n`
+      : `Worktree kept at ${cleanup.path} — ${cleanup.reason}\n`,
+  );
 }
 
 /**
