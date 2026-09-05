@@ -127,6 +127,18 @@ function payload(overrides: Record<string, unknown> = {}): string {
 
 const HEAD_SHA = "9f1c2ab3d4e5f60718293a4b5c6d7e8f90a1b2c3";
 
+/** A review that said something, so the chrome tests have something to keep. */
+const APPROVED = "### 🟢 Approval recommended\n\nThe change is narrowly scoped.";
+
+/**
+ * Copilot's trailing promotional block, copied from PR #1413 rather than
+ * paraphrased — a fixture that invented its own wording would pass against a
+ * rule that never matched the real thing.
+ */
+const PROMO =
+  '\n\n---\n\n💡 <a href="/o/r/new/main?filename=.github/skills/code-review/SKILL.md">Add a `code-review` agent skill</a>' +
+  ' or configure MCP servers for context-aware, tailored reviews. <a href="https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui">Learn more in the docs.</a>';
+
 /** Reply table for the one `gh pr view` call `readReview` makes. */
 const view = (stdout: string): Record<string, Partial<CommandResult>> => ({
   "pr view": { stdout },
@@ -877,6 +889,61 @@ describe("readReview", () => {
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
       { author: "d", body: "real feedback", createdAt: "", id: "" },
     ]);
+  });
+
+  it("drops the reviewer's promotional footer, which was never review", async () => {
+    // Observed on PR #1413: the pass was handed this block, read it as a
+    // request, and declined it in `responses` — which by then were posted
+    // publicly, so a timezone bugfix carried a paragraph about not adding a
+    // SKILL.md.
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: APPROVED + PROMO }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toBe(APPROVED);
+  });
+
+  it("leaves the same footer alone when a human quotes it", async () => {
+    // Scoped to the reviewer on exactly the grounds the error-notice drop is:
+    // a person quoting the block is a person saying something, and matching on
+    // text alone would silently edit their message.
+    const runner = fakeRunner(
+      view(
+        payload({ comments: [{ author: { login: "some-human" }, body: "what is this?" + PROMO }] }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toContain(
+      "docs.github.com/copilot",
+    );
+  });
+
+  it("keeps a reviewer's trailing section when it is not the vendor's chrome", async () => {
+    // A rule is not enough on its own, and neither is the 💡. Reviewers use
+    // both when making a real suggestion, and swallowing one is the failure
+    // direction nobody recovers from by noticing.
+    const body = "Looks fine.\n\n---\n\n💡 Consider extracting the helper.";
+    const runner = fakeRunner(view(payload({ reviews: [{ author: { login: "copilot" }, body }] })));
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toBe(body);
+  });
+
+  it("drops a review that was nothing but chrome, rather than passing on a blank", async () => {
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: PROMO }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    // Still a response — the reviewer spoke — but there is nothing in it to act on.
+    expect(result.outcome === "read" && result.review.reviewerResponded).toBe(true);
+    expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
   });
 
   it("names an author it could not read rather than dropping the comment", async () => {

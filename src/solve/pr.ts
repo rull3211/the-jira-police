@@ -1054,20 +1054,27 @@ export async function readReview(
       // A human quoting the failure in a comment is asking for something, and
       // matching on text alone would delete a person's message because a bot
       // had used the same words.
-      comments: entries.flatMap((entry) =>
-        entry.body === null ||
-        entry.body.trim() === "" ||
-        (matchesReviewer(entry.login, reviewer) && isReviewerError(entry.body))
+      comments: entries.flatMap((entry) => {
+        // Chrome comes off before the blank check rather than after, so a
+        // review whose body was *only* boilerplate drops out entirely instead
+        // of reaching the pass as an empty comment to puzzle over.
+        const body =
+          entry.body !== null && matchesReviewer(entry.login, reviewer)
+            ? stripReviewerChrome(entry.body)
+            : entry.body;
+        return body === null ||
+          body.trim() === "" ||
+          (matchesReviewer(entry.login, reviewer) && isReviewerError(body))
           ? []
           : [
               {
                 author: entry.login === "" ? "unknown" : entry.login,
-                body: entry.body,
+                body,
                 createdAt: entry.createdAt ?? "",
                 id: entry.id,
               },
-            ],
-      ),
+            ];
+      }),
       state,
       isDraft,
     },
@@ -1094,6 +1101,45 @@ const REVIEWER_ERROR = [/encountered an error/iu, /unable to review/iu];
 /** Whether a review body is the reviewer saying it failed rather than a review. */
 function isReviewerError(body: string | null): boolean {
   return body !== null && REVIEWER_ERROR.every((phrase) => phrase.test(body));
+}
+
+/**
+ * A link only the reviewer's own marketing puts in a review body.
+ *
+ * Observed on PR #1413, 2026-09-05: Copilot ends every review with a rule and a
+ * promotional block offering to *"Add a `code-review` agent skill"*. The pass is
+ * handed the body whole, so it read that as a request, declined it in
+ * `responses`, and the decline was posted publicly on a timezone bugfix where it
+ * reads as noise. Nothing was wrong with the reasoning; the input was never
+ * feedback.
+ *
+ * **Two conditions, for the same reason `REVIEWER_ERROR` needs two fragments.**
+ * A trailing rule alone is far too common, and a 💡 alone is something a
+ * reviewer plausibly writes when suggesting an idea — stripping *that* would
+ * delete a real suggestion, which is the one failure direction worth avoiding
+ * here. A link to GitHub's own docs about configuring the reviewer is the part
+ * no code review contains.
+ */
+const REVIEWER_PROMO = /docs\.github\.com\/copilot/u;
+
+/**
+ * Drops a trailing boilerplate block from a reviewer's body.
+ *
+ * Applied to the reviewer's entries only, on exactly the grounds the drop above
+ * is scoped: a human who quotes the footer is a human saying something, and
+ * matching on text alone would silently edit a person's words.
+ *
+ * Fails open by construction. If the vendor reformats, the block stops matching
+ * and comes back — costing one bullet in a public comment, visible on the pull
+ * request, where the next person to read it will come back here. The opposite
+ * bias, a rule loose enough to swallow real feedback, is not recoverable by
+ * anyone noticing.
+ */
+function stripReviewerChrome(body: string): string {
+  const rule = body.lastIndexOf("\n---");
+  return rule !== -1 && REVIEWER_PROMO.test(body.slice(rule))
+    ? body.slice(0, rule).trimEnd()
+    : body;
 }
 
 /**
