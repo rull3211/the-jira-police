@@ -8,6 +8,7 @@ import {
   describeSolveOutcome,
   isAdvanceFailureExit,
   isFailureExit,
+  reportsToTicket,
   reviewStageAfter,
   terminalLabelAfter,
 } from "./solve-outcome.ts";
@@ -742,5 +743,94 @@ describe("terminalLabelAfter", () => {
         cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
       }),
     ).toBe("failed");
+  });
+});
+
+describe("reportsToTicket", () => {
+  /**
+   * The same exhaustive table as above, and for a stronger reason.
+   *
+   * This function's failure mode is an absence. A wrongly-silent outcome posts
+   * nothing, releases the claim, and leaves a ticket byte-for-byte as it was
+   * found — there is no artefact to notice, so nothing but this table stands
+   * between a new outcome kind and a run that is invisible to the team.
+   */
+  const EXPECTED: Readonly<Record<string, boolean>> = {
+    "no-worktree": true,
+    bailed: true,
+    "abandoned:judgement": true,
+    "abandoned:environment": true,
+    refused: true,
+    failed: true,
+    crashed: true,
+    "unusable-base": true,
+    verified: false,
+  };
+
+  it("covers every outcome kind", () => {
+    expect(new Set(OUTCOMES.map(exitKey))).toEqual(new Set(Object.keys(EXPECTED)));
+  });
+
+  for (const outcome of OUTCOMES) {
+    const key = exitKey(outcome);
+    it(`${EXPECTED[key] === true ? "reports" : "stays quiet about"} ${key}`, () => {
+      expect(reportsToTicket(outcome)).toBe(EXPECTED[key]);
+    });
+  }
+
+  it("reports a blocked machine, which is the case the old gate lost", () => {
+    // SSX-3832, 2026-09-05: a policy hook denied the write pass its Write tool.
+    // The run had claimed the ticket, cut a worktree and verified the base build
+    // before it was stopped, then released every label and said nothing. This is
+    // the mutation that matters — restore the old `terminalLabelAfter` gate and
+    // this is the assertion that fails.
+    expect(
+      reportsToTicket({
+        kind: "abandoned",
+        cause: "environment",
+        reason: "the write pass was denied its Write tool by a local policy hook",
+        devLens: { accurate: true, correction: "" },
+        worktree,
+      }),
+    ).toBe(true);
+  });
+
+  it("reports a crash and an unusable base, which the old gate also lost", () => {
+    expect(
+      reportsToTicket({
+        kind: "crashed",
+        pass: "recon",
+        reason: "recon pass exceeded 1800000ms",
+        worktree,
+      }),
+    ).toBe(true);
+    expect(
+      reportsToTicket({
+        kind: "unusable-base",
+        reason: "the base build does not pass in a fresh worktree",
+        verification: {} as never,
+        worktree,
+      }),
+    ).toBe(true);
+  });
+
+  it("disagrees with terminalLabelAfter, because they ask different questions", () => {
+    // The pairing that must not collapse back. An environment abandon is
+    // reported and must NOT be labelled: reporting tells a team the run
+    // happened, labelling would take a retryable ticket out of the queue for
+    // good. Any change making one derive from the other breaks this.
+    const blocked: SolveOutcome = {
+      kind: "abandoned",
+      cause: "environment",
+      reason: "the write pass was denied its Write tool by a local policy hook",
+      devLens: lens,
+      worktree,
+    };
+    expect(reportsToTicket(blocked)).toBe(true);
+    expect(terminalLabelAfter(blocked)).toBeNull();
+  });
+
+  it("stays quiet on success, because the pull request is the notification", () => {
+    expect(reportsToTicket(verified)).toBe(false);
   });
 });

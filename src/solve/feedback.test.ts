@@ -273,7 +273,24 @@ describe("renderSolveComment", () => {
     expect(body).not.toContain(FOOTER_SENTINEL);
   });
 
-  it("promises no merge path, on every outcome", () => {
+  it("does not promise a merge path on a run that produced nothing to merge", () => {
+    // The inverse of the test that used to be here, which pinned "A human
+    // merges. This bot has no merge path." and demonstrated it on `verified` —
+    // now the only outcome that never reaches this renderer. Every comment that
+    // does reach it is about a run with no pull request, so the sentence had
+    // become an answer to a question nobody had asked.
+    const body = renderSolveComment("SSX-1", {
+      kind: "crashed",
+      pass: "recon",
+      reason: "the pass timed out",
+      worktree,
+    } as unknown as SolveOutcome);
+
+    expect(body).not.toContain("A human merges");
+    expect(body).not.toContain("merge path");
+  });
+
+  it("still renders the diff size for a verified run", () => {
     const body = renderSolveComment("SSX-1", {
       kind: "verified",
       worktree,
@@ -282,7 +299,6 @@ describe("renderSolveComment", () => {
       lines: 11,
     } as unknown as SolveOutcome);
 
-    expect(body).toContain("A human merges");
     expect(body).toContain("2 file(s), 11 line(s)");
   });
 
@@ -569,8 +585,11 @@ describe("recordDevLens", () => {
 
 describe("reportOutcome", () => {
   it("records locally and says plainly that nothing was posted", async () => {
-    // The current phase. The absence of a commenter is the write path not being
-    // wired, and it is reported as a value rather than logged and forgotten.
+    // Not a phase any more: `reportsToTicket` supplies a commenter for every
+    // outcome but `verified`, so in production this branch is the `verified`
+    // one. It stays pinned because the absence is reported as a value rather
+    // than logged and forgotten, and because a caller wanting the calibration
+    // row without a Jira write is still a legitimate thing to be.
     const directory = await outputDir();
 
     const result = await reportOutcome(

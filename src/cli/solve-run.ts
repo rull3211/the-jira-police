@@ -74,6 +74,7 @@ import {
   describeSolveOutcome,
   isAdvanceFailureExit,
   isFailureExit,
+  reportsToTicket,
   reviewStageAfter,
   terminalLabelAfter,
 } from "./solve-outcome.ts";
@@ -200,21 +201,34 @@ export async function runSolver(
   // `devLensAccurate: false` — triage's lens was wrong, the single most useful
   // thing the pipeline had produced — and the process exited and lost it.
   //
-  // **A commenter is passed only when the run reached a verdict**, and the gate
-  // is `terminalLabelAfter` rather than a second rule of its own. That is on
-  // purpose: the label and the comment are one statement, so a ticket taken out
-  // of the queue always carries the reason it left, and one that stays in is
-  // never annotated with an explanation for something that did not happen.
-  // Sharing the predicate is what stops those two drifting apart.
+  // **Every outcome but `verified` is said out loud on the ticket**, and the
+  // gate is `reportsToTicket` rather than `terminalLabelAfter`. Those were one
+  // predicate until 2026-09-05, and the comment here argued the fusion was the
+  // point — "the label and the comment are one statement". It was wrong in a way
+  // that could only ever show up as an absence: the outcomes that write no label
+  // are exactly the ones that then said nothing, so a run that claimed a ticket,
+  // cut a worktree, verified the base and was stopped by a policy hook released
+  // every label and left a board identical to one nobody had touched. See
+  // `reportsToTicket` for the run that demonstrated it.
   //
-  // The outcomes it withholds are the ones whose own headlines say they are not
-  // about the ticket — `crashed`, `unusable-base`, an `environment` abandon.
-  // `feedback.ts` phrases each of those as "this says nothing about whether the
-  // ticket is solvable", and posting that sentence on somebody's bug is worse
-  // than staying quiet: under E it would arrive every time a laptop slept
-  // mid-pass. Those still get the local calibration row, which is where a fact
-  // about this machine belongs.
-  const commenter = terminalLabelAfter(outcome) === null ? null : createSolveCommenter(settings);
+  // The narrowness is still right for the label and still wrong for the reader.
+  // A `crashed`, `unusable-base` or `environment` outcome must not be labelled,
+  // because re-running it is sensible; it must still be reported, because "this
+  // is about the machine, not your ticket" is worth more to a team than a gap
+  // they cannot distinguish from the tool being switched off. `feedback.ts`
+  // already phrases all three that way and its tests already pin the wording, so
+  // the bodies needed no change — only the gate withheld them.
+  //
+  // **This line is not mutation-covered, and that was measured rather than
+  // assumed.** Putting `terminalLabelAfter` back here leaves all 1805 tests
+  // green, because there is no `solve-run.test.ts` and nothing constructs this
+  // function's dependencies. The predicate itself is covered nine ways over in
+  // `solve-outcome.test.ts`; what is uncovered is the choice of predicate at the
+  // only place it is made, which is the half that actually silenced SSX-3832.
+  // Recorded here rather than fixed, because a harness for this function is a
+  // larger change than the feature it would guard — but it is a gap in the house
+  // rule, not an exemption from it.
+  const commenter = reportsToTicket(outcome) ? createSolveCommenter(settings) : null;
   const feedback = await reportOutcome(
     {
       outputDirectory: settings.OUTPUT_DIR,

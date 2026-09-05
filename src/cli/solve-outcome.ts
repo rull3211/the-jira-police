@@ -110,6 +110,66 @@ export function terminalLabelAfter(outcome: SolveOutcome): SolveOutcomeLabel | n
   return outcome.kind === "abandoned" && outcome.cause === "judgement" ? "failed" : null;
 }
 
+/**
+ * Whether this outcome is said out loud on the ticket.
+ *
+ * Until 2026-09-05 there was no such function: the commenter was gated on
+ * `terminalLabelAfter(outcome) !== null`, and the comment at that call site
+ * argued the fusion was the point — "the label and the comment are one
+ * statement". They are not, and the fusion had a failure mode nobody predicted
+ * because it is invisible by construction.
+ *
+ * ## What silence actually looked like
+ *
+ * SSX-3832, 2026-09-05. A local policy hook denied the write pass its `Write`
+ * tool, so the run ended `abandoned` with cause `environment`. Before that it
+ * had claimed the ticket, written fifteen labels, cut a worktree, verified the
+ * base build green on all four steps, and paid for triage, recon and a fix pass.
+ * Then it released every label byte-for-byte and posted nothing, because
+ * `environment` writes no terminal label. **The board was identical to a ticket
+ * nobody had ever picked up.** Somebody asking "did the bot try this one?" had
+ * no way to find out short of reading a terminal that had already scrolled.
+ *
+ * ## Two questions, and only one of them is about the ticket's fate
+ *
+ * `terminalLabelAfter` asks *is this ticket's fate decided*, and its answer must
+ * stay narrow: a hook denial or a slept laptop says nothing about the ticket, so
+ * labelling it would convert a transient failure into one only a human can
+ * clear. That reasoning is sound and is unchanged.
+ *
+ * This asks *did this run spend a claim on this ticket*, which is true of every
+ * outcome above, including all the ones that must not be labelled. Answering the
+ * second question with the first is what produced the silence — the narrowness
+ * that is correct for a queue is exactly wrong for a reader.
+ *
+ * ## Why the old argument for silence does not survive
+ *
+ * It was noise: `feedback.ts` phrases these as "this says nothing about whether
+ * the ticket is solvable", and posting that on somebody's bug every time a
+ * laptop slept was judged worse than saying nothing. But silence is only kind
+ * when the alternative is noise, and here the alternative is a team guessing
+ * whether the tool ran at all. A sentence saying "this is about the machine, not
+ * your ticket" is worth more than an unexplained gap, because the gap is
+ * indistinguishable from the tool being switched off.
+ *
+ * The honest cost is stacking. Nothing here writes a label, so under E the same
+ * ticket can be re-claimed and abandoned nightly, and `commenter.ts` has no read
+ * tool with which to find and rewrite its own last comment. That is real, it is
+ * the noise the old gate was reaching for, and the fix for it is the
+ * transient/deterministic split plus a per-ticket attempt count — both of which
+ * belong with E, where the thing doing the retrying first exists. Hand-driven
+ * runs, which is all there are today, post once per invocation by a person.
+ *
+ * ## `verified` is the one exclusion, and it is not an exception
+ *
+ * A verified run is the only outcome that already announces itself: it goes on
+ * to open a pull request, and the pull request is the notification. Commenting
+ * as well would say the same thing twice, in the channel with no dedupe.
+ */
+export function reportsToTicket(outcome: SolveOutcome): boolean {
+  return outcome.kind !== "verified";
+}
+
 /** One line an operator can act on, per outcome. */
 export function describeSolveOutcome(outcome: SolveOutcome): string {
   switch (outcome.kind) {

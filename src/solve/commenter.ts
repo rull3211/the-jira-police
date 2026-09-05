@@ -28,15 +28,27 @@
  * reopen exactly that door for the sake of a comment that does not need it.
  * A commenter comments.
  *
- * **No reads, and therefore no idempotency.** The poster is granted
- * `getJiraIssue` and `atlassianUserInfo` so it can refresh its comment in
- * place; without them a re-run stacks a second one. This does not refresh, and
- * stacking is the correct behaviour here rather than a limitation being
- * tolerated. A verdict comment is posted in the same breath as `agent:failed`,
- * which takes the ticket out of the queue — so a *second* one can only follow a
- * human having removed that label, which is a person asking for another
- * attempt. Two attempts are two events, and flattening them into one edited
- * comment would erase the fact that the first answer was overruled.
+ * **No reads, and therefore no idempotency — which is now a real limitation
+ * rather than a defended choice.** The poster is granted `getJiraIssue` and
+ * `atlassianUserInfo` so it can refresh its comment in place; without them a
+ * re-run stacks a second one.
+ *
+ * That used to be free. A comment was posted in the same breath as
+ * `agent:failed`, which takes the ticket out of the queue, so a second one could
+ * only follow a human clearing the label — a person asking for another attempt,
+ * and two attempts are two events that should not be flattened into one edited
+ * comment. `reportsToTicket` ended that: most outcomes now comment and write no
+ * label at all, so nothing stops the same ticket being claimed, blocked and
+ * commented on again, and the argument above no longer covers the common case.
+ *
+ * It is survivable only because every run today is a person typing a command.
+ * Under E it is not, and the fix is not a read tool here — it is the
+ * transient/deterministic split, so a deterministic blocker stops being
+ * re-claimed at all, plus a per-ticket attempt count for the rest. Granting this
+ * component `getJiraIssue` to dedupe would buy idempotency by widening the
+ * narrowest surface in the tree, to paper over a retry loop that should not be
+ * running. Recorded here rather than fixed, because the thing doing the
+ * retrying does not exist yet.
  *
  * The result is one write tool and no read tools, which makes this the
  * narrowest MCP surface in the tree, and narrow enough that the blast radius

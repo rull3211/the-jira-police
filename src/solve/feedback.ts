@@ -44,13 +44,17 @@
  * implementation, and proposed the split that would fix them, to a scrollback.
  * `src/solve/commenter.ts` fills it.
  *
- * **An absent commenter still means something, and it is no longer the phase
- * gate.** It now means *this outcome is not about the ticket*. The caller
- * supplies one only for a run that reached a verdict, so a crash or an unusable
- * base gets the local calibration row and no Jira write — which is the right
- * silence rather than a missing feature, since the alternative is posting "this
- * says nothing about whether the ticket is solvable" on somebody's bug every
- * time a laptop sleeps mid-pass.
+ * **An absent commenter now means only one thing: the run succeeded.** It was
+ * the phase gate through D4c, then briefly meant *this outcome is not about the
+ * ticket* — a crash or an unusable base got the calibration row and no Jira
+ * write, on the argument that posting "this says nothing about whether the
+ * ticket is solvable" was worse than staying quiet. That argument weighed the
+ * noise and never weighed the silence, which is harder to notice because it
+ * looks like nothing at all: a run stopped by a policy hook released its claim
+ * and left the ticket byte-for-byte as found, indistinguishable from one the
+ * queue had never reached. The caller now supplies a commenter for every outcome
+ * except `verified`, which needs none because it opens a pull request instead.
+ * See `reportsToTicket`.
  *
  * ## The correction is untrusted text
  *
@@ -88,10 +92,13 @@ export interface FeedbackDeps {
   /**
    * Absent means *do not post*, and the caller decides that per outcome.
    *
-   * It gated the phase until D4c and now gates relevance: a commenter is passed
-   * only for an outcome that is a verdict about the ticket, so this being unset
-   * is a statement rather than a gap. See the header, and `terminalLabelAfter`,
-   * which is the one predicate deciding both this and the label.
+   * It gated the phase until D4c, then gated relevance, and now gates almost
+   * nothing: `reportsToTicket` supplies one for every outcome but `verified`.
+   * Deciding it is no longer `terminalLabelAfter`'s job — the two shared a
+   * predicate until 2026-09-05, and the sharing is what made a blocked run
+   * silent. The parameter stays optional because a caller that wants the
+   * calibration row without a Jira write is still a legitimate thing to be, and
+   * every test in this file relies on it.
    */
   readonly commenter?: TicketCommenter;
 }
@@ -392,7 +399,19 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
   ];
 }
 
-/** The ticket comment. Pure, so it is testable without a Jira account. */
+/**
+ * The ticket comment. Pure, so it is testable without a Jira account.
+ *
+ * It used to close with *"A human merges. This bot has no merge path."* on every
+ * outcome, and the test pinning it demonstrated the line on `verified` — the one
+ * outcome that actually has a pull request to not merge. `reportsToTicket` made
+ * that the one outcome which never renders. So the sentence now only ever
+ * appears on comments about runs that produced nothing to merge, where it
+ * answers a question the reader was not asking, at the bottom of a comment whose
+ * whole job is to be short enough to read. Removed rather than made conditional:
+ * the condition would be `kind === "verified"`, which is `!reportsToTicket`,
+ * which is unreachable from here.
+ */
 export function renderSolveComment(issueKey: string, outcome: SolveOutcome): string {
   return [
     `## Solve attempt — ${issueKey}`,
@@ -400,8 +419,6 @@ export function renderSolveComment(issueKey: string, outcome: SolveOutcome): str
     headline(outcome),
     ...bailDetail(outcome),
     ...correctionBlock(outcome),
-    "",
-    "A human merges. This bot has no merge path.",
     "",
     SOLVE_SENTINEL,
   ].join("\n");
