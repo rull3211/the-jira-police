@@ -202,6 +202,29 @@ export interface AdvanceRequest extends Omit<ReviewRoundRequest, "reviewFeedback
   readonly ghTimeoutMs: number;
 }
 
+/**
+ * What happened to the "please look again" ping at the end of a round.
+ *
+ * A boolean here was two facts wearing one name. `false` meant "the API call
+ * failed, a human must add the reviewer by hand" — a thing to act on — and a
+ * round that had nothing to show the reviewer had no way to say so except by
+ * lying in one direction or the other.
+ */
+export type ReRequest =
+  /** The reviewer was pinged and will look again. */
+  | "asked"
+  /** The ping did not go out. Recoverable, by a human clicking one button. */
+  | "failed"
+  /**
+   * Nothing was pushed, so there was nothing new to re-read and no ping was
+   * sent. Observed on PR #2658: the round at 12:23 changed no code, re-requested
+   * anyway, and Copilot re-reviewed a byte-identical tree three minutes later
+   * and restated itself. That is the reviewer instability §6.1c describes, and
+   * we were manufacturing it — a paid review of a diff nobody had touched,
+   * whose only possible output is the previous review again.
+   */
+  | "unnecessary";
+
 export type AdvanceOutcome =
   /** The reviewer has not said anything yet. Look again later; nothing ran. */
   | { readonly kind: "waiting" }
@@ -237,7 +260,7 @@ export type AdvanceOutcome =
       readonly kind: "iterated";
       readonly round: number;
       readonly responses: readonly string[];
-      readonly reviewerRequested: boolean;
+      readonly reviewerRequested: ReRequest;
       /**
        * Whether a commit actually reached the branch this round.
        *
@@ -589,7 +612,14 @@ export async function advance(
    * human clicking the reviewer in. Returning `failed` here would discard a
    * completed round of work over that.
    */
-  const reRequest = async (): Promise<boolean> => {
+  const reRequest = async (pushed: boolean): Promise<ReRequest> => {
+    // The ping is for a commit, not for a round. Skipping it when there is no
+    // commit is what stops the loop asking a reviewer to re-read a tree it has
+    // already read — see `ReRequest`. A reply we posted on a thread notifies on
+    // its own, so nothing goes unheard by leaving this out.
+    if (!pushed) {
+      return "unnecessary";
+    }
     const asked = await requestReview(commands, {
       ...gh,
       ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
@@ -601,9 +631,9 @@ export async function advance(
         round,
         reason: asked.reason,
       });
-      return false;
+      return "failed";
     }
-    return true;
+    return "asked";
   };
 
   // The high-water-mark filter, and the single most important line in this
@@ -708,7 +738,7 @@ export async function advance(
     // out: a round that answered without editing has answered, and its argument
     // belongs next to the comment it answers rather than only in a terminal.
     const threadOutcome = await answer();
-    const reviewerRequested = await reRequest();
+    const reviewerRequested = await reRequest(false);
     return {
       kind: "iterated",
       round: round + 1,
@@ -745,7 +775,8 @@ export async function advance(
   // After the push, never before. A reply claiming what changed must not be
   // standing in public on a round that pushed nothing.
   const threadOutcome = await answer();
-  const reviewerRequested = await reRequest();
+  const pushed = committed.outcome === "committed";
+  const reviewerRequested = await reRequest(pushed);
   return {
     kind: "iterated",
     round: round + 1,
@@ -755,7 +786,7 @@ export async function advance(
     // that `commitAll` then finds nothing to commit in — a rewrite that
     // reproduced the file byte for byte — and the branch is the only honest
     // witness to what a reviewer will see.
-    pushed: committed.outcome === "committed",
+    pushed,
     threads: threadOutcome,
     unresolved: resolved.report.unresolved,
   };

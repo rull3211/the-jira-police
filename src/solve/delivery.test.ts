@@ -419,7 +419,7 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    expect(outcome).toMatchObject({ kind: "iterated", round: 1, reviewerRequested: true });
+    expect(outcome).toMatchObject({ kind: "iterated", round: 1, reviewerRequested: "asked" });
     expect(ran(h, "push")).toBe(true);
     expect(ran(h, "pr", "edit")).toBe(true);
   });
@@ -464,7 +464,7 @@ describe("advance", () => {
 
     // Still an iterated round: the code is pushed and the pull request is
     // healthy. Only the notification is missing, and a human can supply it.
-    expect(outcome).toMatchObject({ kind: "iterated", round: 1, reviewerRequested: false });
+    expect(outcome).toMatchObject({ kind: "iterated", round: 1, reviewerRequested: "failed" });
     expect(ran(h, "push")).toBe(true);
   });
 
@@ -483,19 +483,35 @@ describe("advance", () => {
     expect(ran(h, "pr", "ready")).toBe(false);
   });
 
-  it("reports the re-request on a round that answered without touching code", async () => {
-    // The no-change branch is a separate call site and was separately silent.
-    // `changed: false` is what routes there — a review that raised only
-    // questions, answered without an edit, so there is nothing to push.
+  it("does not ask the reviewer to re-read a tree it did not change", async () => {
+    // Measured on PR #2658. The round at 12:23 changed no code, re-requested
+    // review anyway, and Copilot re-reviewed the identical tree at 12:28 and
+    // restated its previous verdict. That is a paid review whose only possible
+    // output is the one already on the pull request, and the loop then has to
+    // spend a round reading it. `changed: false` is what routes here — a review
+    // that raised only questions, answered without an edit.
+    const h = harness({ review: review({ changed: false }) });
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", reviewerRequested: "unnecessary" });
+    expect(ran(h, "pr", "edit")).toBe(false);
+    // Proves it took the no-change path rather than duplicating the test above.
+    expect(ran(h, "push")).toBe(false);
+  });
+
+  it("does not report a failed re-request when it never made one", async () => {
+    // The reading that would undo the fix. "Not asked" and "asked and it did
+    // not work" are the same boolean and opposite instructions: one is a person
+    // clicking the reviewer in, the other is nothing to do. A round that
+    // pushed nothing must not send anybody after that button.
     const h = harness({ review: review({ changed: false }) }, [
       { match: saw("pr", "edit"), reply: { exitCode: 1, stderr: "HTTP 403" } },
     ]);
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    expect(outcome).toMatchObject({ kind: "iterated", reviewerRequested: false });
-    // Proves it took the no-change path rather than duplicating the test above.
-    expect(ran(h, "push")).toBe(false);
+    expect(outcome).toMatchObject({ reviewerRequested: "unnecessary" });
   });
 
   it("does not claim to have pushed on a round that changed nothing", async () => {
@@ -657,7 +673,9 @@ describe("advance", () => {
 
     expect(outcome).toMatchObject({ kind: "iterated", round: 1 });
     expect(ran(h, "push")).toBe(false);
-    expect(ran(h, "pr", "edit")).toBe(true);
+    // And no re-request either, for the reason the test below this one gives:
+    // there is nothing new on the branch for a reviewer to look at.
+    expect(ran(h, "pr", "edit")).toBe(false);
   });
 
   it("does not push a round that failed verification", async () => {

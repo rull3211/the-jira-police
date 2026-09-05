@@ -309,7 +309,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     kind: "iterated",
     round: 1,
     responses: ["renamed the helper"],
-    reviewerRequested: true,
+    reviewerRequested: "asked",
     pushed: true,
     threads: NO_THREADS,
     unresolved: "",
@@ -318,7 +318,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     kind: "iterated",
     round: 2,
     responses: ["answered in a comment"],
-    reviewerRequested: false,
+    reviewerRequested: "failed",
     pushed: false,
     threads: NO_THREADS,
     unresolved: "",
@@ -393,7 +393,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       pushed: true,
-      reviewerRequested: false,
+      reviewerRequested: "failed",
       threads: NO_THREADS,
       unresolved: "",
     });
@@ -407,7 +407,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       pushed: true,
-      reviewerRequested: true,
+      reviewerRequested: "asked",
       threads: NO_THREADS,
       unresolved: "",
     });
@@ -421,7 +421,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       pushed: true,
-      reviewerRequested: true,
+      reviewerRequested: "asked",
       threads: NO_THREADS,
       unresolved: "the second point needs a product decision",
     });
@@ -436,7 +436,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       pushed: true,
-      reviewerRequested: true,
+      reviewerRequested: "asked",
       threads: NO_THREADS,
       unresolved: "",
     });
@@ -456,7 +456,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["checked the claim; the premise does not hold"],
       pushed: false,
-      reviewerRequested: true,
+      reviewerRequested: "asked",
       threads: NO_THREADS,
       unresolved: "",
     });
@@ -474,7 +474,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       pushed: true,
-      reviewerRequested: true,
+      reviewerRequested: "asked",
       threads: NO_THREADS,
       unresolved: "",
     });

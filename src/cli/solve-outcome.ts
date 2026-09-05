@@ -17,7 +17,7 @@
  * register. Both have a test saying so.
  */
 
-import type { AdvanceOutcome } from "../solve/delivery.ts";
+import type { AdvanceOutcome, ReRequest } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -139,6 +139,20 @@ export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
   return outcome.kind === "failed" || outcome.kind === "refused";
 }
 
+/**
+ * One line per re-request result, and only one of the three is a call to act.
+ *
+ * A table rather than a ternary because the middle case is the one that used to
+ * be missing: a round that pushed nothing sent no ping, and printing the "NOT
+ * asked" warning for it would send a person to click a button that would do
+ * nothing but summon a second review of an unchanged diff.
+ */
+const REREQUEST_LINE = {
+  asked: `\nThe reviewer was asked to look again.`,
+  failed: `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`,
+  unnecessary: `\nThe reviewer was not asked again — nothing was pushed, so there is nothing new to re-read.`,
+} as const satisfies Record<ReRequest, string>;
+
 /** One line an operator can act on, per review-round outcome. */
 export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
   switch (outcome.kind) {
@@ -164,9 +178,7 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
           : `ITERATED — round ${String(outcome.round)} answered without changing code, so nothing was pushed.`) +
         ` Responses:\n` +
         outcome.responses.map((response) => `  - ${response}`).join("\n") +
-        (outcome.reviewerRequested
-          ? `\nThe reviewer was asked to look again.`
-          : `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`) +
+        REREQUEST_LINE[outcome.reviewerRequested] +
         `\nInline threads: ${String(outcome.threads.answered)} answered, ${String(outcome.threads.resolved)} resolved.` +
         // Same reasoning as the re-request line above. A reply that would not
         // post is a decline nobody can see, which on the pull request is
