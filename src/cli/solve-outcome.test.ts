@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 import {
+  chainDecision,
   describeAdvanceOutcome,
   describeSolveOutcome,
   isAdvanceFailureExit,
@@ -303,6 +304,29 @@ describe("describeSolveOutcome", () => {
 /** The common case: no inline threads, so nothing to post and nothing to fail. */
 const NO_THREADS = { answered: 0, resolved: 0, failures: [] } as const;
 
+/**
+ * Every review-round kind there is, checked by the compiler.
+ *
+ * A `Record` over the union, so adding a kind to `AdvanceOutcome` without adding
+ * it here is a type error, and removing one is too. The fixture below is then
+ * pinned against these keys at runtime — which is the part that was missing:
+ * both tables in this file claimed to cover "every review-round kind" and
+ * neither had a `capped` entry, because the fixture was a hand-written list and
+ * nothing compared it to anything. Same defect `client.test.ts` had against
+ * `AGENT_LABELS`, found the same way, and worth a second guard rather than a
+ * second correction.
+ */
+const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
+  waiting: null,
+  ready: null,
+  iterated: null,
+  exhausted: null,
+  capped: null,
+  abandoned: null,
+  refused: null,
+  failed: null,
+};
+
 /** One of every review-round kind, so the tables below are about all of them. */
 const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   { kind: "waiting" },
@@ -330,10 +354,22 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     unresolved: "",
   },
   { kind: "exhausted", rounds: 3, unresolved: "this still allocates on every render" },
+  { kind: "capped", rounds: 20, unresolved: "the reviewer and the pass disagree about the type" },
   { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
   { kind: "failed", stage: "push", reason: "the remote rejected the push" },
 ];
+
+describe("the review-round fixture", () => {
+  it("has an example of every kind the type admits", () => {
+    // The guard the two "every review-round kind" tables below were missing.
+    // Without it the fixture is a list somebody wrote once, and a kind added
+    // later is silently untested by three separate tables that all say they
+    // cover everything.
+    const present = new Set(ADVANCE_OUTCOMES.map((outcome) => outcome.kind));
+    expect([...present].toSorted()).toEqual(Object.keys(ADVANCE_KINDS).toSorted());
+  });
+});
 
 /** The two `iterated` shapes above, by the only field this mapping reads. */
 const ITERATED_DRAFTING = ADVANCE_OUTCOMES[2] as Extract<AdvanceOutcome, { kind: "iterated" }>;
@@ -397,6 +433,7 @@ describe("reviewStageAfter", () => {
       ["iterated", "reviewing"],
       ["iterated", "review-done"],
       ["exhausted", "review-done"],
+      ["capped", null],
       ["abandoned", null],
       ["refused", null],
       ["failed", null],
@@ -435,10 +472,66 @@ describe("isAdvanceFailureExit", () => {
       ready: false,
       iterated: false,
       exhausted: false,
+      capped: false,
       abandoned: false,
       refused: true,
       failed: true,
     });
+  });
+});
+
+describe("chainDecision", () => {
+  it("keeps going only while the reviewer is still in the conversation", () => {
+    // Pinned whole, and the direction matters: an outcome this function has not
+    // been taught about must stop the chain, not join it. `--review` is the one
+    // loop in this service with nobody between the iterations, so a new kind
+    // defaulting to `continue` is a new way to spend money unattended.
+    const table = ADVANCE_OUTCOMES.map((outcome) => [outcome.kind, chainDecision(outcome).stop]);
+    expect(table).toEqual([
+      ["waiting", false],
+      ["ready", true],
+      ["iterated", false],
+      ["iterated", true],
+      ["exhausted", true],
+      ["capped", true],
+      ["abandoned", true],
+      ["refused", true],
+      ["failed", true],
+    ]);
+  });
+
+  it("ends the chain on the round that hands the pull request to a human", () => {
+    // Undrafting means this side has finished (§6.1c). The loop keeping watch
+    // afterwards is right for a daemon and wrong for a foreground command,
+    // which would hold a terminal open for as long as a review takes.
+    expect(chainDecision(ITERATED_UNDRAFTED).stop).toBe(true);
+    expect(chainDecision(ITERATED_DRAFTING).stop).toBe(false);
+  });
+
+  it("counts a silence only when the reviewer has actually said nothing", () => {
+    // `silent` is what `MAX_REVIEW_WAITS` counts, and it is deliberately not
+    // `!stop`. A round that ran and pushed is the loop working; folding it in
+    // here would let a productive pull request trip the absent-reviewer brake.
+    const silent = ADVANCE_OUTCOMES.filter((outcome) => chainDecision(outcome).silent);
+    expect(silent.map((outcome) => outcome.kind)).toEqual(["waiting"]);
+  });
+
+  it("names a reason for every kind, because the operator is watching this one", () => {
+    for (const outcome of ADVANCE_OUTCOMES) {
+      expect(chainDecision(outcome).why).not.toBe("");
+    }
+  });
+
+  it("distinguishes the two caps in the sentence it prints", () => {
+    // They stop the chain identically and mean opposite things: one is a policy
+    // about how much argument a bot reviewer is worth, the other a brake on the
+    // machinery. An operator reading only "stopped" cannot tell which to relax.
+    const budget = chainDecision({ kind: "exhausted", rounds: 3, unresolved: "" }).why;
+    const brake = chainDecision({ kind: "capped", rounds: 20, unresolved: "" }).why;
+
+    expect(budget).toContain("budget");
+    expect(brake).toContain("MAX_PR_ROUNDS_TOTAL");
+    expect(brake).toContain("draft");
   });
 });
 

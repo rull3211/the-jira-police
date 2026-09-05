@@ -194,6 +194,109 @@ export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
 }
 
 /**
+ * Whether `--review` should run another round, and what to call the ending.
+ *
+ * The whole of the chain's termination logic, as a pure function over one
+ * outcome, because the alternative is a `while` loop with six `break`s in it and
+ * no way to test the sixth. The loop that consumes this decides nothing: it
+ * sleeps, it counts, and it obeys.
+ *
+ * ## Continuing is the narrow case, and that is the safe direction
+ *
+ * Exactly two outcomes continue. `waiting` means the reviewer has not spoken, so
+ * there is nothing to do but look again. `iterated` means a round happened, and
+ * a round that happened invites another review. **Everything else stops**, and
+ * the default arm is written to stop rather than to continue so that an outcome
+ * added later has to be argued into the loop instead of falling into it.
+ *
+ * ## Undrafting ends the chain, which is the one decision worth defending
+ *
+ * §6.1 says the loop keeps listening after undraft, because a human review is
+ * exactly what undrafting invites. That is right for the daemon and wrong here:
+ * this is a foreground command, and "keep listening" in a foreground command
+ * means a terminal blocked for however many days a person takes to review. The
+ * chain's goal is the handover, so it stops at the handover — undrafted, ticket
+ * on `agent:review-done`, a human's turn. The listening E does afterwards is a
+ * different loop with a different operator, and conflating them would make this
+ * command's ending depend on somebody else's calendar.
+ *
+ * So `ready` stops, `exhausted` stops — both undrafted — and `iterated` stops
+ * when it undrafted itself, which is §6.1c's rule that a round changing nothing
+ * has finished. An `iterated` round that pushed stays a draft and goes round
+ * again.
+ *
+ * ## `silent` is a separate question from `stop`
+ *
+ * It marks the one outcome that means *the reviewer said nothing*, and it is
+ * what `MAX_REVIEW_WAITS` counts. It has to be separate because the round caps
+ * cannot see this failure at all: a reviewer that never answers produces no
+ * rounds, so `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` both sit at zero
+ * while the loop spins. Silence is the unbounded case, and it is unbounded
+ * precisely because it is free — which is why it needs its own counter rather
+ * than a share of somebody else's.
+ */
+export interface ChainDecision {
+  readonly stop: boolean;
+  /** True only when the reviewer has not spoken. Counts against `MAX_REVIEW_WAITS`. */
+  readonly silent: boolean;
+  /** One line, for the operator, naming why the chain did what it did next. */
+  readonly why: string;
+}
+
+export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
+  switch (outcome.kind) {
+    case "waiting": {
+      return { stop: false, silent: true, why: "the reviewer has not said anything yet" };
+    }
+    case "iterated": {
+      // The draft flag, not `pushed` — the same choice `reviewStageAfter` makes
+      // and for the same reason. A round can push nothing and still be finished,
+      // and a round whose answer would not post holds the draft deliberately.
+      return outcome.undrafted === "undrafted"
+        ? {
+            stop: true,
+            silent: false,
+            why: "the round undrafted the pull request — a human has it now",
+          }
+        : {
+            stop: false,
+            silent: false,
+            why: `round ${String(outcome.round)} ${outcome.pushed ? "pushed" : "answered without pushing"}, so the reviewer gets another look`,
+          };
+    }
+    case "ready": {
+      return { stop: true, silent: false, why: "nothing left to act on — undrafted" };
+    }
+    case "exhausted": {
+      return {
+        stop: true,
+        silent: false,
+        why: "the reviewer's round budget is spent; undrafted anyway",
+      };
+    }
+    case "capped": {
+      return {
+        stop: true,
+        silent: false,
+        why: "MAX_PR_ROUNDS_TOTAL reached — the pull request is left in draft for a human",
+      };
+    }
+    case "abandoned": {
+      return { stop: true, silent: false, why: `the pass declined: ${outcome.reason}` };
+    }
+    case "refused": {
+      return { stop: true, silent: false, why: `refused at the ${outcome.stage}` };
+    }
+    default: {
+      // `failed`, and anything added later. Stopping is the default on purpose:
+      // a new outcome that should loop is a deliberate edit here, and a new
+      // outcome nobody thought about ends the chain rather than driving it.
+      return { stop: true, silent: false, why: "the round could not complete" };
+    }
+  }
+}
+
+/**
  * Which review stage the ticket should be in after this round, or `null`.
  *
  * The pull request's draft flag is the source of truth and the ticket's label is

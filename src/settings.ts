@@ -243,6 +243,18 @@ export const SETTINGS = [
     fallback: "20",
   },
   {
+    name: "REVIEW_POLL_MS",
+    description:
+      "How long --review waits before looking at the pull request again. Two minutes, from measurement rather than taste: every Copilot review on PR #2658 landed two and a half to four minutes after the review was requested, so a shorter interval buys nothing but git churn and a longer one adds dead time to every round. A poll that finds nothing costs one gh read and no model call — waiting is free, which is why the bound that matters is MAX_REVIEW_WAITS rather than this.",
+    fallback: "120000",
+  },
+  {
+    name: "MAX_REVIEW_WAITS",
+    description:
+      "How many consecutive silent polls --review tolerates before it stops and hands the pull request to a human. Ten, which at the default interval is twenty minutes of nothing. This is the bound on the one thing the round caps cannot see: a reviewer that never answers produces no rounds, so MAX_REVIEW_ITERATIONS and MAX_PR_ROUNDS_TOTAL both stay at zero while the loop spins forever. Counted consecutively and reset by any round that runs, because a slow reviewer and an absent one differ only in whether they eventually speak.",
+    fallback: "10",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",

@@ -14,6 +14,7 @@
  *   solve:once SSX-3822 --claim   writes the claim label
  *   solve:once SSX-3822 --solve   ... and runs the solver, nothing leaves the box
  *   solve:once SSX-3822 --pr      ... and opens the draft pull request
+ *   solve:once SSX-3822 --review  ... and works the review until it cannot
  * ```
  *
  * Each flag is a whole phase's worth of privilege, so the command line reads as
@@ -62,7 +63,7 @@
  */
 
 /** In privilege order. The index into this array *is* the ordering. */
-export const PHASES = ["plan", "claim", "solve", "pr"] as const;
+export const PHASES = ["plan", "claim", "solve", "pr", "review"] as const;
 
 export type SolvePhase = (typeof PHASES)[number];
 
@@ -71,16 +72,20 @@ const PHASE_FLAGS: ReadonlyMap<string, SolvePhase> = new Map([
   ["--claim", "claim"],
   ["--solve", "solve"],
   ["--pr", "pr"],
+  ["--review", "review"],
 ]);
 
 export const USAGE =
-  "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr]\n" +
+  "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr | --review]\n" +
   "       solve-once <ISSUE-KEY> --advance\n" +
   "  (no arguments)          the whole queue, reporting the claims it would make\n" +
   "  <ISSUE-KEY>             one ticket, same reporting\n" +
   "  <ISSUE-KEY> --claim     writes the claim label, then releases it\n" +
   "  <ISSUE-KEY> --solve     ... and runs the solver; nothing is pushed\n" +
   "  <ISSUE-KEY> --pr        ... and opens the draft pull request\n" +
+  "  <ISSUE-KEY> --review    ... and keeps answering the review until it is done,\n" +
+  "                          out of rounds, or out of patience. Unattended, paid\n" +
+  "                          per round, and the only loop in this service.\n" +
   "Each flag does everything the ones above it do. A run that does not reach a\n" +
   "pull request puts the labels back where it found them.\n" +
   "\n" +
@@ -101,6 +106,22 @@ export const USAGE =
  * is refused rather than resolved: `--pr --advance` has no coherent reading,
  * and the two guesses available (solve then advance, or advance then ignore the
  * solve) differ by a paid model pass and a force-push.
+ *
+ * ## `--review` is the fifth rung, and it is not this flag with a longer name
+ *
+ * The distinction is exactly the one above. `--advance` cannot be a rung because
+ * it needs a pull request it did not make, so ordering it against `--pr` is a
+ * guess. `--review` *is* a rung because it makes the pull request first: the
+ * order is forced by the work rather than chosen by the parser, and every rung
+ * below it runs unchanged. One run, going as far as a run can go.
+ *
+ * What it adds over `--pr` is the only unattended loop in this service: rounds
+ * against whatever the reviewer says, until something ends it. That is E's
+ * defining capability arriving early, and the thing that keeps it honest is that
+ * it is bounded on four sides — `MAX_PR_ROUNDS_TOTAL` on the machinery,
+ * `MAX_REVIEW_ITERATIONS` on the reviewer, `MAX_REVIEW_WAITS` on silence, and
+ * every non-continuing outcome — and that a person typed one ticket key and is
+ * watching it. `chainDecision` is where the first and last of those live.
  */
 const ADVANCE_FLAG = "--advance";
 

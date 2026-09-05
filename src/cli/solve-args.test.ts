@@ -22,6 +22,17 @@ function parsed(argv: readonly string[]): { issueKey: string | null; phase: stri
   return { issueKey, phase };
 }
 
+/**
+ * Every flag that names a rung, derived rather than typed out again.
+ *
+ * Three `it.each` lists below used to be hand-copied `["--claim", "--solve",
+ * "--pr"]`, which is the same defect `client.test.ts` had against `AGENT_LABELS`
+ * and `solve-outcome.test.ts` had against `AdvanceOutcome`: adding `--review`
+ * left all three green while testing nothing about it. `plan` is dropped because
+ * it is the absence of a flag, not one.
+ */
+const RUNG_FLAGS = PHASES.filter((phase) => phase !== "plan").map((phase) => `--${phase}`);
+
 function error(argv: readonly string[]): string {
   const result = parseSolveArgs(argv);
   if (result.ok) {
@@ -41,25 +52,24 @@ describe("parseSolveArgs", () => {
     expect(parsed(["SSX-3822"])).toEqual({ issueKey: "SSX-3822", phase: "plan" });
   });
 
-  it.each([
-    ["--claim", "claim"],
-    ["--solve", "solve"],
-    ["--pr", "pr"],
-  ])("%s selects the %s phase", (flag, phase) => {
-    expect(parsed(["SSX-3822", flag]).phase).toBe(phase);
+  it.each(RUNG_FLAGS)("%s selects the phase it is named after", (flag) => {
+    expect(parsed(["SSX-3822", flag]).phase).toBe(flag.slice(2));
   });
 
   it("takes the highest phase when several are given", () => {
     // `--claim --pr` has one coherent reading, and it is not "claim".
     expect(parsed(["SSX-3822", "--claim", "--pr"]).phase).toBe("pr");
     expect(parsed(["SSX-3822", "--pr", "--claim"]).phase).toBe("pr");
+    // And the newest rung is the highest, which is the whole reason it is one:
+    // `--review` is a longer run than `--pr`, not a different one.
+    expect(parsed(["SSX-3822", "--review", "--claim"]).phase).toBe("review");
   });
 
   it("does not care where the flag sits relative to the key", () => {
     expect(parsed(["--solve", "SSX-3822"])).toEqual({ issueKey: "SSX-3822", phase: "solve" });
   });
 
-  it.each(["--claim", "--solve", "--pr"])("refuses %s with no issue key", (flag) => {
+  it.each(RUNG_FLAGS)("refuses %s with no issue key", (flag) => {
     // THE ONE THAT MATTERS. Without this, `solve:once --pr` means "open a pull
     // request for every ticket in the queue" — an unbounded write, from a
     // command line one character shorter than the safe one, typed by someone
@@ -126,7 +136,7 @@ describe("--advance, the flag that is not a rung", () => {
     expect(error(["--advance"])).toContain("every open pull request");
   });
 
-  it.each(["--claim", "--solve", "--pr"])("refuses to be combined with %s", (flag) => {
+  it.each(RUNG_FLAGS)("refuses to be combined with %s", (flag) => {
     // Refused rather than resolved. The two available guesses — solve then
     // advance, or advance and drop the solve — differ by a paid model pass and
     // a push, so neither is a reading the parser is entitled to pick.

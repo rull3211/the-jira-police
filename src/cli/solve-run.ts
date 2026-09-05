@@ -33,9 +33,10 @@
  */
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
-import type { Settings } from "../settings.ts";
+import { logger } from "../logger.ts";
+import { type Settings, numeric } from "../settings.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
-import { advance, publish } from "../solve/delivery.ts";
+import { type AdvanceOutcome, advance, publish } from "../solve/delivery.ts";
 import { reportOutcome } from "../solve/feedback.ts";
 import {
   type ClaimAuthority,
@@ -68,6 +69,7 @@ import {
 } from "../wiring.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
 import {
+  chainDecision,
   describeAdvanceOutcome,
   describeSolveOutcome,
   isAdvanceFailureExit,
@@ -469,13 +471,13 @@ export async function runAdvance(
   settings: Settings,
   client: JiraClient,
   issueKey: string,
-): Promise<void> {
+): Promise<AdvanceOutcome | null> {
   const read = createTicketReader(client);
   const { text, detail } = await read(issueKey);
 
   const base = requestOrRefusal(settings, detail, text, "--advance");
   if (base === null) {
-    return;
+    return null;
   }
 
   const branch = branchNameFor(issueKey, detail.summary);
@@ -484,7 +486,7 @@ export async function runAdvance(
       `refusing --advance: ${issueKey}'s summary yields no usable branch name, so there is nothing to look for.\n`,
     );
     process.exitCode = 3;
-    return;
+    return null;
   }
 
   const deps = createSolveRunDeps(settings);
@@ -493,14 +495,14 @@ export async function runAdvance(
   if (found.outcome === "failed") {
     process.stderr.write(`\nCould not tell whether a pull request exists: ${found.reason}\n`);
     process.exitCode = 1;
-    return;
+    return null;
   }
   if (found.outcome === "none") {
     process.stdout.write(
       `\nNo pull request on ${branch}. --advance acts on one that already exists; run --pr first.\n`,
     );
     process.exitCode = 3;
-    return;
+    return null;
   }
   if (found.state !== "OPEN") {
     // Reported and not an error. A merged pull request is the happy ending, and
@@ -528,7 +530,7 @@ export async function runAdvance(
         ? labelEdit([], [])
         : completionTransition(labels, found.state === "MERGED" ? "done" : "closed"),
     );
-    return;
+    return null;
   }
 
   const attached = await attachWorktree(deps.commands, {
@@ -541,7 +543,7 @@ export async function runAdvance(
   if (attached.outcome === "refused") {
     process.stderr.write(`\nNo worktree, so no review round: ${attached.reason}\n`);
     process.exitCode = 1;
-    return;
+    return null;
   }
   const { worktree } = attached;
   process.stdout.write(`\nAdvancing #${String(found.number)} in ${worktree.path}\n`);
@@ -573,6 +575,124 @@ export async function runAdvance(
       ? `Worktree removed.\n`
       : `Worktree kept at ${cleanup.path} — ${cleanup.reason}\n`,
   );
+
+  return result;
+}
+
+/**
+ * Sleep, as a named function so the loop below reads as a loop.
+ *
+ * `unref` is deliberate: a Ctrl-C during the two-minute wait should end the
+ * process, not be queued behind the timer. The chain holds no lock and writes
+ * nothing while it waits, so being killed here is safe — the pull request and
+ * the ticket are both in a state some earlier round already committed to.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref();
+  });
+}
+
+/**
+ * `--review`: rounds against the reviewer until something ends it.
+ *
+ * The only unattended loop in this service, and the capability that Phase E is
+ * otherwise defined by. It is here rather than in the daemon because the plan's
+ * ordering rule is that every phase is driven by hand before the loop drives it
+ * — and there was no way to drive *this* by hand, because the thing to drive is
+ * the looping. One ticket, named by a person, in the foreground, with the output
+ * on their terminal is the weakest form of the capability that still tests it.
+ *
+ * ## Four bounds, and only one of them is new
+ *
+ * `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` are enforced inside
+ * `advance` against the marker on the pull request, so they bound this loop
+ * without it doing anything — and they keep bounding it across restarts, which a
+ * counter in this function would not. Every non-continuing outcome ends it, via
+ * `chainDecision`. What is new is `MAX_REVIEW_WAITS`, because the other three
+ * are all counts of *rounds* and the failure this loop adds is a reviewer who
+ * never produces one.
+ *
+ * ## It reports before it spends, because the operator is the fifth bound
+ *
+ * The worst case is printed up front in money. That is not decoration: a person
+ * who typed `--review` on a whim can read the number and Ctrl-C before the first
+ * round, and this is the only phase where the cost is a product rather than a
+ * sum. Round cost is the measured $0.94 from PR #2658.
+ */
+export async function runReviewChain(
+  settings: Settings,
+  client: JiraClient,
+  issueKey: string,
+): Promise<void> {
+  const pollMs = numeric(settings, "REVIEW_POLL_MS", 1);
+  const maxWaits = numeric(settings, "MAX_REVIEW_WAITS", 1);
+  const maxRounds = numeric(settings, "MAX_PR_ROUNDS_TOTAL", 1);
+
+  process.stdout.write(
+    `\n── review chain ──────────────────────────────────────────\n` +
+      `Polling every ${String(Math.round(pollMs / 1000))}s, giving up after ${String(maxWaits)} silent polls.\n` +
+      `At most ${String(maxRounds)} rounds, roughly $${(maxRounds * 0.94).toFixed(2)} if it runs to the cap.\n` +
+      `Ctrl-C is safe: nothing is held open between rounds.\n\n`,
+  );
+
+  let silences = 0;
+  let rounds = 0;
+
+  for (;;) {
+    const outcome = await runAdvance(settings, client, issueKey);
+    if (outcome === null) {
+      // `runAdvance` reached no round and has already said why — no pull
+      // request, not open, no worktree. It also set the exit code if that was
+      // an error, so there is nothing to add and nothing to retry.
+      process.stdout.write(`\nChain stopped before a round could run.\n`);
+      return;
+    }
+
+    const decision = chainDecision(outcome);
+    if (!decision.silent) {
+      rounds += 1;
+      // Reset rather than decrement. A reviewer that answers once has proved it
+      // is there, and carrying old silence forward would end a healthy chain on
+      // the strength of a slow start.
+      silences = 0;
+    }
+
+    if (decision.stop) {
+      process.stdout.write(
+        `\n── chain finished after ${String(rounds)} round${rounds === 1 ? "" : "s"} ──\n${decision.why}\n`,
+      );
+      logger.info("solve.chain.finished", {
+        issueKey,
+        rounds,
+        outcome: outcome.kind,
+        why: decision.why,
+      });
+      return;
+    }
+
+    if (decision.silent) {
+      silences += 1;
+      if (silences >= maxWaits) {
+        // Not an error exit. A quiet reviewer is not a malfunction, and a
+        // non-zero code here would teach a future daemon's backoff to treat
+        // "nobody has looked yet" as an outage worth retrying harder.
+        process.stdout.write(
+          `\n── chain finished after ${String(rounds)} rounds ──\n` +
+            `The reviewer said nothing for ${String(silences)} polls (${String(Math.round((silences * pollMs) / 60000))} minutes). ` +
+            `Leaving the pull request as it is; run --advance later, or check the reviewer was actually requested.\n`,
+        );
+        logger.warn("solve.chain.silent", { issueKey, rounds, silences });
+        return;
+      }
+    }
+
+    process.stdout.write(
+      `\n${decision.why} — waiting ${String(Math.round(pollMs / 1000))}s` +
+        `${decision.silent ? ` (${String(silences)}/${String(maxWaits)})` : ""}\n`,
+    );
+    await sleep(pollMs);
+  }
 }
 
 /**
@@ -640,6 +760,17 @@ export async function runWriteRungs(
       // needs. `agent:solving` is a concurrency slot, and the work it was
       // counting is finished the moment the pull request exists.
       await moveLabels(client, issueKey, reviewTransition);
+
+      // The fifth rung, and it runs here rather than after the `finally` for a
+      // reason worth stating: the chain must only start on a run that actually
+      // opened a pull request. `keepClaim` is that fact — it is set by
+      // `runPublish` and is the same condition that moves the ticket to
+      // `agent:reviewing`. Hanging the loop off the phase alone would start it
+      // after a publish that failed, where it would find no pull request,
+      // report so, and exit having looked expensive for no reason.
+      if (includes(phase, "review")) {
+        await runReviewChain(settings, client, issueKey);
+      }
     }
   } finally {
     // Three endings, and the middle one used to be the only one. A run that
