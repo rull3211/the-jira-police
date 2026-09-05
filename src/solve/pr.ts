@@ -234,6 +234,46 @@ export type ReadReviewResult =
   | { readonly outcome: "read"; readonly review: ReviewState }
   | { readonly outcome: "failed"; readonly reason: string };
 
+export interface ThreadComment {
+  readonly author: string;
+  readonly body: string;
+  /** ISO 8601, as GitHub returns it. Not parsed here; ordering is the API's. */
+  readonly createdAt: string;
+}
+
+/**
+ * One inline conversation on the diff.
+ *
+ * These are the comments `gh pr view --json reviews,comments` cannot reach, and
+ * on the first real review round they were the entire substance of the review:
+ * the summary body said "minor robustness/test-isolation improvements
+ * suggested" and the two things actually being asked for were down here. A loop
+ * reading only the summary does not miss the review politely — it infers what
+ * the review probably said and then acts on the inference.
+ */
+export interface ReviewThread {
+  /** The GraphQL node id. What a reply and a resolve are both addressed to. */
+  readonly id: string;
+  readonly isResolved: boolean;
+  /**
+   * Whether the diff has moved out from under the thread.
+   *
+   * Not the same as resolved and must not be read as it. An outdated thread is
+   * one whose lines changed, which is what happens when a round addresses the
+   * comment — and also what happens when an unrelated edit lands nearby. It is
+   * a hint about where to look, not a verdict about whether the point stands.
+   */
+  readonly isOutdated: boolean;
+  readonly path: string;
+  /** `null` on an outdated thread — GitHub drops the line once the diff moves. */
+  readonly line: number | null;
+  readonly comments: readonly ThreadComment[];
+}
+
+export type ReadThreadsResult =
+  | { readonly outcome: "read"; readonly threads: readonly ReviewThread[] }
+  | { readonly outcome: "failed"; readonly reason: string };
+
 export interface MarkReadyRequest {
   readonly worktreePath: string;
   readonly repo: string;
@@ -949,6 +989,215 @@ const REVIEWER_ERROR = [/encountered an error/iu, /unable to review/iu];
 /** Whether a review body is the reviewer saying it failed rather than a review. */
 function isReviewerError(body: string | null): boolean {
   return body !== null && REVIEWER_ERROR.every((phrase) => phrase.test(body));
+}
+
+/**
+ * How many threads, and how many comments in each, one read asks for.
+ *
+ * The maximum a single GraphQL connection accepts. Paging is not implemented
+ * and truncation is refused instead, because the only reason this function
+ * exists is that the loop was acting on feedback it could not see — quietly
+ * dropping the hundred-and-first thread would rebuild that defect one page
+ * further out. A pull request that hits either bound wants a human anyway.
+ */
+const THREAD_PAGE = 100;
+
+const THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(first:${String(THREAD_PAGE)}){
+        pageInfo{ hasNextPage }
+        nodes{
+          id isResolved isOutdated path line
+          comments(first:${String(THREAD_PAGE)}){
+            pageInfo{ hasNextPage }
+            nodes{ author{login} body createdAt }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+/** `owner/name`, split into the two arguments GraphQL wants separately. */
+const OWNER_NAME = /^([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/u;
+
+/** Follows a chain of keys, stopping at the first that is not a record. */
+function dig(root: unknown, ...keys: readonly string[]): unknown {
+  let here: unknown = root;
+  for (const key of keys) {
+    const record = asRecord(here);
+    if (record === null) {
+      return undefined;
+    }
+    here = record[key];
+  }
+  return here;
+}
+
+/** Whether a connection said there is another page behind the one we read. */
+function truncated(connection: unknown): boolean {
+  return dig(connection, "pageInfo", "hasNextPage") === true;
+}
+
+function parseThreadComments(value: unknown): readonly ThreadComment[] | null {
+  const nodes = dig(value, "nodes");
+  if (!Array.isArray(nodes)) {
+    return null;
+  }
+  const comments: ThreadComment[] = [];
+  for (const node of nodes) {
+    const record = asRecord(node);
+    const body = record?.["body"];
+    const createdAt = record?.["createdAt"];
+    if (typeof body !== "string" || typeof createdAt !== "string") {
+      return null;
+    }
+    const login = dig(record, "author", "login");
+    // A deleted account comes back as a null author. The comment it left is
+    // still on the thread and still says whatever it says.
+    comments.push({ author: typeof login === "string" ? login : "unknown", body, createdAt });
+  }
+  return comments;
+}
+
+/**
+ * Reads the inline review threads on a pull request.
+ *
+ * Separate from `readReview` and over a different transport, because the two
+ * cannot be merged: `gh pr view --json` has no flag for these at all, and the
+ * fields that make a thread actionable — its node id, and whether it is already
+ * resolved — exist only in GraphQL. So this is `gh api graphql`, and it is the
+ * only place in the tree that speaks it.
+ *
+ * **Nothing here degrades to an empty list.** `entriesOf` skips a malformed
+ * entry, on the reasoning that one bad review among twenty should not discard
+ * the nineteen; the opposite rule applies here and for a reason that is
+ * specific rather than stylistic. A dropped review is a comment the loop does
+ * not answer. A dropped *thread* is a comment the loop does not answer while
+ * believing it has answered everything — and the round then resolves what it
+ * did see, undrafts, and tells a human the review was addressed. Every
+ * unreadable shape is therefore a refusal, including a single bad node.
+ */
+export async function readReviewThreads(
+  runner: CommandRunner,
+  request: ReviewRequest,
+): Promise<ReadThreadsResult> {
+  const { worktreePath, repo, number, timeoutMs } = request;
+
+  const parts = OWNER_NAME.exec(repo);
+  if (parts === null) {
+    return {
+      outcome: "failed",
+      reason: `"${repo}" is not an owner/name pair, and GraphQL takes the two separately`,
+    };
+  }
+
+  const queried = await runner.run(
+    [
+      "gh",
+      "api",
+      "graphql",
+      // `-f` and not `-F`: the typed form reads a value beginning with `@` out
+      // of a file, and the raw form does not interpret the value at all.
+      "-f",
+      `owner=${parts[1] ?? ""}`,
+      "-f",
+      `name=${parts[2] ?? ""}`,
+      "-F",
+      `number=${String(number)}`,
+      "-f",
+      `query=${THREADS_QUERY}`,
+    ],
+    { cwd: worktreePath, timeoutMs },
+  );
+  if (failed(queried)) {
+    return {
+      outcome: "failed",
+      reason: `gh could not read the review threads on #${String(number)} (${why(queried)})`,
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(queried.stdout);
+  } catch {
+    return {
+      outcome: "failed",
+      reason: `gh printed something that is not JSON for the review threads on #${String(number)}`,
+    };
+  }
+
+  // GraphQL answers a partly-failed query with data *and* errors, and gh has
+  // been known to exit 0 on it. Half a thread list read as a whole one is the
+  // failure this function exists to prevent.
+  if (dig(parsed, "errors") !== undefined) {
+    return {
+      outcome: "failed",
+      reason: `GraphQL returned errors for the review threads on #${String(number)} (${bothEnds(queried.stdout)})`,
+    };
+  }
+
+  const connection = dig(parsed, "data", "repository", "pullRequest", "reviewThreads");
+  const nodes = dig(connection, "nodes");
+  if (!Array.isArray(nodes)) {
+    return {
+      outcome: "failed",
+      reason:
+        "the review threads came back as a shape this does not understand — read as unreadable rather than as a pull request with no inline comments",
+    };
+  }
+  if (truncated(connection)) {
+    return {
+      outcome: "failed",
+      reason: `#${String(number)} has more than ${String(THREAD_PAGE)} review threads, which is past what one read covers`,
+    };
+  }
+
+  const threads: ReviewThread[] = [];
+  for (const node of nodes) {
+    const record = asRecord(node);
+    if (record === null) {
+      return {
+        outcome: "failed",
+        reason: "a review thread came back as something other than an object",
+      };
+    }
+    const id = record["id"];
+    const isResolved = record["isResolved"];
+    const isOutdated = record["isOutdated"];
+    const path = record["path"];
+    const line = record["line"];
+    if (
+      typeof id !== "string" ||
+      id === "" ||
+      typeof isResolved !== "boolean" ||
+      typeof isOutdated !== "boolean" ||
+      typeof path !== "string" ||
+      !(typeof line === "number" || line === null)
+    ) {
+      return { outcome: "failed", reason: "a review thread is missing fields this needs to act" };
+    }
+    if (truncated(record["comments"])) {
+      return {
+        outcome: "failed",
+        reason: `the thread on ${path} has more than ${String(THREAD_PAGE)} comments, and the reply this round would answer may not be among the ones read`,
+      };
+    }
+    const comments = parseThreadComments(record["comments"]);
+    if (comments === null) {
+      return { outcome: "failed", reason: `a comment on the thread on ${path} could not be read` };
+    }
+    threads.push({ id, isResolved, isOutdated, path, line, comments });
+  }
+
+  logger.info("solve.pr.threads_read", {
+    repo,
+    number,
+    threads: threads.length,
+    open: threads.filter((thread) => !thread.isResolved).length,
+  });
+  return { outcome: "read", threads };
 }
 
 /**
