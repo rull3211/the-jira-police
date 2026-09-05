@@ -7,15 +7,18 @@ import { type Settings, SettingsError, readSettings } from "./settings.ts";
 import { buildPrompt, toolsFor } from "./triage/runner.ts";
 import { runSolveCycle } from "./solve/poller.ts";
 import type { IssueDetail } from "./jira/client.ts";
-import type { SolveOutcome } from "./solve/orchestrator.ts";
+import type { SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
 import {
   NotSolvableError,
   baseBranchOf,
+  buildAdvanceRequest,
+  buildFindPrRequest,
   buildPublishRequest,
   buildSolveRequest,
   buildTriageOptions,
   createSolveDeps,
   createSolveRunDeps,
+  githubRepoFor,
   pollIntervalMs,
   shouldPost,
 } from "./wiring.ts";
@@ -803,5 +806,146 @@ describe("createSolveRunDeps", () => {
 
     expect(readers).not.toHaveProperty("commands");
     expect(readers).not.toHaveProperty("passes");
+  });
+});
+
+describe("githubRepoFor", () => {
+  it("joins the configured owner to the checkout's directory name", () => {
+    expect(githubRepoFor(settingsWith(PUBLISH_ENV), "/repos/buy-insurance-advisor-web")).toBe(
+      "storebrand-digital/buy-insurance-advisor-web",
+    );
+  });
+
+  it("refuses when no owner is configured rather than guessing one", () => {
+    // The single place that decides which GitHub repository this service talks
+    // to. An owner inferred from a remote is right until somebody adds a fork
+    // as `origin`, and then a bot is pushing to a stranger's repository.
+    expect(() =>
+      githubRepoFor(settingsWith({ ...PUBLISH_ENV, SOLVE_GITHUB_OWNER: "" }), "/r/x"),
+    ).toThrow(SettingsError);
+  });
+});
+
+/** The solve request the two review-round builders are given. */
+function advanceBase(): SolveRequest {
+  return buildSolveRequest(
+    settingsWith(PUBLISH_ENV),
+    detailWith(["svc:buy-insurance-advisor-web"]),
+    "ticket text",
+  );
+}
+
+const attachedWorktree = {
+  issueKey: "SSX-3822",
+  path: "/tmp/solve/SSX-3822",
+  branch: "fix/ssx-3822-favicon",
+  repoPath: "/repos/buy-insurance-advisor-web",
+};
+
+describe("buildFindPrRequest", () => {
+  it("searches from the repository checkout, not from a worktree", () => {
+    // The order this encodes: whether a pull request exists is what decides
+    // whether there is anything to attach a worktree to, so the search has to
+    // be runnable before one exists.
+    const request = buildFindPrRequest(
+      settingsWith(PUBLISH_ENV),
+      advanceBase(),
+      "fix/ssx-3822-favicon",
+    );
+
+    expect(request.cwd).toBe("/repos/buy-insurance-advisor-web");
+    expect(request.repo).toBe("storebrand-digital/buy-insurance-advisor-web");
+    expect(request.branch).toBe("fix/ssx-3822-favicon");
+  });
+
+  it("floors the gh timeout above zero", () => {
+    expect(() =>
+      buildFindPrRequest(
+        settingsWith({ ...PUBLISH_ENV, SOLVE_GH_TIMEOUT_MS: "0" }),
+        advanceBase(),
+        "fix/ssx-3822-favicon",
+      ),
+    ).toThrow();
+  });
+});
+
+describe("buildAdvanceRequest", () => {
+  it("names the repository from configuration, as publishing does", () => {
+    // THE PHASE D2 PRIVILEGE GRANT. Publishing makes work visible; this pushes
+    // to a pull request people are already reading, so the target is decided by
+    // the same setting rather than by whatever remote the worktree carries.
+    const request = buildAdvanceRequest(
+      settingsWith(PUBLISH_ENV),
+      advanceBase(),
+      attachedWorktree,
+      2657,
+    );
+
+    expect(request.repo).toBe("storebrand-digital/buy-insurance-advisor-web");
+    expect(request.number).toBe(2657);
+    expect(request.worktree).toBe(attachedWorktree);
+  });
+
+  it("refuses when no owner is configured", () => {
+    expect(() =>
+      buildAdvanceRequest(
+        settingsWith({ ...PUBLISH_ENV, SOLVE_GITHUB_OWNER: "" }),
+        advanceBase(),
+        attachedWorktree,
+        2657,
+      ),
+    ).toThrow(SettingsError);
+  });
+
+  it("carries the solve request's own fields through untouched", () => {
+    // The review round runs the same passes against the same repository with
+    // the same timeouts. A separate set of values here would mean a round that
+    // verifies differently from the run that opened the pull request.
+    const base = advanceBase();
+
+    const request = buildAdvanceRequest(settingsWith(PUBLISH_ENV), base, attachedWorktree, 1);
+
+    expect(request.issueKey).toBe(base.issueKey);
+    expect(request.repoPath).toBe(base.repoPath);
+    expect(request.baseRef).toBe(base.baseRef);
+    expect(request.stepTimeoutMs).toBe(base.stepTimeoutMs);
+  });
+
+  it("starts every hand-driven invocation at round zero", () => {
+    // Pinned because it is a known gap rather than an intention. Nothing
+    // persists a round count, so `MAX_REVIEW_ITERATIONS` cannot fire from the
+    // command line and the operator is the only thing counting. The review
+    // cursor is what replaces this, and this test is what will fail when it does.
+    const request = buildAdvanceRequest(
+      settingsWith({ ...PUBLISH_ENV, MAX_REVIEW_ITERATIONS: "3" }),
+      advanceBase(),
+      attachedWorktree,
+      1,
+    );
+
+    expect(request.round).toBe(0);
+    expect(request.maxRounds).toBe(3);
+  });
+
+  it("does not name a reviewer, so the delivery default applies", () => {
+    expect(
+      "reviewer" in
+        buildAdvanceRequest(settingsWith(PUBLISH_ENV), advanceBase(), attachedWorktree, 1),
+    ).toBe(false);
+  });
+
+  it("commits as the configured identity", () => {
+    const request = buildAdvanceRequest(
+      settingsWith({
+        ...PUBLISH_ENV,
+        SOLVE_BOT_NAME: "jira-police",
+        SOLVE_BOT_EMAIL: "jp@x.invalid",
+      }),
+      advanceBase(),
+      attachedWorktree,
+      1,
+    );
+
+    expect(request.identity).toEqual({ name: "jira-police", email: "jp@x.invalid" });
   });
 });

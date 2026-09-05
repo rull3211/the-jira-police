@@ -1814,6 +1814,42 @@ model to find the project's own conventions rather than supplying any. The Node-
 lives entirely in `discoverPlan`, and the tests assert the negative in both directions — no Node
 command is ever issued against a Maven base, and no `mvn` against a Node one.
 
+### An undeclared package manager, and the temporary shim for one
+
+`invocationOf` runs `corepack <name>@<version>` when the base manifest declares `packageManager`,
+and the bare name from `PATH` when it does not. `versionNote` appends a sentence to any install
+refusal saying which of the two happened, because the second case is the likelier explanation for
+an install that dies in a repository whose own CI is green.
+
+That sentence earned itself on 2026-09-05, on the first real `--advance`. `buy-insurance-advisor-web`
+declares no `packageManager`, so the install ran this machine's pnpm 11 — which **no longer reads
+the `pnpm` field from `package.json`** — and refused the frozen install because the seven security
+overrides recorded in the lockfile were not in its configuration. The harness named the cause in
+its own refusal text without being asked.
+
+The fix belongs in that repository and is open as
+[buy-insurance-advisor-web#2659](https://github.com/storebrand-digital/buy-insurance-advisor-web/pull/2659):
+declare `pnpm@9.15.9`, and every consumer — corepack, `pnpm/action-setup`, a developer's shell and
+this harness — resolves the same version. **Until it merges**, a solve or review round against that
+repository needs pnpm 9 on `PATH`:
+
+```sh
+PATH="$HOME/.local/share/pnpm9-shim:$PATH" \
+  node --env-file-if-exists=.env src/cli/solve-once.ts SSX-3822 --advance
+```
+
+`~/.local/share/pnpm9-shim/pnpm` is a two-line `exec corepack pnpm@9.15.9 "$@"`. Three notes, each
+of which cost a run to learn:
+
+- **`node` directly, not `pnpm solve:once`.** The shim shadows `pnpm` for the whole process tree,
+  and this repository's own `engines.pnpm` is `>=11`, so the outer command refuses before the inner
+  one gets a chance.
+- **Not `/tmp`.** The previous shim lived there and was gone by the time it was next needed, which
+  is how this was rediscovered rather than remembered.
+- **It expires by itself.** Once #2659 merges the manifest declares a version, `invocationOf` takes
+  the corepack path, and `PATH` stops mattering. Delete the directory then; the block above is the
+  reminder.
+
 ### Delivery
 
 `pr.ts` is the dumbest module in the phase on purpose: it builds argv arrays, hands them to the

@@ -2,19 +2,30 @@ import { describe, expect, it } from "vitest";
 
 import { PHASES, includes, parseSolveArgs, rank, unavailable, writes } from "./solve-args.ts";
 
-/** The invocation, or a failure that names what went wrong. */
+/**
+ * The ladder invocation, or a failure that names what went wrong.
+ *
+ * `mode` is dropped rather than asserted, so the tests below stay pairs of key
+ * and phase. The mode itself is not unchecked — asking for it here and getting
+ * `advance` throws, which is what makes `parsed(["SSX-3822", "--advance"])`
+ * a failing test rather than a quietly different shape.
+ */
 function parsed(argv: readonly string[]): { issueKey: string | null; phase: string } {
   const result = parseSolveArgs(argv);
   if (!result.ok) {
     throw new Error(`expected a parse, got: ${result.error}`);
   }
-  return result.invocation;
+  if (result.invocation.mode !== "ladder") {
+    throw new Error(`expected a ladder invocation, got ${result.invocation.mode}`);
+  }
+  const { issueKey, phase } = result.invocation;
+  return { issueKey, phase };
 }
 
 function error(argv: readonly string[]): string {
   const result = parseSolveArgs(argv);
   if (result.ok) {
-    throw new Error(`expected a refusal, got phase ${result.invocation.phase}`);
+    throw new Error(`expected a refusal, got ${JSON.stringify(result.invocation)}`);
   }
   return result.error;
 }
@@ -77,6 +88,62 @@ describe("parseSolveArgs", () => {
     // There is no such flag and there never was. Accepting it would let someone
     // believe they had asked for something.
     expect(error(["SSX-1", "--dry-run"])).toContain("unknown flag");
+  });
+});
+
+/** The advance invocation, or a thrown assertion naming what came back instead. */
+function advance(argv: readonly string[]): { issueKey: string } {
+  const result = parseSolveArgs(argv);
+  if (!result.ok) {
+    throw new Error(`expected a parse, got: ${result.error}`);
+  }
+  if (result.invocation.mode !== "advance") {
+    throw new Error(`expected an advance invocation, got ${result.invocation.mode}`);
+  }
+  return { issueKey: result.invocation.issueKey };
+}
+
+describe("--advance, the flag that is not a rung", () => {
+  it("parses into its own mode rather than a phase", () => {
+    expect(advance(["SSX-3822", "--advance"])).toEqual({ issueKey: "SSX-3822" });
+  });
+
+  it("does not care where the flag sits relative to the key", () => {
+    expect(advance(["--advance", "SSX-3822"])).toEqual({ issueKey: "SSX-3822" });
+  });
+
+  it("leaves the ladder at its lowest rung when it is not asked for", () => {
+    // The mode is a fork, not a default. A run without the flag must still be a
+    // ladder run, or every existing caller changes meaning.
+    expect(parsed(["SSX-3822"])).toEqual({ issueKey: "SSX-3822", phase: "plan" });
+  });
+
+  it("needs an issue key", () => {
+    // Same shape of refusal as the rungs, different consequence: a keyless
+    // advance would push a commit to every open pull request the queue knows
+    // about, on pull requests people are in the middle of reading.
+    expect(error(["--advance"])).toContain("needs an issue key");
+    expect(error(["--advance"])).toContain("every open pull request");
+  });
+
+  it.each(["--claim", "--solve", "--pr"])("refuses to be combined with %s", (flag) => {
+    // Refused rather than resolved. The two available guesses — solve then
+    // advance, or advance and drop the solve — differ by a paid model pass and
+    // a push, so neither is a reading the parser is entitled to pick.
+    const reason = error(["SSX-3822", flag, "--advance"]);
+    expect(reason).toContain("cannot be combined");
+    expect(reason).toContain(flag);
+  });
+
+  it("refuses the combination whichever order it is typed in", () => {
+    expect(error(["SSX-3822", "--advance", "--pr"])).toContain("cannot be combined");
+  });
+
+  it("reports the missing key before the ladder's own keyless refusal", () => {
+    // `--pr --advance` with no key breaks two rules at once. The combination is
+    // the one to report: an operator told "--pr needs an issue key" would supply
+    // one and hit the real refusal on the next attempt, having learned nothing.
+    expect(error(["--pr", "--advance"])).toContain("cannot be combined");
   });
 });
 

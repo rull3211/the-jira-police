@@ -6,6 +6,7 @@
  *   node src/cli/solve-once.ts SSX-3822 --claim   writes the claim label
  *   node src/cli/solve-once.ts SSX-3822 --solve   ... and runs the solver
  *   node src/cli/solve-once.ts SSX-3822 --pr      ... and opens the draft PR
+ *   node src/cli/solve-once.ts SSX-3822 --advance one review round on the open PR
  *
  * The ladder is `solve-args.ts`, including why anything past the first two rungs
  * refuses to run without an issue key. The rungs themselves are `solve-run.ts`,
@@ -67,7 +68,7 @@ import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
 import { USAGE, parseSolveArgs, unavailable, writes } from "./solve-args.ts";
-import { runWriteRungs } from "./solve-run.ts";
+import { runAdvance, runWriteRungs } from "./solve-run.ts";
 
 async function main(): Promise<void> {
   const args = parseSolveArgs(process.argv.slice(2));
@@ -76,9 +77,31 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  const { issueKey, phase } = args.invocation;
-
   const settings = readSettings();
+
+  if (args.invocation.mode === "advance") {
+    // The whole of the advance mode, and it is short because it shares nothing
+    // with the ladder below: no queue is read, no claim is written, no report is
+    // produced. It acts on a pull request, and the ticket is only how it finds
+    // one. `--pr`'s configuration check still applies — the same GitHub owner
+    // names the repository this talks to — so it is asked for by rung name even
+    // though no rung is being climbed.
+    const { issueKey } = args.invocation;
+    const missing = unavailable("pr", settings);
+    if (missing !== null) {
+      process.stderr.write(`refusing --advance: ${missing}\n`);
+      logger.warn("solve-once.refused", { mode: "advance", issueKey, reason: missing });
+      process.exitCode = 3;
+      return;
+    }
+
+    logger.info("solve-once.settings", { ...describeSettings(settings), mode: "advance" });
+    await runAdvance(settings, createJiraClient(settings), issueKey);
+    logger.info("solve-once.done", { mode: "advance", issueKey });
+    return;
+  }
+
+  const { issueKey, phase } = args.invocation;
 
   // Checked before the board is read, and long before anything is written. A
   // rung that cannot run should not cost a Jira round trip, and above all should

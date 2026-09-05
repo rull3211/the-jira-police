@@ -8,7 +8,8 @@ function ok(argv: readonly string[]): { issueKey: string | null; phase: string }
   if (!parsed.ok) {
     throw new Error(`expected a parse, got: ${parsed.error}`);
   }
-  return parsed.invocation;
+  const { issueKey, phase } = parsed.invocation;
+  return { issueKey, phase };
 }
 
 function error(argv: readonly string[]): string {
@@ -84,6 +85,26 @@ describe("parseBotArgs", () => {
 
     it("rejects a second positional", () => {
       expect(error(["SSX-3822", "SSX-9999"])).toContain("at most one issue key");
+    });
+  });
+
+  describe("--advance is not one of this command's flags", () => {
+    it("refuses it rather than ignoring it", () => {
+      const reason = error(["SSX-3822", "--advance"]);
+      expect(reason).toContain("not a bot:once flag");
+      expect(reason).toContain("solve:once");
+    });
+
+    it("refuses it at every rung it could be combined with", () => {
+      // The shared parser already refuses these combinations, so this asserts
+      // the refusal survives the extra hop rather than that it exists.
+      for (const flag of ["--claim", "--solve", "--pr"]) {
+        expect(error(["SSX-3822", flag, "--advance"])).not.toBe("");
+      }
+    });
+
+    it("does not offer it in the usage text", () => {
+      expect(USAGE).not.toContain("--advance");
     });
   });
 

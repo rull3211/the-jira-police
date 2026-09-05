@@ -75,22 +75,61 @@ const PHASE_FLAGS: ReadonlyMap<string, SolvePhase> = new Map([
 
 export const USAGE =
   "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr]\n" +
+  "       solve-once <ISSUE-KEY> --advance\n" +
   "  (no arguments)          the whole queue, reporting the claims it would make\n" +
   "  <ISSUE-KEY>             one ticket, same reporting\n" +
   "  <ISSUE-KEY> --claim     writes the claim label, then releases it\n" +
   "  <ISSUE-KEY> --solve     ... and runs the solver; nothing is pushed\n" +
   "  <ISSUE-KEY> --pr        ... and opens the draft pull request\n" +
   "Each flag does everything the ones above it do. A run that does not reach a\n" +
-  "pull request puts the labels back where it found them.\n";
+  "pull request puts the labels back where it found them.\n" +
+  "\n" +
+  "  <ISSUE-KEY> --advance   one review round on the pull request that already\n" +
+  "                          exists; does not claim, solve, or open anything\n";
 
-export interface SolveInvocation {
-  /** `null` means the whole queue. Only ever null at the `plan` phase. */
-  readonly issueKey: string | null;
-  readonly phase: SolvePhase;
-}
+/**
+ * The flag that is not a rung.
+ *
+ * Every other flag names how far up one run should go, so they share an
+ * ordering and the highest wins. This one names a *different run*: it operates
+ * on a pull request an earlier, finished invocation opened, and the worktree it
+ * needs is reconstructed from that pull request's branch rather than cut fresh.
+ *
+ * Reading it as a fifth rung would make `--advance` imply `--pr`, which is the
+ * opposite of what the word means — the pull request is the precondition, not
+ * the thing to create. So it is a separate mode, and combining it with a rung
+ * is refused rather than resolved: `--pr --advance` has no coherent reading,
+ * and the two guesses available (solve then advance, or advance then ignore the
+ * solve) differ by a paid model pass and a force-push.
+ */
+const ADVANCE_FLAG = "--advance";
+
+export type SolveInvocation =
+  | {
+      readonly mode: "ladder";
+      /** `null` means the whole queue. Only ever null at the `plan` phase. */
+      readonly issueKey: string | null;
+      readonly phase: SolvePhase;
+    }
+  | { readonly mode: "advance"; readonly issueKey: string };
+
+/** The ladder half, for the commands that have no review mode at all. */
+export type LadderInvocation = Extract<SolveInvocation, { mode: "ladder" }>;
 
 export type ParsedArgs =
   | { readonly ok: true; readonly invocation: SolveInvocation }
+  | { readonly ok: false; readonly error: string };
+
+/**
+ * A parse that cannot come back as a review round.
+ *
+ * `bot:once` triages a ticket and then solves it; there is no pull request in
+ * its world yet, so `--advance` is not a flag it can honour. Narrowing the
+ * return type rather than checking the mode at the call site means that command
+ * stays a compile error away from silently ignoring the flag.
+ */
+export type ParsedLadderArgs =
+  | { readonly ok: true; readonly invocation: LadderInvocation }
   | { readonly ok: false; readonly error: string };
 
 /** How far up the ladder a phase sits. */
@@ -160,16 +199,23 @@ export interface LadderSettings {
 export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   const positional: string[] = [];
   let phase: SolvePhase = "plan";
+  let advance = false;
+  let namedRung = false;
 
   for (const arg of argv) {
     if (!arg.startsWith("-")) {
       positional.push(arg);
       continue;
     }
+    if (arg === ADVANCE_FLAG) {
+      advance = true;
+      continue;
+    }
     const named = PHASE_FLAGS.get(arg);
     if (named === undefined) {
       return { ok: false, error: `unknown flag: ${arg}` };
     }
+    namedRung = true;
     // Highest wins. `--claim --pr` has one coherent reading.
     if (rank(named) > rank(phase)) {
       phase = named;
@@ -185,6 +231,23 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
 
   const issueKey = positional[0] ?? null;
 
+  if (advance) {
+    // Refused, not resolved. See `ADVANCE_FLAG`.
+    if (namedRung) {
+      return {
+        ok: false,
+        error: `${ADVANCE_FLAG} cannot be combined with --${phase} — advancing acts on a pull request that already exists, so there is no coherent order for the two`,
+      };
+    }
+    if (issueKey === null) {
+      return {
+        ok: false,
+        error: `${ADVANCE_FLAG} needs an issue key — it would otherwise push a commit to every open pull request the queue knows about`,
+      };
+    }
+    return { ok: true, invocation: { mode: "advance", issueKey } };
+  }
+
   if (issueKey === null && writes(phase)) {
     return {
       ok: false,
@@ -192,5 +255,5 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
     };
   }
 
-  return { ok: true, invocation: { issueKey, phase } };
+  return { ok: true, invocation: { mode: "ladder", issueKey, phase } };
 }

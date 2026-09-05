@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
-import { describeSolveOutcome, isFailureExit } from "./solve-outcome.ts";
+import {
+  describeAdvanceOutcome,
+  describeSolveOutcome,
+  isAdvanceFailureExit,
+  isFailureExit,
+} from "./solve-outcome.ts";
 
 const worktree = {
   issueKey: "SSX-3822",
@@ -289,5 +295,117 @@ describe("describeSolveOutcome", () => {
 
     expect(line).toContain("Nothing was pushed");
     expect(line).toContain(worktree.branch);
+  });
+});
+
+/** One of every review-round kind, so the tables below are about all of them. */
+const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
+  { kind: "waiting" },
+  { kind: "ready", rounds: 2 },
+  { kind: "iterated", round: 1, responses: ["renamed the helper"], reviewerRequested: true },
+  { kind: "iterated", round: 2, responses: ["answered in a comment"], reviewerRequested: false },
+  { kind: "exhausted", rounds: 3, unresolved: "this still allocates on every render" },
+  { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
+  { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
+  { kind: "failed", stage: "push", reason: "the remote rejected the push" },
+];
+
+describe("isAdvanceFailureExit", () => {
+  it("does not fail the shell while the reviewer has said nothing", () => {
+    // The common case by a wide margin: most ticks find no new comment. A
+    // non-zero code here would make an idle loop indistinguishable from a
+    // broken one, which is the reading a daemon's backoff would act on.
+    expect(isAdvanceFailureExit({ kind: "waiting" })).toBe(false);
+  });
+
+  it("does not fail the shell when a pass read the review and declined", () => {
+    // Same rule as the solve side. Declining is an answer, and a human taking
+    // the pull request from here is an outcome this is built to reach.
+    expect(isAdvanceFailureExit({ kind: "abandoned", reason: "needs a migration" })).toBe(false);
+  });
+
+  it("does not fail the shell when the round cap fires", () => {
+    // The cap working is not the command failing. What it owes the operator is
+    // the line saying so, which `describeAdvanceOutcome` is tested for below.
+    expect(isAdvanceFailureExit({ kind: "exhausted", rounds: 3, unresolved: "still slow" })).toBe(
+      false,
+    );
+  });
+
+  it("agrees with itself across every review-round kind", () => {
+    // Pinned whole, so a new outcome forces a decision rather than defaulting
+    // to zero — the direction that fails quietly.
+    const table = ADVANCE_OUTCOMES.map((outcome) => [outcome.kind, isAdvanceFailureExit(outcome)]);
+    expect(Object.fromEntries(table)).toEqual({
+      waiting: false,
+      ready: false,
+      iterated: false,
+      exhausted: false,
+      abandoned: false,
+      refused: true,
+      failed: true,
+    });
+  });
+});
+
+describe("describeAdvanceOutcome", () => {
+  it("says something for every kind", () => {
+    for (const outcome of ADVANCE_OUTCOMES) {
+      expect(describeAdvanceOutcome(outcome)).not.toBe("");
+    }
+  });
+
+  it("does not let a refusal read like a round that ran", () => {
+    const text = describeAdvanceOutcome({
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: ["lockfile touched"],
+    });
+    expect(text).toContain("REFUSED");
+    expect(text).toContain("Nothing was pushed");
+  });
+
+  it("says out loud when the reviewer was not asked to look again", () => {
+    // The failure this guards against is silent: the round succeeded, the code
+    // is pushed, and nobody will ever read it because the notification did not
+    // go out. The recovery is a person clicking one button, so they must be told.
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      reviewerRequested: false,
+    });
+    expect(text).toContain("NOT");
+    expect(text).toContain("add them by hand");
+  });
+
+  it("does not print that warning when the reviewer was asked", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      reviewerRequested: true,
+    });
+    expect(text).not.toContain("NOT");
+    expect(text).toContain("asked to look again");
+  });
+
+  it("says the cap fired rather than that the reviewer was satisfied", () => {
+    // `ready` and `exhausted` both undraft, and reading one as the other would
+    // tell a human the bot and the reviewer agreed when they did not.
+    const text = describeAdvanceOutcome({
+      kind: "exhausted",
+      rounds: 3,
+      unresolved: "this still allocates on every render",
+    });
+    expect(text).toContain("EXHAUSTED");
+    expect(text).toContain("still allocates on every render");
+    expect(text).not.toContain("nothing to act on");
+  });
+
+  it("does not describe waiting as work that happened", () => {
+    const text = describeAdvanceOutcome({ kind: "waiting" });
+    expect(text).toContain("WAITING");
+    expect(text).toContain("nothing was pushed");
   });
 });

@@ -673,6 +673,150 @@ function matchesReviewer(login: string, reviewer: string): boolean {
   return login.toLowerCase().startsWith(wanted);
 }
 
+export interface FindPrRequest {
+  /** Where `gh` runs. The repository checkout, not a worktree — there may not be one yet. */
+  readonly cwd: string;
+  readonly repo: string;
+  /** The branch to look for, as a bare name. Derived from the ticket, not from GitHub. */
+  readonly branch: string;
+  readonly timeoutMs: number;
+}
+
+export type FindPrResult =
+  /**
+   * One pull request, and its state.
+   *
+   * `state` is carried rather than reduced to a boolean because the three
+   * values mean three different next moves: `OPEN` is a review round, `MERGED`
+   * is the ticket finished, `CLOSED` is a person declining the change. A caller
+   * handed only "usable/not" would have to guess between the last two.
+   */
+  | {
+      readonly outcome: "found";
+      readonly number: number;
+      readonly state: string;
+      readonly isDraft: boolean;
+    }
+  /** No pull request was ever opened for this branch. */
+  | { readonly outcome: "none" }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/**
+ * Finds the pull request for a branch.
+ *
+ * Exists because a review round starts from a ticket, and everything else it
+ * needs hangs off a pull request number that nothing on this machine records.
+ * The branch is the join: it is derived from the issue key and the summary by
+ * `branchNameFor`, so it can be recomputed from the ticket alone, which is what
+ * makes a review round resumable without any stored state.
+ *
+ * ## Closed and merged are searched for, not filtered out
+ *
+ * `--state all`, deliberately. Restricting to open ones would report a merged
+ * pull request as "none", and the caller would read that as "nothing has been
+ * published yet" — the opposite of the truth, at the one moment the loop is
+ * supposed to stop. A terminal pull request is a *result*, not an absence.
+ *
+ * ## Ambiguity is refused rather than resolved
+ *
+ * Two open pull requests on one branch is not a state this service creates, so
+ * seeing it means something happened that is not understood — a human opened a
+ * second one, or a branch was reused. Picking either would be a guess, made
+ * immediately before pushing a commit to whichever was picked. It fails
+ * instead, and says both numbers so a person can look.
+ *
+ * The terminal case does not need that care: with no open pull request, a merge
+ * is reported if any of them merged, regardless of how many there are, because
+ * "this branch reached `main`" is true whichever one carried it. That reading is
+ * also independent of the order `gh` happens to return rows in, which is not
+ * documented and must not be relied on.
+ */
+export async function findPullRequest(
+  runner: CommandRunner,
+  request: FindPrRequest,
+): Promise<FindPrResult> {
+  const { cwd, repo, branch, timeoutMs } = request;
+
+  const listed = await runner.run(
+    [
+      "gh",
+      "pr",
+      "list",
+      "--repo",
+      repo,
+      "--head",
+      branch,
+      "--state",
+      "all",
+      "--json",
+      "number,state,isDraft",
+      "--limit",
+      "20",
+    ],
+    { cwd, timeoutMs },
+  );
+  if (failed(listed)) {
+    return { outcome: "failed", reason: `gh could not list pull requests (${why(listed)})` };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(listed.stdout);
+  } catch {
+    return { outcome: "failed", reason: "gh printed something that is not JSON for the PR list" };
+  }
+  if (!Array.isArray(parsed)) {
+    return {
+      outcome: "failed",
+      reason:
+        "the pull request list came back as something other than a list — read as a shape this does not understand rather than as an absence of pull requests",
+    };
+  }
+
+  const rows: { number: number; state: string; isDraft: boolean }[] = [];
+  for (const entry of parsed) {
+    const row = asRecord(entry);
+    const number = row?.["number"];
+    const state = row?.["state"];
+    const isDraft = row?.["isDraft"];
+    if (typeof number !== "number" || typeof state !== "string" || typeof isDraft !== "boolean") {
+      // One unreadable row is not "no pull requests". Dropping it silently is
+      // how a merged PR becomes an absence, so the whole call fails instead.
+      return {
+        outcome: "failed",
+        reason: "a pull request row is missing number, state or isDraft",
+      };
+    }
+    rows.push({ number, state, isDraft });
+  }
+
+  if (rows.length === 0) {
+    return { outcome: "none" };
+  }
+
+  const open = rows.filter((row) => row.state.toUpperCase() === "OPEN");
+  if (open.length > 1) {
+    return {
+      outcome: "failed",
+      reason: `${String(open.length)} open pull requests share the branch ${branch} (#${open
+        .map((row) => String(row.number))
+        .join(", #")}) — refusing to guess which one is under review`,
+    };
+  }
+
+  const chosen = open[0] ?? rows.find((row) => row.state.toUpperCase() === "MERGED") ?? rows[0];
+  if (chosen === undefined) {
+    return { outcome: "none" };
+  }
+
+  return {
+    outcome: "found",
+    number: chosen.number,
+    state: chosen.state.toUpperCase(),
+    isDraft: chosen.isDraft,
+  };
+}
+
 /**
  * Reads the current review state of the PR.
  *

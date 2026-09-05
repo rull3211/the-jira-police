@@ -51,7 +51,9 @@ import type { ClaimCapabilities } from "./solve/claim.ts";
 import { createCommandRunner } from "./solve/exec.ts";
 import { repoFromLabels } from "./solve/labels.ts";
 import type { SolveDependencies, SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
-import type { PublishRequest } from "./solve/delivery.ts";
+import type { AdvanceRequest, PublishRequest } from "./solve/delivery.ts";
+import type { FindPrRequest } from "./solve/pr.ts";
+import type { Worktree } from "./solve/worktree.ts";
 import { createPassRunner } from "./solve/passes.ts";
 import { composePullRequest } from "./solve/pr-text.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
@@ -500,12 +502,6 @@ export function buildPublishRequest(
   outcome: Extract<SolveOutcome, { kind: "verified" }>,
   issueKey: string,
 ): PublishRequest {
-  // Not trimmed: `readSettings` has already done that, so whitespace has
-  // already become the empty string. See `worktreeRoot`.
-  if (settings.SOLVE_GITHUB_OWNER === "") {
-    throw new SettingsError(["SOLVE_GITHUB_OWNER"]);
-  }
-
   const { title, body } = composePullRequest(outcome, {
     issueKey,
     jiraBaseUrl: settings.JIRA_BASE_URL,
@@ -514,7 +510,7 @@ export function buildPublishRequest(
 
   return {
     worktree: outcome.worktree,
-    repo: `${settings.SOLVE_GITHUB_OWNER}/${basename(outcome.worktree.repoPath)}`,
+    repo: githubRepoFor(settings, outcome.worktree.repoPath),
     baseBranch: baseBranchOf(settings.SOLVE_BASE_REF),
     commit: outcome.commit,
     title,
@@ -537,6 +533,86 @@ export function buildPublishRequest(
  */
 export function baseBranchOf(baseRef: string): string {
   return baseRef.startsWith("origin/") ? baseRef.slice("origin/".length) : baseRef;
+}
+
+/**
+ * `SOLVE_GITHUB_OWNER/<checkout name>`, or a settings error.
+ *
+ * One function rather than the same template literal in three places, because
+ * it is the only thing that decides which GitHub repository this service talks
+ * to. Passing `--repo` explicitly is what stops gh inferring a target from
+ * whatever remote a worktree happens to carry, so every gh call in the service
+ * takes its answer from here.
+ *
+ * Not trimmed: `readSettings` has already done that, so whitespace has already
+ * become the empty string. See `worktreeRoot`. The owner has no default on
+ * purpose — it names the account a pull request would be opened against, which
+ * is not a thing to guess.
+ */
+export function githubRepoFor(settings: Settings, repoPath: string): string {
+  if (settings.SOLVE_GITHUB_OWNER === "") {
+    throw new SettingsError(["SOLVE_GITHUB_OWNER"]);
+  }
+  return `${settings.SOLVE_GITHUB_OWNER}/${basename(repoPath)}`;
+}
+
+/**
+ * Where to look for the pull request a review round would act on.
+ *
+ * `cwd` is the repository checkout rather than a worktree, and that ordering is
+ * the point: the search runs *before* anything is attached, because whether a
+ * pull request exists is what decides if there is anything to attach to.
+ */
+export function buildFindPrRequest(
+  settings: Settings,
+  base: SolveRequest,
+  branch: string,
+): FindPrRequest {
+  return {
+    cwd: base.repoPath,
+    repo: githubRepoFor(settings, base.repoPath),
+    branch,
+    timeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
+  };
+}
+
+/**
+ * **This function is the phase D2 privilege grant.**
+ *
+ * `buildPublishRequest` is the moment work first becomes visible to other
+ * people. This is the moment the service pushes to a pull request people are
+ * already reading, without being asked again. Same reasoning, one step further,
+ * and the same shape — a reader asking "what can rewrite an open pull request"
+ * greps for one name and reads its call sites.
+ *
+ * ## `round` is zero on every hand-driven invocation, and that is a known gap
+ *
+ * `advance` compares `round` against `maxRounds` and stops when the reviewer's
+ * budget is spent. There is nothing here to count from: each invocation is a
+ * fresh process with no memory of the last, so a run started by an operator
+ * always claims to be on its first round and `MAX_REVIEW_ITERATIONS` never
+ * fires. That is tolerable only while a person is the loop — they can see how
+ * many times they have typed the command. It stops being tolerable the moment
+ * the daemon drives this, and the count has to come from the pull request
+ * itself, which is what the review cursor (D3) exists to read. Recorded here
+ * rather than hidden behind a plausible-looking `0`.
+ */
+export function buildAdvanceRequest(
+  settings: Settings,
+  base: SolveRequest,
+  worktree: Worktree,
+  number: number,
+): AdvanceRequest {
+  return {
+    ...base,
+    worktree,
+    repo: githubRepoFor(settings, worktree.repoPath),
+    number,
+    identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
+    round: 0,
+    maxRounds: numeric(settings, "MAX_REVIEW_ITERATIONS", 0),
+    ghTimeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
+  };
 }
 
 /**
