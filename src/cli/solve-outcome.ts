@@ -159,6 +159,14 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         (outcome.reviewerRequested
           ? `\nThe reviewer was asked to look again.`
           : `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`) +
+        `\nInline threads: ${String(outcome.threads.answered)} answered, ${String(outcome.threads.resolved)} resolved.` +
+        // Same reasoning as the re-request line above. A reply that would not
+        // post is a decline nobody can see, which on the pull request is
+        // indistinguishable from the comment never having been read — and the
+        // round itself succeeded, so nothing else will draw attention to it.
+        (outcome.threads.failures.length === 0
+          ? ""
+          : `\nCould not post:\n${outcome.threads.failures.map((line) => `  - ${line}`).join("\n")}`) +
         // Printed on a successful round, not only on an exhausted one. This is
         // the field the skill calls "what tells a human to stop the loop and
         // look", and a round that succeeded is exactly when nobody goes looking.

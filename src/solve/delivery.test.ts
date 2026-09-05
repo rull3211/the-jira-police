@@ -95,6 +95,61 @@ const asked =
   (argv: readonly string[]): boolean =>
     argv.includes("graphql") && argv.some((arg) => arg.includes(operation));
 
+/** One inline thread as GraphQL returns it. */
+const thread = (overrides: Record<string, unknown> = {}): unknown => ({
+  id: "PRRT_1",
+  isResolved: false,
+  isOutdated: false,
+  path: "src/app/head.tsx",
+  line: 19,
+  comments: {
+    pageInfo: { hasNextPage: false },
+    nodes: [
+      {
+        author: { login: "copilot" },
+        body: "this is not idempotent",
+        createdAt: "2026-09-05T09:00:00Z",
+      },
+    ],
+  },
+  ...overrides,
+});
+
+/** The `reviewThreads` reply. Empty by default; no pull request need have any. */
+const threadsJson = (...nodes: readonly unknown[]): string =>
+  JSON.stringify({
+    data: {
+      repository: {
+        pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false }, nodes } },
+      },
+    },
+  });
+
+/** One comment inside a thread, as GraphQL nests them. */
+const spoke = (author: string, body: string): unknown => ({
+  author: { login: author },
+  body,
+  createdAt: "2026-09-05T09:00:00Z",
+});
+
+/** A thread carrying this conversation and nothing else changed. */
+const talking = (...nodes: readonly unknown[]): unknown =>
+  thread({ comments: { pageInfo: { hasNextPage: false }, nodes } });
+
+/** Where a call landed in the sequence, or `-1`. Used for ordering claims. */
+const at = (h: Harness, match: (argv: readonly string[]) => boolean): number =>
+  h.calls.findIndex((argv) => match(argv));
+
+/** A pull request carrying these inline threads and nothing else new. */
+const inline = (...nodes: readonly unknown[]): Rule => ({
+  match: asked("reviewThreads"),
+  reply: { stdout: threadsJson(...nodes) },
+});
+
+/** Did the run write the marker at all — either the first post or a later edit? */
+const markerWritten = (h: Harness): boolean =>
+  h.calls.some((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv));
+
 /** A pull request that already carries a marker saying `count` rounds are gone. */
 const spent = (count: number, lastRead = "2026-09-05T08:00:00Z"): Rule => ({
   match: saw("pr", "view"),
@@ -111,6 +166,7 @@ const saw =
 const PR_URL = "https://github.com/acme/advisor/pull/42";
 const PR_NODE = "PR_kwDOnode";
 const POSTED = "IC_marker";
+const REPLY_URL = `${PR_URL}#discussion_r1`;
 
 interface Harness {
   readonly deps: SolveDependencies;
@@ -142,6 +198,7 @@ function harness(
     // The marker's three GraphQL calls. All succeed by default, so a test that
     // wants a failed reservation has to say so — the reservation refusing is
     // the interesting case and must not be reachable by forgetting a fixture.
+    { match: asked("reviewThreads"), reply: { stdout: threadsJson() } },
     {
       match: asked("pullRequest(number:"),
       reply: { stdout: JSON.stringify({ data: { repository: { pullRequest: { id: PR_NODE } } } }) },
@@ -156,6 +213,23 @@ function harness(
       match: asked("updateIssueComment"),
       reply: {
         stdout: JSON.stringify({ data: { updateIssueComment: { issueComment: { id: POSTED } } } }),
+      },
+    },
+    // The two thread writes, both succeeding by default for the same reason: a
+    // test about a reply that would not post has to arrange that failure, so it
+    // cannot be reached by leaving a fixture out.
+    {
+      match: asked("addPullRequestReviewThreadReply"),
+      reply: {
+        stdout: JSON.stringify({
+          data: { addPullRequestReviewThreadReply: { comment: { url: REPLY_URL } } },
+        }),
+      },
+    },
+    {
+      match: asked("resolveReviewThread"),
+      reply: {
+        stdout: JSON.stringify({ data: { resolveReviewThread: { thread: { isResolved: true } } } }),
       },
     },
   ];
@@ -526,7 +600,7 @@ describe("advance", () => {
 
     await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
 
-    expect(ran(h, "graphql")).toBe(false);
+    expect(markerWritten(h)).toBe(false);
   });
 
   it("pushes nothing when the round only answered questions", async () => {
@@ -716,7 +790,7 @@ describe("advance's review cursor", () => {
 
     expect(outcome).toMatchObject({ kind: "failed", stage: "cursor" });
     expect(h.seen).toEqual([]);
-    expect(ran(h, "graphql")).toBe(false);
+    expect(markerWritten(h)).toBe(false);
   });
 
   it("refuses the round when there are two markers, rather than picking one", async () => {
@@ -912,6 +986,214 @@ describe("advance's review cursor", () => {
 
     expect(outcome).toMatchObject({ kind: "capped" });
     expect(h.seen).toEqual([]);
+  });
+});
+
+describe("advance's inline threads", () => {
+  /**
+   * A pull request whose reviewer has spoken and left no issue comment at all.
+   *
+   * Every test here has to distinguish "the round ran because of the thread"
+   * from "the round ran because of a comment", so the comment channel is empty
+   * in all of them.
+   */
+  const QUIET: Rule = {
+    match: saw("pr", "view"),
+    reply: {
+      stdout: reviewJson({ reviews: [{ author: { login: "copilot" }, body: "" }] } as never),
+    },
+  };
+
+  const ANSWER = {
+    threadId: "PRRT_1",
+    reply: "appended only when there is no icon link already — 8235cae",
+    basis: "changed-code",
+    resolve: true,
+  };
+
+  it("runs a round for an open thread even when no issue comment is new", async () => {
+    // The gate reads both channels, and this is the half that was missing on
+    // #2658: the substance of that review lived in the threads, `--json` could
+    // not see it, and the loop marked the pull request reviewed. Make the gate
+    // consider comments alone and this undrafts over an unanswered review.
+    const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", round: 1 });
+    expect(ran(h, "pr", "ready")).toBe(false);
+  });
+
+  it("does not re-litigate a thread whose last comment is ours", async () => {
+    // The instability rule, keyed on a fact rather than a date: a bot reviewer
+    // restating a settled point leaves no new comment, so nothing time-based
+    // could tell this from a fresh objection. Unplug it and the round argues
+    // with an answer it already gave, every tick, at full solve cost.
+    const h = harness({}, [
+      QUIET,
+      inline(talking(spoke("copilot", "this is not idempotent"), spoke("rull3211", "bot: it is"))),
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(h.seen).toEqual([]);
+  });
+
+  it("acts again when the reviewer comes back after our reply", async () => {
+    // The other half of the rule. One that never lets a thread through is a
+    // loop that has stopped listening, and it looks identical to the test above.
+    const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [
+      QUIET,
+      inline(
+        talking(
+          spoke("copilot", "this is not idempotent"),
+          spoke("rull3211", "bot: it is"),
+          spoke("copilot", "no — bootstrap runs twice under HMR"),
+        ),
+      ),
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated" });
+  });
+
+  it("leaves a thread somebody already resolved alone", async () => {
+    const h = harness({}, [QUIET, inline(thread({ isResolved: true }))]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(h.seen).toEqual([]);
+  });
+
+  it("hands the pass each thread's id and words, not a summary of them", async () => {
+    // #2658 again: the pass was given the review's one-line summary, inferred
+    // what the inline comments must have said, guessed one of them right and
+    // invented the other. It gets the text now, and the id it has to quote back.
+    const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
+
+    await advance(h.deps, advanceRequest);
+
+    expect(h.seen[0]?.options.reviewFeedback).toContain("PRRT_1");
+    expect(h.seen[0]?.options.reviewFeedback).toContain("this is not idempotent");
+  });
+
+  it("answers the thread only after the commit it talks about is pushed", async () => {
+    // A reply says what changed. Posted before the push it is a public claim
+    // about a commit that may never arrive, and the reviewer reads an answer to
+    // a change that is not there.
+    const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
+
+    await advance(h.deps, advanceRequest);
+
+    const pushed = at(h, saw("push"));
+    expect(pushed).toBeGreaterThan(-1);
+    expect(at(h, asked("addPullRequestReviewThreadReply"))).toBeGreaterThan(pushed);
+  });
+
+  it("still answers on a round that changed no code", async () => {
+    // The no-change branch is a separate return and was separately capable of
+    // staying silent. A round that answered without editing has answered, and
+    // the argument belongs next to the comment rather than in a terminal.
+    const h = harness({ review: review({ changed: false, threadAnswers: [ANSWER] }) }, [
+      QUIET,
+      inline(thread()),
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", threads: { answered: 1, resolved: 1 } });
+    expect(ran(h, "push")).toBe(false);
+  });
+
+  it("posts nothing on a thread it was never given", async () => {
+    // The id is model-authored, so it is untrusted like every other field the
+    // pass fills in. One that came from nowhere addresses a conversation this
+    // round never read, and answering it is the loop talking to a stranger.
+    const h = harness(
+      { review: review({ threadAnswers: [{ ...ANSWER, threadId: "PRRT_elsewhere" }] }) },
+      [QUIET, inline(thread())],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", threads: { answered: 0, resolved: 0 } });
+    expect(at(h, asked("addPullRequestReviewThreadReply"))).toBe(-1);
+    expect((outcome as { threads: { failures: readonly string[] } }).threads.failures[0]).toContain(
+      "PRRT_elsewhere",
+    );
+  });
+
+  it("does not close a thread whose reply would not post", async () => {
+    // Resolving is how a reviewer's queue gets shorter, so a thread closed
+    // without the argument arriving buries the objection. The resolve takes the
+    // reply's receipt for exactly this reason; unplug it and this fails.
+    const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [
+      QUIET,
+      inline(thread()),
+      {
+        match: asked("addPullRequestReviewThreadReply"),
+        reply: { exitCode: 1, stderr: "HTTP 502" },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", threads: { answered: 0, resolved: 0 } });
+    expect(at(h, asked("resolveReviewThread"))).toBe(-1);
+    expect((outcome as { threads: { failures: readonly string[] } }).threads.failures).toHaveLength(
+      1,
+    );
+  });
+
+  it("keeps a pushed round when the reply would not post, and says so out loud", async () => {
+    // The same trade `reviewerRequested` makes. The code is pushed and the pull
+    // request is healthy; discarding the round over a comment that would not
+    // send helps nobody. Silence is the part that is not acceptable.
+    const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [
+      QUIET,
+      inline(thread()),
+      {
+        match: asked("addPullRequestReviewThreadReply"),
+        reply: { exitCode: 1, stderr: "HTTP 502" },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated" });
+    expect(ran(h, "push")).toBe(true);
+  });
+
+  it("fails the round when the inline comments cannot be read at all", async () => {
+    // Half a review is worse than none: the round would resolve what it did see
+    // and undraft on the strength of it. `readReviewThreads` refuses rather than
+    // returning a short list, and this call site must not soften that.
+    const h = harness({ review: review() }, [
+      QUIET,
+      { match: asked("reviewThreads"), reply: { exitCode: 1, stderr: "HTTP 502" } },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "read" });
+    expect(h.seen).toEqual([]);
+    expect(markerWritten(h)).toBe(false);
+  });
+
+  it("names the open thread when it gives up on the pull request", async () => {
+    // `unresolved` is what tells a human to stop the loop and look, and on a
+    // capped pull request the threads are most of what is still open.
+    const h = harness({}, [spent(20), inline(thread())]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxTotalRounds: 20 });
+
+    expect(outcome).toMatchObject({ kind: "capped" });
+    expect((outcome as { unresolved: string }).unresolved).toContain(
+      "src/app/head.tsx:19 — this is not idempotent",
+    );
   });
 });
 

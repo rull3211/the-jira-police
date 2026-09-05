@@ -298,6 +298,9 @@ describe("describeSolveOutcome", () => {
   });
 });
 
+/** The common case: no inline threads, so nothing to post and nothing to fail. */
+const NO_THREADS = { answered: 0, resolved: 0, failures: [] } as const;
+
 /** One of every review-round kind, so the tables below are about all of them. */
 const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   { kind: "waiting" },
@@ -307,6 +310,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     round: 1,
     responses: ["renamed the helper"],
     reviewerRequested: true,
+    threads: NO_THREADS,
     unresolved: "",
   },
   {
@@ -314,6 +318,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     round: 2,
     responses: ["answered in a comment"],
     reviewerRequested: false,
+    threads: NO_THREADS,
     unresolved: "",
   },
   { kind: "exhausted", rounds: 3, unresolved: "this still allocates on every render" },
@@ -386,6 +391,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       reviewerRequested: false,
+      threads: NO_THREADS,
       unresolved: "",
     });
     expect(text).toContain("NOT");
@@ -398,6 +404,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       reviewerRequested: true,
+      threads: NO_THREADS,
       unresolved: "",
     });
     expect(text).not.toContain("NOT");
@@ -410,6 +417,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       reviewerRequested: true,
+      threads: NO_THREADS,
       unresolved: "the second point needs a product decision",
     });
 
@@ -423,6 +431,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       reviewerRequested: true,
+      threads: NO_THREADS,
       unresolved: "",
     });
 

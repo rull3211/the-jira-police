@@ -7,6 +7,7 @@ import {
   type PushRequest,
   type ReviewComment,
   type ReviewRequest,
+  type ReviewThread,
   type ThreadReply,
   COPILOT_REVIEWER,
   MAX_FEEDBACK_CHARS,
@@ -15,6 +16,7 @@ import {
   editComment,
   findPullRequest,
   formatReviewFeedback,
+  formatThreads,
   markReady,
   parsePrUrl,
   postComment,
@@ -1622,6 +1624,72 @@ describe("formatReviewFeedback", () => {
 
     expect(block.length).toBeLessThan(MAX_FEEDBACK_CHARS);
     expect(block).not.toContain("truncated");
+  });
+});
+
+const inlineThread = (overrides: Partial<ReviewThread> = {}): ReviewThread => ({
+  id: "PRRT_1",
+  isResolved: false,
+  isOutdated: false,
+  path: "src/setNonProductionFavicon.ts",
+  line: 19,
+  comments: [{ author: "copilot", body: "this is not idempotent", createdAt: "" }],
+  ...overrides,
+});
+
+describe("formatThreads", () => {
+  it("says so plainly when there are no threads", () => {
+    expect(formatThreads([])).toBe("No inline review threads.");
+  });
+
+  it("quotes the id the answer has to name back", () => {
+    // The id is how a reply reaches the thread. Rendered anywhere it can be
+    // paraphrased or abbreviated, the round answers a conversation that does
+    // not exist and the reviewer sees nothing at all.
+    expect(formatThreads([inlineThread()])).toContain("id PRRT_1");
+  });
+
+  it("gives the location a reader can go to", () => {
+    expect(formatThreads([inlineThread()])).toContain("src/setNonProductionFavicon.ts:19");
+  });
+
+  it("says the diff moved rather than inventing a line", () => {
+    // `null` is what GitHub returns once the lines under a thread change.
+    // Rendering it as a number would point the round at line zero of a file.
+    const block = formatThreads([inlineThread({ line: null, isOutdated: true })]);
+
+    expect(block).toContain("the diff has moved; no line");
+    expect(block).not.toContain(":null");
+  });
+
+  it("includes our own earlier replies, not only the reviewer's words", () => {
+    // Deliberate, and the opposite of what `reviewerComments` does to the issue
+    // comments. Seeing its own answer is how a round knows the point is already
+    // made in public and declines to make it twice.
+    const block = formatThreads([
+      inlineThread({
+        comments: [
+          { author: "copilot", body: "this is not idempotent", createdAt: "" },
+          { author: "rull3211", body: "bot: appended only when absent", createdAt: "" },
+        ],
+      }),
+    ]);
+
+    expect(block).toContain("bot: appended only when absent");
+  });
+
+  it("stays inside the same cap the review feedback does", () => {
+    const long = Array.from({ length: 200 }, (_unused, index) =>
+      inlineThread({
+        id: `PRRT_${String(index)}`,
+        comments: [{ author: "copilot", body: `${String(index)} `.repeat(400), createdAt: "" }],
+      }),
+    );
+
+    const block = formatThreads(long);
+
+    expect(block.length).toBeLessThanOrEqual(MAX_FEEDBACK_CHARS);
+    expect(block).toContain("truncated");
   });
 });
 

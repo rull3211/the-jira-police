@@ -1677,10 +1677,57 @@ export function formatReviewFeedback(comments: readonly ReviewComment[]): string
     .join("\n\n");
   const block = `Review feedback (${String(comments.length)} ${comments.length === 1 ? "comment" : "comments"}):\n\n${rendered}`;
 
+  return capped(block);
+}
+
+/** The shared budget. The note is inside it, not added to it. */
+function capped(block: string): string {
   if (block.length <= MAX_FEEDBACK_CHARS) {
     return block;
   }
-  // The note is inside the budget, not added to it. A cap that the truncation
-  // notice itself can exceed is not a cap.
   return `${block.slice(0, MAX_FEEDBACK_CHARS - TRUNCATION_NOTE.length)}${TRUNCATION_NOTE}`;
+}
+
+/**
+ * Renders inline review threads for the next model pass, ids and all.
+ *
+ * Separate from `formatReviewFeedback` because the two are read for different
+ * things. A review body is prose to act on. A thread is prose to act on **and**
+ * an address to answer at, so the id is in the header of every entry and the
+ * schema tells the pass to copy it back verbatim. A round that paraphrases an
+ * id answers nothing and resolves nothing.
+ *
+ * **Every comment on the thread is rendered, including this service's own
+ * previous replies**, and that is the point rather than completeness for its
+ * own sake. It is what lets a pass see that a point has already been answered
+ * in public and decline to argue it again — the plan's rule that a reviewer
+ * re-raising a settled point must not restart the argument, expressed as a fact
+ * the pass can read off the thread instead of a policy it has to be told.
+ *
+ * The same caveat as the sibling: `---` is a reading aid, a comment body
+ * containing one forges a boundary, and the whole block is untrusted input.
+ */
+export function formatThreads(threads: readonly ReviewThread[]): string {
+  if (threads.length === 0) {
+    return "No inline review threads.";
+  }
+
+  const rendered = threads
+    .map((thread, index) => {
+      // An outdated thread has no line: GitHub drops it once the diff moves.
+      // Saying so beats printing `null`, which reads as a bug in this code.
+      const where =
+        thread.line === null
+          ? `${thread.path} (the diff has moved; no line)`
+          : `${thread.path}:${String(thread.line)}`;
+      const conversation = thread.comments
+        .map((comment) => `${comment.author} wrote:\n${comment.body.trim()}`)
+        .join("\n\n");
+      return `--- thread ${String(index + 1)} of ${String(threads.length)} · id ${thread.id} · ${where} ---\n${conversation}`;
+    })
+    .join("\n\n");
+
+  return capped(
+    `Inline review threads (${String(threads.length)}). Answer every one in threadAnswers, copying each id exactly:\n\n${rendered}`,
+  );
 }
