@@ -280,6 +280,103 @@ export async function createWorktree(
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
 }
 
+export interface AttachRequest {
+  readonly issueKey: string;
+  /**
+   * The branch to attach to, as a bare name — `fix/ssx-3822-slug`, never
+   * `origin/fix/...`. **Untrusted**; see the function's header.
+   */
+  readonly branch: string;
+  readonly repoPath: string;
+  readonly parentDirectory: string;
+  readonly timeoutMs: number;
+}
+
+/**
+ * A worktree on a branch that already exists on the remote.
+ *
+ * The counterpart to {@link createWorktree}, and it exists because a review
+ * round operates on a pull request that some earlier, finished run opened. That
+ * run's worktree is gone — or was never on this machine, once a daemon is doing
+ * this. What survives is a branch on `origin`, and answering a reviewer means
+ * committing to *that* branch rather than to a fresh cut of the base.
+ *
+ * ## Why this is not a flag on `createWorktree`
+ *
+ * The two differ in the one place that matters. `createWorktree` uses
+ * `worktree add -b`, and its failure on an already-existing branch *is* a
+ * guard: it stops a second run for the same ticket from quietly reusing a
+ * branch that may already carry commits. Attaching wants the opposite — the
+ * branch must exist — so sharing one function would mean making that guard
+ * conditional on an argument, and a guard an argument can switch off is not one
+ * you can reason about from the call site. Two functions, one rule each.
+ *
+ * ## The branch name is not ours, and that is the new risk
+ *
+ * Every branch `createWorktree` touches was derived by `branchNameFor` from an
+ * issue key and a summary. This one is *handed* a branch, and the caller reads
+ * it off a pull request — so it is remote data, chosen by anybody who can open
+ * a pull request on the repository. `isWorkBranch` is therefore re-checked
+ * here rather than assumed of the caller. The difference between honouring it
+ * and trusting the input is the difference between checking out
+ * `fix/ssx-3822-thing` and checking out `main`, and *"the agent may never work
+ * on main or any protected branch, never"* is not a rule that can rest on one
+ * call site being right.
+ */
+export async function attachWorktree(
+  runner: CommandRunner,
+  request: AttachRequest,
+): Promise<WorktreeResult> {
+  const { issueKey, branch, repoPath, parentDirectory, timeoutMs } = request;
+
+  const refuse = (reason: string): WorktreeResult => ({ outcome: "refused", issueKey, reason });
+
+  if (!ISSUE_KEY.test(issueKey)) {
+    return refuse(`${JSON.stringify(issueKey)} is not an issue key this service will act on`);
+  }
+  if (!isWorkBranch(branch)) {
+    return refuse(
+      `${JSON.stringify(branch)} is not an implementation branch — this service commits only to ${[...WORK_BRANCH_PREFIXES].join("/")}-prefixed branches, and this name came from a pull request rather than from us`,
+    );
+  }
+
+  const path = `${parentDirectory}/${issueKey}`;
+  const opts = { cwd: repoPath, timeoutMs };
+
+  const fetched = await runner.run(["git", "-C", repoPath, "fetch", "origin", "--quiet"], opts);
+  if (failed(fetched)) {
+    return refuse(`could not fetch origin (${why(fetched)})`);
+  }
+
+  // Resolved through the remote-tracking ref, not the local branch of the same
+  // name. A local `fix/ssx-3822-x` left behind by an earlier run on this
+  // machine can be stale, or ahead, or unrelated; the pull request under review
+  // is whatever `origin` has, and that is the only thing a reviewer has read.
+  const remote = `origin/${branch}`;
+  const head = await runner.run(
+    ["git", "-C", repoPath, "rev-parse", "--verify", "--quiet", `${remote}^{commit}`],
+    opts,
+  );
+  if (failed(head)) {
+    return refuse(
+      `${remote} does not resolve to a commit (${why(head)}) — the pull request's branch is not on the remote, so there is nothing here to review`,
+    );
+  }
+
+  const added = await runner.run(
+    ["git", "-C", repoPath, "worktree", "add", path, "--track", "-b", branch, remote],
+    opts,
+  );
+  if (failed(added)) {
+    return refuse(
+      `could not attach a worktree to ${branch} (${why(added)}) — a local branch of that name, or a worktree already at ${path}, is the usual cause, and both are leftovers from an earlier run rather than something to work around`,
+    );
+  }
+
+  logger.info("solve.worktree.attached", { issueKey, path, branch, remote });
+  return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
+}
+
 /**
  * What the caller wants done with the checkout.
  *

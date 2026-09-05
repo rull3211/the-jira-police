@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type AttachRequest,
   type CommandResult,
   type CommandRunner,
   type WorktreeRequest,
+  attachWorktree,
   branchNameFor,
   createWorktree,
   removeWorktree,
@@ -50,6 +52,20 @@ const request = (overrides: Partial<WorktreeRequest> = {}): WorktreeRequest => (
 
 /** The reason of a refusal, or "" if it was not refused. */
 function refusal(result: Awaited<ReturnType<typeof createWorktree>>): string {
+  return result.outcome === "refused" ? result.reason : "";
+}
+
+const attach = (overrides: Partial<AttachRequest> = {}): AttachRequest => ({
+  issueKey: "SSX-3822",
+  branch: "fix/ssx-3822-favicon-is-missing",
+  repoPath: "/repos/buy-insurance-advisor-web",
+  parentDirectory: "/tmp/solve",
+  timeoutMs: 60_000,
+  ...overrides,
+});
+
+/** The reason of an attach refusal, or "" if it was not refused. */
+function refused(result: Awaited<ReturnType<typeof attachWorktree>>): string {
   return result.outcome === "refused" ? result.reason : "";
 }
 
@@ -437,5 +453,118 @@ describe("removeWorktree", () => {
     const runner = fakeRunner([TIMEOUT]);
 
     expect((await removeWorktree(runner, worktree, "discard", 30_000)).outcome).toBe("kept");
+  });
+});
+
+describe("attachWorktree", () => {
+  it("checks out the branch the pull request is on", async () => {
+    const runner = fakeRunner();
+
+    const result = await attachWorktree(runner, attach());
+
+    expect(result).toEqual({
+      outcome: "created",
+      worktree: {
+        issueKey: "SSX-3822",
+        path: "/tmp/solve/SSX-3822",
+        branch: "fix/ssx-3822-favicon-is-missing",
+        repoPath: "/repos/buy-insurance-advisor-web",
+      },
+    });
+    expect(runner.calls.at(-1)).toEqual([
+      "git",
+      "-C",
+      "/repos/buy-insurance-advisor-web",
+      "worktree",
+      "add",
+      "/tmp/solve/SSX-3822",
+      "--track",
+      "-b",
+      "fix/ssx-3822-favicon-is-missing",
+      "origin/fix/ssx-3822-favicon-is-missing",
+    ]);
+  });
+
+  it("fetches before resolving anything", async () => {
+    const runner = fakeRunner();
+
+    await attachWorktree(runner, attach());
+
+    // Same reason `createWorktree` fetches first: the branch under review is
+    // whatever the reviewer can see, and a stale remote-tracking ref would
+    // answer a review by committing on top of a commit that is not the one
+    // being reviewed.
+    expect(runner.calls[0]).toContain("fetch");
+  });
+
+  it("resolves the remote branch, not a local one of the same name", async () => {
+    const runner = fakeRunner();
+
+    await attachWorktree(runner, attach());
+
+    // The mutation this exists to catch is dropping the `origin/` prefix. A
+    // leftover local branch from an earlier run on this machine can be stale or
+    // ahead of the pull request, and resolving it would review the wrong code
+    // while every other assertion here still passed.
+    expect(runner.calls[1]).toContain("origin/fix/ssx-3822-favicon-is-missing^{commit}");
+    expect(runner.calls[1]).not.toContain("fix/ssx-3822-favicon-is-missing^{commit}");
+  });
+
+  it("refuses a branch that is not an implementation branch", async () => {
+    // The whole reason `isWorkBranch` is re-checked here: this name arrives
+    // from a pull request, so anyone who can open one on the repository picks
+    // it. Each of these satisfies some weaker reading of "looks like a branch".
+    for (const hostile of [
+      "main",
+      "master",
+      "origin/main",
+      "chore/main",
+      "feat/release/2026-09",
+      "release/2026-09",
+      "refs/heads/main",
+      "",
+    ]) {
+      const runner = fakeRunner();
+
+      const result = await attachWorktree(runner, attach({ branch: hostile }));
+
+      expect(refused(result)).toContain("implementation branch");
+      // Nothing ran. A refusal that had already fetched would still be a
+      // refusal, but it would mean the guard sits after the first side effect.
+      expect(runner.calls).toEqual([]);
+    }
+  });
+
+  it("refuses an issue key it would not act on", async () => {
+    const runner = fakeRunner();
+
+    expect(refused(await attachWorktree(runner, attach({ issueKey: "../../etc" })))).toContain(
+      "not an issue key",
+    );
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("refuses when the branch is not on the remote", async () => {
+    const runner = fakeRunner([OK, FAIL]);
+
+    const result = await attachWorktree(runner, attach());
+
+    expect(refused(result)).toContain("does not resolve to a commit");
+    // Refused before `worktree add` — two calls, not three.
+    expect(runner.calls).toHaveLength(2);
+  });
+
+  it("refuses when git will not create the worktree", async () => {
+    const runner = fakeRunner([OK, OK, FAIL]);
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain(
+      "could not attach a worktree",
+    );
+  });
+
+  it("refuses when the fetch times out", async () => {
+    const runner = fakeRunner([TIMEOUT]);
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain("could not fetch origin");
   });
 });
