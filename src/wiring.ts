@@ -60,6 +60,8 @@ import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
 import { type RenderedTicket, renderTicket } from "./solve/ticket.ts";
 import { withFitnessNote } from "./triage/fitness-note.ts";
 import { UnpostableError, assertPostable } from "./triage/gate.ts";
+import { createTicketCommenter } from "./solve/commenter.ts";
+import type { TicketCommenter } from "./solve/feedback.ts";
 import { runPost } from "./triage/poster.ts";
 import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
 
@@ -289,6 +291,31 @@ function toSolveCandidate(ticket: TicketRef): SolveCandidate {
  * is touched — instead of at the point where its value would have decided
  * whether a human's go-ahead was required.
  */
+/**
+ * The solve pipeline's way of saying something on a ticket.
+ *
+ * Composed here rather than in the command for the reason `createSolveDeps` is:
+ * constructing a capability is the privilege grant, and a reviewer looking for
+ * "what can this reach Jira with" should find every answer in one file.
+ *
+ * The budget is `TRIAGE_TIMEOUT_MS`, which is not a copy-paste. It is what the
+ * triage poster runs on — the only comparable component in the tree, and a
+ * closer relative than anything named `SOLVE_*`: both are a short storecode
+ * session that holds finished text and calls one Atlassian tool. The `SOLVE_*`
+ * budgets are all sized for a model reading a repository, and `SOLVE_TIMEOUT_MS`
+ * in particular is thirty minutes, which for a one-tool write is not a timeout
+ * so much as the absence of one.
+ */
+export function createSolveCommenter(settings: Settings): TicketCommenter {
+  return createTicketCommenter({
+    executable: settings.STORECODE_PATH,
+    workingDirectory: process.cwd(),
+    // Floored at 1ms on the same grounds as everywhere else: zero is not "no
+    // timeout", it is one that expired before the session started.
+    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+  });
+}
+
 export function createSolveDeps(
   settings: Settings,
   client: JiraClient,

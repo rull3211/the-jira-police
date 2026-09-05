@@ -29,15 +29,28 @@
  * difference is deliberate: a snapshot answers "what is the queue doing now",
  * and calibration is a question about a trend.
  *
- * ## Posting is a capability the caller supplies, and today nobody supplies it
+ * ## Posting is a capability the caller supplies, and now one does
  *
  * `TicketCommenter` is one method wide. An implementation of it cannot
  * transition an issue, edit a field, or touch a label — the same reasoning as
  * `ClaimCapabilities`, and for the same reason: the type should tell a reviewer
- * the blast radius without them reading the implementation. Nothing in this
- * tree constructs one yet, so `reportOutcome` writes the local record and
- * reports that the comment was not posted. That is the honest state of the
- * phase, and it is visible in the return value rather than hidden in a log.
+ * the blast radius without them reading the implementation.
+ *
+ * This paragraph used to end "nothing in this tree constructs one yet", and
+ * what that cost is worth keeping now that it is false. The seam sat empty
+ * through every phase, so a run's conclusion reached a local file and an
+ * operator's terminal and stopped — including the SSX-3831 bail, where recon
+ * declined the ticket, named the two acceptance criteria that admit no single
+ * implementation, and proposed the split that would fix them, to a scrollback.
+ * `src/solve/commenter.ts` fills it.
+ *
+ * **An absent commenter still means something, and it is no longer the phase
+ * gate.** It now means *this outcome is not about the ticket*. The caller
+ * supplies one only for a run that reached a verdict, so a crash or an unusable
+ * base gets the local calibration row and no Jira write — which is the right
+ * silence rather than a missing feature, since the alternative is posting "this
+ * says nothing about whether the ticket is solvable" on somebody's bug every
+ * time a laptop sleeps mid-pass.
  *
  * ## The correction is untrusted text
  *
@@ -72,7 +85,14 @@ export interface TicketCommenter {
 
 export interface FeedbackDeps {
   readonly outputDirectory: string;
-  /** Absent means the write path is not wired. The absence is the phase gate. */
+  /**
+   * Absent means *do not post*, and the caller decides that per outcome.
+   *
+   * It gated the phase until D4c and now gates relevance: a commenter is passed
+   * only for an outcome that is a verdict about the ticket, so this being unset
+   * is a statement rather than a gap. See the header, and `terminalLabelAfter`,
+   * which is the one predicate deciding both this and the label.
+   */
   readonly commenter?: TicketCommenter;
 }
 

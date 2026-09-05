@@ -61,6 +61,7 @@ import {
   buildPublishRequest,
   buildSolveRequest,
   createClaimCapabilities,
+  createSolveCommenter,
   createSolveDeps,
   createSolveRunDeps,
   createTicketReader,
@@ -197,13 +198,26 @@ export async function runSolver(
   // `devLensAccurate: false` — triage's lens was wrong, the single most useful
   // thing the pipeline had produced — and the process exited and lost it.
   //
-  // **No commenter is passed, and that is the phase gate, not an oversight.**
-  // `reportOutcome` posts only if given a `TicketCommenter`; with none it
-  // writes the local record and says the comment was not posted. So this adds a
-  // local artifact and no Jira write, which is the same posture as the rest of
-  // the command.
+  // **A commenter is passed only when the run reached a verdict**, and the gate
+  // is `terminalLabelAfter` rather than a second rule of its own. That is on
+  // purpose: the label and the comment are one statement, so a ticket taken out
+  // of the queue always carries the reason it left, and one that stays in is
+  // never annotated with an explanation for something that did not happen.
+  // Sharing the predicate is what stops those two drifting apart.
+  //
+  // The outcomes it withholds are the ones whose own headlines say they are not
+  // about the ticket — `crashed`, `unusable-base`, an `environment` abandon.
+  // `feedback.ts` phrases each of those as "this says nothing about whether the
+  // ticket is solvable", and posting that sentence on somebody's bug is worse
+  // than staying quiet: under E it would arrive every time a laptop slept
+  // mid-pass. Those still get the local calibration row, which is where a fact
+  // about this machine belongs.
+  const commenter = terminalLabelAfter(outcome) === null ? null : createSolveCommenter(settings);
   const feedback = await reportOutcome(
-    { outputDirectory: settings.OUTPUT_DIR },
+    {
+      outputDirectory: settings.OUTPUT_DIR,
+      ...(commenter === null ? {} : { commenter }),
+    },
     issueKey,
     outcome,
     new Date(),
