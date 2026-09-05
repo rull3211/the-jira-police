@@ -255,6 +255,12 @@ export const SETTINGS = [
     fallback: "10",
   },
   {
+    name: "FAIL_FIRST_CHECK",
+    description:
+      "Whether a verified solve also runs its own new tests against the base, to see whether they fail when the fix is taken away. On by default, which is the opposite of every other switch here: this one grants nothing and writes nothing, and the failure mode of it being off is the thing it exists to catch — a regression test that is green against the bug it is named for. Set it to false only for cost, since it buys one extra install and one extra test run per solve. The result is reported on the pull request and never withholds one.",
+    fallback: "true",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",
@@ -398,6 +404,20 @@ export function numeric(settings: Settings, name: SettingName, min = 0): number 
  */
 export function flag(settings: Settings, name: SettingName): boolean {
   return settings[name].trim().toLowerCase() === "true";
+}
+
+/**
+ * Whether the fail-first experiment runs. **Only "false" turns it off.**
+ *
+ * The mirror image of `flag` above, and the asymmetry is the point rather than
+ * an oversight. `flag` fails closed because the thing it reads decides whether
+ * this service writes to shared tickets, so a typo must not grant a privilege.
+ * This reads a quality check that grants nothing, and there a typo must not
+ * silently withdraw a guard — `FAIL_FIRST_CHECK=fasle` should keep checking.
+ * Two settings, two directions, both chosen by what a mistake costs.
+ */
+export function failFirstCheck(settings: Settings): boolean {
+  return settings["FAIL_FIRST_CHECK"].trim().toLowerCase() !== "false";
 }
 
 export function list(settings: Settings, name: SettingName): readonly string[] {

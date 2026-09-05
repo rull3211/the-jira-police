@@ -67,7 +67,14 @@ import {
   parseSimplify,
 } from "./runner.ts";
 import { prepareSkillRoot, removeSkillRoot } from "./skill-root.ts";
-import { verify, verifyBase, type VerificationResult, type VerifyRequest } from "./verify.ts";
+import {
+  checkFailFirst,
+  verify,
+  verifyBase,
+  type FailFirstResult,
+  type VerificationResult,
+  type VerifyRequest,
+} from "./verify.ts";
 import {
   type CommandRunner,
   createWorktree,
@@ -111,6 +118,18 @@ export interface SolveRequest {
   readonly branchPrefix?: string;
   readonly vaultPath?: string;
   readonly limits?: DiffLimits;
+  /**
+   * Whether to run the fail-first experiment, `FAIL_FIRST_CHECK`.
+   *
+   * Optional and **on when absent**, which is the opposite of how every
+   * privilege setting in this service defaults, and deliberately so. This is
+   * not a privilege — it grants nothing and writes nothing — it is a quality
+   * check, and the failure mode of it being off is the one it exists to stop:
+   * a regression test that is green against the bug it names, shipped quietly.
+   * The reason it is switchable at all is cost, since it buys one extra install
+   * and one extra test run per solve.
+   */
+  readonly failFirstCheck?: boolean;
   readonly gitTimeoutMs: number;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
@@ -244,6 +263,15 @@ export type SolveOutcome =
       readonly fix: FixReport;
       readonly simplify: SimplifyReport;
       readonly verification: VerificationResult;
+      /**
+       * Whether the run's own tests notice when its fix is taken away.
+       *
+       * On the outcome rather than in a log because it is feedback for a
+       * reviewer, and this service's recurring failure is producing its best
+       * reasoning on a channel nobody reads. It is never a reason to withhold
+       * the pull request — see `checkFailFirst`.
+       */
+      readonly failFirst: FailFirstResult;
       readonly devLens: DevLensFeedback;
       readonly files: number;
       readonly lines: number;
@@ -737,7 +765,8 @@ async function runPipeline(
       worktree,
     };
   }
-  const verdict = checkDiff(parseNumstat(finalDiff), request.limits ?? DEFAULT_LIMITS);
+  const changes = parseNumstat(finalDiff);
+  const verdict = checkDiff(changes, request.limits ?? DEFAULT_LIMITS);
   if (!verdict.ok) {
     logger.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -760,11 +789,35 @@ async function runPipeline(
     return { kind: "failed", reason: verification.reason, verification, devLens, worktree };
   }
 
+  // ---- fail-first ----------------------------------------------------------
+  //
+  // After verification and never instead of it. The two questions are ordered
+  // the way they are because only the first one can withhold a pull request:
+  // there is no point asking whether the tests notice the fix being taken away
+  // until they have been seen to pass with it there.
+  //
+  // The paths come from the same numstat the gate was given, so the experiment
+  // is bounded by exactly the change the gate bounded — not by either model's
+  // account of what it touched.
+  const failFirst =
+    request.failFirstCheck === false
+      ? ({ outcome: "skipped", reason: "FAIL_FIRST_CHECK is off" } as const)
+      : await checkFailFirst(commands, {
+          repoPath: request.repoPath,
+          worktreePath: worktree.path,
+          probePath: `${worktree.path}-failfirst`,
+          baseRef: request.baseRef,
+          changedPaths: changes.map((change) => change.path),
+          stepTimeoutMs: request.stepTimeoutMs,
+          installTimeoutMs: request.installTimeoutMs,
+        });
+
   logger.info("solve.verified", {
     issueKey,
     branch: worktree.branch,
     files: verdict.files,
     lines: verdict.lines,
+    failFirst: failFirst.outcome,
   });
   return {
     kind: "verified",
@@ -774,6 +827,7 @@ async function runPipeline(
     fix,
     simplify,
     verification,
+    failFirst,
     devLens,
     files: verdict.files,
     lines: verdict.lines,

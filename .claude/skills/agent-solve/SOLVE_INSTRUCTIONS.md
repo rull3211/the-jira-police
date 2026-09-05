@@ -93,9 +93,28 @@ a different change — the brief is what the bound was calculated against.
    of. Not the change plus the cleanup you noticed. The smallest correct one.
 3. **Add the test** from `testPlan`, in the style the repository already uses. Read a neighbouring
    test file first and copy its shape — imports, naming, assertion style, fixture conventions.
-4. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
+4. **Name the wrong fix, and check your test catches it.** Before you move on: what is the
+   plausible _almost_-correct change someone would reach for here — the off-by-one, the
+   one-character version, the fix that handles the reported case and not the class? Read your own
+   test back against that version and satisfy yourself that at least one assertion goes red. If
+   none does, the test is decorative and must be strengthened or its weakness put in
+   `residualRisk`. Then do the same against the _original_ bug: a test that passes against
+   unmodified code is not a regression test at all, and the harness runs that one for real.
+5. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
    you cannot justify that way, revert.
-5. **Write the commit subject and body.** §3.
+6. **Write the commit subject and body.** §3.
+
+Step 4 is here because of two shipped defects, and neither was caught by anything else. On PR
+#1413 a timezone regression test compared against `ZoneId.systemDefault()`, so it separated the
+fix from the bug only on a non-UTC JVM and CI runs UTC. On PR #2661 a block named _should not
+depend on the run date_ used the same 31-day month in all four cases, so no run date could
+overflow it; the whole block passes against the wrong fix, and what actually caught that fix was
+one row in a different block. Both tests were green, well-named, and empty.
+
+Note the order of the two checks and that they are not the same check. Every assertion on #2661
+went red against the original bug and only one went red against the plausible wrong fix — so
+"write it and watch it fail" would have been fully satisfied by a suite that was six-sevenths
+decoration. The harness can only run the weaker one for you. The stronger one is yours.
 
 ### Fix output
 

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { ALLOWED_EXECUTABLES } from "./exec.ts";
 import {
+  type FailFirstRequest,
   type VerifyRequest,
+  checkFailFirst,
   discoverPlan,
+  isTestPath,
   invocationOf,
   packageManagerOf,
   unverifiableChanges,
@@ -746,5 +749,200 @@ describe("verifyBase", () => {
     await verify(laterRunner, request());
 
     expect(baseRunner.calls).toEqual(laterRunner.calls);
+  });
+});
+
+/**
+ * The fail-first experiment.
+ *
+ * Two properties carry most of the weight here and neither is about the
+ * verdict. The first is that the solve worktree is read and never written to,
+ * because at the point this runs it holds a verified, uncommitted fix and the
+ * whole design was chosen to keep it out of harm's way. The second is that the
+ * probe checkout is always removed, including on the paths that give up part
+ * way through, since those are the ones a happy-path test never reaches.
+ */
+const TREE = "b".repeat(40);
+
+const ff = (overrides: Partial<FailFirstRequest> = {}): FailFirstRequest => ({
+  repoPath: "/repos/advisor",
+  worktreePath: "/tmp/solve/SSX-3833",
+  probePath: "/tmp/solve/SSX-3833-failfirst",
+  baseRef: "origin/main",
+  changedPaths: ["src/utils/DateUtils.ts", "src/utils/tests/DateUtils.test.ts"],
+  stepTimeoutMs: 120_000,
+  installTimeoutMs: 300_000,
+  ...overrides,
+});
+
+describe("checkFailFirst", () => {
+  /** A world where every command works and the probe's suite goes red. */
+  const world = (replies: Record<string, CommandResult> = {}) =>
+    fakeRunner({ "write-tree": out(`${TREE}\n`), "run test": bad(1), ...replies });
+
+  describe("what counts as a test", () => {
+    it("recognises the shapes the pilot repositories actually use", () => {
+      expect(isTestPath("src/utils/tests/DateUtils.test.ts")).toBe(true);
+      expect(isTestPath("src/x.spec.tsx")).toBe(true);
+      expect(isTestPath("src/__tests__/x.ts")).toBe(true);
+      expect(isTestPath("src/test/java/com/x/XTest.java")).toBe(true);
+      expect(isTestPath("src/utils/DateUtils.ts")).toBe(false);
+      // Not a test despite the word: the extension rule is anchored on a dot,
+      // so a file merely mentioning testing is left with the fix where it
+      // belongs.
+      expect(isTestPath("src/latest.ts")).toBe(false);
+    });
+  });
+
+  it("says nothing when the run wrote no test", async () => {
+    const runner = world();
+    const result = await checkFailFirst(runner, ff({ changedPaths: ["src/utils/DateUtils.ts"] }));
+
+    expect(result.outcome).toBe("skipped");
+    // And it gave up before spending anything. A skipped experiment that still
+    // cuts a checkout and installs into it is the cost without the finding.
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("says nothing when the run wrote only tests", async () => {
+    const runner = world();
+    const result = await checkFailFirst(
+      runner,
+      ff({ changedPaths: ["src/utils/tests/DateUtils.test.ts"] }),
+    );
+
+    expect(result.outcome).toBe("skipped");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("reports the tests as vacuous when they pass without the fix", async () => {
+    const result = await checkFailFirst(world({ "run test": OK }), ff());
+
+    expect(result).toEqual({
+      outcome: "vacuous",
+      tests: ["src/utils/tests/DateUtils.test.ts"],
+    });
+  });
+
+  it("reports them as guarded when they go red without it", async () => {
+    const result = await checkFailFirst(world(), ff());
+
+    expect(result.outcome).toBe("guarded");
+  });
+
+  it("reads a timed-out suite as red rather than as green", async () => {
+    // The conservative direction, and the same reading `verify` gives the same
+    // event. Treating a timeout as a pass would print "vacuous" — the one
+    // verdict this function is trusted on — off the back of no result at all.
+    const result = await checkFailFirst(world({ "run test": TIMEOUT }), ff());
+
+    expect(result.outcome).toBe("guarded");
+  });
+
+  it("lays only the tests onto the base, never the fix", async () => {
+    // The experiment is the fix being absent. Checking the source files out
+    // too would make every run report `vacuous`, which is the mutation that
+    // turns this feature into a permanent false alarm.
+    const runner = world();
+    await checkFailFirst(runner, ff());
+
+    const laid = runner.calls.find((argv) => argv.includes("checkout")) ?? [];
+    expect(laid).toContain("src/utils/tests/DateUtils.test.ts");
+    expect(laid).not.toContain("src/utils/DateUtils.ts");
+  });
+
+  it("never writes to the solve worktree", async () => {
+    // The property the second-worktree design exists for. At this point in a
+    // run the solve worktree holds a verified, uncommitted change, so the only
+    // things allowed to touch it are the two reads that take a save point.
+    const runner = world();
+    await checkFailFirst(runner, ff());
+
+    const touched = runner.calls.filter((argv) => argv.includes("/tmp/solve/SSX-3833"));
+    expect(touched).toEqual([
+      [
+        "git",
+        "-C",
+        "/tmp/solve/SSX-3833",
+        "add",
+        "--",
+        "src/utils/DateUtils.ts",
+        "src/utils/tests/DateUtils.test.ts",
+      ],
+      ["git", "-C", "/tmp/solve/SSX-3833", "write-tree"],
+    ]);
+  });
+
+  it("refuses a tree that is not an object id", async () => {
+    // `write-tree`'s output becomes an argument to `git checkout`. Anything
+    // that is not a whole object id is a ref-ish string reaching a command that
+    // resolves ref-ish strings, so it is checked as a whole rather than found
+    // inside the output.
+    const result = await checkFailFirst(world({ "write-tree": out("HEAD\n") }), ff());
+
+    expect(result.outcome).toBe("inconclusive");
+  });
+
+  it("gives up without cutting anything when the save point fails", async () => {
+    const runner = world({ "write-tree": bad(128) });
+    const result = await checkFailFirst(runner, ff());
+
+    expect(result.outcome).toBe("inconclusive");
+    expect(runner.calls.some((argv) => argv.includes("add") && argv.includes("--detach"))).toBe(
+      false,
+    );
+  });
+
+  it("reports the checkout it could not cut, and does not go on to test", async () => {
+    const runner = world({ "--detach": bad(128) });
+    const result = await checkFailFirst(runner, ff());
+
+    expect(result.outcome).toBe("inconclusive");
+    expect(runner.calls.some((argv) => argv.join(" ").includes("run test"))).toBe(false);
+  });
+
+  it("is inconclusive rather than vacuous when the tests will not lay down", async () => {
+    // A deleted test file lands here: it is not in the tree, so the checkout
+    // refuses. Running the base suite anyway would pass — it is the base — and
+    // print `vacuous` about tests that were never there.
+    const runner = world({ checkout: bad(1) });
+    const result = await checkFailFirst(runner, ff());
+
+    expect(result.outcome).toBe("inconclusive");
+    expect(runner.calls.some((argv) => argv.join(" ").includes("run test"))).toBe(false);
+  });
+
+  it("is inconclusive when the probe cannot install", async () => {
+    const result = await checkFailFirst(world({ "install --frozen-lockfile": bad(1) }), ff());
+
+    expect(result.outcome).toBe("inconclusive");
+  });
+
+  it("removes the probe checkout on every path that created one", async () => {
+    // Including the ones that gave up. A leaked worktree is a registered entry
+    // in the repository, so the next run of the same ticket collides with it —
+    // and the give-up paths are exactly the ones a happy-path test misses.
+    for (const replies of [
+      {},
+      { "run test": OK },
+      { checkout: bad(1) },
+      { "install --frozen-lockfile": bad(1) },
+    ]) {
+      const runner = world(replies);
+      await checkFailFirst(runner, ff());
+
+      expect(
+        runner.calls.filter((argv) => argv.join(" ").includes("worktree remove --force")),
+      ).toHaveLength(1);
+    }
+  });
+
+  it("does not let a failed cleanup swallow the finding", async () => {
+    // The finding is about the change; a directory left behind is about this
+    // machine. Reporting the second by discarding the first is the wrong trade,
+    // and a `finally` that returns is how it happens by accident.
+    const result = await checkFailFirst(world({ "run test": OK, "worktree remove": bad(1) }), ff());
+
+    expect(result.outcome).toBe("vacuous");
   });
 });

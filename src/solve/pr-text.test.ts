@@ -65,6 +65,7 @@ function verified(overrides: Partial<Verified> = {}): Verified {
         { name: "typecheck", passed: true, exitCode: 0, timedOut: false, output: "" },
       ],
     },
+    failFirst: { outcome: "guarded", tests: ["src/x.test.ts"] },
     devLens: { accurate: true, correction: "" },
     files: 2,
     lines: 31,
@@ -390,5 +391,48 @@ describe("composePullRequest", () => {
     expect(composePullRequest(verified(), CONTEXT).title).toBe(
       composeTitle(verified(), "SSX-3822"),
     );
+  });
+
+  it("says on the page when the new tests pass without the fix, and names them", () => {
+    // The finding this whole check exists to surface, and it goes above the
+    // fold rather than into a collapsed section: a reviewer who reads only the
+    // green ticks would otherwise take a decorative test for a guard.
+    const outcome = verified({
+      failFirst: { outcome: "vacuous", tests: ["src/utils/tests/DateUtils.test.ts"] },
+    });
+    const { body } = composePullRequest(outcome, CONTEXT);
+    expect(body).toContain("⚠️ **The new tests pass without the fix.**");
+    expect(body).toContain("`src/utils/tests/DateUtils.test.ts`");
+  });
+
+  it("does not call the fix wrong when it says the test is", () => {
+    // The two are separate findings and the wording has to keep them apart. A
+    // vacuous test is a statement about the test; the fix may well be correct,
+    // and a body that implies otherwise argues a reviewer out of a good change.
+    const outcome = verified({
+      failFirst: { outcome: "vacuous", tests: ["src/x.test.ts"] },
+    });
+    expect(composePullRequest(outcome, CONTEXT).body).toContain("The fix may still be right");
+  });
+
+  it("says nothing at all when the tests did fail without the fix", () => {
+    // `guarded` is the weak verdict — a new test importing a new helper fails
+    // against the base for the wrong reason — so rendering it beside the
+    // verification ticks would claim more than the experiment established.
+    const outcome = verified({
+      failFirst: { outcome: "guarded", tests: ["src/x.test.ts"] },
+    });
+    expect(composePullRequest(outcome, CONTEXT).body).not.toContain("without the fix");
+  });
+
+  it("says nothing when the check was skipped or could not run", () => {
+    for (const failFirst of [
+      { outcome: "skipped", reason: "no tests changed" },
+      { outcome: "inconclusive", reason: "could not write a tree" },
+    ] as const) {
+      expect(composePullRequest(verified({ failFirst }), CONTEXT).body).not.toContain(
+        "without the fix",
+      );
+    }
   });
 });

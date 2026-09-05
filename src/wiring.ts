@@ -46,7 +46,15 @@ import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
-import { type Settings, SettingsError, flag, list, numeric, solveMode } from "./settings.ts";
+import {
+  type Settings,
+  SettingsError,
+  failFirstCheck,
+  flag,
+  list,
+  numeric,
+  solveMode,
+} from "./settings.ts";
 import type { ClaimCapabilities } from "./solve/claim.ts";
 import { createCommandRunner } from "./solve/exec.ts";
 import { repoFromLabels } from "./solve/labels.ts";
@@ -496,6 +504,7 @@ export function buildSolveRequest(
     parentDirectory: worktreeRoot(settings),
     baseRef: settings.SOLVE_BASE_REF,
     vaultPath: settings.VAULT_PATH,
+    failFirstCheck: failFirstCheck(settings),
     gitTimeoutMs: numeric(settings, "SOLVE_GIT_TIMEOUT_MS", 1),
     stepTimeoutMs: numeric(settings, "SOLVE_STEP_TIMEOUT_MS", 1),
     installTimeoutMs: numeric(settings, "SOLVE_INSTALL_TIMEOUT_MS", 1),

@@ -209,6 +209,34 @@ function checkLine(outcome: Verified): string {
     .join(" · ");
 }
 
+/**
+ * The fail-first finding, and it is a line only when there is something to say.
+ *
+ * `guarded` renders nothing. It is the expected result, it is the one this
+ * experiment is not sound about (see `checkFailFirst`), and a green tick for it
+ * next to the verification ticks would read as a stronger claim than it is —
+ * "the tests are good" rather than "one specific way of them being empty was
+ * ruled out". `skipped` and `inconclusive` render nothing for the plainer
+ * reason that no experiment ran.
+ *
+ * `vacuous` is the whole point of the feature reaching this page. It says a
+ * regression test passes against the unfixed code, which is a defect in the
+ * change a reviewer is about to approve and is invisible from the diff — every
+ * assertion in it is green either way.
+ */
+function failFirstLine(outcome: Verified): string {
+  if (outcome.failFirst.outcome !== "vacuous") {
+    return "";
+  }
+  const tests = outcome.failFirst.tests.map((path) => `\`${path}\``).join(", ");
+  return (
+    `⚠️ **The new tests pass without the fix.** The harness put ${tests} onto ` +
+    `an unmodified checkout of the base and the suite went green, so nothing here ` +
+    `separates the fix from the bug it is named for. The fix may still be right — ` +
+    `this is a finding about the test.`
+  );
+}
+
 export function composePullRequest(
   outcome: Verified,
   context: PullRequestContext,
@@ -238,6 +266,7 @@ export function composePullRequest(
       `rounds, then a person decides.</sub>`,
 
     lens,
+    failFirstLine(outcome),
 
     details("What a reviewer should check by hand", fix.residualRisk),
     recon.devLensAccurate ? "" : details("Where triage was wrong", recon.devLensCorrection),

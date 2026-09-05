@@ -960,6 +960,48 @@ describe("solveTicket, and the branch rule", () => {
   });
 });
 
+/** The commands only `checkFailFirst` issues, and nothing else in the run. */
+const probeCalls = (calls: readonly (readonly string[])[]) =>
+  calls.filter((argv) => argv.includes("write-tree") || argv.includes("--detach"));
+
+describe("solveTicket, and the fail-first experiment", () => {
+  it("runs it by default, because nobody has to remember to ask for it", async () => {
+    // The opposite default from every other switch on a solve. It grants no
+    // privilege and writes nothing, and the failure mode of it being off is
+    // precisely the defect it is here to find.
+    const { h } = harness(FULL);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(probeCalls(h.calls).length).toBeGreaterThan(0);
+    expect(outcome).toMatchObject({ kind: "verified" });
+  });
+
+  it("spends nothing at all when it is switched off", async () => {
+    // The reason the setting exists is cost, so the off position has to cost
+    // nothing — not run the experiment and discard it.
+    const { h } = harness(FULL);
+
+    const outcome = await solveTicket(h.deps, { ...request, failFirstCheck: false });
+
+    expect(probeCalls(h.calls)).toEqual([]);
+    expect(outcome).toMatchObject({
+      kind: "verified",
+      failFirst: { outcome: "skipped" },
+    });
+  });
+
+  it("still publishes when the experiment cannot run", async () => {
+    // A report, never a refusal. A fix does not become wrong because the
+    // harness could not take its tests apart.
+    const { h } = harness(FULL);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("verified");
+  });
+});
+
 const reviewRequest = {
   ...request,
   worktree,
