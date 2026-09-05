@@ -89,6 +89,13 @@ function harness(
   const seen: { pass: Pass; options: SolveRunOptions }[] = [];
 
   const defaults: readonly Rule[] = [
+    // A Node base: `pom.xml` is absent. Answering every `git show` with the
+    // manifest would make the base look like it declared both toolchains, and
+    // `verify` refuses that rather than choosing.
+    {
+      match: (argv) => argv.includes("show") && argv.some((arg) => arg.endsWith(":pom.xml")),
+      reply: { exitCode: 128 },
+    },
     { match: saw("show"), reply: { stdout: MANIFEST } },
     { match: saw("--name-only"), reply: { stdout: "" } },
     { match: saw("--numstat"), reply: { stdout: NUMSTAT } },
@@ -518,6 +525,7 @@ describe("reviewerComments", () => {
   it("drops our own comments, so a round is not fed its own replies", async () => {
     const state: ReviewState = {
       reviewerResponded: true,
+      reviewerErrored: false,
       state: "OPEN",
       isDraft: true,
       comments: [
@@ -535,6 +543,7 @@ describe("reviewerComments", () => {
   it("matches our identity regardless of case", () => {
     const state: ReviewState = {
       reviewerResponded: true,
+      reviewerErrored: false,
       state: "OPEN",
       isDraft: true,
       comments: [{ author: "JIRA-Police", body: "mine" }],
@@ -546,6 +555,7 @@ describe("reviewerComments", () => {
   it("keeps everything when none of it is ours", () => {
     const state: ReviewState = {
       reviewerResponded: true,
+      reviewerErrored: false,
       state: "OPEN",
       isDraft: true,
       comments: [{ author: "copilot", body: "a" }],

@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1004 tests, no build step, no deployment
+Status: running end to end against production Jira. 1519 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -25,14 +25,17 @@ A **second queue** exists alongside grooming: tickets a triage assessment marked
 tickets and reports the exact label edit it _would_ make, and the cycle that runs it holds no
 function capable of making it.
 
-Everything past that queue — the claim, the worktree, the four model passes, the diff bound, the
-verification, the commit, the pull request, the review round-trip — is **built, tested, and wired
-to nothing**. No entry point constructs a `CommandRunner`, a `PassRunner` or a
-`ClaimCapabilities`, so no code path in this repository can reach any of it: the inertness is a
-fact about the composition rather than a promise made in a comment, and granting it is an edit to
-a wiring function, which is where a reviewer looks. Building a capability and granting it are kept
-as separate commits on purpose. See §4 for the queue, §15 for the pipeline, and §13 for what is
-genuinely absent. Nothing runs any of it from the daemon; `pnpm start` is the grooming loop only.
+Past that queue the picture is no longer uniform, and the split is worth stating precisely because
+it used to be a single sentence. **The solver runs.** `pnpm solve:once <KEY> --solve` composes a
+`CommandRunner` and a `PassRunner` and drives the whole first half — worktree, four model passes,
+diff bound, mechanical verification — against a real repository. It has done so, by hand, and §15
+records what that cost. **Everything else is still wired to nothing**: the claim
+(`ClaimCapabilities`), the commit, the pull request and the review round-trip are built, tested,
+and constructed by no entry point. That inertness is a fact about the composition rather than a
+promise made in a comment, and granting it is an edit to a wiring function, which is where a
+reviewer looks. Building a capability and granting it are kept as separate commits on purpose.
+See §4 for the queue, §15 for the pipeline, and §13 for what is genuinely absent. Nothing runs any
+of it from the daemon; `pnpm start` is the grooming loop only.
 
 ---
 
@@ -424,9 +427,11 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/logger.ts`              | JSON lines to stdout/stderr; `console` is banned by lint                                                |
 | `src/duration.ts`            | `30s` / `4m` / `1.5h` for CLI flags                                                                     |
 
-`wiring.ts` exists because there are four entry points — the daemon, `poll:once`, `triage:once`
-and `solve:once` — and a difference in how they wire the same pipeline would be a bug that only
-shows up in production. `triage:once` used to build its options by hand; the copy drifted the
+`wiring.ts` exists because there are five entry points — the daemon, `poll:once`, `triage:once`,
+`solve:once` and `bot:once` — and a difference in how they wire the same pipeline would be a bug
+that only shows up in production. The two solve commands go further than sharing `wiring.ts`: their
+write rungs are literally the same functions, in `src/cli/solve-run.ts`, so a command file is now
+argument parsing plus a call into the one module that writes to Jira, a worktree or GitHub. `triage:once` used to build its options by hand; the copy drifted the
 moment the real skill grew requirements. Note which modules are absent from that list of callers:
 nothing in `wiring.ts` composes the solve pipeline, which is what §15 means by inert.
 
@@ -518,28 +523,33 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 `.env`, read via `node --env-file-if-exists`. Every setting is declared once in `src/settings.ts`;
 `describeSettings()` masks the sensitive ones so the startup dump is safe to paste.
 
-| Setting                      | Default                            | Notes                                                                                                                                                  |
-| ---------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `JIRA_BASE_URL`              | `https://storebrand.atlassian.net` |                                                                                                                                                        |
-| `JIRA_EMAIL`                 | —                                  | **required**                                                                                                                                           |
-| `JIRA_AUTH`                  | —                                  | **required**, sensitive, discovery only                                                                                                                |
-| `JIRA_PROJECT`               | `SSX`                              |                                                                                                                                                        |
-| `JIRA_COMPONENTS`            | `SSX Advisor`                      | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets                                                      |
-| `JIRA_EXCLUDED_TYPES`        | `10009`                            | Deloppgave / sub-task — arrives attached to a parent already triaged                                                                                   |
-| `POLL_INTERVAL_MS`           | `300000`                           |                                                                                                                                                        |
-| `CURSOR_OVERLAP_MS`          | `120000`                           | See §4                                                                                                                                                 |
-| `FIRST_RUN_LOOKBACK_MINUTES` | `60`                               | Deliberately short — a wide first window means one paid run per historical issue                                                                       |
-| `SKILL_NAME`                 | `mock-triage`                      | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                                                                         |
-| `VAULT_PATH`                 | —                                  | Required for the real skill; checked at wiring time, not first-ticket time                                                                             |
-| `WRITE_BACK`                 | `false`                            | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed                                                            |
-| `TRIAGE_TIMEOUT_MS`          | `1200000`                          | Raised from `600000` on 2026-09-04 after a run was killed that was slow rather than stuck (§13). Floor of 1 — zero is a timer that has already expired |
-| `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`      | Both gitignored                                                                                                                                        |
-| `SOLVE_ENABLED`              | `false`                            | Master switch for the solve queue. Strict `"true"`. Checked at composition _and_ in the poller                                                         |
-| `SOLVE_MODE`                 | `manual`                           | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback                              |
-| `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                             | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing |
-| `SOLVE_REPOS`                | — (**no fallback**)                | Repository allowlist. The only solve setting without a default, deliberately: see §14.10                                                               |
-| `MAX_CONCURRENT_SOLVES`      | `1`                                | Counted from the board via `buildInFlightJql`, never from local state                                                                                  |
-| `MAX_REVIEW_ITERATIONS`      | `3`                                | Unused until Phase D                                                                                                                                   |
+| Setting                      | Default                                | Notes                                                                                                                                                                                                            |
+| ---------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JIRA_BASE_URL`              | `https://storebrand.atlassian.net`     |                                                                                                                                                                                                                  |
+| `JIRA_EMAIL`                 | —                                      | **required**                                                                                                                                                                                                     |
+| `JIRA_AUTH`                  | —                                      | **required**, sensitive, discovery only                                                                                                                                                                          |
+| `JIRA_PROJECT`               | `SSX`                                  |                                                                                                                                                                                                                  |
+| `JIRA_COMPONENTS`            | `SSX Advisor`                          | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets                                                                                                                |
+| `JIRA_EXCLUDED_TYPES`        | `10009`                                | Deloppgave / sub-task — arrives attached to a parent already triaged                                                                                                                                             |
+| `POLL_INTERVAL_MS`           | `300000`                               |                                                                                                                                                                                                                  |
+| `CURSOR_OVERLAP_MS`          | `120000`                               | See §4                                                                                                                                                                                                           |
+| `FIRST_RUN_LOOKBACK_MINUTES` | `60`                                   | Deliberately short — a wide first window means one paid run per historical issue                                                                                                                                 |
+| `SKILL_NAME`                 | `mock-triage`                          | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                                                                                                                                   |
+| `VAULT_PATH`                 | —                                      | Required for the real skill; checked at wiring time, not first-ticket time                                                                                                                                       |
+| `WRITE_BACK`                 | `false`                                | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed                                                                                                                      |
+| `TRIAGE_TIMEOUT_MS`          | `1200000`                              | Raised from `600000` on 2026-09-04 after a run was killed that was slow rather than stuck (§13). Floor of 1 — zero is a timer that has already expired                                                           |
+| `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`          | Both gitignored                                                                                                                                                                                                  |
+| `SOLVE_ENABLED`              | `false`                                | Master switch for the solve queue. Strict `"true"`. Checked at composition _and_ in the poller                                                                                                                   |
+| `SOLVE_MODE`                 | `manual`                               | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback                                                                                        |
+| `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                                 | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing                                                           |
+| `SOLVE_REPOS`                | — (**no fallback**)                    | Repository allowlist. The only solve setting without a default, deliberately: see §14.10                                                                                                                         |
+| `MAX_CONCURRENT_SOLVES`      | `1`                                    | Counted from the board via `buildInFlightJql`, never from local state                                                                                                                                            |
+| `MAX_REVIEW_ITERATIONS`      | `3`                                    | Quoted in the pull request body so a reader knows what undrafts it. The loop that spends the rounds (`advance`) is built and not called                                                                          |
+| `SOLVE_WORKTREE_ROOT`        | — (blank means the temp dir)           | Grants nothing. Exists because macOS `tmpdir()` lands under `/private/var`, and the by-hand diff review phase C depends on needs a path a person can open                                                        |
+| `SOLVE_GITHUB_OWNER`         | — (**no fallback**)                    | The account a pull request is opened against. No default for the same reason as `SOLVE_REPOS`, plus one of its own: an owner inferred from the checkout's remote is right until somebody adds a fork as `origin` |
+| `SOLVE_BOT_NAME`             | `jira-police`                          | Commit author. Widens nothing                                                                                                                                                                                    |
+| `SOLVE_BOT_EMAIL`            | `jira-police@users.noreply.github.com` | Commit author                                                                                                                                                                                                    |
+| `SOLVE_GH_TIMEOUT_MS`        | `60000`                                | Every `git` and `gh` command in the delivery path. Floor of 1                                                                                                                                                    |
 
 Commands:
 
@@ -551,20 +561,71 @@ pnpm poll:once                     # one full cycle
 pnpm triage:once SSX-1234 [--write]
 pnpm solve:once                    # whole queue; reads the board, changes nothing
 pnpm solve:once SSX-1234           # the same, narrowed to one ticket
-pnpm solve:once SSX-1234 --claim   # B2 — writes the claim label      (refuses: not wired)
-pnpm solve:once SSX-1234 --solve   # C  — ... and runs the solver     (refuses: not wired)
-pnpm solve:once SSX-1234 --pr      # D  — ... and opens the draft PR  (refuses: not wired)
+pnpm solve:once SSX-1234 --claim   # B2 — claims, proves the queue drops it, releases
+pnpm solve:once SSX-1234 --solve   # C  — ... and runs the solver; nothing is pushed
+pnpm solve:once SSX-1234 --pr      # D  — ... and opens the draft PR, reviewer @copilot
+pnpm bot:once SSX-1234             # triage + the fitness call; writes nothing
+pnpm bot:once SSX-1234 --claim     # ... writes the verdict, then claims the ticket
+pnpm bot:once SSX-1234 --solve     # ... and runs the solver; nothing is pushed
+pnpm bot:once SSX-1234 --pr        # ... and opens the draft PR — the whole bot, one command
 pnpm check-types && pnpm lint && pnpm test
 ```
 
 Note the script is **`check-types`**, not `typecheck`.
 
-The three escalating flags are parsed today and refuse today, each naming the module that would
-have to be composed for it to work (`src/cli/solve-args.ts`). Dry is the default, so there is no
-`--dry-run`: the flag that has to be typed is the one that escalates. Every flag past the first
-**requires an issue key**, because `solve:once --pr` would otherwise mean "open a pull request for
-every ticket in the queue" — an unbounded write from a command line one character shorter than the
-safe one, at the moment an operator is experimenting.
+All three escalating flags are wired, and **the ladder is cumulative** — `--pr` claims, solves and
+opens the pull request. This paragraph used to say they refused, each naming the module that would
+have to be composed; that was accurate for two phases and is now history. What `unavailable`
+(`src/cli/solve-args.ts`) still does is refuse a rung that is not _configured_, which today means
+`--pr` without a `SOLVE_GITHUB_OWNER` — checked before the claim rather than discovered after the
+solver has run.
+
+Dry is the default, so there is no `--dry-run`: the flag that has to be typed is the one that
+escalates. Every flag past the first **requires an issue key**, because `solve:once --pr` would
+otherwise mean "open a pull request for every ticket in the queue" — an unbounded write from a
+command line one character shorter than the safe one, at the moment an operator is experimenting.
+
+A run that does not reach a pull request releases its own claim on the way out, in a `finally`, so
+a ticket is not left claimed by a run that crashed. A run that _did_ open one keeps `agent:solving`:
+releasing there would return a solved ticket to the queue for a second solver to duplicate.
+
+### `bot:once` — the same ladder with triage on the front
+
+`solve:once` starts from a ticket the board has already assessed. `bot:once` assesses it first: it
+runs triage, reads `agentFitness`, and escalates only if that call says the ticket is agent-fixable.
+The rungs are the same four functions — they were extracted into `src/cli/solve-run.ts` so that both
+commands run the same code rather than two copies that drift.
+
+Three things about it are worth stating, because each is a boundary being moved rather than reused.
+
+**It is the first thing that acts on `agentFitness`.** Until now the fitness call was recorded — in
+the artifact, in a label — and consumed by nothing, which meant a wrong `solvable` cost nothing and
+therefore taught nothing. Here `solvable: false` ends the run before the claim and prints the
+blockers. That also gives the calibration period its other half: `devLensAccurate` says how often
+recon disagreed with triage on tickets that ran, and the refusals now say how often triage declined.
+
+**`agent:start` is satisfied by argv rather than by the board.** `ClaimAuthority` (`src/solve/
+labels.ts`) is `SolveMode | "named"`, and `"named"` skips the human-label check the way `auto` does.
+It is deliberately not a third `SolveMode`: `solveMode` refuses any value that is not `manual` or
+`auto`, so `"named"` cannot arrive from `.env` or from the daemon, which has no argv. Widening
+`SolveMode` instead would have turned "skip the human" into a setting. What `"named"` does **not**
+skip is `agent:solvable`, the blocking lifecycle labels, or `SOLVE_REPOS` — naming a ticket answers
+"may this run", not "can an agent fix this", and the second question is triage's.
+
+**It is broader than auto mode in exactly one way: no issue-type filter.** `SOLVE_AUTO_ISSUE_TYPES`
+narrows a poller choosing its own work to `Feil`. A named ticket has already been chosen, so the
+filter has nothing left to protect — and the pilot ticket is an `Oppgave`, so applying it would have
+made the command refuse the only ticket it was built to run.
+
+Triage always runs, and always first, even on a recently-triaged ticket. The claim reads
+`agent:solvable` off the board, so escalating past the free rung implies a triage write — not as a
+convenience but because the alternative is a claim that cannot succeed. That coupling is why there
+is no separate `--write` flag here.
+
+**Untested, and named as such:** `bot-once.ts`'s `main` passes the literal `"named"` to
+`runWriteRungs`, and no test covers `main` — the same gap `solve-once.ts` has, for the same reason
+(a module that runs on import). The pure parts either side of it, `resolveSettings` and
+`fitnessRefusal`, are tested and mutation-tested; the wiring between them is read, not asserted.
 
 Numeric settings carry a floor as well as a type. `numeric` rejects a negative everywhere, and the
 two values that become a delay — `TRIAGE_TIMEOUT_MS` and `POLL_INTERVAL_MS` — additionally refuse
@@ -607,9 +668,9 @@ with a note saying where it came from.
 
 ## 12. Local divergence from upstream
 
-`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Three local
-changes.** The first two are to §11's label-reconciliation list; the third is to §1's ingest and is
-the only one that changes what the skill reads:
+`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Four local
+changes.** The first three are to §11's label-reconciliation list; the fourth is to §1's ingest and
+is the only one that changes what the skill reads:
 
 1. **`next:*`.** Skill vocabulary — the same file defines
    `next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead` — and no human sets
@@ -619,7 +680,30 @@ the only one that changes what the skill reads:
    of the namespace is not the skill's: see the security boundary in §3. This is the first
    namespace shared with a writer other than the skill, so the list is narrower than a prefix.
 
-3. **Comments are read.** §1 now passes `comment` in the `getJiraIssue` field list and §8 scores
+3. **The taxonomy namespaces — `team:`, `jira:`, `domain:`, `svc:`, `value:`, `effort:` — but only
+   as a swap.** §11's removal list named the skill's _assessments_ and not its _facts_, while the
+   skill's label vocabulary (`INTAKE_INSTRUCTIONS.md`, "Labels") sets both. The asymmetry: a
+   re-triage could revise its verdict freely and could never revise a fact. A ticket re-routed to
+   another squad kept the old `team:` beside the new one; a corrected `svc:` left two, which
+   `repoFromLabels` reads as ambiguous and resolves to `null`, taking the ticket out of the solve
+   queue entirely. The skill was the only writer of those labels and the only party unable to fix
+   them.
+
+   They are a **second tier** rather than six more entries in `OWNED_LABEL_NAMESPACES`, because the
+   two kinds fail differently. A missing `dor:` label is a verdict not yet reached. A missing `svc:`
+   is a fact deleted — and the value it decides is which repository a solver may write to. So
+   `REVISABLE_LABEL_NAMESPACES` permits removal only when the same mutation adds at least one label
+   in the same namespace: a replacement, never a bare deletion. A wrong new value is a wrong label
+   the next re-triage corrects; a bare deletion is a hole nothing notices, because the ticket then
+   reads as one that was never triaged. "At least one" and not "exactly one", since `team:` is
+   legitimately multi-valued on dual-owned repos.
+
+   **`impl-uncertain` stays unremovable**, and that is a known limitation rather than an oversight.
+   It is a bare label, not a namespaced one, so there is no namespace for a replacement to arrive in
+   and nothing for the swap rule to check — a ticket whose implementation site later becomes clear
+   keeps it. Fixing that means naming a literal, which is a different decision from this one.
+
+4. **Comments are read.** §1 now passes `comment` in the `getJiraIssue` field list and §8 scores
    DoR against comments as well as the body. Upstream reads the description only, which broke the
    skill's own send-back loop: §11 asks the reporter for what is missing and invites them to
    "reply here", and a reply landed in the one channel the next run could not hear. The re-run
@@ -696,13 +780,18 @@ the only one that changes what the skill reads:
    design already assumed as much in the places that count — the human gate, the recon bail, and
    the dry phase that produced this observation instead of a pull request.
 
-The gate's `OWNED_LABEL_NAMESPACES` must **match §11 exactly, not be a superset**. A gate looser
-than the contract it enforces has a hole in it. Widen it only by widening §11 first — and tell
-Jacob, because neither divergence is upstream yet.
+Both of the gate's lists must **match §11 exactly, not be a superset**. A gate looser than the
+contract it enforces has a hole in it. Widen either only by widening §11 first — and tell Jacob,
+because none of the divergences is upstream yet.
 
-`agent:` is the one entry where the namespace list alone is looser than §11, so it carries a second
-check (`TRIAGE_OWNED_AGENT_LABELS`) rather than being expressed as a prefix. If a future namespace
-is likewise only partly owned, copy that shape rather than widening the prefix list.
+Two entries are looser as a bare prefix than §11 allows, and each carries a second check rather than
+being widened or dropped:
+
+- `agent:` is only partly owned, so `TRIAGE_OWNED_AGENT_LABELS` narrows it to the one label triage
+  writes. If a future namespace is likewise only partly owned, copy that shape.
+- The six `REVISABLE_LABEL_NAMESPACES` are owned but not freely removable, so removal is conditional
+  on a same-namespace add. If a future namespace holds a fact rather than an assessment, copy that
+  shape instead — the test is whether "absent" is a state the ticket may legitimately be in.
 
 ---
 
@@ -714,11 +803,22 @@ is likewise only partly owned, copy that shape rather than widening the prefix l
   access and an Enterprise Grid app install, both human-gated. Constraints already researched and
   encoded in that module's header: one operation per call, markdown must end with `\n`, no
   "append to list X", section ids are unstable and must be re-looked-up every edit.
-- **Cost telemetry.** `total_cost_usd`, `usage` and `num_turns` are in the stream and never read.
-  A trivial mock run measured **$0.11** on `claude-opus-5`; a real triage reads the ticket,
-  searches for duplicates and consults the vault, so it is several times that. At ~4–5 tickets/day
-  the floor is real money. This blocks the "should triage run on a cheaper model?" decision.
-- **`--max-budget-usd` / `--max-turns` / per-job `--session-id`.**
+- ~~**Cost telemetry.**~~ **Done 2026-09-04.** `sessionCost` in `session.ts` reads
+  `total_cost_usd`, `duration_ms`, `num_turns` and the four token counts off the `result` event
+  and logs them as `session.cost`. One place, so it prices everything: triage, the poster and all
+  four solve passes. Two properties are load-bearing and both are mutation-tested — every field is
+  `number | null` because **an unreported cost is not a free one**, and the log line sits _above_
+  the success check because a failed run has still been paid for, so a total that skipped failures
+  would look best on the days that went worst.
+
+  The measurement that motivated it: `storecode -p "say ok"` — a two-word answer — cost
+  **$0.127**, on 2 input tokens, 4 output tokens and **20,351 cache-creation tokens** billed at
+  list. So the old "$0.11 per triage" figure was almost entirely fixed overhead rather than the
+  cost of reading a ticket, and the per-invocation floor is about a tenth of a dollar before the
+  model does any work. A solve is four such sessions.
+
+- **`--max-budget-usd` / `--max-turns` / per-job `--session-id`.** Now actionable: `session.cost`
+  supplies the number a cap would be set from.
 - **Deployment.** No launchd job, no container, no metrics. `pnpm start` in a terminal is the
   current answer.
 - **Concurrency.** Issues are triaged sequentially. Fine at 4–5/day.
@@ -791,16 +891,35 @@ before it, so the command line reads as the privilege escalation it is.
     response. Had it keyed off an approving state, the review loop would have waited forever on a
     reviewer that had already spoken.
 
-  One sub-question genuinely needs a write and is **deliberately deferred to phase D** rather than
-  probed on a throwaway pull request: whether `gh pr edit --add-reviewer @copilot` succeeds with
-  this token's `repo` scope. Phase D opens a real draft pull request anyway, so the probe costs
-  nothing there and costs a junk PR in a team repo here. Deferring is safe because of _where_ the
-  answer lands: the reviewer request happens after the PR exists and before anything is undrafted,
-  so an insufficient scope surfaces as a loud failure on a draft that a human can finish by hand —
-  not as a silent skip. What phase D must therefore **not** do is treat a failed `--add-reviewer`
-  as a warning and carry on to `gh pr ready`: that would undraft a PR nobody has reviewed, turning
-  a missing scope into a merge candidate. Everything downstream of the request is already
-  evidenced above.
+  One sub-question genuinely needed a write and was **deferred to phase D** rather than probed on
+  a throwaway pull request: whether `gh pr edit --add-reviewer @copilot` succeeds with this token's
+  `repo` scope. Phase D opens a real draft pull request anyway, so the probe cost nothing there and
+  would have cost a junk PR in a team repo. Deferring was safe because of _where_ the answer lands:
+  the reviewer request happens after the PR exists and before anything is undrafted, so an
+  insufficient scope surfaces as a loud failure on a draft a human can finish by hand — not as a
+  skip nobody sees. What phase D must therefore **not** do is treat a failed `--add-reviewer` as a
+  warning and carry on to `gh pr ready`: that would undraft a PR nobody has reviewed, turning a
+  missing scope into a merge candidate.
+
+  **Answered on PR #2657, 2026-09-04, and the answer had a second half nobody asked for.** The
+  request succeeded — `repo` scope is enough, the app was assigned, and its job ran. The app then
+  failed: `Resource not accessible by integration` on `GET /repos/…/pulls/2657`, because the
+  Copilot installation lacks `pull_requests: read` on that repository. That is an org
+  configuration, not something this codebase can fix, and re-requesting produced the same result.
+
+  **Granted since.** On PR #2658, 2026-09-05, Copilot reviewed for real. `reviewerErrored` stays:
+  the permission can be revoked, and a guard removed because the thing it caught stopped happening
+  is a guard removed at exactly the wrong time.
+
+  The part that is ours is **how the failure came back**: as an ordinary `COMMENTED` review whose
+  whole body was "Copilot encountered an error and was unable to review this pull request." Read
+  as feedback, that spends a paid review round asking a model to address an error message. Read as
+  a review with no comments, it is an approval — the loop undrafts and marks the ticket `agent:done`
+  on a review that never happened, which is the pipeline telling a human their code was reviewed
+  when it was not. `ReviewState` therefore has a third state, `reviewerErrored`, sitting between
+  "no response" and "a review". It is recognised from the reviewer's own text, which is brittle
+  and is the only signal there is; both phrases must match, and the match is scoped to the
+  requested reviewer so a person quoting the failure keeps their comment.
 
 - **`main` is protected, and that is a stronger backstop than the plan claimed.**
   `required_approving_review_count: 1` with `require_code_owner_reviews: true`. Since Copilot only
@@ -815,8 +934,50 @@ before it, so the command line reads as the privilege escalation it is.
   of verification being mechanical and of the diff gate refusing edits to the files that define
   what verification means.
 
-- **Cost of a solve is still unmeasured.** A triage was measured at $0.11 and a solve is several
-  passes of a larger context, so it is a different order of magnitude.
+- ~~**Cost of a solve is still unmeasured.**~~ **Measured 2026-09-04**, across three consecutive
+  `--pr` runs on SSX-3822. Recon does cost more than the fix, and by a wide margin:
+
+  | pass      | cost                | duration      | turns   |
+  | --------- | ------------------- | ------------- | ------- |
+  | recon     | $1.40 – $1.71       | 3.8 – 4.7 min | 41 – 48 |
+  | fix       | $0.85 – $0.96       | 1.3 – 1.6 min | 22 – 29 |
+  | simplify  | $0.32 – $0.42       | 0.6 – 0.9 min | 8 – 9   |
+  | verify    | **$0**              | ~40 s         | —       |
+  | **total** | **≈ $2.60 – $3.00** | ~7 min        |         |
+
+  Verify is free because it is mechanical — the harness runs the commands and reads exit codes,
+  and no model is asked whether the tests passed (invariant 13). Recon is roughly half the bill,
+  which is the read-only pass that can decline the work: the pass most worth paying for is also
+  the one that most often produces no code. Against a triage run at $0.11, a solve is ~25×.
+
+  The spread across three runs of the _same ticket_ is itself a reading. Same ticket, same repo,
+  same base — 15% variance in cost and a different `simplify` verdict each time.
+
+- **The host's own safety hook can abandon a fix pass, non-deterministically.** Observed
+  2026-09-04 on the second solve of SSX-3822. The fix pass tried to write
+  `src/utils/setFavicon.ts` and storecode's `pipelock` PreToolUse hook denied it —
+  `pipelock: blocked (Credential Path Directive)`. The likely trigger is content, not path: this
+  ticket is about detecting non-production environments, and the Credential Path Directive fires
+  on text containing the `.env` substring, which `import.meta.env.PROD` contains. **The first
+  solve of the same ticket wrote the same feature and was not blocked**, so this varies with
+  whatever the model happens to write, not with the ticket.
+
+  Three things to take from it, in order of importance:
+
+  1. **The refusal contract held under real pressure.** The pass did not retry a variation, did
+     not look for a way around the hook, and — the part worth keeping — **declined to ship the
+     half of the change that had succeeded**, on the grounds that a lone `favicon-test.svg` would
+     read as a complete fix. That is the failure mode the pass contract names, refused
+     unprompted.
+  2. **`abandoned` is now known to be overloaded.** It currently means both "the model judged
+     this ticket unfixable" and "the environment would not let the model write", which are
+     different facts with different remedies — the first is feedback about triage, the second is
+     a host misconfiguration and says nothing about the ticket. The calibration record cannot
+     currently tell them apart, so `dev-lens.md` will slowly accumulate environment failures
+     scored as ticket assessments.
+  3. **It is not this service's bug to fix.** The hook lives in `~/.storecode/`, a protected path,
+     and editing a safety hook so that this project's own agent can write is exactly the move the
+     operating rules forbid. It needs a human to decide whether the directive is over-matching.
 
 - **Triage duration is high-variance, and the first reading of that was wrong.** On 2026-09-04 a
   triage of SSX-3831 exceeded the 600 s `TRIAGE_TIMEOUT_MS`. The obvious inference — that the
@@ -861,21 +1022,46 @@ Things that look like details and are not:
     an operator emptying the allowlist to take the solver off a repository would have it handed
     straight back, revocable only by editing source. It is the one solve setting with no
     fallback, and unset means nothing is allowed. The same reasoning applies to anything future
-    that names what may be written to. Note this cuts the opposite way from
+    that names what may be written to — **`SOLVE_GITHUB_OWNER` is that future**, and carries a
+    second reason of its own: an owner inferred from the checkout's remote is correct right up
+    until somebody adds a fork as `origin`, at which point a bot opens a pull request against a
+    repository nobody chose. Note this cuts the opposite way from
     `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_ the restriction — the test to apply is not
     "does it have a default" but "does silence widen or narrow what the service may touch."
-11. **Every label write is read-modify-write, and must be verified after the fact.** The
-    available write path — MCP `editJiraIssue` — exposes only `fields`, never Jira's
-    `update.labels.add`/`remove`. There is no compare-and-swap and no way to touch one label in
-    isolation: the whole field is replaced. Two consequences. Concurrent claims cannot be
-    prevented, only made unlikely (`MAX_CONCURRENT_SOLVES=1`, one host). And any label added by
-    anyone between the read and the write is silently dropped — a PM adding `next:to-trio` while
-    a solve claims the ticket loses their edit, with nothing in either history explaining it.
-    The mitigation is to re-read after writing and confirm the set is what was intended, and to
-    keep the window between read and write free of model calls and I/O. This is why invariant 5
-    reads _delta, never a replacement array_: the poster path can honour it because the skill
-    resolves the delta against live inside a single session, and the claim path cannot, which
-    makes the claim the more dangerous of the two writes despite being the smaller one.
+11. **A label write names the labels it changes, and nothing else.** Every label edit goes
+    through `JiraClient.updateLabels`, which sends Jira's `update.labels.add` / `.remove` and
+    refuses any label failing `/^agent:[a-z][a-z0-9-]{0,60}$/`. So the write is physically
+    incapable of touching `triaged`, `svc:*`, `dor:*` or a human's `next:*`, and verification
+    asks only whether the delta took — `diffEdit`, not a whole-field comparison.
+
+    **This inverts what this invariant said until 2026-09-04, and the history is the point.**
+    It used to read _every label write is read-modify-write, and must be verified after the
+    fact_, because the only write path was MCP `editJiraIssue`, whose input schema has one field
+    for issue data — `fields` — and is `additionalProperties: false`. There was no `update` key
+    to pass. Adding one label meant reading all N, appending, and writing all N back, so any
+    label anyone added in between was silently dropped: a PM adding `next:to-trio` while a solve
+    claimed the ticket lost their edit, with nothing in either history explaining it. The
+    mitigation was read-back-and-verify, which narrows the window and cannot close it — and
+    `claim.ts` shipped its own limit as a passing test saying so.
+
+    What changed is not the tool surface but a **decision about the standing rule** that the
+    REST credential is discovery-only. The amendment is deliberately the narrowest one that
+    closes the hole: one method, one HTTP verb, labels only, the `agent:` namespace only, and
+    **comments stay on the MCP path** — those are Atlassian Document Format, the MCP tool does
+    the markdown→ADF conversion, and reimplementing that to move a write off a path that works
+    would be widening the credential for no benefit.
+
+    Three things follow. **Concurrent claims are still not prevented**, only made unlikely
+    (`MAX_CONCURRENT_SOLVES=1`, one host) — a delta is not a compare-and-swap. **Verification
+    narrowed on purpose**: with a delta, a bystander label appearing between the write and the
+    read-back is a colleague working, and reporting it as `unverified` would fire the check on
+    innocent events, which is how a check ends up switched off (§8). **And `releaseClaim`
+    derives its delta from the receipt, not from the live set** — "remove whatever is live and
+    was not there before" reads as the careful version and is the old clobber by another route.
+
+    Invariant 5 (_delta, never a replacement array_) now holds on both write paths rather than
+    on one, which is what it was always asking for.
+
 12. **A capability is only withheld if something withholds it.** `--allowedTools` pre-approves;
     it does not restrict. This service ran for its whole life with three comments in
     `runner.ts` and one in `poster.ts` asserting that omission from that list was denial, and it
@@ -894,15 +1080,187 @@ Things that look like details and are not:
     behaviour from data an agent can write: **discover from the pristine base, not from what the
     run produced**, and treat "the check passed" as meaningless until you know the check was the
     one you meant.
+14. **An escalation that does not arrive undoes itself.** Every rung above the dry run opens by
+    claiming the ticket and closes, in a `finally`, by releasing it. A crash, a bail, a failed
+    verification and a refused push all leave the board exactly as they found it, because a claim
+    left behind by a run nobody watched is a ticket the queue can never offer again — and the
+    manual repair for that is a human editing the label field by hand, which is the whole-field
+    clobber invariant 11 exists to have eliminated.
+
+    The single exception is a pull request that exists, including one whose reviewer could not be
+    added. There the work is real and ongoing, and releasing would return a solved ticket to the
+    queue for a second solver to duplicate. So the rule is not "always release" but **release
+    unless the run produced something someone else can now see** — which is the same line the
+    ladder is ordered along.
+
+    Two things make this checkable rather than aspirational. The release is derived from the
+    receipt (invariant 11), so it is arithmetically the inverse of the claim and cannot touch a
+    label this service did not write. And it never throws: it runs on the way out of a run that
+    has usually already failed, and turning "the claim was gone before I could undo it" into an
+    exception would replace the operator's real error with a bookkeeping one.
+
+15. **The pull request body is composed from what the harness measured, not from the model's
+    account of itself.** The model writes the commit subject and body — it just made the change
+    and is the only thing that knows why — and that prose is the only model-authored text in the
+    document. It is quoted under a heading naming whose words they are, and neutralised by
+    `asProse`. Everything else is harness-established fact: exit codes it read, file and line
+    counts it measured, the recon verdict it parsed.
+
+    This matters more here than anywhere else in the pipeline, because the pull request body is
+    the most widely-read artifact the service produces and the one most likely to be believed. A
+    model asked to summarise its own work will say the tests pass, and it has no way to know — the
+    harness ran them (invariant 13, §15). So the body says, in the document itself, that the model
+    was never asked.
+
+    The neutralising is not tidiness. The commit prose descends from ticket text, which is
+    attacker-controlled, and text that can create document structure can forge a heading, a table
+    row, a link, or a checklist that reads as though the harness wrote it.
+
+    **This was a code fence until 2026-09-04, and the trade is worth recording.** `safeFence`
+    counted the longest run of backticks in the text and fenced with one more, which is the
+    stronger guarantee: nothing inside a fence renders as anything. It was traded away after the
+    first live pull request (#2657) was read by a human, whose verdict was that the body was "a bit
+    long and hard to read" — a fence renders prose as a monospace dump with a horizontal
+    scrollbar, and the body's whole job is to be read. A document nobody reads has no integrity
+    property worth protecting.
+
+    So `asProse` replaces it: paragraphs are reflowed to one line each, then `\`, `` ` ``, `[`,
+    `]` and `|` are escaped, `<` becomes `&lt;`, and a leading `#`, `>`, `-`, `+`, `*`, `=`, `~`
+    or `1.` is escaped at the one line-start each paragraph now has. The backslash goes first, or
+    a backslash already in the text cancels an escape added after it. Emphasis (`*`, `_` inline)
+    is deliberately left renderable: it is cosmetic, it cannot forge a section or a link, and
+    escaping it would mangle every `snake_case` identifier in the prose.
+
+    It is a weaker guarantee than the fence and an enumerated one, so it is enumerated in tests —
+    fourteen cases in `pr-text.test.ts`, each mutation-tested. **If a construct is found that gets
+    through, the fix is another line in `escapeInline` or `escapeLeading` plus a test, not a
+    retreat to the fence.** The old reasoning that escaping "would corrupt code samples" was
+    overstated: an escaped backtick renders as a backtick.
+
+    The same change moved recon's correction, the fix pass's summary and simplify's log into
+    `<details>`, leaving on the page only what a reviewer decides with — is it green, how big is
+    it, and did anything disagree with anything. `details` escapes its own text rather than
+    accepting rendered markdown, so that "there was nothing to say" is decided in one place; the
+    first attempt composed it with the `_(nothing said)_` marker and therefore rendered a widget
+    for every absent field, because that marker is not empty.
+
+16. **The commit message is bounded by the harness, not by the model's restraint.** The fix pass
+    is asked for one or two sentences and `composeCommitMessage` keeps two, wraps every kept line
+    at 72 columns, and strips trailing whitespace from each. Asking is not enough on its own:
+    the request is arithmetic about text, which a model satisfies most of the time, and "most of
+    the time" is a solve that dies at the last step after three paid passes.
+
+    This is written from the failure. The first live `--pr` run passed recon, fix, simplify and
+    all four verification steps, and was then rejected by the target repository's own
+    `commit-msg` hook — `@commitlint/config-conventional` caps body lines at 100 characters and
+    the model had written one 190-character paragraph. Nothing upstream was wrong; the harness's
+    own Conventional Commits check passed, because it checks the subject.
+
+    Two smaller rules fall out of it. The width is 72, git's convention, rather than the 100 that
+    happened to be configured here — this service does not read the target repository's
+    commitlint config, so the margin has to come from choosing a number below every value anyone
+    sets. And the shortening is a **cut, not a summary**: lines are wrapped and never rejoined,
+    a word longer than the width gets its own line rather than being broken, and the long-form
+    reasoning is not lost because `summary` and `residualRisk` carry it into the pull request,
+    which is where a reviewer reads prose. A commit message is read in `git log --oneline`.
+
+    The same run taught the diagnosis rule beside it. Commitlint echoes the message it was given
+    before printing its verdict, so `why()` keeping the first 300 characters of output kept 300
+    characters of our own commit body and cut the rule name. It now keeps **both ends** and marks
+    the gap: a tool names the failing step at the top and gives the verdict at the bottom, and a
+    truncation that can only preserve one of those will eventually drop the one that mattered.
 
 ---
 
 ## 15. The solve pipeline
 
-Everything below is built and tested and **has never run**. It is documented here rather than in
-§13 because "not built" and "built, and reachable from nowhere" call for completely different
-things from a reader: the first is a design to argue with, the second is code to review. What is
-still missing is listed in §13; what it _does_ is here.
+Everything below is built, tested and **reachable from the command line** — the claim, the four
+passes, the commit, the push and the draft pull request are one `solve:once SSX-1234 --pr` away.
+
+This paragraph has been rewritten twice as that stopped being true in stages, and the shape of what
+is left is worth stating precisely rather than as "mostly done". Two things are still built and
+called by nothing: **`advance`**, the Copilot review loop that reads the review, runs a round
+against it and undrafts (phase D2), and **the rest of the label state machine** — a published pull
+request leaves the ticket on `agent:solving`, and `agent:reviewing` / `agent:done` are moved by
+hand. The command says so when it happens rather than leaving the board to be misread.
+
+What is still missing entirely is listed in §13; what this _does_ is here.
+
+<a id="what-running-it-cost"></a>
+
+### What running it cost
+
+Four solve attempts against one ticket, 2026-09-04. Each got further than the last, and **each
+surfaced a defect that 1245 passing tests did not** — which is the finding, more than any of the
+individual bugs:
+
+| #   | Defect                                                                 | Why no test caught it                                                     |
+| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 1   | `/agent-solve` resolved to nothing from the worktree                   | no test ran a pass from a foreign working directory                       |
+| 2   | `simplify` handed a `--numstat` where the prompt said "diff"           | one function served two callers; the test asserted the value it was given |
+| 3   | the diff gate could not see created files                              | the harness fixture replied to `git diff`; real git has an index          |
+| 4   | an honest "I gave up after touching something" was rejected as invalid | the guard was tested against its own premise                              |
+| 5   | no bail reason was ever logged anywhere                                | nothing asserts on the absence of a log line                              |
+
+Two of the five (2 and 4) were guards behaving exactly as unit-tested while being wrong about
+reality, and two (1 and 3) were the harness's own test doubles agreeing with the code and
+disagreeing with the world — §11's second rule, met again in a new place. The general lesson is
+already in §11 and got its most expensive demonstration here: **a fixture that agrees with the
+code proves the two agree, and nothing else.** Running it once was worth more than the five
+hundred tests written since the last time anything ran.
+
+Of the two defects that were left open when the above was written, one is now fixed:
+
+- **A pass timeout used to kill the process.** `passes.run` throws two ways — `runSession`
+  rejects on a timeout or a non-zero exit, and the parsers throw `SolveParseError` when the
+  model's output contradicts itself — and neither was caught. A solve is a long-running job
+  holding a worktree, so the throw took the process down and orphaned the worktree.
+
+  Fixed by `runPass`, which converts both into the same thing, because the caller's decision is
+  identical: **no verdict was reached.** Which of the two it was survives in the reason string.
+  It produces a new outcome kind, `crashed`, rather than another `refused` stage, so that every
+  exhaustive `switch` had to be edited to admit it — and each of those edits is a place where
+  the difference between "no verdict" and "a verdict of no" had to be decided deliberately:
+
+  |                    | what `crashed` does                                                                    |
+  | ------------------ | -------------------------------------------------------------------------------------- |
+  | ticket comment     | says the step did not finish and that this says nothing about the ticket's solvability |
+  | calibration record | scores the lens `n/a`, never `**wrong**`                                               |
+  | shell exit code    | `1` — nothing was learned, at full cost                                                |
+  | `devLens`          | absent from the type, because the pass that produces it may be the pass that died      |
+
+  The calibration row is the sharpest of the four. Booking a harness timeout as a wrong fitness
+  call would make the triage assessment look worse the flakier the harness got, which is the one
+  bias that would make the scoreboard argue for the opposite of the truth.
+
+  The review round is the deliberate exception: a dead review pass returns `abandoned`, not
+  `crashed`, because by then a pull request exists, so there is a human on the other end and
+  somewhere to put the reason.
+
+  Two things the fix does **not** do. `runPass` wraps `passes.run` only — a throw from git, from
+  the verification steps or from the worktree layer still propagates, which is why
+  `solveTicket`'s skill-root cleanup is still a `finally` and why the test for it now has to
+  make _the shell_ fail rather than a pass. And the process still dies if the throw comes from
+  there; bounding that is Phase E's problem, not this one's.
+
+  This also cost the CLI's outcome reporting its excuse for being untested. `solve-once.ts` ends
+  in a top-level `await`, so importing it runs the command, and the exit-code rule had therefore
+  never been exercised — the `crashed` clause could be deleted and every test still passed.
+  Split into `src/cli/solve-outcome.ts`, the same move `solve-args.ts` made earlier and for the
+  same reason.
+
+The second is fixed too, though not in the shape it was filed in:
+
+- **`removeWorktree` was never called.** Filed as "call it on success". That would have been data
+  loss — nothing in this phase commits, so a successful run's worktree is the only copy of the
+  work. It is now called on `bailed` only, which is the one outcome whose worktree is provably
+  empty. The full reasoning, and what is still not cleaned up, is under "Never a protected branch".
+
+And one non-defect worth recording, because diagnosing it wrongly was itself instructive: a run
+appeared to hang for thirty minutes in `recon`. It was not API slowness. **The laptop was
+closed.** `SOLVE_TIMEOUT_MS` bounds elapsed wall-clock time, not time the process spent running,
+so suspending the machine spends the budget. Anything later that treats a timeout as evidence
+about the model has to survive that.
 
 ```
   worktree      cut from origin/<base> after a fetch, on a fresh work branch
@@ -925,6 +1283,32 @@ still missing is listed in §13; what it _does_ is here.
 `orchestrator.ts` owns the first half, `delivery.ts` the second. Neither touches Jira and neither
 takes a Jira client: labels and comments belong to the caller, which keeps the whole thing
 runnable by hand against one ticket with nothing on the board changing.
+
+### The first end-to-end run, 2026-09-05
+
+`bot:once SSX-3822 --pr`, 15 minutes wall clock: triage 3½ min → poster → claim → recon 7 min →
+fix → install → vitest → commit → push → **draft PR #2658**, five files, +70/-1. Every stage ran
+as designed and nothing needed a hand on it.
+
+Three things it settled:
+
+- **Copilot review works in this org.** It reviewed #2658 (`COMMENTED`), closing the last open
+  verification item. Nothing acted on the review — `advance` is unbuilt — so the ticket ends on
+  `agent:solving`.
+- **The fitness call refused a ticket for the first time.** A second run, `bot:once SSX-3801`,
+  stopped before the claim: DoR row 9 unmet, so the verdict could not be `ready-ish`, so
+  `solvable` had to be false. Two further guards would have caught it independently — the change
+  is consumed by an external partner, and its repo is not on `SOLVE_REPOS` — and the cheapest
+  fired first, which is the ordering the ladder is for. Nothing was claimed and no worktree cut.
+- **A stale solve comment steered a verdict.** SSX-3822 had been label-reset but still carried the
+  previous run's comment, and triage's `recommendedNextStep` came back asking why a branch and PR
+  already existed. Harmless here, and it is the §1-reads-comments divergence working as specified
+  — solve comments are excluded from _satisfying_ DoR, not from being read as context. Worth
+  knowing before reading any re-run's verdict as independent of the run before it.
+
+One gap the refusal exposed and no label yet expresses: **"not ready yet" and "not ever" both land
+as `solvable: false`.** SSX-3801's DoR gap is fixable by a reporter; its partner-contract blast
+radius is not. The distinction survives only in `rationale` prose.
 
 ### The two actors
 
@@ -961,6 +1345,32 @@ nothing here should be read as mechanically enforced. It matters less in this di
 solve passes are given no MCP server at all (`requiredMcpServers: []` in `passes.ts`), because a
 solve pass reads the ticket as text handed to it and has no reason to hold a connection to
 something it could also write through.
+
+### The skill root
+
+`skill-root.ts` exists because of defect 1 above, and the shape of the fix is the interesting part.
+
+Every pass sends `/agent-solve <KEY> --<pass>` as its first line. The skill lives in _this_
+repository; the pass runs with its working directory set to the worktree, deliberately, because
+that is `passes.ts`'s first containment property. Claude Code discovers skills from the working
+directory and from `--add-dir`, and neither pointed here — so all four passes would have shipped
+sending a slash command that resolved to nothing. Probed from a foreign directory:
+`Unknown command: /agent-solve`.
+
+The obvious fix is `--add-dir <the-jira-police>`, and it is the wrong one. The same probe
+established that `--add-dir` plus a pre-approved `Write` is write access to everything in the
+added directory — so making the skill readable that way would hand every pass this service's own
+source, its settings and its gates, which is the one directory a solve pass must not be able to
+edit. Instead the harness copies the two skill files into a throwaway directory, adds _that_, and
+deletes it afterwards. The pass gets exactly the text it needs to resolve the command and no path
+back to the repository that wrote it.
+
+Worth generalising: the failure was not that a guard was missing but that **a string was assumed
+to resolve**. Nothing in the type system distinguishes a slash command that dispatches from one
+that is echoed as prose, and no unit test noticed because none of them ran a pass from anywhere
+but this repository's root. The class is the same as §14.12 — an intention with no mechanism under
+it — and the tell was identical: prose describing a skill-driven pipeline, behaviour sending a
+dead string.
 
 **The harness half is `CommandRunner`, and `exec.ts` is its only real implementation.** Every
 other module in `src/solve/` takes one and was written and committed without granting anything;
@@ -1085,6 +1495,34 @@ diff is the evidence a human needs to decide whether the ticket was mis-assessed
 refuses because the worktree is dirty, that is git reporting uncommitted work at a point where
 there should be none.
 
+**Which run gets cleaned up is narrower than "on success", and the narrowing is the point.**
+`removeWorktree` used to be called by nothing at all; the obvious fix — call it whenever the run
+succeeded — is wrong, and working out why produced the better rule.
+
+Nothing in this phase commits. `composeCommitMessage` composes a message and no `git commit` ever
+consumes it, so the worktree of a `verified` run holds uncommitted work that exists in exactly one
+place. Removing it on success would delete the artifact the run was for, and `describeSolveOutcome`
+would still be telling the operator to go and read it. "Clean up on success" reads as tidiness and
+would have been data loss.
+
+So the rule is **remove when the run cannot have written anything**, which today means exactly one
+outcome: `bailed`. Recon is the only pass with neither `Write` nor `Edit`, so its checkout is
+pristine, and a bail is the _expected_ result whenever triage's blind fitness call was optimistic —
+making it both the safest worktree to remove and the one that would otherwise accumulate fastest.
+Every other outcome keeps its worktree, and now says so accurately.
+
+Three things hold that reasoning in place rather than leaving it as a comment. The removal is not
+forced, so if the assumption is ever falsified — a future recon that can write, or anything else
+dirtying the checkout — git refuses and the run keeps the evidence. The refusal is not swallowed:
+`RemoveResult` rides out on the outcome, so the CLI prints either "removed" or the path plus git's
+reason, and cannot claim a directory is waiting when it is not. And the field is **required** on
+the outcome type, so the compiler made every construction site state what happened to the worktree
+instead of letting the question go unasked.
+
+Still not cleaned up: the branch. `git worktree remove` leaves it behind, so a bailed run still
+costs one empty ref on the pilot repository. Deleting it is a separate privilege and is not taken
+here.
+
 ### The diff gate
 
 `diff-gate.ts` is `assertPostable` for code — a mechanical check between the model finishing and
@@ -1131,8 +1569,9 @@ them.
 The model is never asked whether the tests passed. The harness runs them and reads exit codes,
 because "did it work" is the one question the thing being judged must not answer about itself.
 
-The commands are discovered from `git show <base>:package.json` — the pristine manifest — never
-from the worktree. The header is blunt that this is necessary and **insufficient**, which is the
+The commands are discovered from the pristine manifest — `git show <base>:package.json`, or
+`git show <base>:pom.xml` for a Java repository, per _Two toolchains_ below — never from the
+worktree. The header is blunt that this is necessary and **insufficient**, which is the
 part it would be easy to stop at: knowing the base said `"test": "vitest run"` does not help if the
 command executes in a worktree where `package.json` now says something else, because the package
 manager reads the manifest on disk and not the one we consulted. So there are two halves, and the
@@ -1141,7 +1580,7 @@ are still byte-identical to the base. That list is shared with the diff gate on 
 refuses such a diff after the fact, this refuses to produce a verdict about it, and if the list
 grows it grows for both.
 
-The package manager comes from an allowlist keyed with `Object.hasOwn` rather than `in` — `in`
+For a Node base, the package manager comes from an allowlist keyed with `Object.hasOwn` rather than `in` — `in`
 walks the prototype chain, so a manifest declaring `constructor@1` would satisfy an allowlist that
 was never given that name. The step names (`check-types`/`typecheck`, `lint`, `test`) are literals
 from a table and never keys read out of the manifest, which is why nothing here has to sanitise a
@@ -1167,11 +1606,213 @@ refusal.** It ran, it did not pass in the time allowed, and a hang is a plausibl
 fix to cause; the other reading is the one that lets an infinite loop through. Conversely a failed
 `install` is a refusal, because nothing was verified and so there is nothing to have failed.
 
-The known limitation is stated rather than solved: if the base itself is already failing lint or
-typecheck, every run on that repository fails through no fault of the solver. Proving otherwise
-would mean verifying the base too and doubling the runtime of every solve. The cheaper mitigation
-is that per-step results are kept and reported, so a step failing identically on every ticket is
-visible as the repository problem it is rather than looking like a run of bad luck.
+**The package manager's _version_ used to be discovered from nothing, and that is the limitation
+the first real run hit.** `packageManagerOf` read `packageManager` from the manifest, split on `@`,
+kept the name and threw the version away — so which binary ran was a property of `PATH`. On this
+machine `PATH` gives pnpm 11; the pilot repo pins pnpm 9 in CI, its lockfile is
+`lockfileVersion: 9.0`, and pnpm 11 no longer reads the `pnpm.overrides` block that lockfile was
+generated from. So `install` died and no verdict was reached.
+
+The outcome was right — `refused`, not `failed`, exactly as the table above requires, and the
+solver's change was never blamed for a toolchain mismatch. Note also what the repository's own
+declarations say: `engines.pnpm` is `">=9"`, which pnpm 11 satisfies, while the configuration only
+works on 9. **The machine-readable claim and the machine-readable behaviour disagree, in someone
+else's repository** — the same defect class this service exists to catch, found by running against
+it.
+
+The harness half is now fixed, and the shape of the fix is worth more than the bug. A declared
+version is kept and the invocation becomes `corepack <name>@<version>`, which is Node's own shim
+for this and needs nothing pre-installed. That immediately creates a new hole, because
+**`packageManager: "pnpm@https://example.com/x.tgz"` is valid input to corepack** and means
+"download this and execute it" — sourced from a manifest belonging to the repository under
+verification. So `PACKAGE_MANAGER_VERSION` admits plain semver and nothing else: no URLs, no
+ranges, no dist-tags. Ranges are refused for a second reason — they make "which pnpm ran" a fact
+about the day rather than about the manifest, which defeats the point of reading the field.
+`corepack` had to join `ALLOWED_EXECUTABLES`, where it is the one entry that contradicts that
+list's own rule against programs that run other programs; it earns the place because it shims only
+the three managers already listed, and because that version pattern is what stops it being
+general. The two are coupled and must not drift apart.
+
+**What this does not fix is the pilot repository**, which declares no `packageManager` at all and
+so still gets whatever `PATH` offers. Refusing every repository without the field would mean
+verifying almost nothing, so instead the undeclared case is _reported_: `versionNote` appends the
+version that actually ran and points at a CI pin as the first thing to check. Diagnosing this the
+first time took four runs and a detour through someone else's `package.json`; the refusal now says
+in one line what that cost an afternoon.
+
+**Verification needs registry credentials, and that is an architectural constraint, not a
+detail.** The install step is the first thing in this whole service that talks to a package
+registry, and the pilot repository's dependencies are private GitHub Packages. So a solve can
+fail for a reason that has nothing to do with the ticket, the model or the repository: an expired
+PAT, or one that was never SSO-authorised for the org. Both were hit while getting the first run
+through, and they present differently — `401 unauthenticated` for the expired token, `403 …
+protected by organization SAML enforcement` for the unauthorised one.
+
+Diagnosing it was harder than it should have been because **a warm pnpm store hides a dead
+token**. pnpm keeps its content-addressable store per major version (`store/v3` for pnpm 9,
+`store/v11` for pnpm 11), so installs that resolve entirely from a warm store make no network
+request at all and succeed with credentials that would be rejected. Switching pnpm major version
+switched to a cold store, and that is what finally surfaced the 401 — the token had in fact been
+expiring for some time, silently, behind a cache.
+
+The consequence for the phases: this is fine for the daemon, which runs as the user's own process
+and inherits `~/.npmrc`, and fine for hand-driving. It is not fine for anything that would run
+this in CI or as another user, and it means a `refused` at the install step should always be read
+as "check the credential" before it is read as anything about the code.
+
+### `failed` is only true relative to a base that passes
+
+This section used to end by declining to solve a known limitation. It said: if the base itself is
+already failing lint or typecheck, every run on that repository fails through no fault of the
+solver — and that proving otherwise would mean verifying the base too and doubling the runtime of
+every solve. That reasoning was written with Node in mind, and on 2026-09-05 a Maven run produced
+the counter-evidence, so the paragraph is replaced rather than qualified.
+
+**What happened.** SSX-3801, `insurance-commerce-rest-api`. The model wrote a fix, the diff gate
+passed it, `mvn -B test` exited 1, and the run was reported as `failed` — a verdict about the
+change. It was not. `git-commit-id-plugin:4.9.10` is bound to `initialize` and reads `.git`
+directly; in a linked worktree `.git` is a _file_ containing `gitdir: …`, not a directory, and
+that plugin version predates worktree support. The build died eleven lines in. `Tests run:` never
+appeared. The fix was never compiled, let alone tested, and the service said it had failed.
+
+The control run settles it: same Maven, same JDK, same plugin, `BUILD SUCCESS` in the main
+checkout and `BUILD FAILURE` in the worktree.
+
+**Why Node never surfaced this.** Nothing in the Node toolchain reads `.git` — `pnpm install`,
+`tsc`, `vitest` and `oxlint` read files in the tree and nothing else. Maven was the first
+toolchain whose build depends on repository _metadata layout_, so worktree isolation, the thing
+that makes the solver safe to run at all, was the thing that broke it. Node was immune by
+accident. And the pilot repo's base was always green, so the missing premise never said anything
+false; it was simply never tested.
+
+**The fix.** `verifyBase` runs the discovered plan against the pristine worktree, immediately
+after it is cut and deliberately before any pass. Green means a later red is genuinely about the
+change. Red returns the `unusable-base` outcome, which is a statement about the repository — the
+sentence posted to the ticket names the repository as its subject, and a mutation swapping that
+subject for "the change" is caught by test.
+
+**The runtime argument was wrong in the case that matters.** Doubling is the cost on a _green_
+base, and there it is real: one extra typecheck, lint and test, with the install nearly free the
+second time because the worktree is already populated. On a _red_ base — the case the old
+paragraph was about — the base check is strictly cheaper than what it replaces, because it
+refuses before spending a solve. So the old text traded a saving in the good case against a
+wrong answer in the bad one, and the wrong answer is the expensive half: it costs a reviewer's
+time and it feeds the dev-lens calibration a score for a fix nobody ever ran.
+
+**Measured rather than feared.** The worry about the doubling was that a large Java suite would
+make it intolerable, and a cache of base results keyed by `(repo, baseRef)` was sketched to avoid
+it. It is not needed yet: `mvn -B -Dmaven.gitcommitid.skip=true test` on
+`insurance-commerce-rest-api` — 4562 tests — runs in **1 minute 4 seconds** warm. That is the
+whole cost of the base check on the largest repository in scope, so the cache stays unbuilt until
+something measures worse. Recorded here because the guess that prompted it was an order of
+magnitude out, and the next person to worry about this should start from the number.
+
+Two properties are pinned by test rather than left to reading. `verifyRequestOf` is the only
+place a `VerifyRequest` is built, so the base check and the real check cannot drift apart into
+different experiments; and the base check runs before the first pass, asserted by a harness that
+throws if any pass runs at all.
+
+The per-step reporting the old paragraph offered as a mitigation is kept — it is still how a step
+failing identically across tickets is spotted — but it is no longer the answer.
+
+### Two toolchains, and why the second one looks nothing like the first
+
+Added 2026-09-05, after a run against `insurance-commerce-rest-api` — a Java service — refused at
+verification. The refusal was correct and it was predicted before the run: `discoverPlan` read
+`git show <base>:package.json`, got nothing, and said so. But "this service can only verify
+JavaScript" is a limit of the harness, not of the idea, and half the board's bugs are in Java.
+
+The toolchain is now chosen by which manifest the **base** carries: `package.json` ⇒ Node,
+`pom.xml` ⇒ Maven. The base and not the worktree, for the reason the whole module exists — a run
+that added a `pom.xml` would otherwise get to pick which build system grades it.
+
+**A base carrying both is refused rather than resolved.** Two build systems define what passing
+means, and whichever were checked first would win, which would make the verdict a property of the
+order of two lines in this file. This is the same shape as `repoFromLabels` refusing a ticket with
+two `svc:` labels: a contradiction must not be resolved into a decision. The cost is real —
+a polyglot repository cannot be verified here at all — and it is the cost worth paying, because
+the alternative failure is silent and this one is a sentence in an artifact.
+
+Four things about the Maven plan are deliberately unlike the Node one:
+
+**No install step.** `mvn test` resolves its own dependencies; a separate install phase would
+either be a no-op or a second full download. So `VerificationPlan.install` became nullable, and
+`verify` skips the phase rather than running something harmless. An "install" line in the report
+that never ran is a step a reader would count as evidence.
+
+**The single test step is marked `cold`, and a cold step is charged the _install_ budget.** A first
+Java build on a machine downloads most of Maven Central. On the step budget it times out, and a
+timed-out step is `failed` — so the machine's empty `~/.m2` would be reported as the change being
+wrong. That is exactly the `refused`/`failed` confusion the outcome table exists to prevent,
+arriving through the timeout instead of through the outcome mapping. `Step.cold` is what keeps the
+two apart, and it is a property of the step rather than of the toolchain so that the budget rule
+stays readable in `verify` without a `toolchain === "maven"` test.
+
+**`mvn` from `PATH`, and deliberately never `./mvnw`.** Running the wrapper is the conventional
+thing to do and it pins the version, which is the one thing `PATH` cannot do. It is also a file
+inside the repository being verified, which a solve run has write access to — so executing it
+would make "which program verifies this change" answerable by the change. That is the single
+property `ALLOWED_EXECUTABLES` exists to deny, and the same reason `sh` and `make` are excluded by
+name. The accepted cost is a possible version mismatch with the repository's CI; it is a mismatch
+rather than an execution channel, and `plan.note` says so on every Maven refusal and on the cold
+step's failure. The wrapper is refused by the diff gate all the same, for a different reason: this
+harness will not run it, but everyone else's CI will.
+
+**Exactly one flag, `-B`, and exactly one property.** The temptation is `--no-transfer-progress`,
+`-q`, `-Dstyle.color=none`. Each is a way for the _test_ step to exit non-zero because Maven did
+not recognise a flag — and a non-zero test step is reported as `failed`, which is a harness
+mistake printed as a verdict about the model's code. `-B` (batch mode) has been in Maven since 2.0
+and does the one necessary thing: stops it waiting on a terminal that is not there.
+
+The property is `-Dmaven.gitcommitid.skip=true`, added 2026-09-05, and it is the only concession
+this harness makes to how a particular repository builds. **The flag/property distinction is what
+makes it safe**: Maven silently ignores a user property no plugin claims, so this is inert on a
+repository that does not have the plugin, whereas an unrecognised flag would fail the test step
+everywhere. A test asserts that every argument between `mvn` and the goal is either `-B` or starts
+with `-D`, so the next person to reach for a flag has to read this paragraph first.
+
+Why it is needed: `pl.project13.maven:git-commit-id-plugin:4.9.10` binds its `revision` goal to
+`initialize`, so it runs before anything compiles, and its `GitDirLocator` parses the `.git` file
+with `split(":")` and no trim. In a linked worktree that file reads `gitdir: /abs/path`, so the
+plugin receives `" /abs/path"` with a leading space, `File.isAbsolute()` returns false, and an
+absolute path is resolved as a relative one. Measured: `Could not get HEAD Ref` nine seconds into
+the build in a worktree, `BUILD SUCCESS` for the same commit in an ordinary checkout.
+
+Three properties make skipping it acceptable rather than merely convenient. It writes
+`git.properties`, a metadata file — it compiles nothing, runs nothing, and skips no test; nothing
+in that repository's source, tests, `Dockerfile` or CI reads the file it produces; and the
+plugin's other goal, `validateRevision`, binds to `verify`, which this plan never reaches.
+
+The cost is real and is printed in the failure reason rather than buried here: **this is not
+byte-for-byte the build CI runs.** The alternative that avoids that — cutting a full local clone
+per solve so Maven sees an ordinary `.git` directory — was measured and works, but it buys
+fidelity on a metadata file at the price of a second isolation strategy and reworked push
+mechanics for Phase D, since a local clone's `origin` is a path on disk rather than GitHub. If a
+second worktree-hostile plugin ever turns up, that trade flips and the clone is the right answer.
+
+The same logic ruled out a Maven warm-up step. `mvn -DskipTests test-compile` before the real run
+would separate "downloading the world" from "the tests", which is what the Node split buys — but
+it also compiles the model's code, and an install failure maps to `refused`. A fix that does not
+compile would then be booked as "no verdict reached" instead of `failed`, which is the worst
+single error this module can make. So Maven gets one step that does everything, and the budget
+does the work the split would have done.
+
+What _is_ checked before planning is that Maven exists: `mvn -v` at plan time, and a refusal
+naming the harness if it does not. Without that probe an absent Maven makes `mvn -B test` exit
+non-zero, and a machine with no Java installed reports every Java fix as broken.
+
+One repair fell out of the rewrite. `git show` failing used to mean one thing, "could not read the
+manifest"; with two manifests, non-zero legitimately means "this one is not here". So `Shown`
+distinguishes `found`, `absent` and `unreadable`, and only the timeout can be told apart
+mechanically — `git show` exits 128 both for a missing path and for a missing ref. A wrong base ref
+therefore reads as both manifests absent, and that refusal names the ref rather than asserting the
+repository has no build system.
+
+Nothing else in the pipeline branches on language. The `agent-solve` skill was checked line by
+line for it and needed no change: it never names TypeScript, React, pnpm or vitest, and asks the
+model to find the project's own conventions rather than supplying any. The Node-versus-Maven split
+lives entirely in `discoverPlan`, and the tests assert the negative in both directions — no Node
+command is ever issued against a Maven base, and no `mvn` against a Node one.
 
 ### Delivery
 
@@ -1251,12 +1892,20 @@ undercounts its own passes is a poor thing to leave lying around in this reposit
 
 ### What is inert, and why that is the plan
 
-`orchestrator.ts`, `delivery.ts`, `passes.ts`, `pr.ts`, `exec.ts` and `claim.ts` are all built,
-all tested, and **constructed by nothing**. There is no code path from `src/index.ts` or from any
-`src/cli/` entry point to `solveTicket`, `publish`, `advance` or `claimTicket`, because nothing
-builds the `CommandRunner`, `PassRunner` or `ClaimCapabilities` they require. `pnpm start` is the
-grooming loop and `pnpm solve:once` is the dry queue report; between them that is everything this
-service can currently do.
+`orchestrator.ts`, `passes.ts` and `exec.ts` are now **wired**: `createSolveRunDeps` builds the
+`CommandRunner` and the `PassRunner`, and `pnpm solve:once <KEY> --solve` reaches `solveTicket`.
+That was phase C's privilege grant and it is a real one — this process can now write files in
+another repository's worktree and run `git`, `gh` and a package manager. `delivery.ts`, `pr.ts`
+and `claim.ts` remain **constructed by nothing**: no entry point builds a `ClaimCapabilities`, so
+no code path here can edit a label, open a pull request or push.
+
+**The ladder is not cumulative, and the asymmetry is deliberate rather than an oversight.**
+`--claim` refuses while `--solve` runs, which reads backwards until you see what each flag grants:
+`--solve` writes to a scratch worktree that a human then inspects, and `--claim` writes to the
+shared board. The privileges are not ordered by how far down the pipeline they sit, so the flags
+are not either. `unavailable()` in `solve-args.ts` says so in the refusal text itself, and each
+refusal names the structural reason — which function was not composed — rather than a policy, so
+the claim is checkable by reading `wiring.ts` instead of trusted.
 
 That is a deliberate phase ordering and not an oversight. Each capability was built and reviewed
 before it was granted, and the grant is a separate commit in each case — which is only meaningful

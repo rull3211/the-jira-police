@@ -79,6 +79,43 @@ const OWNED_LABEL_NAMESPACES: readonly string[] = [
 ];
 
 /**
+ * Namespaces the skill also writes, removable only as half of a swap.
+ *
+ * The asymmetry these fix: §11's removal list named the *assessments* and not the
+ * *taxonomy*, while the skill's label vocabulary sets both. So a re-triage could
+ * revise its verdict freely and could never revise a fact — a ticket re-routed to
+ * another squad kept the old `team:` beside the new one, and a corrected `svc:`
+ * left two, which `repoFromLabels` reads as ambiguous and resolves to `null`. The
+ * skill was the only writer of those labels and the only party unable to fix them.
+ *
+ * They are not simply moved into the list above, because the two kinds fail
+ * differently. A missing `dor:` label is a verdict not yet reached. A missing
+ * `svc:` is a fact deleted — and the value it decides is which repository a solver
+ * may write to. So removal here is permitted only when the same mutation adds at
+ * least one label in the same namespace: a replacement, never a bare deletion. A
+ * model that gets the new value wrong is a wrong label, which the next re-triage
+ * corrects; a model that removes and adds nothing is a hole no re-triage notices,
+ * because the ticket then looks like one that was never triaged.
+ *
+ * "At least one", not "exactly one", because `team:` is legitimately multi-valued
+ * on dual-owned repos, and a rule that forced a 1:1 swap would block the honest
+ * case of one owner becoming two.
+ *
+ * `impl-uncertain` is deliberately absent and stays unremovable: it is a bare
+ * label rather than a namespaced one (`labels.ts`), so it has no namespace to
+ * swap within, and the rule above has nothing to bite on. Widening for it would
+ * mean naming a single literal, which is a different decision from this one.
+ */
+const REVISABLE_LABEL_NAMESPACES: readonly string[] = [
+  "team:",
+  "jira:",
+  "domain:",
+  "svc:",
+  "value:",
+  "effort:",
+];
+
+/**
  * The only `agent:` label triage may touch — and the reason the namespace above
  * is not enough on its own.
  *
@@ -175,9 +212,26 @@ function checkLabels(payload: TriagePayload): readonly string[] {
   const violations: string[] = [];
 
   for (const label of payload.mutation.labelsRemove) {
-    if (!OWNED_LABEL_NAMESPACES.some((namespace) => label.startsWith(namespace))) {
+    if (OWNED_LABEL_NAMESPACES.some((namespace) => label.startsWith(namespace))) {
+      continue;
+    }
+
+    // Not owned outright. It may still be revisable, in which case the question
+    // is not "may this be removed" but "is something taking its place" — and the
+    // answer has to come from this same mutation, since there is no later edit
+    // to rely on. `find` rather than `some`: the namespace is needed to look for
+    // the replacement, and to say which one was missing.
+    const revisable = REVISABLE_LABEL_NAMESPACES.find((namespace) => label.startsWith(namespace));
+    if (revisable === undefined) {
       violations.push(
         `labelsRemove contains "${label}", which is not in a namespace the skill owns — §11 forbids touching a human label`,
+      );
+      continue;
+    }
+
+    if (!payload.mutation.labelsAdd.some((added) => added.startsWith(revisable))) {
+      violations.push(
+        `labelsRemove contains "${label}" but the mutation adds no other ${revisable} label — §11 allows revising this namespace, not emptying it`,
       );
     }
   }

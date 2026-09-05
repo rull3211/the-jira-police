@@ -1,13 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
-import { SolveParseError, type Pass, type SolveRunOptions } from "./runner.ts";
+import { describe, expect, it, vi } from "vitest";
+
+// `SolveParseError` used to be imported here so a test could assert
+// `solveTicket` rejected with it. It does not reject any more — a parser
+// refusing the model's output is a `crashed` outcome now — and the import going
+// unused is the small, real sign of that change.
+import type { Pass, SolveRunOptions } from "./runner.ts";
 import {
   type PassRunner,
   type SolveDependencies,
   type SolveRequest,
   resolveReview,
   solveTicket,
+  solveWithRetry,
 } from "./orchestrator.ts";
+import { logger } from "../logger.ts";
 import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
 
 /** The escape, not the byte, so this file stays greppable. See `verify.ts`. */
@@ -20,6 +29,23 @@ const MANIFEST = JSON.stringify({
 
 const FILES = ["src/app/head.tsx", "src/app/head.test.tsx"];
 const NUMSTAT = [`12\t3\t${FILES[0] ?? ""}`, `9\t0\t${FILES[1] ?? ""}`, ""].join(NUL);
+
+/**
+ * A real unified patch, which is a different thing from `NUMSTAT`.
+ *
+ * The gate reads counts; a pass reads code. Keeping the two fixtures visibly
+ * unalike is what lets a test tell which read a call site made — when one
+ * function served both, no assertion in this file could distinguish them, and
+ * the one at "gives simplify the diff" asserted the wrong one and passed.
+ */
+const PATCH = [
+  `diff --git a/${FILES[0] ?? ""} b/${FILES[0] ?? ""}`,
+  "@@ -1,3 +1,4 @@",
+  " export function Head() {",
+  '+  return <link rel="icon" href="/favicon-nonprod.svg" />;',
+  "}",
+  "",
+].join("\n");
 
 /** Six files, which is one past `DEFAULT_LIMITS.maxFiles`. */
 const OVER_CAP = [
@@ -52,6 +78,7 @@ const fix = (overrides: Record<string, unknown> = {}): Record<string, unknown> =
   testOmittedReason: "",
   residualRisk: "",
   abandoned: "",
+  abandonedCause: "none",
   ...overrides,
 });
 
@@ -78,7 +105,18 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
 
 interface Rule {
   readonly match: (argv: readonly string[]) => boolean;
-  readonly reply: Partial<CommandResult>;
+  /** Omitted when `throws` is set — the command never gets as far as answering. */
+  readonly reply?: Partial<CommandResult>;
+  /**
+   * The command *rejects*, rather than answering with a non-zero exit code.
+   *
+   * Those are different failures and only this one escapes `runPipeline`. A
+   * non-zero exit is a result the pipeline inspects and turns into an outcome;
+   * a rejection is the shell layer itself coming apart, and since pass failures
+   * are now caught by `runPass` it is the only kind of throw left that can
+   * reach `solveTicket`'s `finally`. Which makes it the only way to test it.
+   */
+  readonly throws?: string;
 }
 
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
@@ -89,11 +127,48 @@ const saw =
   (argv: readonly string[]): boolean =>
     needles.every((needle) => argv.includes(needle));
 
+/** `git show <ref>:pom.xml`, whatever the ref is. */
+const SHOWS_POM = (argv: readonly string[]): boolean =>
+  argv.includes("show") && argv.some((arg) => arg.endsWith(":pom.xml"));
+
+/**
+ * The same match, ignored the first time it fires.
+ *
+ * Verification now runs twice with byte-identical argv — once against the
+ * pristine base, once against the change — and a stateless rule cannot tell
+ * those apart. Every test below that wants a *verdict about the change* wants
+ * the second run to fail and the first to pass; a rule failing both says the
+ * repository was already broken, which is a different outcome and now has its
+ * own kind. So the distinction the fake has to model is exactly the one the
+ * production code was missing.
+ */
+function afterBase(match: (argv: readonly string[]) => boolean) {
+  let seenOnce = false;
+  return (argv: readonly string[]): boolean => {
+    if (!match(argv)) {
+      return false;
+    }
+    if (seenOnce) {
+      return true;
+    }
+    seenOnce = true;
+    return false;
+  };
+}
+
 interface Harness {
   readonly deps: SolveDependencies;
   /** Passes and commands interleaved, so ordering assertions are about order. */
   readonly timeline: readonly string[];
   readonly calls: readonly (readonly string[])[];
+  /**
+   * How many passes had run when `calls[i]` was made.
+   *
+   * Only the base check runs commands at zero, so this is how the staging
+   * tests exclude it: staging bounds what a *pass* wrote, and there is nothing
+   * to bound before the first one.
+   */
+  readonly passesBefore: readonly number[];
   readonly seen: readonly { readonly pass: Pass; readonly options: SolveRunOptions }[];
 }
 
@@ -108,25 +183,47 @@ interface Harness {
 function harness(
   script: Partial<Record<Pass, unknown>>,
   rules: readonly Rule[] = [],
+  /**
+   * Passes whose `run` rejects, which is what a `SOLVE_TIMEOUT_MS` expiry looks
+   * like from here. Distinct from an unscripted pass — that also throws, but
+   * out of the harness rather than out of the runner, and it means "this test
+   * says the pass must not have run" rather than "the pass ran and died".
+   */
+  dies: Partial<Record<Pass, string>> = {},
 ): { readonly h: Harness } {
   const timeline: string[] = [];
   const calls: (readonly string[])[] = [];
+  const passesBefore: number[] = [];
   const seen: { pass: Pass; options: SolveRunOptions }[] = [];
 
   const defaults: readonly Rule[] = [
+    // The pilot repo is a Node one, so `pom.xml` is not in its base tree.
+    // Answering every `git show` with the manifest would put both toolchains in
+    // the base and `verify` would refuse before running a step.
+    { match: SHOWS_POM, reply: { exitCode: 128 } },
     { match: saw("show"), reply: { stdout: MANIFEST } },
     { match: saw("--name-only"), reply: { stdout: "" } },
     { match: saw("--numstat"), reply: { stdout: NUMSTAT } },
+    // `git diff` without `--numstat` is the patch read, and it must answer
+    // differently from the one above or the two are indistinguishable here.
+    {
+      match: (argv) => argv.includes("diff") && !argv.includes("--numstat"),
+      reply: { stdout: PATCH },
+    },
   ];
   const all = [...rules, ...defaults];
 
   const commands: CommandRunner = {
     run: (argv) => {
       calls.push([...argv]);
+      passesBefore.push(seen.length);
       timeline.push(
         `cmd:${argv.slice(0, 2).join(" ")}${argv.includes("--numstat") ? " numstat" : ""}`,
       );
       const rule = all.find((candidate) => candidate.match(argv));
+      if (rule?.throws !== undefined) {
+        return Promise.reject(new Error(rule.throws));
+      }
       return Promise.resolve({ ...OK, ...rule?.reply });
     },
   };
@@ -135,6 +232,10 @@ function harness(
     run: (pass, options, parse) => {
       timeline.push(`pass:${pass}`);
       seen.push({ pass, options });
+      const death = dies[pass];
+      if (death !== undefined) {
+        return Promise.reject(new Error(death));
+      }
       const output = script[pass];
       if (output === undefined) {
         throw new Error(`the ${pass} pass ran, and this test says it must not have`);
@@ -143,7 +244,7 @@ function harness(
     },
   };
 
-  return { h: { deps: { commands, passes }, timeline, calls, seen } };
+  return { h: { deps: { commands, passes }, timeline, calls, passesBefore, seen } };
 }
 
 const request: SolveRequest = {
@@ -267,6 +368,57 @@ describe("solveTicket, when recon declines", () => {
     expect(outcome).toMatchObject({ kind: "bailed", reason: expect.stringContaining("dead code") });
   });
 
+  it("removes the worktree, because recon cannot have written to it", async () => {
+    // The only outcome that cleans up. Recon holds no `Write` and no `Edit`, so
+    // the checkout is pristine; and a bail is the *expected* result whenever
+    // triage's blind fitness call was optimistic, which makes this the leak
+    // that would have grown fastest.
+    const { h } = harness(bailed);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("removed");
+    expect(
+      h.calls.some(
+        (argv) => argv[0] === "git" && argv.includes("worktree") && argv.includes("remove"),
+      ),
+    ).toBe(true);
+  });
+
+  it("never forces the removal", async () => {
+    // `--force` would turn "tidy up after a read-only pass" into "delete
+    // whatever is in there". The whole safety of removing on this path rests on
+    // git refusing when the assumption is wrong, and `--force` removes exactly
+    // that backstop.
+    const { h } = harness(bailed);
+
+    await solveTicket(h.deps, request);
+
+    const removal = h.calls.find((argv) => argv.includes("worktree") && argv.includes("remove"));
+    expect(removal).toBeDefined();
+    expect(removal).not.toContain("--force");
+    expect(removal).not.toContain("-f");
+  });
+
+  it("keeps the worktree, and says why, when git refuses to remove it", async () => {
+    // If recon ever gains a write, or something else dirties the checkout, git
+    // declines and the reason has to reach the operator rather than a log.
+    const { h } = harness(bailed, [
+      {
+        match: (argv) => argv.includes("worktree") && argv.includes("remove"),
+        reply: { exitCode: 1, stderr: "contains modified or untracked files" },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("bailed");
+    expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("kept");
+    expect(
+      outcome.kind === "bailed" && outcome.cleanup.outcome === "kept" ? outcome.cleanup.reason : "",
+    ).toContain("uncommitted");
+  });
+
   it("still carries the dev-lens correction, which is the point of bailing", async () => {
     const { h } = harness({
       recon: recon({
@@ -302,6 +454,7 @@ describe("solveTicket, when the fix pass abandons", () => {
       testAdded: false,
       testOmittedReason: "nothing was changed",
       abandoned: "the fix needs a schema migration, which is outside what this may do",
+      abandonedCause: "judgement",
     }),
   };
 
@@ -344,16 +497,204 @@ describe("solveTicket, and what each pass is given", () => {
     expect(JSON.parse(brief)).toMatchObject({ proceed: true, approach: "add the link element" });
   });
 
-  it("gives simplify the diff and withholds the brief", async () => {
+  it("gives simplify a real patch and withholds the brief", async () => {
     // Showing it the requirement would invite it to reconsider the change
     // rather than the way the change is written.
+    //
+    // REGRESSION, 2026-09-04. This test used to assert `toBe(NUMSTAT)` — the
+    // gate's format, a table of line counts — under a name that said "the
+    // diff", and it passed for as long as one function served both reads. The
+    // first real solve crashed here, because the numstat is `-z` separated and
+    // `spawn` refuses a NUL in argv. The crash was the lucky outcome: without
+    // the `-z` the pass would have run, been shown a count table, found nothing
+    // to simplify, and looked like it was working.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
 
     const options = h.seen.find((entry) => entry.pass === "simplify")?.options;
-    expect(options?.diff).toBe(NUMSTAT);
+    expect(options?.diff).toBe(PATCH);
+    expect(options?.diff).toContain("@@");
     expect(options?.brief).toBeUndefined();
+  });
+
+  it("never puts a NUL in front of a pass", async () => {
+    // THE GUARD, stated as the property rather than as one call site. Anything
+    // handed to a pass becomes part of a single argv element, so a NUL anywhere
+    // in it fails the run before the model is reached. Checked across every
+    // string every pass received, so a future field added to `SolveRunOptions`
+    // and wired to a `-z` read is caught here rather than in production.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    expect(h.seen.length).toBeGreaterThan(0);
+    for (const { pass, options } of h.seen) {
+      for (const [field, value] of Object.entries(options)) {
+        if (typeof value === "string") {
+          expect(value, `${pass} pass, ${field}`).not.toContain("\0");
+        }
+      }
+    }
+  });
+
+  it("makes files the pass created visible before reading any diff", async () => {
+    // THE GUARD, and it closes a hole rather than tidying one. `git diff <base>`
+    // reports tracked files only, so a pass that *creates* a file did not appear
+    // in it at all. Measured on the first real solve: the gate passed a
+    // five-file change having read two files and four lines — the whole
+    // implementation, its test and a new asset were invisible to it.
+    //
+    // Every categorical refusal the gate makes names a path that must not be
+    // touched, and each was evadable by writing a new file instead of editing
+    // one. A fresh `.github/workflows/*.yml` would have passed and then run.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    // The base check diffs too — that is how it notices a changed manifest —
+    // but it runs before any pass, so there is nothing it could have created
+    // and nothing to stage. `passesBefore` excludes it without excluding any
+    // diff this guard is about.
+    const staged = h.calls.findIndex((argv) => argv.includes("--intent-to-add"));
+    const firstDiff = h.calls.findIndex(
+      (argv, index) => argv.includes("diff") && (h.passesBefore[index] ?? 0) > 0,
+    );
+    expect(staged).toBeGreaterThanOrEqual(0);
+    expect(firstDiff).toBeGreaterThanOrEqual(0);
+    expect(staged).toBeLessThan(firstDiff);
+  });
+
+  it("stages before every diff, not only the first", async () => {
+    // A pass can create a file after an earlier read. Staging once at the top
+    // would bound the fix pass's new files and miss simplify's.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    for (const [index, argv] of h.calls.entries()) {
+      if (!argv.includes("diff") || (h.passesBefore[index] ?? 0) === 0) {
+        continue;
+      }
+      const preceding = h.calls.slice(0, index);
+      expect(
+        preceding.some((earlier) => earlier.includes("--intent-to-add")),
+        `the diff at call ${String(index)} was not preceded by a staging call`,
+      ).toBe(true);
+    }
+  });
+
+  it("refuses when it cannot stage, rather than reading a partial diff", async () => {
+    // Falling back to the tracked-only diff would report "nothing else changed"
+    // about a change it could not see, which is the failure being fixed. An
+    // unbounded diff has to stop the run.
+    const { h } = harness(FULL, [{ match: saw("--intent-to-add"), reply: { exitCode: 128 } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("refused");
+    if (outcome.kind === "refused") {
+      expect(outcome.stage).toBe("diff-gate");
+    }
+  });
+
+  it.each([
+    ["recon", { recon: recon({ proceed: false, bailReason: "the dev lens names a dead file" }) }],
+    [
+      "fix",
+      {
+        ...FULL,
+        fix: fix({ abandoned: "the config contradicts the ticket", abandonedCause: "judgement" }),
+      },
+    ],
+  ] as const)("logs why the %s pass gave up", async (pass, script) => {
+    // THE ONE THAT MATTERS about a bail, and it was missing entirely. A bail is
+    // the most informative thing a solve produces — triage cannot read source,
+    // so this is the first time anything with the code in front of it has had
+    // an opinion — and the reason was returned to a caller that prints a
+    // one-word outcome. Both real bails so far were diagnosed by reading a
+    // stack trace, because the sentence explaining them reached nobody.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness(script);
+
+    await solveTicket(h.deps, request);
+
+    expect(info).toHaveBeenCalledWith(
+      "solve.abandoned",
+      expect.objectContaining({ pass, reason: expect.stringMatching(/\S/u) }),
+    );
+    info.mockRestore();
+  });
+
+  it("says whether an abandoned run left files behind", async () => {
+    // Changes what a human does next: debris in the worktree needs looking at,
+    // a clean bail does not. Only representable at all since the coherence rule
+    // forbidding "abandoned and changed" was corrected — see `parseFix`.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness({
+      ...FULL,
+      fix: fix({
+        abandoned: "thought better of it",
+        abandonedCause: "judgement",
+        changed: true,
+      }),
+    });
+
+    await solveTicket(h.deps, request);
+
+    expect(info).toHaveBeenCalledWith(
+      "solve.abandoned",
+      expect.objectContaining({ leftFiles: true }),
+    );
+    info.mockRestore();
+  });
+
+  it("logs that the write pass ran, since it is the one that spends the privilege", async () => {
+    // Recon, simplify and verify all logged; `fix` did not, which left the only
+    // pass holding `Write` and `Edit` as the single step with no record it had
+    // run. On the first verified run that showed up as a six-minute hole in the
+    // log between two lines, with no way to tell a slow fix from a hung one.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    expect(info).toHaveBeenCalledWith(
+      "solve.fix",
+      expect.objectContaining({ issueKey: "SSX-3822", changed: true, files: FILES.length }),
+    );
+    info.mockRestore();
+  });
+
+  it("keeps model-claimed file paths out of the fix log", async () => {
+    // `filesTouched` is model-authored, derived from a ticket anyone with a
+    // Jira account can edit, and the diff gate is what checks it against git's
+    // own account. Printing the claim into a log a human skims invites reading
+    // the claim as the finding — so the log carries the count and the gate
+    // keeps the paths.
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    const logged = info.mock.calls.find(([event]) => event === "solve.fix")?.[1];
+    expect(JSON.stringify(logged)).not.toContain(FILES[0] ?? "");
+    info.mockRestore();
+  });
+
+  it("still reads the numstat for the gate, not the patch", async () => {
+    // The other half of the split. Feeding the gate a unified patch would make
+    // `parseNumstat` return nothing, and an empty file list passes every cap —
+    // the gate would report ok on a diff it never read.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    const gateReads = h.calls.filter((argv) => argv.includes("diff") && argv.includes("--numstat"));
+    expect(gateReads.length).toBeGreaterThan(0);
+    for (const argv of gateReads) {
+      expect(argv).toContain("-z");
+    }
   });
 
   it("points every pass at the worktree, never at the repository", async () => {
@@ -368,8 +709,12 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("refuses a simplify pass that strayed outside the fix's files", async () => {
-    // Propagates rather than becoming an outcome: a report that contradicts
-    // its own contract is a broken contract, not a ticket that did not work.
+    // Becomes an outcome rather than propagating. It used to reject, which read
+    // as principled — a broken contract is not a ticket that did not work — but
+    // the caller is a long-running job holding a worktree, and the practical
+    // effect of the throw was that the process died and the worktree leaked.
+    // The contract is still refused; what changed is that the refusal is
+    // something the caller can act on.
     const { h } = harness({
       ...FULL,
       simplify: simplify({
@@ -380,7 +725,52 @@ describe("solveTicket, and what each pass is given", () => {
       }),
     });
 
-    await expect(solveTicket(h.deps, request)).rejects.toThrow(SolveParseError);
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("crashed");
+    expect(outcome.kind === "crashed" ? outcome.pass : null).toBe("simplify");
+    // The parser's complaint survives into the reason rather than being
+    // flattened to "a pass died".
+    expect(outcome.kind === "crashed" ? outcome.reason : "").toContain("unrelated.ts");
+  });
+
+  it("turns a pass that times out into an outcome, not a throw", async () => {
+    // The case this was built for. `SOLVE_TIMEOUT_MS` fires inside `passes.run`,
+    // and until `runPass` existed that rejection went straight past every
+    // caller — `solve:once` printed a stack trace and the daemon that Phase E
+    // adds would have taken the whole loop down with it.
+    const { h } = harness({}, [], { recon: "pass timed out after 900000ms" });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("crashed");
+    expect(outcome.kind === "crashed" ? outcome.pass : null).toBe("recon");
+    expect(outcome.kind === "crashed" ? outcome.reason : "").toContain("timed out");
+  });
+
+  it("does not run the fix pass after recon dies", async () => {
+    // The privilege claim, and the reason this is a separate test from the one
+    // above. `crashed` means no verdict was reached; if the write pass ran
+    // anyway then a run that reports having reached no verdict has still edited
+    // the worktree, which is the one way this outcome could lie.
+    // `fix` is scripted, so a pipeline that wrongly continued would still
+    // satisfy every assertion in the test above and only fail this one.
+    const { h } = harness({ fix: fix() }, [], { recon: "pass timed out after 900000ms" });
+
+    await solveTicket(h.deps, request);
+
+    expect(h.seen.map(({ pass }) => pass)).toEqual(["recon"]);
+  });
+
+  it("carries no dev lens off a crashed run", async () => {
+    // Recon is what produces the lens, so a run that lost recon has no reading
+    // to report. Reporting one anyway would feed the fitness assessment
+    // evidence nobody gathered — see `lensOf` in `feedback.ts`.
+    const { h } = harness({}, [], { recon: "pass timed out" });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).not.toHaveProperty("devLens");
   });
 });
 
@@ -433,9 +823,55 @@ describe("solveTicket, at the diff gate", () => {
   });
 });
 
+describe("solveTicket, at the base check", () => {
+  it("stops before any pass when the repository's own build is red", async () => {
+    // The harness throws on an unscripted pass, so passing `{}` is the
+    // assertion: if recon ran, this test fails with that error instead. That
+    // matters more than the returned kind — the base check exists to spend
+    // nothing on a repository that cannot answer the question.
+    const { h } = harness({}, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("unusable-base");
+    expect(h.seen).toHaveLength(0);
+  });
+
+  it("keeps the worktree, because the worktree is the difference", async () => {
+    // Unlike a bail, this is not cleaned up. The failure mode it was built for
+    // is a build that passes in a normal checkout and fails in a linked one, so
+    // the only place it reproduces is the directory a tidy-up would delete.
+    const { h } = harness({}, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({ kind: "unusable-base", worktree: { path: worktree.path } });
+    expect(h.calls.some((argv) => argv.includes("worktree") && argv.includes("remove"))).toBe(
+      false,
+    );
+  });
+
+  it("runs before the fix, not after it", async () => {
+    // Ordering is the whole value. A base check after the model has written is
+    // no longer a base check, and would cost exactly what this saves.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    const firstBuild = h.timeline.findIndex(
+      (entry) => entry.startsWith("cmd:") && !entry.startsWith("cmd:git"),
+    );
+    const firstPass = h.timeline.findIndex((entry) => entry.startsWith("pass:"));
+    expect(firstBuild).toBeGreaterThanOrEqual(0);
+    expect(firstBuild).toBeLessThan(firstPass);
+  });
+});
+
 describe("solveTicket, at verification", () => {
   it("returns failed — a fact about the code — when a step does not pass", async () => {
-    const { h } = harness(FULL, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
+    // `afterBase`, so the base's test run passes. Without that premise this is
+    // not a fact about the code — see the `unusable-base` tests below.
+    const { h } = harness(FULL, [{ match: afterBase(saw("run", "test")), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
 
@@ -445,7 +881,7 @@ describe("solveTicket, at verification", () => {
   it("returns refused — not failed — when the harness could not form a verdict", async () => {
     // Install dying verifies nothing. Reporting it as `failed` would blame the
     // change for evidence that was never gathered.
-    const { h } = harness(FULL, [{ match: saw("install"), reply: { exitCode: 1 } }]);
+    const { h } = harness(FULL, [{ match: afterBase(saw("install")), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
 
@@ -454,7 +890,9 @@ describe("solveTicket, at verification", () => {
 
   it("keeps a manifest edit a refusal, not a failure", async () => {
     const { h } = harness(FULL, [
-      { match: saw("--name-only"), reply: { stdout: `package.json${NUL}` } },
+      // Nothing is edited at base time, so the manifest only looks touched on
+      // the second read — which is also what really happens.
+      { match: afterBase(saw("--name-only")), reply: { stdout: `package.json${NUL}` } },
     ]);
 
     const outcome = await solveTicket(h.deps, request);
@@ -555,7 +993,25 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, reviewRequest);
 
     expect(outcome.kind).toBe("resolved");
-    expect(h.calls.some((argv) => argv[1] === "run" && argv[2] === "test")).toBe(true);
+    // Matched on the tail rather than fixed indices: a declared
+    // `packageManager` puts `corepack <pm>@<version>` in front of `run`, so
+    // position-keyed assertions here break for a reason unrelated to the claim.
+    expect(h.calls.some((argv) => argv.slice(-2).join(" ") === "run test")).toBe(true);
+  });
+
+  it("abandons the round rather than crashing when the review pass dies", async () => {
+    // The one place a dead pass is deliberately *not* `crashed`. By here a pull
+    // request exists, so there is a human on the other end and somewhere to put
+    // the reason; a new outcome kind would only make every caller of
+    // `resolveReview` handle a case that reduces to "this round produced
+    // nothing". The reason still has to survive, or the PR sits there with no
+    // explanation of why the bot stopped answering.
+    const { h } = harness({}, [], { review: "pass timed out after 900000ms" });
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome.kind).toBe("abandoned");
+    expect(outcome.kind === "abandoned" ? outcome.reason : "").toContain("timed out");
   });
 
   it("gates the whole cumulative diff, not just the round's increment", async () => {
@@ -622,5 +1078,244 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, reviewRequest);
 
     expect(outcome.kind).toBe("resolved");
+  });
+});
+
+/** The file the `/agent-solve` slash command has to resolve to. */
+function entryPoint(root: string): string {
+  return join(root, ".claude", "skills", "agent-solve", "SKILL.md");
+}
+
+describe("the skill root", () => {
+  it("is staged, on disk, before every pass that runs", async () => {
+    // THE ONE THAT MATTERS. Every prompt opens with `/agent-solve <KEY>
+    // --<pass>`, and the session's working directory is the worktree, which
+    // contains no skills. Probed 2026-09-04 from such a directory:
+    // `Unknown command: /agent-solve`. Checking existence *during* the pass
+    // rather than after is the point — it is deleted on the way out, so an
+    // assertion afterwards would prove nothing about what the pass could see.
+    const { h } = harness(FULL);
+    const staged: boolean[] = [];
+    const passes: PassRunner = {
+      run: (pass, options, parse) => {
+        staged.push(existsSync(entryPoint(options.skillRootPath ?? "")));
+        return h.deps.passes.run(pass, options, parse);
+      },
+    };
+
+    await solveTicket({ ...h.deps, passes }, request);
+
+    expect(staged).toEqual([true, true, true]);
+  });
+
+  it("is the same root for all three passes", async () => {
+    // Restaging per pass would work and would also mean the `fix` pass could be
+    // reading a different copy from the one `recon` read.
+    const { h } = harness(FULL);
+    await solveTicket(h.deps, request);
+
+    const roots = new Set(h.seen.map(({ options }) => options.skillRootPath));
+    expect(roots.size).toBe(1);
+  });
+
+  it("is removed once the run returns", async () => {
+    const { h } = harness(FULL);
+    await solveTicket(h.deps, request);
+
+    const root = h.seen[0]?.options.skillRootPath ?? "";
+    expect(root).not.toBe("");
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it("is removed even when the run throws", async () => {
+    // The `finally`, and the reason it is one. Unplugging it leaves a
+    // read-only directory per crashed run, which the next run for that ticket
+    // then cannot overwrite — a failure that only shows up after a crash.
+    //
+    // This used to throw by leaving a pass unscripted, which stopped working
+    // when `runPass` started catching those; the run returns `crashed` now and
+    // a `finally` is indistinguishable from a plain trailing statement on a
+    // path that returns. So the throw has to come from the layer `runPass`
+    // does *not* wrap — the shell — and it has to land after a pass has run,
+    // or there is no staged root recorded to go looking for.
+    const { h } = harness({ recon: recon(), fix: fix(), simplify: simplify() }, [
+      { match: saw("--numstat"), throws: "git died mid-diff" },
+    ]);
+
+    await expect(solveTicket(h.deps, request)).rejects.toThrow("git died mid-diff");
+
+    const root = h.seen[0]?.options.skillRootPath ?? "";
+    expect(root).not.toBe("");
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it("does not hand the pass the repository this service lives in", async () => {
+    // `--add-dir` grants write to a pass that pre-approves `Write` (probed
+    // 2026-09-04). The staged root is what keeps the solver away from its own
+    // denylists and its own diff gate.
+    const { h } = harness(FULL);
+    await solveTicket(h.deps, request);
+
+    for (const { pass, options } of h.seen) {
+      expect(options.skillRootPath ?? "", `the ${pass} pass`).not.toContain("the-jira-police");
+    }
+  });
+
+  it("reaches the review pass too", async () => {
+    const { h } = harness({ review: review() });
+    const seen: string[] = [];
+    const passes: PassRunner = {
+      run: (pass, options, parse) => {
+        seen.push(existsSync(entryPoint(options.skillRootPath ?? "")) ? "staged" : "missing");
+        return h.deps.passes.run(pass, options, parse);
+      },
+    };
+
+    await resolveReview({ ...h.deps, passes }, reviewRequest);
+
+    expect(seen).toEqual(["staged"]);
+  });
+});
+
+describe("solveWithRetry", () => {
+  /**
+   * A pipeline whose script changes between attempts.
+   *
+   * The attempt boundary is the `recon` pass, because that is the first thing
+   * `runPipeline` runs. Everything else about the harness is the one above.
+   */
+  function attempts(
+    scripts: readonly Partial<Record<Pass, unknown>>[],
+    rules: readonly Rule[] = [],
+  ): { readonly deps: SolveDependencies; readonly calls: readonly (readonly string[])[] } {
+    let index = -1;
+    const calls: (readonly string[])[] = [];
+    const base = harness({}, rules).h;
+
+    const passes: PassRunner = {
+      run: (pass, options, parse) => {
+        if (pass === "recon") {
+          index += 1;
+        }
+        const script = scripts[index] ?? {};
+        const output = script[pass];
+        if (output === undefined) {
+          throw new Error(`attempt ${String(index + 1)}: the ${pass} pass must not have run`);
+        }
+        return Promise.resolve(parse(output));
+      },
+    };
+
+    const commands: CommandRunner = {
+      run: async (argv, options) => {
+        calls.push([...argv]);
+        return base.deps.commands.run(argv, options);
+      },
+    };
+
+    return { deps: { commands, passes }, calls };
+  }
+
+  const stopped = (cause: "judgement" | "environment"): Partial<Record<Pass, unknown>> => ({
+    recon: recon(),
+    fix: fix({
+      changed: false,
+      filesTouched: [],
+      commitSubject: "",
+      commitBody: "",
+      testAdded: false,
+      testOmittedReason: "nothing was changed",
+      abandoned: cause === "environment" ? "a safety hook denied the write" : "the brief is wrong",
+      abandonedCause: cause,
+    }),
+  });
+
+  it("does not rerun a ticket the model judged", async () => {
+    // A verdict is an answer. Asking the same question again costs a second
+    // four-pass session and gets the same one.
+    const { deps } = attempts([stopped("judgement")]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(1);
+    expect(result.outcome).toMatchObject({ kind: "abandoned", cause: "judgement" });
+  });
+
+  it("reruns a ticket the machine got in the way of", async () => {
+    // Observed 2026-09-04: the host's own safety hook denied a write mid-pass,
+    // twice in eight write-capable sessions, non-deterministically — and the
+    // run that wrote materially identical content to a neighbouring path
+    // succeeded. Nothing about the ticket changed between them.
+    const { deps } = attempts([stopped("environment"), FULL]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(2);
+    expect(result.outcome.kind).toBe("verified");
+  });
+
+  it("stops after one retry, however many times the machine gets in the way", async () => {
+    // An obstacle that survives a clean retry is not transient, and a loop that
+    // keeps paying to find that out turns a blocked host into a bill.
+    const { deps } = attempts([stopped("environment"), stopped("environment")]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(2);
+    expect(result.outcome).toMatchObject({ kind: "abandoned", cause: "environment" });
+  });
+
+  it("clears the first attempt's worktree and branch before cutting a new one", async () => {
+    // Both names are derived from the issue key, so a second `worktree add -b`
+    // collides with its own predecessor unless both are gone.
+    const { deps, calls } = attempts([stopped("environment"), FULL]);
+
+    await solveWithRetry(deps, request);
+
+    const git = calls.filter((argv) => argv.includes("worktree") || argv.includes("branch"));
+    expect(git.map((argv) => argv.slice(3, 5).join(" "))).toEqual([
+      "worktree add",
+      "worktree remove",
+      "branch -d",
+      "worktree add",
+    ]);
+  });
+
+  it("does not retry when the first attempt's worktree survived", async () => {
+    // `git worktree remove` refuses on a dirty checkout, and a dirty checkout
+    // means the blocked attempt left work behind. That is evidence, and the
+    // retry would have to destroy it to proceed.
+    const { deps } = attempts(
+      [stopped("environment"), FULL],
+      [{ match: saw("worktree", "remove"), reply: { exitCode: 1, stderr: "contains modified" } }],
+    );
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(1);
+    expect(result.retryBlocked).toContain("worktree is still there");
+  });
+
+  it("does not retry when the first attempt's branch survived", async () => {
+    // `branch -d` refuses on unmerged commits — same argument, one layer down,
+    // and the case the worktree check alone would miss.
+    const { deps } = attempts(
+      [stopped("environment"), FULL],
+      [{ match: saw("branch", "-d"), reply: { exitCode: 1, stderr: "not fully merged" } }],
+    );
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result.attempts).toBe(1);
+    expect(result.retryBlocked).toContain("branch is still there");
+  });
+
+  it("leaves every other outcome exactly as it found it", async () => {
+    const { deps } = attempts([FULL]);
+
+    const result = await solveWithRetry(deps, request);
+
+    expect(result).toMatchObject({ attempts: 1, retryBlocked: "" });
+    expect(result.outcome.kind).toBe("verified");
   });
 });

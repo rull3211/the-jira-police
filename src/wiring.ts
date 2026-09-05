@@ -37,14 +37,25 @@
  * a retry.
  */
 
-import { JiraClient } from "./jira/client.ts";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+
+import { type IssueDetail, JiraClient } from "./jira/client.ts";
 import { buildInFlightJql, buildNewIssuesJql, buildSolveQueueJql } from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
 import { type Settings, SettingsError, flag, list, numeric, solveMode } from "./settings.ts";
+import type { ClaimCapabilities } from "./solve/claim.ts";
+import { createCommandRunner } from "./solve/exec.ts";
+import { repoFromLabels } from "./solve/labels.ts";
+import type { SolveDependencies, SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
+import type { PublishRequest } from "./solve/delivery.ts";
+import { createPassRunner } from "./solve/passes.ts";
+import { composePullRequest } from "./solve/pr-text.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
+import { type RenderedTicket, renderTicket } from "./solve/ticket.ts";
 import { withFitnessNote } from "./triage/fitness-note.ts";
 import { UnpostableError, assertPostable } from "./triage/gate.ts";
 import { runPost } from "./triage/poster.ts";
@@ -265,11 +276,11 @@ function toSolveCandidate(ticket: TicketRef): SolveCandidate {
  * composes the grooming one and for the same reason: `solve:once` and the
  * daemon must be the same run, or the rehearsal proves nothing.
  *
- * Both reads go through the same Jira REST credential the grooming poller
- * uses, and that is still discovery-only. Nothing here can write — `SolveDeps`
- * has no write function to give, which is the Phase B refusal made structural
- * rather than promised. When the claim is eventually written it will go through
- * storecode's own MCP session, as every other mutation in this service does.
+ * Both reads go through the same Jira REST credential the grooming poller uses.
+ * Nothing here can write — `SolveDeps` has no write function to give, which is
+ * the Phase B refusal made structural rather than promised. The claim's write
+ * is a separate composition, `createClaimCapabilities`, so that reading the
+ * board and being able to change it stay two different call sites.
  *
  * `solveMode` is called here rather than deeper in, so an unrecognised
  * `SOLVE_MODE` fails at composition — before a query is built, before the board
@@ -316,5 +327,240 @@ export function createSolveDeps(
       return (await client.search(inFlightJql)).length;
     },
     ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+/**
+ * The claim's write. **This function is the Phase B2 privilege grant.**
+ *
+ * Its own function, called from nowhere that merely reads, for the same reason
+ * `createSolveRunDeps` is separate: "what can this process do" should be
+ * answerable by reading the call sites, and a poller that constructed a writer
+ * in order to fetch a queue would make the answer "everything, always".
+ *
+ * The narrowing is at the credential — `updateLabels` refuses anything outside
+ * the `agent:` namespace and cannot touch a field other than `labels` — so this
+ * adapter is deliberately thin. There is nothing for it to check that is not
+ * already checked one layer down, and a second copy of the rule here would be
+ * the copy that goes stale.
+ */
+export function createClaimCapabilities(client: JiraClient): ClaimCapabilities {
+  return {
+    readLabels: async (issueKey) => (await client.fetchDetail(issueKey)).labels,
+    applyLabels: async (issueKey, change) => {
+      await client.updateLabels(issueKey, { add: change.add, remove: change.remove });
+    },
+  };
+}
+
+/**
+ * The solver's dependencies. **This function is the phase C privilege grant.**
+ *
+ * Everything above composes readers. This composes the two objects that can
+ * change something: a `CommandRunner`, which runs git and the repository's own
+ * test commands, and a `PassRunner`, which starts a model session holding
+ * `Write` and `Edit`. Nothing else in the process can do either, which is why
+ * `solve-once.ts` could honestly refuse before this existed — the refusal was
+ * structural, and this is the change that removes it.
+ *
+ * Kept separate from `createSolveDeps` rather than folded into it. The queue
+ * poller runs on every cycle and needs none of this; if the two were one
+ * function, reading the board would construct the ability to write to a
+ * repository, and "what can this process do" would stop being answerable by
+ * reading the call site.
+ *
+ * `VAULT_PATH` is required for the same reason `buildTriageOptions` requires it:
+ * the branch naming and commit conventions the solver is held to live there, and
+ * a pass that cannot read them will invent its own and fail the mechanical
+ * checks afterwards. Failing at startup beats failing four sessions in.
+ */
+export function createSolveRunDeps(settings: Settings): SolveDependencies {
+  if (settings.VAULT_PATH === "") {
+    throw new SettingsError(["VAULT_PATH"]);
+  }
+
+  return {
+    commands: createCommandRunner(),
+    passes: createPassRunner({
+      executable: settings.STORECODE_PATH,
+      // Floored at 1ms on the same grounds as the triage budget: zero is not
+      // "no timeout", it is a timeout that expired before the pass started.
+      timeoutMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
+    }),
+  };
+}
+
+/** Why a ticket cannot be solved, as a sentence rather than a null. */
+export class NotSolvableError extends Error {}
+
+/**
+ * Turns one ticket into the request `solveTicket` runs.
+ *
+ * The repository is derived from the ticket's own `svc:` label and then checked
+ * against `SOLVE_REPOS`, and both halves matter. `repoFromLabels` answers "which
+ * repository is this ticket about" and returns `null` for every ambiguous
+ * reading; `SOLVE_REPOS` answers "which repositories may be written to at all".
+ * A ticket that names a repository nobody allowed is refused here rather than
+ * discovered four sessions later, and the refusal names the repository so
+ * widening the allowlist is an obvious next step rather than a guess.
+ *
+ * The two checks are deliberately not collapsed. One is about the ticket and
+ * one is about the operator's configuration, and a single combined "is this
+ * solvable" boolean would report a missing label and a forbidden repository as
+ * the same event.
+ */
+/**
+ * Where worktrees are cut, and why it is configurable.
+ *
+ * The default is the system temp directory — temporary by construction, removed
+ * on success, and deliberately nowhere near the checkout so a failed run leaves
+ * its evidence somewhere obviously not the repository. That default is still
+ * right and is unchanged.
+ *
+ * It became configurable because of what the default costs on macOS, where
+ * `tmpdir()` resolves under `/private/var`. The pipeline's own rule is that a
+ * human reads the worktree diff by hand before anything leaves the machine, and
+ * a path some tooling refuses to open makes that review impossible to perform —
+ * so the setting exists to buy back a step the process depends on, not to make
+ * the location a matter of taste. Blank means the default, because freezing
+ * today's `tmpdir()` into a string breaks the first machine that disagrees.
+ *
+ * No `.trim()` here, and that is deliberate rather than an omission. Every value
+ * `readSettings` produces is already trimmed, and a whitespace-only entry has
+ * already become the empty string by the time it arrives — so a trim on this
+ * line is a guard no test can unplug, which is the kind of reassuring dead code
+ * this project treats as worse than none. `SOLVE_MODE` does trim, and should not.
+ */
+function worktreeRoot(settings: Settings): string {
+  const configured = settings.SOLVE_WORKTREE_ROOT;
+  return configured === "" ? join(tmpdir(), "jira-police-solve") : configured;
+}
+
+export function buildSolveRequest(
+  settings: Settings,
+  detail: IssueDetail,
+  ticket: string,
+): SolveRequest {
+  if (settings.SOLVE_REPO_ROOT === "") {
+    throw new SettingsError(["SOLVE_REPO_ROOT"]);
+  }
+
+  const repo = repoFromLabels(detail.labels);
+  if (repo === null) {
+    throw new NotSolvableError(
+      `${detail.key} does not name exactly one repository. Labels: ${detail.labels.join(", ") || "(none)"}. The solver reads the svc: label and refuses to guess between none and several.`,
+    );
+  }
+
+  const allowed = list(settings, "SOLVE_REPOS");
+  if (!allowed.includes(repo)) {
+    throw new NotSolvableError(
+      `${detail.key} is about "${repo}", which is not in SOLVE_REPOS (${allowed.join(", ") || "empty"}). Nothing was touched.`,
+    );
+  }
+
+  return {
+    issueKey: detail.key,
+    ticket,
+    summary: detail.summary,
+    repoPath: join(settings.SOLVE_REPO_ROOT, repo),
+    parentDirectory: worktreeRoot(settings),
+    baseRef: settings.SOLVE_BASE_REF,
+    vaultPath: settings.VAULT_PATH,
+    gitTimeoutMs: numeric(settings, "SOLVE_GIT_TIMEOUT_MS", 1),
+    stepTimeoutMs: numeric(settings, "SOLVE_STEP_TIMEOUT_MS", 1),
+    installTimeoutMs: numeric(settings, "SOLVE_INSTALL_TIMEOUT_MS", 1),
+  };
+}
+
+/**
+ * **This function is the phase D privilege grant.**
+ *
+ * What it composes is the argument to `publish`, and `publish` is the first
+ * thing in this service that makes work visible to other people: it commits,
+ * pushes a branch to a shared remote, opens a pull request and puts a reviewer
+ * on it. Nothing before it leaves the machine. That is why it is a separate
+ * function from `buildSolveRequest` rather than more fields on it — a reader
+ * asking "can this process open a pull request" should find the answer by
+ * grepping for one name and looking at its call sites.
+ *
+ * Three of the four values it needs are configuration and one is derived:
+ *
+ *  - the repository is `SOLVE_GITHUB_OWNER/<name>`, where the name has already
+ *    been through `SOLVE_REPOS`. Passing `--repo` explicitly is what stops gh
+ *    inferring a target from whatever remote the worktree carries.
+ *  - the base branch is `SOLVE_BASE_REF` with its remote stripped. A PR is
+ *    opened against a branch name, and `origin/main` is not one — gh reports
+ *    that as a missing base, a long way from the setting that caused it.
+ *  - the identity and the timeout are settings with defaults, because neither
+ *    widens anything.
+ */
+export function buildPublishRequest(
+  settings: Settings,
+  outcome: Extract<SolveOutcome, { kind: "verified" }>,
+  issueKey: string,
+): PublishRequest {
+  // Not trimmed: `readSettings` has already done that, so whitespace has
+  // already become the empty string. See `worktreeRoot`.
+  if (settings.SOLVE_GITHUB_OWNER === "") {
+    throw new SettingsError(["SOLVE_GITHUB_OWNER"]);
+  }
+
+  const { title, body } = composePullRequest(outcome, {
+    issueKey,
+    jiraBaseUrl: settings.JIRA_BASE_URL,
+    maxReviewRounds: numeric(settings, "MAX_REVIEW_ITERATIONS", 0),
+  });
+
+  return {
+    worktree: outcome.worktree,
+    repo: `${settings.SOLVE_GITHUB_OWNER}/${basename(outcome.worktree.repoPath)}`,
+    baseBranch: baseBranchOf(settings.SOLVE_BASE_REF),
+    commit: outcome.commit,
+    title,
+    body,
+    identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
+    timeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
+  };
+}
+
+/**
+ * `origin/main` → `main`.
+ *
+ * `SOLVE_BASE_REF` is a *ref* — it is fetched and branched from, and both of
+ * those want the remote-qualified form. A pull request base is a *branch name*
+ * on the remote, and passing `origin/main` there makes gh report that the base
+ * does not exist, which sends the reader looking at GitHub rather than at the
+ * setting. Only a leading `origin/` is stripped, and only one: a branch legally
+ * named `origin/something` is unusual but a branch named `release/origin/x` is
+ * not, and a global replace would mangle it.
+ */
+export function baseBranchOf(baseRef: string): string {
+  return baseRef.startsWith("origin/") ? baseRef.slice("origin/".length) : baseRef;
+}
+
+/**
+ * Reads one ticket in full and renders it as the text a solve pass is given.
+ *
+ * Lives here because it is the join between the Jira client and the solver, and
+ * it is a join this codebase has now got wrong twice — once in triage, which
+ * decided on tickets whose comments it had never read, and once nearly here.
+ * `JiraClient.search` returns a `TicketRef` with no description and no comments;
+ * a caller that reached for the object it already had would have produced a
+ * solver that reads a summary and calls it the ticket.
+ */
+export function createTicketReader(
+  client: JiraClient,
+): (issueKey: string) => Promise<RenderedTicket & { readonly detail: IssueDetail }> {
+  return async (issueKey: string) => {
+    const detail = await client.fetchDetail(issueKey);
+    const rendered = await renderTicket(client, detail);
+    if (rendered.omitted.length > 0) {
+      // Logged rather than swallowed: "the asset the ticket told you to use was
+      // not shown to the solver" is the kind of thing that otherwise surfaces as
+      // a baffling diff.
+      logger.warn("solve.ticket_attachments_omitted", { issueKey, omitted: rendered.omitted });
+    }
+    return { ...rendered, detail };
   };
 }

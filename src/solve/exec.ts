@@ -62,8 +62,38 @@ import type { CommandOptions, CommandResult, CommandRunner } from "./worktree.ts
  * `bash`, `env`, `xargs`, `make`, `node`, `npx`, `pnpx`, `dlx`. Each is a way
  * to run something else, which is precisely what an allowlist of programs is
  * for.
+ *
+ * **`corepack` is on the list and is also a way to run something else**, so it
+ * is the one entry that contradicts the paragraph above and has to earn its
+ * place. Two things distinguish it from `npx`. It shims exactly the three
+ * managers already on this list and cannot be asked for a fourth, so the set of
+ * programs reachable through it is the set reachable without it. And the
+ * argument it takes is validated before it is built: `PACKAGE_MANAGER_VERSION`
+ * in `verify.ts` admits plain semver only, which is what stops
+ * `packageManager: "pnpm@https://…/x.tgz"` — a perfectly valid thing to say to
+ * corepack — from turning a manifest into a download-and-execute. That guard is
+ * load-bearing for this list entry, so the two must not drift apart either.
+ *
+ * **`mvn`, and deliberately not `./mvnw`.** A Maven repository ships a wrapper
+ * script, and running it is the conventional thing to do because it pins the
+ * version. It is also a file inside the repository being verified, which a solve
+ * run has write access to — so executing it would make "which program verifies
+ * this change" answerable by the change. That is the one property this list
+ * exists to deny, and it is why `sh` and `make` are excluded by name above.
+ * `mvn` resolved from `PATH` is the same shape as `pnpm`: a name this service
+ * chose, not a path the repository supplied. The cost is that the pinned version
+ * is not honoured, which is a version mismatch rather than an execution channel,
+ * and `verify.ts` says so in its refusals.
  */
-export const ALLOWED_EXECUTABLES: readonly string[] = ["git", "gh", "pnpm", "npm", "yarn"];
+export const ALLOWED_EXECUTABLES: readonly string[] = [
+  "git",
+  "gh",
+  "pnpm",
+  "npm",
+  "yarn",
+  "corepack",
+  "mvn",
+];
 
 /**
  * Environment variables passed through to children.

@@ -42,6 +42,21 @@ function bailed(accurate: boolean, correction = ""): SolveOutcome {
     } as unknown as Extract<SolveOutcome, { kind: "bailed" }>["recon"],
     devLens: { accurate, correction },
     worktree,
+    // Nothing in this module reads it — a ticket comment is about the code, not
+    // about the harness's disk — but the type carries it, and defaulting it
+    // here rather than in the type is what keeps that a deliberate choice.
+    cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
+  };
+}
+
+/** A fix pass that stopped, for one of the two reasons that are not the same. */
+function abandoned(cause: "judgement" | "environment"): SolveOutcome {
+  return {
+    kind: "abandoned",
+    reason: cause === "environment" ? "a safety hook denied the write" : "the brief is wrong",
+    cause,
+    devLens: { accurate: true, correction: "" },
+    worktree,
   };
 }
 
@@ -111,6 +126,24 @@ describe("renderSolveComment", () => {
     expect(failed).toContain("rejected it");
   });
 
+  it("does not let a blocked machine read as a verdict on the ticket", () => {
+    // The ticket's owner reads this. Told "an agent stopped once it saw the
+    // files", they conclude their bug is not agent-fixable — from a run where
+    // the host's safety hook denied a write and the code was never judged at
+    // all. Same class of misreading as `refused` reading like `failed`.
+    const body = renderSolveComment("SSX-1", abandoned("environment"));
+
+    expect(body).toContain("about the machine, not the ticket");
+    expect(body).not.toContain("judged");
+  });
+
+  it("says a judged decline was a judgement", () => {
+    const body = renderSolveComment("SSX-1", abandoned("judgement"));
+
+    expect(body).toContain("read the code and judged");
+    expect(body).not.toContain("about the machine");
+  });
+
   it("surfaces the correction when the lens was wrong", () => {
     const body = renderSolveComment("SSX-1", bailed(false, "the bug is in the API, not the UI"));
 
@@ -144,6 +177,37 @@ describe("renderSolveComment", () => {
     });
 
     expect(body).toContain("nothing was attempted");
+    expect(body).not.toContain("triage assessment was off");
+  });
+
+  it("does not let a crash read like a verdict on the ticket", () => {
+    // The same defence as the `refused` test above, one step further out.
+    // `crashed` is the outcome most likely to be misread as "an agent tried and
+    // could not do it", and that misreading is expensive: it is a false data
+    // point about fitness, recorded against a run that gathered no evidence.
+    const body = renderSolveComment("SSX-1", {
+      kind: "crashed",
+      pass: "fix",
+      reason: "pass timed out after 900000ms",
+      worktree,
+    });
+
+    expect(body).toContain("did not finish");
+    expect(body).toContain("says nothing about whether the ticket is solvable");
+    expect(body).not.toMatch(/rejected it|would not judge it/u);
+  });
+
+  it("invents no correction for a run whose recon never returned", () => {
+    // `crashed` carries no `devLens` at all, and the pass that would have
+    // produced one is the pass that may have died. Silence is the honest
+    // reading; anything else is a fabricated row in the calibration record.
+    const body = renderSolveComment("SSX-1", {
+      kind: "crashed",
+      pass: "recon",
+      reason: "pass timed out after 900000ms",
+      worktree,
+    });
+
     expect(body).not.toContain("triage assessment was off");
   });
 
@@ -207,10 +271,40 @@ describe("calibrationRow", () => {
     expect(row).toContain("| n/a |");
   });
 
+  it("scores a crashed run as no reading, not as a wrong one", () => {
+    // The calibration table is the scoreboard for the blind fitness call, and
+    // it is read by counting down the `Lens` column. Booking a harness timeout
+    // as `**wrong**` would make the assessment look worse the flakier the
+    // harness got — the one bias that would make the table argue for the
+    // opposite of the truth.
+    const row = calibrationRow(
+      "SSX-1",
+      { kind: "crashed", pass: "fix", reason: "pass timed out", worktree },
+      NOW,
+    );
+
+    expect(row).toContain("| n/a |");
+    expect(row).toContain("| crashed |");
+    expect(row).not.toContain("**wrong**");
+  });
+
   it("stays one row when the correction contains newlines", () => {
     const row = calibrationRow("SSX-1", bailed(false, "line one\nline two"), NOW);
 
     expect(row.trimEnd().split("\n")).toHaveLength(1);
+  });
+
+  it("says which kind of abandon it was, since the column is counted by eye", () => {
+    // This table is read down the page to decide whether triage's blind call
+    // can be trusted. A bare `abandoned` puts the host's own safety hook in the
+    // same column as a ticket an agent judged unfixable, and someone counting
+    // rows would conclude the assessment is worse than it is.
+    expect(calibrationRow("SSX-1", abandoned("environment"), NOW)).toContain(
+      "| abandoned (environment) |",
+    );
+    expect(calibrationRow("SSX-1", abandoned("judgement"), NOW)).toContain(
+      "| abandoned (judgement) |",
+    );
   });
 });
 

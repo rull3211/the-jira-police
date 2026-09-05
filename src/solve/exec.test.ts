@@ -55,6 +55,14 @@ describe("isAllowedExecutable", () => {
       expect(isAllowedExecutable(program)).toBe(false);
     },
   );
+
+  it.each(["./mvnw", "mvnw", "mvnw.cmd", ".mvn/wrapper/mvnw"])("refuses %s", (program) => {
+    // Separate from the list above because the reason is different. These are
+    // not ways to run something else in general — they are the one program the
+    // *repository under verification* gets to choose, and a solve run can write
+    // to it. `mvn` is allowed; the wrapper that the repo ships is not.
+    expect(isAllowedExecutable(program)).toBe(false);
+  });
 });
 
 describe("childEnv", () => {

@@ -11,6 +11,7 @@
     "poll:once": "node --env-file-if-exists=.env src/cli/poll-once.ts",
     "triage:once": "node --env-file-if-exists=.env src/cli/triage-once.ts",
     "solve:once": "node --env-file-if-exists=.env src/cli/solve-once.ts",
+    "bot:once": "node --env-file-if-exists=.env src/cli/bot-once.ts",
     "check-types": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",

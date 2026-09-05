@@ -260,6 +260,74 @@ describe("labels", () => {
   });
 });
 
+describe("the taxonomy namespaces, revisable only as a swap", () => {
+  /** Removing `old`, adding `next`, with the verdict's label list kept in step. */
+  function swap(remove: readonly string[], add: readonly string[]): TriagePayload {
+    return payload({
+      labels: ["dor:gaps", "route:ours", ...add],
+      mutation: mutation({ labelsAdd: [...add], labelsRemove: [...remove] }),
+    });
+  }
+
+  it.each([
+    ["team:advisor", "team:partner"],
+    ["jira:ssx", "jira:edh"],
+    ["domain:pricing", "domain:claims"],
+    ["svc:old-web", "svc:buy-insurance-advisor-web"],
+    ["value:low", "value:high"],
+    ["effort:L", "effort:S"],
+  ])("allows replacing %s with %s", (old, next) => {
+    expect(violations(swap([old], [next]))).toEqual([]);
+  });
+
+  it.each(["team:advisor", "jira:ssx", "domain:pricing", "svc:old-web", "value:low", "effort:L"])(
+    "refuses to remove %s with nothing taking its place",
+    (label) => {
+      // The whole point of the tier. These labels are facts about the ticket, and
+      // a fact this skill deletes is one no later re-triage will notice is gone —
+      // the ticket just reads as one that was never triaged.
+      expect(violations(swap([label], [])).join(" ")).toContain("not emptying it");
+    },
+  );
+
+  it("refuses a removal whose replacement is in a different namespace", () => {
+    // The near miss: something *is* being added, so a rule that only counted
+    // `labelsAdd.length` would pass this. The ticket still ends up with no
+    // `svc:` label, and `repoFromLabels` still answers `null`.
+    expect(violations(swap(["svc:old-web"], ["team:partner"])).join(" ")).toContain(
+      "adds no other svc: label",
+    );
+  });
+
+  it("names the namespace that was left empty, not just the label", () => {
+    expect(violations(swap(["effort:L"], [])).join(" ")).toContain("no other effort: label");
+  });
+
+  it("allows one owner becoming two", () => {
+    // `team:` is multi-valued on dual-owned repos, so the rule is "at least one
+    // add in the namespace" rather than a 1:1 exchange. A stricter rule would
+    // have blocked the honest case of a repo gaining a second owning squad.
+    expect(violations(swap(["team:advisor"], ["team:advisor-core", "team:partner"]))).toEqual([]);
+  });
+
+  it("still refuses a bare human label that merely sits beside a swap", () => {
+    // The swap does not buy amnesty for the rest of the removals: each is judged
+    // on its own namespace, and `blocked` belongs to a person.
+    expect(violations(swap(["team:advisor", "blocked"], ["team:partner"])).join(" ")).toContain(
+      "not in a namespace the skill owns",
+    );
+  });
+
+  it("keeps impl-uncertain unremovable, having no namespace to swap within", () => {
+    // Recorded as a limitation rather than an oversight: it is a bare label, so
+    // there is no namespace for a replacement to arrive in and nothing for the
+    // swap rule to check. See REVISABLE_LABEL_NAMESPACES.
+    expect(
+      violations(swap(["impl-uncertain"], ["svc:buy-insurance-advisor-web"])).join(" "),
+    ).toContain("not in a namespace the skill owns");
+  });
+});
+
 describe("the agent: namespace, which triage only partly owns", () => {
   it("allows retiring its own agent:solvable when it changes its mind", () => {
     expect(

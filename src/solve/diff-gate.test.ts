@@ -149,6 +149,43 @@ describe("checkDiff — verification integrity", () => {
     expect(reasonsFor([ok("vitest.config.ts")])).toContain("which tests run");
   });
 
+  it("refuses a POM, which is the Maven equivalent of the manifest", () => {
+    expect(reasonsFor([ok("pom.xml")])).toContain("without making the code correct");
+    expect(reasonsFor([ok("modules/api/pom.xml")])).toContain("without making the code correct");
+  });
+
+  it("refuses the Maven wrapper even though the harness does not run it", () => {
+    // `verify.ts` invokes `mvn` from PATH, so editing `mvnw` cannot change this
+    // run's verdict. It changes everyone else's, which is the wider blast
+    // radius and the reason this is refused rather than merely ignored.
+    for (const path of [
+      "mvnw",
+      "mvnw.cmd",
+      "tools/mvnw",
+      ".mvn/wrapper/maven-wrapper.properties",
+    ]) {
+      expect(reasonsFor([ok(path)])).toContain("which build actually runs");
+    }
+  });
+
+  it("does not refuse a source file that merely mentions a build path", () => {
+    // The Maven patterns are anchored to a whole path segment at both ends, and
+    // this list is one path per anchor: drop any one of the four and the
+    // corresponding entry here is refused for containing a build path's name as
+    // a substring. `pom.xml.ts` is a fixture, `parent-pom.xml` is not the POM
+    // the build reads, `mvnwrapper.ts` is not the wrapper, and `legacy-mvnw` is
+    // not `mvnw`. Refusing any of them blocks an ordinary fix.
+    for (const path of [
+      "src/fixtures/pom.xml.ts",
+      "src/fixtures/parent-pom.xml",
+      "src/mvnwrapper.ts",
+      "src/tools/legacy-mvnw",
+      "src/gen.mvn/notes.md",
+    ]) {
+      expect(checkDiff([ok(path, 3, 1)]).ok).toBe(true);
+    }
+  });
+
   it("refuses these regardless of how small the change is", () => {
     // Not subject to a cap. A one-line edit to the manifest is the dangerous
     // size, not the safe one.

@@ -8,36 +8,44 @@
  *   node src/cli/solve-once.ts SSX-3822 --pr      ... and opens the draft PR
  *
  * The ladder is `solve-args.ts`, including why anything past the first two rungs
- * refuses to run without an issue key. This file is what happens afterwards.
+ * refuses to run without an issue key. The rungs themselves are `solve-run.ts`,
+ * which this file used to contain: they moved out when `bot-once.ts` needed the
+ * same four steps, and a module that runs `main()` on import cannot be imported.
+ * What is left here is this command's own shape — parse, configure, read the
+ * queue, report it, and hand a named ticket to the rungs.
  *
- * ## What actually runs today, and what refuses
+ * ## Every rung is wired, and the ladder is cumulative
  *
- * The first two rungs work and change nothing: they read the board, work out
- * which tickets would be claimed and exactly which label edit each claim would
- * be, and report that. **Every rung above them refuses**, because the write path
- * they need is not wired — `createSolveDeps` composes two readers and no writer,
- * so there is no function present in this process capable of making the edit.
+ * `--pr` claims the ticket, solves it, and opens the pull request. `--solve`
+ * does the first two. `--claim` does the first. What each rung *adds* is one
+ * phase's worth of privilege, and the run stops at the rung you named.
  *
- * That refusal is worth having now rather than when the writer lands. It is the
- * difference between a command that does nothing because nobody implemented it
- * and a command that says which phase is missing, and it means the argument
- * parsing, the usage text and the "one ticket at a time" rule are all in place
- * and tested *before* the privilege arrives rather than in the same change as it.
+ * ## Claim first, release last
  *
- * ## The comment this replaces
+ * Every write run opens with the claim and, unless it got as far as a pull
+ * request, closes by putting the labels back exactly as it found them. Two
+ * reasons, and the second is the one that would have bitten:
+ *
+ * 1. A ticket the board shows as unclaimed while a solver is working on it is
+ *    the state the queue exists to prevent.
+ * 2. A hand-driven run is expected to be repeated. Leaving `agent:solving` on a
+ *    ticket after a `--claim` rehearsal means the next run finds nothing and the
+ *    operator has to unpick labels by hand to try again — which is exactly when
+ *    somebody edits the field wholesale and loses a PM's label.
+ *
+ * A published pull request is the one case that keeps the claim, because there
+ * the work is real and ongoing.
+ *
+ * ## The comments this replaces
  *
  * This file used to state that there was deliberately no `--dry-run` flag and no
  * flag to turn the dry run off, "because a flag would imply the other mode
- * exists; it does not." That was true when the only rung was the first one. The
- * plan's own rule is that the sentence gets rewritten in the change that makes it
- * false, rather than being left to become exactly the kind of prose/behaviour
- * divergence this project exists to catch — so here is the honest version:
- *
- * The other mode now exists in the argument parser and does not exist in the
- * wiring. There is still no `--dry-run` flag, because dry is the default and the
- * flag that has to be typed is the one that escalates. What changed is that
- * "this command cannot write" stopped being a property of the whole command and
- * became a property of the phase you asked for.
+ * exists; it does not." That was true when the only rung was the first one; it
+ * was rewritten once the parser grew the flags, to say the other mode existed in
+ * the parser and not in the wiring. Both sentences are now spent. There is still
+ * no `--dry-run` flag, because dry is the default and the flag you have to type
+ * is the one that escalates — but "this command cannot write" is no longer true
+ * of anything except the rung you get for free.
  *
  * ## The artifact, and why naming a ticket suppresses it
  *
@@ -54,11 +62,12 @@
  */
 
 import { logger } from "../logger.ts";
-import { describeSettings, readSettings, withConfigErrors } from "../settings.ts";
+import { describeSettings, readSettings, solveMode, withConfigErrors } from "../settings.ts";
 import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
-import { USAGE, parseSolveArgs, unavailable } from "./solve-args.ts";
+import { USAGE, parseSolveArgs, unavailable, writes } from "./solve-args.ts";
+import { runWriteRungs } from "./solve-run.ts";
 
 async function main(): Promise<void> {
   const args = parseSolveArgs(process.argv.slice(2));
@@ -69,10 +78,13 @@ async function main(): Promise<void> {
   }
   const { issueKey, phase } = args.invocation;
 
-  // Checked before the board is read. A phase that cannot run should not cost a
-  // Jira round trip, and more importantly should not print a plan that reads
-  // like a prelude to the thing it is about to refuse to do.
-  const missing = unavailable(phase);
+  const settings = readSettings();
+
+  // Checked before the board is read, and long before anything is written. A
+  // rung that cannot run should not cost a Jira round trip, and above all should
+  // not claim a ticket and solve it on the way to discovering it was never
+  // configured to open the pull request the operator asked for.
+  const missing = unavailable(phase, settings);
   if (missing !== null) {
     process.stderr.write(`refusing --${phase}: ${missing}\n`);
     logger.warn("solve-once.refused", { phase, issueKey, reason: missing });
@@ -80,7 +92,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  const settings = readSettings();
   logger.info("solve-once.settings", { ...describeSettings(settings), phase });
 
   const client = createJiraClient(settings);
@@ -102,10 +113,25 @@ async function main(): Promise<void> {
     );
   }
 
+  // `writes` rather than a phase comparison, and the key check is the parser's
+  // rule restated: no rung above the first may run without a named ticket. The
+  // parser already rejects that, so this narrows a type rather than guarding.
+  const attemptedWrites = writes(phase) && issueKey !== null;
+  if (attemptedWrites) {
+    await runWriteRungs(settings, client, issueKey, phase, outcome, solveMode(settings));
+  }
+
+  // `cycleDryRun`, not `dryRun`. The field used to carry the shorter name and it
+  // read as a claim about the whole command — the first live `--pr` run logged
+  // `dryRun: true` on a run that had written the ticket's labels twice. It is
+  // true of the planning pass, which never writes and is the only thing
+  // `runSolveCycle` does; every write this command makes happens after it, in
+  // `runWriteRungs`. So both are reported, and neither pretends to be the other.
   logger.info("solve-once.done", {
     phase,
     issueKey,
-    dryRun: outcome.dryRun,
+    cycleDryRun: outcome.dryRun,
+    attemptedWrites,
     found: outcome.found,
     inFlight: outcome.inFlight,
     capacity: outcome.capacity,

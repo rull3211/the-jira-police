@@ -150,6 +150,81 @@ export const SETTINGS = [
     // and buys an allowlist that can actually be emptied.
   },
   {
+    name: "SOLVE_REPO_ROOT",
+    description:
+      "Directory holding the local checkouts the solver works from; a ticket's repository is resolved as SOLVE_REPO_ROOT/<name> where the name comes from the ticket's own svc: label. The solver never edits these checkouts — it creates a git worktree from one — but it does read and fetch in them, so this points at real repositories and is deliberately not guessed.",
+    // No fallback, for the same reason as SOLVE_REPOS. A default of "the
+    // directory above this one" would be right on this machine and silently
+    // wrong on any other, and the way it would be wrong is by finding some
+    // other checkout with a matching name. Naming the path costs one line and
+    // makes the answer to "which code can this touch" readable.
+  },
+  {
+    name: "SOLVE_BASE_REF",
+    description:
+      "The ref a solve branches from and targets. origin/main by default, and fetched immediately before branching so a solve never starts from a stale local ref. Configurable because not every repository calls it main; changing it does not widen anything, since the branch created from it is still a fresh implementation branch and the push guard still refuses protected names.",
+    fallback: "origin/main",
+  },
+  {
+    name: "SOLVE_GIT_TIMEOUT_MS",
+    description:
+      "Budget for a single git invocation — fetch, worktree add, commit, push. Generous next to how long git usually takes, because the one that is slow is the first fetch of a repository nobody has fetched today, and killing that produces a confusing failure a long way from its cause.",
+    fallback: "120000",
+  },
+  {
+    name: "SOLVE_STEP_TIMEOUT_MS",
+    description:
+      "Budget for one verification step: the repository's own test, typecheck or lint command. Per step rather than per run, because a repository may define several and the slow one should not be charged for the fast ones.",
+    fallback: "600000",
+  },
+  {
+    name: "SOLVE_INSTALL_TIMEOUT_MS",
+    description:
+      "Budget for installing dependencies in a fresh worktree. Separate from SOLVE_STEP_TIMEOUT_MS and larger, because a new worktree has no node_modules and the first install in a repository is the slowest thing the solver does. Later installs are much faster — pnpm's store is content-addressable — so this is sized for the cold case and rarely reached.",
+    fallback: "900000",
+  },
+  {
+    name: "SOLVE_TIMEOUT_MS",
+    description:
+      "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones.",
+    fallback: "1800000",
+  },
+  {
+    name: "SOLVE_GITHUB_OWNER",
+    description:
+      "The GitHub owner or organisation pull requests are opened against; a ticket's repository becomes SOLVE_GITHUB_OWNER/<name>, where the name is the same one SOLVE_REPOS allows and the ticket's svc: label supplies. gh is never left to infer the repository from whatever remote the worktree happens to carry, because a wrong inference here opens a pull request on somebody else's repository and there is no undo that unsends the notifications.",
+    // No fallback, for the same reason as SOLVE_REPOS and SOLVE_REPO_ROOT: this
+    // names a place that gets written to. An owner guessed from the checkout's
+    // remote would be right until the day someone adds a fork as `origin`.
+  },
+  {
+    name: "SOLVE_WORKTREE_ROOT",
+    description:
+      "Directory the solver cuts its worktrees into, one per issue key. Defaults to the system temp directory, which is where a temporary checkout belongs — deliberately nowhere near the repository, so a failed run leaves its evidence somewhere obviously not the working copy. Configurable because a run that fails keeps its worktree for a human to read, and on macOS the default lands under /private/var, which some tooling cannot open; pointing this at a readable directory is the difference between a diff that can be reviewed by hand and one that can only be described.",
+    fallback: "",
+    // Empty means the system temp directory. It cannot default to the literal
+    // path because `tmpdir()` is a function of the environment, and freezing
+    // today's answer into a string would break the first machine that disagrees.
+  },
+  {
+    name: "SOLVE_BOT_NAME",
+    description:
+      "Author name on commits the solver makes. Says a machine wrote it, in the one place every reader of the repository already looks: git blame, the PR author line, and whatever CODEOWNERS automation reads the log. Defaulted rather than required because a missing value here would block a run over a cosmetic field, and unlike the repository settings a wrong name widens nothing.",
+    fallback: "jira-police",
+  },
+  {
+    name: "SOLVE_BOT_EMAIL",
+    description:
+      "Author email on commits the solver makes. A noreply address on purpose: replies to a bot's commits should go to the ticket, and a real mailbox here would collect them silently.",
+    fallback: "jira-police@users.noreply.github.com",
+  },
+  {
+    name: "SOLVE_GH_TIMEOUT_MS",
+    description:
+      "Budget for a single gh invocation — opening the pull request, requesting the review, reading the review back, undrafting. Separate from SOLVE_GIT_TIMEOUT_MS because these are API round trips rather than local work, so they fail differently: a slow one is GitHub being slow or a token being re-authorised, neither of which is helped by the generous budget a cold git fetch needs.",
+    fallback: "60000",
+  },
+  {
     name: "MAX_CONCURRENT_SOLVES",
     description:
       "How many tickets may be in flight at once, counted from the tickets currently carrying the claim label rather than from anything local. One, for the pilot: a solve is expensive, and a bounded blast radius is worth more than throughput while the fitness call is still being calibrated.",

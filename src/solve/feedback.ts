@@ -117,7 +117,28 @@ export function safeText(text: string): string {
  * finding with a stack trace about itself.
  */
 function lensOf(outcome: SolveOutcome): { accurate: boolean; correction: string } | null {
-  return outcome.kind === "no-worktree" ? null : (outcome.devLens ?? null);
+  // `crashed` joins `no-worktree` here for a different reason worth keeping
+  // straight: not that no pass ran, but that the pass which produces the lens
+  // may be the one that died. An absent correction is honest; a fabricated one
+  // would feed the fitness assessment evidence nobody gathered.
+  //
+  // Deleting the `crashed` clause kills no test, and the honest reason is that
+  // it cannot: `crashed` carries no `devLens` field, so `?? null` reaches the
+  // same answer by accident. What does catch it is `tsc` — the property does
+  // not exist on that member of the union, so the narrowing is load-bearing at
+  // compile time even though it is inert at run time. Recorded as mechanically
+  // enforced by the type checker rather than by a test, in the same spirit as
+  // the backstop notes in `worktree.ts` and `verify.ts`.
+  //
+  // `unusable-base` joins them for the first reason rather than the second: it
+  // is decided before recon runs, so there is no lens to be accurate or
+  // inaccurate about. Scoring the fitness call on a run that never read the
+  // code would credit or blame triage for a broken build.
+  return outcome.kind === "no-worktree" ||
+    outcome.kind === "crashed" ||
+    outcome.kind === "unusable-base"
+    ? null
+    : (outcome.devLens ?? null);
 }
 
 /**
@@ -134,13 +155,31 @@ function headline(outcome: SolveOutcome): string {
     case "no-worktree": {
       return `No branch could be cut, so nothing was attempted: ${safeText(outcome.reason)}`;
     }
+    case "unusable-base": {
+      // Phrased to put the repository, not the ticket, in the reader's way. The
+      // ticket may be perfectly solvable; this run could not have told anyone.
+      return `The repository's own build does not pass before any change, so nothing was attempted and nothing can be concluded about this ticket: ${safeText(
+        outcome.reason,
+      )}`;
+    }
     case "bailed": {
       return `An agent read the code and stopped before changing anything: ${safeText(
         outcome.reason,
       )}`;
     }
     case "abandoned": {
-      return `An agent started and stopped once it saw the files: ${safeText(outcome.reason)}`;
+      // The two causes are opposite claims and must not share a sentence. A
+      // `judgement` abandon says the ticket was misjudged; an `environment`
+      // abandon says this machine got in the way and the ticket was never
+      // reached. Phrased in the same register as `crashed` for that reason —
+      // it is the same class of statement.
+      return outcome.cause === "environment"
+        ? `An agent was prevented from working — this is about the machine, not the ticket, and says nothing about whether it is solvable: ${safeText(
+            outcome.reason,
+          )}`
+        : `An agent read the code and judged the change should not be made as briefed: ${safeText(
+            outcome.reason,
+          )}`;
     }
     case "refused": {
       return `An agent made a change, but the harness would not judge it (${outcome.stage}), so nothing here says whether the change was any good: ${outcome.reasons
@@ -149,6 +188,14 @@ function headline(outcome: SolveOutcome): string {
     }
     case "failed": {
       return `An agent made a change and this repository's own checks rejected it: ${safeText(
+        outcome.reason,
+      )}`;
+    }
+    case "crashed": {
+      // Phrased to be unmistakably about the harness. This is the outcome most
+      // likely to be misread as "the agent could not do it", which would put a
+      // false data point into the fitness assessment.
+      return `The ${outcome.pass} step did not finish, so nothing was judged and this says nothing about whether the ticket is solvable: ${safeText(
         outcome.reason,
       )}`;
     }
@@ -205,12 +252,25 @@ const HEADER = [
   "",
 ].join("\n");
 
+/**
+ * The `Outcome` column, which is read down the page as a scoreboard.
+ *
+ * `abandoned` alone is the one kind that means two incompatible things, and the
+ * table is the place where that matters most: a reader counting abandons to
+ * decide whether triage's blind call can be trusted would be counting the
+ * host's safety hook among the ticket's own failures. The cause is appended
+ * rather than folded into a second column so old rows stay readable.
+ */
+function outcomeLabel(outcome: SolveOutcome): string {
+  return outcome.kind === "abandoned" ? `abandoned (${outcome.cause})` : outcome.kind;
+}
+
 /** One table row. Pure. */
 export function calibrationRow(issueKey: string, outcome: SolveOutcome, now: Date): string {
   const lens = lensOf(outcome);
   const verdict = lens === null ? "n/a" : lens.accurate ? "ok" : "**wrong**";
   const correction = lens === null || lens.accurate ? "—" : safeText(lens.correction) || "—";
-  return `| ${now.toISOString()} | ${issueKey} | ${outcome.kind} | ${verdict} | ${correction} |\n`;
+  return `| ${now.toISOString()} | ${issueKey} | ${outcomeLabel(outcome)} | ${verdict} | ${correction} |\n`;
 }
 
 /**
@@ -274,7 +334,7 @@ export async function reportOutcome(
 
   logger.info("solve.feedback", {
     issueKey,
-    outcome: outcome.kind,
+    outcome: outcomeLabel(outcome),
     devLensAccurate: lens?.accurate ?? null,
   });
 

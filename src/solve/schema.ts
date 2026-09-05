@@ -113,6 +113,7 @@ export const FIX_SCHEMA = {
     "testOmittedReason",
     "residualRisk",
     "abandoned",
+    "abandonedCause",
   ],
   properties: {
     changed: {
@@ -138,7 +139,7 @@ export const FIX_SCHEMA = {
     commitBody: {
       type: "string",
       description:
-        "Why the change was made. The diff already shows what changed, so do not narrate it. Do NOT include the issue key or a tracking reference — the harness appends that itself, because it knows the key and asking you to remember it would only invent a way for the run to fail. Must not claim tests pass or that the fix is verified.",
+        "Why the change was made, in ONE OR TWO SENTENCES — as short as a person writes a commit. The harness keeps only the first two sentences and discards the rest, so put the reason first. The diff already shows what changed, so do not narrate it. Save the longer explanation for `summary` and `residualRisk`, which reach the pull request. Do NOT include the issue key or a tracking reference — the harness appends that itself, because it knows the key and asking you to remember it would only invent a way for the run to fail. Must not claim tests pass or that the fix is verified.",
     },
     testAdded: {
       type: "boolean",
@@ -158,6 +159,12 @@ export const FIX_SCHEMA = {
       type: "string",
       description:
         "Non-empty if you made no change and the run should be discarded — for instance because the recon brief turned out to be wrong once you read the files again. Do not substitute a different change from the one the brief described: the diff bound was calculated against that brief. Leave the worktree as you found it.",
+    },
+    abandonedCause: {
+      type: "string",
+      enum: ["none", "judgement", "environment"],
+      description:
+        "Why the run was abandoned. `none` if and only if `abandoned` is empty. `judgement` means you read the code and concluded the change should not be made as briefed — that is a verdict about the ticket, and it is fed back to the triage assessment that called this ticket solvable. `environment` means you were prevented from working: a tool call denied by a safety hook, a file you could not open, a missing dependency. Choose `environment` whenever the obstacle was not about the code, even if you are unsure — an environment cause is retried on a clean worktree and costs only a rerun, whereas a `judgement` cause is recorded as evidence that the ticket was misjudged, and a wrong entry there quietly corrupts a record nobody can audit afterwards.",
     },
   },
 } as const;
@@ -281,7 +288,7 @@ export const REVIEW_SCHEMA = {
     commitBody: {
       type: "string",
       description:
-        "Why this round changed what it did. Do NOT include the issue key — the harness appends it. Must not claim tests pass.",
+        "Why this round changed what it did, in ONE OR TWO SENTENCES — as short as a person writes a commit. The harness keeps only the first two sentences and discards the rest, so put the reason first. Do NOT include the issue key — the harness appends it. Must not claim tests pass.",
     },
     unresolved: {
       type: "string",

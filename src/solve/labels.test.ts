@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { SolveMode } from "../settings.ts";
 import {
   AGENT_LABELS,
+  type ClaimAuthority,
   LabelStateError,
   SOLVE_QUEUE_EXCLUDED_LABELS,
   applyEdit,
@@ -47,11 +47,49 @@ describe("eligibility", () => {
     expect(isEligible(["bug", "dor:pass"], "auto")).toBe(false);
   });
 
-  it("treats an unrecognised mode as manual rather than as auto", () => {
+  it("treats an unrecognised authority as manual rather than as auto", () => {
     // `solveMode` refuses such a value, so this can only arrive via a caller
     // that read the mode from somewhere else. It still must not skip the human.
-    expect(isEligible([AGENT_LABELS.solvable], "Auto" as SolveMode)).toBe(false);
-    expect(isEligible([AGENT_LABELS.solvable], "" as SolveMode)).toBe(false);
+    expect(isEligible([AGENT_LABELS.solvable], "Auto" as ClaimAuthority)).toBe(false);
+    expect(isEligible([AGENT_LABELS.solvable], "" as ClaimAuthority)).toBe(false);
+    expect(isEligible([AGENT_LABELS.solvable], "Named" as ClaimAuthority)).toBe(false);
+  });
+
+  describe("the named authority — an operator typed the key", () => {
+    it("needs no agent:start, because the terminal is the authorisation", () => {
+      expect(eligibility([AGENT_LABELS.solvable], "named")).toEqual({ eligible: true });
+    });
+
+    it("still refuses a ticket triage never marked solvable", () => {
+      // The load-bearing half. Naming a ticket answers "may this run", which is
+      // not "can an agent fix this" — and only triage has made that call. A
+      // `named` authority that skipped this would make the whole fitness
+      // assessment optional from the command line, which is where it is most
+      // likely to be skipped and least likely to be noticed.
+      const verdict = eligibility([AGENT_LABELS.start], "named");
+      expect(verdict.eligible).toBe(false);
+      expect(verdict).toMatchObject({ reason: expect.stringContaining("agent:solvable") });
+    });
+
+    it.each([AGENT_LABELS.solving, AGENT_LABELS.reviewing, AGENT_LABELS.done, AGENT_LABELS.failed])(
+      "still refuses a ticket already carrying %s",
+      (blocker) => {
+        // Naming a ticket does not override the dedupe. Somebody else's claim
+        // is not ceremony an operator gets to skip.
+        expect(isEligible([AGENT_LABELS.solvable, blocker], "named")).toBe(false);
+      },
+    );
+
+    it("consumes an agent:start that happens to be there", () => {
+      // A human authorised it on the board, then somebody ran the command
+      // instead of waiting for the poller. Leaving the label behind would hand
+      // the queue a standing approval for work that has already been done.
+      expect(claimTransition(AUTHORISED, "named").remove).toEqual([AGENT_LABELS.start]);
+    });
+
+    it("removes nothing when there was no standing approval to consume", () => {
+      expect(claimTransition([AGENT_LABELS.solvable], "named").remove).toEqual([]);
+    });
   });
 
   it.each([AGENT_LABELS.solving, AGENT_LABELS.reviewing, AGENT_LABELS.done, AGENT_LABELS.failed])(

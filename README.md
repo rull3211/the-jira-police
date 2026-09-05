@@ -235,9 +235,11 @@ a repo on `SOLVE_REPOS`.
 
 Re-run `SOLVE_ENABLED=true pnpm solve:once` after each step.
 
-**Add the labels in the Jira UI, not through the MCP tool.** The UI adds one label atomically;
-the write path available to this service can only replace the whole label field, which would
-silently drop anything edited in between. See invariant 11 in `ARCHITECTURE.md`.
+**Add the labels however you like.** This paragraph used to say "in the Jira UI, not through the
+MCP tool", because the only write path this service had replaced the whole label field and would
+silently drop anything edited in between. It no longer does: `JiraClient.updateLabels` sends
+Jira's own `update.labels.add` / `.remove` and can only ever name `agent:*`. See invariant 11 in
+`ARCHITECTURE.md`.
 
 The other two decision types need no board changes — both are env overrides on top of step 2:
 
@@ -270,18 +272,60 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 
 The typecheck script is **`check-types`**, not `typecheck`.
 
-### Flags that do not exist yet
+### The escalation ladder
 
-`solve:once` takes no arguments today. As the remaining phases land it grows one flag each, every
-one implying the ones before it, so the command line reads as the privilege escalation it is:
+Each `solve:once` flag is one phase's worth of privilege, so the command line reads as the
+escalation it is. **The ladder is cumulative**: `--pr` claims the ticket, solves it and opens the
+pull request. This README previously said it was not, which was true while the phases were built
+out of order and `--claim` refused; both are wired now.
 
 ```
-pnpm solve:once                    # whole queue, dry              ← built
+pnpm solve:once                    # whole queue, dry
 pnpm solve:once SSX-1234           # one named ticket, dry
-pnpm solve:once SSX-1234 --claim   # writes the claim label
-pnpm solve:once SSX-1234 --solve   # runs the solver, nothing pushed
-pnpm solve:once SSX-1234 --pr      # opens the draft PR
+pnpm solve:once SSX-1234 --claim   # claims, checks the queue drops it, releases
+pnpm solve:once SSX-1234 --solve   # ... and runs the solver; nothing is pushed
+pnpm solve:once SSX-1234 --pr      # ... and opens the draft PR, reviewer @copilot
 ```
+
+**A run that stops short of a pull request puts the labels back.** `releaseClaim` restores exactly
+the set the claim found, derived from the receipt rather than from the ticket's current labels — so
+a `next:to-trio` a PM added while the ticket was claimed survives. The one run that keeps
+`agent:solving` is one that opened a pull request, because there the work is real and ongoing.
+
+The rest of the label state machine is not built. A published pull request leaves the ticket on
+`agent:solving`; `agent:reviewing` and `agent:done` are moved by hand for now, and the command says
+so when it happens.
+
+### Temporary: the pnpm 9 shim, and when a solve needs it
+
+**Delete this section once the pilot repository pins its own `packageManager`.** There is a PR to
+write that does exactly that; until it merges, this is the workaround.
+
+`--solve` runs the pilot repository's own install and test scripts in the worktree. That
+repository's manifest declares no `packageManager`, so `verify.ts` falls back to whichever `pnpm`
+is on `PATH` — and this machine's is 11, which no longer honours the `pnpm.overrides` block the
+repository's pnpm-9 lockfile depends on. The install dies on a repository whose CI is green. The
+refusal says so (`versionNote`), which is how it was diagnosed, but saying so does not fix it.
+
+```bash
+mkdir -p /tmp/pnpm9bin
+printf '#!/bin/sh\nexec corepack pnpm@9.15.9 "$@"\n' > /tmp/pnpm9bin/pnpm
+chmod +x /tmp/pnpm9bin/pnpm
+```
+
+Then run the solver through `node` rather than through `pnpm`:
+
+```bash
+PATH="/tmp/pnpm9bin:$PATH" node --env-file-if-exists=.env src/cli/solve-once.ts SSX-1234 --solve
+```
+
+**`node`, not `pnpm solve:once`, and that is not a style preference.** The shell resolves `pnpm`
+_after_ applying the `PATH=` prefix, so `PATH=... pnpm solve:once` would run pnpm 9 against _this_
+repository — which pins `pnpm@11.20.0` and declares `engines.pnpm >= 11`, so it fails before it
+starts. There is no build step here, so the `node` line above is exactly what the script runs.
+
+`/tmp` is cleared on reboot. If a solve suddenly starts failing its install again, re-create the
+shim before looking anywhere else.
 
 ---
 
@@ -291,16 +335,21 @@ Full table in `ARCHITECTURE.md` §10. The ones that matter for a demo:
 
 | Setting                   | Default       | Notes                                                                   |
 | ------------------------- | ------------- | ----------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH` | —             | Required. Discovery only — this credential never writes                 |
+| `JIRA_EMAIL`, `JIRA_AUTH` | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket     |
 | `VAULT_PATH`              | —             | Required by the real skill; checked at startup, not on the first ticket |
 | `SKILL_NAME`              | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post        |
 | `WRITE_BACK`              | `false`       | The only setting the whole team can see the effect of. Strict `"true"`  |
 | `SOLVE_ENABLED`           | `false`       | Master switch for the solve queue. Strict `"true"`                      |
 | `SOLVE_MODE`              | `manual`      | `manual` also requires the human's `agent:start` label                  |
 | `SOLVE_REPOS`             | —             | Repository allowlist, **no default**. Unset means nothing is allowed    |
+| `SOLVE_GITHUB_OWNER`      | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it |
+| `SOLVE_WORKTREE_ROOT`     | —             | Where worktrees are cut. Blank means the system temp directory          |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
-post; an empty `SOLVE_REPOS` allows no repository.
+post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
+request. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
+open in a file browser, because macOS puts the default under `/private/var` and the diff review the
+solver phase depends on is a person reading that worktree.
 
 ---
 
@@ -313,14 +362,22 @@ acts on it. Triage cannot read source code, so `agent:solvable` is a _candidate_
 | ----- | ---------------------------------------------------------- | -------------------- |
 | A     | Fitness assessment in triage, `agent:solvable`             | **built**            |
 | B1    | The picker: solve queue, claim planning, cycle report      | **built**            |
-| B2    | The claim write, verified by re-reading, plus release      | not started          |
-| C     | The solver: worktree, recon, edit, verification, diff gate | not started          |
-| D     | Push, draft PR, Copilot review loop, undraft               | not started          |
+| B2    | The claim write, verified by re-reading, plus release      | **built**            |
+| C     | The solver: worktree, recon, edit, verification, diff gate | **built**            |
+| D     | Push, draft PR, reviewer requested                         | **built and run**    |
+| D2    | The Copilot review loop and undraft (`advance`)            | built, not called    |
 | E     | Run it from the daemon                                     | **last, on purpose** |
 
 Every phase owes two hand-operated commands before it counts as done: a dry run that reports what
 it _would_ change, and a single run against one named ticket. The daemon is last because the only
 thing it adds is that nobody is watching — a ticket claimed, solved and PR'd by hand is a
 demonstration; the same sequence on a five-minute timer is a deployment.
+
+D was driven end to end on 2026-09-04: SSX-3822 claimed, solved, verified, committed, pushed, and
+opened as [draft PR #2657](https://github.com/storebrand-digital/buy-insurance-advisor-web/pull/2657)
+with Copilot requested. Copilot itself then failed — its app installation cannot read pull requests
+in that repository — which is an org permission to grant and not a thing this codebase can fix.
+It is recorded here because it is the reason D2 stays uncalled: see `reviewerErrored` in
+`src/solve/pr.ts` for why a reviewer's own error must not be read as an approval.
 
 A human always merges. The bot has no merge path.

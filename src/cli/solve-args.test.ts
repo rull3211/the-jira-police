@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PHASES, parseSolveArgs, rank, unavailable, writes } from "./solve-args.ts";
+import { PHASES, includes, parseSolveArgs, rank, unavailable, writes } from "./solve-args.ts";
 
 /** The invocation, or a failure that names what went wrong. */
 function parsed(argv: readonly string[]): { issueKey: string | null; phase: string } {
@@ -95,36 +95,81 @@ describe("rank and writes", () => {
   });
 });
 
-describe("unavailable", () => {
-  it("lets the dry run through", () => {
-    expect(unavailable("plan")).toBeNull();
-  });
-
-  it("blocks every phase that would write, so far", () => {
-    // The inertness the plan promises, asserted rather than described. When a
-    // phase is wired this test is what forces the claim in the header to be
-    // updated in the same change — which is the whole habit this repo is built
-    // around.
-    for (const phase of PHASES.filter((candidate) => candidate !== "plan")) {
-      expect(unavailable(phase)).toBeTruthy();
-    }
-  });
-
-  it("names the missing wiring rather than saying no", () => {
-    // An operator who types `--claim` and reads "refused" learns nothing. One
-    // who reads which module is missing can check the claim themselves.
-    expect(unavailable("claim")).toContain("B2");
-    expect(unavailable("solve")).toContain("orchestrator.ts");
-    expect(unavailable("pr")).toContain("delivery.ts");
-  });
-
-  it("agrees with `writes` about which phases are dangerous", () => {
-    // Two lists that must stay in step: one decides what the parser demands an
-    // issue key for, the other decides what refuses to run. They are derived
-    // from the same ordering, and this is the assertion that keeps a future
-    // phase from being added to one and forgotten in the other.
+describe("includes", () => {
+  it("makes every rung include itself", () => {
     for (const phase of PHASES) {
-      expect(unavailable(phase) !== null).toBe(writes(phase));
+      expect(includes(phase, phase)).toBe(true);
     }
+  });
+
+  it("makes the pull request rung do the claim and the solve", () => {
+    // THE ONE THAT MATTERS on this function. An equality check here would skip
+    // the claim on a `--pr` run and leave the solver working on a ticket the
+    // board shows as unclaimed.
+    expect(includes("pr", "claim")).toBe(true);
+    expect(includes("pr", "solve")).toBe(true);
+  });
+
+  it("does not reach upward", () => {
+    expect(includes("claim", "solve")).toBe(false);
+    expect(includes("claim", "pr")).toBe(false);
+    expect(includes("solve", "pr")).toBe(false);
+  });
+
+  it("agrees with writes about the free rung", () => {
+    for (const phase of PHASES) {
+      expect(includes(phase, "claim")).toBe(writes(phase));
+    }
+  });
+});
+
+/** Settings with an owner configured, which is the only key this module reads. */
+const OWNED = { SOLVE_GITHUB_OWNER: "storebrand-digital" };
+
+describe("unavailable", () => {
+  it("lets every rung through once the owner is configured", () => {
+    // This block used to assert that the rungs above `plan` refused because
+    // nothing had been wired, and it did its job twice: wiring phase C broke it,
+    // then wiring B2 and D broke it again, each time forcing the header and the
+    // usage text to be corrected in the same change.
+    for (const phase of PHASES) {
+      expect(unavailable(phase, OWNED)).toBeNull();
+    }
+  });
+
+  it("refuses the pull request rung when no GitHub owner is configured", () => {
+    // The setting has no fallback on purpose. Without this check the failure
+    // arrives from `buildPublishRequest` — after the ticket has been claimed and
+    // the solver has run.
+    expect(unavailable("pr", { SOLVE_GITHUB_OWNER: "" })).toContain("SOLVE_GITHUB_OWNER");
+  });
+
+  it("treats whitespace as unset", () => {
+    expect(unavailable("pr", { SOLVE_GITHUB_OWNER: "   " })).toBeTruthy();
+  });
+
+  it("does not refuse the rungs that do not need an owner", () => {
+    // A missing GitHub owner must not stop a claim or a solve. Both are useful
+    // on their own, and neither goes near GitHub.
+    for (const phase of ["plan", "claim", "solve"] as const) {
+      expect(unavailable(phase, { SOLVE_GITHUB_OWNER: "" })).toBeNull();
+    }
+  });
+
+  it("says what the setting is for rather than only naming it", () => {
+    // An operator who reads "SOLVE_GITHUB_OWNER is not set" still has to guess
+    // whether it is an org, a user, or `owner/repo`.
+    expect(unavailable("pr", { SOLVE_GITHUB_OWNER: "" })).toContain("GitHub account");
+  });
+
+  it("still demands an issue key for everything that can change anything", () => {
+    // `unavailable` and `writes` used to be required to agree, on the grounds
+    // that every writing phase was also unwired. Wiring `--solve` separated
+    // them: it writes — to a worktree — and is available. The property worth
+    // keeping is the parser's, and it is unchanged.
+    for (const phase of PHASES) {
+      expect(writes(phase)).toBe(phase !== "plan");
+    }
+    expect(parseSolveArgs(["--solve"]).ok).toBe(false);
   });
 });

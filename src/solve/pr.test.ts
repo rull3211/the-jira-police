@@ -245,6 +245,45 @@ describe("commitAll", () => {
     expect(reason(result)).toContain("pathspec did not match");
   });
 
+  it("keeps the end of a long failure, where the verdict is", async () => {
+    // REGRESSION, 2026-09-04. The first live `--pr` run was rejected by the
+    // target repo's commit-msg hook, and the log said nothing useful: commitlint
+    // echoes the message it was handed *before* printing its verdict, so a
+    // head-only truncation kept 300 characters of our own commit body and cut
+    // the rule name — the one part that says what to change.
+    const echo = `⧗   input: fix(advisor): add a favicon\n\n${"padding ".repeat(60)}`;
+    const runner = fakeRunner({
+      commit: { exitCode: 1, stdout: `${echo}\n✖   body's lines must not be longer than 100` },
+    });
+
+    const result = await commitAll(runner, commitRequest());
+
+    expect(reason(result)).toContain("body's lines must not be longer than 100");
+  });
+
+  it("keeps the start of a long failure too, and marks what it dropped", async () => {
+    // Tail-only would be the same mistake facing the other way: a tool that
+    // fails on step three of five names the step at the top.
+    const runner = fakeRunner({
+      commit: { exitCode: 1, stderr: `step 3 of 5 failed\n${"x".repeat(900)}\ntrailing detail` },
+    });
+
+    const result = await commitAll(runner, commitRequest());
+
+    expect(reason(result)).toContain("step 3 of 5 failed");
+    expect(reason(result)).toContain("trailing detail");
+    expect(reason(result)).toMatch(/\[…\d+ chars…\]/u);
+  });
+
+  it("does not mangle a failure short enough to print whole", async () => {
+    const runner = fakeRunner({ commit: { exitCode: 1, stderr: "error: pathspec did not match" } });
+
+    const result = await commitAll(runner, commitRequest());
+
+    expect(reason(result)).toContain("exit 1: error: pathspec did not match");
+    expect(reason(result)).not.toContain("chars…");
+  });
+
   it("treats a timed-out commit as a failure even though the exit code is zero", async () => {
     // The runner reports a killed command as exit 0 plus `timedOut`, and it
     // could plausibly have printed "nothing to commit" before it hung.
@@ -575,7 +614,13 @@ describe("readReview", () => {
 
     expect(result).toEqual({
       outcome: "read",
-      review: { reviewerResponded: false, comments: [], state: "OPEN", isDraft: true },
+      review: {
+        reviewerResponded: false,
+        reviewerErrored: false,
+        comments: [],
+        state: "OPEN",
+        isDraft: true,
+      },
     });
   });
 
@@ -593,6 +638,7 @@ describe("readReview", () => {
 
     expect(result.outcome === "read" ? result.review : null).toEqual({
       reviewerResponded: true,
+      reviewerErrored: false,
       comments: [
         { author: "copilot", body: "Two things below." },
         { author: "copilot", body: "Nit: rename this." },
@@ -600,6 +646,92 @@ describe("readReview", () => {
       state: "OPEN",
       isDraft: true,
     });
+  });
+
+  // The exact body GitHub posted on PR #2657, 2026-09-04. The Copilot app was
+  // requested, ran, and could not read the pull request — its installation
+  // lacked `pull_requests: read` on that repository — and reported that as an
+  // ordinary COMMENTED review.
+  const COPILOT_ERROR =
+    "Copilot encountered an error and was unable to review this pull request. " +
+    "You can try again by re-requesting a review.";
+
+  it("does not read a reviewer's own error as feedback to act on", async () => {
+    // Feeding this to a review round spends a paid pass asking a model to
+    // address an error message.
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: COPILOT_ERROR }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
+  });
+
+  it("does not read a reviewer's own error as a clean review either", async () => {
+    // The worse of the two. An empty comment list plus `reviewerResponded` is
+    // indistinguishable from an approval, so the loop would undraft and mark
+    // the ticket done on the strength of a review that never happened.
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: COPILOT_ERROR }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.reviewerErrored : null).toBe(true);
+  });
+
+  it("still counts the error as the reviewer having responded", async () => {
+    // It did respond. What it said was that it could not review, and those are
+    // two different facts — collapsing them would make the loop wait forever
+    // for a reviewer that has already answered.
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: COPILOT_ERROR }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.reviewerResponded : null).toBe(true);
+  });
+
+  it("does not mistake a review that discusses an error for a failed review", async () => {
+    // Both phrases must appear. "encountered an error" alone is ordinary
+    // review prose about the code under review.
+    const runner = fakeRunner(
+      view(
+        payload({
+          reviews: [
+            {
+              author: { login: "copilot" },
+              body: "This encountered an error path that is not covered by a test.",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.reviewerErrored : null).toBe(false);
+    expect(result.outcome === "read" ? result.review.comments : []).toHaveLength(1);
+  });
+
+  it("ignores an error notice posted by somebody who is not the reviewer", async () => {
+    // `reviewerErrored` is a statement about the reviewer we asked for. A human
+    // quoting the failure in a comment has not made the reviewer fail.
+    const runner = fakeRunner(
+      view(payload({ comments: [{ author: { login: "a-human" }, body: COPILOT_ERROR }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.reviewerErrored : null).toBe(false);
+    // And it is kept as a comment. A person quoting the failure is asking for
+    // something; deleting their message because a bot used the same words would
+    // be the recogniser reaching past what it knows.
+    expect(result.outcome === "read" ? result.review.comments : []).toEqual([
+      { author: "a-human", body: COPILOT_ERROR },
+    ]);
   });
 
   it.each([
@@ -685,7 +817,13 @@ describe("readReview", () => {
 
     expect(result).toEqual({
       outcome: "read",
-      review: { reviewerResponded: false, comments: [], state: "OPEN", isDraft: true },
+      review: {
+        reviewerResponded: false,
+        reviewerErrored: false,
+        comments: [],
+        state: "OPEN",
+        isDraft: true,
+      },
     });
   });
 
