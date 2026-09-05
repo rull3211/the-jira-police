@@ -251,8 +251,17 @@ export type Spoken =
  *
  * Draft means *this side is still working*. A round that pushed a commit is
  * still working — the reviewer has something new to read — so it stays a draft.
- * A round that changed nothing has done everything it can, and leaving it in
- * draft buys another full round whose only discovery is an empty inbox.
+ * A round that changed nothing has done everything it can, and the honest thing
+ * is to hand the pull request to a human, which is what undrafting is.
+ *
+ * **The obvious argument for this is wrong and is not the reason.** It is
+ * tempting to say the draft costs a paid round to clear; it does not. The
+ * empty-inbox path returns `ready` before the pass runs, so a later tick that
+ * finds nothing new spends no money at all — measured on #2658, where it took
+ * 2.5 seconds. What the delay actually costs is that the wait is not bounded:
+ * the tick only clears the draft *if nothing new arrives*, so on a pull request
+ * anyone is still commenting on, the draft never clears, and a human reviews a
+ * pull request whose own flag says it is unfinished.
  *
  * `failed` is separate from `still-drafting` because they are opposite
  * instructions. One is a person clicking "Ready for review"; the other is
@@ -823,10 +832,10 @@ export async function advance(
     // that answered without editing has answered, and its argument belongs next
     // to the comment it answers rather than only in a terminal.
     //
-    // Then the pull request leaves draft. This side is finished with it — there
-    // is nothing for the reviewer to re-read and nothing more this loop can do
-    // — so holding the draft only buys another paid round to discover an empty
-    // inbox, on every tick once E is driving.
+    // Then the pull request leaves draft. This side is finished with it: there
+    // is nothing for the reviewer to re-read and nothing more this loop can do,
+    // so the flag saying otherwise is just wrong. See `Undraft` for why waiting
+    // for a later tick to clear it is not a reliable substitute.
     const threadOutcome = await answer();
     const spoken = await say();
     return {

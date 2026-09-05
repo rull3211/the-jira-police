@@ -620,7 +620,9 @@ describe("advance", () => {
 
   it("takes the pull request out of draft when the round changed nothing", async () => {
     // This side is finished: nothing new to re-read, nothing more the loop can
-    // do. Holding the draft buys one more paid round to discover an empty inbox.
+    // do. A later tick would clear the draft only if nothing new arrived, so on
+    // an active pull request it never clears and a human reviews something
+    // flagged unfinished.
     const h = harness({ review: review({ changed: false }) });
 
     const outcome = await advance(h.deps, advanceRequest);
