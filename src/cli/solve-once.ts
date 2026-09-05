@@ -6,6 +6,7 @@
  *   node src/cli/solve-once.ts SSX-3822 --claim   writes the claim label
  *   node src/cli/solve-once.ts SSX-3822 --solve   ... and runs the solver
  *   node src/cli/solve-once.ts SSX-3822 --pr      ... and opens the draft PR
+ *   node src/cli/solve-once.ts SSX-3822 --advance one review round on the open PR
  *
  * The ladder is `solve-args.ts`, including why anything past the first two rungs
  * refuses to run without an issue key. The rungs themselves are `solve-run.ts`,
@@ -76,9 +77,23 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  const { issueKey, phase } = args.invocation;
-
   const settings = readSettings();
+
+  if (args.invocation.mode === "advance") {
+    // Parsed, refused, and deliberately in that order. `--advance` is a flag an
+    // operator can type from this commit and a review round they cannot run
+    // until the next one — the same shape every other capability here shipped
+    // in, because the reviewable event is the wiring rather than the code.
+    // Replacing this branch with the call is the whole of that commit.
+    process.stderr.write(
+      "--advance is not wired yet — the review round exists but nothing calls it\n",
+    );
+    logger.warn("solve-once.refused", { mode: "advance", issueKey: args.invocation.issueKey });
+    process.exitCode = 3;
+    return;
+  }
+
+  const { issueKey, phase } = args.invocation;
 
   // Checked before the board is read, and long before anything is written. A
   // rung that cannot run should not cost a Jira round trip, and above all should

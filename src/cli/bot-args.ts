@@ -35,7 +35,7 @@
  * only have created the combination that always fails.
  */
 
-import { type ParsedArgs, parseSolveArgs } from "./solve-args.ts";
+import { type ParsedLadderArgs, parseSolveArgs } from "./solve-args.ts";
 
 export const USAGE =
   "usage: bot-once <ISSUE-KEY> [--claim | --solve | --pr]\n" +
@@ -61,12 +61,27 @@ export const USAGE =
  * precondition for this command existing at all, and an operator who supplies
  * one gets the flag error on the next attempt from the parser below.
  */
-export function parseBotArgs(argv: readonly string[]): ParsedArgs {
+export function parseBotArgs(argv: readonly string[]): ParsedLadderArgs {
   if (!argv.some((arg) => !arg.startsWith("-"))) {
     return {
       ok: false,
       error: "an issue key is required — this command triages one named ticket, not a queue",
     };
   }
-  return parseSolveArgs(argv);
+  const parsed = parseSolveArgs(argv);
+  if (!parsed.ok) {
+    return parsed;
+  }
+  // Refused rather than quietly ignored. This command's whole shape is triage
+  // *then* solve, so there is no pull request for a review round to act on —
+  // and an operator who typed `--advance` here wants the other command, not a
+  // run that silently did something else with their ticket.
+  if (parsed.invocation.mode !== "ladder") {
+    return {
+      ok: false,
+      error:
+        "--advance is not a bot:once flag — this command triages a ticket and then solves it, so there is no pull request to advance yet; use solve:once <ISSUE-KEY> --advance",
+    };
+  }
+  return { ok: true, invocation: parsed.invocation };
 }
