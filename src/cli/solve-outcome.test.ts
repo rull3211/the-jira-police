@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
+import type { ReviewCycleOutcome } from "../solve/review-cycle.ts";
 import {
   chainDecision,
+  completionLabelFor,
   describeAdvanceOutcome,
+  describeReviewSweep,
   describeSolveOutcome,
+  endedState,
   isAdvanceFailureExit,
   isFailureExit,
   reportsToTicket,
@@ -880,5 +884,110 @@ describe("reportsToTicket", () => {
 
   it("stays quiet on success, because the pull request is the notification", () => {
     expect(reportsToTicket(verified)).toBe(false);
+  });
+});
+
+describe("describeReviewSweep", () => {
+  const quiet: ReviewCycleOutcome = {
+    watched: 4,
+    acted: [],
+    settled: [],
+    ended: [],
+    unlooked: [],
+    deferred: [],
+  };
+
+  it("says a quiet pass in one line", () => {
+    // A watch prints this every tick forever. If a pass on which nothing
+    // happened is more than one line, the log is unreadable by the time
+    // anything does happen.
+    const line = describeReviewSweep(7, quiet);
+    expect(line).toBe("pass 7: 4 watched");
+    expect(line).not.toContain("\n");
+  });
+
+  it("names every ticket it spent money on, rather than counting them", () => {
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      acted: [
+        { issueKey: "SSX-1", number: 11, outcome: { kind: "waiting", quietMs: null } },
+        {
+          issueKey: "SSX-2",
+          number: 22,
+          outcome: { kind: "failed", stage: "worktree", reason: "dirty" },
+        },
+      ],
+    });
+    expect(line).toContain("SSX-1 #11 waiting");
+    expect(line).toContain("SSX-2 #22 failed");
+  });
+
+  it("reports the deferral, because that is the bound doing something", () => {
+    // The mutation this catches is dropping the branch as noise. Deferred work
+    // is actionable work this pass declined to pay for, and hiding it makes
+    // MAX_REVIEW_ROUNDS_PER_TICK invisible at the only moment it is visible —
+    // which reads, from a terminal, as a loop ignoring a reviewer.
+    expect(describeReviewSweep(1, { ...quiet, deferred: ["SSX-9", "SSX-10"] })).toContain(
+      "2 deferred",
+    );
+  });
+
+  it("gives a failed look its reason and not just a count", () => {
+    // A look that failed repeats identically every pass until somebody reads
+    // why, so a bare number would scroll past forever saying nothing.
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      unlooked: [{ issueKey: "SSX-3", reason: "gh timed out" }],
+    });
+    expect(line).toContain("SSX-3: gh timed out");
+  });
+
+  it("distinguishes a merge from a close", () => {
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      ended: [
+        { issueKey: "SSX-4", number: 44, state: "MERGED" },
+        { issueKey: "SSX-5", number: 55, state: "CLOSED" },
+      ],
+    });
+    expect(line).toContain("SSX-4 MERGED");
+    expect(line).toContain("SSX-5 CLOSED");
+  });
+
+  it("does not print a section for something that did not happen", () => {
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      settled: [{ issueKey: "SSX-6", number: 66, outcome: { kind: "waiting", quietMs: 1 } }],
+    });
+    expect(line).toContain("1 settled");
+    expect(line).not.toContain("deferred");
+    expect(line).not.toContain("could not look");
+  });
+});
+
+describe("endedState and completionLabelFor", () => {
+  it("gives agent:done to a merge and nothing else", () => {
+    // THE ONE GUARDING THE NUMBER. `agent:done` is the count of bugs this tool
+    // fixed. Widen it to any ended pull request and the count silently absorbs
+    // every change a person declined — a failure that shows up as a
+    // plausible-looking figure in a report rather than as a malfunction, which
+    // is the only reason it needs a test of its own.
+    expect(completionLabelFor("MERGED")).toBe("done");
+    expect(completionLabelFor("CLOSED")).toBe("closed");
+  });
+
+  it("reads only the exact word gh prints for a merge", () => {
+    expect(endedState("MERGED")).toBe("MERGED");
+    expect(endedState("CLOSED")).toBe("CLOSED");
+  });
+
+  it("treats a state it has never seen as closed", () => {
+    // The safe direction, and the direction a `state ===` check flipped to
+    // `!==` would get wrong. `closed` counts nothing, so an unrecognised
+    // spelling costs a ticket the wrong label; the inverse would let a future
+    // `gh` inflate the number of bugs this service claims to have fixed.
+    expect(endedState("merged")).toBe("CLOSED");
+    expect(endedState("DRAFT")).toBe("CLOSED");
+    expect(endedState("")).toBe("CLOSED");
   });
 });

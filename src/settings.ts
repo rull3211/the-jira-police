@@ -255,6 +255,12 @@ export const SETTINGS = [
     fallback: "1200000",
   },
   {
+    name: "MAX_REVIEW_ROUNDS_PER_TICK",
+    description:
+      "How many pull requests one pass over the watched set may run a round for. Every other round bound is per pull request and counted from its marker; this one is per tick and is the only thing standing between a reviewer that answered twenty pull requests while the machine slept and twenty paid rounds in the first minute after it wakes — the largest single spend this service can make, on the tick nobody is watching. Three, which is roughly three dollars at the measured round cost. Tickets over the bound are deferred rather than skipped: they are still actionable, the next tick takes them, and because the set is ordered oldest-updated first the same one cannot be starved twice. Zero is meaningful and is the dry run — look at everything, spend on nothing.",
+    fallback: "3",
+  },
+  {
     name: "FAIL_FIRST_CHECK",
     description:
       "Whether a verified solve also runs its own new tests against the base, to see whether they fail when the fix is taken away. On by default, which is the opposite of every other switch here: this one grants nothing and writes nothing, and the failure mode of it being off is the thing it exists to catch — a regression test that is green against the bug it is named for. Set it to false only for cost, since it buys one extra install and one extra test run per solve. The result is reported on the pull request and never withholds one.",

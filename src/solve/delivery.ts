@@ -967,8 +967,16 @@ export async function advance(
  *
  * Everything from here needs the checkout: the reservation is the last thing
  * before the pass, and the pass, the commit and the push all run in it.
+ *
+ * **Exported for the cycle, which cannot use `advance`.** `advance` fuses the
+ * survey and the round into one call, which is right for one ticket and wrong
+ * for a set: a cycle has to look at every watched pull request and then spend on
+ * only the few with work, so its bound is counted between the two halves. A
+ * caller that reached for `advance` per ticket would bound the *looks* instead,
+ * and the first merged pull request past the bound would go unnoticed for as
+ * long as the bound kept being reached. See `review-cycle.ts`.
  */
-async function runRound(
+export async function runRound(
   deps: SolveDependencies,
   request: AdvanceRequest,
   worktree: Worktree,

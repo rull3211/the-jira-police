@@ -34,9 +34,17 @@
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
 import { logger } from "../logger.ts";
-import { type Settings, numeric } from "../settings.ts";
+import { type Settings, flag, numeric } from "../settings.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
-import { type AdvanceOutcome, advance, publish } from "../solve/delivery.ts";
+import {
+  type AdvanceOutcome,
+  type AdvanceRequest,
+  type PendingRound,
+  advance,
+  publish,
+  runRound,
+  surveyReview,
+} from "../solve/delivery.ts";
 import { reportOutcome } from "../solve/feedback.ts";
 import {
   type ClaimAuthority,
@@ -51,9 +59,20 @@ import {
   reviewStageTransition,
   reviewTransition,
 } from "../solve/labels.ts";
-import { type SolveOutcome, type SolveRequest, solveWithRetry } from "../solve/orchestrator.ts";
+import {
+  type SolveDependencies,
+  type SolveOutcome,
+  type SolveRequest,
+  solveWithRetry,
+} from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
 import { findPullRequest } from "../solve/pr.ts";
+import {
+  type ReviewCycleOutcome,
+  type ReviewLook,
+  type WatchedTicket,
+  runReviewCycle,
+} from "../solve/review-cycle.ts";
 import {
   type Worktree,
   type WorktreeResult,
@@ -69,6 +88,7 @@ import {
   buildSolveRequest,
   createClaimCapabilities,
   createSolveCommenter,
+  createReviewCycleDeps,
   createSolveDeps,
   createSolveRunDeps,
   createTicketReader,
@@ -76,8 +96,11 @@ import {
 import { type SolvePhase, includes } from "./solve-args.ts";
 import {
   chainDecision,
+  completionLabelFor,
   describeAdvanceOutcome,
+  describeReviewSweep,
   describeSolveOutcome,
+  endedState,
   isAdvanceFailureExit,
   isFailureExit,
   reportsToTicket,
@@ -548,7 +571,7 @@ export async function runAdvance(
     await moveLabels(client, issueKey, (labels) =>
       isTerminal(labels)
         ? labelEdit([], [])
-        : completionTransition(labels, found.state === "MERGED" ? "done" : "closed"),
+        : completionTransition(labels, completionLabelFor(endedState(found.state))),
     );
     return null;
   }
@@ -724,6 +747,288 @@ export async function runReviewChain(
     }
 
     process.stdout.write(`\n${decision.why} — waiting ${String(Math.round(pollMs / 1000))}s\n`);
+    await sleep(pollMs);
+  }
+}
+
+/**
+ * Everything a round needs, carried from the look that found it to the act that
+ * pays for it.
+ *
+ * The cycle calls `look` and `act` as two separate functions, so the work the
+ * look already did — the ticket read, the request, the repository — has to live
+ * somewhere between them. It is held in a map keyed by issue key rather than
+ * threaded through `ReviewLook`, because the cycle has no use for it and a type
+ * carrying a `SolveRequest` it never reads would invite a future round to use
+ * the cycle's copy instead of the caller's.
+ */
+interface ReviewTarget {
+  readonly request: AdvanceRequest;
+  /** Set by `request.attach`, read by the cleanup after the round. */
+  readonly holder: { worktree: Worktree | null };
+}
+
+/**
+ * The cheap half, for one watched ticket.
+ *
+ * Every read here names its own repository, so none of them need a checkout —
+ * that is the property `surveyReview` was split out to expose and the whole
+ * reason a loop over the watched set is affordable. A ticket whose pull request
+ * nobody has touched costs one Jira read and two `gh` reads and stops.
+ *
+ * **It throws rather than reporting most failures, and that is deliberate.** The
+ * cycle catches a rejected look, records the ticket and its reason, and carries
+ * on to the rest of the set. Returning a fourth "something went wrong" arm would
+ * make every call site of `ReviewLook` handle a case the cycle already handles
+ * once, and the one behaviour that matters — nineteen healthy pull requests do
+ * not lose their tick to the twentieth — is the same either way.
+ */
+function createReviewLook(
+  settings: Settings,
+  client: JiraClient,
+  deps: SolveDependencies,
+  targets: Map<string, ReviewTarget>,
+): (ticket: WatchedTicket) => Promise<ReviewLook> {
+  const read = createTicketReader(client);
+
+  return async (ticket: WatchedTicket): Promise<ReviewLook> => {
+    const { text, detail } = await read(ticket.key);
+    // Throws `NotSolvableError` for a ticket naming a repository the operator
+    // has not allowed. Not caught here: it is a real answer about one ticket and
+    // the cycle records it as such, where `--advance` prints it and sets an exit
+    // code because there a person is waiting on that one ticket.
+    const base = buildSolveRequest(settings, detail, text);
+
+    const branch = branchNameFor(ticket.key, detail.summary);
+    if (branch === null) {
+      throw new Error(`${ticket.key}'s summary yields no usable branch name`);
+    }
+
+    const found = await findPullRequest(deps.commands, buildFindPrRequest(settings, base, branch));
+
+    if (found.outcome === "failed") {
+      throw new Error(found.reason);
+    }
+    if (found.outcome === "none") {
+      return { outcome: "no-pull-request", reason: `no pull request on ${branch}` };
+    }
+    if (found.state !== "OPEN") {
+      return { outcome: "ended", number: found.number, state: endedState(found.state) };
+    }
+
+    const holder: { worktree: Worktree | null } = { worktree: null };
+    const attach = async (): Promise<WorktreeResult> => {
+      const attached = await attachWorktree(deps.commands, {
+        issueKey: ticket.key,
+        branch,
+        repoPath: base.repoPath,
+        parentDirectory: base.parentDirectory,
+        timeoutMs: base.gitTimeoutMs,
+      });
+      if (attached.outcome === "created") {
+        holder.worktree = attached.worktree;
+      }
+      return attached;
+    };
+
+    // Built here and reused by `act` rather than rebuilt there. The round has to
+    // run against the same numbers the survey decided on — a `MAX_REVIEW_ITERATIONS`
+    // read twice could differ across a long tick, and the marker would then
+    // record a round the survey never authorised.
+    const request = buildAdvanceRequest(settings, base, attach, found.number);
+    targets.set(ticket.key, { request, holder });
+
+    const surveyed = await surveyReview(deps.commands, request);
+    return surveyed.outcome === "settled"
+      ? { outcome: "settled", number: found.number, result: surveyed.result }
+      : { outcome: "round", number: found.number, pending: surveyed.pending };
+  };
+}
+
+/**
+ * The expensive half: attach, run the round, put the checkout back.
+ *
+ * This is `advance`'s tail, and it is spelled out here rather than by calling
+ * `advance` because `advance` would survey again. A second survey between the
+ * look and the round is not merely wasted: it would read a comment posted in the
+ * intervening seconds and run against a batch the cycle's bound never counted.
+ */
+function createReviewAct(
+  deps: SolveDependencies,
+  targets: Map<string, ReviewTarget>,
+): (ticket: WatchedTicket, pending: PendingRound, number: number) => Promise<AdvanceOutcome> {
+  return async (ticket, pending, number) => {
+    const target = targets.get(ticket.key);
+    if (target === undefined) {
+      // Unreachable through the cycle, which only acts on a ticket it looked at.
+      // Thrown rather than defaulted because the alternative is inventing a
+      // request and spending money against it.
+      throw new Error(`no prepared round for ${ticket.key}`);
+    }
+
+    process.stdout.write(`\n${ticket.key}: round on #${String(number)}\n`);
+
+    const attached = await target.request.attach();
+    if (attached.outcome === "refused") {
+      // Nothing has been reserved — the reservation is on the far side of the
+      // checkout — so the next tick will decide the same thing again, which is
+      // right for a checkout that failed for a local reason.
+      return { kind: "failed", stage: "worktree", reason: attached.reason };
+    }
+
+    const result = await runRound(deps, target.request, attached.worktree, pending);
+
+    if (target.holder.worktree !== null) {
+      // Kept only for a refusal, where the diff is the evidence an operator
+      // needs to decide whether the gate or the pass was wrong. Everything else
+      // either pushed its work or wrote nothing.
+      await removeWorktree(
+        deps.commands,
+        target.holder.worktree,
+        result.kind === "refused" ? "keep-as-evidence" : "discard",
+        target.request.gitTimeoutMs,
+      );
+    }
+
+    return result;
+  };
+}
+
+/**
+ * One pass over the watched set, with the label writes the cycle refuses to make.
+ *
+ * `runReviewCycle` reads and decides and writes nothing, exactly as
+ * `runSolveCycle` does, so the three label transitions live here: the terminal
+ * for a pull request that ended, and the draft-flag mirror for everything that
+ * reached an answer. That split is not tidiness — a write is a visible change to
+ * an interface a reviewer would look at, and it should be findable at a call
+ * site rather than buried in a loop body.
+ */
+export async function runReviewSweep(
+  settings: Settings,
+  client: JiraClient,
+  issueKey: string | null,
+): Promise<ReviewCycleOutcome> {
+  const targets = new Map<string, ReviewTarget>();
+  // Built once, before the cycle, and shared by both halves. Not for the saving
+  // — it is a command runner and a clock — but because it throws `SettingsError`
+  // on a missing `VAULT_PATH`, and inside the look that throw is caught by the
+  // cycle and filed as one ticket's problem. A watch would then report every
+  // ticket as unlookable, every pass, forever, with the real cause named once
+  // per ticket in a list of reasons nobody reads twice.
+  const runDeps = createSolveRunDeps(settings);
+  const deps = createReviewCycleDeps(
+    settings,
+    client,
+    createReviewLook(settings, client, runDeps, targets),
+    createReviewAct(runDeps, targets),
+  );
+
+  // Narrowed after the query rather than by a different one. The subscription is
+  // the pair of labels, so a named ticket that is not carrying one is not under
+  // review — and saying "it is not in the watched set" is a more useful answer
+  // than silently watching something nothing else would have looked at.
+  const outcome = await runReviewCycle(
+    issueKey === null
+      ? deps
+      : {
+          ...deps,
+          fetchWatched: async () =>
+            (await deps.fetchWatched()).filter((ticket) => ticket.key === issueKey),
+        },
+  );
+
+  for (const ended of outcome.ended) {
+    // §6.1's terminal, through the same function `--advance` uses. The rule that
+    // only a merge earns `agent:done` is a metric, and a metric encoded twice is
+    // a metric that will eventually be encoded two ways.
+    await moveLabels(client, ended.issueKey, (labels) =>
+      isTerminal(labels)
+        ? labelEdit([], [])
+        : completionTransition(labels, completionLabelFor(ended.state)),
+    );
+  }
+
+  for (const entry of [...outcome.acted, ...outcome.settled]) {
+    await moveReviewStage(client, entry.issueKey, reviewStageAfter(entry.outcome));
+  }
+
+  return outcome;
+}
+
+/**
+ * `--watch`: keep looking at every pull request under review.
+ *
+ * ## Why this is a different loop from `--review`, and not a longer one
+ *
+ * `runReviewChain` polls one pull request it just opened, and stops when that
+ * pull request is done or has gone quiet. Its subject is a run. This one's
+ * subject is *the board*: it re-reads the query every tick, so a pull request
+ * another run opened five minutes ago joins the set without anything being
+ * restarted, and one that merged leaves it. That is the difference between
+ * finishing a job and holding a post, and it is why the silence bound does not
+ * appear here — one quiet pull request is not a reason to stop watching the
+ * other nineteen.
+ *
+ * ## What bounds it
+ *
+ * Not a round count on this stack, which is the mistake `silence.ts` sets out.
+ * Every bound it has already lives in the remote system: `MAX_REVIEW_ITERATIONS`
+ * and `MAX_PR_ROUNDS_TOTAL` on each pull request's marker, and the pair of labels
+ * that decides whether a ticket is in the query at all. What this function adds
+ * is `MAX_REVIEW_ROUNDS_PER_TICK`, and the banner prints what a tick can cost
+ * before the first one runs, for the reason `--review` prints its own worst case:
+ * the operator is the last bound, and a bound cannot act on a number it has not
+ * been shown.
+ *
+ * It ends when the watched set is empty. That is the honest terminal for a
+ * command whose subject is a set — there is nothing under review — and every
+ * other ending is the operator's Ctrl-C, which is safe here for the same reason
+ * it is safe in the chain: the checkout is removed after each round and nothing
+ * is held between ticks.
+ */
+export async function runWatch(
+  settings: Settings,
+  client: JiraClient,
+  issueKey: string | null,
+): Promise<void> {
+  const pollMs = numeric(settings, "REVIEW_POLL_MS", 1);
+  const maxRounds = numeric(settings, "MAX_REVIEW_ROUNDS_PER_TICK", 0);
+
+  // Said here as well as inside the cycle, and the duplication is the point.
+  // `runReviewCycle` returns an empty outcome when the switch is off, and this
+  // loop's terminal is an empty watched set — so without this, `SOLVE_ENABLED=false`
+  // prints "Nothing is under review" and exits. That is a true sentence about a
+  // query that was never run, which is this project's whole defect class: the
+  // operator would go looking at labels for a fault that is in their `.env`.
+  if (!flag(settings, "SOLVE_ENABLED")) {
+    process.stderr.write(
+      `refusing --watch: SOLVE_ENABLED is off, so nothing would be looked at and the loop would exit at once.\n`,
+    );
+    process.exitCode = 3;
+    return;
+  }
+
+  process.stdout.write(
+    `\n── review watch ──────────────────────────────────────────\n` +
+      `${issueKey === null ? "Every ticket under review" : issueKey}, looked at every ` +
+      `${String(Math.round(pollMs / 1000))}s.\n` +
+      `A look costs two gh reads; only a round costs money. At most ${String(maxRounds)} ` +
+      `round${maxRounds === 1 ? "" : "s"} per pass, roughly $${(maxRounds * 0.94).toFixed(2)}.\n` +
+      `Ctrl-C is safe: the checkout is removed after each round and nothing is held between passes.\n\n`,
+  );
+
+  for (let pass = 1; ; pass += 1) {
+    const outcome = await runReviewSweep(settings, client, issueKey);
+
+    if (outcome.watched === 0) {
+      process.stdout.write(
+        `\nNothing is under review${issueKey === null ? "" : ` for ${issueKey}`}. Watch finished.\n`,
+      );
+      return;
+    }
+
+    process.stdout.write(`\n${describeReviewSweep(pass, outcome)}\n`);
     await sleep(pollMs);
   }
 }

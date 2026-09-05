@@ -17,6 +17,7 @@ import {
   buildPublishRequest,
   buildSolveRequest,
   buildTriageOptions,
+  createReviewCycleDeps,
   createSolveDeps,
   createSolveRunDeps,
   githubRepoFor,
@@ -980,5 +981,164 @@ describe("buildAdvanceRequest", () => {
     );
 
     expect(request.identity).toEqual({ name: "jira-police", email: "jp@x.invalid" });
+  });
+});
+
+/**
+ * Composition of the review cycle.
+ *
+ * The unit tests in `src/solve/review-cycle.test.ts` prove the cycle bounds its
+ * spend against a fake. These prove the fake resembles what production hands it,
+ * which for this cycle is the half that decides how much it can cost: the query
+ * that says which pull requests are in scope, the switch, and the per-tick bound.
+ */
+/** Records the query and answers it, without `fakeClient`'s NOT IN routing. */
+function watchClient(watched: readonly TicketRef[] = []): {
+  client: JiraClient;
+  queries: string[];
+} {
+  const queries: string[] = [];
+  const client = {
+    search: async (jql: string): Promise<readonly TicketRef[]> => {
+      queries.push(jql);
+      return watched;
+    },
+  } as unknown as JiraClient;
+  return { client, queries };
+}
+
+/** A `look` or an `act` that must not be called, and says so if it is. */
+const never = async (): Promise<never> => {
+  throw new Error("not called");
+};
+
+describe("createReviewCycleDeps", () => {
+  const REVIEW_ENV = { JIRA_PROJECT: "SSX", JIRA_COMPONENTS: "SSX Advisor" };
+
+  function reviewSettings(overrides: Partial<Record<string, string>> = {}): Settings {
+    return settingsWith({ ...REVIEW_ENV, ...overrides });
+  }
+
+  it("reads the watched set, not the solve queue", async () => {
+    // THE ONE THAT MATTERS. Wired to `buildSolveQueueJql` this looks at tickets
+    // that have no pull request at all, and `look` would report every one of
+    // them as unlookable — a cycle that is busy, costs Jira round trips, and
+    // never notices the merge it exists to notice.
+    const { client, queries } = watchClient();
+
+    await createReviewCycleDeps(reviewSettings(), client, never, never).fetchWatched();
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain('labels IN ("agent:reviewing", "agent:review-done")');
+    expect(queries[0]).not.toContain("agent:solvable");
+  });
+
+  it("advertises the query it runs", async () => {
+    const { client, queries } = watchClient();
+    const deps = createReviewCycleDeps(reviewSettings(), client, never, never);
+
+    await deps.fetchWatched();
+
+    expect(deps.watchJql).toBe(queries[0]);
+  });
+
+  it("carries the timestamp the cycle orders on", async () => {
+    // The cycle sorts oldest-updated first so the same pull request cannot be
+    // starved twice by the per-tick bound. Drop `updated` in the narrowing and
+    // every ticket parses as NaN, the sort becomes whatever order Jira replied
+    // in, and the starvation the ordering prevents comes back silently.
+    const { client } = watchClient([ticket()]);
+
+    const watched = await createReviewCycleDeps(
+      reviewSettings(),
+      client,
+      never,
+      never,
+    ).fetchWatched();
+
+    expect(watched).toEqual([
+      {
+        key: "SSX-3822",
+        summary: "A bug",
+        url: "https://example.invalid/browse/SSX-3822",
+        labels: ["agent:solvable", "agent:start", "svc:buy-insurance-advisor-web"],
+        updated: "2026-09-02T09:55:34.178+0200",
+      },
+    ]);
+  });
+
+  it("fails closed on the master switch", () => {
+    // `flag` and not `!== "false"`: an unset or mistyped SOLVE_ENABLED must not
+    // arm the one loop here that pushes to a pull request unattended.
+    expect(
+      createReviewCycleDeps(reviewSettings(), watchClient().client, never, never).enabled,
+    ).toBe(false);
+    expect(
+      createReviewCycleDeps(
+        reviewSettings({ SOLVE_ENABLED: "true" }),
+        watchClient().client,
+        never,
+        never,
+      ).enabled,
+    ).toBe(true);
+  });
+
+  it("takes the per-tick bound from its own setting", () => {
+    const deps = createReviewCycleDeps(
+      reviewSettings({ MAX_REVIEW_ROUNDS_PER_TICK: "1" }),
+      watchClient().client,
+      never,
+      never,
+    );
+
+    expect(deps.maxRounds).toBe(1);
+  });
+
+  it("allows a bound of zero, which is this cycle's dry run", () => {
+    // Zero must reach the cycle as zero rather than being clamped or read as
+    // absent: look at everything, spend on nothing, is the honest dry run for a
+    // round whose whole effect is on a pull request.
+    expect(
+      createReviewCycleDeps(
+        reviewSettings({ MAX_REVIEW_ROUNDS_PER_TICK: "0" }),
+        watchClient().client,
+        never,
+        never,
+      ).maxRounds,
+    ).toBe(0);
+  });
+
+  it("passes the caller's two halves through untouched", () => {
+    // The cheap look and the paid round are the caller's, so that the loop and
+    // `--advance` cannot drift into doing different things. Rebuilding either
+    // here would put the spend seam in the file nobody reads.
+    const look = never;
+    const act = never;
+    const deps = createReviewCycleDeps(reviewSettings(), watchClient().client, look, act);
+
+    expect(deps.look).toBe(look);
+    expect(deps.act).toBe(act);
+  });
+
+  it("omits the signal rather than passing undefined", () => {
+    // `exactOptionalPropertyTypes` makes these two different objects, and the
+    // cycle reads `signal?.aborted`. Present-but-undefined is harmless here and
+    // is the shape that stops being harmless the moment anything checks the key.
+    const deps = createReviewCycleDeps(reviewSettings(), watchClient().client, never, never);
+
+    expect("signal" in deps).toBe(false);
+  });
+
+  it("carries a signal when one is given", async () => {
+    const controller = new AbortController();
+    const deps = createReviewCycleDeps(
+      reviewSettings(),
+      watchClient().client,
+      never,
+      never,
+      controller.signal,
+    );
+
+    expect(deps.signal).toBe(controller.signal);
   });
 });

@@ -41,7 +41,12 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import { type IssueDetail, JiraClient } from "./jira/client.ts";
-import { buildInFlightJql, buildNewIssuesJql, buildSolveQueueJql } from "./jira/jql.ts";
+import {
+  buildInFlightJql,
+  buildNewIssuesJql,
+  buildReviewQueueJql,
+  buildSolveQueueJql,
+} from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
@@ -64,6 +69,7 @@ import type { FindPrRequest } from "./solve/pr.ts";
 import { createPassRunner } from "./solve/passes.ts";
 import { composePullRequest } from "./solve/pr-text.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
+import type { ReviewCycleDeps, WatchedTicket } from "./solve/review-cycle.ts";
 import { type RenderedTicket, renderTicket } from "./solve/ticket.ts";
 import { withFitnessNote } from "./triage/fitness-note.ts";
 import { UnpostableError, assertPostable } from "./triage/gate.ts";
@@ -363,6 +369,75 @@ export function createSolveDeps(
       return (await client.search(inFlightJql)).length;
     },
     ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+/**
+ * Composes the review cycle, the way `createSolveDeps` composes the solve one.
+ *
+ * ## `look` and `act` come from the caller, and that is the whole point
+ *
+ * Every other `create*Deps` in this file builds its dependencies outright. This
+ * one takes the two that cost money as parameters, because they are the two
+ * halves the cycle exists to keep apart — a cheap read for every watched pull
+ * request, a paid round for the few with work — and composing them here would
+ * put the seam in the file nobody reads when asking "how often does this spend".
+ * `solve-run.ts` builds both from the same primitives `--advance` uses, so the
+ * loop and the single shot cannot drift into doing different things.
+ *
+ * What is built here is the part that decides *scope*: the query, the master
+ * switch, and the per-tick bound. Those are the three answers to "how much can
+ * this cost", and they belong with the other privilege grants.
+ *
+ * The query is built eagerly for `createSolveDeps`'s reason: a malformed one is
+ * a misconfiguration and should stop the process rather than the tick that first
+ * reaches the board.
+ */
+export function createReviewCycleDeps(
+  settings: Settings,
+  client: JiraClient,
+  look: ReviewCycleDeps["look"],
+  act: ReviewCycleDeps["act"],
+  signal?: AbortSignal,
+): ReviewCycleDeps {
+  const watchJql = buildReviewQueueJql({
+    project: settings.JIRA_PROJECT,
+    components: list(settings, "JIRA_COMPONENTS"),
+  });
+
+  return {
+    // The same switch the solve queue reads, and checked again inside the cycle.
+    // A review round pushes a commit to a pull request people are reading, so
+    // "is this service switched on" is not a question to answer once.
+    enabled: flag(settings, "SOLVE_ENABLED"),
+    watchJql,
+    maxRounds: numeric(settings, "MAX_REVIEW_ROUNDS_PER_TICK", 0),
+    fetchWatched: async () => {
+      logger.info("review.query", { jql: watchJql });
+      return (await client.search(watchJql)).map(toWatchedTicket);
+    },
+    look,
+    act,
+    ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+/**
+ * The same five fields `toSolveCandidate` takes, and deliberately not that
+ * function.
+ *
+ * The two shapes coincide today. They are narrowings of `TicketRef` for two
+ * queues that select on different facts, and sharing the mapping would make the
+ * next field either queue needs a field both get — which is how `TicketRef`
+ * grew a `description` nobody wanted. See `WatchedTicket`'s own note.
+ */
+function toWatchedTicket(ticket: TicketRef): WatchedTicket {
+  return {
+    key: ticket.key,
+    summary: ticket.summary,
+    url: ticket.url,
+    labels: ticket.labels,
+    updated: ticket.updated,
   };
 }
 

@@ -21,6 +21,7 @@ import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
 import type { ReviewStage, SolveOutcomeLabel } from "../solve/labels.ts";
 import { hasGoneQuiet } from "../solve/silence.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
+import type { ReviewCycleOutcome } from "../solve/review-cycle.ts";
 
 /**
  * Whether the shell should hear about this.
@@ -426,6 +427,45 @@ export function reviewStageAfter(outcome: AdvanceOutcome): ReviewStage | null {
 }
 
 /**
+ * `gh`'s state string, narrowed to the two endings that mean something here.
+ *
+ * `FindPrResult.state` is a `string` because it is whatever `gh pr list`
+ * printed, and this service must not care: the only question it asks of a
+ * finished pull request is whether it was merged. So anything that is not
+ * exactly `MERGED` is read as closed, which is the safe direction — `closed` is
+ * the label that counts nothing, and a future `gh` spelling this service has
+ * never seen must not be able to inflate the number of bugs it claims to have
+ * fixed.
+ *
+ * Callers must have ruled `OPEN` out first. It is not an ending, and there is
+ * nothing sensible to return for it; a third arm would invite a caller to pass
+ * an open pull request and get a terminal back.
+ */
+export function endedState(state: string): "MERGED" | "CLOSED" {
+  return state === "MERGED" ? "MERGED" : "CLOSED";
+}
+
+/**
+ * The terminal label a finished pull request earns, and it is a metric.
+ *
+ * §3c: `agent:done` is **merged only**. It is the count of bugs this tool
+ * actually fixed, and a pull request a person closed unmerged is work the tool
+ * completed that nobody wanted — a different number, and the more interesting of
+ * the two, which disappears entirely the moment the buckets are folded together.
+ *
+ * A function rather than a ternary at each call site, and that is the whole
+ * reason it exists. There are two places a pull request's terminal is written —
+ * `--advance` finding it already ended, and the watch cycle noticing the same
+ * thing on a later pass — and until this they held the same ternary twice. Two
+ * identical literals encoding a rule is the failure `labels.ts`'s own header
+ * names, and the failure mode here is not a crash: it is a plausible-looking
+ * figure in a report, which is exactly the mutation §3c asks to be guarded.
+ */
+export function completionLabelFor(state: "MERGED" | "CLOSED"): SolveOutcomeLabel {
+  return state === "MERGED" ? "done" : "closed";
+}
+
+/**
  * One line per re-request result, and only one of the three is a call to act.
  *
  * A table rather than a ternary because the middle case is the one that used to
@@ -527,4 +567,54 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       return `FAILED at the ${outcome.stage} stage — ${outcome.reason}`;
     }
   }
+}
+
+/**
+ * One pass over the watched set, in the fewest lines that still say what it cost.
+ *
+ * A watch prints this every tick, forever, so the shape matters more than it
+ * does for a one-shot command: an operator is going to read hundreds of these
+ * and the only way that stays useful is if a quiet pass is one short line and an
+ * expensive one is visibly longer. So the counts that are usually zero are
+ * omitted when they are, and `acted` — the only field that spent money — always
+ * names its tickets rather than counting them.
+ *
+ * **`deferred` is never omitted when non-zero, even though it looks like noise.**
+ * It is the one number that says the bound bit: work was actionable and this
+ * pass declined to pay for it. Hiding that would make `MAX_REVIEW_ROUNDS_PER_TICK`
+ * invisible at exactly the moment it is doing something, which is how a bound
+ * gets blamed for a loop that seems to be ignoring a reviewer.
+ */
+export function describeReviewSweep(pass: number, outcome: ReviewCycleOutcome): string {
+  const parts = [`pass ${String(pass)}: ${String(outcome.watched)} watched`];
+
+  if (outcome.acted.length > 0) {
+    parts.push(
+      `${String(outcome.acted.length)} round(s) — ` +
+        outcome.acted
+          .map((entry) => `${entry.issueKey} #${String(entry.number)} ${entry.outcome.kind}`)
+          .join(", "),
+    );
+  }
+  if (outcome.settled.length > 0) {
+    parts.push(`${String(outcome.settled.length)} settled without spending`);
+  }
+  if (outcome.ended.length > 0) {
+    parts.push(
+      `ended — ${outcome.ended.map((entry) => `${entry.issueKey} ${entry.state}`).join(", ")}`,
+    );
+  }
+  if (outcome.deferred.length > 0) {
+    parts.push(`${String(outcome.deferred.length)} deferred to the next pass`);
+  }
+  // Last, and always listed by ticket. A look that failed is the one thing here
+  // that will repeat identically every pass until somebody reads the reason, so
+  // a bare count would scroll past forever saying nothing.
+  if (outcome.unlooked.length > 0) {
+    parts.push(
+      `could not look at — ${outcome.unlooked.map((entry) => `${entry.issueKey}: ${entry.reason}`).join("; ")}`,
+    );
+  }
+
+  return parts.join("\n  ");
 }
