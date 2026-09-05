@@ -1699,6 +1699,14 @@ refuses before spending a solve. So the old text traded a saving in the good cas
 wrong answer in the bad one, and the wrong answer is the expensive half: it costs a reviewer's
 time and it feeds the dev-lens calibration a score for a fix nobody ever ran.
 
+**Measured rather than feared.** The worry about the doubling was that a large Java suite would
+make it intolerable, and a cache of base results keyed by `(repo, baseRef)` was sketched to avoid
+it. It is not needed yet: `mvn -B -Dmaven.gitcommitid.skip=true test` on
+`insurance-commerce-rest-api` — 4562 tests — runs in **1 minute 4 seconds** warm. That is the
+whole cost of the base check on the largest repository in scope, so the cache stays unbuilt until
+something measures worse. Recorded here because the guess that prompted it was an order of
+magnitude out, and the next person to worry about this should start from the number.
+
 Two properties are pinned by test rather than left to reading. `verifyRequestOf` is the only
 place a `VerifyRequest` is built, so the base check and the real check cannot drift apart into
 different experiments; and the base check runs before the first pass, asserted by a harness that
