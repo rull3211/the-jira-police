@@ -486,6 +486,75 @@ export async function unverifiableChanges(
   return paths.filter((path) => VERIFICATION_PATHS.some((rule) => rule.pattern.test(path)));
 }
 
+export type BaseCheck =
+  /** The repository's own build passes here. A later red is about the change. */
+  | { readonly outcome: "usable" }
+  /** It does not, and nothing has been changed yet, so nothing is to blame. */
+  | {
+      readonly outcome: "unusable";
+      readonly reason: string;
+      readonly verification: VerificationResult;
+    };
+
+/**
+ * Runs the plan against the worktree **before the model has touched it**.
+ *
+ * Added 2026-09-05, from a run that got the verdict wrong. `verify` correctly
+ * reports "a step ran and did not pass" as `failed`, and `failed` means *the
+ * change is bad* — which is only true if the step would have passed without the
+ * change. Nothing checked that, so the first Java solve was booked as a broken
+ * fix when the truth was that this repository cannot build in a git worktree at
+ * all: `git-commit-id-plugin` 4.9.10 binds to `initialize` and cannot read a
+ * linked worktree's `.git`, which is a *file* (`gitdir: …`) and not a directory.
+ * The build died eleven lines in, no test ran, and the model's diff was never
+ * compiled, let alone evaluated. Same Maven, same JDK, same plugin: green in
+ * the main checkout, red in the worktree.
+ *
+ * So `failed` was a statement about code nothing had read. That is the precise
+ * failure the three-outcome type exists to prevent, arriving through the one
+ * door it did not cover — not a mislabelled outcome, but a missing premise.
+ *
+ * **Both non-passing outcomes become `unusable`, and the distinction is kept
+ * anyway.** A base that fails and a base that refuses lead to the same
+ * decision — do not run the model — but not to the same sentence, so the whole
+ * `VerificationResult` is carried out rather than a boolean.
+ *
+ * ## Why this is cheaper than it looks
+ *
+ * It runs before the model does. On a repository whose build does not work
+ * here, this costs one build and saves an entire solve — strictly less than
+ * the run it replaces. Only on a healthy base is it an extra pass, and there
+ * the expensive half is shared: pnpm's store and Maven's `~/.m2` are warm the
+ * second time, and `target/` is already populated.
+ *
+ * ARCHITECTURE.md §15 previously named this as a known limitation *stated
+ * rather than solved*, on the grounds that it doubles the runtime of every
+ * solve. That reasoning was written for Node, where the base check is install
+ * plus three steps. It did not survive contact with a base that could not run
+ * at all, and the trade it described — double runtime — turns out to be the
+ * wrong axis: the cost is not runtime, it is that without this the verdict
+ * does not mean what the type says it means.
+ */
+export async function verifyBase(
+  runner: CommandRunner,
+  request: VerifyRequest,
+): Promise<BaseCheck> {
+  const verification = await verify(runner, request);
+  if (verification.outcome === "passed") {
+    return { outcome: "usable" };
+  }
+
+  const detail = verification.reason;
+  return {
+    outcome: "unusable",
+    verification,
+    reason:
+      verification.outcome === "failed"
+        ? `the repository's own build does not pass in a fresh worktree, before anything was changed — ${detail}. This is a fact about the repository or this harness, not about any fix`
+        : `the repository's build could not be run here at all — ${detail}`,
+  };
+}
+
 /**
  * Runs the plan against the worktree and returns what actually happened.
  *
@@ -494,6 +563,10 @@ export async function unverifiableChanges(
  * manifest was edited" or "install died" is the harness declining to have an
  * opinion. Collapsing them would let a broken harness read as a broken fix, and
  * a solver would then be judged on evidence that was never gathered.
+ *
+ * **`failed` is only true relative to a base that passes.** `verifyBase` above
+ * establishes that premise; without it this function's `failed` is an
+ * unsupported claim rather than a verdict.
  *
  * A timed-out step is a **failure**, not a refusal. It ran; it did not pass in
  * the time allowed; and a hang is a plausible thing for a bad fix to cause. The

@@ -131,11 +131,44 @@ const saw =
 const SHOWS_POM = (argv: readonly string[]): boolean =>
   argv.includes("show") && argv.some((arg) => arg.endsWith(":pom.xml"));
 
+/**
+ * The same match, ignored the first time it fires.
+ *
+ * Verification now runs twice with byte-identical argv — once against the
+ * pristine base, once against the change — and a stateless rule cannot tell
+ * those apart. Every test below that wants a *verdict about the change* wants
+ * the second run to fail and the first to pass; a rule failing both says the
+ * repository was already broken, which is a different outcome and now has its
+ * own kind. So the distinction the fake has to model is exactly the one the
+ * production code was missing.
+ */
+function afterBase(match: (argv: readonly string[]) => boolean) {
+  let seenOnce = false;
+  return (argv: readonly string[]): boolean => {
+    if (!match(argv)) {
+      return false;
+    }
+    if (seenOnce) {
+      return true;
+    }
+    seenOnce = true;
+    return false;
+  };
+}
+
 interface Harness {
   readonly deps: SolveDependencies;
   /** Passes and commands interleaved, so ordering assertions are about order. */
   readonly timeline: readonly string[];
   readonly calls: readonly (readonly string[])[];
+  /**
+   * How many passes had run when `calls[i]` was made.
+   *
+   * Only the base check runs commands at zero, so this is how the staging
+   * tests exclude it: staging bounds what a *pass* wrote, and there is nothing
+   * to bound before the first one.
+   */
+  readonly passesBefore: readonly number[];
   readonly seen: readonly { readonly pass: Pass; readonly options: SolveRunOptions }[];
 }
 
@@ -160,6 +193,7 @@ function harness(
 ): { readonly h: Harness } {
   const timeline: string[] = [];
   const calls: (readonly string[])[] = [];
+  const passesBefore: number[] = [];
   const seen: { pass: Pass; options: SolveRunOptions }[] = [];
 
   const defaults: readonly Rule[] = [
@@ -182,6 +216,7 @@ function harness(
   const commands: CommandRunner = {
     run: (argv) => {
       calls.push([...argv]);
+      passesBefore.push(seen.length);
       timeline.push(
         `cmd:${argv.slice(0, 2).join(" ")}${argv.includes("--numstat") ? " numstat" : ""}`,
       );
@@ -209,7 +244,7 @@ function harness(
     },
   };
 
-  return { h: { deps: { commands, passes }, timeline, calls, seen } };
+  return { h: { deps: { commands, passes }, timeline, calls, passesBefore, seen } };
 }
 
 const request: SolveRequest = {
@@ -517,9 +552,16 @@ describe("solveTicket, and what each pass is given", () => {
 
     await solveTicket(h.deps, request);
 
+    // The base check diffs too — that is how it notices a changed manifest —
+    // but it runs before any pass, so there is nothing it could have created
+    // and nothing to stage. `passesBefore` excludes it without excluding any
+    // diff this guard is about.
     const staged = h.calls.findIndex((argv) => argv.includes("--intent-to-add"));
-    const firstDiff = h.calls.findIndex((argv) => argv.includes("diff"));
+    const firstDiff = h.calls.findIndex(
+      (argv, index) => argv.includes("diff") && (h.passesBefore[index] ?? 0) > 0,
+    );
     expect(staged).toBeGreaterThanOrEqual(0);
+    expect(firstDiff).toBeGreaterThanOrEqual(0);
     expect(staged).toBeLessThan(firstDiff);
   });
 
@@ -531,7 +573,7 @@ describe("solveTicket, and what each pass is given", () => {
     await solveTicket(h.deps, request);
 
     for (const [index, argv] of h.calls.entries()) {
-      if (!argv.includes("diff")) {
+      if (!argv.includes("diff") || (h.passesBefore[index] ?? 0) === 0) {
         continue;
       }
       const preceding = h.calls.slice(0, index);
@@ -781,9 +823,55 @@ describe("solveTicket, at the diff gate", () => {
   });
 });
 
+describe("solveTicket, at the base check", () => {
+  it("stops before any pass when the repository's own build is red", async () => {
+    // The harness throws on an unscripted pass, so passing `{}` is the
+    // assertion: if recon ran, this test fails with that error instead. That
+    // matters more than the returned kind — the base check exists to spend
+    // nothing on a repository that cannot answer the question.
+    const { h } = harness({}, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("unusable-base");
+    expect(h.seen).toHaveLength(0);
+  });
+
+  it("keeps the worktree, because the worktree is the difference", async () => {
+    // Unlike a bail, this is not cleaned up. The failure mode it was built for
+    // is a build that passes in a normal checkout and fails in a linked one, so
+    // the only place it reproduces is the directory a tidy-up would delete.
+    const { h } = harness({}, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({ kind: "unusable-base", worktree: { path: worktree.path } });
+    expect(h.calls.some((argv) => argv.includes("worktree") && argv.includes("remove"))).toBe(
+      false,
+    );
+  });
+
+  it("runs before the fix, not after it", async () => {
+    // Ordering is the whole value. A base check after the model has written is
+    // no longer a base check, and would cost exactly what this saves.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, request);
+
+    const firstBuild = h.timeline.findIndex(
+      (entry) => entry.startsWith("cmd:") && !entry.startsWith("cmd:git"),
+    );
+    const firstPass = h.timeline.findIndex((entry) => entry.startsWith("pass:"));
+    expect(firstBuild).toBeGreaterThanOrEqual(0);
+    expect(firstBuild).toBeLessThan(firstPass);
+  });
+});
+
 describe("solveTicket, at verification", () => {
   it("returns failed — a fact about the code — when a step does not pass", async () => {
-    const { h } = harness(FULL, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
+    // `afterBase`, so the base's test run passes. Without that premise this is
+    // not a fact about the code — see the `unusable-base` tests below.
+    const { h } = harness(FULL, [{ match: afterBase(saw("run", "test")), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
 
@@ -793,7 +881,7 @@ describe("solveTicket, at verification", () => {
   it("returns refused — not failed — when the harness could not form a verdict", async () => {
     // Install dying verifies nothing. Reporting it as `failed` would blame the
     // change for evidence that was never gathered.
-    const { h } = harness(FULL, [{ match: saw("install"), reply: { exitCode: 1 } }]);
+    const { h } = harness(FULL, [{ match: afterBase(saw("install")), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
 
@@ -802,7 +890,9 @@ describe("solveTicket, at verification", () => {
 
   it("keeps a manifest edit a refusal, not a failure", async () => {
     const { h } = harness(FULL, [
-      { match: saw("--name-only"), reply: { stdout: `package.json${NUL}` } },
+      // Nothing is edited at base time, so the manifest only looks touched on
+      // the second read — which is also what really happens.
+      { match: afterBase(saw("--name-only")), reply: { stdout: `package.json${NUL}` } },
     ]);
 
     const outcome = await solveTicket(h.deps, request);

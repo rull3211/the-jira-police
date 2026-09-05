@@ -129,7 +129,14 @@ function lensOf(outcome: SolveOutcome): { accurate: boolean; correction: string 
   // compile time even though it is inert at run time. Recorded as mechanically
   // enforced by the type checker rather than by a test, in the same spirit as
   // the backstop notes in `worktree.ts` and `verify.ts`.
-  return outcome.kind === "no-worktree" || outcome.kind === "crashed"
+  //
+  // `unusable-base` joins them for the first reason rather than the second: it
+  // is decided before recon runs, so there is no lens to be accurate or
+  // inaccurate about. Scoring the fitness call on a run that never read the
+  // code would credit or blame triage for a broken build.
+  return outcome.kind === "no-worktree" ||
+    outcome.kind === "crashed" ||
+    outcome.kind === "unusable-base"
     ? null
     : (outcome.devLens ?? null);
 }
@@ -147,6 +154,13 @@ function headline(outcome: SolveOutcome): string {
   switch (outcome.kind) {
     case "no-worktree": {
       return `No branch could be cut, so nothing was attempted: ${safeText(outcome.reason)}`;
+    }
+    case "unusable-base": {
+      // Phrased to put the repository, not the ticket, in the reader's way. The
+      // ticket may be perfectly solvable; this run could not have told anyone.
+      return `The repository's own build does not pass before any change, so nothing was attempted and nothing can be concluded about this ticket: ${safeText(
+        outcome.reason,
+      )}`;
     }
     case "bailed": {
       return `An agent read the code and stopped before changing anything: ${safeText(

@@ -33,6 +33,11 @@ import type { SolveOutcome } from "../solve/orchestrator.ts";
  * hand needs `$?` to say so rather than reading past a line of output. The rule
  * is "did this produce a usable answer", not "was the code bad".
  *
+ * `unusable-base` is a failure by that rule even though it is the cheapest
+ * outcome here — it stops before the model runs, so it costs almost nothing.
+ * The exit code is not about money. No question was answered, and the operator
+ * has something to fix that a re-run will not fix by itself.
+ *
  * That same rule is what splits `abandoned` down the middle. A `judgement`
  * abandon is an answer — the model read the code and said no — and exits zero
  * for the reason `bailed` does. An `environment` abandon is `crashed` wearing a
@@ -45,6 +50,7 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
     outcome.kind === "refused" ||
     outcome.kind === "no-worktree" ||
     outcome.kind === "crashed" ||
+    outcome.kind === "unusable-base" ||
     (outcome.kind === "abandoned" && outcome.cause === "environment")
   );
 }
@@ -54,6 +60,13 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
   switch (outcome.kind) {
     case "no-worktree": {
       return `NO WORKTREE — the run never started: ${outcome.reason}`;
+    }
+    case "unusable-base": {
+      // The worktree is named because it is the evidence. This outcome exists
+      // for builds that pass in a normal checkout and fail in a linked one, so
+      // "reproduce it in the repo" is the wrong first instruction — reproduce
+      // it here.
+      return `UNUSABLE BASE — ${outcome.reason}\nWorktree kept at ${outcome.worktree.path} — reproduce there, not in the main checkout, since that is the difference this found`;
     }
     case "bailed": {
       // The one outcome whose worktree may be gone, so this is the one line

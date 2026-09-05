@@ -67,7 +67,7 @@ import {
   parseSimplify,
 } from "./runner.ts";
 import { prepareSkillRoot, removeSkillRoot } from "./skill-root.ts";
-import { verify, type VerificationResult } from "./verify.ts";
+import { verify, verifyBase, type VerificationResult, type VerifyRequest } from "./verify.ts";
 import {
   type CommandRunner,
   createWorktree,
@@ -135,6 +135,28 @@ export interface DevLensFeedback {
 export type SolveOutcome =
   /** Never got as far as a session. */
   | { readonly kind: "no-worktree"; readonly reason: string }
+  /**
+   * The worktree exists but the repository's own build does not pass in it,
+   * before any pass ran. Says nothing about the ticket or any fix.
+   *
+   * A separate kind rather than a `refused` stage for two reasons. It happens
+   * **before recon**, so there is no `devLens` to carry, and `refused` requires
+   * one. And it is the outcome most likely to be misread as a bad fix, so every
+   * exhaustive switch should have to be edited to admit it — the argument
+   * `crashed` already makes below.
+   *
+   * **The worktree is kept**, unlike `bailed`, which also holds nothing the
+   * model wrote. The defining property of this outcome is that the build
+   * behaves differently *here* than in an ordinary checkout, and the worktree
+   * is the only place that difference can be reproduced. Deleting it would
+   * throw away the single artifact that explains the refusal.
+   */
+  | {
+      readonly kind: "unusable-base";
+      readonly reason: string;
+      readonly verification: VerificationResult;
+      readonly worktree: Worktree;
+    }
   /**
    * Recon read the code and declined. Not a failure.
    *
@@ -509,6 +531,29 @@ export async function solveWithRetry(
   return { outcome: await solveTicket(deps, request), attempts: 2, retryBlocked: "" };
 }
 
+/**
+ * The only place a {@link VerifyRequest} is built.
+ *
+ * The base check and the post-fix check have to be the same experiment with the
+ * same budgets, because the whole argument for calling a later red a *failure*
+ * is that these identical steps were green before the change. Two construction
+ * sites could drift — a longer timeout here, a different base ref there — and
+ * the drift would be invisible, showing up only as a confident verdict about
+ * code that was never the problem.
+ */
+function verifyRequestOf(
+  request: Pick<SolveRequest, "repoPath" | "baseRef" | "stepTimeoutMs" | "installTimeoutMs">,
+  worktree: Worktree,
+): VerifyRequest {
+  return {
+    repoPath: request.repoPath,
+    worktreePath: worktree.path,
+    baseRef: request.baseRef,
+    stepTimeoutMs: request.stepTimeoutMs,
+    installTimeoutMs: request.installTimeoutMs,
+  };
+}
+
 async function runPipeline(
   deps: SolveDependencies,
   request: SolveRequest,
@@ -531,6 +576,25 @@ async function runPipeline(
     return { kind: "no-worktree", reason: created.reason };
   }
   const { worktree } = created;
+
+  // ---- the base ------------------------------------------------------------
+  // Before any pass, and deliberately before the expensive one. `verify`'s
+  // `failed` means "the change is bad", which is only true if the same steps
+  // would have passed without it. This is where that premise is established;
+  // see `verifyBase`.
+  const baseCheck = await verifyBase(deps.commands, verifyRequestOf(request, worktree));
+  if (baseCheck.outcome === "unusable") {
+    logger.info("solve.base.unusable", {
+      issueKey,
+      verification: baseCheck.verification.outcome,
+    });
+    return {
+      kind: "unusable-base",
+      reason: baseCheck.reason,
+      verification: baseCheck.verification,
+      worktree,
+    };
+  }
 
   const base: SolveRunOptions = {
     issueKey,
@@ -680,13 +744,7 @@ async function runPipeline(
   }
 
   // ---- verification ------------------------------------------------------
-  const verification = await verify(commands, {
-    repoPath: request.repoPath,
-    worktreePath: worktree.path,
-    baseRef: request.baseRef,
-    stepTimeoutMs: request.stepTimeoutMs,
-    installTimeoutMs: request.installTimeoutMs,
-  });
+  const verification = await verify(commands, verifyRequestOf(request, worktree));
   if (verification.outcome === "refused") {
     // Not a statement about the change. Kept distinct from `failed` all the way
     // out of this function so no caller can report it as one.
@@ -842,13 +900,7 @@ async function runReviewRound(
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
   }
 
-  const verification = await verify(commands, {
-    repoPath: request.repoPath,
-    worktreePath: worktree.path,
-    baseRef: request.baseRef,
-    stepTimeoutMs: request.stepTimeoutMs,
-    installTimeoutMs: request.installTimeoutMs,
-  });
+  const verification = await verify(commands, verifyRequestOf(request, worktree));
   if (verification.outcome === "refused") {
     return { kind: "refused", stage: "verification", reasons: [verification.reason] };
   }

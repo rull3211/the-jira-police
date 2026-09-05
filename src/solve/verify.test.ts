@@ -8,6 +8,7 @@ import {
   packageManagerOf,
   unverifiableChanges,
   verify,
+  verifyBase,
   versionNote,
 } from "./verify.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
@@ -627,5 +628,72 @@ describe("the Maven toolchain", () => {
     const argv0 = result.outcome === "planned" ? (result.plan.steps[0]?.argv[0] ?? "") : "";
 
     expect(ALLOWED_EXECUTABLES).toContain(argv0);
+  });
+});
+
+describe("verifyBase", () => {
+  it("calls a green base usable and says nothing else", async () => {
+    const check = await verifyBase(fakeRunner({ diff: out("") }), request());
+
+    expect(check).toEqual({ outcome: "usable" });
+  });
+
+  it("calls a red base unusable rather than letting it become a failed fix", async () => {
+    // THE GUARD. `verify`'s `failed` means "the change is bad", and that is only
+    // true if these same steps pass without the change. Measured on SSX-3801:
+    // a Maven plugin could not read a linked worktree's `.git`, the build died
+    // before compiling anything, and the run was booked as a failed fix of a
+    // fix that was never built.
+    const check = await verifyBase(fakeRunner({ diff: out(""), "run test": bad(1) }), request());
+
+    expect(check.outcome).toBe("unusable");
+  });
+
+  it("blames the repository, not the fix, in the reason it gives", async () => {
+    // The wording is the point. This reason is posted to a Jira ticket, and a
+    // reader who takes it as a verdict on their bug goes looking for a defect
+    // that was never reported.
+    const check = await verifyBase(fakeRunner({ diff: out(""), "run test": bad(1) }), request());
+    const said = check.outcome === "unusable" ? check.reason : "";
+
+    expect(said).toContain("the repository's own build");
+    expect(said).toContain("before anything was changed");
+    expect(said).toContain("not about any fix");
+    // The subject has to be the repository. Swapping in "the change" leaves
+    // every phrase above intact and reverses what the sentence says, which is
+    // the one mutation this test exists to catch.
+    expect(said).not.toContain("the change");
+  });
+
+  it("keeps a refusal apart from a red base", async () => {
+    // Both are unusable, but they are different repairs: one is a build to fix,
+    // the other is a harness that could not run one. Collapsing them sends the
+    // operator to the wrong place.
+    const check = await verifyBase(fakeRunner({ show: ABSENT }), request());
+    const said = check.outcome === "unusable" ? check.reason : "";
+
+    expect(said).toContain("could not be run here at all");
+    expect(said).not.toContain("does not pass");
+  });
+
+  it("hands the whole verification back, not just a sentence", async () => {
+    // The caller logs which outcome it was and a human needs the step that
+    // died. Reducing this to a string here would discard it at the only point
+    // it exists.
+    const check = await verifyBase(fakeRunner({ diff: out(""), "run lint": bad(1) }), request());
+
+    expect(check.outcome === "unusable" ? check.verification.outcome : "").toBe("failed");
+  });
+
+  it("runs the same steps the real check will", async () => {
+    // If the base were verified with a cheaper plan, its green would not
+    // license anything. Pinned by comparing the two command lists directly.
+    const baseRunner = fakeRunner({ diff: out("") });
+    const laterRunner = fakeRunner({ diff: out("") });
+
+    await verifyBase(baseRunner, request());
+    await verify(laterRunner, request());
+
+    expect(baseRunner.calls).toEqual(laterRunner.calls);
   });
 });

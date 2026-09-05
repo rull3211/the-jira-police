@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1505 tests, no build step, no deployment
+Status: running end to end against production Jira. 1515 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -1660,11 +1660,52 @@ and inherits `~/.npmrc`, and fine for hand-driving. It is not fine for anything 
 this in CI or as another user, and it means a `refused` at the install step should always be read
 as "check the credential" before it is read as anything about the code.
 
-The known limitation is stated rather than solved: if the base itself is already failing lint or
-typecheck, every run on that repository fails through no fault of the solver. Proving otherwise
-would mean verifying the base too and doubling the runtime of every solve. The cheaper mitigation
-is that per-step results are kept and reported, so a step failing identically on every ticket is
-visible as the repository problem it is rather than looking like a run of bad luck.
+### `failed` is only true relative to a base that passes
+
+This section used to end by declining to solve a known limitation. It said: if the base itself is
+already failing lint or typecheck, every run on that repository fails through no fault of the
+solver — and that proving otherwise would mean verifying the base too and doubling the runtime of
+every solve. That reasoning was written with Node in mind, and on 2026-09-05 a Maven run produced
+the counter-evidence, so the paragraph is replaced rather than qualified.
+
+**What happened.** SSX-3801, `insurance-commerce-rest-api`. The model wrote a fix, the diff gate
+passed it, `mvn -B test` exited 1, and the run was reported as `failed` — a verdict about the
+change. It was not. `git-commit-id-plugin:4.9.10` is bound to `initialize` and reads `.git`
+directly; in a linked worktree `.git` is a _file_ containing `gitdir: …`, not a directory, and
+that plugin version predates worktree support. The build died eleven lines in. `Tests run:` never
+appeared. The fix was never compiled, let alone tested, and the service said it had failed.
+
+The control run settles it: same Maven, same JDK, same plugin, `BUILD SUCCESS` in the main
+checkout and `BUILD FAILURE` in the worktree.
+
+**Why Node never surfaced this.** Nothing in the Node toolchain reads `.git` — `pnpm install`,
+`tsc`, `vitest` and `oxlint` read files in the tree and nothing else. Maven was the first
+toolchain whose build depends on repository _metadata layout_, so worktree isolation, the thing
+that makes the solver safe to run at all, was the thing that broke it. Node was immune by
+accident. And the pilot repo's base was always green, so the missing premise never said anything
+false; it was simply never tested.
+
+**The fix.** `verifyBase` runs the discovered plan against the pristine worktree, immediately
+after it is cut and deliberately before any pass. Green means a later red is genuinely about the
+change. Red returns the `unusable-base` outcome, which is a statement about the repository — the
+sentence posted to the ticket names the repository as its subject, and a mutation swapping that
+subject for "the change" is caught by test.
+
+**The runtime argument was wrong in the case that matters.** Doubling is the cost on a _green_
+base, and there it is real: one extra typecheck, lint and test, with the install nearly free the
+second time because the worktree is already populated. On a _red_ base — the case the old
+paragraph was about — the base check is strictly cheaper than what it replaces, because it
+refuses before spending a solve. So the old text traded a saving in the good case against a
+wrong answer in the bad one, and the wrong answer is the expensive half: it costs a reviewer's
+time and it feeds the dev-lens calibration a score for a fix nobody ever ran.
+
+Two properties are pinned by test rather than left to reading. `verifyRequestOf` is the only
+place a `VerifyRequest` is built, so the base check and the real check cannot drift apart into
+different experiments; and the base check runs before the first pass, asserted by a harness that
+throws if any pass runs at all.
+
+The per-step reporting the old paragraph offered as a mitigation is kept — it is still how a step
+failing identically across tickets is spotted — but it is no longer the answer.
 
 ### Two toolchains, and why the second one looks nothing like the first
 

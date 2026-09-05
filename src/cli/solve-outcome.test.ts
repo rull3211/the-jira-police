@@ -66,6 +66,12 @@ const OUTCOMES: readonly SolveOutcome[] = [
     worktree,
   },
   { kind: "crashed", pass: "fix", reason: "pass timed out after 900000ms", worktree },
+  {
+    kind: "unusable-base",
+    reason: "the repository's own build does not pass in a fresh worktree",
+    verification: {} as never,
+    worktree,
+  },
   verified,
 ];
 
@@ -118,8 +124,23 @@ describe("isFailureExit", () => {
       refused: true,
       failed: true,
       crashed: true,
+      "unusable-base": true,
       verified: false,
     });
+  });
+
+  it("fails the shell on an unusable base, cheap though it is", () => {
+    // The temptation is to exit zero because nothing was spent — the check runs
+    // before the model. But the rule is "did this produce a usable answer", and
+    // an operator who sees zero here will re-run and get the same nothing.
+    expect(
+      isFailureExit({
+        kind: "unusable-base",
+        reason: "the build fails before any change",
+        verification: {} as never,
+        worktree,
+      }),
+    ).toBe(true);
   });
 
   it("does not fail the shell when a pass read the code and declined", () => {
