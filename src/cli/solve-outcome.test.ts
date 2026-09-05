@@ -8,6 +8,7 @@ import {
   isAdvanceFailureExit,
   isFailureExit,
   reviewStageAfter,
+  terminalLabelAfter,
 } from "./solve-outcome.ts";
 
 const worktree = {
@@ -585,5 +586,68 @@ describe("describeAdvanceOutcome", () => {
     const text = describeAdvanceOutcome({ kind: "waiting" });
     expect(text).toContain("WAITING");
     expect(text).toContain("nothing was pushed");
+  });
+});
+
+describe("terminalLabelAfter", () => {
+  /**
+   * The whole table, because this function is defined by what it excludes.
+   *
+   * A test naming only the two outcomes that label would pass just as happily
+   * if a third started labelling too, and a wrongly-labelled ticket leaves the
+   * queue permanently with nothing but a human to notice. So every kind is
+   * pinned, and `exitKey` splits `abandoned` for the reason it was written:
+   * that kind is the one whose two causes disagree here as well.
+   */
+  const EXPECTED: Readonly<Record<string, "failed" | null>> = {
+    "no-worktree": null,
+    bailed: "failed",
+    "abandoned:judgement": "failed",
+    "abandoned:environment": null,
+    refused: null,
+    failed: null,
+    crashed: null,
+    "unusable-base": null,
+    verified: null,
+  };
+
+  it("covers every outcome kind", () => {
+    // Pins the table against the union rather than against itself: a new
+    // SolveOutcome member reaches this test before it reaches production.
+    expect(new Set(OUTCOMES.map(exitKey))).toEqual(new Set(Object.keys(EXPECTED)));
+  });
+
+  for (const outcome of OUTCOMES) {
+    const key = exitKey(outcome);
+    it(`leaves ${key} as ${EXPECTED[key] ?? "a release"}`, () => {
+      expect(terminalLabelAfter(outcome)).toBe(EXPECTED[key] ?? null);
+    });
+  }
+
+  it("does not label a machine failure, so a re-run stays possible", () => {
+    // The case with teeth. A crash says nothing about the ticket — SSX-3831's
+    // recon was killed by a sleeping laptop — and labelling it would turn a
+    // transient failure into one only a human could clear.
+    expect(
+      terminalLabelAfter({
+        kind: "crashed",
+        pass: "recon",
+        reason: "recon pass of SSX-3831 exceeded 1800000ms",
+        worktree,
+      }),
+    ).toBeNull();
+  });
+
+  it("labels a bail, so the queue stops paying to be told no twice", () => {
+    expect(
+      terminalLabelAfter({
+        kind: "bailed",
+        reason: "two acceptance criteria have no single reasonable implementation",
+        devLens: { accurate: false, correction: "AK3 needs a mechanism that does not exist" },
+        worktree,
+        recon: {} as never,
+        cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
+      }),
+    ).toBe("failed");
   });
 });

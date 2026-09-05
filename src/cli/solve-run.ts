@@ -42,6 +42,7 @@ import {
   type LabelEdit,
   LabelStateError,
   type ReviewStage,
+  type SolveOutcomeLabel,
   completionTransition,
   isNoopEdit,
   isTerminal,
@@ -71,6 +72,7 @@ import {
   isAdvanceFailureExit,
   isFailureExit,
   reviewStageAfter,
+  terminalLabelAfter,
 } from "./solve-outcome.ts";
 
 /**
@@ -581,6 +583,7 @@ export async function runWriteRungs(
   }
 
   let keepClaim = false;
+  let terminal: SolveOutcomeLabel | null = null;
   try {
     if (!includes(phase, "solve")) {
       // The `--claim` rehearsal, and the experiment the plan asks for, performed
@@ -601,6 +604,10 @@ export async function runWriteRungs(
     }
 
     const outcome = await runSolver(settings, client, issueKey, cycle);
+    // Read before the early return, because the outcomes that decide a ticket's
+    // fate are exactly the ones that never reach a pull request. Computing it
+    // after the `verified` narrowing below would be dead code that looked live.
+    terminal = outcome === null ? null : terminalLabelAfter(outcome);
     if (outcome === null || !includes(phase, "pr") || outcome.kind !== "verified") {
       return;
     }
@@ -621,8 +628,23 @@ export async function runWriteRungs(
       await moveLabels(client, issueKey, reviewTransition);
     }
   } finally {
-    if (!keepClaim) {
+    // Three endings, and the middle one used to be the only one. A run that
+    // reached a verdict about the ticket must not be released: `runRelease`
+    // restores the labels this run found, `agent:solvable` among them, which
+    // leaves a declined ticket looking exactly like one nobody has tried. In
+    // auto mode the queue then re-claims it every tick and pays for the same
+    // refusal each time — see `terminalLabelAfter`.
+    const decided = terminal;
+    if (keepClaim) {
+      // Handed on by `reviewTransition` above; the pull request owns it now.
+    } else if (decided === null) {
       await runRelease(client, receipt);
+    } else {
+      await moveLabels(client, issueKey, (labels) => completionTransition(labels, decided));
+      process.stdout.write(
+        `\n${issueKey} is out of the solve queue until a human removes agent:${decided}.\n` +
+          `That is the point: this run reached a verdict, and re-running it would reach the same one.\n`,
+      );
     }
   }
 }

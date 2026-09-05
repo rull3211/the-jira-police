@@ -18,7 +18,7 @@
  */
 
 import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
-import type { ReviewStage } from "../solve/labels.ts";
+import type { ReviewStage, SolveOutcomeLabel } from "../solve/labels.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -55,6 +55,59 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
     outcome.kind === "unusable-base" ||
     (outcome.kind === "abandoned" && outcome.cause === "environment")
   );
+}
+
+/**
+ * The label a finished solve leaves behind, or `null` to release the ticket.
+ *
+ * `null` does not mean "nothing happened". It means *put the ticket back exactly
+ * as it was found*, which is the right answer for every outcome that says
+ * nothing about the ticket: a crashed pass, an unusable base, a machine that got
+ * in the way. Re-running those is sensible, and a label excluding the ticket
+ * from the queue would convert a transient failure into a permanent one that
+ * only a human could clear.
+ *
+ * `failed` is the opposite case, and until this function nothing produced it.
+ * The label existed, `completionTransition` knew how to write it, and no
+ * production caller ever asked — so the `failed` arm was built, tested and
+ * unreachable. What that cost is the argument for this function: a bailed ticket
+ * was restored byte-for-byte and became indistinguishable from one nobody had
+ * tried, so in auto mode the queue re-claimed it every tick and paid for triage
+ * and recon each time, **with no condition that could ever clear it**, because
+ * the thing that would clear it was the label with no writer. Observed on
+ * SSX-3831, 2026-09-05, where recon declined correctly and the ticket came back
+ * carrying `agent:solvable` as though the run had never happened.
+ *
+ * ## Two outcomes qualify, and this is deliberately not `!isFailureExit`
+ *
+ * `bailed` is §5's case: recon read the code and declined. `abandoned` with
+ * cause `judgement` is the same statement one pass later — the doc on that
+ * variant calls it "a verdict about the ticket", against `environment`, which
+ * "says nothing whatever about the ticket".
+ *
+ * Those happen to be the two non-success outcomes that exit zero, so this could
+ * be spelled as `isFailureExit` inverted, and it is not. That rule asks *did
+ * this produce a usable answer*, for the benefit of `$?` and a daemon's backoff.
+ * This one asks *is this ticket's fate now decided*, for the benefit of a queue.
+ * They agree today and they are two different questions — the same reasoning
+ * that keeps `reviewStageAfter` on the draft flag rather than on `pushed`.
+ * Deriving one from the other would let a change to an exit code silently
+ * relabel tickets, which is a long way from where anyone would look.
+ *
+ * ## What this deliberately leaves open
+ *
+ * `refused` and `failed` keep releasing. An agent did work and it was not
+ * accepted — neither a verdict about the ticket nor a fault of the machine — and
+ * a re-run may well succeed, so they stay retryable. The cost of that is honest
+ * and worth stating: auto mode can still spend repeatedly on one of them.
+ * Bounding *that* wants a per-ticket attempt count rather than a terminal label,
+ * and it belongs with E, where the thing doing the retrying first exists.
+ */
+export function terminalLabelAfter(outcome: SolveOutcome): SolveOutcomeLabel | null {
+  if (outcome.kind === "bailed") {
+    return "failed";
+  }
+  return outcome.kind === "abandoned" && outcome.cause === "judgement" ? "failed" : null;
 }
 
 /** One line an operator can act on, per outcome. */
