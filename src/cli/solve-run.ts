@@ -1005,6 +1005,11 @@ export async function runWatch(
     process.stderr.write(
       `refusing --watch: SOLVE_ENABLED is off, so nothing would be looked at and the loop would exit at once.\n`,
     );
+    // Logged as well as printed, because the caller logs `solve-once.done`
+    // whatever happened and the exit code is the only other trace. A refusal
+    // that appears in a log only as a successful finish is the same divergence
+    // the message above exists to prevent, one layer out.
+    logger.warn("solve.watch.refused", { reason: "SOLVE_ENABLED is off" });
     process.exitCode = 3;
     return;
   }
