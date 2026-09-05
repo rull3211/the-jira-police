@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1515 tests, no build step, no deployment
+Status: running end to end against production Jira. 1519 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -1750,11 +1750,37 @@ rather than an execution channel, and `plan.note` says so on every Maven refusal
 step's failure. The wrapper is refused by the diff gate all the same, for a different reason: this
 harness will not run it, but everyone else's CI will.
 
-**Exactly one flag, `-B`.** The temptation is `--no-transfer-progress`, `-q`, `-Dstyle.color=none`.
-Each is a way for the _test_ step to exit non-zero because Maven did not recognise a flag — and a
-non-zero test step is reported as `failed`, which is a harness mistake printed as a verdict about
-the model's code. `-B` (batch mode) has been in Maven since 2.0 and does the one necessary thing:
-stops it waiting on a terminal that is not there.
+**Exactly one flag, `-B`, and exactly one property.** The temptation is `--no-transfer-progress`,
+`-q`, `-Dstyle.color=none`. Each is a way for the _test_ step to exit non-zero because Maven did
+not recognise a flag — and a non-zero test step is reported as `failed`, which is a harness
+mistake printed as a verdict about the model's code. `-B` (batch mode) has been in Maven since 2.0
+and does the one necessary thing: stops it waiting on a terminal that is not there.
+
+The property is `-Dmaven.gitcommitid.skip=true`, added 2026-09-05, and it is the only concession
+this harness makes to how a particular repository builds. **The flag/property distinction is what
+makes it safe**: Maven silently ignores a user property no plugin claims, so this is inert on a
+repository that does not have the plugin, whereas an unrecognised flag would fail the test step
+everywhere. A test asserts that every argument between `mvn` and the goal is either `-B` or starts
+with `-D`, so the next person to reach for a flag has to read this paragraph first.
+
+Why it is needed: `pl.project13.maven:git-commit-id-plugin:4.9.10` binds its `revision` goal to
+`initialize`, so it runs before anything compiles, and its `GitDirLocator` parses the `.git` file
+with `split(":")` and no trim. In a linked worktree that file reads `gitdir: /abs/path`, so the
+plugin receives `" /abs/path"` with a leading space, `File.isAbsolute()` returns false, and an
+absolute path is resolved as a relative one. Measured: `Could not get HEAD Ref` nine seconds into
+the build in a worktree, `BUILD SUCCESS` for the same commit in an ordinary checkout.
+
+Three properties make skipping it acceptable rather than merely convenient. It writes
+`git.properties`, a metadata file — it compiles nothing, runs nothing, and skips no test; nothing
+in that repository's source, tests, `Dockerfile` or CI reads the file it produces; and the
+plugin's other goal, `validateRevision`, binds to `verify`, which this plan never reaches.
+
+The cost is real and is printed in the failure reason rather than buried here: **this is not
+byte-for-byte the build CI runs.** The alternative that avoids that — cutting a full local clone
+per solve so Maven sees an ordinary `.git` directory — was measured and works, but it buys
+fidelity on a metadata file at the price of a second isolation strategy and reworked push
+mechanics for Phase D, since a local clone's `origin` is a path on disk rather than GitHub. If a
+second worktree-hostile plugin ever turns up, that trade flips and the clone is the right answer.
 
 The same logic ruled out a Maven warm-up step. `mvn -DskipTests test-compile` before the real run
 would separate "downloading the world" from "the tests", which is what the Node split buys — but

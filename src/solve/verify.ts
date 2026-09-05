@@ -140,6 +140,43 @@ const MANIFESTS: Record<Toolchain, string> = {
 const MAVEN = "mvn";
 
 /**
+ * Turns off git-commit-id's build stamping, because it cannot read a worktree.
+ *
+ * The only concession this harness makes to a specific repository's build, and
+ * it is here rather than in a per-repo config because the thing it works around
+ * is not specific to a repository — it is specific to *worktrees*, which is the
+ * isolation every solve runs in.
+ *
+ * `pl.project13.maven:git-commit-id-plugin` binds `revision` to `initialize`,
+ * so it runs before anything compiles, and its `GitDirLocator` parses the
+ * `.git` file with `split(":")` and no trim. In a linked worktree that file
+ * reads `gitdir: /abs/path`, so the plugin gets `" /abs/path"` with a leading
+ * space, `File.isAbsolute()` says false, and it resolves an absolute path as a
+ * relative one. Measured on `insurance-commerce-rest-api` 2026-09-05: the build
+ * died nine seconds in with `Could not get HEAD Ref`, and the same commit built
+ * green in an ordinary checkout.
+ *
+ * Three properties make this safe to send unconditionally:
+ *
+ * 1. **An unknown `-D` property is inert.** Maven ignores user properties it
+ *    has no plugin for — unlike an unknown *flag*, which exits non-zero on the
+ *    test step and would be reported as `failed`, a harness mistake printed as
+ *    a verdict. That is why this is a property and why no flag joins `-B`.
+ * 2. **It cannot weaken the test signal.** The goal writes `git.properties`, a
+ *    metadata file. It compiles nothing, runs nothing and skips no test.
+ * 3. **The plugin's other goal is out of reach.** `validateRevision` binds to
+ *    `verify`, and this plan stops at `test`.
+ *
+ * The cost is honest and is printed in `note` below: this is not byte-for-byte
+ * the build the repository's CI runs. That is a real gap, and the reason it is
+ * accepted is that the alternative — cutting a full clone per solve so Maven
+ * sees an ordinary `.git` — buys correctness for a metadata file at the price
+ * of a second isolation strategy and reworked push mechanics. See ARCHITECTURE
+ * §15 for that argument in full.
+ */
+const SKIP_GIT_STAMP = "-Dmaven.gitcommitid.skip=true";
+
+/**
  * One manifest's presence in the base tree.
  *
  * `absent` and `unreadable` are separate because they lead to different
@@ -406,9 +443,14 @@ async function mavenPlan(
     outcome: "planned",
     plan: {
       install: null,
-      steps: [{ name: "test", argv: [MAVEN, "-B", "test"], cold: true }],
+      steps: [{ name: "test", argv: [MAVEN, "-B", SKIP_GIT_STAMP, "test"], cold: true }],
       toolchain: "maven",
-      note: ` — using ${MAVEN} from PATH; the repository's own wrapper is deliberately not executed, so a version mismatch with its CI is the first thing to check`,
+      // Both departures from the repository's own build are named, because a
+      // reader deciding whether to trust this result needs to know them without
+      // reading this file. The wrapper clause is hedged: the repository that
+      // prompted all of this has no `mvnw` at all, and a note asserting one was
+      // skipped would send an operator looking for a file that is not there.
+      note: ` — using ${MAVEN} from PATH with ${SKIP_GIT_STAMP}, so this is not byte-for-byte the build CI runs; if the repository has a wrapper it was not executed either, which makes a toolchain difference the first thing to check`,
     },
   };
 }

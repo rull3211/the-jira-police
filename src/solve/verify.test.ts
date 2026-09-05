@@ -531,10 +531,58 @@ describe("the Maven toolchain", () => {
       // `mvn test` resolves its own dependencies, so a separate step would
       // either be a no-op line in the report or a second full download.
       install: null,
-      steps: [{ name: "test", argv: ["mvn", "-B", "test"], cold: true }],
+      steps: [
+        { name: "test", argv: ["mvn", "-B", "-Dmaven.gitcommitid.skip=true", "test"], cold: true },
+      ],
       toolchain: "maven",
-      note: expect.stringContaining("wrapper is deliberately not executed") as unknown as string,
+      note: expect.stringContaining("-Dmaven.gitcommitid.skip=true") as unknown as string,
     });
+  });
+
+  it("skips git stamping, which cannot read a worktree", async () => {
+    // THE GUARD. `git-commit-id-plugin` binds to `initialize`, so without this
+    // the build dies before compiling anything and the run is booked as a
+    // failed fix of code that was never built. Measured on
+    // insurance-commerce-rest-api: `Could not get HEAD Ref` in a worktree,
+    // green in an ordinary checkout of the same commit.
+    const result = await discoverPlan(mavenRunner(), request());
+    const argv = result.outcome === "planned" ? (result.plan.steps[0]?.argv ?? []) : [];
+
+    expect(argv).toContain("-Dmaven.gitcommitid.skip=true");
+  });
+
+  it("passes it as a property, never as a flag", async () => {
+    // The distinction the whole workaround rests on. Maven ignores a user
+    // property no plugin claims, so this is inert on a repository without the
+    // plugin; an unrecognised *flag* would exit non-zero on the test step and
+    // be reported as `failed` — a harness mistake printed as a verdict about
+    // the model's code. Anything here not starting `-D` is that mistake.
+    const result = await discoverPlan(mavenRunner(), request());
+    const argv = result.outcome === "planned" ? (result.plan.steps[0]?.argv ?? []) : [];
+
+    for (const arg of argv.slice(1, -1)) {
+      expect(arg === "-B" || arg.startsWith("-D")).toBe(true);
+    }
+  });
+
+  it("says in the reason that it did not run the repository's own build", async () => {
+    // The accepted cost, made visible where it is acted on. A reviewer decides
+    // whether to trust a red Maven run partly on whether it was the real build,
+    // and this is the only place that question gets answered.
+    const result = await verify(mavenRunner({ diff: out(""), "-B": bad(1) }), request());
+
+    expect(reason(result)).toContain("-Dmaven.gitcommitid.skip=true");
+  });
+
+  it("does not claim a wrapper was skipped as though one existed", async () => {
+    // The repository this was built for has no `mvnw` and no `.mvn/wrapper`.
+    // The note used to assert the wrapper "is deliberately not executed",
+    // sending an operator to look for a file that is not there — the
+    // prose/behaviour divergence this project exists to catch, in our own text.
+    const result = await discoverPlan(mavenRunner(), request());
+    const note = result.outcome === "planned" ? result.plan.note : "";
+
+    expect(note).toContain("if the repository has a wrapper");
   });
 
   it("never runs a Node command against a Maven base", async () => {
@@ -617,10 +665,13 @@ describe("the Maven toolchain", () => {
     // The cold step is also the install, so there is no install refusal to hang
     // the note on. Without this the "mvnw was not executed" hint — the first
     // thing to check on a version mismatch — could never be printed.
-    const result = await verify(mavenRunner({ diff: out(""), "-B test": bad(1) }), request());
+    const result = await verify(
+      mavenRunner({ diff: out(""), "skip=true test": bad(1) }),
+      request(),
+    );
 
     expect(result.outcome).toBe("failed");
-    expect(reason(result)).toContain("wrapper is deliberately not executed");
+    expect(reason(result)).toContain("not byte-for-byte the build CI runs");
   });
 
   it("names an executable the runner allows", async () => {
