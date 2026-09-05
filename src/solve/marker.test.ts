@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BOT_PREFIX,
+  findMarker,
   isMarker,
   isNewer,
   isOurs,
@@ -138,6 +139,42 @@ describe("parseMarker", () => {
       "bot: iteration count 1\nLast read: 2026-09-05T10:00:00Z\n\n- narrowed the type\n\nedited by hand",
     );
     expect(result.outcome === "parsed" && result.marker.rounds).toEqual(["narrowed the type"]);
+  });
+});
+
+const at = (body: string, id = "IC_1"): { body: string; id: string } => ({ body, id });
+
+describe("findMarker", () => {
+  const MARKER = "bot: iteration count 2\nLast read: 2026-09-05T10:00:00Z";
+
+  it("finds the marker among ordinary comments", () => {
+    const mine = at(MARKER);
+    const result = findMarker([at("Looks good", "IC_0"), mine, at("bot: replied", "IC_2")]);
+
+    expect(result).toEqual({ outcome: "found", comment: mine });
+  });
+
+  it("reports no marker on a pull request that has never had a round", () => {
+    expect(findMarker([at("Looks good", "IC_0")])).toEqual({ outcome: "absent" });
+  });
+
+  it("refuses two markers rather than picking one", () => {
+    // Picking the higher count would resume from one and orphan the other, and
+    // the reason there are two is that something already went wrong. A loop
+    // that repairs it by choosing has stopped being able to report it.
+    const result = findMarker([at(MARKER, "IC_1"), at(MARKER, "IC_2")]);
+
+    expect(result).toMatchObject({ outcome: "unusable" });
+    expect(result.outcome === "unusable" ? result.reason : "").toContain("2 marker comments");
+  });
+
+  it("refuses a marker with no node id rather than reading it as absent", () => {
+    // Absent is the tempting shortcut and the worst of the three: it posts a
+    // second marker immediately and reports nothing.
+    const result = findMarker([at(MARKER, "")]);
+
+    expect(result).toMatchObject({ outcome: "unusable" });
+    expect(result.outcome === "unusable" ? result.reason : "").toContain("node id");
   });
 });
 

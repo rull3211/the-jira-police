@@ -157,6 +157,61 @@ export function parseMarker(body: string): ParseMarkerResult {
 }
 
 /**
+ * The narrowest shape `findMarker` needs.
+ *
+ * Structural rather than `ReviewComment`, so this file keeps its promise not to
+ * know about `pr.ts`. Importing the real type would make the pure half of the
+ * cursor depend on the half that shells out to `gh`.
+ */
+export interface MarkerCandidate {
+  readonly body: string;
+  readonly id: string;
+}
+
+export type FindMarkerResult<T> =
+  | { readonly outcome: "found"; readonly comment: T }
+  /** No marker yet. The first round on this pull request posts one. */
+  | { readonly outcome: "absent" }
+  | { readonly outcome: "unusable"; readonly reason: string };
+
+/**
+ * Locates the marker among a pull request's comments.
+ *
+ * **Two markers is a refusal, not a tie-break.** Picking the higher count, or
+ * the later one, would quietly resume from one of them and leave the other to
+ * be edited by nobody — and the reason there are two is that something already
+ * went wrong, most likely a post that succeeded after its response was lost. A
+ * loop that repairs that by choosing has stopped being able to report it. The
+ * caller stops the round and a person deletes one comment.
+ *
+ * **A marker with no node id is a refusal for the same reason, one step
+ * earlier.** It cannot be edited, so the round would have to post a second one
+ * — which is the case above, created deliberately. Reading it as `absent` is
+ * the tempting shortcut and is the worst of the three: it posts that second
+ * marker immediately and reports nothing.
+ */
+export function findMarker<T extends MarkerCandidate>(comments: readonly T[]): FindMarkerResult<T> {
+  const found = comments.filter((comment) => isMarker(comment.body));
+  if (found.length > 1) {
+    return {
+      outcome: "unusable",
+      reason: `${String(found.length)} marker comments on this pull request — a round would resume from one and orphan the other, so a person deletes the extras`,
+    };
+  }
+  const only = found[0];
+  if (only === undefined) {
+    return { outcome: "absent" };
+  }
+  if (only.id === "") {
+    return {
+      outcome: "unusable",
+      reason: "the marker comment came back without a node id, so it cannot be edited in place",
+    };
+  }
+  return { outcome: "found", comment: only };
+}
+
+/**
  * Whether a comment is newer than the high-water mark.
  *
  * Strictly newer. A comment created at exactly the recorded instant was the

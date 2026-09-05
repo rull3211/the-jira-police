@@ -1315,19 +1315,33 @@ const RESOLVE_MUTATION = `mutation($threadId:ID!){
   resolveReviewThread(input:{threadId:$threadId}){ thread{ isResolved } }
 }`;
 
-/** Runs a GraphQL mutation and hands back its parsed payload, or a reason. */
+/**
+ * Runs a GraphQL operation and hands back its parsed payload, or a reason.
+ *
+ * `numbers` is separate from `fields` because gh's two flags mean different
+ * things and only one of them is safe for a value this service did not write.
+ * `-F` is typed — it turns `42` into an Int, which an `Int!` variable requires
+ * — but it also reads a value beginning with `@` out of a *file*. So a model-
+ * authored reply body goes through `-f`, which interprets nothing, and only
+ * values this code produced as digits go through `-F`.
+ */
 async function mutate(
   runner: CommandRunner,
   what: string,
   query: string,
   fields: readonly (readonly [string, string])[],
-  opts: { readonly cwd: string; readonly timeoutMs: number },
+  opts: {
+    readonly cwd: string;
+    readonly timeoutMs: number;
+    readonly numbers?: readonly (readonly [string, number])[];
+  },
 ): Promise<{ readonly data: unknown } | { readonly reason: string }> {
   const argv = ["gh", "api", "graphql"];
   for (const [key, value] of fields) {
-    // Raw, not typed: `-F` would read a value beginning with `@` out of a file,
-    // and a reply body is written by a model from a ticket anyone can edit.
     argv.push("-f", `${key}=${value}`);
+  }
+  for (const [key, value] of opts.numbers ?? []) {
+    argv.push("-F", `${key}=${String(value)}`);
   }
   argv.push("-f", `query=${query}`);
 
@@ -1454,6 +1468,153 @@ export async function resolveThread(
 
   logger.info("solve.pr.thread_resolved", { threadId: reply.threadId, reply: reply.commentUrl });
   return { outcome: "resolved" };
+}
+
+export interface PostCommentRequest {
+  readonly cwd: string;
+  readonly repo: string;
+  readonly number: number;
+  readonly body: string;
+  readonly timeoutMs: number;
+}
+
+export interface EditCommentRequest {
+  readonly cwd: string;
+  /** The node id of the comment to rewrite. Never "the last one". */
+  readonly commentId: string;
+  readonly body: string;
+  readonly timeoutMs: number;
+}
+
+export type WriteCommentResult =
+  | { readonly outcome: "written"; readonly commentId: string }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+const POST_COMMENT = `mutation($subjectId:ID!,$body:String!){
+  addComment(input:{subjectId:$subjectId,body:$body}){ commentEdge{ node{ id } } }
+}`;
+
+const EDIT_COMMENT = `mutation($id:ID!,$body:String!){
+  updateIssueComment(input:{id:$id,body:$body}){ issueComment{ id } }
+}`;
+
+const PR_NODE_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){ pullRequest(number:$number){ id } }
+}`;
+
+/**
+ * Posts the marker comment, once, on a pull request that has none.
+ *
+ * Through `addComment` rather than `gh pr comment` because the node id of what
+ * was created is the whole point: without it the next round has to find the
+ * comment again by prefix, and a round that cannot find what it just wrote
+ * posts a second one.
+ */
+export async function postComment(
+  runner: CommandRunner,
+  request: PostCommentRequest,
+): Promise<WriteCommentResult> {
+  const { cwd, repo, number, body, timeoutMs } = request;
+  if (body.trim() === "") {
+    return { outcome: "failed", reason: "refusing to post an empty comment" };
+  }
+  const parts = OWNER_NAME.exec(repo);
+  if (parts === null) {
+    return { outcome: "failed", reason: `"${repo}" is not an owner/name repository` };
+  }
+
+  const subject = await mutate(
+    runner,
+    `read the node id of #${String(number)}`,
+    PR_NODE_QUERY,
+    [
+      ["owner", parts[1] ?? ""],
+      ["name", parts[2] ?? ""],
+    ],
+    { cwd, timeoutMs, numbers: [["number", number]] },
+  );
+  if ("reason" in subject) {
+    return { outcome: "failed", reason: subject.reason };
+  }
+  const subjectId = dig(subject.data, "data", "repository", "pullRequest", "id");
+  if (typeof subjectId !== "string" || subjectId === "") {
+    return { outcome: "failed", reason: `#${String(number)} came back without a node id` };
+  }
+
+  const posted = await mutate(
+    runner,
+    `comment on #${String(number)}`,
+    POST_COMMENT,
+    [
+      ["subjectId", subjectId],
+      ["body", body],
+    ],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in posted) {
+    return { outcome: "failed", reason: posted.reason };
+  }
+
+  const id = dig(posted.data, "data", "addComment", "commentEdge", "node", "id");
+  // Same rule as a thread reply: a mutation that will not say where the comment
+  // landed has not given a usable receipt, and here the receipt is what every
+  // later round edits. Without it the marker is write-once.
+  if (typeof id !== "string" || id === "") {
+    return {
+      outcome: "failed",
+      reason: `the comment on #${String(number)} came back without a node id, so no later round could edit it`,
+    };
+  }
+
+  logger.info("solve.pr.commented", { repo, number, commentId: id });
+  return { outcome: "written", commentId: id };
+}
+
+/**
+ * Rewrites one comment, named by its node id.
+ *
+ * **Not `gh pr comment --edit-last`.** That flag edits the last comment of the
+ * *current user*, and the current user is the operator this service is
+ * authenticated as — so a round running after a human commented would overwrite
+ * that person's words with machine state. The obvious flag is the dangerous
+ * one, which is why the safe path is spelled out in a mutation instead.
+ */
+export async function editComment(
+  runner: CommandRunner,
+  request: EditCommentRequest,
+): Promise<WriteCommentResult> {
+  const { cwd, commentId, body, timeoutMs } = request;
+  if (commentId === "") {
+    return { outcome: "failed", reason: "refusing to edit a comment with no id" };
+  }
+  if (body.trim() === "") {
+    return { outcome: "failed", reason: "refusing to blank a comment" };
+  }
+
+  const edited = await mutate(
+    runner,
+    `edit comment ${commentId}`,
+    EDIT_COMMENT,
+    [
+      ["id", commentId],
+      ["body", body],
+    ],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in edited) {
+    return { outcome: "failed", reason: edited.reason };
+  }
+
+  const id = dig(edited.data, "data", "updateIssueComment", "issueComment", "id");
+  if (typeof id !== "string" || id === "") {
+    return {
+      outcome: "failed",
+      reason: `the edit of comment ${commentId} was accepted but came back empty, so nothing proves it took`,
+    };
+  }
+
+  logger.info("solve.pr.comment_edited", { commentId: id });
+  return { outcome: "written", commentId: id };
 }
 
 /**

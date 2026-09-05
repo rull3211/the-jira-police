@@ -12,10 +12,12 @@ import {
   MAX_FEEDBACK_CHARS,
   commitAll,
   createDraftPr,
+  editComment,
   findPullRequest,
   formatReviewFeedback,
   markReady,
   parsePrUrl,
+  postComment,
   push,
   readReview,
   readReviewThreads,
@@ -1420,6 +1422,147 @@ describe("resolveThread", () => {
 
     expect(result.outcome).toBe("failed");
     expect(reason(result)).toContain("Bad credentials");
+  });
+});
+
+const MARKER_BODY = "bot: iteration count 1\nLast read: 2026-09-05T10:00:00Z";
+
+/** The two-step reply table `postComment` needs: node id, then the comment. */
+const posts = (commentId = "IC_9"): Record<string, Partial<CommandResult>> => ({
+  "pullRequest(number:$number){ id }": {
+    stdout: JSON.stringify({ data: { repository: { pullRequest: { id: "PR_1" } } } }),
+  },
+  addComment: {
+    stdout: JSON.stringify({ data: { addComment: { commentEdge: { node: { id: commentId } } } } }),
+  },
+});
+
+describe("postComment", () => {
+  const request = { cwd: WORKTREE, repo: REPO, number: 42, body: MARKER_BODY, timeoutMs: 60_000 };
+
+  it("reads the pull request's node id and hands back the comment's", async () => {
+    // The returned id is the point of using addComment over `gh pr comment`:
+    // without it, the next round has to find the marker again by prefix, and a
+    // round that cannot find what it just wrote posts a second one.
+    const runner = fakeRunner(posts());
+
+    const result = await postComment(runner, request);
+
+    expect(result).toEqual({ outcome: "written", commentId: "IC_9" });
+  });
+
+  it("passes the number typed and the body raw", async () => {
+    // `-F` turns 42 into an Int, which the query's `Int!` requires. It also
+    // reads a value beginning with `@` out of a file, so a body nobody here
+    // wrote never goes through it.
+    const runner = fakeRunner(posts());
+
+    await postComment(runner, request);
+
+    expect(runner.calls[0]).toContain("-F");
+    expect(runner.calls[0]).toContain("number=42");
+    const post = runner.calls[1] ?? [];
+    expect(post).toContain(`body=${MARKER_BODY}`);
+    expect(post[post.indexOf(`body=${MARKER_BODY}`) - 1]).toBe("-f");
+  });
+
+  it("refuses an empty body before running anything", async () => {
+    const runner = fakeRunner(posts());
+
+    const result = await postComment(runner, { ...request, body: "   " });
+
+    expect(result.outcome).toBe("failed");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("refuses a repo that is not owner/name", async () => {
+    const runner = fakeRunner(posts());
+
+    const result = await postComment(runner, { ...request, repo: "advisor" });
+
+    expect(reason(result)).toContain("owner/name");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("does not comment when the pull request has no node id", async () => {
+    const runner = fakeRunner({
+      "pullRequest(number:$number){ id }": { stdout: JSON.stringify({ data: {} }) },
+    });
+
+    const result = await postComment(runner, request);
+
+    expect(reason(result)).toContain("without a node id");
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  it("fails when the comment came back without an id, so no round could edit it", async () => {
+    const runner = fakeRunner({
+      ...posts(),
+      addComment: { stdout: JSON.stringify({ data: { addComment: {} } }) },
+    });
+
+    const result = await postComment(runner, request);
+
+    expect(reason(result)).toContain("no later round could edit it");
+  });
+});
+
+/** Reply table for the one `updateIssueComment` call `editComment` makes. */
+const edits = (id = "IC_9"): Record<string, Partial<CommandResult>> => ({
+  updateIssueComment: {
+    stdout: JSON.stringify({ data: { updateIssueComment: { issueComment: { id } } } }),
+  },
+});
+
+describe("editComment", () => {
+  const request = { cwd: WORKTREE, commentId: "IC_9", body: MARKER_BODY, timeoutMs: 60_000 };
+
+  it("rewrites the comment named by its node id", async () => {
+    const runner = fakeRunner(edits());
+
+    const result = await editComment(runner, request);
+
+    expect(result).toEqual({ outcome: "written", commentId: "IC_9" });
+    expect(runner.calls[0]).toContain("id=IC_9");
+  });
+
+  it("never reaches for --edit-last", async () => {
+    // That flag edits the last comment of the *current user*, and the current
+    // user is the operator. A round running after a human commented would
+    // overwrite that person's words with machine state.
+    const runner = fakeRunner(edits());
+
+    await editComment(runner, request);
+
+    expect(runner.calls.flat()).not.toContain("--edit-last");
+  });
+
+  it("refuses to edit a comment with no id", async () => {
+    const runner = fakeRunner(edits());
+
+    const result = await editComment(runner, { ...request, commentId: "" });
+
+    expect(result.outcome).toBe("failed");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("refuses to blank a comment", async () => {
+    const runner = fakeRunner(edits());
+
+    const result = await editComment(runner, { ...request, body: "\n  " });
+
+    expect(reason(result)).toContain("blank");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("does not report an edit that came back empty as written", async () => {
+    const runner = fakeRunner({
+      updateIssueComment: { stdout: JSON.stringify({ data: { updateIssueComment: {} } }) },
+    });
+
+    const result = await editComment(runner, request);
+
+    expect(reason(result)).toContain("nothing proves it took");
   });
 });
 
