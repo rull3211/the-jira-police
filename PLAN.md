@@ -561,6 +561,12 @@ a demonstration; the same sequence on a five-minute timer is a deployment.
   nightly.
 - **A test harness for `runSolveRungs`.** Measured, not assumed: putting the wrong predicate back
   at that call site leaves all 1841 tests green, because nothing constructs its dependencies.
+  **`runWatch`, `runReviewSweep` and the two halves it builds are in the same position**, and the
+  gap now covers a refusal rather than only a predicate: the `SOLVE_ENABLED` guard that stops
+  `--watch` reporting an empty watched set as _nothing is under review_ has no test that fails when
+  it is unplugged. Everything decidable was pushed into pure functions that do — `describeReviewSweep`,
+  `endedState`, `completionLabelFor`, the parser, `createReviewCycleDeps` — which narrows the
+  untested part to the wiring and does not close it.
 
 ---
 
