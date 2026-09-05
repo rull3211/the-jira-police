@@ -17,27 +17,26 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1719 tests, no build step, no deployment
+Status: running end to end against production Jira. 1841 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
-`agent:solvable`, waiting to be fixed by an agent. It is read-only today — it selects the right
-tickets and reports the exact label edit it _would_ make, and the cycle that runs it holds no
-function capable of making it.
+`agent:solvable`, waiting to be fixed by an agent. It selects the right tickets, claims them, and
+excludes whatever is already in flight — the dedupe lives in the ticket's own labels rather than
+on disk.
 
-Past that queue **the whole pipeline is now wired and has been driven by hand, one rung at a
-time.** `pnpm solve:once <KEY>` climbs a cumulative ladder — `--claim` writes the Jira label,
-`--solve` cuts a worktree and runs the four model passes under a diff bound and mechanical
-verification, `--pr` commits, pushes and opens a draft pull request — and `--advance`, a separate
-mode rather than a rung, runs one review round against a pull request an earlier run left open.
-Real tickets have been claimed, solved, pushed, reviewed and merged this way; §15 records what
-each step cost.
+Past that queue **the whole pipeline is wired and has been driven by hand, one rung at a time.**
+`pnpm solve:once <KEY>` climbs a cumulative ladder — `--claim` writes the Jira label, `--solve`
+cuts a worktree and runs the model passes under a diff bound and mechanical verification, `--pr`
+commits, pushes and opens a draft pull request, `--review` then works the review to a handover —
+and `--advance`, a separate mode rather than a rung, runs one review round against a pull request
+an earlier run left open. Real tickets have been claimed, solved, pushed, reviewed and merged this
+way; §15 records what each step cost.
 
 What that sentence used to say, and said for two months, was that all of it was "wired to
 nothing". That was the honest description while it held, and each grant was its own commit so a
 reviewer could see the composition change rather than take a comment's word for it. **The
-remaining inertness is much narrower and worth naming exactly:** nothing writes `agent:reviewing`,
-so the poller's review-advance step has nothing to find; and `pnpm start` is still the grooming
+remaining inertness is now narrow enough to name in one line:** `pnpm start` is still the grooming
 loop only. Every solve, publish and review round is a person typing a command and reading the
 output. See §4 for the queue, §15 for the pipeline, and §13 for what is genuinely absent.
 
@@ -194,9 +193,10 @@ One rule in the table is a security boundary rather than a coherence check. Tria
 `agent:solvable` and nothing else in the namespace: `agent:start` is a human's authorisation for a
 bot to attempt a fix. The analyst's entire input is a Jira ticket, and a ticket is written by
 whoever felt like writing one — so if the skill could emit `agent:start`, a ticket body could ask
-it to, and the human approval step would be one the bot performs for itself. The solver's own
-`agent:solving` / `agent:done` / `agent:failed` are excluded for a different reason: the solve
-queue has no local cursor, and its idempotency rests entirely on those labels having one writer.
+it to, and the human approval step would be one the bot performs for itself. The solver's own six
+— `agent:solving`, `agent:reviewing`, `agent:review-done`, `agent:done`, `agent:closed`,
+`agent:failed` — are excluded for a different reason: the solve queue has no local cursor, and its
+idempotency rests entirely on those labels having one writer.
 
 ### post — `src/triage/poster.ts`
 
@@ -415,6 +415,8 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/solve/pr.ts`            | `git` and `gh` as argv arrays. Commit, push, draft PR, read review and its inline threads, reply, resolve, comment, undraft |
 | `src/solve/marker.ts`        | The round cursor as one comment: render, parse, locate, and refuse rather than reset. No I/O                                |
 | `src/solve/delivery.ts`      | `publish` and `advance` — the review round-trip as two callable steps                                                       |
+| `src/solve/feedback.ts`      | What a run says back to the ticket. Renders the outcome; `safeText` and `shorten` bound what a model wrote                  |
+| `src/solve/commenter.ts`     | Posting that comment over an Atlassian MCP session. The narrowest tool surface in the tree — no reads, no `editJiraIssue`   |
 | `src/solve/exec.ts`          | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                                     |
 | `src/solve/passes.ts`        | The real `PassRunner`. Working directory is the worktree; no MCP server required                                            |
 | `src/cli/solve-once.ts`      | Argument parsing, then a call into `solve-run.ts`. Dry by default; every write is a typed flag                              |
@@ -561,6 +563,17 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `SOLVE_BOT_NAME`             | `jira-police`                          | Commit author. Widens nothing                                                                                                                                                                                    |
 | `SOLVE_BOT_EMAIL`            | `jira-police@users.noreply.github.com` | Commit author                                                                                                                                                                                                    |
 | `SOLVE_GH_TIMEOUT_MS`        | `60000`                                | Every `git` and `gh` command in the delivery path. Floor of 1                                                                                                                                                    |
+| `SOLVE_GIT_TIMEOUT_MS`       | `120000`                               | The worktree commands — `fetch`, `worktree add`, `checkout`. Longer than the `gh` budget because a cold `fetch` is the one git operation that is genuinely slow                                                  |
+| `SOLVE_STEP_TIMEOUT_MS`      | `600000`                               | One discovered verification step — test, typecheck, lint                                                                                                                                                         |
+| `SOLVE_INSTALL_TIMEOUT_MS`   | `900000`                               | Dependency install, which is separate because a fresh worktree has no `node_modules` and the first install in a repository is not comparable to any later step                                                   |
+| `SOLVE_TIMEOUT_MS`           | `1800000`                              | One model pass. The setting that machine sleep defeats: a pass killed here did nothing wrong and is deliberately not retried (§13)                                                                                |
+| `SOLVE_BASE_REF`             | `origin/main`                          | What a worktree is cut from and what `verifyBase` and the fail-first probe are judged against                                                                                                                    |
+| `SOLVE_REPO_ROOT`            | — (**no fallback**)                    | Where the pilot checkouts live. No default for the same reason as `SOLVE_REPOS`: a path that survives being deleted from `.env` is a write privilege that cannot be revoked without editing source               |
+| `REVIEW_POLL_MS`             | `120000`                               | How long `--review` waits between rounds. Two minutes from measurement, not taste — every Copilot review on #2658 landed two and a half to four minutes after the request                                        |
+| `MAX_REVIEW_WAITS`           | `10`                                   | Consecutive polls that found nothing, reset by any round that runs. The only bound that catches a reviewer who never answers: every other cap reads the marker, and the marker only moves when a round runs      |
+| `FAIL_FIRST_CHECK`           | `true`                                 | **The one setting that defaults on**, and the mirror of `flag()` on purpose — `!== "false"`. Every other switch fails closed so a typo cannot arm a privilege; this one grants nothing, so a typo must not silently withdraw a guard |
+| `STORECODE_PATH`             | `storecode`                            | The subprocess binary. Overridable so a probe can point at a different build without editing source                                                                                                              |
+| `LOG_LEVEL`                  | `info`                                 | Widens nothing                                                                                                                                                                                                   |
 
 Commands:
 
@@ -575,19 +588,24 @@ pnpm solve:once SSX-1234           # the same, narrowed to one ticket
 pnpm solve:once SSX-1234 --claim   # B2 — claims, proves the queue drops it, releases
 pnpm solve:once SSX-1234 --solve   # C  — ... and runs the solver; nothing is pushed
 pnpm solve:once SSX-1234 --pr      # D  — ... and opens the draft PR, reviewer @copilot
+pnpm solve:once SSX-1234 --review  # ... and works the review to a handover
 pnpm solve:once SSX-1234 --advance # one review round on the PR a previous run opened
 pnpm bot:once SSX-1234             # triage + the fitness call; writes nothing
 pnpm bot:once SSX-1234 --claim     # ... writes the verdict, then claims the ticket
 pnpm bot:once SSX-1234 --solve     # ... and runs the solver; nothing is pushed
-pnpm bot:once SSX-1234 --pr        # ... and opens the draft PR — the whole bot, one command
+pnpm bot:once SSX-1234 --pr        # ... and opens the draft PR
+pnpm bot:once SSX-1234 --review    # ... and reviews it out of draft — the whole bot, one command
 pnpm check-types && pnpm lint && pnpm test
 ```
 
 Note the script is **`check-types`**, not `typecheck`.
 
-All three escalating flags are wired, and **the ladder is cumulative** — `--pr` claims, solves and
-opens the pull request. This paragraph used to say they refused, each naming the module that would
-have to be composed; that was accurate for two phases and is now history. What `unavailable`
+All four escalating flags are wired, and **the ladder is cumulative** — `--review` claims, solves,
+opens the pull request and then works the review. This paragraph used to say they refused, each
+naming the module that would have to be composed; that was accurate for two phases and is now
+history. `--advance` is the one thing on the list that is not a rung, and the parser refuses to
+combine it with one: it acts on a pull request an earlier run opened, so implying `--solve` would
+mean re-solving the ticket from scratch before touching the review. What `unavailable`
 (`src/cli/solve-args.ts`) still does is refuse a rung that is not _configured_, which today means
 `--pr` without a `SOLVE_GITHUB_OWNER` — checked before the claim rather than discovered after the
 solver has run.
@@ -598,8 +616,11 @@ otherwise mean "open a pull request for every ticket in the queue" — an unboun
 command line one character shorter than the safe one, at the moment an operator is experimenting.
 
 A run that does not reach a pull request releases its own claim on the way out, in a `finally`, so
-a ticket is not left claimed by a run that crashed. A run that _did_ open one keeps `agent:solving`:
-releasing there would return a solved ticket to the queue for a second solver to duplicate.
+a ticket is not left claimed by a run that crashed — unless the outcome _decides_ the ticket's
+fate, in which case it leaves a terminal label and the reason behind instead. A run that opened a
+pull request does not release either: it moves the ticket to `agent:reviewing`, because releasing
+there would return a solved ticket to the queue for a second solver to duplicate, and keeping
+`agent:solving` would hold the only concurrency slot for as long as a human takes to review.
 
 ### `bot:once` — the same ladder with triage on the front
 
@@ -855,14 +876,18 @@ who remembers them should be able to see that they were retired rather than quie
   `buy-insurance-advisor-web`, pull requests opened and merged. _Delivery end to end_ — `publish`
   and `advance` are both called from `src/cli/solve-run.ts`, and `buildAdvanceRequest` passes
   `MAX_REVIEW_ITERATIONS` and `MAX_PR_ROUNDS_TOTAL` in.
-- **`agent:reviewing`, and with it the poller's review step.** Nothing writes that label, so the
-  ticket ends a publish run still on `agent:solving` and the "advance anything under review"
-  step has nothing to iterate. It is the one piece of the label machine still unwritten, and it
-  is what the review loop needs before it can be driven by anything but a person naming a key.
-- **Both reviewers, and the pull request as the terminal.** `advance` still stops at the undraft
-  and still gates on the requested reviewer having spoken, so a human who comments first is read
-  and then discarded by a check asking a different question. `state` (`OPEN`/`CLOSED`/`MERGED`)
-  is parsed and read by nobody.
+- **Retired, 2026-09-05.** _`agent:reviewing`, and the pull request as the terminal._ Both are
+  written. `reviewTransition` replaces the claim when the pull request opens,
+  `reviewStageTransition` mirrors the draft flag onto `agent:review-done`, and
+  `completionTransition` writes `agent:done` on a merge, `agent:closed` on a close and
+  `agent:failed` on a bail. `state` (`OPEN`/`CLOSED`/`MERGED`) is read, and the loop no longer
+  ends at the undraft. **The poller's review step is still absent, but it moved rather than
+  stalled** — it belongs to the daemon below, since nothing runs on a timer to call it.
+- **Both reviewers.** `advance` still gates `waiting` on the _requested_ reviewer having spoken,
+  so a human who comments first is collected — `readReview` filters no authors — and then
+  discarded by a check asking a different question. A human's request also burns
+  `MAX_REVIEW_ITERATIONS`, which exists to stop two machines talking to each other and has no
+  business bounding a person. The last slice before the daemon; see PLAN.md §6.2.
 - **Running it from the daemon, and this one is deliberately _last_.** Not wired into `index.ts`;
   `pnpm start` is the grooming loop and must stay that way until everything above has been driven
   by hand. The property the daemon adds is _nobody is watching_, which is the last property you
@@ -925,9 +950,9 @@ before it, so the command line reads as the privilege escalation it is.
   The part that is ours is **how the failure came back**: as an ordinary `COMMENTED` review whose
   whole body was "Copilot encountered an error and was unable to review this pull request." Read
   as feedback, that spends a paid review round asking a model to address an error message. Read as
-  a review with no comments, it is an approval — the loop undrafts and marks the ticket `agent:done`
-  on a review that never happened, which is the pipeline telling a human their code was reviewed
-  when it was not. `ReviewState` therefore has a third state, `reviewerErrored`, sitting between
+  a review with no comments, it is an approval — the loop undrafts and moves the ticket to
+  `agent:review-done` on a review that never happened, which is the pipeline telling a human their
+  code was reviewed when it was not. `ReviewState` therefore has a third state, `reviewerErrored`, sitting between
   "no response" and "a review". It is recognised from the reviewer's own text, which is brittle
   and is the only signal there is; both phrases must match, and the match is scoped to the
   requested reviewer so a person quoting the failure keeps their comment.
@@ -1185,16 +1210,21 @@ Things that look like details and are not:
 
 ## 15. The solve pipeline
 
-Everything below is built, tested and **reachable from the command line** — the claim, the four
+Everything below is built, tested and **reachable from the command line** — the claim, the model
 passes, the commit, the push and the draft pull request are one `solve:once SSX-1234 --pr` away.
 
-This paragraph has been rewritten three times as that stopped being true in stages, and the shape
-of what is left is worth stating precisely rather than as "mostly done". **`advance` is now wired
-too** — `solve:once SSX-1234 --advance` runs one review round against a pull request an earlier run
-opened — so the review loop is a mode rather than a plan. What is still called by nothing is **the
-rest of the label state machine**: a published pull request leaves the ticket on `agent:solving`,
-and `agent:reviewing` / `agent:done` are moved by hand. The command says so when it happens rather
-than leaving the board to be misread.
+This paragraph has been rewritten four times as that stopped being true in stages, and the shape
+of what is left is worth stating precisely rather than as "mostly done". **`advance` is wired** —
+`solve:once SSX-1234 --advance` runs one review round against a pull request an earlier run opened
+— and `--review` chains the whole thing, opening the pull request and then working rounds until
+the reviewer stops or a bound fires. **The label state machine is wired too**, since 2026-09-05:
+nothing on the solve path is moved by hand any more. A ticket goes
+`agent:solving → agent:reviewing → agent:review-done` and ends on `agent:done`, `agent:closed` or
+`agent:failed`, and every outcome that spent a claim says so on the ticket.
+
+What is left here is one review-loop slice — human reviewers are collected and then dropped by the
+`waiting` gate (§13) — and the daemon, which is the only thing that would call any of it on a
+timer.
 
 What is still missing entirely is listed in §13; what this _does_ is here.
 
