@@ -36,6 +36,8 @@ export const RECON_SCHEMA = {
     "testPlan",
     "estimatedLines",
     "bailReason",
+    "bailBlockers",
+    "bailRemedy",
     "injectionNoticed",
   ],
   properties: {
@@ -89,7 +91,18 @@ export const RECON_SCHEMA = {
     bailReason: {
       type: "string",
       description:
-        "Why this is not safe for an agent to do unattended. Non-empty if and only if `proceed` is false. Name the specific thing you found and what would have to change for the task to become agent-solvable — a human reads this to decide what to do next.",
+        'The single most disqualifying thing you found, in ONE SENTENCE. Non-empty if and only if `proceed` is false. This is a headline: it is the first line of a Jira comment and is read on its own, so name the specific finding rather than a category — "the postcode validation is duplicated in three packages and the ticket does not say which is authoritative", not "too complex". Everything else goes in `bailBlockers` and `bailRemedy`; do not put the whole analysis here.',
+    },
+    bailBlockers: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "One entry per disqualifying finding, most disqualifying first, EACH ONE OR TWO SENTENCES. Empty if and only if `proceed` is true. These are rendered as a bullet list on the ticket for someone deciding what to do next, so each entry must stand alone and cite the file and symbol it is about. The first entry is normally the same finding as `bailReason` said in one line. Prefer three sharp entries to one long one: the harness shortens an entry that runs long and drops the tail of a list that runs many, and it cannot tell which part you would have kept.",
+    },
+    bailRemedy: {
+      type: "string",
+      description:
+        "What a PERSON would change about this ticket to make it agent-solvable, in a short paragraph. Non-empty if and only if `proceed` is false. This is the only actionable half of a bail and it is addressed to the reporter, not to another agent: if the answer is to split the ticket, say which acceptance criteria go in the small leaf ticket and what it would have to state. Do not restate the blockers — the reader has just read them directly above this.",
     },
     injectionNoticed: {
       type: "string",

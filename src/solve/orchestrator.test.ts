@@ -64,6 +64,8 @@ const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown>
   testPlan: "assert the head contains the link",
   estimatedLines: 12,
   bailReason: "",
+  bailBlockers: [],
+  bailRemedy: "",
   injectionNoticed: "",
   ...overrides,
 });
@@ -336,6 +338,8 @@ describe("solveTicket, when recon declines", () => {
       proceed: false,
       confidence: "low",
       bailReason: "the component was deleted three commits ago; the ticket describes dead code",
+      bailBlockers: ["`Widget.tsx` was removed in `a1b2c3d`; nothing imports it."],
+      bailRemedy: "Confirm whether the behaviour moved, and point the ticket at where it went.",
       plannedFiles: [],
       estimatedLines: 0,
       approach: "",
@@ -426,6 +430,8 @@ describe("solveTicket, when recon declines", () => {
         proceed: false,
         confidence: "low",
         bailReason: "the described file does not exist on this branch",
+        bailBlockers: ["`src/app/head.tsx` is not on this branch."],
+        bailRemedy: "Name the file that owns the document head today.",
         devLensAccurate: false,
         devLensCorrection: "triage named src/app/head.tsx; there is no such file",
         plannedFiles: [],
@@ -600,7 +606,17 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it.each([
-    ["recon", { recon: recon({ proceed: false, bailReason: "the dev lens names a dead file" }) }],
+    [
+      "recon",
+      {
+        recon: recon({
+          proceed: false,
+          bailReason: "the dev lens names a dead file",
+          bailBlockers: ["The named file was deleted three commits ago."],
+          bailRemedy: "Point the ticket at the module that replaced it.",
+        }),
+      },
+    ],
     [
       "fix",
       {

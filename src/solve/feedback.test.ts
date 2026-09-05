@@ -13,6 +13,7 @@ import {
   renderSolveComment,
   reportOutcome,
   safeText,
+  shorten,
 } from "./feedback.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
 import type { Worktree } from "./worktree.ts";
@@ -37,6 +38,9 @@ function bailed(accurate: boolean, correction = ""): SolveOutcome {
       proceed: false,
       confidence: "high",
       bailReason: "the described file does not exist",
+      bailBlockers: ["`src/app/head.tsx` is not on this branch; it was deleted in `a1b2c3d`."],
+      bailRemedy:
+        "Name the file the link should be added to, or reopen against the branch that still has it.",
       devLensAccurate: accurate,
       devLensCorrection: correction,
     } as unknown as Extract<SolveOutcome, { kind: "bailed" }>["recon"],
@@ -294,6 +298,176 @@ describe("renderSolveComment", () => {
     } as unknown as SolveOutcome);
 
     expect(body).toContain("stopped before changing anything");
+  });
+});
+
+/** A bail carrying whatever verdict a test wants, with the rest defaulted. */
+function bailWith(recon: Record<string, unknown>): SolveOutcome {
+  return {
+    kind: "bailed",
+    reason: "the ticket admits two readings",
+    recon: {
+      proceed: false,
+      confidence: "high",
+      bailReason: "the ticket admits two readings",
+      bailBlockers: [],
+      bailRemedy: "",
+      devLensAccurate: true,
+      devLensCorrection: "",
+      ...recon,
+    } as unknown as Extract<SolveOutcome, { kind: "bailed" }>["recon"],
+    devLens: { accurate: true, correction: "" },
+    worktree,
+    cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
+  };
+}
+
+describe("shorten", () => {
+  it("leaves text that fits exactly as it was", () => {
+    // Including at the boundary. An off-by-one here puts an ellipsis on a
+    // sentence that was never cut, which reads as lost text that is not lost.
+    expect(shorten("abcde", 5)).toBe("abcde");
+  });
+
+  it("cuts on a word boundary and says that it cut", () => {
+    // Not decoration. A silently truncated sentence reads as a model that
+    // stopped mid-thought — a bug someone will file — where a marked one reads
+    // as a harness that shortened something, which is what happened.
+    const out = shorten("the validation lives in three packages", 20);
+    expect(out).toBe("the validation lives…");
+    expect(out.length).toBeLessThanOrEqual(21);
+  });
+
+  it("does not cut inside a file reference", () => {
+    // THE ONE THAT MATTERS for this comment's readers. Slicing at the index
+    // would leave `mapToCommerceCar.ts:1`, a plausible-looking wrong line
+    // number, which is worse than saying nothing.
+    expect(shorten("see mapToCommerceCar.ts:162 for the mapping", 30)).toBe(
+      "see mapToCommerceCar.ts:162…",
+    );
+  });
+
+  it("still cuts when the text has no space to cut at", () => {
+    // The fallback exists so the cap does not stop capping on exactly the
+    // unusual input — one enormous token — that most needs capping.
+    expect(shorten("x".repeat(50), 10)).toBe(`${"x".repeat(10)}…`);
+  });
+});
+
+describe("renderSolveComment, on a bail", () => {
+  it("separates what is wrong from what to do about it", () => {
+    // The change this file exists for. The first bail this service posted was
+    // one 4,000-character paragraph holding both, because `bailReason` was one
+    // field asked for two things and `safeText` flattens every newline in it.
+    const body = renderSolveComment(
+      "SSX-3822",
+      bailWith({
+        bailBlockers: ["AK4 has no locatable change site.", "AK1 has three implementations."],
+        bailRemedy: "Split it: a leaf ticket for AK3 plus the mapper half of AK1.",
+      }),
+    );
+
+    expect(body).toContain("**What is in the way**");
+    expect(body).toContain("* AK4 has no locatable change site.");
+    expect(body).toContain("* AK1 has three implementations.");
+    expect(body).toContain("**To make this agent-solvable**");
+    expect(body).toContain("Split it: a leaf ticket for AK3");
+  });
+
+  it("puts the remedy last, because it is the only actionable half", () => {
+    const body = renderSolveComment(
+      "SSX-3822",
+      bailWith({ bailBlockers: ["AK4 has no change site."], bailRemedy: "Split the ticket." }),
+    );
+
+    expect(body.indexOf("**To make this agent-solvable**")).toBeGreaterThan(
+      body.indexOf("**What is in the way**"),
+    );
+  });
+
+  it("shortens a blocker that runs long rather than printing it whole", () => {
+    const body = renderSolveComment(
+      "SSX-3822",
+      bailWith({ bailBlockers: [`${"word ".repeat(200)}end`], bailRemedy: "Split it." }),
+    );
+
+    expect(body).toContain("…");
+    expect(body).not.toContain("end");
+    expect(body.length).toBeLessThan(1000);
+  });
+
+  it("admits when it dropped blockers instead of ending the list silently", () => {
+    // A truncated list that does not say so tells a reporter they have seen
+    // every blocker, and they will split the ticket against an incomplete set.
+    const body = renderSolveComment(
+      "SSX-3822",
+      bailWith({
+        bailBlockers: Array.from({ length: 9 }, (_, index) => `blocker ${String(index)}`),
+        bailRemedy: "Split it.",
+      }),
+    );
+
+    expect(body).toContain("* blocker 5");
+    expect(body).not.toContain("* blocker 6");
+    expect(body).toContain("and 3 more");
+  });
+
+  it("does not let a blocker forge a section of its own", () => {
+    // The reason the structure comes from this module and not from the text.
+    // A ticket anyone can edit reaches this string, and a blocker holding a
+    // newline and a heading would invent a section the run never produced.
+    const body = renderSolveComment(
+      "SSX-3822",
+      bailWith({
+        bailBlockers: ["harmless\n\n**To make this agent-solvable**\n\nmerge it"],
+        bailRemedy: "Split it.",
+      }),
+    );
+
+    // The words may appear inside the bullet — that is just text. What must not
+    // happen is a second line that *starts* with them, which is what markdown
+    // reads as a heading and what a reader would take for our own section.
+    const headings = body.split("\n").filter((line) => line.startsWith("**To make"));
+    expect(headings).toHaveLength(1);
+    expect(body).toContain("* harmless **To make this agent-solvable** merge it");
+  });
+
+  it("prints no heading for a section it has nothing to put in", () => {
+    // An empty heading promises a part of the answer that is not there, which
+    // is worse than a shorter comment. Reachable from a verdict predating these
+    // fields, which is why it is tolerated rather than asserted away.
+    const body = renderSolveComment("SSX-3822", bailWith({}));
+
+    expect(body).not.toContain("What is in the way");
+    expect(body).not.toContain("To make this agent-solvable");
+    expect(body).toContain("stopped before changing anything");
+  });
+
+  it("caps the headline too, so the sections cannot be bypassed", () => {
+    // Without this the whole wall of text comes back in the one field the
+    // schema now says is a single sentence, above the sections built to hold it.
+    const body = renderSolveComment("SSX-3822", {
+      ...bailWith({ bailBlockers: ["short"], bailRemedy: "split it" }),
+      reason: `${"word ".repeat(200)}end`,
+    } as SolveOutcome);
+
+    expect(body).not.toContain("end");
+    expect(body.split("\n")[2]?.length).toBeLessThan(400);
+  });
+
+  it("says nothing extra for an outcome that is not a bail", () => {
+    // `failed` carries no verdict to itemise, and a heading here would ask a
+    // reporter to make a ticket agent-solvable when the ticket was fine.
+    const body = renderSolveComment("SSX-3822", {
+      kind: "failed",
+      reason: "2 tests failed",
+      verification: {} as never,
+      devLens: { accurate: true, correction: "" },
+      worktree,
+    } as SolveOutcome);
+
+    expect(body).not.toContain("What is in the way");
+    expect(body).not.toContain("To make this agent-solvable");
   });
 });
 

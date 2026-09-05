@@ -36,6 +36,8 @@ function verified(overrides: Partial<Verified> = {}): Verified {
       testPlan: "unit",
       estimatedLines: 12,
       bailReason: "",
+      bailBlockers: [],
+      bailRemedy: "",
       injectionNoticed: "",
     },
     fix: {

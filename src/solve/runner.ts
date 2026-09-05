@@ -351,6 +351,10 @@ export interface ReconVerdict {
   readonly testPlan: string;
   readonly estimatedLines: number;
   readonly bailReason: string;
+  /** One line per disqualifying finding. Empty iff `proceed`. */
+  readonly bailBlockers: readonly string[];
+  /** What a person would change to make the ticket agent-solvable. Empty iff `proceed`. */
+  readonly bailRemedy: string;
   readonly injectionNoticed: string;
 }
 
@@ -658,6 +662,8 @@ export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
     testPlan: str(record, "testPlan"),
     estimatedLines,
     bailReason: str(record, "bailReason"),
+    bailBlockers: strings(record, "bailBlockers"),
+    bailRemedy: str(record, "bailRemedy"),
     injectionNoticed: str(record, "injectionNoticed"),
   };
 
@@ -674,6 +680,27 @@ export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
   }
   if (verdict.proceed && verdict.plannedFiles.length === 0) {
     throw new SolveParseError(`${issueKey}: proceed is true but no files were named`);
+  }
+
+  // The bail's other two fields, held to the same iff as the headline and for a
+  // sharper reason. A bail comment is three sections and only one of them tells
+  // the reporter what to do; a run that produced the diagnosis and skipped the
+  // remedy would post the wall of text that splitting these fields exists to
+  // prevent, under a heading promising the part that is missing.
+  if (verdict.proceed && (verdict.bailBlockers.length > 0 || verdict.bailRemedy.trim() !== "")) {
+    throw new SolveParseError(
+      `${issueKey}: proceed is true but the bail fields were filled in — the run contradicted itself, so neither reading is safe to act on`,
+    );
+  }
+  if (!verdict.proceed && verdict.bailBlockers.length === 0) {
+    throw new SolveParseError(
+      `${issueKey}: declined to proceed without itemising why — the headline alone is not enough for a person deciding what to do next`,
+    );
+  }
+  if (!verdict.proceed && verdict.bailRemedy.trim() === "") {
+    throw new SolveParseError(
+      `${issueKey}: declined to proceed without saying what would make the ticket solvable — that is the only actionable half of a bail`,
+    );
   }
   return verdict;
 }

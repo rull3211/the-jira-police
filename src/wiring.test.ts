@@ -658,6 +658,8 @@ function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
       testPlan: "",
       estimatedLines: 1,
       bailReason: "",
+      bailBlockers: [],
+      bailRemedy: "",
       injectionNoticed: "",
     },
     fix: {
