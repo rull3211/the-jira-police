@@ -181,6 +181,64 @@ export function buildInFlightJql(options: InFlightJqlOptions): string {
   return clauses.join(" AND ");
 }
 
+export interface ReviewQueueJqlOptions {
+  readonly project: string;
+  readonly components: readonly string[];
+}
+
+/**
+ * Builds the JQL that selects the pull requests still worth looking at.
+ *
+ * **Both labels, and selecting only the first is the bug this query exists to
+ * avoid.** `agent:reviewing` is a pull request the loop is still pushing to;
+ * `agent:review-done` is one that has been undrafted and is waiting on a person.
+ * The second is not a terminal — the loop keeps listening through human review,
+ * and the arrow between the two runs in both directions, because a human comment
+ * on an undrafted pull request starts another round and moves the ticket back.
+ * Watching `agent:reviewing` alone would mean undrafting silently ends the loop,
+ * which is exactly the ending §6.1 of the plan was written to remove,
+ * reintroduced through a label instead of through a `return`.
+ *
+ * Neither label is a claim on `MAX_CONCURRENT_SOLVES`, which is why this is a
+ * third query rather than a variant of `buildInFlightJql`: concurrency bounds
+ * *active work*, and a pull request waiting on a person is not that. The set
+ * this returns is measured in days and the set that one returns is measured in
+ * minutes.
+ *
+ * **No `statusCategory != Done`**, for the reason `buildInFlightJql` gives and
+ * one more of its own. A ticket somebody closed while its pull request was open
+ * still has that pull request, and the look is what writes `agent:done` or
+ * `agent:closed` when it ends. Filtering the ticket out here would leave the
+ * label on it forever with nothing that could ever clear it — the leak §3c
+ * names, arriving through the query instead of through the state machine.
+ *
+ * **No `labels NOT IN (...)`**, unlike the solve queue, and the omission is
+ * deliberate rather than an oversight. The terminals (`agent:done`,
+ * `agent:closed`, `agent:failed`) are written in the same edit that removes
+ * `agent:reviewing` or `agent:review-done`, so a ticket carrying a terminal is
+ * already outside this query's positive clause. Adding the exclusion would be a
+ * second copy of that rule, and the two copies are what drift.
+ *
+ * Oldest touched first, like the solve queue: a look is cheap, but if a cycle is
+ * ever bounded, the pull request nobody has touched in longest is the one to
+ * look at first.
+ */
+export function buildReviewQueueJql(options: ReviewQueueJqlOptions): string {
+  const clauses = [`project = ${assertSafe(options.project, "project")}`];
+
+  if (options.components.length > 0) {
+    const values = options.components.map((entry) => jqlValue(entry, "component")).join(", ");
+    clauses.push(`component IN (${values})`);
+  }
+
+  const watched = [AGENT_LABELS.reviewing, AGENT_LABELS.reviewDone]
+    .map((label) => jqlValue(label, "label"))
+    .join(", ");
+  clauses.push(`labels IN (${watched})`);
+
+  return `${clauses.join(" AND ")} ORDER BY updated ASC`;
+}
+
 export interface SolveQueueJqlOptions {
   readonly project: string;
   /** Same restriction as the new-issue query, for the same reason. */

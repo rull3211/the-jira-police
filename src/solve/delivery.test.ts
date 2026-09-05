@@ -9,9 +9,9 @@ import {
 } from "./delivery.ts";
 import { BOT_PREFIX, MARKER_PREFIX, NEVER_READ, parseMarker } from "./marker.ts";
 import type { PassRunner, SolveDependencies } from "./orchestrator.ts";
-import type { BotIdentity, ReviewComment, ReviewState } from "./pr.ts";
+import type { BotIdentity, ReviewComment, ReviewOrigin, ReviewState } from "./pr.ts";
 import type { Pass, SolveRunOptions } from "./runner.ts";
-import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
+import type { CommandResult, CommandRunner, Worktree, WorktreeResult } from "./worktree.ts";
 
 /** The escape, not the byte, so this file stays greppable. See `verify.ts`. */
 const NUL = "\u0000";
@@ -55,6 +55,9 @@ const reviewJson = (overrides: Partial<ReviewState> = {}): string => {
   const base = {
     state: "OPEN",
     isDraft: true,
+    // The pull request's own creation, which is the floor under the silence
+    // clock: a payload without it is refused rather than read as quiet.
+    createdAt: "2026-09-05T09:00:00Z",
     reviews: [{ author: { login: "copilot" }, body: "The wrapper element looks unnecessary." }],
     comments: [] as unknown[],
     reviewRequests: [] as unknown[],
@@ -69,9 +72,16 @@ const reviewJson = (overrides: Partial<ReviewState> = {}): string => {
  * Carries an `id`, because `findMarker` refuses a marker it could not edit and
  * a fixture without one would exercise that refusal rather than the cursor.
  */
-const markerComment = (count: number, lastRead: string, id = "IC_marker"): unknown => ({
+const markerComment = (
+  count: number,
+  lastRead: string,
+  id = "IC_marker",
+  reviewerCount?: number,
+): unknown => ({
   author: { login: "rull3211" },
-  body: `bot: iteration count ${String(count)}\nLast read: ${lastRead}\n`,
+  body:
+    `bot: iteration count ${String(count)}\nLast read: ${lastRead}\n` +
+    (reviewerCount === undefined ? "" : `Reviewer rounds: ${String(reviewerCount)}\n`),
   createdAt: "2026-09-05T09:00:00Z",
   id,
 });
@@ -82,6 +92,14 @@ const dated = (body: string, createdAt: string): unknown => ({
   body,
   createdAt,
   id: `IC_${createdAt}`,
+});
+
+/** The same, from somebody who is not the requested reviewer. */
+const fromHuman = (body: string, createdAt = "2026-09-05T10:00:00Z"): unknown => ({
+  author: { login: "a-colleague" },
+  body,
+  createdAt,
+  id: `IC_human_${createdAt}`,
 });
 
 interface Rule {
@@ -168,6 +186,30 @@ const markerWritten = (h: Harness): boolean =>
 const spent = (count: number, lastRead = "2026-09-05T08:00:00Z"): Rule => ({
   match: saw("pr", "view"),
   reply: { stdout: reviewJson({ comments: [markerComment(count, lastRead)] } as never) },
+});
+
+/**
+ * A pull request spelled out whole: both counts on the marker, and exactly the
+ * reviews and comments named. Used by the round-classification tests, which are
+ * the only ones that care that the two counts can differ and that the reviews
+ * list can be empty while the comments list is not.
+ */
+const board = (opts: {
+  readonly count: number;
+  readonly reviewerCount: number;
+  readonly reviews?: readonly unknown[];
+  readonly comments?: readonly unknown[];
+}): Rule => ({
+  match: saw("pr", "view"),
+  reply: {
+    stdout: reviewJson({
+      reviews: opts.reviews ?? [],
+      comments: [
+        markerComment(opts.count, "2026-09-05T08:00:00Z", "IC_marker", opts.reviewerCount),
+        ...(opts.comments ?? []),
+      ],
+    } as never),
+  },
 });
 
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
@@ -397,7 +439,9 @@ const advanceRequest: AdvanceRequest = {
   gitTimeoutMs: 30_000,
   stepTimeoutMs: 300_000,
   installTimeoutMs: 600_000,
-  worktree,
+  attach: () => Promise.resolve({ outcome: "created", worktree } as const),
+  cwd: "/repos/buy-insurance-advisor-web",
+  now: Date.parse("2026-09-05T10:00:00Z"),
   repo: "acme/advisor",
   number: 42,
   identity: IDENTITY,
@@ -414,7 +458,12 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    expect(outcome).toEqual({ kind: "waiting" });
+    // An hour, measured from the pull request's own creation because nothing
+    // else on it carries a date. The number is the outcome's whole contribution
+    // to the silence bound — `advance` measures and the caller decides, so a
+    // foreground command and a daemon can be patient by different amounts
+    // without either of them counting ticks.
+    expect(outcome).toEqual({ kind: "waiting", quietMs: 3_600_000 });
     expect(h.seen).toEqual([]);
     expect(ran(h, "pr", "ready")).toBe(false);
   });
@@ -427,6 +476,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [],
             reviewRequests: [],
@@ -722,6 +772,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "the wrapper looks unnecessary" }],
             comments: [{ author: { login: "rull3211" }, body: "bot: moved it, as you suggested" }],
             reviewRequests: [],
@@ -748,6 +799,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [{ author: { login: "rull3211" }, body: "bot: pushed a fix" }],
             reviewRequests: [],
@@ -767,7 +819,7 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
 
-    expect(outcome).toMatchObject({ kind: "exhausted", rounds: 3 });
+    expect(outcome).toMatchObject({ kind: "reviewer-exhausted", rounds: 3 });
     expect(h.seen).toEqual([]);
     expect(ran(h, "pr", "ready")).toBe(true);
   });
@@ -777,7 +829,7 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
 
-    if (outcome.kind !== "exhausted") {
+    if (outcome.kind !== "reviewer-exhausted") {
       throw new Error(`expected exhausted, got ${outcome.kind}`);
     }
     expect(outcome.unresolved).toContain("wrapper element");
@@ -792,6 +844,97 @@ describe("advance", () => {
     await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
 
     expect(markerWritten(h)).toBe(false);
+  });
+
+  it("cuts no checkout on any outcome decided before a round runs", async () => {
+    // The poll-cycle guard, and the one with a price on it. `advance` used to
+    // be handed a worktree, so every tick paid a fetch, a checkout and an
+    // install before anyone had asked whether there was anything to answer —
+    // at one tick a minute across a watched set, that is the whole cost of the
+    // cycle spent on pull requests nobody had touched. The survey is two `gh`
+    // reads and names its repository explicitly, so it needs no checkout at
+    // all. Unplug this and the cheap half of the cycle stops being cheap.
+    const cases: readonly { readonly why: string; readonly rules: readonly Rule[] }[] = [
+      {
+        why: "waiting",
+        rules: [
+          { match: saw("pr", "view"), reply: { stdout: reviewJson({ reviews: [] } as never) } },
+        ],
+      },
+      {
+        why: "ready",
+        rules: [
+          {
+            match: saw("pr", "view"),
+            reply: {
+              stdout: reviewJson({
+                reviews: [{ author: { login: "copilot" }, body: "" }],
+              } as never),
+            },
+          },
+        ],
+      },
+      { why: "reviewer-exhausted", rules: [spent(3)] },
+      { why: "capped", rules: [spent(20)] },
+    ];
+
+    for (const { why, rules } of cases) {
+      const h = harness({}, rules);
+      let attached = 0;
+      const attach = (): Promise<WorktreeResult> => {
+        attached += 1;
+        return Promise.resolve({ outcome: "created", worktree } as const);
+      };
+
+      await advance(h.deps, { ...advanceRequest, attach, maxRounds: 3, maxTotalRounds: 20 });
+
+      expect(`${why}: ${String(attached)}`).toBe(`${why}: 0`);
+    }
+  });
+
+  it("reports a refused checkout as its own stage, before anything is spent", async () => {
+    // Its own stage rather than `read` or `resolve`, because of where it now
+    // happens: after the round has been decided and before it is reserved. No
+    // marker has moved and no pass has run, so the honest report is that the
+    // machine could not get to the work — not that the work failed.
+    const h = harness({}, []);
+    const refusal: WorktreeResult = {
+      outcome: "refused",
+      issueKey: "SSX-1",
+      reason: "the branch is checked out elsewhere",
+    };
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      attach: () => Promise.resolve(refusal),
+    });
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "worktree" });
+    expect(markerWritten(h)).toBe(false);
+    expect(h.seen).toEqual([]);
+  });
+
+  it("does not re-mark a pull request ready that is already out of draft", async () => {
+    // Not an optimisation. `ready` is the outcome of every tick on an undrafted
+    // pull request waiting for a human to merge it, and that wait is measured
+    // in days — so an unconditional `gh pr ready` is a write per pull request
+    // per tick, forever, on the pull requests where nothing is happening.
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            isDraft: false,
+            reviews: [{ author: { login: "copilot" }, body: "" }],
+          } as never),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(ran(h, "pr", "ready")).toBe(false);
   });
 
   it("pushes nothing when the round only answered questions", async () => {
@@ -863,6 +1006,7 @@ describe("advance", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [],
             reviewRequests: [],
@@ -901,6 +1045,7 @@ describe("advance's review cursor", () => {
       stdout: JSON.stringify({
         state: "OPEN",
         isDraft: true,
+        createdAt: "2026-09-05T09:00:00Z",
         // Dateless, so the review body itself cannot be what makes the round
         // run — otherwise every test below would pass with no cursor at all.
         reviews: [{ author: { login: "copilot" }, body: "" }],
@@ -1102,6 +1247,7 @@ describe("advance's review cursor", () => {
           stdout: JSON.stringify({
             state: "OPEN",
             isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
             reviews: [{ author: { login: "copilot" }, body: "" }],
             comments: [
               markerComment(1, "2026-09-05T08:00:00Z"),
@@ -1380,18 +1526,21 @@ describe("advance's inline threads", () => {
   });
 });
 
-const said = (author: string, body: string): ReviewComment => ({
+const said = (author: string, body: string, origin: ReviewOrigin = "reviewer"): ReviewComment => ({
   author,
   body,
   createdAt: "2026-09-05T10:00:00Z",
   id: "IC_1",
+  origin,
 });
 
 const stateWith = (...comments: readonly ReviewComment[]): ReviewState => ({
-  reviewerResponded: true,
+  anyoneResponded: true,
   reviewerErrored: false,
   state: "OPEN",
   isDraft: true,
+  createdAt: "2026-09-05T09:00:00Z",
+  newestAt: "2026-09-05T10:00:00Z",
   comments,
 });
 
@@ -1421,5 +1570,147 @@ describe("reviewerComments", () => {
 
   it("keeps everything when none of it is ours", () => {
     expect(reviewerComments(stateWith(said("copilot", "a")))).toHaveLength(1);
+  });
+});
+
+describe("advance's round classification", () => {
+  const REVIEWER = { author: { login: "copilot" }, body: "the wrapper looks unnecessary" };
+
+  /**
+   * A review with nothing in the body, which is what an inline comment arrives
+   * under. It opens the `waiting` gate — somebody spoke — and contributes no
+   * comment of its own, so the two thread tests below get a batch that is
+   * entirely inline and can be classified by the thread alone.
+   */
+  const APPROVED = { author: { login: "copilot" }, body: "" };
+
+  it("wakes for a person who commented before the reviewer did", async () => {
+    // The comment was always collected; the gate threw it away. `waiting` asked
+    // whether the *requested reviewer* had spoken, which is a narrower question
+    // than the list behind it answers, so a human review on a pull request the
+    // bot reviewer had not reached yet went unread.
+    const h = harness({ review: review() }, [
+      board({ count: 0, reviewerCount: 0, comments: [fromHuman("please rename this")] }),
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome.kind).not.toBe("waiting");
+    expect(h.seen).toHaveLength(1);
+  });
+
+  it("runs a round for a person after the reviewer's budget is spent", async () => {
+    // The user's rule, and the reason for it: `MAX_REVIEW_ITERATIONS` bounds two
+    // machines talking to each other, because nothing in that conversation adds
+    // information from outside it. A person asking for a change is exactly the
+    // outside information the cap protects against the absence of. Capping it
+    // would be the bot telling a reviewer it has run out of turns.
+    const h = harness({ review: review() }, [
+      board({ count: 3, reviewerCount: 3, comments: [fromHuman("please rename this")] }),
+    ]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
+
+    expect(outcome.kind).not.toBe("reviewer-exhausted");
+    expect(h.seen).toHaveLength(1);
+  });
+
+  it("counts a mixed batch as a human round", async () => {
+    // Where the rule is easiest to get subtly wrong, and the asymmetry decides
+    // it: over-counting silently declines work a person asked for because a bot
+    // happened to comment in the same window, under-counting spends one more
+    // round. Only one of those is recoverable by whoever notices.
+    const h = harness({ review: review() }, [
+      board({
+        count: 3,
+        reviewerCount: 3,
+        reviews: [REVIEWER],
+        comments: [fromHuman("and please rename this")],
+      }),
+    ]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
+
+    expect(outcome.kind).not.toBe("reviewer-exhausted");
+    expect(h.seen).toHaveLength(1);
+  });
+
+  it("leaves the reviewer count where it was on a human round", async () => {
+    const h = harness({ review: review() }, [
+      board({ count: 1, reviewerCount: 1, comments: [fromHuman("please rename this")] }),
+    ]);
+
+    await advance(h.deps, advanceRequest);
+
+    // The total moves — the absolute brake counts everything — and the
+    // reviewer's half does not.
+    expect(wrote(h)).toContain("bot: iteration count 2");
+    expect(wrote(h)).toContain("Reviewer rounds: 1");
+  });
+
+  it("spends the reviewer count on a reviewer-only round", async () => {
+    const h = harness({ review: review() }, [
+      board({ count: 1, reviewerCount: 1, reviews: [REVIEWER] }),
+    ]);
+
+    await advance(h.deps, advanceRequest);
+
+    expect(wrote(h)).toContain("bot: iteration count 2");
+    expect(wrote(h)).toContain("Reviewer rounds: 2");
+  });
+
+  it("still stops a human at the absolute cap", async () => {
+    // `MAX_PR_ROUNDS_TOTAL` is a brake on the machinery rather than a policy
+    // about a reviewer, and a brake a person's comment could step past is not a
+    // brake. This is the half of the split that human feedback does not lift.
+    const h = harness({ review: review() }, [
+      board({ count: 20, reviewerCount: 0, comments: [fromHuman("one more thing")] }),
+    ]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxTotalRounds: 20 });
+
+    expect(outcome).toMatchObject({ kind: "capped", rounds: 20 });
+    expect(h.seen).toEqual([]);
+  });
+
+  it("reads a thread's origin from whoever raised the point", async () => {
+    // The first comment, not the last. A reviewer's thread that a person has
+    // replied on is still the reviewer's point, and reading the newest comment
+    // instead would let any passer-by reset the reviewer's budget by agreeing
+    // with it.
+    const h = harness({ review: review() }, [
+      board({ count: 3, reviewerCount: 3, reviews: [APPROVED] }),
+      inline(talking(spoke("copilot", "this is not idempotent"), spoke("a-colleague", "agreed"))),
+    ]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
+
+    expect(outcome).toMatchObject({ kind: "reviewer-exhausted" });
+  });
+
+  it("treats a thread a person opened as a human round", async () => {
+    const h = harness({ review: review() }, [
+      board({ count: 3, reviewerCount: 3, reviews: [APPROVED] }),
+      inline(talking(spoke("a-colleague", "this needs a null check"))),
+    ]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
+
+    expect(outcome.kind).not.toBe("reviewer-exhausted");
+    expect(h.seen).toHaveLength(1);
+  });
+
+  it("undrafts and keeps listening when the reviewer's budget runs out", async () => {
+    // The rename is the point. `exhausted` read as a terminal, and it is not
+    // one any more: the pull request comes out of draft, says so, and a human
+    // comment arriving afterwards still gets a round.
+    const h = harness({ review: review() }, [
+      board({ count: 3, reviewerCount: 3, reviews: [REVIEWER] }),
+    ]);
+
+    const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
+
+    expect(outcome).toMatchObject({ kind: "reviewer-exhausted", rounds: 3 });
+    expect(ran(h, "pr", "ready")).toBe(true);
   });
 });

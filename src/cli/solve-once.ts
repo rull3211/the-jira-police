@@ -7,6 +7,8 @@
  *   node src/cli/solve-once.ts SSX-3822 --solve   ... and runs the solver
  *   node src/cli/solve-once.ts SSX-3822 --pr      ... and opens the draft PR
  *   node src/cli/solve-once.ts SSX-3822 --advance one review round on the open PR
+ *   node src/cli/solve-once.ts --watch            keep looking at every ticket under review
+ *   node src/cli/solve-once.ts SSX-3822 --watch   the same loop, one ticket
  *
  * The ladder is `solve-args.ts`, including why anything past the first two rungs
  * refuses to run without an issue key. The rungs themselves are `solve-run.ts`,
@@ -68,7 +70,7 @@ import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
 import { USAGE, parseSolveArgs, unavailable, writes } from "./solve-args.ts";
-import { runAdvance, runWriteRungs } from "./solve-run.ts";
+import { runAdvance, runWatch, runWriteRungs } from "./solve-run.ts";
 
 async function main(): Promise<void> {
   const args = parseSolveArgs(process.argv.slice(2));
@@ -98,6 +100,31 @@ async function main(): Promise<void> {
     logger.info("solve-once.settings", { ...describeSettings(settings), mode: "advance" });
     await runAdvance(settings, createJiraClient(settings), issueKey);
     logger.info("solve-once.done", { mode: "advance", issueKey });
+    return;
+  }
+
+  if (args.invocation.mode === "watch") {
+    // Shares the advance mode's configuration check and nothing else. The same
+    // GitHub owner names every repository this will touch, so `--pr`'s check is
+    // the right one; there is no rung being climbed here either.
+    //
+    // **No queue read and no report**, which is the difference from the ladder
+    // below. This command's subject is the pull requests already open, and
+    // `runSolveCycle` answers a question about the tickets that have none — so
+    // running it here would print a cycle report about work this mode will
+    // never do, and overwrite `solve-cycle.md` with it.
+    const { issueKey } = args.invocation;
+    const missing = unavailable("pr", settings);
+    if (missing !== null) {
+      process.stderr.write(`refusing --watch: ${missing}\n`);
+      logger.warn("solve-once.refused", { mode: "watch", issueKey, reason: missing });
+      process.exitCode = 3;
+      return;
+    }
+
+    logger.info("solve-once.settings", { ...describeSettings(settings), mode: "watch" });
+    await runWatch(settings, createJiraClient(settings), issueKey);
+    logger.info("solve-once.done", { mode: "watch", issueKey });
     return;
   }
 

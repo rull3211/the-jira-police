@@ -59,9 +59,37 @@ export const MARKER_PREFIX = `${BOT_PREFIX}iteration count `;
 
 const LAST_READ = "Last read: ";
 
+/**
+ * The second count's line, and it sits *after* the high-water mark on purpose.
+ *
+ * The first two lines are read positionally, and markers written before this
+ * line existed are still sitting on open pull requests. Appending keeps those
+ * parseable; inserting would have made every one of them unreadable, which by
+ * this file's own rule means unadvanceable.
+ */
+const REVIEWER_ROUNDS = "Reviewer rounds: ";
+
 export interface Marker {
-  /** Rounds already spent on this pull request. Never decreases. */
+  /**
+   * Rounds already spent on this pull request, whoever asked for them. Never
+   * decreases. This is what `MAX_PR_ROUNDS_TOTAL` reads.
+   */
   readonly count: number;
+  /**
+   * Of those, the ones spent answering the requested reviewer.
+   *
+   * Split out because the two caps stopped meaning the same thing.
+   * `MAX_REVIEW_ITERATIONS` bounds how much argument a bot reviewer is worth,
+   * and a person asking for a change is not that argument — so human rounds
+   * advance `count` and leave this alone. `MAX_PR_ROUNDS_TOTAL` still counts
+   * everything, because it is a brake on the machinery rather than a policy
+   * about a reviewer, and a brake that human feedback could step past is not a
+   * brake.
+   *
+   * Never greater than `count`, and `parseMarker` refuses a marker claiming
+   * otherwise rather than clamping it.
+   */
+  readonly reviewerCount: number;
   /**
    * The high-water mark: the newest comment this loop has already handled.
    *
@@ -111,6 +139,7 @@ export function renderMarker(marker: Marker): string {
   const lines = [
     `${MARKER_PREFIX}${String(marker.count)}`,
     `${LAST_READ}${marker.lastRead}`,
+    `${REVIEWER_ROUNDS}${String(marker.reviewerCount)}`,
     "",
     ...marker.rounds.map((round) => `- ${round}`),
   ];
@@ -165,13 +194,52 @@ export function parseMarker(body: string): ParseMarkerResult {
     return { outcome: "unreadable", reason: `"${lastRead}" is not a readable instant` };
   }
 
+  // Found rather than read positionally, and **absent is not an error**. Every
+  // marker written before the reviewer count existed is missing this line, and
+  // refusing them would make each of those pull requests unadvanceable by a
+  // format change alone.
+  //
+  // Absent means "all of them", not "none of them". A marker from before the
+  // split cannot say which of its rounds were human, and the two guesses are
+  // not symmetric: reading them as reviewer rounds can only make the cap fire
+  // sooner, while reading them as human ones would hand back the whole budget
+  // on every pull request currently open.
+  const reviewerLine = lines.find((line) => line.startsWith(REVIEWER_ROUNDS));
+  let reviewerCount = count;
+  if (reviewerLine !== undefined) {
+    const reviewerText = reviewerLine.slice(REVIEWER_ROUNDS.length).trim();
+    if (!COUNT.test(reviewerText)) {
+      return {
+        outcome: "unreadable",
+        reason: `"${reviewerText}" is not a whole number of reviewer rounds`,
+      };
+    }
+    reviewerCount = Number.parseInt(reviewerText, 10);
+    if (!Number.isSafeInteger(reviewerCount)) {
+      return {
+        outcome: "unreadable",
+        reason: `${reviewerText} is too large to be a reviewer round count`,
+      };
+    }
+    // Refused rather than clamped. A marker claiming more reviewer rounds than
+    // rounds has been edited by something that did not understand it, and the
+    // repair — min(a, b) — would quietly resume a count nobody can vouch for on
+    // the one pull request where the state is known to be wrong.
+    if (reviewerCount > count) {
+      return {
+        outcome: "unreadable",
+        reason: `the marker claims ${String(reviewerCount)} reviewer rounds out of ${String(count)} rounds`,
+      };
+    }
+  }
+
   const rounds = lines
     .slice(2)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("- "))
     .map((line) => line.slice(2));
 
-  return { outcome: "parsed", marker: { count, lastRead, rounds } };
+  return { outcome: "parsed", marker: { count, reviewerCount, lastRead, rounds } };
 }
 
 /**

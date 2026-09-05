@@ -102,6 +102,11 @@
 
 import { logger } from "../logger.ts";
 import { assertWorkBranch, isProtectedRef } from "./branch.ts";
+// The prefix that marks a comment as ours, and the only thing that does. Taken
+// from `marker.ts` rather than restated here: two copies of a sentinel is one
+// sentinel and one silent bug the day somebody changes the other.
+import { isOurs } from "./marker.ts";
+import { newestInstant } from "./silence.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
 /**
@@ -196,9 +201,39 @@ export type RequestReviewResult =
   | { readonly outcome: "requested" }
   | { readonly outcome: "failed"; readonly reason: string };
 
+/**
+ * Which of the two reviewers said this, and only one of them is on a budget.
+ *
+ * `MAX_REVIEW_ITERATIONS` exists to stop two machines talking to each other
+ * forever, because nothing in that conversation brings in information from
+ * outside it. A person asking for a change *is* that outside information, so
+ * counting their request against the cap would end with the loop telling a
+ * reviewer it had run out of turns. The cap therefore counts `reviewer`
+ * feedback and nothing else, and this field is what tells them apart.
+ */
+export type ReviewOrigin = "reviewer" | "human";
+
+/**
+ * Classifies one login against the requested reviewer.
+ *
+ * **A blank reviewer reads as `reviewer`, not as `human`.** Nothing can match
+ * an empty name, so the natural reading would make every comment human — and
+ * `origin` decides what is exempt from a spend cap, so an empty setting would
+ * release `MAX_REVIEW_ITERATIONS` on every pull request at once. The exemption
+ * has to be something a reviewer name grants, never something its absence does.
+ */
+export function reviewOrigin(login: string, reviewer: string): ReviewOrigin {
+  if (reviewer.replace(/^@/u, "").trim() === "") {
+    return "reviewer";
+  }
+  return matchesReviewer(login, reviewer) ? "reviewer" : "human";
+}
+
 export interface ReviewComment {
   readonly author: string;
   readonly body: string;
+  /** Whether the requested reviewer wrote this, or a person did. */
+  readonly origin: ReviewOrigin;
   /**
    * When it was written, or `""` when the entry carried no readable date.
    *
@@ -220,8 +255,23 @@ export interface ReviewComment {
 }
 
 export interface ReviewState {
-  /** Whether the requested reviewer has said anything at all yet. */
-  readonly reviewerResponded: boolean;
+  /**
+   * Whether anyone the loop should answer has said anything at all yet.
+   *
+   * **This used to ask about the requested reviewer alone, and that discarded
+   * every human who commented first.** The comments were never missing —
+   * `readReview` builds its list from reviews and issue comments with no author
+   * filter — but the gate in front of them asked a narrower question than the
+   * list answered, so a person's review was read, found, and thrown away while
+   * the loop reported itself as waiting.
+   *
+   * Our own comments do not count. They are dropped by the `bot: ` prefix
+   * rather than by a login, because `gh` is authenticated as the operator and
+   * there is no name that separates the bot from the human it posts as. Without
+   * that, the marker this loop wrote would read as somebody having spoken, and
+   * the round after it would undraft a pull request no reviewer had looked at.
+   */
+  readonly anyoneResponded: boolean;
   /**
    * Whether the reviewer answered by saying it could not review.
    *
@@ -246,6 +296,32 @@ export interface ReviewState {
   readonly comments: readonly ReviewComment[];
   readonly state: string;
   readonly isDraft: boolean;
+  /**
+   * When the pull request itself was opened.
+   *
+   * The floor under the silence clock, and the only instant that is guaranteed
+   * to exist. A pull request nobody has reviewed, commented on or marked has no
+   * other date on it at all, and that is exactly the pull request the silence
+   * bound is for — a reviewer that was never really requested. Without this the
+   * one case the bound exists to catch is the one case it cannot measure.
+   */
+  readonly createdAt: string;
+  /**
+   * The newest instant among *all* entries, including the ones dropped below.
+   *
+   * Computed before the filtering, which is the point. `comments` drops
+   * whitespace-only bodies, the reviewer's own error notice, and anything that
+   * was pure boilerplate — every one of which is still something that happened,
+   * and an approving review with an empty body is the commonest of them. A
+   * silence clock reading the filtered list would report a pull request as
+   * untouched for hours because the only thing on it was an approval.
+   *
+   * Our own comments are counted too. See `silence.ts`: the asymmetry between
+   * waiting too long and giving up too early decides it.
+   *
+   * `""` when no entry carried a readable date.
+   */
+  readonly newestAt: string;
 }
 
 export type ReadReviewResult =
@@ -255,6 +331,15 @@ export type ReadReviewResult =
 export interface ThreadComment {
   readonly author: string;
   readonly body: string;
+  /**
+   * Whether the requested reviewer wrote this, or a person did.
+   *
+   * Classified here rather than in `delivery.ts` so both transports answer the
+   * question the same way. An inline thread and a review body are the same
+   * feedback arriving down two pipes, and a round that counted one of them
+   * against the cap and not the other would be applying two policies.
+   */
+  readonly origin: ReviewOrigin;
   /** ISO 8601, as GitHub returns it. Not parsed here; ordering is the API's. */
   readonly createdAt: string;
 }
@@ -968,10 +1053,10 @@ export async function findPullRequest(
  *    actual condition of a pull request immediately before an irreversible
  *    action is taken on it.
  *
- * `reviewerResponded` is computed from logins alone, independently of whether
- * the entry carried usable text. An approving review has an empty body and is
- * still a response — treating it as silence would leave the loop waiting on a
- * reviewer that has already finished.
+ * `anyoneResponded` is computed independently of whether the entry carried
+ * usable text. An approving review has an empty body and is still a response —
+ * treating it as silence would leave the loop waiting on a reviewer that has
+ * already finished.
  */
 export async function readReview(
   runner: CommandRunner,
@@ -994,7 +1079,11 @@ export async function readReview(
       // in `reviews` and `comments` already arrives whole — with its own `id`,
       // and with `submittedAt` or `createdAt` depending on which list it came
       // from. Adding `id` here would ask for the pull request's id, not theirs.
-      "reviews,comments,state,isDraft",
+      //
+      // `createdAt` *is* asked for at this level and does mean the pull
+      // request's own, which is the floor under the silence clock. See
+      // `ReviewState.createdAt`.
+      "reviews,comments,state,isDraft,createdAt",
     ],
     { cwd: worktreePath, timeoutMs },
   );
@@ -1037,12 +1126,32 @@ export async function readReview(
     };
   }
 
+  // Refused rather than defaulted, for a narrower reason than the pair above.
+  // Nothing irreversible hangs off it; what hangs off it is the loop's ability
+  // to tell "quiet for ten minutes" from "quiet since it was opened", and a
+  // default of `""` disables the silence bound on exactly the pull requests
+  // that have nothing else dated on them — which is every pull request the
+  // bound was written for.
+  const createdAt = root["createdAt"];
+  if (typeof createdAt !== "string") {
+    return {
+      outcome: "failed",
+      reason:
+        "the payload is missing the pull request's createdAt, so there is no floor under the silence clock and a quiet pull request could not be told from a new one",
+    };
+  }
+
   const entries = [...reviews, ...comments];
   const fromReviewer = entries.filter((entry) => matchesReviewer(entry.login, reviewer));
   return {
     outcome: "read",
     review: {
-      reviewerResponded: fromReviewer.length > 0,
+      // Checked on the raw entries rather than on the filtered `comments`
+      // below, because an approving review has an empty body and is still a
+      // response — and so is a review whose whole substance is inline, which
+      // arrives here as an entry with nothing in it. Treating either as silence
+      // would leave the loop waiting on a reviewer that has already finished.
+      anyoneResponded: entries.some((entry) => !isOurs(entry.body ?? "")),
       reviewerErrored: fromReviewer.some((entry) => isReviewerError(entry.body)),
       // Whitespace-only bodies are dropped here and not above: they are a
       // response for the purpose of "has the reviewer spoken", and nothing at
@@ -1070,6 +1179,7 @@ export async function readReview(
               {
                 author: entry.login === "" ? "unknown" : entry.login,
                 body,
+                origin: reviewOrigin(entry.login, reviewer),
                 createdAt: entry.createdAt ?? "",
                 id: entry.id,
               },
@@ -1077,6 +1187,9 @@ export async function readReview(
       }),
       state,
       isDraft,
+      createdAt,
+      // Every entry, before the filtering above. See `ReviewState.newestAt`.
+      newestAt: newestInstant(entries.map((entry) => entry.createdAt ?? "")) ?? "",
     },
   };
 }
@@ -1191,7 +1304,7 @@ function truncated(connection: unknown): boolean {
   return dig(connection, "pageInfo", "hasNextPage") === true;
 }
 
-function parseThreadComments(value: unknown): readonly ThreadComment[] | null {
+function parseThreadComments(value: unknown, reviewer: string): readonly ThreadComment[] | null {
   const nodes = dig(value, "nodes");
   if (!Array.isArray(nodes)) {
     return null;
@@ -1206,8 +1319,11 @@ function parseThreadComments(value: unknown): readonly ThreadComment[] | null {
     }
     const login = dig(record, "author", "login");
     // A deleted account comes back as a null author. The comment it left is
-    // still on the thread and still says whatever it says.
-    comments.push({ author: typeof login === "string" ? login : "unknown", body, createdAt });
+    // still on the thread and still says whatever it says. It classifies as
+    // `human`, which is the safe direction: an unnamed account is not the
+    // reviewer, and reading it as one would put a person's point on a budget.
+    const author = typeof login === "string" ? login : "unknown";
+    comments.push({ author, body, origin: reviewOrigin(author, reviewer), createdAt });
   }
   return comments;
 }
@@ -1335,7 +1451,7 @@ export async function readReviewThreads(
         reason: `the thread on ${path} has more than ${String(THREAD_PAGE)} comments, and the reply this round would answer may not be among the ones read`,
       };
     }
-    const comments = parseThreadComments(record["comments"]);
+    const comments = parseThreadComments(record["comments"], request.reviewer ?? COPILOT_REVIEWER);
     if (comments === null) {
       return { outcome: "failed", reason: `a comment on the thread on ${path} could not be read` };
     }

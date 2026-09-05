@@ -6,6 +6,7 @@ import {
   assertSafe,
   buildNewIssuesJql,
   buildInFlightJql,
+  buildReviewQueueJql,
   buildSolveQueueJql,
   jqlValue,
   lookbackMinutes,
@@ -379,6 +380,71 @@ describe("buildInFlightJql", () => {
 
   it("refuses to interpolate an unsafe component", () => {
     expect(() => buildInFlightJql({ ...SCOPE, components: ['x") OR labels = "y'] })).toThrow(
+      JqlError,
+    );
+  });
+});
+
+/**
+ * The set the review cycle looks at.
+ *
+ * Every test here is about the same mistake in a different shape: watching one
+ * of the two labels, or excluding a ticket that still has an open pull request.
+ * Both leave a pull request the loop opened with nothing that will ever look at
+ * it again.
+ */
+describe("buildReviewQueueJql", () => {
+  const SCOPE = { project: "SSX", components: ["SSX Advisor"] };
+
+  it("builds the query verbatim", () => {
+    expect(buildReviewQueueJql(SCOPE)).toBe(
+      'project = SSX AND component IN ("SSX Advisor") ' +
+        'AND labels IN ("agent:reviewing", "agent:review-done") ORDER BY updated ASC',
+    );
+  });
+
+  it("watches an undrafted pull request as well as a drafting one", () => {
+    // The mutation this is here for: drop agent:review-done and undrafting
+    // silently ends the loop. A human review arriving after the handover is
+    // exactly the feedback the loop was extended to hear, and it lands on a
+    // ticket carrying that label and no other.
+    const jql = buildReviewQueueJql(SCOPE);
+
+    expect(jql).toContain('"agent:reviewing"');
+    expect(jql).toContain('"agent:review-done"');
+  });
+
+  it("is a disjunction, not a conjunction", () => {
+    // `labels = a AND labels = b` is a ticket carrying both, which no ticket
+    // ever does — the two are mirror images written in one edit. That mutation
+    // yields an always-empty queue, which reads as "nothing to do" rather than
+    // as a malfunction, and is the reason this is checked separately from the
+    // verbatim string.
+    expect(buildReviewQueueJql(SCOPE)).not.toContain("labels =");
+  });
+
+  it("keeps watching a pull request whose ticket someone closed", () => {
+    // Same direction as the in-flight query and one reason more: the look is
+    // what writes agent:done or agent:closed when the pull request ends, so
+    // filtering the ticket out here strands the label with nothing to clear it.
+    expect(buildReviewQueueJql(SCOPE)).not.toContain("statusCategory");
+  });
+
+  it("does not restate the terminals as an exclusion", () => {
+    // They are written in the same edit that removes the labels above, so a
+    // ticket carrying one is already outside the positive clause. A second copy
+    // of that rule is a second thing to keep in step.
+    expect(buildReviewQueueJql(SCOPE)).not.toContain("NOT IN");
+  });
+
+  it("stays inside the configured scope, and omits the clause when there is none", () => {
+    expect(buildReviewQueueJql(SCOPE)).toContain('component IN ("SSX Advisor")');
+    expect(buildReviewQueueJql({ ...SCOPE, components: [] })).not.toContain("component");
+  });
+
+  it("refuses to interpolate an unsafe project or component", () => {
+    expect(() => buildReviewQueueJql({ ...SCOPE, project: 'X" OR "1"="1' })).toThrow(JqlError);
+    expect(() => buildReviewQueueJql({ ...SCOPE, components: ['x") OR labels = "y'] })).toThrow(
       JqlError,
     );
   });

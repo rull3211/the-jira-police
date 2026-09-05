@@ -157,6 +157,61 @@ describe("--advance, the flag that is not a rung", () => {
   });
 });
 
+/** The watch invocation, or a thrown assertion naming what came back instead. */
+function watch(argv: readonly string[]): { issueKey: string | null } {
+  const result = parseSolveArgs(argv);
+  if (!result.ok) {
+    throw new Error(`expected a parse, got: ${result.error}`);
+  }
+  if (result.invocation.mode !== "watch") {
+    throw new Error(`expected a watch invocation, got ${result.invocation.mode}`);
+  }
+  return { issueKey: result.invocation.issueKey };
+}
+
+describe("--watch, the flag that is not a rung and may run bare", () => {
+  it("parses into its own mode rather than a phase", () => {
+    expect(watch(["SSX-3822", "--watch"])).toEqual({ issueKey: "SSX-3822" });
+  });
+
+  it("does not care where the flag sits relative to the key", () => {
+    expect(watch(["--watch", "SSX-3822"])).toEqual({ issueKey: "SSX-3822" });
+  });
+
+  it("runs bare, and that is the difference from --advance", () => {
+    // THE ONE THAT MATTERS, and it is the opposite assertion to every other
+    // keyless test in this file. A keyless `--advance` is refused because it
+    // would push to every open pull request; a keyless `--watch` looks at every
+    // one and pays for at most `MAX_REVIEW_ROUNDS_PER_TICK` of them, because the
+    // survey gates the spend. Turn this into a refusal and the whole watched-set
+    // mode is unreachable — which is what it was before this change.
+    expect(watch(["--watch"])).toEqual({ issueKey: null });
+  });
+
+  it("leaves the ladder at its lowest rung when it is not asked for", () => {
+    expect(parsed(["SSX-3822"])).toEqual({ issueKey: "SSX-3822", phase: "plan" });
+  });
+
+  it.each(RUNG_FLAGS)("refuses to be combined with %s", (flag) => {
+    const reason = error(["SSX-3822", flag, "--watch"]);
+    expect(reason).toContain("cannot be combined");
+    expect(reason).toContain(flag);
+  });
+
+  it("refuses to be combined with --advance, in either order", () => {
+    // Not an ambiguity refusal — `--advance --watch` reads fine as "watch". It
+    // is refused because the two differ by whether the command ever returns,
+    // and choosing for the operator means choosing whether their terminal comes
+    // back.
+    expect(error(["SSX-3822", "--advance", "--watch"])).toContain("cannot be combined");
+    expect(error(["SSX-3822", "--watch", "--advance"])).toContain("cannot be combined");
+  });
+
+  it("reports the combination rather than the ladder's keyless refusal", () => {
+    expect(error(["--pr", "--watch"])).toContain("cannot be combined");
+  });
+});
+
 describe("rank and writes", () => {
   it("orders the phases by privilege", () => {
     expect(rank("plan")).toBeLessThan(rank("claim"));

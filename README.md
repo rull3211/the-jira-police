@@ -285,16 +285,28 @@ pnpm solve:once SSX-1234           # one named ticket, dry
 pnpm solve:once SSX-1234 --claim   # claims, checks the queue drops it, releases
 pnpm solve:once SSX-1234 --solve   # ... and runs the solver; nothing is pushed
 pnpm solve:once SSX-1234 --pr      # ... and opens the draft PR, reviewer @copilot
+pnpm solve:once SSX-1234 --review  # ... and works the review through to a handover
+pnpm solve:once SSX-1234 --advance # one review round on a PR an earlier run opened
+pnpm solve:once --watch            # poll every ticket under review until none is left
+pnpm solve:once SSX-1234 --watch   # the same loop, narrowed to one ticket
 ```
+
+**The last three are modes, not rungs, and the parser refuses to combine them with one.**
+`--advance` and `--watch` act on pull requests that finished runs created, so implying `--solve`
+would mean re-solving the ticket before touching the review. `--watch` is the only one that runs
+with no ticket key at all: bare, its subject is every ticket the review query returns.
 
 **A run that stops short of a pull request puts the labels back.** `releaseClaim` restores exactly
 the set the claim found, derived from the receipt rather than from the ticket's current labels — so
 a `next:to-trio` a PM added while the ticket was claimed survives. The one run that keeps
 `agent:solving` is one that opened a pull request, because there the work is real and ongoing.
 
-The rest of the label state machine is not built. A published pull request leaves the ticket on
-`agent:solving`; `agent:reviewing` and `agent:done` are moved by hand for now, and the command says
-so when it happens.
+**The rest of the label state machine is built, and this paragraph used to say it was not.** A
+published pull request now moves the ticket from `agent:solving` to `agent:reviewing`; undrafting
+writes `agent:review-done` and a round that pushes writes it back, because the arrow runs both
+ways; and a pull request that ends gets `agent:done` if it merged and `agent:closed` if it did not.
+`agent:done` is therefore the merged-only metric — how many bugs this tool actually fixed — rather
+than a note that the agent stopped.
 
 ### Temporary: the pnpm 9 shim, and when a solve needs it
 
@@ -307,25 +319,25 @@ is on `PATH` — and this machine's is 11, which no longer honours the `pnpm.ove
 repository's pnpm-9 lockfile depends on. The install dies on a repository whose CI is green. The
 refusal says so (`versionNote`), which is how it was diagnosed, but saying so does not fix it.
 
+The shim lives at `~/.pnpm9bin/pnpm` and is **selective rather than blanket**, which is what makes
+it safe to leave on `PATH` for a whole session. It walks up from the working directory to the
+nearest `package.json`: one that pins a `packageManager` gets the real pnpm, which self-delegates
+correctly, and one that does not is assumed to be the pilot repository and gets pnpm 9. So this
+repository — which pins `pnpm@11.20.0` and requires `>= 11` — keeps running under 11 even inside a
+shimmed shell.
+
 ```bash
-mkdir -p /tmp/pnpm9bin
-printf '#!/bin/sh\nexec corepack pnpm@9.15.9 "$@"\n' > /tmp/pnpm9bin/pnpm
-chmod +x /tmp/pnpm9bin/pnpm
+PATH="$HOME/.pnpm9bin:$PATH" pnpm solve:once SSX-1234 --solve
 ```
 
-Then run the solver through `node` rather than through `pnpm`:
+**An earlier version of this section put a blanket shim in `/tmp` and insisted on `node` rather
+than `pnpm solve:once`,** because the shell resolves `pnpm` _after_ applying the `PATH=` prefix and
+a blanket shim would therefore have run pnpm 9 against this repository, which fails before it
+starts. That warning was true of that shim and is not true of this one — the delegation rule above
+is exactly the case it was guarding. The `node` form still works and is still what the script runs;
+there is no build step here.
 
-```bash
-PATH="/tmp/pnpm9bin:$PATH" node --env-file-if-exists=.env src/cli/solve-once.ts SSX-1234 --solve
-```
-
-**`node`, not `pnpm solve:once`, and that is not a style preference.** The shell resolves `pnpm`
-_after_ applying the `PATH=` prefix, so `PATH=... pnpm solve:once` would run pnpm 9 against _this_
-repository — which pins `pnpm@11.20.0` and declares `engines.pnpm >= 11`, so it fails before it
-starts. There is no build step here, so the `node` line above is exactly what the script runs.
-
-`/tmp` is cleared on reboot. If a solve suddenly starts failing its install again, re-create the
-shim before looking anywhere else.
+`/tmp` was cleared on reboot, which is the other reason the shim moved to `$HOME`.
 
 ---
 

@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
+import type { ReviewCycleOutcome } from "../solve/review-cycle.ts";
 import {
   chainDecision,
+  completionLabelFor,
   describeAdvanceOutcome,
+  describeReviewSweep,
   describeSolveOutcome,
+  endedState,
   isAdvanceFailureExit,
   isFailureExit,
   reportsToTicket,
@@ -321,7 +325,7 @@ const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
   waiting: null,
   ready: null,
   iterated: null,
-  exhausted: null,
+  "reviewer-exhausted": null,
   capped: null,
   abandoned: null,
   refused: null,
@@ -330,7 +334,7 @@ const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
 
 /** One of every review-round kind, so the tables below are about all of them. */
 const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
-  { kind: "waiting" },
+  { kind: "waiting", quietMs: 60_000 },
   { kind: "ready", rounds: 2 },
   {
     kind: "iterated",
@@ -354,7 +358,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
     threads: NO_THREADS,
     unresolved: "",
   },
-  { kind: "exhausted", rounds: 3, unresolved: "this still allocates on every render" },
+  { kind: "reviewer-exhausted", rounds: 3, unresolved: "this still allocates on every render" },
   { kind: "capped", rounds: 20, unresolved: "the reviewer and the pass disagree about the type" },
   { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
@@ -398,16 +402,16 @@ describe("reviewStageAfter", () => {
     // `exhausted` undrafts the pull request, so it reaches the same label by a
     // different road. What made it different — the loop gave up rather than
     // agreed — is recorded in the comment on the ticket, not in this label.
-    expect(reviewStageAfter({ kind: "exhausted", rounds: 3, unresolved: "still slow" })).toBe(
-      "review-done",
-    );
+    expect(
+      reviewStageAfter({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" }),
+    ).toBe("review-done");
   });
 
   it("writes nothing while the reviewer has said nothing", () => {
     // The mutation this pins is the expensive one. Once the advance step runs on
     // a timer this is the outcome of almost every tick, so a stage here is a
     // Jira write per tick per pull request under review, forever.
-    expect(reviewStageAfter({ kind: "waiting" })).toBe(null);
+    expect(reviewStageAfter({ kind: "waiting", quietMs: 60_000 })).toBe(null);
   });
 
   it("leaves the label alone for every round that left the draft flag alone", () => {
@@ -433,7 +437,7 @@ describe("reviewStageAfter", () => {
       ["ready", "review-done"],
       ["iterated", "reviewing"],
       ["iterated", "review-done"],
-      ["exhausted", "review-done"],
+      ["reviewer-exhausted", "review-done"],
       ["capped", null],
       ["abandoned", null],
       ["refused", null],
@@ -447,7 +451,7 @@ describe("isAdvanceFailureExit", () => {
     // The common case by a wide margin: most ticks find no new comment. A
     // non-zero code here would make an idle loop indistinguishable from a
     // broken one, which is the reading a daemon's backoff would act on.
-    expect(isAdvanceFailureExit({ kind: "waiting" })).toBe(false);
+    expect(isAdvanceFailureExit({ kind: "waiting", quietMs: 60_000 })).toBe(false);
   });
 
   it("does not fail the shell when a pass read the review and declined", () => {
@@ -459,9 +463,9 @@ describe("isAdvanceFailureExit", () => {
   it("does not fail the shell when the round cap fires", () => {
     // The cap working is not the command failing. What it owes the operator is
     // the line saying so, which `describeAdvanceOutcome` is tested for below.
-    expect(isAdvanceFailureExit({ kind: "exhausted", rounds: 3, unresolved: "still slow" })).toBe(
-      false,
-    );
+    expect(
+      isAdvanceFailureExit({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" }),
+    ).toBe(false);
   });
 
   it("agrees with itself across every review-round kind", () => {
@@ -472,7 +476,7 @@ describe("isAdvanceFailureExit", () => {
       waiting: false,
       ready: false,
       iterated: false,
-      exhausted: false,
+      "reviewer-exhausted": false,
       capped: false,
       abandoned: false,
       refused: true,
@@ -481,19 +485,25 @@ describe("isAdvanceFailureExit", () => {
   });
 });
 
+/** Twenty minutes, the `REVIEW_SILENCE_MS` default, so the tables read as production would. */
+const SILENCE_MS = 1_200_000;
+
 describe("chainDecision", () => {
   it("keeps going only while the reviewer is still in the conversation", () => {
     // Pinned whole, and the direction matters: an outcome this function has not
     // been taught about must stop the chain, not join it. `--review` is the one
     // loop in this service with nobody between the iterations, so a new kind
     // defaulting to `continue` is a new way to spend money unattended.
-    const table = ADVANCE_OUTCOMES.map((outcome) => [outcome.kind, chainDecision(outcome).stop]);
+    const table = ADVANCE_OUTCOMES.map((outcome) => [
+      outcome.kind,
+      chainDecision(outcome, SILENCE_MS).stop,
+    ]);
     expect(table).toEqual([
       ["waiting", false],
       ["ready", true],
       ["iterated", false],
       ["iterated", true],
-      ["exhausted", true],
+      ["reviewer-exhausted", true],
       ["capped", true],
       ["abandoned", true],
       ["refused", true],
@@ -505,30 +515,60 @@ describe("chainDecision", () => {
     // Undrafting means this side has finished (§6.1c). The loop keeping watch
     // afterwards is right for a daemon and wrong for a foreground command,
     // which would hold a terminal open for as long as a review takes.
-    expect(chainDecision(ITERATED_UNDRAFTED).stop).toBe(true);
-    expect(chainDecision(ITERATED_DRAFTING).stop).toBe(false);
+    expect(chainDecision(ITERATED_UNDRAFTED, SILENCE_MS).stop).toBe(true);
+    expect(chainDecision(ITERATED_DRAFTING, SILENCE_MS).stop).toBe(false);
   });
 
   it("counts a silence only when the reviewer has actually said nothing", () => {
-    // `silent` is what `MAX_REVIEW_WAITS` counts, and it is deliberately not
-    // `!stop`. A round that ran and pushed is the loop working; folding it in
-    // here would let a productive pull request trip the absent-reviewer brake.
-    const silent = ADVANCE_OUTCOMES.filter((outcome) => chainDecision(outcome).silent);
+    // `silent` marks the one outcome where nobody said anything, and it is
+    // deliberately not `!stop`. A round that ran and pushed is the loop
+    // working; folding it in here would let a productive pull request trip the
+    // absent-reviewer brake.
+    const silent = ADVANCE_OUTCOMES.filter((outcome) => chainDecision(outcome, SILENCE_MS).silent);
     expect(silent.map((outcome) => outcome.kind)).toEqual(["waiting"]);
   });
 
   it("names a reason for every kind, because the operator is watching this one", () => {
     for (const outcome of ADVANCE_OUTCOMES) {
-      expect(chainDecision(outcome).why).not.toBe("");
+      expect(chainDecision(outcome, SILENCE_MS).why).not.toBe("");
     }
+  });
+
+  it("stops once the pull request has been quiet for longer than the bound", () => {
+    // The bound that used to be a counter on the chain's own stack. It is a
+    // duration now, read off the pull request, so it means the same number of
+    // minutes whatever `REVIEW_POLL_MS` is — and unplugging it gives back the
+    // one loop in this service that polls forever with nobody watching.
+    const decision = chainDecision({ kind: "waiting", quietMs: SILENCE_MS }, SILENCE_MS);
+
+    expect(decision.stop).toBe(true);
+    expect(decision.silent).toBe(true);
+    expect(decision.why).toContain("20 minutes");
+  });
+
+  it("keeps waiting while the pull request is still fresh", () => {
+    expect(chainDecision({ kind: "waiting", quietMs: SILENCE_MS - 1 }, SILENCE_MS).stop).toBe(
+      false,
+    );
+  });
+
+  it("keeps waiting when it could not measure how quiet the pull request is", () => {
+    // `null` is "the question cannot be answered from this payload", and the
+    // safe reading of that is to look again. Making it stop would end a live
+    // pull request on a parse failure, which is unrecoverable in the direction
+    // that matters: one more free `gh` read against an abandoned review.
+    expect(chainDecision({ kind: "waiting", quietMs: null }, 0).stop).toBe(false);
   });
 
   it("distinguishes the two caps in the sentence it prints", () => {
     // They stop the chain identically and mean opposite things: one is a policy
     // about how much argument a bot reviewer is worth, the other a brake on the
     // machinery. An operator reading only "stopped" cannot tell which to relax.
-    const budget = chainDecision({ kind: "exhausted", rounds: 3, unresolved: "" }).why;
-    const brake = chainDecision({ kind: "capped", rounds: 20, unresolved: "" }).why;
+    const budget = chainDecision(
+      { kind: "reviewer-exhausted", rounds: 3, unresolved: "" },
+      SILENCE_MS,
+    ).why;
+    const brake = chainDecision({ kind: "capped", rounds: 20, unresolved: "" }, SILENCE_MS).why;
 
     expect(budget).toContain("budget");
     expect(brake).toContain("MAX_PR_ROUNDS_TOTAL");
@@ -664,10 +704,11 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("says the cap fired rather than that the reviewer was satisfied", () => {
-    // `ready` and `exhausted` both undraft, and reading one as the other would
-    // tell a human the bot and the reviewer agreed when they did not.
+    // `ready` and `reviewer-exhausted` both undraft, and reading one as the
+    // other would tell a human the bot and the reviewer agreed when they did
+    // not.
     const text = describeAdvanceOutcome({
-      kind: "exhausted",
+      kind: "reviewer-exhausted",
       rounds: 3,
       unresolved: "this still allocates on every render",
     });
@@ -676,8 +717,19 @@ describe("describeAdvanceOutcome", () => {
     expect(text).not.toContain("nothing to act on");
   });
 
+  it("says which budget ran out, and that the other one has not", () => {
+    // The rename is the whole of it. This used to be an ending: undraft, report,
+    // stop. It is now a statement about one of two channels, and an operator who
+    // reads it as a terminal will go and do by hand the thing the loop is still
+    // willing to do — answer the next human comment.
+    const text = describeAdvanceOutcome({ kind: "reviewer-exhausted", rounds: 3, unresolved: "x" });
+
+    expect(text).toContain("REVIEWER EXHAUSTED");
+    expect(text).toContain("human");
+  });
+
   it("does not describe waiting as work that happened", () => {
-    const text = describeAdvanceOutcome({ kind: "waiting" });
+    const text = describeAdvanceOutcome({ kind: "waiting", quietMs: 60_000 });
     expect(text).toContain("WAITING");
     expect(text).toContain("nothing was pushed");
   });
@@ -832,5 +884,110 @@ describe("reportsToTicket", () => {
 
   it("stays quiet on success, because the pull request is the notification", () => {
     expect(reportsToTicket(verified)).toBe(false);
+  });
+});
+
+describe("describeReviewSweep", () => {
+  const quiet: ReviewCycleOutcome = {
+    watched: 4,
+    acted: [],
+    settled: [],
+    ended: [],
+    unlooked: [],
+    deferred: [],
+  };
+
+  it("says a quiet pass in one line", () => {
+    // A watch prints this every tick forever. If a pass on which nothing
+    // happened is more than one line, the log is unreadable by the time
+    // anything does happen.
+    const line = describeReviewSweep(7, quiet);
+    expect(line).toBe("pass 7: 4 watched");
+    expect(line).not.toContain("\n");
+  });
+
+  it("names every ticket it spent money on, rather than counting them", () => {
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      acted: [
+        { issueKey: "SSX-1", number: 11, outcome: { kind: "waiting", quietMs: null } },
+        {
+          issueKey: "SSX-2",
+          number: 22,
+          outcome: { kind: "failed", stage: "worktree", reason: "dirty" },
+        },
+      ],
+    });
+    expect(line).toContain("SSX-1 #11 waiting");
+    expect(line).toContain("SSX-2 #22 failed");
+  });
+
+  it("reports the deferral, because that is the bound doing something", () => {
+    // The mutation this catches is dropping the branch as noise. Deferred work
+    // is actionable work this pass declined to pay for, and hiding it makes
+    // MAX_REVIEW_ROUNDS_PER_TICK invisible at the only moment it is visible —
+    // which reads, from a terminal, as a loop ignoring a reviewer.
+    expect(describeReviewSweep(1, { ...quiet, deferred: ["SSX-9", "SSX-10"] })).toContain(
+      "2 deferred",
+    );
+  });
+
+  it("gives a failed look its reason and not just a count", () => {
+    // A look that failed repeats identically every pass until somebody reads
+    // why, so a bare number would scroll past forever saying nothing.
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      unlooked: [{ issueKey: "SSX-3", reason: "gh timed out" }],
+    });
+    expect(line).toContain("SSX-3: gh timed out");
+  });
+
+  it("distinguishes a merge from a close", () => {
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      ended: [
+        { issueKey: "SSX-4", number: 44, state: "MERGED" },
+        { issueKey: "SSX-5", number: 55, state: "CLOSED" },
+      ],
+    });
+    expect(line).toContain("SSX-4 MERGED");
+    expect(line).toContain("SSX-5 CLOSED");
+  });
+
+  it("does not print a section for something that did not happen", () => {
+    const line = describeReviewSweep(1, {
+      ...quiet,
+      settled: [{ issueKey: "SSX-6", number: 66, outcome: { kind: "waiting", quietMs: 1 } }],
+    });
+    expect(line).toContain("1 settled");
+    expect(line).not.toContain("deferred");
+    expect(line).not.toContain("could not look");
+  });
+});
+
+describe("endedState and completionLabelFor", () => {
+  it("gives agent:done to a merge and nothing else", () => {
+    // THE ONE GUARDING THE NUMBER. `agent:done` is the count of bugs this tool
+    // fixed. Widen it to any ended pull request and the count silently absorbs
+    // every change a person declined — a failure that shows up as a
+    // plausible-looking figure in a report rather than as a malfunction, which
+    // is the only reason it needs a test of its own.
+    expect(completionLabelFor("MERGED")).toBe("done");
+    expect(completionLabelFor("CLOSED")).toBe("closed");
+  });
+
+  it("reads only the exact word gh prints for a merge", () => {
+    expect(endedState("MERGED")).toBe("MERGED");
+    expect(endedState("CLOSED")).toBe("CLOSED");
+  });
+
+  it("treats a state it has never seen as closed", () => {
+    // The safe direction, and the direction a `state ===` check flipped to
+    // `!==` would get wrong. `closed` counts nothing, so an unrecognised
+    // spelling costs a ticket the wrong label; the inverse would let a future
+    // `gh` inflate the number of bugs this service claims to have fixed.
+    expect(endedState("merged")).toBe("CLOSED");
+    expect(endedState("DRAFT")).toBe("CLOSED");
+    expect(endedState("")).toBe("CLOSED");
   });
 });

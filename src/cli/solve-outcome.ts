@@ -19,7 +19,9 @@
 
 import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
 import type { ReviewStage, SolveOutcomeLabel } from "../solve/labels.ts";
+import { hasGoneQuiet } from "../solve/silence.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
+import type { ReviewCycleOutcome } from "../solve/review-cycle.ts";
 
 /**
  * Whether the shell should hear about this.
@@ -237,12 +239,12 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  *   declined to act on it. A human takes the pull request from there, which is
  *   the outcome the review round exists to be able to reach.
  *
- * `exhausted` also exits zero: the cap firing is the cap working. The caller
+ * `reviewer-exhausted` also exits zero: the cap firing is the cap working. The caller
  * still has to say so on the ticket, which is a different obligation from an
  * exit code.
  *
  * `capped` exits zero for the same reason and it is the one worth arguing
- * about, because unlike `exhausted` it means a pull request has cost twenty
+ * about, because unlike `reviewer-exhausted` it means a pull request has cost twenty
  * rounds and is being abandoned mid-review. That is a bad state and it is
  * tempting to make `$?` say so. It must not: the brake firing is the brake
  * working, and a non-zero exit would teach a daemon's backoff to treat the
@@ -280,33 +282,53 @@ export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
  * different loop with a different operator, and conflating them would make this
  * command's ending depend on somebody else's calendar.
  *
- * So `ready` stops, `exhausted` stops — both undrafted — and `iterated` stops
+ * So `ready` stops, `reviewer-exhausted` stops — both undrafted — and `iterated` stops
  * when it undrafted itself, which is §6.1c's rule that a round changing nothing
  * has finished. An `iterated` round that pushed stays a draft and goes round
  * again.
  *
  * ## `silent` is a separate question from `stop`
  *
- * It marks the one outcome that means *the reviewer said nothing*, and it is
- * what `MAX_REVIEW_WAITS` counts. It has to be separate because the round caps
- * cannot see this failure at all: a reviewer that never answers produces no
- * rounds, so `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` both sit at zero
- * while the loop spins. Silence is the unbounded case, and it is unbounded
- * precisely because it is free — which is why it needs its own counter rather
- * than a share of somebody else's.
+ * It marks the one outcome that means *the reviewer said nothing*, and it is the
+ * one the round caps cannot see at all: a reviewer that never answers produces
+ * no rounds, so `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` both sit at
+ * zero while the loop spins. Silence is the unbounded case, and it is unbounded
+ * precisely because it is free.
+ *
+ * ## The silence bound is read, not counted
+ *
+ * This used to be `MAX_REVIEW_WAITS` and the chain counted its own consecutive
+ * silent polls. Two things were wrong with that, and `silence.ts` sets both out:
+ * the count lived on a stack, and it made patience a product of the poll
+ * interval. So the outcome now carries how long the pull request has actually
+ * been quiet, and the only thing left to decide here is what that is worth — a
+ * decision this function makes for a foreground command and a daemon will make
+ * differently for itself.
+ *
+ * `silenceMs` is a parameter rather than a closed-over setting for the same
+ * reason: two callers, one measurement, two policies.
  */
 export interface ChainDecision {
   readonly stop: boolean;
-  /** True only when the reviewer has not spoken. Counts against `MAX_REVIEW_WAITS`. */
+  /** True only when the reviewer has not spoken. */
   readonly silent: boolean;
   /** One line, for the operator, naming why the chain did what it did next. */
   readonly why: string;
 }
 
-export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
+export function chainDecision(outcome: AdvanceOutcome, silenceMs: number): ChainDecision {
   switch (outcome.kind) {
     case "waiting": {
-      return { stop: false, silent: true, why: "the reviewer has not said anything yet" };
+      // Unmeasurable reads as "keep looking", which is `hasGoneQuiet`'s rule and
+      // not this function's guess. A bound that fires when it cannot measure
+      // would end the chain on a payload it failed to understand.
+      return hasGoneQuiet(outcome.quietMs, silenceMs)
+        ? {
+            stop: true,
+            silent: true,
+            why: `nothing has happened on the pull request for ${String(Math.round((outcome.quietMs ?? 0) / 60000))} minutes — leaving it as it is; run --advance later, or check the reviewer was actually requested`,
+          }
+        : { stop: false, silent: true, why: "the reviewer has not said anything yet" };
     }
     case "iterated": {
       // The draft flag, not `pushed` — the same choice `reviewStageAfter` makes
@@ -327,7 +349,7 @@ export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
     case "ready": {
       return { stop: true, silent: false, why: "nothing left to act on — undrafted" };
     }
-    case "exhausted": {
+    case "reviewer-exhausted": {
       return {
         stop: true,
         silent: false,
@@ -379,13 +401,13 @@ export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
 export function reviewStageAfter(outcome: AdvanceOutcome): ReviewStage | null {
   switch (outcome.kind) {
     // Undrafted, so the agentic cycle is over and a human is the only thing
-    // left. `exhausted` reaches the same place by a different road — the
+    // left. `reviewer-exhausted` reaches the same place by a different road — the
     // reviewer's budget ran out rather than the reviewer running out of things
     // to say — and the ticket cannot tell the difference because the pull
     // request cannot either. The comment on the ticket is where that difference
     // is recorded, and it already is.
     case "ready":
-    case "exhausted": {
+    case "reviewer-exhausted": {
       return "review-done";
     }
     // The only outcome that can go either way, and it is decided by the draft
@@ -402,6 +424,45 @@ export function reviewStageAfter(outcome: AdvanceOutcome): ReviewStage | null {
       return null;
     }
   }
+}
+
+/**
+ * `gh`'s state string, narrowed to the two endings that mean something here.
+ *
+ * `FindPrResult.state` is a `string` because it is whatever `gh pr list`
+ * printed, and this service must not care: the only question it asks of a
+ * finished pull request is whether it was merged. So anything that is not
+ * exactly `MERGED` is read as closed, which is the safe direction — `closed` is
+ * the label that counts nothing, and a future `gh` spelling this service has
+ * never seen must not be able to inflate the number of bugs it claims to have
+ * fixed.
+ *
+ * Callers must have ruled `OPEN` out first. It is not an ending, and there is
+ * nothing sensible to return for it; a third arm would invite a caller to pass
+ * an open pull request and get a terminal back.
+ */
+export function endedState(state: string): "MERGED" | "CLOSED" {
+  return state === "MERGED" ? "MERGED" : "CLOSED";
+}
+
+/**
+ * The terminal label a finished pull request earns, and it is a metric.
+ *
+ * §3c: `agent:done` is **merged only**. It is the count of bugs this tool
+ * actually fixed, and a pull request a person closed unmerged is work the tool
+ * completed that nobody wanted — a different number, and the more interesting of
+ * the two, which disappears entirely the moment the buckets are folded together.
+ *
+ * A function rather than a ternary at each call site, and that is the whole
+ * reason it exists. There are two places a pull request's terminal is written —
+ * `--advance` finding it already ended, and the watch cycle noticing the same
+ * thing on a later pass — and until this they held the same ternary twice. Two
+ * identical literals encoding a rule is the failure `labels.ts`'s own header
+ * names, and the failure mode here is not a crash: it is a plausible-looking
+ * figure in a report, which is exactly the mutation §3c asks to be guarded.
+ */
+export function completionLabelFor(state: "MERGED" | "CLOSED"): SolveOutcomeLabel {
+  return state === "MERGED" ? "done" : "closed";
 }
 
 /**
@@ -477,14 +538,15 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         (outcome.unresolved === "" ? "" : `\nUnresolved:\n${outcome.unresolved}`)
       );
     }
-    case "exhausted": {
+    case "reviewer-exhausted": {
       return (
-        `EXHAUSTED — ${String(outcome.rounds)} round(s) spent and the reviewer still has comments open. ` +
-        `Undrafted anyway; a human decides from here.\nUnresolved:\n${outcome.unresolved}`
+        `REVIEWER EXHAUSTED — ${String(outcome.rounds)} round(s) spent and the reviewer still has comments open. ` +
+        `Undrafted anyway; a human decides from here, and a human's comment still gets a round.` +
+        `\nUnresolved:\n${outcome.unresolved}`
       );
     }
     case "capped": {
-      // Deliberately does not say "undrafted", because it is not. `exhausted`
+      // Deliberately does not say "undrafted", because it is not. `reviewer-exhausted`
       // is a reviewer running out of turns on a pull request the loop still
       // believes in; this is the machinery hitting a stop, which says nothing
       // about whether the code is ready.
@@ -505,4 +567,54 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       return `FAILED at the ${outcome.stage} stage — ${outcome.reason}`;
     }
   }
+}
+
+/**
+ * One pass over the watched set, in the fewest lines that still say what it cost.
+ *
+ * A watch prints this every tick, forever, so the shape matters more than it
+ * does for a one-shot command: an operator is going to read hundreds of these
+ * and the only way that stays useful is if a quiet pass is one short line and an
+ * expensive one is visibly longer. So the counts that are usually zero are
+ * omitted when they are, and `acted` — the only field that spent money — always
+ * names its tickets rather than counting them.
+ *
+ * **`deferred` is never omitted when non-zero, even though it looks like noise.**
+ * It is the one number that says the bound bit: work was actionable and this
+ * pass declined to pay for it. Hiding that would make `MAX_REVIEW_ROUNDS_PER_TICK`
+ * invisible at exactly the moment it is doing something, which is how a bound
+ * gets blamed for a loop that seems to be ignoring a reviewer.
+ */
+export function describeReviewSweep(pass: number, outcome: ReviewCycleOutcome): string {
+  const parts = [`pass ${String(pass)}: ${String(outcome.watched)} watched`];
+
+  if (outcome.acted.length > 0) {
+    parts.push(
+      `${String(outcome.acted.length)} round(s) — ` +
+        outcome.acted
+          .map((entry) => `${entry.issueKey} #${String(entry.number)} ${entry.outcome.kind}`)
+          .join(", "),
+    );
+  }
+  if (outcome.settled.length > 0) {
+    parts.push(`${String(outcome.settled.length)} settled without spending`);
+  }
+  if (outcome.ended.length > 0) {
+    parts.push(
+      `ended — ${outcome.ended.map((entry) => `${entry.issueKey} ${entry.state}`).join(", ")}`,
+    );
+  }
+  if (outcome.deferred.length > 0) {
+    parts.push(`${String(outcome.deferred.length)} deferred to the next pass`);
+  }
+  // Last, and always listed by ticket. A look that failed is the one thing here
+  // that will repeat identically every pass until somebody reads the reason, so
+  // a bare count would scroll past forever saying nothing.
+  if (outcome.unlooked.length > 0) {
+    parts.push(
+      `could not look at — ${outcome.unlooked.map((entry) => `${entry.issueKey}: ${entry.reason}`).join("; ")}`,
+    );
+  }
+
+  return parts.join("\n  ");
 }

@@ -90,7 +90,12 @@ export const USAGE =
   "pull request puts the labels back where it found them.\n" +
   "\n" +
   "  <ISSUE-KEY> --advance   one review round on the pull request that already\n" +
-  "                          exists; does not claim, solve, or open anything\n";
+  "                          exists; does not claim, solve, or open anything\n" +
+  "\n" +
+  "  --watch                 keep looking at every ticket under review, running a\n" +
+  "                          round for the ones a reviewer has written to. A look\n" +
+  "                          is two gh reads and costs nothing; only a round pays.\n" +
+  "  <ISSUE-KEY> --watch     the same loop, narrowed to one ticket\n";
 
 /**
  * The flag that is not a rung.
@@ -119,11 +124,46 @@ export const USAGE =
  * against whatever the reviewer says, until something ends it. That is E's
  * defining capability arriving early, and the thing that keeps it honest is that
  * it is bounded on four sides — `MAX_PR_ROUNDS_TOTAL` on the machinery,
- * `MAX_REVIEW_ITERATIONS` on the reviewer, `MAX_REVIEW_WAITS` on silence, and
+ * `MAX_REVIEW_ITERATIONS` on the reviewer, `REVIEW_SILENCE_MS` on silence, and
  * every non-continuing outcome — and that a person typed one ticket key and is
  * watching it. `chainDecision` is where the first and last of those live.
  */
 const ADVANCE_FLAG = "--advance";
+
+/**
+ * The other flag that is not a rung, and the only one that may run bare.
+ *
+ * `--watch` is `--advance` with the two things a loop needs: it keeps looking,
+ * and it looks at the whole watched set rather than at one ticket. Everything it
+ * can do to a pull request, `--advance` can already do once; what it adds is
+ * that nobody has to type the command again.
+ *
+ * ## Why a bare `--watch` is allowed where a bare `--advance` is not
+ *
+ * `--advance` refuses to run without a key because it would otherwise push a
+ * commit to every open pull request the queue knows about. That reasoning does
+ * not carry over, and the difference is the survey. A bare `--watch` reads the
+ * `agent:reviewing` / `agent:review-done` query and *looks* at every pull request
+ * in it — two `gh` reads each, no checkout — and spends only on the ones a
+ * reviewer has actually written to. The unbounded thing `--advance` was
+ * protecting against is the checkout and the pass, and those are now behind a
+ * gate that a quiet pull request does not open.
+ *
+ * It is also bounded where `--advance` is not: at most `MAX_REVIEW_ROUNDS_PER_TICK`
+ * rounds per pass over the set, with the rest deferred to the next one. So the
+ * worst case of the bare form is a number an operator can read off the banner
+ * before it starts, which is the same argument `--review` makes for printing its
+ * cost up front.
+ *
+ * ## It is still not a rung, for `--advance`'s reason
+ *
+ * It acts on pull requests earlier runs opened, so ordering it against `--pr` is
+ * the same guess, and combining the two is refused rather than resolved.
+ * Combining it with `--advance` is refused as well — not because the reading is
+ * ambiguous, but because it is redundant in a way that hides which one is
+ * running, and an operator who typed both should be told which they meant.
+ */
+const WATCH_FLAG = "--watch";
 
 export type SolveInvocation =
   | {
@@ -132,7 +172,9 @@ export type SolveInvocation =
       readonly issueKey: string | null;
       readonly phase: SolvePhase;
     }
-  | { readonly mode: "advance"; readonly issueKey: string };
+  | { readonly mode: "advance"; readonly issueKey: string }
+  /** `null` means every ticket the review query returns. See `WATCH_FLAG`. */
+  | { readonly mode: "watch"; readonly issueKey: string | null };
 
 /** The ladder half, for the commands that have no review mode at all. */
 export type LadderInvocation = Extract<SolveInvocation, { mode: "ladder" }>;
@@ -221,6 +263,7 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   const positional: string[] = [];
   let phase: SolvePhase = "plan";
   let advance = false;
+  let watch = false;
   let namedRung = false;
 
   for (const arg of argv) {
@@ -230,6 +273,10 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
     }
     if (arg === ADVANCE_FLAG) {
       advance = true;
+      continue;
+    }
+    if (arg === WATCH_FLAG) {
+      watch = true;
       continue;
     }
     const named = PHASE_FLAGS.get(arg);
@@ -251,6 +298,27 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   }
 
   const issueKey = positional[0] ?? null;
+
+  if (watch) {
+    // Both refusals are the same shape as `--advance`'s, and the second is not
+    // about ambiguity. `--advance --watch` reads perfectly well as "watch"; it
+    // is refused because the two differ by whether the command ever returns,
+    // and an operator who typed both should be told which they got rather than
+    // having it chosen for them.
+    if (namedRung) {
+      return {
+        ok: false,
+        error: `${WATCH_FLAG} cannot be combined with --${phase} — watching acts on pull requests that already exist, so there is no coherent order for the two`,
+      };
+    }
+    if (advance) {
+      return {
+        ok: false,
+        error: `${WATCH_FLAG} cannot be combined with ${ADVANCE_FLAG} — one looks once and returns, the other keeps looking, so say which`,
+      };
+    }
+    return { ok: true, invocation: { mode: "watch", issueKey } };
+  }
 
   if (advance) {
     // Refused, not resolved. See `ADVANCE_FLAG`.
