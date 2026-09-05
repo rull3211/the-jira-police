@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1519 tests, no build step, no deployment
+Status: running end to end against production Jira. 1700 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -25,17 +25,21 @@ A **second queue** exists alongside grooming: tickets a triage assessment marked
 tickets and reports the exact label edit it _would_ make, and the cycle that runs it holds no
 function capable of making it.
 
-Past that queue the picture is no longer uniform, and the split is worth stating precisely because
-it used to be a single sentence. **The solver runs.** `pnpm solve:once <KEY> --solve` composes a
-`CommandRunner` and a `PassRunner` and drives the whole first half — worktree, four model passes,
-diff bound, mechanical verification — against a real repository. It has done so, by hand, and §15
-records what that cost. **Everything else is still wired to nothing**: the claim
-(`ClaimCapabilities`), the commit, the pull request and the review round-trip are built, tested,
-and constructed by no entry point. That inertness is a fact about the composition rather than a
-promise made in a comment, and granting it is an edit to a wiring function, which is where a
-reviewer looks. Building a capability and granting it are kept as separate commits on purpose.
-See §4 for the queue, §15 for the pipeline, and §13 for what is genuinely absent. Nothing runs any
-of it from the daemon; `pnpm start` is the grooming loop only.
+Past that queue **the whole pipeline is now wired and has been driven by hand, one rung at a
+time.** `pnpm solve:once <KEY>` climbs a cumulative ladder — `--claim` writes the Jira label,
+`--solve` cuts a worktree and runs the four model passes under a diff bound and mechanical
+verification, `--pr` commits, pushes and opens a draft pull request — and `--advance`, a separate
+mode rather than a rung, runs one review round against a pull request an earlier run left open.
+Real tickets have been claimed, solved, pushed, reviewed and merged this way; §15 records what
+each step cost.
+
+What that sentence used to say, and said for two months, was that all of it was "wired to
+nothing". That was the honest description while it held, and each grant was its own commit so a
+reviewer could see the composition change rather than take a comment's word for it. **The
+remaining inertness is much narrower and worth naming exactly:** nothing writes `agent:reviewing`,
+so the poller's review-advance step has nothing to find; and `pnpm start` is still the grooming
+loop only. Every solve, publish and review round is a person typing a command and reading the
+output. See §4 for the queue, §15 for the pipeline, and §13 for what is genuinely absent.
 
 ---
 
@@ -389,43 +393,47 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-| Path                         | Role                                                                                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`               | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides                       |
-| `src/loop.ts`                | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                    |
-| `src/poller.ts`              | One cycle. Ordering, dedupe, failure isolation, the three rules above                                   |
-| `src/wiring.ts`              | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps` |
-| `src/settings.ts`            | Declarative settings table + generic reader, with a `sensitive` marker                                  |
-| `src/jira/jql.ts`            | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting                      |
-| `src/solve/labels.ts`        | The `agent:` state machine as pure functions; `repoFromLabels`                                          |
-| `src/solve/poller.ts`        | One solve cycle. **Dry run only** — plans the claim, cannot make it                                     |
-| `src/solve/report.ts`        | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                      |
-| `src/solve/claim.ts`         | The claim and its release. Read, re-check, write, read back. **Wired to nothing**                       |
-| `src/solve/branch.ts`        | What may be written to: a work-prefix allowlist and a protected-name denylist                           |
-| `src/solve/worktree.ts`      | The throwaway worktree, the branch name, and the `CommandRunner` interface                              |
-| `src/solve/schema.ts`        | The four draft-07 contracts handed to `agent-solve`                                                     |
-| `src/solve/runner.ts`        | The pass command lines and their parsers. Where `Write` is granted — and everything withheld            |
-| `src/solve/diff-gate.ts`     | The bound on what a solve run may have changed. Pure — no git, no fs                                    |
-| `src/solve/verify.ts`        | Mechanical verification. `passed` / `failed` / `refused`, never collapsed                               |
-| `src/solve/orchestrator.ts`  | The sequence: worktree → recon → fix → simplify → gate → verify                                         |
-| `src/solve/pr.ts`            | `git` and `gh` as argv arrays. Commit, push, draft PR, read review, undraft                             |
-| `src/solve/delivery.ts`      | `publish` and `advance` — the review round-trip as two callable steps                                   |
-| `src/solve/exec.ts`          | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                 |
-| `src/solve/passes.ts`        | The real `PassRunner`. Working directory is the worktree; no MCP server required                        |
-| `src/cli/solve-once.ts`      | One solve cycle and exit. No `--dry-run` flag, because there is no other mode                           |
-| `src/jira/client.ts`         | `/rest/api/3/search/jql`, token pagination, Basic auth                                                  |
-| `src/jira/types.ts`          | The slice of the Jira payload actually read, plus `TicketRef`                                           |
-| `src/state/store.ts`         | Cursor + seen keys, atomic write                                                                        |
-| `src/triage/schema.ts`       | The draft-07 contract handed to the analyst. Descriptions double as instructions                        |
-| `src/triage/session.ts`      | Shared subprocess machinery for both runs                                                               |
-| `src/triage/runner.ts`       | The analyst                                                                                             |
-| `src/triage/gate.ts`         | The check                                                                                               |
-| `src/triage/poster.ts`       | The writer                                                                                              |
-| `src/triage/fitness-note.ts` | Renders the fitness call into the comment from the field, so prose cannot disagree with it              |
-| `src/output/sink.ts`         | `FileSink` (reports) and the rejection artifacts                                                        |
-| `src/output/canvas.ts`       | Slack canvas payload builders — **built, never called** (§13)                                           |
-| `src/logger.ts`              | JSON lines to stdout/stderr; `console` is banned by lint                                                |
-| `src/duration.ts`            | `30s` / `4m` / `1.5h` for CLI flags                                                                     |
+| Path                         | Role                                                                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`               | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides                                           |
+| `src/loop.ts`                | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                        |
+| `src/poller.ts`              | One cycle. Ordering, dedupe, failure isolation, the three rules above                                                       |
+| `src/wiring.ts`              | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps`                     |
+| `src/settings.ts`            | Declarative settings table + generic reader, with a `sensitive` marker                                                      |
+| `src/jira/jql.ts`            | Query builders — new-issue, solve queue, in-flight. Validation, id-vs-name quoting                                          |
+| `src/solve/labels.ts`        | The `agent:` state machine as pure functions; `repoFromLabels`                                                              |
+| `src/solve/poller.ts`        | One solve cycle. **Dry run only** — plans the claim, cannot make it                                                         |
+| `src/solve/report.ts`        | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                                          |
+| `src/solve/claim.ts`         | The claim and its release. Read, re-check, write, read back                                                                 |
+| `src/solve/branch.ts`        | What may be written to: a work-prefix allowlist and a protected-name denylist                                               |
+| `src/solve/worktree.ts`      | The throwaway worktree, the branch name, and the `CommandRunner` interface                                                  |
+| `src/solve/schema.ts`        | The four draft-07 contracts handed to `agent-solve`                                                                         |
+| `src/solve/runner.ts`        | The pass command lines and their parsers. Where `Write` is granted — and everything withheld                                |
+| `src/solve/diff-gate.ts`     | The bound on what a solve run may have changed. Pure — no git, no fs                                                        |
+| `src/solve/verify.ts`        | Mechanical verification. `passed` / `failed` / `refused`, never collapsed                                                   |
+| `src/solve/orchestrator.ts`  | The sequence: worktree → recon → fix → simplify → gate → verify                                                             |
+| `src/solve/pr.ts`            | `git` and `gh` as argv arrays. Commit, push, draft PR, read review and its inline threads, reply, resolve, comment, undraft |
+| `src/solve/marker.ts`        | The round cursor as one comment: render, parse, locate, and refuse rather than reset. No I/O                                |
+| `src/solve/delivery.ts`      | `publish` and `advance` — the review round-trip as two callable steps                                                       |
+| `src/solve/exec.ts`          | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                                     |
+| `src/solve/passes.ts`        | The real `PassRunner`. Working directory is the worktree; no MCP server required                                            |
+| `src/cli/solve-once.ts`      | Argument parsing, then a call into `solve-run.ts`. Dry by default; every write is a typed flag                              |
+| `src/cli/solve-args.ts`      | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                        |
+| `src/cli/solve-run.ts`       | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                          |
+| `src/cli/solve-outcome.ts`   | Outcomes to an operator's terminal, and the rule deciding `$?`                                                              |
+| `src/jira/client.ts`         | `/rest/api/3/search/jql`, token pagination, Basic auth                                                                      |
+| `src/jira/types.ts`          | The slice of the Jira payload actually read, plus `TicketRef`                                                               |
+| `src/state/store.ts`         | Cursor + seen keys, atomic write                                                                                            |
+| `src/triage/schema.ts`       | The draft-07 contract handed to the analyst. Descriptions double as instructions                                            |
+| `src/triage/session.ts`      | Shared subprocess machinery for both runs                                                                                   |
+| `src/triage/runner.ts`       | The analyst                                                                                                                 |
+| `src/triage/gate.ts`         | The check                                                                                                                   |
+| `src/triage/poster.ts`       | The writer                                                                                                                  |
+| `src/triage/fitness-note.ts` | Renders the fitness call into the comment from the field, so prose cannot disagree with it                                  |
+| `src/output/sink.ts`         | `FileSink` (reports) and the rejection artifacts                                                                            |
+| `src/output/canvas.ts`       | Slack canvas payload builders — **built, never called** (§13)                                                               |
+| `src/logger.ts`              | JSON lines to stdout/stderr; `console` is banned by lint                                                                    |
+| `src/duration.ts`            | `30s` / `4m` / `1.5h` for CLI flags                                                                                         |
 
 `wiring.ts` exists because there are five entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once` and `bot:once` — and a difference in how they wire the same pipeline would be a bug
@@ -433,7 +441,9 @@ that only shows up in production. The two solve commands go further than sharing
 write rungs are literally the same functions, in `src/cli/solve-run.ts`, so a command file is now
 argument parsing plus a call into the one module that writes to Jira, a worktree or GitHub. `triage:once` used to build its options by hand; the copy drifted the
 moment the real skill grew requirements. Note which modules are absent from that list of callers:
-nothing in `wiring.ts` composes the solve pipeline, which is what §15 means by inert.
+`wiring.ts` composes the solve pipeline too — `createSolveRunDeps`, `createClaimCapabilities`,
+`buildSolveRequest`, `buildPublishRequest`, `buildFindPrRequest`, `buildAdvanceRequest` — which is
+what makes the ladder a real escalation rather than five commands that happen to look alike.
 
 ---
 
@@ -544,7 +554,8 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                                 | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing                                                           |
 | `SOLVE_REPOS`                | — (**no fallback**)                    | Repository allowlist. The only solve setting without a default, deliberately: see §14.10                                                                                                                         |
 | `MAX_CONCURRENT_SOLVES`      | `1`                                    | Counted from the board via `buildInFlightJql`, never from local state                                                                                                                                            |
-| `MAX_REVIEW_ITERATIONS`      | `3`                                    | Quoted in the pull request body so a reader knows what undrafts it. The loop that spends the rounds (`advance`) is built and not called                                                                          |
+| `MAX_REVIEW_ITERATIONS`      | `3`                                    | Quoted in the pull request body so a reader knows what undrafts it. A policy about how much argument a bot reviewer is worth                                                                                     |
+| `MAX_PR_ROUNDS_TOTAL`        | `20`                                   | The absolute per-pull-request stop, deliberately **not** the same number as above. One is a policy, this is a brake, and conflating them lets a policy change disable a safety stop. Hitting it does not undraft |
 | `SOLVE_WORKTREE_ROOT`        | — (blank means the temp dir)           | Grants nothing. Exists because macOS `tmpdir()` lands under `/private/var`, and the by-hand diff review phase C depends on needs a path a person can open                                                        |
 | `SOLVE_GITHUB_OWNER`         | — (**no fallback**)                    | The account a pull request is opened against. No default for the same reason as `SOLVE_REPOS`, plus one of its own: an owner inferred from the checkout's remote is right until somebody adds a fork as `origin` |
 | `SOLVE_BOT_NAME`             | `jira-police`                          | Commit author. Widens nothing                                                                                                                                                                                    |
@@ -564,6 +575,7 @@ pnpm solve:once SSX-1234           # the same, narrowed to one ticket
 pnpm solve:once SSX-1234 --claim   # B2 — claims, proves the queue drops it, releases
 pnpm solve:once SSX-1234 --solve   # C  — ... and runs the solver; nothing is pushed
 pnpm solve:once SSX-1234 --pr      # D  — ... and opens the draft PR, reviewer @copilot
+pnpm solve:once SSX-1234 --advance # one review round on the PR a previous run opened
 pnpm bot:once SSX-1234             # triage + the fitness call; writes nothing
 pnpm bot:once SSX-1234 --claim     # ... writes the verdict, then claims the ticket
 pnpm bot:once SSX-1234 --solve     # ... and runs the solver; nothing is pushed
@@ -830,28 +842,27 @@ being widened or dropped:
 ### The solve feature, from the claim onward
 
 Everything that _selects_ a ticket is built and was verified against the live board on
-2026-09-03. Everything that _changes_ anything is built and has never run: see §15 for what each
-piece does, and this list for what is missing before any of it could.
+2026-09-03. **Everything that _changes_ anything is now built, composed and driven by hand** —
+claim, solve, push, draft pull request, and a review round against an open one. §15 records what
+each step did and what it cost. This list is what is still missing, and it is shorter than the
+five bullets it replaced; the four that went are kept below in one line each, because a reader
+who remembers them should be able to see that they were retired rather than quietly dropped.
 
-- **A composition.** The gap is not code, it is a caller. Nothing constructs a `CommandRunner`,
-  a `PassRunner` or a `ClaimCapabilities`, so `solveTicket`, `publish`, `advance`, `claimTicket`
-  and `releaseClaim` are all unreachable from `src/index.ts` and from every `src/cli/` entry
-  point. There is also nothing to compose them _from_: the pipeline needs a repository path, a
-  base ref, a worktree parent directory, a bot identity, an `owner/name` for `gh` and three
-  separate timeouts, and `src/settings.ts` declares none of them. A phase that cannot be
-  configured cannot be switched on by accident.
-- **The claim write.** The experiment `src/solve/claim.ts` unlocks — _claim one ticket, confirm a
-  second `solve:once` picks nothing up, release it, confirm the ticket ends exactly where it
-  started_ — still has not been run, because running it means granting the write. Deliberately
-  deferred until every read-only path has been driven by hand: the grooming pipeline works, and
-  only finished pieces get wired in.
-- **Any run at all against a real repository.** Every module in `src/solve/` is tested against a
-  fake `CommandRunner`, so what is proven is that the right argv arrays are built and the right
-  exit codes are branched on. No worktree has been cut, no pass has been spawned, no `pnpm test`
-  has been run by this service in another repository, and no pull request has been opened.
-- **Delivery, end to end.** `publish` and `advance` exist and are tested; nothing has called
-  them. `MAX_REVIEW_ITERATIONS` is still read by nothing — `advance` takes its `maxRounds` as a
-  parameter, and no caller exists to pass the setting in.
+- **Retired, 2026-09-03 to 2026-09-05.** _A composition_ — `wiring.ts` now builds a
+  `CommandRunner`, a `PassRunner` and a `ClaimCapabilities`, and `settings.ts` declares every
+  value they need. _The claim write_ — driven, and the queue-drops-it experiment ran. _A run
+  against a real repository_ — worktrees cut, passes spawned, `pnpm test` run in
+  `buy-insurance-advisor-web`, pull requests opened and merged. _Delivery end to end_ — `publish`
+  and `advance` are both called from `src/cli/solve-run.ts`, and `buildAdvanceRequest` passes
+  `MAX_REVIEW_ITERATIONS` and `MAX_PR_ROUNDS_TOTAL` in.
+- **`agent:reviewing`, and with it the poller's review step.** Nothing writes that label, so the
+  ticket ends a publish run still on `agent:solving` and the "advance anything under review"
+  step has nothing to iterate. It is the one piece of the label machine still unwritten, and it
+  is what the review loop needs before it can be driven by anything but a person naming a key.
+- **Both reviewers, and the pull request as the terminal.** `advance` still stops at the undraft
+  and still gates on the requested reviewer having spoken, so a human who comments first is read
+  and then discarded by a check asking a different question. `state` (`OPEN`/`CLOSED`/`MERGED`)
+  is parsed and read by nobody.
 - **Running it from the daemon, and this one is deliberately _last_.** Not wired into `index.ts`;
   `pnpm start` is the grooming loop and must stay that way until everything above has been driven
   by hand. The property the daemon adds is _nobody is watching_, which is the last property you
@@ -1177,12 +1188,13 @@ Things that look like details and are not:
 Everything below is built, tested and **reachable from the command line** — the claim, the four
 passes, the commit, the push and the draft pull request are one `solve:once SSX-1234 --pr` away.
 
-This paragraph has been rewritten twice as that stopped being true in stages, and the shape of what
-is left is worth stating precisely rather than as "mostly done". Two things are still built and
-called by nothing: **`advance`**, the Copilot review loop that reads the review, runs a round
-against it and undrafts (phase D2), and **the rest of the label state machine** — a published pull
-request leaves the ticket on `agent:solving`, and `agent:reviewing` / `agent:done` are moved by
-hand. The command says so when it happens rather than leaving the board to be misread.
+This paragraph has been rewritten three times as that stopped being true in stages, and the shape
+of what is left is worth stating precisely rather than as "mostly done". **`advance` is now wired
+too** — `solve:once SSX-1234 --advance` runs one review round against a pull request an earlier run
+opened — so the review loop is a mode rather than a plan. What is still called by nothing is **the
+rest of the label state machine**: a published pull request leaves the ticket on `agent:solving`,
+and `agent:reviewing` / `agent:done` are moved by hand. The command says so when it happens rather
+than leaving the board to be misread.
 
 What is still missing entirely is listed in §13; what this _does_ is here.
 
@@ -1277,7 +1289,9 @@ about the model has to survive that.
     ↓
   publish       commit → push → draft PR → request the reviewer
     ↓
-  advance       read the review → resolve → push → re-request, or undraft
+  advance       read the review and its inline threads → count the round from the
+                marker on the pull request → reserve the next one by editing that
+                marker → resolve → push → answer the threads → re-request, or undraft
 ```
 
 `orchestrator.ts` owns the first half, `delivery.ts` the second. Neither touches Jira and neither
@@ -1293,7 +1307,7 @@ as designed and nothing needed a hand on it.
 Three things it settled:
 
 - **Copilot review works in this org.** It reviewed #2658 (`COMMENTED`), closing the last open
-  verification item. Nothing acted on the review — `advance` is unbuilt — so the ticket ends on
+  verification item. Nothing acted on the review — `advance` was unbuilt that day — so the ticket ends on
   `agent:solving`.
 - **The fitness call refused a ticket for the first time.** A second run, `bot:once SSX-3801`,
   stopped before the claim: DoR row 9 unmet, so the verdict could not be `ready-ish`, so
@@ -1405,12 +1419,12 @@ quietly turn the second into the first.
 `recon` → `fix` → `simplify`, then `review` once per round of reviewer feedback. Four sessions,
 two tool sets.
 
-| Pass       | Tools                              | Shown                        | Must return                                     |
-| ---------- | ---------------------------------- | ---------------------------- | ----------------------------------------------- |
-| `recon`    | `Read` `Grep` `Glob`               | the ticket                   | proceed or a bail reason; a dev-lens correction |
-| `fix`      | the above, plus `Write` and `Edit` | the ticket and recon's brief | files touched, a commit subject, a test story   |
-| `simplify` | same as `fix`                      | the ticket and the real diff | changes made, or why it declined                |
-| `review`   | same as `fix`                      | the ticket and the comments  | a response to every comment                     |
+| Pass       | Tools                              | Shown                                                                    | Must return                                                                                                             |
+| ---------- | ---------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `recon`    | `Read` `Grep` `Glob`               | the ticket                                                               | proceed or a bail reason; a dev-lens correction                                                                         |
+| `fix`      | the above, plus `Write` and `Edit` | the ticket and recon's brief                                             | files touched, a commit subject, a test story                                                                           |
+| `simplify` | same as `fix`                      | the ticket and the real diff                                             | changes made, or why it declined                                                                                        |
+| `review`   | same as `fix`                      | the ticket, the review comments and every open inline thread with its id | a response to every comment, plus a `threadAnswers` entry per thread carrying a reply, a `basis` and whether to resolve |
 
 Four sessions rather than one, and the reason differs each time. **Recon must not be able to
 write**, or "should this be attempted" and "here is the attempt" collapse into one answer, and any
@@ -1887,14 +1901,22 @@ cycle survive a restart: the state lives in the pull request and on the ticket, 
 somebody is awaiting. Opening the pull request is the only step that creates something durable and
 externally visible, so the case where the PR was created but the reviewer request failed gets its
 own outcome — `published-unreviewed` — precisely so that an ordinary retry cannot open a second
-pull request against the same branch. Our own comments are filtered out of the feedback, or the
-second round is handed the first round's replies as though a reviewer had written them, which is a
-loop with no new information in it.
+pull request against the same branch.
+
+Our own comments are filtered out of the feedback, or the second round is handed the first round's
+replies as though a reviewer had written them, which is a loop with no new information in it.
+**What identifies them is the `bot: ` prefix on the body, never the author.** `gh` is
+authenticated as the operator, so a comment this service posts is authored by a human's account
+and is indistinguishable by login from that human's own review — matching on `BotIdentity` would
+both miss every comment we wrote and, worse, mistake a person's comment for machine state to
+overwrite. The threads use the same rule in a different shape: `unansweredThreads` drops a thread
+whose **last** comment is ours, which answers a bot reviewer restating a settled point without
+needing a timestamp, and retries by itself when a reply failed to post.
 
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is
-model-written, the review bot reads it, the comments come back through `formatReviewFeedback` and
-reach the model verbatim — delimiters and all, and those delimiters are forgeable by any comment
+model-written, the review bot reads it, the comments and the inline threads come back through
+`formatReviewFeedback` and `formatThreads` into one block and reach the model verbatim — delimiters and all, and those delimiters are forgeable by any comment
 containing the same string. The containment is structural and lives elsewhere: the denied tool
 set, the diff gate, verification from the pristine manifest, and a draft with a human on the other
 end. A keyword filter there would be worse than useless, because it would suggest the loop is
@@ -1931,25 +1953,27 @@ undercounts its own passes is a poor thing to leave lying around in this reposit
 `orchestrator.ts`, `passes.ts` and `exec.ts` are now **wired**: `createSolveRunDeps` builds the
 `CommandRunner` and the `PassRunner`, and `pnpm solve:once <KEY> --solve` reaches `solveTicket`.
 That was phase C's privilege grant and it is a real one — this process can now write files in
-another repository's worktree and run `git`, `gh` and a package manager. `delivery.ts`, `pr.ts`
-and `claim.ts` remain **constructed by nothing**: no entry point builds a `ClaimCapabilities`, so
-no code path here can edit a label, open a pull request or push.
+another repository's worktree and run `git`, `gh` and a package manager. **`delivery.ts`, `pr.ts`
+and `claim.ts` are wired now too**, in later grants of their own: `createClaimCapabilities` builds
+the label writer, `publish` pushes and opens the pull request, and `advance` pushes to one a
+reviewer is reading. There is no inert half of this pipeline left.
 
-**The ladder is not cumulative, and the asymmetry is deliberate rather than an oversight.**
-`--claim` refuses while `--solve` runs, which reads backwards until you see what each flag grants:
-`--solve` writes to a scratch worktree that a human then inspects, and `--claim` writes to the
-shared board. The privileges are not ordered by how far down the pipeline they sit, so the flags
-are not either. `unavailable()` in `solve-args.ts` says so in the refusal text itself, and each
-refusal names the structural reason — which function was not composed — rather than a policy, so
-the claim is checkable by reading `wiring.ts` instead of trusted.
-
-That is a deliberate phase ordering and not an oversight. Each capability was built and reviewed
-before it was granted, and the grant is a separate commit in each case — which is only meaningful
-if the ungranted state is real. The refusal is therefore structural: it is not a flag anyone can
-flip and not a promise in a comment, it is the absence of a caller, and adding one is an edit to a
-composition function where a reviewer will see it. The gates were written before the thing they
+The heading above therefore describes a state this repository has now left, and it is kept because
+the shape of the argument still governs what comes next. **Each capability was built and reviewed
+before it was granted, and the grant was a separate commit in each case** — which is only
+meaningful if the ungranted state was real. It was: what refused was not a flag anyone could flip
+and not a promise in a comment, it was the absence of a caller, and each grant is an edit to a
+composition function where a reviewer would see it. The gates were written before the thing they
 gate for the same reason — shipping a solver and then its bound would leave a window in which an
 unbounded solver exists.
+
+What `unavailable()` in `solve-args.ts` still does is narrower, and its own doc comment says so:
+it refuses a rung that is not _configured_, which today means `--pr` without a
+`SOLVE_GITHUB_OWNER`. The composition version of that check would now return `null` four times.
+The ladder itself is cumulative — `--pr` claims, solves and opens the pull request — while
+`--advance` is a separate mode rather than a fifth rung, because it operates on a pull request a
+finished run created and implying `--solve` would mean re-solving the ticket before touching the
+review.
 
 The last thing to be wired will be the daemon, and that is deliberate too. The property it adds is
 _nobody is watching_, which is the last property you want rather than an early one: every stage
