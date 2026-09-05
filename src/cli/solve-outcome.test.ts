@@ -298,12 +298,35 @@ describe("describeSolveOutcome", () => {
   });
 });
 
+/** The common case: no inline threads, so nothing to post and nothing to fail. */
+const NO_THREADS = { answered: 0, resolved: 0, failures: [] } as const;
+
 /** One of every review-round kind, so the tables below are about all of them. */
 const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   { kind: "waiting" },
   { kind: "ready", rounds: 2 },
-  { kind: "iterated", round: 1, responses: ["renamed the helper"], reviewerRequested: true },
-  { kind: "iterated", round: 2, responses: ["answered in a comment"], reviewerRequested: false },
+  {
+    kind: "iterated",
+    round: 1,
+    responses: ["renamed the helper"],
+    reviewerRequested: "asked",
+    pushed: true,
+    spoken: { outcome: "posted" },
+    undrafted: "still-drafting",
+    threads: NO_THREADS,
+    unresolved: "",
+  },
+  {
+    kind: "iterated",
+    round: 2,
+    responses: ["answered in a comment"],
+    reviewerRequested: "failed",
+    pushed: false,
+    spoken: { outcome: "posted" },
+    undrafted: "undrafted",
+    threads: NO_THREADS,
+    unresolved: "",
+  },
   { kind: "exhausted", rounds: 3, unresolved: "this still allocates on every render" },
   { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
@@ -373,7 +396,12 @@ describe("describeAdvanceOutcome", () => {
       kind: "iterated",
       round: 2,
       responses: ["fixed"],
-      reviewerRequested: false,
+      pushed: true,
+      spoken: { outcome: "posted" },
+      undrafted: "still-drafting",
+      reviewerRequested: "failed",
+      threads: NO_THREADS,
+      unresolved: "",
     });
     expect(text).toContain("NOT");
     expect(text).toContain("add them by hand");
@@ -384,10 +412,90 @@ describe("describeAdvanceOutcome", () => {
       kind: "iterated",
       round: 2,
       responses: ["fixed"],
-      reviewerRequested: true,
+      pushed: true,
+      spoken: { outcome: "posted" },
+      undrafted: "still-drafting",
+      reviewerRequested: "asked",
+      threads: NO_THREADS,
+      unresolved: "",
     });
     expect(text).not.toContain("NOT");
     expect(text).toContain("asked to look again");
+  });
+
+  it("prints what a successful round could not settle", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      pushed: true,
+      spoken: { outcome: "posted" },
+      undrafted: "still-drafting",
+      reviewerRequested: "asked",
+      threads: NO_THREADS,
+      unresolved: "the second point needs a product decision",
+    });
+
+    expect(text).toContain("Unresolved:");
+    expect(text).toContain("needs a product decision");
+  });
+
+  it("says nothing about unresolved when the round settled everything", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      pushed: true,
+      spoken: { outcome: "posted" },
+      undrafted: "still-drafting",
+      reviewerRequested: "asked",
+      threads: NO_THREADS,
+      unresolved: "",
+    });
+
+    // The common case, and a bare "Unresolved:" heading over nothing trains a
+    // reader to skip the line on the round where it matters.
+    expect(text).not.toContain("Unresolved");
+  });
+
+  it("does not claim a push on a round that only answered", () => {
+    // The bug this pins was found on a live pull request: round 2 of #2658
+    // deliberately changed nothing, and the headline still read "round 2
+    // pushed". An operator who goes looking for that commit and does not find
+    // it has no way to tell which half of the line is wrong.
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["checked the claim; the premise does not hold"],
+      pushed: false,
+      spoken: { outcome: "posted" },
+      undrafted: "undrafted",
+      reviewerRequested: "asked",
+      threads: NO_THREADS,
+      unresolved: "",
+    });
+
+    expect(text).not.toContain("round 2 pushed");
+    expect(text).toContain("nothing was pushed");
+    expect(text).toContain("round 2");
+  });
+
+  it("says the round pushed when it did", () => {
+    // The other half, so the fix cannot be "never say pushed", which would
+    // lose the fact rather than report it correctly.
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      pushed: true,
+      spoken: { outcome: "posted" },
+      undrafted: "still-drafting",
+      reviewerRequested: "asked",
+      threads: NO_THREADS,
+      unresolved: "",
+    });
+
+    expect(text).toContain("round 2 pushed.");
   });
 
   it("says the cap fired rather than that the reviewer was satisfied", () => {

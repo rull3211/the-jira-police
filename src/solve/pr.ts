@@ -199,6 +199,24 @@ export type RequestReviewResult =
 export interface ReviewComment {
   readonly author: string;
   readonly body: string;
+  /**
+   * When it was written, or `""` when the entry carried no readable date.
+   *
+   * Empty rather than absent so the cursor has to decide what to do about it
+   * rather than being able to forget the case exists. `isNewer` treats it as
+   * new, which costs a round and does not lose a reviewer's request.
+   */
+  readonly createdAt: string;
+  /**
+   * The GraphQL node id, or `""` for an entry that has none.
+   *
+   * Only an issue comment can be edited by id, which is how the marker is
+   * rewritten each round without `gh pr comment --edit-last` — that flag edits
+   * the last comment of the *current user*, and the current user is the
+   * operator, so a round running after a human commented would overwrite their
+   * words with machine state.
+   */
+  readonly id: string;
 }
 
 export interface ReviewState {
@@ -232,6 +250,88 @@ export interface ReviewState {
 
 export type ReadReviewResult =
   | { readonly outcome: "read"; readonly review: ReviewState }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+export interface ThreadComment {
+  readonly author: string;
+  readonly body: string;
+  /** ISO 8601, as GitHub returns it. Not parsed here; ordering is the API's. */
+  readonly createdAt: string;
+}
+
+/**
+ * One inline conversation on the diff.
+ *
+ * These are the comments `gh pr view --json reviews,comments` cannot reach, and
+ * on the first real review round they were the entire substance of the review:
+ * the summary body said "minor robustness/test-isolation improvements
+ * suggested" and the two things actually being asked for were down here. A loop
+ * reading only the summary does not miss the review politely — it infers what
+ * the review probably said and then acts on the inference.
+ */
+export interface ReviewThread {
+  /** The GraphQL node id. What a reply and a resolve are both addressed to. */
+  readonly id: string;
+  readonly isResolved: boolean;
+  /**
+   * Whether the diff has moved out from under the thread.
+   *
+   * Not the same as resolved and must not be read as it. An outdated thread is
+   * one whose lines changed, which is what happens when a round addresses the
+   * comment — and also what happens when an unrelated edit lands nearby. It is
+   * a hint about where to look, not a verdict about whether the point stands.
+   */
+  readonly isOutdated: boolean;
+  readonly path: string;
+  /** `null` on an outdated thread — GitHub drops the line once the diff moves. */
+  readonly line: number | null;
+  readonly comments: readonly ThreadComment[];
+}
+
+export type ReadThreadsResult =
+  | { readonly outcome: "read"; readonly threads: readonly ReviewThread[] }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+export interface ThreadReplyRequest {
+  /** Where `gh` runs. Any checkout of the repository will do; GraphQL takes the ids. */
+  readonly cwd: string;
+  readonly threadId: string;
+  /** The answer. Refused when blank — a reply nobody can read is not a reply. */
+  readonly body: string;
+  readonly timeoutMs: number;
+}
+
+/**
+ * Proof that a reply was posted, and the only way to get one.
+ *
+ * `resolveThread` takes this rather than a thread id, so there is no code path
+ * that resolves a thread without having just answered it. That is §6.1c's bound
+ * expressed in the type system rather than in a comment asking nicely.
+ *
+ * Resolving is a bigger privilege than it looks: it is how a reviewer's queue
+ * gets shorter, so a bot that can resolve silently can bury an objection it
+ * merely disagreed with. Requiring the receipt means every thread this service
+ * closes has the argument for closing it sitting in public, next to the comment
+ * it answers, where the reviewer and any human can read it and reopen.
+ */
+export interface ThreadReply {
+  readonly threadId: string;
+  /** The posted comment's URL. Empty means nothing was posted, and blocks the resolve. */
+  readonly commentUrl: string;
+}
+
+export type ReplyToThreadResult =
+  | { readonly outcome: "replied"; readonly reply: ThreadReply }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+export interface ResolveThreadRequest {
+  readonly cwd: string;
+  readonly reply: ThreadReply;
+  readonly timeoutMs: number;
+}
+
+export type ResolveThreadResult =
+  | { readonly outcome: "resolved" }
   | { readonly outcome: "failed"; readonly reason: string };
 
 export interface MarkReadyRequest {
@@ -610,6 +710,36 @@ interface RawEntry {
   readonly login: string;
   /** `null` when gh gave something that is not a string, including for an approval. */
   readonly body: string | null;
+  /** `null` when the entry carries no readable date. See `dateOf`. */
+  readonly createdAt: string | null;
+  /** The GraphQL node id, `""` when absent. Only an issue comment can be edited. */
+  readonly id: string;
+}
+
+/**
+ * When an entry was written, and the two field names that answer it.
+ *
+ * **A review does not have `createdAt`.** Probed against PR #2658 on 2026-09-05,
+ * after the plan flagged this as the half of the question that mattered: a
+ * review's key list is `author, authorAssociation, body, commit, id,
+ * includesCreatedEdit, reactionGroups, state, submittedAt`, and asking for
+ * `createdAt` on one returns `null` for every entry. An issue comment has
+ * `createdAt` and no `submittedAt`. `readReview` merges the two lists, so a
+ * cursor reading only `createdAt` would date every issue comment and no review
+ * at all — and an undated entry is treated as new, which turns the cursor into
+ * "everything is new" for exactly the feedback the loop is bounded on. That is
+ * the runaway the cursor exists to prevent, arriving through a field name.
+ *
+ * Both are read, neither is required to be the one present. Nothing checks they
+ * agree, because they never co-occur.
+ */
+function dateOf(record: Record<string, unknown>): string | null {
+  const submitted = record["submittedAt"];
+  if (typeof submitted === "string" && submitted !== "") {
+    return submitted;
+  }
+  const created = record["createdAt"];
+  return typeof created === "string" && created !== "" ? created : null;
 }
 
 /**
@@ -642,9 +772,12 @@ function entriesOf(value: unknown): readonly RawEntry[] | null {
     }
     const login = asRecord(record["author"])?.["login"];
     const body = record["body"];
+    const id = record["id"];
     entries.push({
       login: typeof login === "string" ? login : "",
       body: typeof body === "string" ? body : null,
+      createdAt: dateOf(record),
+      id: typeof id === "string" ? id : "",
     });
   }
   return entries;
@@ -856,6 +989,11 @@ export async function readReview(
       "--repo",
       repo,
       "--json",
+      // The field list is unchanged, and that is worth a line rather than a
+      // silent omission: `--json` selects top-level fields only, and each entry
+      // in `reviews` and `comments` already arrives whole — with its own `id`,
+      // and with `submittedAt` or `createdAt` depending on which list it came
+      // from. Adding `id` here would ask for the pull request's id, not theirs.
       "reviews,comments,state,isDraft",
     ],
     { cwd: worktreePath, timeoutMs },
@@ -916,13 +1054,27 @@ export async function readReview(
       // A human quoting the failure in a comment is asking for something, and
       // matching on text alone would delete a person's message because a bot
       // had used the same words.
-      comments: entries.flatMap((entry) =>
-        entry.body === null ||
-        entry.body.trim() === "" ||
-        (matchesReviewer(entry.login, reviewer) && isReviewerError(entry.body))
+      comments: entries.flatMap((entry) => {
+        // Chrome comes off before the blank check rather than after, so a
+        // review whose body was *only* boilerplate drops out entirely instead
+        // of reaching the pass as an empty comment to puzzle over.
+        const body =
+          entry.body !== null && matchesReviewer(entry.login, reviewer)
+            ? stripReviewerChrome(entry.body)
+            : entry.body;
+        return body === null ||
+          body.trim() === "" ||
+          (matchesReviewer(entry.login, reviewer) && isReviewerError(body))
           ? []
-          : [{ author: entry.login === "" ? "unknown" : entry.login, body: entry.body }],
-      ),
+          : [
+              {
+                author: entry.login === "" ? "unknown" : entry.login,
+                body,
+                createdAt: entry.createdAt ?? "",
+                id: entry.id,
+              },
+            ];
+      }),
       state,
       isDraft,
     },
@@ -949,6 +1101,566 @@ const REVIEWER_ERROR = [/encountered an error/iu, /unable to review/iu];
 /** Whether a review body is the reviewer saying it failed rather than a review. */
 function isReviewerError(body: string | null): boolean {
   return body !== null && REVIEWER_ERROR.every((phrase) => phrase.test(body));
+}
+
+/**
+ * A link only the reviewer's own marketing puts in a review body.
+ *
+ * Observed on PR #1413, 2026-09-05: Copilot ends every review with a rule and a
+ * promotional block offering to *"Add a `code-review` agent skill"*. The pass is
+ * handed the body whole, so it read that as a request, declined it in
+ * `responses`, and the decline was posted publicly on a timezone bugfix where it
+ * reads as noise. Nothing was wrong with the reasoning; the input was never
+ * feedback.
+ *
+ * **Two conditions, for the same reason `REVIEWER_ERROR` needs two fragments.**
+ * A trailing rule alone is far too common, and a 💡 alone is something a
+ * reviewer plausibly writes when suggesting an idea — stripping *that* would
+ * delete a real suggestion, which is the one failure direction worth avoiding
+ * here. A link to GitHub's own docs about configuring the reviewer is the part
+ * no code review contains.
+ */
+const REVIEWER_PROMO = /docs\.github\.com\/copilot/u;
+
+/**
+ * Drops a trailing boilerplate block from a reviewer's body.
+ *
+ * Applied to the reviewer's entries only, on exactly the grounds the drop above
+ * is scoped: a human who quotes the footer is a human saying something, and
+ * matching on text alone would silently edit a person's words.
+ *
+ * Fails open by construction. If the vendor reformats, the block stops matching
+ * and comes back — costing one bullet in a public comment, visible on the pull
+ * request, where the next person to read it will come back here. The opposite
+ * bias, a rule loose enough to swallow real feedback, is not recoverable by
+ * anyone noticing.
+ */
+function stripReviewerChrome(body: string): string {
+  const rule = body.lastIndexOf("\n---");
+  return rule !== -1 && REVIEWER_PROMO.test(body.slice(rule))
+    ? body.slice(0, rule).trimEnd()
+    : body;
+}
+
+/**
+ * How many threads, and how many comments in each, one read asks for.
+ *
+ * The maximum a single GraphQL connection accepts. Paging is not implemented
+ * and truncation is refused instead, because the only reason this function
+ * exists is that the loop was acting on feedback it could not see — quietly
+ * dropping the hundred-and-first thread would rebuild that defect one page
+ * further out. A pull request that hits either bound wants a human anyway.
+ */
+const THREAD_PAGE = 100;
+
+const THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviewThreads(first:${String(THREAD_PAGE)}){
+        pageInfo{ hasNextPage }
+        nodes{
+          id isResolved isOutdated path line
+          comments(first:${String(THREAD_PAGE)}){
+            pageInfo{ hasNextPage }
+            nodes{ author{login} body createdAt }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+/** `owner/name`, split into the two arguments GraphQL wants separately. */
+const OWNER_NAME = /^([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/u;
+
+/** Follows a chain of keys, stopping at the first that is not a record. */
+function dig(root: unknown, ...keys: readonly string[]): unknown {
+  let here: unknown = root;
+  for (const key of keys) {
+    const record = asRecord(here);
+    if (record === null) {
+      return undefined;
+    }
+    here = record[key];
+  }
+  return here;
+}
+
+/** Whether a connection said there is another page behind the one we read. */
+function truncated(connection: unknown): boolean {
+  return dig(connection, "pageInfo", "hasNextPage") === true;
+}
+
+function parseThreadComments(value: unknown): readonly ThreadComment[] | null {
+  const nodes = dig(value, "nodes");
+  if (!Array.isArray(nodes)) {
+    return null;
+  }
+  const comments: ThreadComment[] = [];
+  for (const node of nodes) {
+    const record = asRecord(node);
+    const body = record?.["body"];
+    const createdAt = record?.["createdAt"];
+    if (typeof body !== "string" || typeof createdAt !== "string") {
+      return null;
+    }
+    const login = dig(record, "author", "login");
+    // A deleted account comes back as a null author. The comment it left is
+    // still on the thread and still says whatever it says.
+    comments.push({ author: typeof login === "string" ? login : "unknown", body, createdAt });
+  }
+  return comments;
+}
+
+/**
+ * Reads the inline review threads on a pull request.
+ *
+ * Separate from `readReview` and over a different transport, because the two
+ * cannot be merged: `gh pr view --json` has no flag for these at all, and the
+ * fields that make a thread actionable — its node id, and whether it is already
+ * resolved — exist only in GraphQL. So this is `gh api graphql`, and it is the
+ * only place in the tree that speaks it.
+ *
+ * **Nothing here degrades to an empty list.** `entriesOf` skips a malformed
+ * entry, on the reasoning that one bad review among twenty should not discard
+ * the nineteen; the opposite rule applies here and for a reason that is
+ * specific rather than stylistic. A dropped review is a comment the loop does
+ * not answer. A dropped *thread* is a comment the loop does not answer while
+ * believing it has answered everything — and the round then resolves what it
+ * did see, undrafts, and tells a human the review was addressed. Every
+ * unreadable shape is therefore a refusal, including a single bad node.
+ */
+export async function readReviewThreads(
+  runner: CommandRunner,
+  request: ReviewRequest,
+): Promise<ReadThreadsResult> {
+  const { worktreePath, repo, number, timeoutMs } = request;
+
+  const parts = OWNER_NAME.exec(repo);
+  if (parts === null) {
+    return {
+      outcome: "failed",
+      reason: `"${repo}" is not an owner/name pair, and GraphQL takes the two separately`,
+    };
+  }
+
+  const queried = await runner.run(
+    [
+      "gh",
+      "api",
+      "graphql",
+      // `-f` and not `-F`: the typed form reads a value beginning with `@` out
+      // of a file, and the raw form does not interpret the value at all.
+      "-f",
+      `owner=${parts[1] ?? ""}`,
+      "-f",
+      `name=${parts[2] ?? ""}`,
+      "-F",
+      `number=${String(number)}`,
+      "-f",
+      `query=${THREADS_QUERY}`,
+    ],
+    { cwd: worktreePath, timeoutMs },
+  );
+  if (failed(queried)) {
+    return {
+      outcome: "failed",
+      reason: `gh could not read the review threads on #${String(number)} (${why(queried)})`,
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(queried.stdout);
+  } catch {
+    return {
+      outcome: "failed",
+      reason: `gh printed something that is not JSON for the review threads on #${String(number)}`,
+    };
+  }
+
+  // GraphQL answers a partly-failed query with data *and* errors, and gh has
+  // been known to exit 0 on it. Half a thread list read as a whole one is the
+  // failure this function exists to prevent.
+  if (dig(parsed, "errors") !== undefined) {
+    return {
+      outcome: "failed",
+      reason: `GraphQL returned errors for the review threads on #${String(number)} (${bothEnds(queried.stdout)})`,
+    };
+  }
+
+  const connection = dig(parsed, "data", "repository", "pullRequest", "reviewThreads");
+  const nodes = dig(connection, "nodes");
+  if (!Array.isArray(nodes)) {
+    return {
+      outcome: "failed",
+      reason:
+        "the review threads came back as a shape this does not understand — read as unreadable rather than as a pull request with no inline comments",
+    };
+  }
+  if (truncated(connection)) {
+    return {
+      outcome: "failed",
+      reason: `#${String(number)} has more than ${String(THREAD_PAGE)} review threads, which is past what one read covers`,
+    };
+  }
+
+  const threads: ReviewThread[] = [];
+  for (const node of nodes) {
+    const record = asRecord(node);
+    if (record === null) {
+      return {
+        outcome: "failed",
+        reason: "a review thread came back as something other than an object",
+      };
+    }
+    const id = record["id"];
+    const isResolved = record["isResolved"];
+    const isOutdated = record["isOutdated"];
+    const path = record["path"];
+    const line = record["line"];
+    if (
+      typeof id !== "string" ||
+      id === "" ||
+      typeof isResolved !== "boolean" ||
+      typeof isOutdated !== "boolean" ||
+      typeof path !== "string" ||
+      !(typeof line === "number" || line === null)
+    ) {
+      return { outcome: "failed", reason: "a review thread is missing fields this needs to act" };
+    }
+    if (truncated(record["comments"])) {
+      return {
+        outcome: "failed",
+        reason: `the thread on ${path} has more than ${String(THREAD_PAGE)} comments, and the reply this round would answer may not be among the ones read`,
+      };
+    }
+    const comments = parseThreadComments(record["comments"]);
+    if (comments === null) {
+      return { outcome: "failed", reason: `a comment on the thread on ${path} could not be read` };
+    }
+    threads.push({ id, isResolved, isOutdated, path, line, comments });
+  }
+
+  logger.info("solve.pr.threads_read", {
+    repo,
+    number,
+    threads: threads.length,
+    open: threads.filter((thread) => !thread.isResolved).length,
+  });
+  return { outcome: "read", threads };
+}
+
+const REPLY_MUTATION = `mutation($threadId:ID!,$body:String!){
+  addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){
+    comment{ url }
+  }
+}`;
+
+const RESOLVE_MUTATION = `mutation($threadId:ID!){
+  resolveReviewThread(input:{threadId:$threadId}){ thread{ isResolved } }
+}`;
+
+/**
+ * Runs a GraphQL operation and hands back its parsed payload, or a reason.
+ *
+ * `numbers` is separate from `fields` because gh's two flags mean different
+ * things and only one of them is safe for a value this service did not write.
+ * `-F` is typed — it turns `42` into an Int, which an `Int!` variable requires
+ * — but it also reads a value beginning with `@` out of a *file*. So a model-
+ * authored reply body goes through `-f`, which interprets nothing, and only
+ * values this code produced as digits go through `-F`.
+ */
+async function mutate(
+  runner: CommandRunner,
+  what: string,
+  query: string,
+  fields: readonly (readonly [string, string])[],
+  opts: {
+    readonly cwd: string;
+    readonly timeoutMs: number;
+    readonly numbers?: readonly (readonly [string, number])[];
+  },
+): Promise<{ readonly data: unknown } | { readonly reason: string }> {
+  const argv = ["gh", "api", "graphql"];
+  for (const [key, value] of fields) {
+    argv.push("-f", `${key}=${value}`);
+  }
+  for (const [key, value] of opts.numbers ?? []) {
+    argv.push("-F", `${key}=${String(value)}`);
+  }
+  argv.push("-f", `query=${query}`);
+
+  const ran = await runner.run(argv, opts);
+  if (failed(ran)) {
+    return { reason: `gh could not ${what} (${why(ran)})` };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(ran.stdout);
+  } catch {
+    return { reason: `gh printed something that is not JSON when asked to ${what}` };
+  }
+  if (dig(parsed, "errors") !== undefined) {
+    return { reason: `GraphQL refused to ${what} (${bothEnds(ran.stdout)})` };
+  }
+  return { data: parsed };
+}
+
+/**
+ * Answers one inline review thread, in public.
+ *
+ * The disagreements this service has with a reviewer used to live in
+ * `responses`, which reaches an operator's terminal and nobody else. A reply on
+ * the thread puts the argument next to the comment it answers, where the
+ * reviewer sees it on the next pass and a human sees it without being told to
+ * go looking. That matters most for the comments the round *declines*: a
+ * decline nobody can see is indistinguishable from not having read it.
+ *
+ * The body is bounded by GitHub rather than here. There is no truncation,
+ * because a half-posted argument is worse than a long one.
+ */
+export async function replyToThread(
+  runner: CommandRunner,
+  request: ThreadReplyRequest,
+): Promise<ReplyToThreadResult> {
+  const { cwd, threadId, body, timeoutMs } = request;
+
+  if (threadId === "") {
+    return { outcome: "failed", reason: "a reply needs a thread to be addressed to" };
+  }
+  if (body.trim() === "") {
+    return { outcome: "failed", reason: "a blank reply says nothing and resolves nothing" };
+  }
+
+  const result = await mutate(
+    runner,
+    `reply to thread ${threadId}`,
+    REPLY_MUTATION,
+    [
+      ["threadId", threadId],
+      ["body", body],
+    ],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in result) {
+    return { outcome: "failed", reason: result.reason };
+  }
+
+  const url = dig(result.data, "data", "addPullRequestReviewThreadReply", "comment", "url");
+  // No URL, no receipt, and therefore no resolve. GitHub accepting the mutation
+  // without saying where the comment landed is not a posted reply.
+  if (typeof url !== "string" || url === "") {
+    return {
+      outcome: "failed",
+      reason: `the reply to thread ${threadId} came back without a comment URL, so nothing proves it posted`,
+    };
+  }
+
+  logger.info("solve.pr.thread_replied", { threadId, url });
+  return { outcome: "replied", reply: { threadId, commentUrl: url } };
+}
+
+/**
+ * Marks a thread resolved, and only one that has just been answered.
+ *
+ * Takes the receipt `replyToThread` returns instead of a thread id, so the
+ * argument for closing the thread is already public by the time this runs.
+ * The receipt is checked at runtime too, not only by the type: a hand-built
+ * `ThreadReply` with an empty URL is a caller reaching around the rule, and it
+ * is refused for the same reason the type exists.
+ *
+ * What this cannot enforce is the other half of §6.1c — resolve only when the
+ * round changed code for the thread or cited something checkable against it,
+ * and send anything resting on judgement alone to `unresolved`. That is a
+ * judgement about the argument, so it lives in the instructions. This enforces
+ * that the argument was made at all.
+ */
+export async function resolveThread(
+  runner: CommandRunner,
+  request: ResolveThreadRequest,
+): Promise<ResolveThreadResult> {
+  const { cwd, reply, timeoutMs } = request;
+
+  if (reply.threadId === "" || reply.commentUrl === "") {
+    return {
+      outcome: "failed",
+      reason:
+        "a thread is resolved only with an answer attached, and this receipt does not carry one",
+    };
+  }
+
+  const result = await mutate(
+    runner,
+    `resolve thread ${reply.threadId}`,
+    RESOLVE_MUTATION,
+    [["threadId", reply.threadId]],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in result) {
+    return { outcome: "failed", reason: result.reason };
+  }
+
+  // Read back rather than trust the exit code, as the claim does. A mutation
+  // that returns a thread still open has not resolved it, and reporting it
+  // resolved is how the reviewer's queue and this loop's idea of it diverge.
+  if (dig(result.data, "data", "resolveReviewThread", "thread", "isResolved") !== true) {
+    return {
+      outcome: "failed",
+      reason: `thread ${reply.threadId} is still open after the resolve was accepted`,
+    };
+  }
+
+  logger.info("solve.pr.thread_resolved", { threadId: reply.threadId, reply: reply.commentUrl });
+  return { outcome: "resolved" };
+}
+
+export interface PostCommentRequest {
+  readonly cwd: string;
+  readonly repo: string;
+  readonly number: number;
+  readonly body: string;
+  readonly timeoutMs: number;
+}
+
+export interface EditCommentRequest {
+  readonly cwd: string;
+  /** The node id of the comment to rewrite. Never "the last one". */
+  readonly commentId: string;
+  readonly body: string;
+  readonly timeoutMs: number;
+}
+
+export type WriteCommentResult =
+  | { readonly outcome: "written"; readonly commentId: string }
+  | { readonly outcome: "failed"; readonly reason: string };
+
+const POST_COMMENT = `mutation($subjectId:ID!,$body:String!){
+  addComment(input:{subjectId:$subjectId,body:$body}){ commentEdge{ node{ id } } }
+}`;
+
+const EDIT_COMMENT = `mutation($id:ID!,$body:String!){
+  updateIssueComment(input:{id:$id,body:$body}){ issueComment{ id } }
+}`;
+
+const PR_NODE_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){ pullRequest(number:$number){ id } }
+}`;
+
+/**
+ * Posts the marker comment, once, on a pull request that has none.
+ *
+ * Through `addComment` rather than `gh pr comment` because the node id of what
+ * was created is the whole point: without it the next round has to find the
+ * comment again by prefix, and a round that cannot find what it just wrote
+ * posts a second one.
+ */
+export async function postComment(
+  runner: CommandRunner,
+  request: PostCommentRequest,
+): Promise<WriteCommentResult> {
+  const { cwd, repo, number, body, timeoutMs } = request;
+  if (body.trim() === "") {
+    return { outcome: "failed", reason: "refusing to post an empty comment" };
+  }
+  const parts = OWNER_NAME.exec(repo);
+  if (parts === null) {
+    return { outcome: "failed", reason: `"${repo}" is not an owner/name repository` };
+  }
+
+  const subject = await mutate(
+    runner,
+    `read the node id of #${String(number)}`,
+    PR_NODE_QUERY,
+    [
+      ["owner", parts[1] ?? ""],
+      ["name", parts[2] ?? ""],
+    ],
+    { cwd, timeoutMs, numbers: [["number", number]] },
+  );
+  if ("reason" in subject) {
+    return { outcome: "failed", reason: subject.reason };
+  }
+  const subjectId = dig(subject.data, "data", "repository", "pullRequest", "id");
+  if (typeof subjectId !== "string" || subjectId === "") {
+    return { outcome: "failed", reason: `#${String(number)} came back without a node id` };
+  }
+
+  const posted = await mutate(
+    runner,
+    `comment on #${String(number)}`,
+    POST_COMMENT,
+    [
+      ["subjectId", subjectId],
+      ["body", body],
+    ],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in posted) {
+    return { outcome: "failed", reason: posted.reason };
+  }
+
+  const id = dig(posted.data, "data", "addComment", "commentEdge", "node", "id");
+  // Same rule as a thread reply: a mutation that will not say where the comment
+  // landed has not given a usable receipt, and here the receipt is what every
+  // later round edits. Without it the marker is write-once.
+  if (typeof id !== "string" || id === "") {
+    return {
+      outcome: "failed",
+      reason: `the comment on #${String(number)} came back without a node id, so no later round could edit it`,
+    };
+  }
+
+  logger.info("solve.pr.commented", { repo, number, commentId: id });
+  return { outcome: "written", commentId: id };
+}
+
+/**
+ * Rewrites one comment, named by its node id.
+ *
+ * **Not `gh pr comment --edit-last`.** That flag edits the last comment of the
+ * *current user*, and the current user is the operator this service is
+ * authenticated as — so a round running after a human commented would overwrite
+ * that person's words with machine state. The obvious flag is the dangerous
+ * one, which is why the safe path is spelled out in a mutation instead.
+ */
+export async function editComment(
+  runner: CommandRunner,
+  request: EditCommentRequest,
+): Promise<WriteCommentResult> {
+  const { cwd, commentId, body, timeoutMs } = request;
+  if (commentId === "") {
+    return { outcome: "failed", reason: "refusing to edit a comment with no id" };
+  }
+  if (body.trim() === "") {
+    return { outcome: "failed", reason: "refusing to blank a comment" };
+  }
+
+  const edited = await mutate(
+    runner,
+    `edit comment ${commentId}`,
+    EDIT_COMMENT,
+    [
+      ["id", commentId],
+      ["body", body],
+    ],
+    { cwd, timeoutMs },
+  );
+  if ("reason" in edited) {
+    return { outcome: "failed", reason: edited.reason };
+  }
+
+  const id = dig(edited.data, "data", "updateIssueComment", "issueComment", "id");
+  if (typeof id !== "string" || id === "") {
+    return {
+      outcome: "failed",
+      reason: `the edit of comment ${commentId} was accepted but came back empty, so nothing proves it took`,
+    };
+  }
+
+  logger.info("solve.pr.comment_edited", { commentId: id });
+  return { outcome: "written", commentId: id };
 }
 
 /**
@@ -1011,10 +1723,57 @@ export function formatReviewFeedback(comments: readonly ReviewComment[]): string
     .join("\n\n");
   const block = `Review feedback (${String(comments.length)} ${comments.length === 1 ? "comment" : "comments"}):\n\n${rendered}`;
 
+  return capped(block);
+}
+
+/** The shared budget. The note is inside it, not added to it. */
+function capped(block: string): string {
   if (block.length <= MAX_FEEDBACK_CHARS) {
     return block;
   }
-  // The note is inside the budget, not added to it. A cap that the truncation
-  // notice itself can exceed is not a cap.
   return `${block.slice(0, MAX_FEEDBACK_CHARS - TRUNCATION_NOTE.length)}${TRUNCATION_NOTE}`;
+}
+
+/**
+ * Renders inline review threads for the next model pass, ids and all.
+ *
+ * Separate from `formatReviewFeedback` because the two are read for different
+ * things. A review body is prose to act on. A thread is prose to act on **and**
+ * an address to answer at, so the id is in the header of every entry and the
+ * schema tells the pass to copy it back verbatim. A round that paraphrases an
+ * id answers nothing and resolves nothing.
+ *
+ * **Every comment on the thread is rendered, including this service's own
+ * previous replies**, and that is the point rather than completeness for its
+ * own sake. It is what lets a pass see that a point has already been answered
+ * in public and decline to argue it again — the plan's rule that a reviewer
+ * re-raising a settled point must not restart the argument, expressed as a fact
+ * the pass can read off the thread instead of a policy it has to be told.
+ *
+ * The same caveat as the sibling: `---` is a reading aid, a comment body
+ * containing one forges a boundary, and the whole block is untrusted input.
+ */
+export function formatThreads(threads: readonly ReviewThread[]): string {
+  if (threads.length === 0) {
+    return "No inline review threads.";
+  }
+
+  const rendered = threads
+    .map((thread, index) => {
+      // An outdated thread has no line: GitHub drops it once the diff moves.
+      // Saying so beats printing `null`, which reads as a bug in this code.
+      const where =
+        thread.line === null
+          ? `${thread.path} (the diff has moved; no line)`
+          : `${thread.path}:${String(thread.line)}`;
+      const conversation = thread.comments
+        .map((comment) => `${comment.author} wrote:\n${comment.body.trim()}`)
+        .join("\n\n");
+      return `--- thread ${String(index + 1)} of ${String(threads.length)} · id ${thread.id} · ${where} ---\n${conversation}`;
+    })
+    .join("\n\n");
+
+  return capped(
+    `Inline review threads (${String(threads.length)}). Answer every one in threadAnswers, copying each id exactly:\n\n${rendered}`,
+  );
 }

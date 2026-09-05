@@ -158,7 +158,21 @@ function headline(outcome: SolveOutcome): string {
     case "unusable-base": {
       // Phrased to put the repository, not the ticket, in the reader's way. The
       // ticket may be perfectly solvable; this run could not have told anyone.
-      return `The repository's own build does not pass before any change, so nothing was attempted and nothing can be concluded about this ticket: ${safeText(
+      //
+      // This frames the reason rather than summarising it, and the summary it
+      // replaces was wrong in two directions at once. `verifyBase` already
+      // returns a complete sentence, carefully qualified — *in a fresh
+      // worktree*, and *a fact about the repository or this harness* — so
+      // restating it here printed the claim twice and the first copy had both
+      // qualifiers stripped, telling a Jira reader that `main` is broken. On
+      // the other branch it was not merely unqualified but false: when the
+      // build could not be *run*, a headline asserting it "does not pass"
+      // states as fact the one thing that run failed to establish.
+      //
+      // So the rule for this case is deliberately narrow — say who has to act
+      // and defer on what happened, because the layer that found out has
+      // already said it better and knows which of the two things went wrong.
+      return `Nothing was attempted and nothing can be concluded about this ticket, because ${safeText(
         outcome.reason,
       )}`;
     }
@@ -239,6 +253,14 @@ export function renderSolveComment(issueKey: string, outcome: SolveOutcome): str
   ].join("\n");
 }
 
+/**
+ * Written once, when the record does not exist yet.
+ *
+ * The annotation paragraph is in here rather than only in the file because the
+ * file is gitignored: a convention documented solely in the artifact is lost the
+ * first time the artifact is regenerated, and what comes back is a record whose
+ * rows carry hand-written notes its own header does not admit to allowing.
+ */
 const HEADER = [
   "# Dev-lens calibration",
   "",
@@ -246,6 +268,13 @@ const HEADER = [
   "from the ticket text alone — it cannot read source — and recon is the first pass that",
   "can. This is the scoreboard for that blind call: read the `Lens` column down the page",
   "before trusting it enough to turn autosolve on.",
+  "",
+  '**One exception to "never rewritten", and it is narrow on purpose.** A row\'s `Correction`',
+  "cell may be annotated by hand when the run's outcome is accurate but misleading without",
+  "context a later run supplied. The recorded verdict is never edited — a run that failed",
+  "stays `failed`, because that is what happened — and the annotation says who is at fault",
+  "instead. Anything wider than that turns a scoreboard into an argument. Annotations are",
+  "marked `[annotated <date>]`.",
   "",
   "| When | Ticket | Outcome | Lens | Correction |",
   "| --- | --- | --- | --- | --- |",

@@ -850,16 +850,89 @@ export function parseSimplify(
   return report;
 }
 
+/**
+ * What a thread answer rests on, and the reason it is asked for separately from
+ * the answer itself.
+ *
+ * Resolving a review thread is the one write in this pipeline that makes a
+ * human's attention *smaller*: it takes a comment off the reviewer's list. A bot
+ * that resolves what it merely disagrees with buries the objection, and it does
+ * so most confidently exactly when it is most wrong — the round on PR #2658 that
+ * motivated this argued a fabricated review point down with three named
+ * precedents and a failure-mode analysis.
+ *
+ * So the bound is evidence, not confidence, and this is the field that carries
+ * it. `changed-code` and `checked` both point at something a reader can go and
+ * verify. `judgement` does not, and cannot resolve.
+ */
+export const ANSWER_BASES = new Set(["changed-code", "checked", "judgement"]);
+
+export type AnswerBasis = "changed-code" | "checked" | "judgement";
+
+export interface ThreadAnswer {
+  readonly threadId: string;
+  readonly reply: string;
+  readonly basis: AnswerBasis;
+  readonly resolve: boolean;
+}
+
 export interface ReviewReport {
   readonly changed: boolean;
   readonly filesTouched: readonly string[];
   readonly responses: readonly string[];
+  readonly threadAnswers: readonly ThreadAnswer[];
   readonly summary: string;
   readonly commitSubject: string;
   readonly commitBody: string;
   readonly unresolved: string;
   readonly abandoned: string;
   readonly injectionNoticed: string;
+}
+
+/**
+ * Reads the per-thread answers, refusing a resolve that rests on an opinion.
+ *
+ * The judgement rule throws rather than quietly turning `resolve` off. A round
+ * that asked to close a reviewer's comment on nothing checkable has
+ * misunderstood the rule bounding the only new privilege in this phase, and
+ * proceeding on the rest of its output means trusting the same reasoning that
+ * just got that wrong. The cost is a discarded round, which is visible; the cost
+ * of downgrading is a model that keeps asking and nobody finding out.
+ */
+function threadAnswers(record: Record<string, unknown>, issueKey: string): readonly ThreadAnswer[] {
+  const value = record["threadAnswers"];
+  if (!Array.isArray(value)) {
+    throw new SolveParseError(`${issueKey}: threadAnswers was not an array`);
+  }
+  return value.map((item) => {
+    const entry = asRecord(item, `${issueKey}: a thread answer`);
+    const basis = str(entry, "basis");
+    if (!ANSWER_BASES.has(basis)) {
+      throw new SolveParseError(
+        `${issueKey}: a thread answer's basis was "${basis}", which is not one of changed-code, checked, judgement`,
+      );
+    }
+    const answer: ThreadAnswer = {
+      threadId: str(entry, "threadId"),
+      reply: str(entry, "reply"),
+      basis: basis as AnswerBasis,
+      resolve: bool(entry, "resolve"),
+    };
+    if (answer.threadId === "") {
+      throw new SolveParseError(`${issueKey}: a thread answer named no thread to post on`);
+    }
+    if (answer.reply.trim() === "") {
+      throw new SolveParseError(
+        `${issueKey}: the answer to thread ${answer.threadId} is blank, and a blank reply is indistinguishable from not having read the comment`,
+      );
+    }
+    if (answer.resolve && answer.basis === "judgement") {
+      throw new SolveParseError(
+        `${issueKey}: the round asked to resolve thread ${answer.threadId} on judgement alone — a thread is closed only when code changed for it or something checkable was cited against it, and anything else stays open for a human`,
+      );
+    }
+    return answer;
+  });
 }
 
 /** Validates one round of review resolution. */
@@ -869,6 +942,7 @@ export function parseReview(value: unknown, issueKey: string): ReviewReport {
     changed: bool(record, "changed"),
     filesTouched: strings(record, "filesTouched"),
     responses: strings(record, "responses"),
+    threadAnswers: threadAnswers(record, issueKey),
     summary: str(record, "summary"),
     commitSubject: str(record, "commitSubject"),
     commitBody: str(record, "commitBody"),

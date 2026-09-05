@@ -17,7 +17,7 @@
  * register. Both have a test saying so.
  */
 
-import type { AdvanceOutcome } from "../solve/delivery.ts";
+import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -126,10 +126,44 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  * `exhausted` also exits zero: the cap firing is the cap working. The caller
  * still has to say so on the ticket, which is a different obligation from an
  * exit code.
+ *
+ * `capped` exits zero for the same reason and it is the one worth arguing
+ * about, because unlike `exhausted` it means a pull request has cost twenty
+ * rounds and is being abandoned mid-review. That is a bad state and it is
+ * tempting to make `$?` say so. It must not: the brake firing is the brake
+ * working, and a non-zero exit would teach a daemon's backoff to treat the
+ * safety stop as an outage — retrying the one pull request that has already
+ * proved it should be left alone.
  */
 export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
   return outcome.kind === "failed" || outcome.kind === "refused";
 }
+
+/**
+ * One line per re-request result, and only one of the three is a call to act.
+ *
+ * A table rather than a ternary because the middle case is the one that used to
+ * be missing: a round that pushed nothing sent no ping, and printing the "NOT
+ * asked" warning for it would send a person to click a button that would do
+ * nothing but summon a second review of an unchanged diff.
+ */
+const REREQUEST_LINE = {
+  asked: `\nThe reviewer was asked to look again.`,
+  failed: `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`,
+  unnecessary: `\nThe reviewer was not asked again — nothing was pushed, so there is nothing new to re-read.`,
+} as const satisfies Record<ReRequest, string>;
+
+/**
+ * One line per draft transition, and again only one is a call to act.
+ *
+ * `still-drafting` is the ordinary case on a round that pushed, so it says why
+ * rather than reading as a thing that went wrong.
+ */
+const UNDRAFT_LINE = {
+  undrafted: `\nThe pull request is out of draft — this side is done with it, a human takes it from here.`,
+  failed: `\nThe pull request could NOT be taken out of draft — do it by hand, or nobody will review this.`,
+  "still-drafting": `\nStill a draft: there is something new for the reviewer to read first.`,
+} as const satisfies Record<Undraft, string>;
 
 /** One line an operator can act on, per review-round outcome. */
 export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
@@ -146,17 +180,54 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       // succeeded and is nobody's problem, while a reviewer who was not asked
       // again is a human clicking one button.
       return (
-        `ITERATED — round ${String(outcome.round)} pushed. Responses:\n` +
+        // Whether anything was pushed is read off the round, not assumed from
+        // the kind. A round that answers a reviewer without touching code is a
+        // successful round, and the headline used to call it a push — sending
+        // an operator to look for a commit that does not exist, and teaching
+        // them to distrust the rest of the line.
+        (outcome.pushed
+          ? `ITERATED — round ${String(outcome.round)} pushed.`
+          : `ITERATED — round ${String(outcome.round)} answered without changing code, so nothing was pushed.`) +
+        ` Responses:\n` +
         outcome.responses.map((response) => `  - ${response}`).join("\n") +
-        (outcome.reviewerRequested
-          ? `\nThe reviewer was asked to look again.`
-          : `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`)
+        REREQUEST_LINE[outcome.reviewerRequested] +
+        UNDRAFT_LINE[outcome.undrafted] +
+        // A review body has no thread, so this is the only channel the round's
+        // answer to it has. Losing it silently leaves a reviewer's objection
+        // standing with the rebuttal in a terminal nobody will read again.
+        (outcome.spoken.outcome === "failed"
+          ? `\nThe answer did NOT reach the pull request — ${outcome.spoken.reason}`
+          : "") +
+        `\nInline threads: ${String(outcome.threads.answered)} answered, ${String(outcome.threads.resolved)} resolved.` +
+        // Same reasoning as the re-request line above. A reply that would not
+        // post is a decline nobody can see, which on the pull request is
+        // indistinguishable from the comment never having been read — and the
+        // round itself succeeded, so nothing else will draw attention to it.
+        (outcome.threads.failures.length === 0
+          ? ""
+          : `\nCould not post:\n${outcome.threads.failures.map((line) => `  - ${line}`).join("\n")}`) +
+        // Printed on a successful round, not only on an exhausted one. This is
+        // the field the skill calls "what tells a human to stop the loop and
+        // look", and a round that succeeded is exactly when nobody goes looking.
+        (outcome.unresolved === "" ? "" : `\nUnresolved:\n${outcome.unresolved}`)
       );
     }
     case "exhausted": {
       return (
         `EXHAUSTED — ${String(outcome.rounds)} round(s) spent and the reviewer still has comments open. ` +
         `Undrafted anyway; a human decides from here.\nUnresolved:\n${outcome.unresolved}`
+      );
+    }
+    case "capped": {
+      // Deliberately does not say "undrafted", because it is not. `exhausted`
+      // is a reviewer running out of turns on a pull request the loop still
+      // believes in; this is the machinery hitting a stop, which says nothing
+      // about whether the code is ready.
+      return (
+        `CAPPED — ${String(outcome.rounds)} round(s) on this pull request, the absolute limit. ` +
+        `Nothing ran and the pull request was left as it is, still a draft if it was one. ` +
+        `Something is wrong for this to have cost twenty rounds; read it before raising the cap.` +
+        `\nUnresolved:\n${outcome.unresolved}`
       );
     }
     case "abandoned": {

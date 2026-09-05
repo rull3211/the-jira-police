@@ -94,6 +94,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   changed: true,
   filesTouched: FILES,
   responses: ["moved the link into the existing fragment, as suggested"],
+  threadAnswers: [],
   summary: "address the reviewer's note about the fragment",
   commitSubject: "fix(advisor): move the favicon link into the head fragment",
   commitBody: "The reviewer pointed out the extra wrapper element.",

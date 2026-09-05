@@ -911,11 +911,13 @@ describe("buildAdvanceRequest", () => {
     expect(request.stepTimeoutMs).toBe(base.stepTimeoutMs);
   });
 
-  it("starts every hand-driven invocation at round zero", () => {
-    // Pinned because it is a known gap rather than an intention. Nothing
-    // persists a round count, so `MAX_REVIEW_ITERATIONS` cannot fire from the
-    // command line and the operator is the only thing counting. The review
-    // cursor is what replaces this, and this test is what will fail when it does.
+  it("supplies no round count at all, because the pull request holds it", () => {
+    // This test used to pin `round: 0`, and its comment said so: nothing
+    // persisted a count, so `MAX_REVIEW_ITERATIONS` could not fire from the
+    // command line and the operator was the only thing counting. The marker
+    // replaced that, and the fix was to delete the field rather than to pass
+    // the right number — a caller that cannot supply the count cannot supply a
+    // wrong one. `advance` reads it off the marker comment instead.
     const request = buildAdvanceRequest(
       settingsWith({ ...PUBLISH_ENV, MAX_REVIEW_ITERATIONS: "3" }),
       advanceBase(),
@@ -923,8 +925,22 @@ describe("buildAdvanceRequest", () => {
       1,
     );
 
-    expect(request.round).toBe(0);
+    expect("round" in request).toBe(false);
     expect(request.maxRounds).toBe(3);
+  });
+
+  it("carries the absolute per-pull-request brake, separately from the reviewer cap", () => {
+    // Two numbers, deliberately not one. Relaxing how much argument a bot
+    // reviewer is worth must not be able to disable the stop on the machinery.
+    const request = buildAdvanceRequest(
+      settingsWith({ ...PUBLISH_ENV, MAX_REVIEW_ITERATIONS: "9", MAX_PR_ROUNDS_TOTAL: "20" }),
+      advanceBase(),
+      attachedWorktree,
+      1,
+    );
+
+    expect(request.maxRounds).toBe(9);
+    expect(request.maxTotalRounds).toBe(20);
   });
 
   it("does not name a reviewer, so the delivery default applies", () => {

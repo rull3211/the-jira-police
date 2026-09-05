@@ -7,17 +7,25 @@ import {
   type PushRequest,
   type ReviewComment,
   type ReviewRequest,
+  type ReviewThread,
+  type ThreadReply,
   COPILOT_REVIEWER,
   MAX_FEEDBACK_CHARS,
   commitAll,
   createDraftPr,
+  editComment,
   findPullRequest,
   formatReviewFeedback,
+  formatThreads,
   markReady,
   parsePrUrl,
+  postComment,
   push,
   readReview,
+  readReviewThreads,
+  replyToThread,
   requestReview,
+  resolveThread,
 } from "./pr.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
@@ -119,12 +127,29 @@ function payload(overrides: Record<string, unknown> = {}): string {
 
 const HEAD_SHA = "9f1c2ab3d4e5f60718293a4b5c6d7e8f90a1b2c3";
 
+/** A review that said something, so the chrome tests have something to keep. */
+const APPROVED = "### 🟢 Approval recommended\n\nThe change is narrowly scoped.";
+
+/**
+ * Copilot's trailing promotional block, copied from PR #1413 rather than
+ * paraphrased — a fixture that invented its own wording would pass against a
+ * rule that never matched the real thing.
+ */
+const PROMO =
+  '\n\n---\n\n💡 <a href="/o/r/new/main?filename=.github/skills/code-review/SKILL.md">Add a `code-review` agent skill</a>' +
+  ' or configure MCP servers for context-aware, tailored reviews. <a href="https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui">Learn more in the docs.</a>';
+
 /** Reply table for the one `gh pr view` call `readReview` makes. */
 const view = (stdout: string): Record<string, Partial<CommandResult>> => ({
   "pr view": { stdout },
 });
 
-const comment = (body: string, author = "copilot"): ReviewComment => ({ author, body });
+const comment = (body: string, author = "copilot"): ReviewComment => ({
+  author,
+  body,
+  createdAt: "",
+  id: "",
+});
 
 describe("commitAll", () => {
   it("stages the whole worktree before committing", async () => {
@@ -626,11 +651,29 @@ describe("readReview", () => {
   });
 
   it("collects a Copilot review and its comments", async () => {
+    // The two lists name the same fact differently and this fixture says so:
+    // a review dates itself with `submittedAt`, an issue comment with
+    // `createdAt`. Probed against PR #2658 — a review has no `createdAt` at
+    // all, and asking for one returns null.
     const runner = fakeRunner(
       view(
         payload({
-          reviews: [{ author: { login: "copilot" }, body: "Two things below." }],
-          comments: [{ author: { login: "copilot" }, body: "Nit: rename this." }],
+          reviews: [
+            {
+              author: { login: "copilot" },
+              body: "Two things below.",
+              submittedAt: "2026-09-05T11:00:49Z",
+              id: "PRR_1",
+            },
+          ],
+          comments: [
+            {
+              author: { login: "copilot" },
+              body: "Nit: rename this.",
+              createdAt: "2026-09-05T11:04:00Z",
+              id: "IC_1",
+            },
+          ],
         }),
       ),
     );
@@ -641,12 +684,59 @@ describe("readReview", () => {
       reviewerResponded: true,
       reviewerErrored: false,
       comments: [
-        { author: "copilot", body: "Two things below." },
-        { author: "copilot", body: "Nit: rename this." },
+        {
+          author: "copilot",
+          body: "Two things below.",
+          createdAt: "2026-09-05T11:00:49Z",
+          id: "PRR_1",
+        },
+        {
+          author: "copilot",
+          body: "Nit: rename this.",
+          createdAt: "2026-09-05T11:04:00Z",
+          id: "IC_1",
+        },
       ],
       state: "OPEN",
       isDraft: true,
     });
+  });
+
+  it("dates a review even though a review has no createdAt", async () => {
+    // The mutation this pins: read only `createdAt` and every review comes
+    // back undated, an undated comment is treated as new, and the cursor
+    // degrades into "everything is new" — which is the runaway it exists to
+    // prevent, arriving through a field name rather than a missing feature.
+    const runner = fakeRunner(
+      view(
+        payload({
+          reviews: [
+            {
+              author: { login: "copilot" },
+              body: "Two things below.",
+              submittedAt: "2026-09-05T11:00:49Z",
+              createdAt: null,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.createdAt : null).toBe(
+      "2026-09-05T11:00:49Z",
+    );
+  });
+
+  it("leaves the date empty rather than guessing when the entry carries none", async () => {
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: "No date on this one." }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.createdAt : null).toBe("");
   });
 
   // The exact body GitHub posted on PR #2657, 2026-09-04. The Copilot app was
@@ -731,7 +821,7 @@ describe("readReview", () => {
     // something; deleting their message because a bot used the same words would
     // be the recogniser reaching past what it knows.
     expect(result.outcome === "read" ? result.review.comments : []).toEqual([
-      { author: "a-human", body: COPILOT_ERROR },
+      { author: "a-human", body: COPILOT_ERROR, createdAt: "", id: "" },
     ]);
   });
 
@@ -797,8 +887,63 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "d", body: "real feedback" },
+      { author: "d", body: "real feedback", createdAt: "", id: "" },
     ]);
+  });
+
+  it("drops the reviewer's promotional footer, which was never review", async () => {
+    // Observed on PR #1413: the pass was handed this block, read it as a
+    // request, and declined it in `responses` — which by then were posted
+    // publicly, so a timezone bugfix carried a paragraph about not adding a
+    // SKILL.md.
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: APPROVED + PROMO }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toBe(APPROVED);
+  });
+
+  it("leaves the same footer alone when a human quotes it", async () => {
+    // Scoped to the reviewer on exactly the grounds the error-notice drop is:
+    // a person quoting the block is a person saying something, and matching on
+    // text alone would silently edit their message.
+    const runner = fakeRunner(
+      view(
+        payload({ comments: [{ author: { login: "some-human" }, body: "what is this?" + PROMO }] }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toContain(
+      "docs.github.com/copilot",
+    );
+  });
+
+  it("keeps a reviewer's trailing section when it is not the vendor's chrome", async () => {
+    // A rule is not enough on its own, and neither is the 💡. Reviewers use
+    // both when making a real suggestion, and swallowing one is the failure
+    // direction nobody recovers from by noticing.
+    const body = "Looks fine.\n\n---\n\n💡 Consider extracting the helper.";
+    const runner = fakeRunner(view(payload({ reviews: [{ author: { login: "copilot" }, body }] })));
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toBe(body);
+  });
+
+  it("drops a review that was nothing but chrome, rather than passing on a blank", async () => {
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: PROMO }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    // Still a response — the reviewer spoke — but there is nothing in it to act on.
+    expect(result.outcome === "read" && result.review.reviewerResponded).toBe(true);
+    expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
   });
 
   it("names an author it could not read rather than dropping the comment", async () => {
@@ -807,7 +952,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "unknown", body: "still feedback" },
+      { author: "unknown", body: "still feedback", createdAt: "", id: "" },
     ]);
   });
 
@@ -900,6 +1045,596 @@ describe("readReview", () => {
   });
 });
 
+/** One thread node, with every field present unless a test removes it. */
+function thread(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "PRRT_1",
+    isResolved: false,
+    isOutdated: false,
+    path: "src/utils/setNonProductionFavicon.ts",
+    line: 19,
+    comments: {
+      pageInfo: { hasNextPage: false },
+      nodes: [
+        {
+          author: { login: "copilot-pull-request-reviewer" },
+          body: "not idempotent",
+          createdAt: "2026-09-04T23:05:36Z",
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+/** The GraphQL envelope around a list of thread nodes. */
+function threadsPayload(nodes: readonly unknown[], hasNextPage = false): string {
+  return JSON.stringify({
+    data: {
+      repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage }, nodes } } },
+    },
+  });
+}
+
+const graphql = (stdout: string): Record<string, Partial<CommandResult>> => ({
+  "api graphql": { stdout },
+});
+
+describe("readReviewThreads", () => {
+  it("reads the inline comments the --json flags cannot reach", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([thread()])));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result).toEqual({
+      outcome: "read",
+      threads: [
+        {
+          id: "PRRT_1",
+          isResolved: false,
+          isOutdated: false,
+          path: "src/utils/setNonProductionFavicon.ts",
+          line: 19,
+          comments: [
+            {
+              author: "copilot-pull-request-reviewer",
+              body: "not idempotent",
+              createdAt: "2026-09-04T23:05:36Z",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("splits the repo into the two arguments GraphQL takes separately", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([])));
+
+    await readReviewThreads(runner, reviewRequest());
+
+    const argv = runner.calls[0] ?? [];
+    expect(argv.slice(0, 3)).toEqual(["gh", "api", "graphql"]);
+    expect(argv).toContain("owner=sparebank1");
+    expect(argv).toContain("name=buy-insurance-advisor-web");
+    expect(argv).toContain("number=42");
+    // The query is one element. Split across two it is not a query at all, and
+    // the argv form is what keeps the caller from having to escape anything.
+    expect(argv.filter((part) => part.startsWith("query=")).length).toBe(1);
+  });
+
+  it("passes owner and name raw, so an @ in one is not read as a filename", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([])));
+
+    await readReviewThreads(runner, reviewRequest());
+
+    const argv = runner.calls[0] ?? [];
+    // gh's typed `-F` reads a value beginning with `@` out of a file. Only the
+    // number, which cannot begin with one, is passed that way.
+    expect(argv[argv.indexOf("owner=sparebank1") - 1]).toBe("-f");
+    expect(argv[argv.indexOf("name=buy-insurance-advisor-web") - 1]).toBe("-f");
+    expect(argv[argv.indexOf("number=42") - 1]).toBe("-F");
+  });
+
+  it("refuses a repo that is not an owner/name pair", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([])));
+
+    const result = await readReviewThreads(runner, reviewRequest({ repo: "just-a-name" }));
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("owner/name");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("reports no inline comments only when the read said so", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([])));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result).toEqual({ outcome: "read", threads: [] });
+  });
+
+  it("fails when gh fails", async () => {
+    const runner = fakeRunner({ "api graphql": { exitCode: 1, stderr: "Bad credentials" } });
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("Bad credentials");
+  });
+
+  it("fails when gh prints something that is not JSON", async () => {
+    const runner = fakeRunner(graphql("<html>proxy</html>"));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("not JSON");
+  });
+
+  it("fails on a partly-failed query rather than reading the half it got", async () => {
+    // GraphQL answers with data *and* errors, and the data half looks complete.
+    const runner = fakeRunner(
+      graphql(
+        JSON.stringify({
+          data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+          errors: [{ message: "Something went wrong" }],
+        }),
+      ),
+    );
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("errors");
+  });
+
+  it("reads an unreadable shape as unreadable, not as a pull request with no threads", async () => {
+    const runner = fakeRunner(graphql(JSON.stringify({ data: { repository: null } })));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    // The mutation this pins: return `{ outcome: "read", threads: [] }` here and
+    // the round proceeds believing it has seen every comment on the diff.
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("shape this does not understand");
+  });
+
+  it("refuses a second page of threads rather than dropping it", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([thread()], true)));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("more than 100 review threads");
+  });
+
+  it("refuses a second page of comments, where our own last reply would be", async () => {
+    const runner = fakeRunner(
+      graphql(
+        threadsPayload([thread({ comments: { pageInfo: { hasNextPage: true }, nodes: [] } })]),
+      ),
+    );
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("more than 100 comments");
+  });
+
+  it("refuses the whole read when one thread is missing a field", async () => {
+    // Deliberately unlike `entriesOf`, which skips a bad entry. A skipped thread
+    // is a comment the round does not answer while reporting that it answered
+    // everything, so one bad node fails the read.
+    const runner = fakeRunner(graphql(threadsPayload([thread(), thread({ isResolved: "no" })])));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("missing fields");
+  });
+
+  it("refuses a thread with no id, which is what a reply is addressed to", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([thread({ id: "" })])));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("missing fields");
+  });
+
+  it("refuses a thread node that is not an object", async () => {
+    const runner = fakeRunner(graphql(threadsPayload(["PRRT_1"])));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("other than an object");
+  });
+
+  it("refuses a comment whose body could not be read", async () => {
+    const runner = fakeRunner(
+      graphql(
+        threadsPayload([
+          thread({ comments: { pageInfo: { hasNextPage: false }, nodes: [{ body: 7 }] } }),
+        ]),
+      ),
+    );
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("could not be read");
+  });
+
+  it("keeps a comment from a deleted account", async () => {
+    const runner = fakeRunner(
+      graphql(
+        threadsPayload([
+          thread({
+            comments: {
+              pageInfo: { hasNextPage: false },
+              nodes: [
+                {
+                  author: null,
+                  body: "still says what it says",
+                  createdAt: "2026-09-04T23:05:36Z",
+                },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome === "read" && result.threads[0]?.comments[0]?.author).toBe("unknown");
+  });
+
+  it("keeps the null line an outdated thread comes back with", async () => {
+    const runner = fakeRunner(graphql(threadsPayload([thread({ isOutdated: true, line: null })])));
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(result.outcome === "read" && result.threads[0]?.line).toBe(null);
+    expect(result.outcome === "read" && result.threads[0]?.isResolved).toBe(false);
+  });
+});
+
+const THREAD_ID = "PRRT_kwDOE4J7MM6fduiU";
+const REPLY_URL = "https://github.com/o/r/pull/2658#discussion_r1";
+
+const replied = (url: string = REPLY_URL): Record<string, Partial<CommandResult>> => ({
+  "api graphql": {
+    stdout: JSON.stringify({
+      data: { addPullRequestReviewThreadReply: { comment: { url } } },
+    }),
+  },
+});
+
+const resolved = (isResolved = true): Record<string, Partial<CommandResult>> => ({
+  "api graphql": {
+    stdout: JSON.stringify({ data: { resolveReviewThread: { thread: { isResolved } } } }),
+  },
+});
+
+const receipt = (overrides: Partial<ThreadReply> = {}): ThreadReply => ({
+  threadId: THREAD_ID,
+  commentUrl: REPLY_URL,
+  ...overrides,
+});
+
+describe("replyToThread", () => {
+  it("posts the answer on the thread and hands back a receipt", async () => {
+    const runner = fakeRunner(replied());
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "Checked: public/index.html ships no icon link.",
+      timeoutMs: 60_000,
+    });
+
+    expect(result).toEqual({
+      outcome: "replied",
+      reply: { threadId: THREAD_ID, commentUrl: REPLY_URL },
+    });
+    const argv = runner.calls[0] ?? [];
+    expect(argv.slice(0, 3)).toEqual(["gh", "api", "graphql"]);
+    expect(argv).toContain(`threadId=${THREAD_ID}`);
+    expect(argv).toContain("body=Checked: public/index.html ships no icon link.");
+  });
+
+  it("passes the body raw, so an @ in it is not read as a filename", async () => {
+    const runner = fakeRunner(replied());
+
+    await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      // A reply body is model-written from a ticket anyone with a board account
+      // can edit. gh's typed `-F` would read this out of a file.
+      body: "@copilot this is the argument",
+      timeoutMs: 60_000,
+    });
+
+    const argv = runner.calls[0] ?? [];
+    expect(argv[argv.indexOf("body=@copilot this is the argument") - 1]).toBe("-f");
+  });
+
+  it("refuses a blank reply", async () => {
+    const runner = fakeRunner(replied());
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "   \n ",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("blank reply");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("refuses a reply with no thread to address", async () => {
+    const runner = fakeRunner(replied());
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: "",
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("fails when gh fails", async () => {
+    const runner = fakeRunner({ "api graphql": { exitCode: 1, stderr: "Not Found" } });
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("Not Found");
+  });
+
+  it("fails on GraphQL errors even when gh exits zero", async () => {
+    const runner = fakeRunner({
+      "api graphql": {
+        stdout: JSON.stringify({ errors: [{ message: "Resource not accessible" }] }),
+      },
+    });
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("Resource not accessible");
+  });
+
+  it("issues no receipt when nothing came back to prove the reply posted", async () => {
+    const runner = fakeRunner(replied(""));
+
+    const result = await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "an answer",
+      timeoutMs: 60_000,
+    });
+
+    // No URL, no receipt, and therefore nothing that can resolve the thread.
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("nothing proves it posted");
+  });
+});
+
+describe("resolveThread", () => {
+  it("resolves a thread that has just been answered", async () => {
+    const runner = fakeRunner(resolved());
+
+    const result = await resolveThread(runner, {
+      cwd: WORKTREE,
+      reply: receipt(),
+      timeoutMs: 60_000,
+    });
+
+    expect(result).toEqual({ outcome: "resolved" });
+    expect(runner.calls[0]).toContain(`threadId=${THREAD_ID}`);
+  });
+
+  it.each([
+    ["no comment URL", receipt({ commentUrl: "" })],
+    ["no thread id", receipt({ threadId: "" })],
+  ])("refuses a receipt with %s", async (_case, reply) => {
+    const runner = fakeRunner(resolved());
+
+    const result = await resolveThread(runner, { cwd: WORKTREE, reply, timeoutMs: 60_000 });
+
+    // The type already makes a bare thread id unusable here. This is the same
+    // rule at runtime, for a caller that hand-built the receipt to get around it.
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("with an answer attached");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("does not report a thread resolved when GitHub says it is still open", async () => {
+    const runner = fakeRunner(resolved(false));
+
+    const result = await resolveThread(runner, {
+      cwd: WORKTREE,
+      reply: receipt(),
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("still open");
+  });
+
+  it("fails when gh fails", async () => {
+    const runner = fakeRunner({ "api graphql": { exitCode: 1, stderr: "Bad credentials" } });
+
+    const result = await resolveThread(runner, {
+      cwd: WORKTREE,
+      reply: receipt(),
+      timeoutMs: 60_000,
+    });
+
+    expect(result.outcome).toBe("failed");
+    expect(reason(result)).toContain("Bad credentials");
+  });
+});
+
+const MARKER_BODY = "bot: iteration count 1\nLast read: 2026-09-05T10:00:00Z";
+
+/** The two-step reply table `postComment` needs: node id, then the comment. */
+const posts = (commentId = "IC_9"): Record<string, Partial<CommandResult>> => ({
+  "pullRequest(number:$number){ id }": {
+    stdout: JSON.stringify({ data: { repository: { pullRequest: { id: "PR_1" } } } }),
+  },
+  addComment: {
+    stdout: JSON.stringify({ data: { addComment: { commentEdge: { node: { id: commentId } } } } }),
+  },
+});
+
+describe("postComment", () => {
+  const request = { cwd: WORKTREE, repo: REPO, number: 42, body: MARKER_BODY, timeoutMs: 60_000 };
+
+  it("reads the pull request's node id and hands back the comment's", async () => {
+    // The returned id is the point of using addComment over `gh pr comment`:
+    // without it, the next round has to find the marker again by prefix, and a
+    // round that cannot find what it just wrote posts a second one.
+    const runner = fakeRunner(posts());
+
+    const result = await postComment(runner, request);
+
+    expect(result).toEqual({ outcome: "written", commentId: "IC_9" });
+  });
+
+  it("passes the number typed and the body raw", async () => {
+    // `-F` turns 42 into an Int, which the query's `Int!` requires. It also
+    // reads a value beginning with `@` out of a file, so a body nobody here
+    // wrote never goes through it.
+    const runner = fakeRunner(posts());
+
+    await postComment(runner, request);
+
+    expect(runner.calls[0]).toContain("-F");
+    expect(runner.calls[0]).toContain("number=42");
+    const post = runner.calls[1] ?? [];
+    expect(post).toContain(`body=${MARKER_BODY}`);
+    expect(post[post.indexOf(`body=${MARKER_BODY}`) - 1]).toBe("-f");
+  });
+
+  it("refuses an empty body before running anything", async () => {
+    const runner = fakeRunner(posts());
+
+    const result = await postComment(runner, { ...request, body: "   " });
+
+    expect(result.outcome).toBe("failed");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("refuses a repo that is not owner/name", async () => {
+    const runner = fakeRunner(posts());
+
+    const result = await postComment(runner, { ...request, repo: "advisor" });
+
+    expect(reason(result)).toContain("owner/name");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("does not comment when the pull request has no node id", async () => {
+    const runner = fakeRunner({
+      "pullRequest(number:$number){ id }": { stdout: JSON.stringify({ data: {} }) },
+    });
+
+    const result = await postComment(runner, request);
+
+    expect(reason(result)).toContain("without a node id");
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  it("fails when the comment came back without an id, so no round could edit it", async () => {
+    const runner = fakeRunner({
+      ...posts(),
+      addComment: { stdout: JSON.stringify({ data: { addComment: {} } }) },
+    });
+
+    const result = await postComment(runner, request);
+
+    expect(reason(result)).toContain("no later round could edit it");
+  });
+});
+
+/** Reply table for the one `updateIssueComment` call `editComment` makes. */
+const edits = (id = "IC_9"): Record<string, Partial<CommandResult>> => ({
+  updateIssueComment: {
+    stdout: JSON.stringify({ data: { updateIssueComment: { issueComment: { id } } } }),
+  },
+});
+
+describe("editComment", () => {
+  const request = { cwd: WORKTREE, commentId: "IC_9", body: MARKER_BODY, timeoutMs: 60_000 };
+
+  it("rewrites the comment named by its node id", async () => {
+    const runner = fakeRunner(edits());
+
+    const result = await editComment(runner, request);
+
+    expect(result).toEqual({ outcome: "written", commentId: "IC_9" });
+    expect(runner.calls[0]).toContain("id=IC_9");
+  });
+
+  it("never reaches for --edit-last", async () => {
+    // That flag edits the last comment of the *current user*, and the current
+    // user is the operator. A round running after a human commented would
+    // overwrite that person's words with machine state.
+    const runner = fakeRunner(edits());
+
+    await editComment(runner, request);
+
+    expect(runner.calls.flat()).not.toContain("--edit-last");
+  });
+
+  it("refuses to edit a comment with no id", async () => {
+    const runner = fakeRunner(edits());
+
+    const result = await editComment(runner, { ...request, commentId: "" });
+
+    expect(result.outcome).toBe("failed");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("refuses to blank a comment", async () => {
+    const runner = fakeRunner(edits());
+
+    const result = await editComment(runner, { ...request, body: "\n  " });
+
+    expect(reason(result)).toContain("blank");
+    expect(runner.calls).toEqual([]);
+  });
+
+  it("does not report an edit that came back empty as written", async () => {
+    const runner = fakeRunner({
+      updateIssueComment: { stdout: JSON.stringify({ data: { updateIssueComment: {} } }) },
+    });
+
+    const result = await editComment(runner, request);
+
+    expect(reason(result)).toContain("nothing proves it took");
+  });
+});
+
 describe("markReady", () => {
   it("undrafts the pull request by number and repo", async () => {
     const runner = fakeRunner();
@@ -956,6 +1691,72 @@ describe("formatReviewFeedback", () => {
 
     expect(block.length).toBeLessThan(MAX_FEEDBACK_CHARS);
     expect(block).not.toContain("truncated");
+  });
+});
+
+const inlineThread = (overrides: Partial<ReviewThread> = {}): ReviewThread => ({
+  id: "PRRT_1",
+  isResolved: false,
+  isOutdated: false,
+  path: "src/setNonProductionFavicon.ts",
+  line: 19,
+  comments: [{ author: "copilot", body: "this is not idempotent", createdAt: "" }],
+  ...overrides,
+});
+
+describe("formatThreads", () => {
+  it("says so plainly when there are no threads", () => {
+    expect(formatThreads([])).toBe("No inline review threads.");
+  });
+
+  it("quotes the id the answer has to name back", () => {
+    // The id is how a reply reaches the thread. Rendered anywhere it can be
+    // paraphrased or abbreviated, the round answers a conversation that does
+    // not exist and the reviewer sees nothing at all.
+    expect(formatThreads([inlineThread()])).toContain("id PRRT_1");
+  });
+
+  it("gives the location a reader can go to", () => {
+    expect(formatThreads([inlineThread()])).toContain("src/setNonProductionFavicon.ts:19");
+  });
+
+  it("says the diff moved rather than inventing a line", () => {
+    // `null` is what GitHub returns once the lines under a thread change.
+    // Rendering it as a number would point the round at line zero of a file.
+    const block = formatThreads([inlineThread({ line: null, isOutdated: true })]);
+
+    expect(block).toContain("the diff has moved; no line");
+    expect(block).not.toContain(":null");
+  });
+
+  it("includes our own earlier replies, not only the reviewer's words", () => {
+    // Deliberate, and the opposite of what `reviewerComments` does to the issue
+    // comments. Seeing its own answer is how a round knows the point is already
+    // made in public and declines to make it twice.
+    const block = formatThreads([
+      inlineThread({
+        comments: [
+          { author: "copilot", body: "this is not idempotent", createdAt: "" },
+          { author: "rull3211", body: "bot: appended only when absent", createdAt: "" },
+        ],
+      }),
+    ]);
+
+    expect(block).toContain("bot: appended only when absent");
+  });
+
+  it("stays inside the same cap the review feedback does", () => {
+    const long = Array.from({ length: 200 }, (_unused, index) =>
+      inlineThread({
+        id: `PRRT_${String(index)}`,
+        comments: [{ author: "copilot", body: `${String(index)} `.repeat(400), createdAt: "" }],
+      }),
+    );
+
+    const block = formatThreads(long);
+
+    expect(block.length).toBeLessThanOrEqual(MAX_FEEDBACK_CHARS);
+    expect(block).toContain("truncated");
   });
 });
 

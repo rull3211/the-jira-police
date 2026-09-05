@@ -60,6 +60,32 @@ function abandoned(cause: "judgement" | "environment"): SolveOutcome {
   };
 }
 
+/**
+ * A base check that came back unusable, carrying a reason in the shape
+ * `verifyBase` actually builds rather than a placeholder.
+ *
+ * The shape is the point of these two constants. `verifyBase` has two branches
+ * and only one of them is a verdict about the build, so a fixture that invented
+ * its own wording would let the headline restate either as the other and no
+ * test would notice.
+ */
+function unusableBase(reason: string): SolveOutcome {
+  return {
+    kind: "unusable-base",
+    reason,
+    verification: { outcome: "failed", reason } as never,
+    worktree,
+  };
+}
+
+/** `verifyBase`'s `failed` branch, qualifiers and all. */
+const BASE_FAILED =
+  "the repository's own build does not pass in a fresh worktree, before anything was changed — 2 tests failed. This is a fact about the repository or this harness, not about any fix";
+
+/** Its other branch, which is not a verdict about the build at all. */
+const BASE_UNRUNNABLE =
+  "the repository's build could not be run here at all — mvn: command not found";
+
 async function outputDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "feedback-"));
 }
@@ -124,6 +150,30 @@ describe("renderSolveComment", () => {
     });
 
     expect(failed).toContain("rejected it");
+  });
+
+  it("does not claim the build fails when the build could not be run", () => {
+    // `verifyBase` has two branches and only one is a verdict. The headline
+    // opened with "the repository's own build does not pass" for both, which on
+    // this branch asserts as fact the one thing the run failed to establish —
+    // and sends a reader to fix a build that may be perfectly fine.
+    const body = renderSolveComment("SSX-1", unusableBase(BASE_UNRUNNABLE));
+
+    expect(body).toContain("could not be run here at all");
+    expect(body).not.toContain("does not pass");
+  });
+
+  it("states an unusable base once, with the qualifiers the check was careful to add", () => {
+    // The reason is already a complete sentence. Summarising it above itself
+    // printed the claim twice, and the copy a skimming reader meets first had
+    // both "in a fresh worktree" and "or this harness" stripped out of it — so
+    // the ticket said `main` is broken. That is this module's own failure mode,
+    // committed in the paragraph written to prevent it.
+    const body = renderSolveComment("SSX-1", unusableBase(BASE_FAILED));
+
+    expect(body).toContain("in a fresh worktree");
+    expect(body).toContain("or this harness");
+    expect(body.match(/does not pass/gu) ?? []).toHaveLength(1);
   });
 
   it("does not let a blocked machine read as a verdict on the ticket", () => {

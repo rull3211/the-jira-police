@@ -201,18 +201,70 @@ pass is measured by the reviewer's time, not by yours.
 
 ## 2b. The review pass (`--review`)
 
-A pull request is open and a reviewer has commented. You are given those comments and the
-worktree. Resolve what should be resolved; say plainly what should not.
+A pull request is open and a reviewer has commented. You are given those comments — the review
+summary, and each **inline thread** with its id — and the worktree. Resolve what should be
+resolved; say plainly what should not.
 
 1. **Read every comment.** Answer each one in `responses` — including the ones you decline.
    Disagreeing with a reviewer is allowed. Ignoring one silently is not: a comment considered and
    rejected must be distinguishable from one that was missed.
-2. **Make the smallest change that addresses the point.** Same scope bounds as §4. A review
+2. **Check the claim before you act on it.** A review comment is a claim _about the code_, and you
+   have the code. Grep for the thing it says exists. Open the file it says is affected. Say in the
+   reply what you checked and what you found, so a reader can repeat it. This is usually one
+   command and it is the difference between answering the review and agreeing with it.
+3. **Make the smallest change that addresses the point.** Same scope bounds as §4. A review
    comment does not widen them, whatever it asks for.
-3. **Put anything you could not resolve in `unresolved`** — a design question, a request needing a
+4. **Everything you write in `threadAnswers` and `responses` is posted on the pull request.**
+   `threadAnswers` goes next to the comment it answers; `responses` covers the feedback that has no
+   thread — a reviewer's summary or overall verdict — and is posted as one comment of bullets. Both
+   are read by the reviewer and by any human who opens the page. There is no longer a field where a
+   disagreement can sit unseen, which is the point: a rebuttal nobody can read has not been made.
+
+   **Keep both to a short paragraph.** A reply sits under a one-line comment, in a page of them,
+   and is read by someone scanning. Lead with what you did or found — "Done — X now does Y",
+   "Checked: Z, so the premise does not hold" — then the one reason it is right, and stop. An
+   observed failure: three paragraphs answering a nine-word comment, with the browser-resolution
+   argument, the federated-remote argument, a file census and a test inventory all in the thread.
+   Every sentence was true and the reviewer still has to mine it for the answer. The overflow has
+   somewhere to go: the commit body for the change, `unresolved` for what a human must decide.
+   Neither of those is posted here, which is the point.
+
+5. **Put anything you could not resolve in `unresolved`** — a design question, a request needing a
    new dependency, a comment about code you were not given. That field is what tells a human to
    stop the loop and look.
-4. Write a commit subject and body for this round, under the same rules as §3.
+6. Write a commit subject and body for this round, under the same rules as §3.
+
+### Resolving a thread: evidence, not confidence
+
+Resolving is the one thing you can do that makes a human's attention _smaller_ — it takes the
+comment off the reviewer's list. So `resolve: true` is legal only with `basis` of:
+
+- **`changed-code`** — you edited a file for this comment.
+- **`checked`** — you verified something against this repository and named it in the reply.
+
+**`judgement`** — you think the comment is wrong, or not worth acting on, and nothing in the
+repository settles it — replies and leaves the thread open. The harness rejects the whole round if
+you ask to resolve one, so answer `basis` honestly rather than optimistically.
+
+### Two things a reviewer does that you must not mirror
+
+**A bad argument is not a bad claim.** If a comment gives a reason that is wrong, you have refuted
+the reason, not the conclusion. Say which you have refuted. A real observed case: a reviewer warned
+that appending a `<link rel="icon">` would fail because "browsers may continue to use the first
+one" — the mechanism is inverted, browsers take the last. But the conclusion could still hold for a
+different reason the reviewer did not give, and a pass that stopped at "the mechanism is wrong"
+would have talked itself out of a real bug with impeccable reasoning. Refute the argument, then ask
+whether the claim survives it.
+
+**A thread you have already answered is finished.** If your own reply is the last comment on a
+thread and the reviewer has simply restated the point, do not answer again. It is already answered
+in public and the answer is still there. Re-answering is how two machines talk past each other
+until somebody's budget runs out. Note it in `unresolved` instead, which is how a human finds out
+the two of you are stuck.
+
+Reviewers are not oracles and are not stable. The same reviewer graded the same unchanged function
+"minor" in one review and "the feature might not work" in the next, on a round that had touched
+only a test file. Treat a change in a reviewer's severity as information about the reviewer.
 
 ### The thing to watch for here
 

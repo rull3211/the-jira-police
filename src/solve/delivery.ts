@@ -40,17 +40,35 @@ import {
   type BotIdentity,
   type ReviewComment,
   type ReviewState,
+  type ReviewThread,
+  type WriteCommentResult,
   COPILOT_REVIEWER,
   commitAll,
   createDraftPr,
+  editComment,
   formatReviewFeedback,
+  formatThreads,
   markReady,
+  postComment,
   push,
   readReview,
+  readReviewThreads,
+  replyToThread,
   requestReview,
+  resolveThread,
 } from "./pr.ts";
+import {
+  type Marker,
+  NEVER_READ,
+  BOT_PREFIX,
+  findMarker,
+  isNewer,
+  isOurs,
+  parseMarker,
+  renderMarker,
+} from "./marker.ts";
 import { type ReviewRoundRequest, type SolveDependencies, resolveReview } from "./orchestrator.ts";
-import type { CommitMessage } from "./runner.ts";
+import type { CommitMessage, ThreadAnswer } from "./runner.ts";
 import type { Worktree } from "./worktree.ts";
 
 export interface PublishRequest {
@@ -164,11 +182,92 @@ export interface AdvanceRequest extends Omit<ReviewRoundRequest, "reviewFeedback
   readonly number: number;
   readonly identity: BotIdentity;
   readonly reviewer?: string;
-  /** Rounds already spent on this pull request. */
-  readonly round: number;
+  /**
+   * The reviewer's argument budget, `MAX_REVIEW_ITERATIONS`.
+   *
+   * **There is no `round` beside it any more, and its absence is the feature.**
+   * It used to be passed in, and `buildAdvanceRequest` passed `0` on every
+   * invocation because a fresh process has nothing to count from — so the cap
+   * could not fire from the command line at all. Rounds already spent are now
+   * read off the marker comment on the pull request, which is the only place
+   * that survives the process. A caller cannot supply the number, so a caller
+   * cannot supply a wrong one.
+   */
   readonly maxRounds: number;
+  /**
+   * The absolute stop, `MAX_PR_ROUNDS_TOTAL`. Not `maxRounds` under a second
+   * name: that one is a policy about how much argument a bot reviewer is worth
+   * and is expected to be relaxed, this one is a brake on the machinery.
+   */
+  readonly maxTotalRounds: number;
   readonly ghTimeoutMs: number;
 }
+
+/**
+ * What happened to the "please look again" ping at the end of a round.
+ *
+ * A boolean here was two facts wearing one name. `false` meant "the API call
+ * failed, a human must add the reviewer by hand" — a thing to act on — and a
+ * round that had nothing to show the reviewer had no way to say so except by
+ * lying in one direction or the other.
+ */
+export type ReRequest =
+  /** The reviewer was pinged and will look again. */
+  | "asked"
+  /** The ping did not go out. Recoverable, by a human clicking one button. */
+  | "failed"
+  /**
+   * Nothing was pushed, so there was nothing new to re-read and no ping was
+   * sent. Observed on PR #2658: the round at 12:23 changed no code, re-requested
+   * anyway, and Copilot re-reviewed a byte-identical tree three minutes later
+   * and restated itself. That is the reviewer instability §6.1c describes, and
+   * we were manufacturing it — a paid review of a diff nobody had touched,
+   * whose only possible output is the previous review again.
+   */
+  | "unnecessary";
+
+/**
+ * What happened to the round's answer to feedback that has no thread.
+ *
+ * A review body — Copilot's summary, a human's overall verdict — is not an
+ * inline comment and has nothing to reply *to*. `answerThreads` therefore never
+ * sees it, so before this existed the round's whole argument went to
+ * `responses`, which reaches an operator's terminal and nobody else. Observed
+ * on round 3 of PR #2658: the pass refuted the reviewer's premise with file and
+ * line references, and on the pull request the last visible word was still the
+ * reviewer's objection. §6.1c's "push back in public" had been built for
+ * threads only.
+ */
+export type Spoken =
+  /** The round's answer is on the pull request. */
+  | { readonly outcome: "posted" }
+  /** All the feedback was inline, so the thread replies already carry it. */
+  | { readonly outcome: "nothing-to-say" }
+  /** The comment did not post. The argument exists nowhere a reviewer can see. */
+  | { readonly outcome: "failed"; readonly reason: string };
+
+/**
+ * Whether the round took the pull request out of draft, and why not if not.
+ *
+ * Draft means *this side is still working*. A round that pushed a commit is
+ * still working — the reviewer has something new to read — so it stays a draft.
+ * A round that changed nothing has done everything it can, and the honest thing
+ * is to hand the pull request to a human, which is what undrafting is.
+ *
+ * **The obvious argument for this is wrong and is not the reason.** It is
+ * tempting to say the draft costs a paid round to clear; it does not. The
+ * empty-inbox path returns `ready` before the pass runs, so a later tick that
+ * finds nothing new spends no money at all — measured on #2658, where it took
+ * 2.5 seconds. What the delay actually costs is that the wait is not bounded:
+ * the tick only clears the draft *if nothing new arrives*, so on a pull request
+ * anyone is still commenting on, the draft never clears, and a human reviews a
+ * pull request whose own flag says it is unfinished.
+ *
+ * `failed` is separate from `still-drafting` because they are opposite
+ * instructions. One is a person clicking "Ready for review"; the other is
+ * nothing to do.
+ */
+export type Undraft = "undrafted" | "failed" | "still-drafting";
 
 export type AdvanceOutcome =
   /** The reviewer has not said anything yet. Look again later; nothing ran. */
@@ -187,19 +286,64 @@ export type AdvanceOutcome =
    * request's fault and is recoverable by a human — `advance` now agrees with
    * it instead of contradicting it.
    *
-   * False matters because the loop has no cursor over reviews: it cannot tell a
-   * fresh response from the one it already handled. So a silently-dropped
-   * re-request does not stall visibly — the next tick re-reads the *same*
-   * comments, resolves them again, and burns rounds until the cap undrafts the
-   * pull request as `exhausted`. Surfacing the flag lets the caller say "pushed
-   * a fix, could not re-request review" on the ticket, which is the one message
-   * that gets a human to add the reviewer by hand.
+   * False used to matter because the loop had no cursor: it could not tell a
+   * fresh response from one it had already handled, so a silently-dropped
+   * re-request did not stall visibly — the next tick re-read the same comments,
+   * resolved them again, and burned rounds until the cap undrafted the pull
+   * request as `exhausted`. **The cursor inverted that failure and did not
+   * remove it.** The marker now recognises those comments as already read, so
+   * the next tick returns `ready` and *undrafts* — which is worse in a quieter
+   * way: a pull request goes to a reviewer who was never told to look at it,
+   * and nothing anywhere says the notification was the missing step.
+   *
+   * So surfacing the flag is what lets the caller say "pushed a fix, could not
+   * re-request review" on the ticket, which is the one message that gets a
+   * human to add the reviewer by hand.
    */
   | {
       readonly kind: "iterated";
       readonly round: number;
       readonly responses: readonly string[];
-      readonly reviewerRequested: boolean;
+      readonly reviewerRequested: ReRequest;
+      /**
+       * Whether a commit actually reached the branch this round.
+       *
+       * Not implied by `iterated`, which is the mistake this field exists to
+       * stop. Two of the three paths to this outcome push nothing — a round
+       * that answered the review without touching code, and one whose edits
+       * `commitAll` found nothing to commit in — and the headline said
+       * "round N pushed" on all three. Observed on round 2 of PR #2658, where
+       * the round deliberately changed nothing and the terminal announced a
+       * push that had not happened. An operator reading that goes looking for
+       * a commit, and the next thing they doubt is the marker.
+       */
+      readonly pushed: boolean;
+      /** Where the answer to non-thread feedback went. See `Spoken`. */
+      readonly spoken: Spoken;
+      /** Whether the round left the pull request in draft. See `Undraft`. */
+      readonly undrafted: Undraft;
+      /**
+       * What was posted on the inline threads, and what would not post.
+       *
+       * Beside `responses` rather than folded into it, because they have
+       * different audiences and only one of them is public: `responses` reaches
+       * an operator's terminal, and these reached the reviewer.
+       */
+      readonly threads: ThreadOutcome;
+      /**
+       * What the round could not settle, carried on the *successful* outcome.
+       *
+       * Only `exhausted` used to have this, so on every round that worked the
+       * field the skill calls "what tells a human to stop the loop and look"
+       * was read out of the model's answer and thrown away. The first real
+       * round demonstrated the cost: it held the pass's own note that one of
+       * the points it had argued with was inferred rather than read, which was
+       * the single honest signal that the round was arguing with something the
+       * reviewer never said. Nothing downstream saw it.
+       *
+       * Empty when the round settled everything, which is the common case.
+       */
+      readonly unresolved: string;
     }
   /**
    * The round cap was reached. Undrafted anyway, and the caller must say so on
@@ -207,6 +351,19 @@ export type AdvanceOutcome =
    * merge, and they need to know the loop gave up rather than agreed.
    */
   | { readonly kind: "exhausted"; readonly rounds: number; readonly unresolved: string }
+  /**
+   * `MAX_PR_ROUNDS_TOTAL` reached. Nothing ran, and **the pull request is left
+   * as it is** — not undrafted.
+   *
+   * That is the difference from `exhausted` and the reason this is not the same
+   * outcome with a bigger number. Exhaustion is a reviewer running out of turns
+   * on a pull request the loop still believes in, so undrafting it is the right
+   * end. This is the machinery hitting a stop, which says nothing about whether
+   * the code is ready; undrafting on it would be the loop reporting a verdict it
+   * did not reach, on the one path taken when something has gone wrong enough to
+   * cost twenty rounds.
+   */
+  | { readonly kind: "capped"; readonly rounds: number; readonly unresolved: string }
   /** The resolution pass declined. A human takes the pull request from here. */
   | { readonly kind: "abandoned"; readonly reason: string }
   | {
@@ -215,8 +372,14 @@ export type AdvanceOutcome =
       readonly reasons: readonly string[];
     }
   | {
+      /**
+       * `cursor` is the stage that must not be recovered from by guessing. A
+       * marker that will not parse, two of them, or a reservation that would not
+       * write all mean the round cannot be counted — and a round that runs
+       * uncounted is the unbounded loop the marker exists to prevent.
+       */
       readonly kind: "failed";
-      readonly stage: "read" | "verification" | "commit" | "push" | "undraft";
+      readonly stage: "read" | "cursor" | "verification" | "commit" | "push" | "undraft";
       readonly reason: string;
     };
 
@@ -226,16 +389,212 @@ export type AdvanceOutcome =
  * Our own comments are dropped. Without this the second round is handed the
  * first round's replies as though a reviewer had written them, and a pass
  * responding to its own previous answers is a loop with no new information in
- * it. Matching on the identity we commit under, because that is the only name
- * we can be sure is ours.
+ * it.
+ *
+ * ## This used to match on the author, and that was a bug
+ *
+ * It compared `ReviewComment.author` — a GitHub **login**, parsed out of
+ * `author.login` — against `BotIdentity.name`, which is `SOLVE_BOT_NAME` and
+ * defaults to the git author string `jira-police`. Those never match, so the
+ * filter dropped nothing. It was inert only because nothing posted a comment
+ * yet, and wrong the moment something did.
+ *
+ * There is no login to fix it to, either. `gh` is authenticated as **the
+ * operator**, so a comment this service posts is authored by a human's account
+ * and is indistinguishable *by author* from that human's own review — verified
+ * on PR #2658, where two hand-driven thread replies came back authored
+ * `rull3211`, the same login as the operator's own reviews. So ours is what
+ * carries the `bot: ` prefix, not what carries a name, and `BotIdentity` goes
+ * back to meaning only what it says: the name on a commit.
+ *
+ * The failure this protects against is not symmetric with the one above.
+ * Getting it wrong in this direction feeds the pass its own last answer and
+ * burns a round; getting it wrong in the other direction discards a person's
+ * comment because they happened to open it with the same three characters,
+ * which is why the prefix is checked at the start of the body and nowhere else.
  */
-export function reviewerComments(
-  review: ReviewState,
-  identity: BotIdentity,
-): readonly ReviewComment[] {
-  const ours = identity.name.toLowerCase();
-  return review.comments.filter((comment) => comment.author.toLowerCase() !== ours);
+export function reviewerComments(review: ReviewState): readonly ReviewComment[] {
+  return review.comments.filter((comment) => !isOurs(comment.body));
 }
+
+/**
+ * The newest instant among the comments this round is about to handle.
+ *
+ * Falls back to the mark already recorded, which is what keeps the cursor
+ * monotonic: a batch whose comments all came back undated must not move the
+ * high-water mark *backwards* to the epoch and re-open everything before it.
+ * An undated comment is still handled — `isNewer` lets it through — it just
+ * does not get to say when.
+ */
+export function newestOf(comments: readonly ReviewComment[], fallback: string): string {
+  let newest = fallback;
+  for (const comment of comments) {
+    if (comment.createdAt !== "" && isNewer(comment.createdAt, newest)) {
+      newest = comment.createdAt;
+    }
+  }
+  return newest;
+}
+
+interface ReserveRequest {
+  readonly worktreePath: string;
+  readonly repo: string;
+  readonly number: number;
+  readonly timeoutMs: number;
+  readonly marker: Marker;
+  /** Absent on the first round of a pull request, which posts rather than edits. */
+  readonly commentId?: string;
+}
+
+/** Writes the marker: an edit when there is one to edit, a post when there is not. */
+async function reserve(
+  runner: SolveDependencies["commands"],
+  request: ReserveRequest,
+): Promise<WriteCommentResult> {
+  const body = renderMarker(request.marker);
+  const shared = { cwd: request.worktreePath, body, timeoutMs: request.timeoutMs };
+  return request.commentId === undefined
+    ? postComment(runner, { ...shared, repo: request.repo, number: request.number })
+    : editComment(runner, { ...shared, commentId: request.commentId });
+}
+
+/**
+ * The inline threads a round should be given, and the rule for leaving one out.
+ *
+ * Two exclusions, and they are not the same kind of thing.
+ *
+ * A **resolved** thread is closed. Someone — a reviewer, a human, or an earlier
+ * round of this loop — decided it was done, and reopening the argument by
+ * answering it again is noise on somebody else's pull request.
+ *
+ * A thread whose **last comment is ours** has been answered in public and the
+ * answer is still there. This is the plan's instability rule, and it is keyed on
+ * a fact rather than on a timestamp on purpose: a bot reviewer that re-raises a
+ * settled point produces no new comment on the thread, so a date-based cursor
+ * would see nothing and a "did the verdict change" check would see an argument
+ * worth having. The thread itself already says who spoke last. If the reviewer
+ * genuinely comes back with something new, their comment is last and the thread
+ * is actionable again, which is exactly the discrimination wanted.
+ *
+ * The second rule is also the retry: a round whose reply failed to post leaves
+ * the reviewer's comment last, so the next round tries again rather than
+ * treating a failed write as an answer given.
+ */
+export function unansweredThreads(threads: readonly ReviewThread[]): readonly ReviewThread[] {
+  return threads.filter((thread) => {
+    if (thread.isResolved) {
+      return false;
+    }
+    const last = thread.comments.at(-1);
+    return last === undefined || !isOurs(last.body);
+  });
+}
+
+/**
+ * One thread, as a line for a human reading `unresolved` on a ticket.
+ *
+ * The location and the first comment, not the whole conversation: this ends up
+ * in a Jira comment telling somebody the loop gave up, and what they need is
+ * enough to find the thread on GitHub.
+ */
+function threadLine(thread: ReviewThread): string {
+  const where = thread.line === null ? thread.path : `${thread.path}:${String(thread.line)}`;
+  return `${where} — ${thread.comments[0]?.body.trim() ?? "(the thread came back empty)"}`;
+}
+
+/** What a round managed to say on the threads it was given. */
+export interface ThreadOutcome {
+  readonly answered: number;
+  readonly resolved: number;
+  /**
+   * One line per thread that could not be answered or closed.
+   *
+   * Reported rather than thrown, for the same reason `reviewerRequested` is: the
+   * code is pushed and the pull request is healthy, and discarding a completed
+   * round because a comment would not post helps nobody. But it is never
+   * silent — an unposted reply is a decline that nobody can see, which is
+   * indistinguishable from not having read the comment.
+   */
+  readonly failures: readonly string[];
+}
+
+/**
+ * Posts the round's answers, and closes only the threads that earned it.
+ *
+ * **Called after the push, never before.** A reply that says what changed is a
+ * public claim about a commit, so posting it before the commit exists would
+ * leave that claim standing on a round that then failed verification and pushed
+ * nothing. The reviewer would read an answer to a change that is not there.
+ *
+ * Two guards worth naming. An answer naming a thread that was not handed to
+ * this round is dropped — the id is model-authored and an id that came from
+ * nowhere addresses a conversation nobody in this round read. And the resolve
+ * goes through `resolveThread`, which takes the receipt `replyToThread`
+ * returns, so a thread cannot be closed by a round that failed to say why.
+ */
+async function answerThreads(
+  runner: SolveDependencies["commands"],
+  opts: { readonly cwd: string; readonly timeoutMs: number },
+  answers: readonly ThreadAnswer[],
+  given: readonly ReviewThread[],
+): Promise<ThreadOutcome> {
+  const ids = new Set(given.map((thread) => thread.id));
+  const failures: string[] = [];
+  let answered = 0;
+  let resolved = 0;
+
+  for (const answer of answers) {
+    if (!ids.has(answer.threadId)) {
+      failures.push(
+        `the round answered thread ${answer.threadId}, which it was not given — nothing was posted`,
+      );
+      continue;
+    }
+
+    const replied = await replyToThread(runner, {
+      cwd: opts.cwd,
+      threadId: answer.threadId,
+      body: answer.reply,
+      timeoutMs: opts.timeoutMs,
+    });
+    if (replied.outcome === "failed") {
+      failures.push(replied.reason);
+      continue;
+    }
+    answered += 1;
+
+    if (!answer.resolve) {
+      continue;
+    }
+    const closed = await resolveThread(runner, {
+      cwd: opts.cwd,
+      reply: replied.reply,
+      timeoutMs: opts.timeoutMs,
+    });
+    if (closed.outcome === "failed") {
+      // The reply is posted, so the argument is public and a human can close
+      // the thread. Worth reporting and not worth failing the round over.
+      failures.push(closed.reason);
+      continue;
+    }
+    resolved += 1;
+  }
+
+  return { answered, resolved, failures };
+}
+
+/**
+ * The round could not be counted, so it does not run.
+ *
+ * Every caller is a place where guessing would release the brake rather than
+ * apply it, which is why they all funnel through one constructor instead of
+ * each deciding what a missing count means.
+ */
+const cursorFailed = (reason: string): AdvanceOutcome => ({
+  kind: "failed",
+  stage: "cursor",
+  reason,
+});
 
 /**
  * Looks once at the review and moves the pull request forward if it can.
@@ -247,7 +606,7 @@ export async function advance(
   request: AdvanceRequest,
 ): Promise<AdvanceOutcome> {
   const { commands } = deps;
-  const { worktree, repo, number, round, maxRounds } = request;
+  const { worktree, repo, number, maxRounds, maxTotalRounds } = request;
   const gh = { worktreePath: worktree.path, repo, number, timeoutMs: request.ghTimeoutMs };
 
   const read = await readReview(commands, gh);
@@ -259,6 +618,32 @@ export async function advance(
   if (!review.reviewerResponded) {
     return { kind: "waiting" };
   }
+
+  // The inline comments, over the transport that can reach them. A failure here
+  // is a failure of the round and not a shrug: `readReviewThreads` refuses
+  // rather than returning a short list precisely so this call site cannot carry
+  // on with half a review, resolve what it did see, and undraft.
+  const inline = await readReviewThreads(commands, gh);
+  if (inline.outcome === "failed") {
+    return { kind: "failed", stage: "read", reason: inline.reason };
+  }
+  const threads = unansweredThreads(inline.threads);
+
+  // The marker is read before anything else is decided, because everything else
+  // is decided from it: how many rounds this pull request has already cost, and
+  // which of the comments below have already been answered.
+  const located = findMarker(review.comments);
+  if (located.outcome === "unusable") {
+    return cursorFailed(located.reason);
+  }
+  const previous = located.outcome === "found" ? parseMarker(located.comment.body) : null;
+  if (previous?.outcome === "unreadable") {
+    // Not zero. The whole point of the marker is that losing the count releases
+    // the brake, so an unreadable one stops the round and says why.
+    return cursorFailed(`the marker on #${String(number)} will not parse — ${previous.reason}`);
+  }
+  const marker = previous?.outcome === "parsed" ? previous.marker : null;
+  const round = marker?.count ?? 0;
 
   const undraft = async (outcome: AdvanceOutcome): Promise<AdvanceOutcome> => {
     const marked = await markReady(commands, gh);
@@ -275,7 +660,14 @@ export async function advance(
    * human clicking the reviewer in. Returning `failed` here would discard a
    * completed round of work over that.
    */
-  const reRequest = async (): Promise<boolean> => {
+  const reRequest = async (pushed: boolean): Promise<ReRequest> => {
+    // The ping is for a commit, not for a round. Skipping it when there is no
+    // commit is what stops the loop asking a reviewer to re-read a tree it has
+    // already read — see `ReRequest`. A reply we posted on a thread notifies on
+    // its own, so nothing goes unheard by leaving this out.
+    if (!pushed) {
+      return "unnecessary";
+    }
     const asked = await requestReview(commands, {
       ...gh,
       ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
@@ -287,16 +679,47 @@ export async function advance(
         round,
         reason: asked.reason,
       });
-      return false;
+      return "failed";
     }
-    return true;
+    return "asked";
   };
 
-  const comments = reviewerComments(review, request.identity);
-  if (comments.length === 0) {
-    // Responded, nothing to act on. The pull request is as good as it is going
-    // to get from this side.
+  // The high-water-mark filter, and the single most important line in this
+  // function. Without it the loop cannot tell a comment it already handled from
+  // a new one, so a review left in place while its author waits for a reply is
+  // re-read, re-resolved and re-pushed on every tick at full solve cost, until
+  // somebody merges the pull request. The round cap bounds that today; §6.2
+  // removes the cap for human feedback, which is exactly the feedback that will
+  // sit unanswered the longest.
+  const comments = reviewerComments(review).filter(
+    (comment) => marker === null || isNewer(comment.createdAt, marker.lastRead),
+  );
+  if (comments.length === 0 && threads.length === 0) {
+    // Responded, nothing *new* to act on. Reached both on a pull request whose
+    // reviewer never had a complaint and on one whose comments were all
+    // answered by an earlier round, and those are the same state: there is
+    // nothing left for this side to do.
+    //
+    // **Both halves are load-bearing.** An open inline thread nobody has
+    // answered is an unaddressed review, and undrafting on the strength of an
+    // empty comment list would do to every pull request what the loop did to
+    // #2658 once — mark it reviewed while the substance of the review sat
+    // somewhere `--json` cannot see.
     return undraft({ kind: "ready", rounds: round });
+  }
+
+  const unresolved = (): string =>
+    [
+      ...comments.map((comment) => comment.body),
+      ...threads.map((thread) => threadLine(thread)),
+    ].join("\n\n");
+
+  if (round >= maxTotalRounds) {
+    // Checked before the reviewer's own cap, because it outranks it: a policy
+    // change to `maxRounds` must not be able to step past the brake. Nothing is
+    // undrafted — see the outcome's doc comment.
+    logger.error("solve.review.capped", { issueKey: worktree.issueKey, number, rounds: round });
+    return { kind: "capped", rounds: round, unresolved: unresolved() };
   }
 
   if (round >= maxRounds) {
@@ -304,16 +727,41 @@ export async function advance(
     // owns saying on the ticket that the cap was hit rather than the reviewer
     // being satisfied.
     logger.warn("solve.review.exhausted", { issueKey: worktree.issueKey, number, rounds: round });
-    return undraft({
-      kind: "exhausted",
-      rounds: round,
-      unresolved: comments.map((comment) => comment.body).join("\n\n"),
-    });
+    return undraft({ kind: "exhausted", rounds: round, unresolved: unresolved() });
+  }
+
+  // **The reservation, and it comes before the pass on purpose.** Bump the
+  // count and move the high-water mark first; if the write fails, the round
+  // does not run. Writing it afterwards means a failed write hands back a free
+  // round — every tick, forever — which is the runaway this whole mechanism
+  // exists to close, reintroduced by an ordering.
+  //
+  // The cost is accepted deliberately: a round that reserves and then fails has
+  // spent a round on feedback it will not retry. `advance` already makes that
+  // trade for `refused`, and here the spend is visible in the marker rather
+  // than silent.
+  const reserved = await reserve(commands, {
+    ...gh,
+    marker: {
+      count: round + 1,
+      lastRead: newestOf(comments, marker?.lastRead ?? NEVER_READ),
+      rounds: [
+        ...(marker?.rounds ?? []),
+        `round ${String(round + 1)} — reading ${String(comments.length)} comment(s) and ${String(threads.length)} thread(s)`,
+      ],
+    },
+    ...(located.outcome === "found" ? { commentId: located.comment.id } : {}),
+  });
+  if (reserved.outcome === "failed") {
+    return cursorFailed(`the round was not reserved, so it did not run — ${reserved.reason}`);
   }
 
   const resolved = await resolveReview(deps, {
     ...request,
-    reviewFeedback: formatReviewFeedback(comments),
+    // One block, so both halves land inside the single untrusted-data fence
+    // `runner.ts` puts around review feedback. A thread body is exactly as
+    // attacker-influenced as a review body and must not get a quieter frame.
+    reviewFeedback: `${formatReviewFeedback(comments)}\n\n${formatThreads(threads)}`,
   });
   if (resolved.kind === "abandoned") {
     return { kind: "abandoned", reason: resolved.reason };
@@ -324,15 +772,82 @@ export async function advance(
   if (resolved.kind === "failed") {
     return { kind: "failed", stage: "verification", reason: resolved.reason };
   }
+  const answer = async (): Promise<ThreadOutcome> =>
+    answerThreads(
+      commands,
+      { cwd: worktree.path, timeoutMs: request.ghTimeoutMs },
+      resolved.report.threadAnswers,
+      threads,
+    );
+
+  /**
+   * Puts the round's answer to the review bodies on the pull request.
+   *
+   * Only when there was feedback with no thread to reply to. A round whose
+   * input was entirely inline has already answered in the right place, and a
+   * summary comment restating it is the bot chatter §6.3 refuses to add.
+   *
+   * The `bot: ` prefix is not decoration. `reviewerComments` drops our own by
+   * that prefix — there is no login to key on, since `gh` posts as the operator
+   * — so a comment written without it is read back next round as a reviewer
+   * asking for something, and the loop argues with itself. It is deliberately
+   * not the marker's prefix, which is longer and matched separately.
+   */
+  const say = async (): Promise<Spoken> => {
+    if (comments.length === 0 || resolved.report.responses.length === 0) {
+      return { outcome: "nothing-to-say" };
+    }
+    const posted = await postComment(commands, {
+      cwd: worktree.path,
+      repo,
+      number,
+      body: `${BOT_PREFIX}round ${String(round + 1)}\n\n${resolved.report.responses
+        .map((response) => `- ${response}`)
+        .join("\n")}`,
+      timeoutMs: request.ghTimeoutMs,
+    });
+    return posted.outcome === "failed"
+      ? { outcome: "failed", reason: posted.reason }
+      : { outcome: "posted" };
+  };
+
+  /**
+   * Takes the pull request out of draft when the round has nothing left to do.
+   *
+   * Gated on the answer being *visible*, not merely produced. Undrafting hands
+   * the pull request to a human, and doing that while the round's reply sits in
+   * a terminal — or failed to post — shows them a reviewer's objection with no
+   * answer next to it, which is the state round 3 of #2658 would have created.
+   */
+  const leaveDraft = async (spoken: Spoken, posted: ThreadOutcome): Promise<Undraft> => {
+    if (spoken.outcome === "failed" || posted.failures.length > 0) {
+      return "still-drafting";
+    }
+    const marked = await markReady(commands, gh);
+    return marked.outcome === "failed" ? "failed" : "undrafted";
+  };
+
   if (resolved.kind === "no-change") {
-    // Questions answered, no code touched. Nothing to push, and the reviewer
-    // is asked again so they can read the answers.
-    const reviewerRequested = await reRequest();
+    // Questions answered, no code touched. The replies still go out: a round
+    // that answered without editing has answered, and its argument belongs next
+    // to the comment it answers rather than only in a terminal.
+    //
+    // Then the pull request leaves draft. This side is finished with it: there
+    // is nothing for the reviewer to re-read and nothing more this loop can do,
+    // so the flag saying otherwise is just wrong. See `Undraft` for why waiting
+    // for a later tick to clear it is not a reliable substitute.
+    const threadOutcome = await answer();
+    const spoken = await say();
     return {
       kind: "iterated",
       round: round + 1,
       responses: resolved.report.responses,
-      reviewerRequested,
+      reviewerRequested: await reRequest(false),
+      pushed: false,
+      spoken,
+      undrafted: await leaveDraft(spoken, threadOutcome),
+      threads: threadOutcome,
+      unresolved: resolved.report.unresolved,
     };
   }
 
@@ -348,22 +863,39 @@ export async function advance(
   }
 
   if (committed.outcome === "committed") {
-    const pushed = await push(commands, {
+    const sent = await push(commands, {
       worktreePath: worktree.path,
       branch: worktree.branch,
       timeoutMs: request.gitTimeoutMs,
     });
-    if (pushed.outcome === "failed") {
-      return { kind: "failed", stage: "push", reason: pushed.reason };
+    if (sent.outcome === "failed") {
+      return { kind: "failed", stage: "push", reason: sent.reason };
     }
   }
 
-  const reviewerRequested = await reRequest();
+  // After the push, never before. A reply claiming what changed must not be
+  // standing in public on a round that pushed nothing.
+  const threadOutcome = await answer();
+  const spoken = await say();
+  const pushed = committed.outcome === "committed";
+  const reviewerRequested = await reRequest(pushed);
   return {
     kind: "iterated",
     round: round + 1,
     responses: resolved.report.responses,
     reviewerRequested,
+    spoken,
+    // A round with a commit on it stays a draft even though it is the same
+    // `iterated` kind: the reviewer has something new to read, and undrafting
+    // now would put a half-answered pull request in front of a human.
+    undrafted: pushed ? "still-drafting" : await leaveDraft(spoken, threadOutcome),
+    // The commit, not the model's `changed` flag. A pass can report an edit
+    // that `commitAll` then finds nothing to commit in — a rewrite that
+    // reproduced the file byte for byte — and the branch is the only honest
+    // witness to what a reviewer will see.
+    pushed,
+    threads: threadOutcome,
+    unresolved: resolved.report.unresolved,
   };
 }
 
