@@ -218,6 +218,16 @@ resolved; say plainly what should not.
    next to the comment it answers, where the reviewer and any human can read it. `responses`
    reaches an operator's terminal and nobody else, so a disagreement that lives only there has not
    been made.
+
+   **Keep the reply to a short paragraph.** It sits under a one-line comment, in a page of them,
+   and is read by someone scanning. Lead with what you did or found — "Done — X now does Y",
+   "Checked: Z, so the premise does not hold" — then the one reason it is right, and stop. An
+   observed failure: three paragraphs answering a nine-word comment, with the browser-resolution
+   argument, the federated-remote argument, a file census and a test inventory all in the thread.
+   Every sentence was true and the reviewer still has to mine it for the answer. The overflow has
+   somewhere to go: `responses` for the operator, the commit body for the change, `unresolved` for
+   what a human must decide. None of those are posted on the thread, which is the point.
+
 5. **Put anything you could not resolve in `unresolved`** — a design question, a request needing a
    new dependency, a comment about code you were not given. That field is what tells a human to
    stop the loop and look.

@@ -292,7 +292,7 @@ export const REVIEW_SCHEMA = {
           reply: {
             type: "string",
             description:
-              "What to post on the thread. A reviewer and a human will read it, so give the reasoning, not a verdict. If you are declining the comment, say what you checked and what you found.",
+              'What to post on the thread, in a short paragraph at most. Lead with what you did or found — "Done \u2014 X now does Y" or "Checked: Z, so the premise does not hold". This sits next to a one-line review comment and is read by someone scanning a page of them, so match that scale: the change, and the one reason it is right. Detail that does not fit belongs in `responses`, the commit body or `unresolved`, none of which are posted here.',
           },
           basis: {
             type: "string",
