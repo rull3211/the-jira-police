@@ -150,7 +150,11 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         outcome.responses.map((response) => `  - ${response}`).join("\n") +
         (outcome.reviewerRequested
           ? `\nThe reviewer was asked to look again.`
-          : `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`)
+          : `\nThe reviewer was NOT asked to look again — add them by hand, or nothing will re-read this.`) +
+        // Printed on a successful round, not only on an exhausted one. This is
+        // the field the skill calls "what tells a human to stop the loop and
+        // look", and a round that succeeded is exactly when nobody goes looking.
+        (outcome.unresolved === "" ? "" : `\nUnresolved:\n${outcome.unresolved}`)
       );
     }
     case "exhausted": {

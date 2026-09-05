@@ -295,6 +295,31 @@ describe("advance", () => {
     expect(ran(h, "pr", "edit")).toBe(true);
   });
 
+  it.each([
+    ["pushed a change", review({ unresolved: "the second point needs a product decision" })],
+    [
+      "only answered questions",
+      review({
+        changed: false,
+        filesTouched: [],
+        unresolved: "the second point needs a product decision",
+      }),
+    ],
+  ])("carries what a successful round could not settle — %s", async (_case, report) => {
+    // Only `exhausted` used to carry this, so on a round that worked the field
+    // the skill calls "what tells a human to stop the loop and look" was read
+    // and dropped. Both construction sites, because they are separate returns
+    // and a fix to one leaves the other silent.
+    const h = harness({ review: report });
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({
+      kind: "iterated",
+      unresolved: "the second point needs a product decision",
+    });
+  });
+
   // `publish` already treats a failed reviewer request as its own outcome.
   // `advance` used to discard the same result while its type said "the reviewer
   // was asked again", so the one caller that could act on it was never told.

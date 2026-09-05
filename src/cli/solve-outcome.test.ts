@@ -302,8 +302,20 @@ describe("describeSolveOutcome", () => {
 const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   { kind: "waiting" },
   { kind: "ready", rounds: 2 },
-  { kind: "iterated", round: 1, responses: ["renamed the helper"], reviewerRequested: true },
-  { kind: "iterated", round: 2, responses: ["answered in a comment"], reviewerRequested: false },
+  {
+    kind: "iterated",
+    round: 1,
+    responses: ["renamed the helper"],
+    reviewerRequested: true,
+    unresolved: "",
+  },
+  {
+    kind: "iterated",
+    round: 2,
+    responses: ["answered in a comment"],
+    reviewerRequested: false,
+    unresolved: "",
+  },
   { kind: "exhausted", rounds: 3, unresolved: "this still allocates on every render" },
   { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
@@ -374,6 +386,7 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       reviewerRequested: false,
+      unresolved: "",
     });
     expect(text).toContain("NOT");
     expect(text).toContain("add them by hand");
@@ -385,9 +398,37 @@ describe("describeAdvanceOutcome", () => {
       round: 2,
       responses: ["fixed"],
       reviewerRequested: true,
+      unresolved: "",
     });
     expect(text).not.toContain("NOT");
     expect(text).toContain("asked to look again");
+  });
+
+  it("prints what a successful round could not settle", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      reviewerRequested: true,
+      unresolved: "the second point needs a product decision",
+    });
+
+    expect(text).toContain("Unresolved:");
+    expect(text).toContain("needs a product decision");
+  });
+
+  it("says nothing about unresolved when the round settled everything", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 2,
+      responses: ["fixed"],
+      reviewerRequested: true,
+      unresolved: "",
+    });
+
+    // The common case, and a bare "Unresolved:" heading over nothing trains a
+    // reader to skip the line on the round where it matters.
+    expect(text).not.toContain("Unresolved");
   });
 
   it("says the cap fired rather than that the reviewer was satisfied", () => {

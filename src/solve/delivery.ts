@@ -200,6 +200,20 @@ export type AdvanceOutcome =
       readonly round: number;
       readonly responses: readonly string[];
       readonly reviewerRequested: boolean;
+      /**
+       * What the round could not settle, carried on the *successful* outcome.
+       *
+       * Only `exhausted` used to have this, so on every round that worked the
+       * field the skill calls "what tells a human to stop the loop and look"
+       * was read out of the model's answer and thrown away. The first real
+       * round demonstrated the cost: it held the pass's own note that one of
+       * the points it had argued with was inferred rather than read, which was
+       * the single honest signal that the round was arguing with something the
+       * reviewer never said. Nothing downstream saw it.
+       *
+       * Empty when the round settled everything, which is the common case.
+       */
+      readonly unresolved: string;
     }
   /**
    * The round cap was reached. Undrafted anyway, and the caller must say so on
@@ -333,6 +347,7 @@ export async function advance(
       round: round + 1,
       responses: resolved.report.responses,
       reviewerRequested,
+      unresolved: resolved.report.unresolved,
     };
   }
 
@@ -364,6 +379,7 @@ export async function advance(
     round: round + 1,
     responses: resolved.report.responses,
     reviewerRequested,
+    unresolved: resolved.report.unresolved,
   };
 }
 
