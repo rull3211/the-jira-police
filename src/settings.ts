@@ -186,7 +186,7 @@ export const SETTINGS = [
   {
     name: "SOLVE_TIMEOUT_MS",
     description:
-      "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones.",
+      "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones. Wall-clock means wall-clock: a machine that sleeps mid-pass spends the budget without the pass running, which killed a recon on SSX-3831 that had done nothing wrong. Harmless for a hand-driven run on a waking machine and not harmless for E, where a laptop daemon meets this every night.",
     fallback: "1800000",
   },
   {
