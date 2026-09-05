@@ -18,6 +18,7 @@
  */
 
 import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
+import type { ReviewStage, SolveOutcomeLabel } from "../solve/labels.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 
 /**
@@ -54,6 +55,119 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
     outcome.kind === "unusable-base" ||
     (outcome.kind === "abandoned" && outcome.cause === "environment")
   );
+}
+
+/**
+ * The label a finished solve leaves behind, or `null` to release the ticket.
+ *
+ * `null` does not mean "nothing happened". It means *put the ticket back exactly
+ * as it was found*, which is the right answer for every outcome that says
+ * nothing about the ticket: a crashed pass, an unusable base, a machine that got
+ * in the way. Re-running those is sensible, and a label excluding the ticket
+ * from the queue would convert a transient failure into a permanent one that
+ * only a human could clear.
+ *
+ * `failed` is the opposite case, and until this function nothing produced it.
+ * The label existed, `completionTransition` knew how to write it, and no
+ * production caller ever asked — so the `failed` arm was built, tested and
+ * unreachable. What that cost is the argument for this function: a bailed ticket
+ * was restored byte-for-byte and became indistinguishable from one nobody had
+ * tried, so in auto mode the queue re-claimed it every tick and paid for triage
+ * and recon each time, **with no condition that could ever clear it**, because
+ * the thing that would clear it was the label with no writer. Observed on
+ * SSX-3831, 2026-09-05, where recon declined correctly and the ticket came back
+ * carrying `agent:solvable` as though the run had never happened.
+ *
+ * ## Two outcomes qualify, and this is deliberately not `!isFailureExit`
+ *
+ * `bailed` is §5's case: recon read the code and declined. `abandoned` with
+ * cause `judgement` is the same statement one pass later — the doc on that
+ * variant calls it "a verdict about the ticket", against `environment`, which
+ * "says nothing whatever about the ticket".
+ *
+ * Those happen to be the two non-success outcomes that exit zero, so this could
+ * be spelled as `isFailureExit` inverted, and it is not. That rule asks *did
+ * this produce a usable answer*, for the benefit of `$?` and a daemon's backoff.
+ * This one asks *is this ticket's fate now decided*, for the benefit of a queue.
+ * They agree today and they are two different questions — the same reasoning
+ * that keeps `reviewStageAfter` on the draft flag rather than on `pushed`.
+ * Deriving one from the other would let a change to an exit code silently
+ * relabel tickets, which is a long way from where anyone would look.
+ *
+ * ## What this deliberately leaves open
+ *
+ * `refused` and `failed` keep releasing. An agent did work and it was not
+ * accepted — neither a verdict about the ticket nor a fault of the machine — and
+ * a re-run may well succeed, so they stay retryable. The cost of that is honest
+ * and worth stating: auto mode can still spend repeatedly on one of them.
+ * Bounding *that* wants a per-ticket attempt count rather than a terminal label,
+ * and it belongs with E, where the thing doing the retrying first exists.
+ */
+export function terminalLabelAfter(outcome: SolveOutcome): SolveOutcomeLabel | null {
+  if (outcome.kind === "bailed") {
+    return "failed";
+  }
+  return outcome.kind === "abandoned" && outcome.cause === "judgement" ? "failed" : null;
+}
+
+/**
+ * Whether this outcome is said out loud on the ticket.
+ *
+ * Until 2026-09-05 there was no such function: the commenter was gated on
+ * `terminalLabelAfter(outcome) !== null`, and the comment at that call site
+ * argued the fusion was the point — "the label and the comment are one
+ * statement". They are not, and the fusion had a failure mode nobody predicted
+ * because it is invisible by construction.
+ *
+ * ## What silence actually looked like
+ *
+ * SSX-3832, 2026-09-05. A local policy hook denied the write pass its `Write`
+ * tool, so the run ended `abandoned` with cause `environment`. Before that it
+ * had claimed the ticket, written fifteen labels, cut a worktree, verified the
+ * base build green on all four steps, and paid for triage, recon and a fix pass.
+ * Then it released every label byte-for-byte and posted nothing, because
+ * `environment` writes no terminal label. **The board was identical to a ticket
+ * nobody had ever picked up.** Somebody asking "did the bot try this one?" had
+ * no way to find out short of reading a terminal that had already scrolled.
+ *
+ * ## Two questions, and only one of them is about the ticket's fate
+ *
+ * `terminalLabelAfter` asks *is this ticket's fate decided*, and its answer must
+ * stay narrow: a hook denial or a slept laptop says nothing about the ticket, so
+ * labelling it would convert a transient failure into one only a human can
+ * clear. That reasoning is sound and is unchanged.
+ *
+ * This asks *did this run spend a claim on this ticket*, which is true of every
+ * outcome above, including all the ones that must not be labelled. Answering the
+ * second question with the first is what produced the silence — the narrowness
+ * that is correct for a queue is exactly wrong for a reader.
+ *
+ * ## Why the old argument for silence does not survive
+ *
+ * It was noise: `feedback.ts` phrases these as "this says nothing about whether
+ * the ticket is solvable", and posting that on somebody's bug every time a
+ * laptop slept was judged worse than saying nothing. But silence is only kind
+ * when the alternative is noise, and here the alternative is a team guessing
+ * whether the tool ran at all. A sentence saying "this is about the machine, not
+ * your ticket" is worth more than an unexplained gap, because the gap is
+ * indistinguishable from the tool being switched off.
+ *
+ * The honest cost is stacking. Nothing here writes a label, so under E the same
+ * ticket can be re-claimed and abandoned nightly, and `commenter.ts` has no read
+ * tool with which to find and rewrite its own last comment. That is real, it is
+ * the noise the old gate was reaching for, and the fix for it is the
+ * transient/deterministic split plus a per-ticket attempt count — both of which
+ * belong with E, where the thing doing the retrying first exists. Hand-driven
+ * runs, which is all there are today, post once per invocation by a person.
+ *
+ * ## `verified` is the one exclusion, and it is not an exception
+ *
+ * A verified run is the only outcome that already announces itself: it goes on
+ * to open a pull request, and the pull request is the notification. Commenting
+ * as well would say the same thing twice, in the channel with no dedupe.
+ */
+export function reportsToTicket(outcome: SolveOutcome): boolean {
+  return outcome.kind !== "verified";
 }
 
 /** One line an operator can act on, per outcome. */
@@ -137,6 +251,157 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  */
 export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
   return outcome.kind === "failed" || outcome.kind === "refused";
+}
+
+/**
+ * Whether `--review` should run another round, and what to call the ending.
+ *
+ * The whole of the chain's termination logic, as a pure function over one
+ * outcome, because the alternative is a `while` loop with six `break`s in it and
+ * no way to test the sixth. The loop that consumes this decides nothing: it
+ * sleeps, it counts, and it obeys.
+ *
+ * ## Continuing is the narrow case, and that is the safe direction
+ *
+ * Exactly two outcomes continue. `waiting` means the reviewer has not spoken, so
+ * there is nothing to do but look again. `iterated` means a round happened, and
+ * a round that happened invites another review. **Everything else stops**, and
+ * the default arm is written to stop rather than to continue so that an outcome
+ * added later has to be argued into the loop instead of falling into it.
+ *
+ * ## Undrafting ends the chain, which is the one decision worth defending
+ *
+ * §6.1 says the loop keeps listening after undraft, because a human review is
+ * exactly what undrafting invites. That is right for the daemon and wrong here:
+ * this is a foreground command, and "keep listening" in a foreground command
+ * means a terminal blocked for however many days a person takes to review. The
+ * chain's goal is the handover, so it stops at the handover — undrafted, ticket
+ * on `agent:review-done`, a human's turn. The listening E does afterwards is a
+ * different loop with a different operator, and conflating them would make this
+ * command's ending depend on somebody else's calendar.
+ *
+ * So `ready` stops, `exhausted` stops — both undrafted — and `iterated` stops
+ * when it undrafted itself, which is §6.1c's rule that a round changing nothing
+ * has finished. An `iterated` round that pushed stays a draft and goes round
+ * again.
+ *
+ * ## `silent` is a separate question from `stop`
+ *
+ * It marks the one outcome that means *the reviewer said nothing*, and it is
+ * what `MAX_REVIEW_WAITS` counts. It has to be separate because the round caps
+ * cannot see this failure at all: a reviewer that never answers produces no
+ * rounds, so `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` both sit at zero
+ * while the loop spins. Silence is the unbounded case, and it is unbounded
+ * precisely because it is free — which is why it needs its own counter rather
+ * than a share of somebody else's.
+ */
+export interface ChainDecision {
+  readonly stop: boolean;
+  /** True only when the reviewer has not spoken. Counts against `MAX_REVIEW_WAITS`. */
+  readonly silent: boolean;
+  /** One line, for the operator, naming why the chain did what it did next. */
+  readonly why: string;
+}
+
+export function chainDecision(outcome: AdvanceOutcome): ChainDecision {
+  switch (outcome.kind) {
+    case "waiting": {
+      return { stop: false, silent: true, why: "the reviewer has not said anything yet" };
+    }
+    case "iterated": {
+      // The draft flag, not `pushed` — the same choice `reviewStageAfter` makes
+      // and for the same reason. A round can push nothing and still be finished,
+      // and a round whose answer would not post holds the draft deliberately.
+      return outcome.undrafted === "undrafted"
+        ? {
+            stop: true,
+            silent: false,
+            why: "the round undrafted the pull request — a human has it now",
+          }
+        : {
+            stop: false,
+            silent: false,
+            why: `round ${String(outcome.round)} ${outcome.pushed ? "pushed" : "answered without pushing"}, so the reviewer gets another look`,
+          };
+    }
+    case "ready": {
+      return { stop: true, silent: false, why: "nothing left to act on — undrafted" };
+    }
+    case "exhausted": {
+      return {
+        stop: true,
+        silent: false,
+        why: "the reviewer's round budget is spent; undrafted anyway",
+      };
+    }
+    case "capped": {
+      return {
+        stop: true,
+        silent: false,
+        why: "MAX_PR_ROUNDS_TOTAL reached — the pull request is left in draft for a human",
+      };
+    }
+    case "abandoned": {
+      return { stop: true, silent: false, why: `the pass declined: ${outcome.reason}` };
+    }
+    case "refused": {
+      return { stop: true, silent: false, why: `refused at the ${outcome.stage}` };
+    }
+    default: {
+      // `failed`, and anything added later. Stopping is the default on purpose:
+      // a new outcome that should loop is a deliberate edit here, and a new
+      // outcome nobody thought about ends the chain rather than driving it.
+      return { stop: true, silent: false, why: "the round could not complete" };
+    }
+  }
+}
+
+/**
+ * Which review stage the ticket should be in after this round, or `null`.
+ *
+ * The pull request's draft flag is the source of truth and the ticket's label is
+ * a mirror of it, so this reads only what the round did to the draft — never
+ * what it concluded, and never whether it succeeded. `agent:review-done` means
+ * *the pull request is out of draft*, which is a fact anyone can check.
+ *
+ * **`null` is the answer for every outcome that left the draft flag alone**, and
+ * it is the majority of them. Saying "leave the label as it is" is not the same
+ * as saying "the ticket is still under review": `capped`, `abandoned`, `refused`
+ * and the error kinds all deliberately leave a pull request exactly as they
+ * found it, and a round that writes a label after changing nothing is a round
+ * that overrides an earlier, better-informed decision with a default.
+ *
+ * `waiting` is the one worth naming separately even though it shares the answer.
+ * It is the *most common* outcome by a wide margin once the advance step runs on
+ * a timer, and it costs nothing today only because it also returns `null` here.
+ * Give it a stage and every quiet pull request becomes a Jira write per tick.
+ */
+export function reviewStageAfter(outcome: AdvanceOutcome): ReviewStage | null {
+  switch (outcome.kind) {
+    // Undrafted, so the agentic cycle is over and a human is the only thing
+    // left. `exhausted` reaches the same place by a different road — the
+    // reviewer's budget ran out rather than the reviewer running out of things
+    // to say — and the ticket cannot tell the difference because the pull
+    // request cannot either. The comment on the ticket is where that difference
+    // is recorded, and it already is.
+    case "ready":
+    case "exhausted": {
+      return "review-done";
+    }
+    // The only outcome that can go either way, and it is decided by the draft
+    // flag rather than by `pushed`. Those agree today — §6.1c's rule is that a
+    // round which pushed stays a draft — but they are two different facts, and
+    // reading the one this label mirrors means a future change to that rule
+    // cannot silently desynchronise the board from the pull request. A `failed`
+    // undraft is `reviewing`, which is correct rather than pessimistic: the pull
+    // request really is still a draft.
+    case "iterated": {
+      return outcome.undrafted === "undrafted" ? "review-done" : "reviewing";
+    }
+    default: {
+      return null;
+    }
+  }
 }
 
 /**

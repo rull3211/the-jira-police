@@ -4,6 +4,7 @@ import {
   SETTINGS,
   SettingsError,
   describeSettings,
+  failFirstCheck,
   flag,
   list,
   numeric,
@@ -165,6 +166,27 @@ describe("the solve settings", () => {
 
   it("arms only on an explicit true", () => {
     expect(flag(readSettings({ ...MINIMAL, SOLVE_ENABLED: "true" }), "SOLVE_ENABLED")).toBe(true);
+  });
+
+  it("checks fail-first unless somebody turned it off", () => {
+    // The one setting here that is on by default, and the asymmetry is the
+    // point: it grants nothing and writes nothing, so the safe direction is
+    // the opposite of every neighbour's.
+    expect(failFirstCheck(readSettings(MINIMAL))).toBe(true);
+  });
+
+  it.each(["", "  ", "no", "0", "flase", "off", "true"])(
+    "keeps checking on %j, because only false may withdraw it",
+    (value) => {
+      // Deliberately not `flag()`. A typo in a setting that arms a privilege
+      // must fail closed; a typo in a setting that removes a guard must not
+      // silently remove it, and those are opposite defaults.
+      expect(failFirstCheck(readSettings({ ...MINIMAL, FAIL_FIRST_CHECK: value }))).toBe(true);
+    },
+  );
+
+  it.each(["false", "FALSE", " false "])("turns off on an explicit %j", (value) => {
+    expect(failFirstCheck(readSettings({ ...MINIMAL, FAIL_FIRST_CHECK: value }))).toBe(false);
   });
 
   it("defaults to manual, so a solve waits for a human", () => {

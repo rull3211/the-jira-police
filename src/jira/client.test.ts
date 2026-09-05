@@ -1,5 +1,6 @@
 import { type Mock, afterEach, describe, expect, it, vi } from "vitest";
 
+import { AGENT_LABELS } from "../solve/labels.ts";
 import { JiraClient, JiraError, assertOwnedLabel, isInlineable } from "./client.ts";
 
 /** A value standing in for the credential, so leak assertions have a needle. */
@@ -585,15 +586,15 @@ describe("JiraClient.updateLabels", () => {
 });
 
 describe("assertOwnedLabel", () => {
-  it("accepts the labels this service actually writes", () => {
-    for (const label of [
-      "agent:solvable",
-      "agent:start",
-      "agent:solving",
-      "agent:reviewing",
-      "agent:done",
-      "agent:failed",
-    ]) {
+  it("accepts every label the state machine can write", () => {
+    // Read off AGENT_LABELS rather than copied out of it, which is the point.
+    // The hand-written list this replaces held the six labels that existed when
+    // it was written, so D4 could add agent:review-done and agent:closed and
+    // this test would have kept passing while the credential decided at runtime,
+    // on a live board, mid-solve, whether it would write them. A label the
+    // machine can produce and the credential will not accept is a ticket stuck
+    // in a state nothing can clear, and the only place it shows up is Jira.
+    for (const label of Object.values(AGENT_LABELS)) {
       expect(() => {
         assertOwnedLabel(label);
       }).not.toThrow();

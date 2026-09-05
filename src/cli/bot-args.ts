@@ -38,11 +38,13 @@
 import { type ParsedLadderArgs, parseSolveArgs } from "./solve-args.ts";
 
 export const USAGE =
-  "usage: bot-once <ISSUE-KEY> [--claim | --solve | --pr]\n" +
+  "usage: bot-once <ISSUE-KEY> [--claim | --solve | --pr | --review]\n" +
   "  <ISSUE-KEY>             triage only; nothing is written anywhere\n" +
   "  <ISSUE-KEY> --claim     ... and writes triage's verdict, then claims the ticket\n" +
   "  <ISSUE-KEY> --solve     ... and runs the solver; nothing is pushed\n" +
   "  <ISSUE-KEY> --pr        ... and opens the draft pull request\n" +
+  "  <ISSUE-KEY> --review    ... and works the review to a handover: the whole\n" +
+  "                          chain, triage to agent:review-done, in one command\n" +
   "Each flag does everything the ones above it do. Triage's own labels are written\n" +
   "from --claim onward, because the claim refuses a ticket without agent:solvable.\n" +
   "The run stops before the claim if triage says the ticket is not agent-solvable.\n";
@@ -76,11 +78,16 @@ export function parseBotArgs(argv: readonly string[]): ParsedLadderArgs {
   // *then* solve, so there is no pull request for a review round to act on —
   // and an operator who typed `--advance` here wants the other command, not a
   // run that silently did something else with their ticket.
+  //
+  // `--review` is not this, and the error below names it because the two are
+  // easy to confuse from the outside. `--advance` acts on a pull request some
+  // earlier run left behind; `--review` opens one and then works it. An operator
+  // typing `--advance` at this command usually wants `--review`.
   if (parsed.invocation.mode !== "ladder") {
     return {
       ok: false,
       error:
-        "--advance is not a bot:once flag — this command triages a ticket and then solves it, so there is no pull request to advance yet; use solve:once <ISSUE-KEY> --advance",
+        "--advance is not a bot:once flag — this command triages a ticket and then solves it, so there is no pull request to advance yet. Use --review to open one and work it in the same run, or solve:once <ISSUE-KEY> --advance to act on one that already exists.",
     };
   }
   return { ok: true, invocation: parsed.invocation };

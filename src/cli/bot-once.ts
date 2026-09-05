@@ -6,6 +6,14 @@
  *   node src/cli/bot-once.ts SSX-3822 --claim   ... writes the verdict, claims it
  *   node src/cli/bot-once.ts SSX-3822 --solve   ... and solves, nothing pushed
  *   node src/cli/bot-once.ts SSX-3822 --pr      ... and opens the pull request
+ *   node src/cli/bot-once.ts SSX-3822 --review  ... and works the review to a handover
+ *
+ * The last of those is the whole value chain in one command — triage, fitness,
+ * claim, solve, verify, push, draft pull request, then rounds against the
+ * reviewer until the pull request is out of draft and the ticket is on
+ * `agent:review-done`. It is also the only thing in this service that loops
+ * without a person between the iterations; `runReviewChain` is where the bounds
+ * on that live, and they are worth reading before typing it.
  *
  * ## Why this exists when `triage:once` and `solve:once` already do
  *

@@ -658,6 +658,8 @@ function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
       testPlan: "",
       estimatedLines: 1,
       bailReason: "",
+      bailBlockers: [],
+      bailRemedy: "",
       injectionNoticed: "",
     },
     fix: {
@@ -674,6 +676,7 @@ function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
     },
     simplify: { changed: false, filesTouched: [], changes: [], declined: "nothing to remove" },
     verification: { outcome: "passed", steps: [] },
+    failFirst: { outcome: "skipped", reason: "no tests changed" },
     devLens: { accurate: true, correction: "" },
     files: 1,
     lines: 4,

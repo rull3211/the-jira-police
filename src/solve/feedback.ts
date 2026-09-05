@@ -29,15 +29,32 @@
  * difference is deliberate: a snapshot answers "what is the queue doing now",
  * and calibration is a question about a trend.
  *
- * ## Posting is a capability the caller supplies, and today nobody supplies it
+ * ## Posting is a capability the caller supplies, and now one does
  *
  * `TicketCommenter` is one method wide. An implementation of it cannot
  * transition an issue, edit a field, or touch a label — the same reasoning as
  * `ClaimCapabilities`, and for the same reason: the type should tell a reviewer
- * the blast radius without them reading the implementation. Nothing in this
- * tree constructs one yet, so `reportOutcome` writes the local record and
- * reports that the comment was not posted. That is the honest state of the
- * phase, and it is visible in the return value rather than hidden in a log.
+ * the blast radius without them reading the implementation.
+ *
+ * This paragraph used to end "nothing in this tree constructs one yet", and
+ * what that cost is worth keeping now that it is false. The seam sat empty
+ * through every phase, so a run's conclusion reached a local file and an
+ * operator's terminal and stopped — including the SSX-3831 bail, where recon
+ * declined the ticket, named the two acceptance criteria that admit no single
+ * implementation, and proposed the split that would fix them, to a scrollback.
+ * `src/solve/commenter.ts` fills it.
+ *
+ * **An absent commenter now means only one thing: the run succeeded.** It was
+ * the phase gate through D4c, then briefly meant *this outcome is not about the
+ * ticket* — a crash or an unusable base got the calibration row and no Jira
+ * write, on the argument that posting "this says nothing about whether the
+ * ticket is solvable" was worse than staying quiet. That argument weighed the
+ * noise and never weighed the silence, which is harder to notice because it
+ * looks like nothing at all: a run stopped by a policy hook released its claim
+ * and left the ticket byte-for-byte as found, indistinguishable from one the
+ * queue had never reached. The caller now supplies a commenter for every outcome
+ * except `verified`, which needs none because it opens a pull request instead.
+ * See `reportsToTicket`.
  *
  * ## The correction is untrusted text
  *
@@ -72,7 +89,17 @@ export interface TicketCommenter {
 
 export interface FeedbackDeps {
   readonly outputDirectory: string;
-  /** Absent means the write path is not wired. The absence is the phase gate. */
+  /**
+   * Absent means *do not post*, and the caller decides that per outcome.
+   *
+   * It gated the phase until D4c, then gated relevance, and now gates almost
+   * nothing: `reportsToTicket` supplies one for every outcome but `verified`.
+   * Deciding it is no longer `terminalLabelAfter`'s job — the two shared a
+   * predicate until 2026-09-05, and the sharing is what made a blocked run
+   * silent. The parameter stays optional because a caller that wants the
+   * calibration row without a Jira write is still a legitimate thing to be, and
+   * every test in this file relies on it.
+   */
   readonly commenter?: TicketCommenter;
 }
 
@@ -104,6 +131,60 @@ export function safeText(text: string): string {
     .replaceAll(/\s+/gu, " ")
     .replaceAll("|", "\\|")
     .trim();
+}
+
+/**
+ * How much of each part of a bail reaches the ticket.
+ *
+ * Measured against the SSX-3822 bail, which arrived as one unbroken 4,000-character
+ * paragraph because `bailReason` was a single field asked for two things at once —
+ * the diagnosis and the remedy — and `safeText` correctly flattens every newline in
+ * it. Splitting the field gives the structure; these give the brevity, and both were
+ * needed. The schema asks for one or two sentences per blocker, but a schema
+ * description is a request and this file's whole subject is what to do when the text
+ * is not what was asked for.
+ */
+const LIMITS = {
+  /** The first line of the comment, read on its own in a notification. */
+  headline: 300,
+  /** One bullet, scanned against five others. */
+  blocker: 300,
+  /** Six is already a longer list than anyone acts on in one sitting. */
+  blockers: 6,
+  /** The actionable half, so it gets the most room of the three. */
+  remedy: 800,
+} as const;
+
+/**
+ * Trims to a length on a word boundary, marking that it did.
+ *
+ * The ellipsis is not decoration. A silently-cut sentence reads as a model that
+ * stopped mid-thought, which is a bug report someone will file; a marked one reads
+ * as a harness that shortened something, which is what happened. Cutting at a space
+ * rather than at the index avoids ending inside `mapToCommerceCar.ts:162`, where the
+ * fragment left behind would be a plausible-looking wrong line number.
+ *
+ * Nothing is lost by this: the full verdict is in the run's own log and in the
+ * `unresolved`/calibration record, and the reader this comment is written for is
+ * deciding whether to split a ticket, not auditing the analysis.
+ */
+export function shorten(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  const cut = text.slice(0, limit);
+  // A cut that already lands on a word boundary keeps the whole word. Without
+  // this the last complete word is thrown away for nothing, which is most
+  // visible on the short limits — it turned "the validation lives" into "the
+  // validation" and made the ellipsis look like it had eaten a clause.
+  if (text[limit] === " ") {
+    return `${cut.trimEnd()}…`;
+  }
+  const space = cut.lastIndexOf(" ");
+  // A limit shorter than the first word leaves no space to cut at. Falling back
+  // to the hard slice is right: the alternative is returning the whole string,
+  // which is a cap that stops capping exactly when the text is most unusual.
+  return `${(space > limit / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 /**
@@ -177,8 +258,13 @@ function headline(outcome: SolveOutcome): string {
       )}`;
     }
     case "bailed": {
-      return `An agent read the code and stopped before changing anything: ${safeText(
-        outcome.reason,
+      // Capped as well as sectioned. `bailReason` is now specified as one
+      // sentence, and a cap is what makes that a property of the comment rather
+      // than a hope about the model — the detail has its own section below and
+      // a headline that swallowed it would put the wall of text back.
+      return `An agent read the code and stopped before changing anything: ${shorten(
+        safeText(outcome.reason),
+        LIMITS.headline,
       )}`;
     }
     case "abandoned": {
@@ -239,15 +325,100 @@ function correctionBlock(outcome: SolveOutcome): readonly string[] {
   ];
 }
 
-/** The ticket comment. Pure, so it is testable without a Jira account. */
+/**
+ * The two sections a bail owes the person holding the ticket.
+ *
+ * ## Why this is a section list and not a longer sentence
+ *
+ * The first bail this service posted, on SSX-3822, was one paragraph of about four
+ * thousand characters: three numbered blockers, a file-by-file scope estimate and a
+ * proposed ticket split, run together with no line breaks. Every word of it was
+ * right and useful, and nobody was going to read it.
+ *
+ * Two separate things made it that shape and both had to change. `bailReason` was a
+ * single schema field asked for two different things — *what is wrong* and *what
+ * would fix the ticket* — so the model had nowhere to put them but one string. And
+ * `safeText` collapses every whitespace run to a space, which is a defence that
+ * must stay: structure this file did not create is structure an editable Jira ticket
+ * could forge. So the structure comes from **here**, out of separate fields, and the
+ * untrusted text keeps arriving flat and gets placed rather than trusted.
+ *
+ * ## The remedy is the point, and it goes last on purpose
+ *
+ * §5 of the plan records the pattern this closes: the service keeps producing its
+ * best reasoning on the channel nobody reads. A bail's diagnosis is evidence and its
+ * remedy is the only part anyone can act on, so the remedy gets the most room, its
+ * own heading naming what it is for, and the last word before the footer.
+ *
+ * Absent fields render nothing rather than an empty heading. A run predating these
+ * schema fields, or one whose reply the parser accepted with an empty list, still
+ * produces a comment that is merely shorter — never one promising a section it does
+ * not have.
+ */
+function bailDetail(outcome: SolveOutcome): readonly string[] {
+  // Deleting this narrowing kills no test, and the honest reason is that it
+  // cannot: no other member of the union carries a verdict with these fields, so
+  // the defensive read below reaches the same empty answer by accident. What
+  // catches it is `tsc` — `recon` does not exist on most of the union — so this
+  // line is enforced at compile time and inert at run time. Same standing as the
+  // `crashed` clause in `lensOf`, and recorded for the same reason.
+  if (outcome.kind !== "bailed") {
+    return [];
+  }
+  // Defensively read, on the same grounds as `lensOf`: the types say a bail
+  // always carries its verdict, and this module runs at the end of every solve
+  // including the ones that went badly. A renderer that throws while explaining
+  // a problem replaces the finding with a stack trace about itself — and here it
+  // would do so *after* the headline had already been composed, so the one
+  // sentence that was safe to print would be lost with the rest.
+  const recon = outcome.recon as Partial<typeof outcome.recon> | undefined;
+  const blockers = (recon?.bailBlockers ?? [])
+    .map((blocker) => safeText(blocker))
+    .filter((blocker) => blocker !== "");
+  const remedy = safeText(recon?.bailRemedy ?? "");
+  const extra = blockers.length - LIMITS.blockers;
+
+  return [
+    ...(blockers.length === 0
+      ? []
+      : [
+          "",
+          "**What is in the way**",
+          "",
+          ...blockers
+            .slice(0, LIMITS.blockers)
+            .map((blocker) => `* ${shorten(blocker, LIMITS.blocker)}`),
+          // Said rather than silently dropped. A truncated list that does not
+          // admit it is one tells a reporter they have seen every blocker, and
+          // they will split the ticket against an incomplete set.
+          ...(extra > 0 ? [`* …and ${String(extra)} more, in the run's own report.`] : []),
+        ]),
+    ...(remedy === ""
+      ? []
+      : ["", "**To make this agent-solvable**", "", shorten(remedy, LIMITS.remedy)]),
+  ];
+}
+
+/**
+ * The ticket comment. Pure, so it is testable without a Jira account.
+ *
+ * It used to close with *"A human merges. This bot has no merge path."* on every
+ * outcome, and the test pinning it demonstrated the line on `verified` — the one
+ * outcome that actually has a pull request to not merge. `reportsToTicket` made
+ * that the one outcome which never renders. So the sentence now only ever
+ * appears on comments about runs that produced nothing to merge, where it
+ * answers a question the reader was not asking, at the bottom of a comment whose
+ * whole job is to be short enough to read. Removed rather than made conditional:
+ * the condition would be `kind === "verified"`, which is `!reportsToTicket`,
+ * which is unreachable from here.
+ */
 export function renderSolveComment(issueKey: string, outcome: SolveOutcome): string {
   return [
     `## Solve attempt — ${issueKey}`,
     "",
     headline(outcome),
+    ...bailDetail(outcome),
     ...correctionBlock(outcome),
-    "",
-    "A human merges. This bot has no merge path.",
     "",
     SOLVE_SENTINEL,
   ].join("\n");

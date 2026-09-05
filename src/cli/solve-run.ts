@@ -33,11 +33,24 @@
  */
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
-import type { Settings } from "../settings.ts";
+import { logger } from "../logger.ts";
+import { type Settings, numeric } from "../settings.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
-import { advance, publish } from "../solve/delivery.ts";
+import { type AdvanceOutcome, advance, publish } from "../solve/delivery.ts";
 import { reportOutcome } from "../solve/feedback.ts";
-import type { ClaimAuthority } from "../solve/labels.ts";
+import {
+  type ClaimAuthority,
+  type LabelEdit,
+  LabelStateError,
+  type ReviewStage,
+  type SolveOutcomeLabel,
+  completionTransition,
+  isNoopEdit,
+  isTerminal,
+  labelEdit,
+  reviewStageTransition,
+  reviewTransition,
+} from "../solve/labels.ts";
 import { type SolveOutcome, type SolveRequest, solveWithRetry } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
 import { findPullRequest } from "../solve/pr.ts";
@@ -49,16 +62,21 @@ import {
   buildPublishRequest,
   buildSolveRequest,
   createClaimCapabilities,
+  createSolveCommenter,
   createSolveDeps,
   createSolveRunDeps,
   createTicketReader,
 } from "../wiring.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
 import {
+  chainDecision,
   describeAdvanceOutcome,
   describeSolveOutcome,
   isAdvanceFailureExit,
   isFailureExit,
+  reportsToTicket,
+  reviewStageAfter,
+  terminalLabelAfter,
 } from "./solve-outcome.ts";
 
 /**
@@ -183,13 +201,39 @@ export async function runSolver(
   // `devLensAccurate: false` — triage's lens was wrong, the single most useful
   // thing the pipeline had produced — and the process exited and lost it.
   //
-  // **No commenter is passed, and that is the phase gate, not an oversight.**
-  // `reportOutcome` posts only if given a `TicketCommenter`; with none it
-  // writes the local record and says the comment was not posted. So this adds a
-  // local artifact and no Jira write, which is the same posture as the rest of
-  // the command.
+  // **Every outcome but `verified` is said out loud on the ticket**, and the
+  // gate is `reportsToTicket` rather than `terminalLabelAfter`. Those were one
+  // predicate until 2026-09-05, and the comment here argued the fusion was the
+  // point — "the label and the comment are one statement". It was wrong in a way
+  // that could only ever show up as an absence: the outcomes that write no label
+  // are exactly the ones that then said nothing, so a run that claimed a ticket,
+  // cut a worktree, verified the base and was stopped by a policy hook released
+  // every label and left a board identical to one nobody had touched. See
+  // `reportsToTicket` for the run that demonstrated it.
+  //
+  // The narrowness is still right for the label and still wrong for the reader.
+  // A `crashed`, `unusable-base` or `environment` outcome must not be labelled,
+  // because re-running it is sensible; it must still be reported, because "this
+  // is about the machine, not your ticket" is worth more to a team than a gap
+  // they cannot distinguish from the tool being switched off. `feedback.ts`
+  // already phrases all three that way and its tests already pin the wording, so
+  // the bodies needed no change — only the gate withheld them.
+  //
+  // **This line is not mutation-covered, and that was measured rather than
+  // assumed.** Putting `terminalLabelAfter` back here leaves all 1805 tests
+  // green, because there is no `solve-run.test.ts` and nothing constructs this
+  // function's dependencies. The predicate itself is covered nine ways over in
+  // `solve-outcome.test.ts`; what is uncovered is the choice of predicate at the
+  // only place it is made, which is the half that actually silenced SSX-3832.
+  // Recorded here rather than fixed, because a harness for this function is a
+  // larger change than the feature it would guard — but it is a gap in the house
+  // rule, not an exemption from it.
+  const commenter = reportsToTicket(outcome) ? createSolveCommenter(settings) : null;
   const feedback = await reportOutcome(
-    { outputDirectory: settings.OUTPUT_DIR },
+    {
+      outputDirectory: settings.OUTPUT_DIR,
+      ...(commenter === null ? {} : { commenter }),
+    },
     issueKey,
     outcome,
     new Date(),
@@ -206,6 +250,96 @@ export async function runSolver(
   }
 
   return outcome;
+}
+
+/**
+ * Moves a ticket's `agent:` labels, and says plainly when it could not.
+ *
+ * Every caller is *after the fact*. The pull request is already open, or the
+ * round has already pushed and replied; this is the board catching up with
+ * something that has happened on GitHub. So nothing here sets an exit code and
+ * nothing throws — the run succeeded, and turning a bookkeeping failure into a
+ * command failure would tell an operator the wrong thing about the work.
+ *
+ * What it does instead is print the exact repair, because a label this service
+ * failed to write is a label a person now has to write. The failure directions
+ * are both survivable and worth knowing:
+ *
+ * - **A failed `reviewTransition` leaves `agent:solving` on.** The ticket keeps
+ *   holding its concurrency slot, which stalls the queue and is visible; it does
+ *   not become claimable twice, which would not be.
+ * - **A failed stage move leaves the old stage on.** Both stages are excluded
+ *   from the queue, so the only cost is a ticket that disagrees with its own
+ *   pull request about whether a human is wanted yet.
+ *
+ * `LabelStateError` is caught rather than propagated for one specific reason:
+ * `reviewStageTransition` throws when the ticket is under review in neither
+ * sense, which is not a fault. It is a person having moved the ticket while the
+ * round ran, and the correct response to that is to leave their decision alone
+ * and report it.
+ *
+ * The read-back is not the claim's read-back-and-verify and does not need to be.
+ * `updateLabels` sends one atomic REST call carrying both the additions and the
+ * removals, so there is no window between them to lose a label in. This confirms
+ * the write landed at all.
+ */
+async function moveLabels(
+  client: JiraClient,
+  issueKey: string,
+  plan: (labels: readonly string[]) => LabelEdit,
+): Promise<void> {
+  const capabilities = createClaimCapabilities(client);
+
+  let change: LabelEdit;
+  try {
+    change = plan(await capabilities.readLabels(issueKey));
+  } catch (error) {
+    if (error instanceof LabelStateError) {
+      process.stdout.write(`\n${issueKey}'s labels were left alone: ${error.message}\n`);
+      return;
+    }
+    throw error;
+  }
+
+  if (isNoopEdit(change)) {
+    return;
+  }
+
+  const wanted = `+${change.add.join(", +")}${change.remove.length === 0 ? "" : ` -${change.remove.join(", -")}`}`;
+  try {
+    await capabilities.applyLabels(issueKey, change);
+  } catch (error) {
+    process.stderr.write(
+      `\nCould not move ${issueKey}'s labels (${wanted}): ${error instanceof Error ? error.message : String(error)}\n` +
+        `Do it by hand; the pull request is unaffected.\n`,
+    );
+    return;
+  }
+
+  const after = await capabilities.readLabels(issueKey);
+  const missing = change.add.filter((label) => !after.includes(label));
+  const lingering = change.remove.filter((label) => after.includes(label));
+  if (missing.length > 0 || lingering.length > 0) {
+    process.stderr.write(
+      `\n${issueKey}'s labels did not come back as written (${wanted}); they are: ${after.join(", ")}\n` +
+        `Fix them by hand — the queue reads these.\n`,
+    );
+    return;
+  }
+
+  process.stdout.write(`\n${issueKey} is now: ${after.join(", ")}\n`);
+}
+
+/** The label half of a finished round: mirror the pull request's draft flag. */
+async function moveReviewStage(
+  client: JiraClient,
+  issueKey: string,
+  stage: ReviewStage | null,
+): Promise<void> {
+  if (stage === null) {
+    return;
+  }
+  await moveLabels(client, issueKey, (labels) => reviewStageTransition(labels, stage));
 }
 
 /**
@@ -351,13 +485,13 @@ export async function runAdvance(
   settings: Settings,
   client: JiraClient,
   issueKey: string,
-): Promise<void> {
+): Promise<AdvanceOutcome | null> {
   const read = createTicketReader(client);
   const { text, detail } = await read(issueKey);
 
   const base = requestOrRefusal(settings, detail, text, "--advance");
   if (base === null) {
-    return;
+    return null;
   }
 
   const branch = branchNameFor(issueKey, detail.summary);
@@ -366,7 +500,7 @@ export async function runAdvance(
       `refusing --advance: ${issueKey}'s summary yields no usable branch name, so there is nothing to look for.\n`,
     );
     process.exitCode = 3;
-    return;
+    return null;
   }
 
   const deps = createSolveRunDeps(settings);
@@ -375,24 +509,42 @@ export async function runAdvance(
   if (found.outcome === "failed") {
     process.stderr.write(`\nCould not tell whether a pull request exists: ${found.reason}\n`);
     process.exitCode = 1;
-    return;
+    return null;
   }
   if (found.outcome === "none") {
     process.stdout.write(
       `\nNo pull request on ${branch}. --advance acts on one that already exists; run --pr first.\n`,
     );
     process.exitCode = 3;
-    return;
+    return null;
   }
   if (found.state !== "OPEN") {
     // Reported and not an error. A merged pull request is the happy ending, and
     // a closed one is a person's decision; neither is something to push to.
-    // Moving the ticket's labels on the strength of this is D4's job, and until
-    // then saying so is the whole of the handling.
     process.stdout.write(
       `\n#${String(found.number)} on ${branch} is ${found.state}. Nothing to advance.\n`,
     );
-    return;
+    // §6.1's terminal, and it had to land in the same change as the label move
+    // rather than after it. Until D4 this branch printed the line above and
+    // stopped, which was survivable because the ticket still carried
+    // `agent:solving` and the publish step said out loud that a person had to
+    // move it on. Both of those are now gone: the ticket sits in
+    // `agent:review-done`, excluded from the queue, with nothing left that would
+    // ever clear it. Shipping the label move without this would not be an
+    // unfinished feature, it would be a leak.
+    //
+    // **`MERGED` and `CLOSED` do not share a label**, for the reason `AGENT_LABELS`
+    // gives: `agent:done` is the count of bugs this tool fixed, and a pull request
+    // a person closed unmerged is work the tool completed that nobody wanted. That
+    // is a different number and an interesting one, and it disappears the moment
+    // the two are folded together — a distinction drawn in a comment is a
+    // distinction no report can read.
+    await moveLabels(client, issueKey, (labels) =>
+      isTerminal(labels)
+        ? labelEdit([], [])
+        : completionTransition(labels, found.state === "MERGED" ? "done" : "closed"),
+    );
+    return null;
   }
 
   const attached = await attachWorktree(deps.commands, {
@@ -405,7 +557,7 @@ export async function runAdvance(
   if (attached.outcome === "refused") {
     process.stderr.write(`\nNo worktree, so no review round: ${attached.reason}\n`);
     process.exitCode = 1;
-    return;
+    return null;
   }
   const { worktree } = attached;
   process.stdout.write(`\nAdvancing #${String(found.number)} in ${worktree.path}\n`);
@@ -415,6 +567,12 @@ export async function runAdvance(
   if (isAdvanceFailureExit(result)) {
     process.exitCode = 1;
   }
+
+  // Before the worktree is cleaned up, so a failure here is reported next to the
+  // round it belongs to rather than after a paragraph about directories. The
+  // stage is `null` for every outcome that left the draft flag alone, which is
+  // most of them, and then this is one read and no write.
+  await moveReviewStage(client, issueKey, reviewStageAfter(result));
 
   // Kept when a human would want the diff — a refusal is a diff that was judged
   // too large or too wide, and reading it is how an operator decides whether the
@@ -431,6 +589,139 @@ export async function runAdvance(
       ? `Worktree removed.\n`
       : `Worktree kept at ${cleanup.path} — ${cleanup.reason}\n`,
   );
+
+  return result;
+}
+
+/**
+ * Sleep, as a named function so the loop below reads as a loop.
+ *
+ * **This called `.unref()` until 2026-09-05, and it made `--review` incapable of
+ * waiting.** An unref'd timer does not hold the event loop open, so the first
+ * time the chain found the reviewer silent and settled in to poll, Node saw
+ * nothing left to do and exited — `Detected unsettled top-level await at
+ * solve-once.ts:167`, exit code 13. The whole of D4d is one loop that waits, and
+ * the one line that does the waiting had opted out of it. Observed on SSX-3789:
+ * claim, solve, push, pull request #2660, `agent:reviewing`, then death 120ms
+ * into a 120s wait.
+ *
+ * The argument for the unref was Ctrl-C, and it was never true. SIGINT
+ * terminates the process whatever timers are pending; a `setTimeout` does not
+ * queue ahead of a signal. So the unref bought nothing and cost the feature.
+ *
+ * The banner `runReviewChain` prints one line above the first call still says
+ * *"Ctrl-C is safe: nothing is held open between rounds"*, and that sentence
+ * stays, because it was describing the right thing for the wrong reason: what
+ * makes an interrupt safe here is that the worktree is removed and no lock is
+ * held between rounds, not that a timer was unref'd. This project's defect class
+ * again — prose that happened to be true of the behaviour it was not describing.
+ */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * `--review`: rounds against the reviewer until something ends it.
+ *
+ * The only unattended loop in this service, and the capability that Phase E is
+ * otherwise defined by. It is here rather than in the daemon because the plan's
+ * ordering rule is that every phase is driven by hand before the loop drives it
+ * — and there was no way to drive *this* by hand, because the thing to drive is
+ * the looping. One ticket, named by a person, in the foreground, with the output
+ * on their terminal is the weakest form of the capability that still tests it.
+ *
+ * ## Four bounds, and only one of them is new
+ *
+ * `MAX_PR_ROUNDS_TOTAL` and `MAX_REVIEW_ITERATIONS` are enforced inside
+ * `advance` against the marker on the pull request, so they bound this loop
+ * without it doing anything — and they keep bounding it across restarts, which a
+ * counter in this function would not. Every non-continuing outcome ends it, via
+ * `chainDecision`. What is new is `MAX_REVIEW_WAITS`, because the other three
+ * are all counts of *rounds* and the failure this loop adds is a reviewer who
+ * never produces one.
+ *
+ * ## It reports before it spends, because the operator is the fifth bound
+ *
+ * The worst case is printed up front in money. That is not decoration: a person
+ * who typed `--review` on a whim can read the number and Ctrl-C before the first
+ * round, and this is the only phase where the cost is a product rather than a
+ * sum. Round cost is the measured $0.94 from PR #2658.
+ */
+export async function runReviewChain(
+  settings: Settings,
+  client: JiraClient,
+  issueKey: string,
+): Promise<void> {
+  const pollMs = numeric(settings, "REVIEW_POLL_MS", 1);
+  const maxWaits = numeric(settings, "MAX_REVIEW_WAITS", 1);
+  const maxRounds = numeric(settings, "MAX_PR_ROUNDS_TOTAL", 1);
+
+  process.stdout.write(
+    `\n── review chain ──────────────────────────────────────────\n` +
+      `Polling every ${String(Math.round(pollMs / 1000))}s, giving up after ${String(maxWaits)} silent polls.\n` +
+      `At most ${String(maxRounds)} rounds, roughly $${(maxRounds * 0.94).toFixed(2)} if it runs to the cap.\n` +
+      `Ctrl-C is safe: nothing is held open between rounds.\n\n`,
+  );
+
+  let silences = 0;
+  let rounds = 0;
+
+  for (;;) {
+    const outcome = await runAdvance(settings, client, issueKey);
+    if (outcome === null) {
+      // `runAdvance` reached no round and has already said why — no pull
+      // request, not open, no worktree. It also set the exit code if that was
+      // an error, so there is nothing to add and nothing to retry.
+      process.stdout.write(`\nChain stopped before a round could run.\n`);
+      return;
+    }
+
+    const decision = chainDecision(outcome);
+    if (!decision.silent) {
+      rounds += 1;
+      // Reset rather than decrement. A reviewer that answers once has proved it
+      // is there, and carrying old silence forward would end a healthy chain on
+      // the strength of a slow start.
+      silences = 0;
+    }
+
+    if (decision.stop) {
+      process.stdout.write(
+        `\n── chain finished after ${String(rounds)} round${rounds === 1 ? "" : "s"} ──\n${decision.why}\n`,
+      );
+      logger.info("solve.chain.finished", {
+        issueKey,
+        rounds,
+        outcome: outcome.kind,
+        why: decision.why,
+      });
+      return;
+    }
+
+    if (decision.silent) {
+      silences += 1;
+      if (silences >= maxWaits) {
+        // Not an error exit. A quiet reviewer is not a malfunction, and a
+        // non-zero code here would teach a future daemon's backoff to treat
+        // "nobody has looked yet" as an outage worth retrying harder.
+        process.stdout.write(
+          `\n── chain finished after ${String(rounds)} rounds ──\n` +
+            `The reviewer said nothing for ${String(silences)} polls (${String(Math.round((silences * pollMs) / 60000))} minutes). ` +
+            `Leaving the pull request as it is; run --advance later, or check the reviewer was actually requested.\n`,
+        );
+        logger.warn("solve.chain.silent", { issueKey, rounds, silences });
+        return;
+      }
+    }
+
+    process.stdout.write(
+      `\n${decision.why} — waiting ${String(Math.round(pollMs / 1000))}s` +
+        `${decision.silent ? ` (${String(silences)}/${String(maxWaits)})` : ""}\n`,
+    );
+    await sleep(pollMs);
+  }
 }
 
 /**
@@ -455,6 +746,7 @@ export async function runWriteRungs(
   }
 
   let keepClaim = false;
+  let terminal: SolveOutcomeLabel | null = null;
   try {
     if (!includes(phase, "solve")) {
       // The `--claim` rehearsal, and the experiment the plan asks for, performed
@@ -475,23 +767,58 @@ export async function runWriteRungs(
     }
 
     const outcome = await runSolver(settings, client, issueKey, cycle);
+    // Read before the early return, because the outcomes that decide a ticket's
+    // fate are exactly the ones that never reach a pull request. Computing it
+    // after the `verified` narrowing below would be dead code that looked live.
+    terminal = outcome === null ? null : terminalLabelAfter(outcome);
     if (outcome === null || !includes(phase, "pr") || outcome.kind !== "verified") {
       return;
     }
 
     keepClaim = await runPublish(settings, outcome, issueKey);
     if (keepClaim) {
-      // Said out loud because the rest of the label state machine — `agent:reviewing`,
-      // `agent:done` — is not built. The ticket stays on `agent:solving`, which is
-      // accurate about the work and wrong about the stage, and a person moving it
-      // on is currently the only thing that will.
-      process.stdout.write(
-        `\n${issueKey} keeps agent:solving. Nothing here writes agent:reviewing yet; move it by hand.\n`,
-      );
+      // The claim is handed in here rather than released, and the difference
+      // matters. `runRelease` restores the labels this run found — including the
+      // `agent:start` the claim consumed — which is right for a run that
+      // achieved nothing and wrong for one that left a pull request open: it
+      // would put the ticket back in the queue with a human's go-ahead still on
+      // it, to be solved a second time.
+      //
+      // So `keepClaim` still means "do not release", and what it now also means
+      // is that the ticket moves on instead of sitting on a claim it no longer
+      // needs. `agent:solving` is a concurrency slot, and the work it was
+      // counting is finished the moment the pull request exists.
+      await moveLabels(client, issueKey, reviewTransition);
+
+      // The fifth rung, and it runs here rather than after the `finally` for a
+      // reason worth stating: the chain must only start on a run that actually
+      // opened a pull request. `keepClaim` is that fact — it is set by
+      // `runPublish` and is the same condition that moves the ticket to
+      // `agent:reviewing`. Hanging the loop off the phase alone would start it
+      // after a publish that failed, where it would find no pull request,
+      // report so, and exit having looked expensive for no reason.
+      if (includes(phase, "review")) {
+        await runReviewChain(settings, client, issueKey);
+      }
     }
   } finally {
-    if (!keepClaim) {
+    // Three endings, and the middle one used to be the only one. A run that
+    // reached a verdict about the ticket must not be released: `runRelease`
+    // restores the labels this run found, `agent:solvable` among them, which
+    // leaves a declined ticket looking exactly like one nobody has tried. In
+    // auto mode the queue then re-claims it every tick and pays for the same
+    // refusal each time — see `terminalLabelAfter`.
+    const decided = terminal;
+    if (keepClaim) {
+      // Handed on by `reviewTransition` above; the pull request owns it now.
+    } else if (decided === null) {
       await runRelease(client, receipt);
+    } else {
+      await moveLabels(client, issueKey, (labels) => completionTransition(labels, decided));
+      process.stdout.write(
+        `\n${issueKey} is out of the solve queue until a human removes agent:${decided}.\n` +
+          `That is the point: this run reached a verdict, and re-running it would reach the same one.\n`,
+      );
     }
   }
 }

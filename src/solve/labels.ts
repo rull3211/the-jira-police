@@ -8,8 +8,13 @@
  *                         operator naming one ticket is the same authorisation
  *                         arriving through argv instead of the board.
  *    → agent:solving      claimed; agent:start removed in the same edit
- *    → agent:reviewing    draft PR open, review requested
- *    → agent:done | agent:failed
+ *    → agent:reviewing    draft PR open; agent:solving removed in the same edit
+ *    ⇄ agent:review-done  undrafted — the agentic cycle is finished and only
+ *                         human approval is left. Two-way: a later round that
+ *                         pushes goes back to agent:reviewing.
+ *    → agent:done         the pull request was MERGED
+ *    → agent:closed       the pull request was closed unmerged
+ *    → agent:failed       bailed
  * ```
  *
  * The unusual thing about this queue is where its state lives. The new-issue
@@ -34,11 +39,27 @@
  *    which a second instance sees a ticket that is solvable, started and
  *    unclaimed — which is the definition of a double claim.
  *
- * 2. **`agent:solving` is not removed when review begins.** It is the claim, and
- *    a ticket under review is still claimed. The queue query excludes
- *    `agent:solving`, so dropping it at the review transition would put a
- *    ticket with an open pull request straight back into the queue to be solved
- *    a second time.
+ * 2. **`agent:solving` *is* removed when review begins, and what replaces it must
+ *    exclude just as hard.** This rule was the opposite until D4, and the reason
+ *    it turned over is worth keeping: `buildInFlightJql` counts `agent:solving`
+ *    against `MAX_CONCURRENT_SOLVES`, so a ticket that held the claim until merge
+ *    would hold the only slot for as long as a human took to review — days, where
+ *    active work is minutes. At `MAX_CONCURRENT_SOLVES=1` the queue delivers one
+ *    pull request and then stops. Concurrency has to bound *work in progress*,
+ *    and a pull request waiting on a person is not that.
+ *
+ *    The half of the old rule that was never wrong is the reason
+ *    `SOLVE_QUEUE_EXCLUDED_LABELS` grew instead of shrinking: dropping the claim
+ *    without excluding the state that replaces it puts a ticket with an open pull
+ *    request back in the queue to be solved a second time. The two edits are one
+ *    change and neither is safe alone.
+ *
+ * 3. **The review phase oscillates, and the labels are allowed to say so.**
+ *    Undrafting is a transition, not an ending — the loop keeps listening for
+ *    human review — so `agent:review-done` can be handed back to
+ *    `agent:reviewing` by a round that pushes. `reviewStageTransition` is one
+ *    function over both directions rather than two mirror-image ones, because a
+ *    mirror is a thing that can be broken on one side only.
  */
 
 import type { SolveMode } from "../settings.ts";
@@ -50,9 +71,38 @@ export const AGENT_LABELS = {
   start: "agent:start",
   /** The claim. Written before any work begins; this is what makes the queue idempotent. */
   solving: "agent:solving",
-  /** Draft pull request open, review requested. Still claimed. */
+  /**
+   * Pull request open and being iterated on. Replaces the claim.
+   *
+   * "Still claimed" until D4, and the sentence had to go along with the
+   * behaviour — see rule 2 in the module header.
+   */
   reviewing: "agent:reviewing",
+  /**
+   * Undrafted: the agentic cycle is finished and only human approval is left.
+   *
+   * The longest-lived state in the machine by a wide margin — days, waiting for a
+   * person, where `agent:solving` is minutes. That is why it is in the exclusions
+   * rather than merely in the diagram.
+   */
+  reviewDone: "agent:review-done",
+  /**
+   * The pull request was **merged**.
+   *
+   * Narrowed in D4 from "the agent finished" to this, because the label is also
+   * the metric for how many bugs this tool actually fixed and a metric cannot
+   * read the prose in a comment. What it used to also cover is `closed`.
+   */
   done: "agent:done",
+  /**
+   * The pull request was closed unmerged.
+   *
+   * Deliberately neither `done` nor `failed`. The agent did the job and a person
+   * declined it, which is not a failure of the agent and is not a bug fixed —
+   * and it is the more interesting of the two numbers, so it does not get folded
+   * into the other one.
+   */
+  closed: "agent:closed",
   failed: "agent:failed",
 } as const;
 
@@ -106,31 +156,46 @@ const SELF_AUTHORISING: ReadonlySet<string> = new Set(["auto", "named"]);
  * hand-written query — and a rule enforced twice from two lists is a rule
  * enforced once, badly.
  *
- * `agent:reviewing` is absent on purpose: a ticket under review still carries
- * `agent:solving`, so it is already excluded, and listing it would suggest the
- * two are independent when the whole design rests on them not being.
+ * Every state the machine can be in except the two it starts from. A ticket is
+ * claimable when nothing here is on it; anything else is either being worked on,
+ * waiting on a person, or over.
+ *
+ * **`agent:reviewing` and `agent:review-done` are the entries that make this list
+ * load-bearing rather than tidy**, and until D4 the first was absent with a
+ * comment explaining that a ticket under review still carried `agent:solving`.
+ * It does not any more (rule 2), so the exclusion that used to come free has to
+ * be written down. `agent:review-done` matters most of the three: it is where a
+ * ticket sits for days, so omitting it is the double-solve bug with the widest
+ * window in the whole design.
  */
 export const SOLVE_QUEUE_EXCLUDED_LABELS: readonly string[] = [
   AGENT_LABELS.solving,
+  AGENT_LABELS.reviewing,
+  AGENT_LABELS.reviewDone,
   AGENT_LABELS.done,
+  AGENT_LABELS.closed,
   AGENT_LABELS.failed,
 ];
 
 /**
- * Labels that make a ticket unclaimable, checked locally.
+ * Labels that make a ticket unclaimable, checked locally. Now the same list.
  *
- * A superset of the query's exclusions, and the extra entry is the point.
- * `agent:reviewing` is redundant *today*, because the review transition keeps
- * `agent:solving`. If someone later decides that reviewing should replace
- * solving rather than accompany it, this list is what stops that change from
- * silently becoming a double-solve bug; the query alone would not.
+ * It used to be a strict superset, holding `agent:reviewing` when the query did
+ * not, and the comment here said why: *"if someone later decides that reviewing
+ * should replace solving rather than accompany it, this list is what stops that
+ * change from silently becoming a double-solve bug."* **That is D4, and the guard
+ * did its job** — the extra entry was already correct when the transition changed
+ * underneath it, so the local check never had a window the query had.
+ *
+ * With the hypothetical arrived, the two sets coincide, and an alias is the
+ * honest way to say so. Two identical literals would be the failure the module
+ * header names at `SOLVE_QUEUE_EXCLUDED_LABELS` — a rule enforced twice from two
+ * lists is a rule enforced once, badly — and the next divergence between them
+ * would be a typo rather than a decision. If a future state ever needs to block a
+ * claim without being excluded from the query, split them again *and say which
+ * entry is the reason*, the way this comment used to.
  */
-const CLAIM_BLOCKING_LABELS: readonly string[] = [
-  AGENT_LABELS.solving,
-  AGENT_LABELS.reviewing,
-  AGENT_LABELS.done,
-  AGENT_LABELS.failed,
-];
+const CLAIM_BLOCKING_LABELS = SOLVE_QUEUE_EXCLUDED_LABELS;
 
 /**
  * The prefix that names the owning repository.
@@ -317,10 +382,15 @@ export function claimTransition(labels: readonly string[], authority: ClaimAutho
 }
 
 /**
- * Solve finished, pull request open: add `agent:reviewing`, keep the claim.
+ * Solve finished, pull request open: `agent:reviewing` on, the claim off.
  *
- * See the module header. `agent:solving` staying on is what keeps the ticket
- * out of the queue while its pull request is being reviewed.
+ * The claim comes off because it is a concurrency slot, not a record — see rule
+ * 2 in the module header. What keeps the ticket out of the queue from here on is
+ * `SOLVE_QUEUE_EXCLUDED_LABELS`, which is why the two changed together.
+ *
+ * Still refuses without `agent:solving`, and the reason is unchanged by the
+ * removal: the claim is what proves this instance owns the ticket, and a caller
+ * that cannot show one is either confused or racing.
  */
 export function reviewTransition(labels: readonly string[]): LabelEdit {
   if (!labels.includes(AGENT_LABELS.solving)) {
@@ -328,10 +398,73 @@ export function reviewTransition(labels: readonly string[]): LabelEdit {
       `refusing to move to ${AGENT_LABELS.reviewing} without ${AGENT_LABELS.solving} — the claim is what proves this instance owns the ticket`,
     );
   }
-  return labelEdit([AGENT_LABELS.reviewing], []);
+  return labelEdit([AGENT_LABELS.reviewing], [AGENT_LABELS.solving]);
 }
 
-export type SolveOutcomeLabel = "done" | "failed";
+/** The two positions of the review phase, which a ticket moves between freely. */
+export type ReviewStage = "reviewing" | "review-done";
+
+const REVIEW_STAGE_LABELS: Readonly<Record<ReviewStage, string>> = {
+  reviewing: AGENT_LABELS.reviewing,
+  "review-done": AGENT_LABELS.reviewDone,
+};
+
+/**
+ * Moves a ticket between the two review stages, in either direction.
+ *
+ * One function rather than an undraft transition and a resume transition,
+ * because the two are one axis and mirror-image functions can be broken on one
+ * side only. A round that undrafts asks for `review-done`; a later round that
+ * pushes a commit asks for `reviewing` again, because while it is pushing, "only
+ * human approval is left" is false.
+ *
+ * **Idempotent on purpose, and that is not a convenience.** Most rounds neither
+ * undraft nor resume — they arrive with the ticket already in the stage they
+ * want — and the advance step will run on a timer. Returning an empty edit lets
+ * the caller skip the write (see `isNoopEdit`) instead of either writing a label
+ * that is already there or having to reproduce this comparison at every call
+ * site.
+ *
+ * **Refuses a ticket that is in neither stage**, which is the guard worth having.
+ * The stage a round wants is decided from a pull request; whether the ticket is
+ * still under review is a fact about the board, and a person can have moved it
+ * to `agent:done` or cleared it entirely in between. Writing `agent:reviewing`
+ * onto a ticket somebody just finished would resurrect it into a state the queue
+ * excludes and nothing else will ever clear.
+ */
+export function reviewStageTransition(labels: readonly string[], stage: ReviewStage): LabelEdit {
+  const present = new Set(labels);
+  if (!present.has(AGENT_LABELS.reviewing) && !present.has(AGENT_LABELS.reviewDone)) {
+    throw new LabelStateError(
+      `refusing to set ${REVIEW_STAGE_LABELS[stage]} on a ticket carrying neither ${AGENT_LABELS.reviewing} nor ${AGENT_LABELS.reviewDone} — it is not under review, and something else has moved it`,
+    );
+  }
+
+  const wanted = REVIEW_STAGE_LABELS[stage];
+  const other = stage === "reviewing" ? AGENT_LABELS.reviewDone : AGENT_LABELS.reviewing;
+  return labelEdit(present.has(wanted) ? [] : [wanted], present.has(other) ? [other] : []);
+}
+
+/** Whether an edit would change nothing, so the caller can skip the write. */
+export function isNoopEdit(change: LabelEdit): boolean {
+  return change.add.length === 0 && change.remove.length === 0;
+}
+
+/**
+ * The three ways this ends, and they are three rather than two on purpose.
+ *
+ * `done` is **merged**, and nothing else, because it is what a report counts.
+ * `closed` is a pull request a person closed unmerged — work the tool completed
+ * that nobody wanted, which is a number worth having and is invisible the moment
+ * it is folded into either neighbour. `failed` is the agent bailing.
+ */
+export type SolveOutcomeLabel = "done" | "closed" | "failed";
+
+const OUTCOME_LABELS: Readonly<Record<SolveOutcomeLabel, string>> = {
+  done: AGENT_LABELS.done,
+  closed: AGENT_LABELS.closed,
+  failed: AGENT_LABELS.failed,
+};
 
 /**
  * The terminal transition: the lifecycle labels come off, one verdict goes on.
@@ -339,21 +472,37 @@ export type SolveOutcomeLabel = "done" | "failed";
  * `agent:solvable` deliberately stays. It is triage's assessment, not the
  * solver's, and a record of what was believed before the attempt is exactly
  * what a calibration period needs to read back off the board afterwards.
+ *
+ * Every in-flight label is swept, including the ones a correct run would not
+ * have left behind together. A ticket reaching here with both `agent:reviewing`
+ * and `agent:review-done` is in a state no transition produces, but it is also a
+ * ticket that is over, and the useful response to an impossible state at the end
+ * of the machine is to clear it rather than to preserve it.
  */
 export function completionTransition(
   labels: readonly string[],
   outcome: SolveOutcomeLabel,
 ): LabelEdit {
   const present = new Set(labels);
-  const remove = [AGENT_LABELS.solving, AGENT_LABELS.reviewing].filter((label) =>
-    present.has(label),
+  const remove = [AGENT_LABELS.solving, AGENT_LABELS.reviewing, AGENT_LABELS.reviewDone].filter(
+    (label) => present.has(label),
   );
-  return labelEdit([outcome === "done" ? AGENT_LABELS.done : AGENT_LABELS.failed], remove);
+  return labelEdit([OUTCOME_LABELS[outcome]], remove);
 }
 
-/** Whether the machine has already stopped for this ticket. */
+/**
+ * Whether the machine has already stopped for this ticket.
+ *
+ * All three verdicts, not the two that mean the agent succeeded. This answers
+ * "is there anything left to do", and a pull request somebody closed is as over
+ * as one they merged.
+ */
 export function isTerminal(labels: readonly string[]): boolean {
-  return labels.includes(AGENT_LABELS.done) || labels.includes(AGENT_LABELS.failed);
+  return (
+    labels.includes(AGENT_LABELS.done) ||
+    labels.includes(AGENT_LABELS.closed) ||
+    labels.includes(AGENT_LABELS.failed)
+  );
 }
 
 /** The labels a ticket would carry after an edit, for reporting a dry run. */

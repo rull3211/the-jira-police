@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { USAGE, parseBotArgs } from "./bot-args.ts";
+import { PHASES } from "./solve-args.ts";
+
+/**
+ * Every rung flag, from the ladder itself rather than copied out of it.
+ *
+ * Four lists below were hand-written `["--claim", "--solve", "--pr"]`, and
+ * `--review` was added to the ladder without any of them noticing — including
+ * the one whose whole stated purpose is catching a rung that outran the help
+ * text. Deriving it is the only version of that test that can do its job.
+ */
+const RUNG_FLAGS = PHASES.filter((phase) => phase !== "plan").map((phase) => `--${phase}`);
 
 /** The invocation, or a thrown assertion — so every test below reads as one line. */
 function ok(argv: readonly string[]): { issueKey: string | null; phase: string } {
@@ -25,17 +36,14 @@ describe("parseBotArgs", () => {
     expect(ok(["SSX-3822"])).toEqual({ issueKey: "SSX-3822", phase: "plan" });
   });
 
-  it.each([
-    ["--claim", "claim"],
-    ["--solve", "solve"],
-    ["--pr", "pr"],
-  ])("reads %s as the %s rung", (flag, phase) => {
-    expect(ok(["SSX-3822", flag]).phase).toBe(phase);
+  it.each(RUNG_FLAGS)("reads %s as the rung it is named after", (flag) => {
+    expect(ok(["SSX-3822", flag]).phase).toBe(flag.slice(2));
   });
 
   it("takes the highest rung when several are named", () => {
     expect(ok(["SSX-3822", "--claim", "--pr"]).phase).toBe("pr");
     expect(ok(["SSX-3822", "--pr", "--claim"]).phase).toBe("pr");
+    expect(ok(["SSX-3822", "--review", "--solve"]).phase).toBe("review");
   });
 
   it("does not care where the key sits among the flags", () => {
@@ -47,9 +55,9 @@ describe("parseBotArgs", () => {
     // queue, which is a reasonable thing for a queue command to do. Here the
     // free rung is a paid model call, so "no key" must never degrade into
     // "every ticket" — least of all at --pr, one character from the safe form.
-    it.each([[[]], [["--claim"]], [["--solve"]], [["--pr"]]])(
+    it.each([[], ...RUNG_FLAGS.map((flag) => [flag])])(
       "refuses %j",
-      (argv: readonly string[]) => {
+      (...argv: readonly string[]) => {
         expect(error(argv)).toContain("an issue key is required");
       },
     );
@@ -95,10 +103,19 @@ describe("parseBotArgs", () => {
       expect(reason).toContain("solve:once");
     });
 
+    it("points at --review, which is what the operator almost always meant", () => {
+      // The two are one letter apart in intent and easy to confuse from outside:
+      // `--advance` works a pull request an earlier run left behind, `--review`
+      // opens one and then works it. A refusal that named neither would send
+      // someone to `solve:once --advance` against a pull request that does not
+      // exist, which fails a second time for a reason they cannot see either.
+      expect(error(["SSX-3822", "--advance"])).toContain("--review");
+    });
+
     it("refuses it at every rung it could be combined with", () => {
       // The shared parser already refuses these combinations, so this asserts
       // the refusal survives the extra hop rather than that it exists.
-      for (const flag of ["--claim", "--solve", "--pr"]) {
+      for (const flag of RUNG_FLAGS) {
         expect(error(["SSX-3822", flag, "--advance"])).not.toBe("");
       }
     });
@@ -111,7 +128,7 @@ describe("parseBotArgs", () => {
   it("documents every rung it accepts", () => {
     // Cheap, and it catches the failure mode where a rung is added to the
     // ladder and the help text keeps describing the old command.
-    for (const flag of ["--claim", "--solve", "--pr"]) {
+    for (const flag of RUNG_FLAGS) {
       expect(USAGE).toContain(flag);
     }
   });

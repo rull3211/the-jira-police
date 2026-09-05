@@ -186,7 +186,7 @@ export const SETTINGS = [
   {
     name: "SOLVE_TIMEOUT_MS",
     description:
-      "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones.",
+      "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones. Wall-clock means wall-clock: a machine that sleeps mid-pass spends the budget without the pass running, which killed a recon on SSX-3831 that had done nothing wrong. Harmless for a hand-driven run on a waking machine and not harmless for E, where a laptop daemon meets this every night.",
     fallback: "1800000",
   },
   {
@@ -241,6 +241,24 @@ export const SETTINGS = [
     description:
       "The absolute number of rounds any one pull request may ever cost, counted from the marker comment on it. Deliberately not MAX_REVIEW_ITERATIONS under another name: that one is a policy about how much argument a bot reviewer is worth, and it is expected to be relaxed — human feedback is not capped by it at all. This is a brake on the machinery, and conflating the two would let a policy change disable a safety stop. Twenty, because the same measurement serves both and only one of them may be tuned freely. On hitting it: stop advancing, say so on the ticket, and leave the pull request open for a human.",
     fallback: "20",
+  },
+  {
+    name: "REVIEW_POLL_MS",
+    description:
+      "How long --review waits before looking at the pull request again. Two minutes, from measurement rather than taste: every Copilot review on PR #2658 landed two and a half to four minutes after the review was requested, so a shorter interval buys nothing but git churn and a longer one adds dead time to every round. A poll that finds nothing costs one gh read and no model call — waiting is free, which is why the bound that matters is MAX_REVIEW_WAITS rather than this.",
+    fallback: "120000",
+  },
+  {
+    name: "MAX_REVIEW_WAITS",
+    description:
+      "How many consecutive silent polls --review tolerates before it stops and hands the pull request to a human. Ten, which at the default interval is twenty minutes of nothing. This is the bound on the one thing the round caps cannot see: a reviewer that never answers produces no rounds, so MAX_REVIEW_ITERATIONS and MAX_PR_ROUNDS_TOTAL both stay at zero while the loop spins forever. Counted consecutively and reset by any round that runs, because a slow reviewer and an absent one differ only in whether they eventually speak.",
+    fallback: "10",
+  },
+  {
+    name: "FAIL_FIRST_CHECK",
+    description:
+      "Whether a verified solve also runs its own new tests against the base, to see whether they fail when the fix is taken away. On by default, which is the opposite of every other switch here: this one grants nothing and writes nothing, and the failure mode of it being off is the thing it exists to catch — a regression test that is green against the bug it is named for. Set it to false only for cost, since it buys one extra install and one extra test run per solve. The result is reported on the pull request and never withholds one.",
+    fallback: "true",
   },
   {
     name: "LOG_LEVEL",
@@ -386,6 +404,20 @@ export function numeric(settings: Settings, name: SettingName, min = 0): number 
  */
 export function flag(settings: Settings, name: SettingName): boolean {
   return settings[name].trim().toLowerCase() === "true";
+}
+
+/**
+ * Whether the fail-first experiment runs. **Only "false" turns it off.**
+ *
+ * The mirror image of `flag` above, and the asymmetry is the point rather than
+ * an oversight. `flag` fails closed because the thing it reads decides whether
+ * this service writes to shared tickets, so a typo must not grant a privilege.
+ * This reads a quality check that grants nothing, and there a typo must not
+ * silently withdraw a guard — `FAIL_FIRST_CHECK=fasle` should keep checking.
+ * Two settings, two directions, both chosen by what a mistake costs.
+ */
+export function failFirstCheck(settings: Settings): boolean {
+  return settings["FAIL_FIRST_CHECK"].trim().toLowerCase() !== "false";
 }
 
 export function list(settings: Settings, name: SettingName): readonly string[] {

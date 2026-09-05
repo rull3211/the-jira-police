@@ -35,6 +35,14 @@
  * §15 for that argument and for why Maven has no install step, no typecheck
  * step, no lint step, and exactly one flag.
  *
+ * ## Two questions, and only the first one gates
+ *
+ * `verify` asks *do the tests pass with the change*. `checkFailFirst`, at the
+ * bottom, asks *do they fail without it* — the house mutation rule applied to
+ * the tests the solver writes rather than to the ones this repository writes.
+ * The second is a report and never a refusal, for a reason given in full at its
+ * own doc comment: a vacuous test does not make a correct fix wrong.
+ *
  * ## Known limitation, deliberately not solved here
  *
  * If the base itself is already failing lint or typecheck, every run on that
@@ -708,4 +716,231 @@ export async function verify(
 
   logger.info("solve.verify.passed", { steps: results.map((step) => step.name) });
   return { outcome: "passed", steps: results };
+}
+
+/**
+ * Paths this treats as tests, and the direction it is deliberately wrong in.
+ *
+ * There is no reliable way to know what a repository considers a test, so this
+ * is a heuristic and is written to fail in one direction only. Over-matching —
+ * calling a source file a test — leaves that file in place during the
+ * experiment below, which biases the answer towards `guarded`, the weak
+ * verdict. Under-matching takes a test away with the fix, which also biases
+ * towards `guarded`. Neither can manufacture a `vacuous`, and `vacuous` is the
+ * only finding this makes. That asymmetry is the whole reason the heuristic is
+ * allowed to be a heuristic.
+ *
+ * The third rule covers `src/utils/tests/DateUtils.test.ts` in the pilot repo
+ * and `src/test/java/...` in the Maven ones with the same pattern, which is
+ * luck rather than design and is recorded so nobody trims it as duplication.
+ */
+export const TEST_PATHS: readonly RegExp[] = [
+  /(^|\/)[^/]*\.(test|spec)\.[cm]?[jt]sx?$/u,
+  /(^|\/)__tests__(\/|$)/u,
+  /(^|\/)tests?\//u,
+];
+
+export function isTestPath(path: string): boolean {
+  return TEST_PATHS.some((pattern) => pattern.test(path));
+}
+
+export type FailFirstResult =
+  /** The run's tests failed without the run's fix. They separate the two. */
+  | { readonly outcome: "guarded"; readonly tests: readonly string[] }
+  /** They passed without it. The test is named for something it does not check. */
+  | { readonly outcome: "vacuous"; readonly tests: readonly string[] }
+  /** There was no experiment to run. Not a finding either way. */
+  | { readonly outcome: "skipped"; readonly reason: string }
+  /** The experiment could not be completed, so it says nothing. */
+  | { readonly outcome: "inconclusive"; readonly reason: string };
+
+export interface FailFirstRequest {
+  readonly repoPath: string;
+  readonly worktreePath: string;
+  /**
+   * Where to cut the throwaway checkout. Derived by the caller from the solve
+   * worktree's own path, never supplied by a model — this is a directory this
+   * service creates and then force-removes.
+   */
+  readonly probePath: string;
+  readonly baseRef: string;
+  /** Every path the run changed, as git reported it. */
+  readonly changedPaths: readonly string[];
+  readonly stepTimeoutMs: number;
+  readonly installTimeoutMs: number;
+}
+
+/**
+ * Runs the run's own tests against the base, and reports whether they notice.
+ *
+ * ## What this is for
+ *
+ * This repository holds itself to *a guard is not shipped until a test fails
+ * when it is unplugged*, and until now the solver was never held to it for the
+ * tests it writes. Two live runs shipped a regression test whose name described
+ * something it did not check — the timezone test on PR #1413, and the
+ * run-date block on PR #2661, where all four cases used an issue date in a
+ * 31-day month so no run date could overflow it. Both were found by a person
+ * reading the diff afterwards. This is the mechanical half of the answer.
+ *
+ * ## It is not test-first, and the distinction is measured rather than argued
+ *
+ * Replaying PR #2661's seven assertions against the two wrong versions of the
+ * function: **all seven** go red against the original defect, and **one** goes
+ * red against the plausible wrong fix (`setMonth(month - 1)`). So a red-green
+ * rule would have been satisfied in full by a suite that was six-sevenths
+ * decorative. What this check catches is the weaker failure — a test that is
+ * red against nothing at all — and the stronger one is asked for in prose, in
+ * `SOLVE_INSTRUCTIONS.md` §2, because "the obvious wrong fix" is not something
+ * a harness can enumerate.
+ *
+ * ## Only one of the two answers is sound, and that is why nothing gates on it
+ *
+ * `vacuous` is trustworthy: the run's tests were laid onto the base and passed,
+ * so they do not distinguish the fix from the bug, full stop. `guarded` means
+ * only that *this experiment did not find them vacuous* — a new test importing
+ * a new non-test helper goes red at the import, which looks identical from
+ * outside. So the result is reported, onto the pull request where a reviewer
+ * reads it, and never used to refuse a fix. A vacuous test does not make a
+ * correct fix wrong, and PR #2661's fix was correct.
+ *
+ * ## Why a second worktree rather than reverting this one
+ *
+ * The obvious implementation takes the fix away in place and puts it back. It
+ * was rejected: at this point in the run the fix is verified and uncommitted,
+ * so the restore is the only thing standing between a good change and losing
+ * it, and `git stash create` — the one save point that does not touch the
+ * working tree — was measured to refuse outright once `--intent-to-add` has
+ * staged the run's new files (`Entry 'x' not uptodate. Cannot merge.`, git
+ * 2.50.1). Isolation is this service's answer everywhere else and it is the
+ * answer here: the probe is a detached checkout of the base with the run's test
+ * files laid on top, and the solve worktree is not touched at all. The cost is
+ * one install and one test run, which is why an operator can switch it off.
+ */
+export async function checkFailFirst(
+  runner: CommandRunner,
+  request: FailFirstRequest,
+): Promise<FailFirstResult> {
+  const { repoPath, worktreePath, probePath, baseRef, changedPaths } = request;
+  const { stepTimeoutMs, installTimeoutMs } = request;
+
+  const tests = changedPaths.filter(isTestPath);
+  if (tests.length === 0) {
+    return {
+      outcome: "skipped",
+      reason: "the run changed no test file, so there is no new guard to unplug",
+    };
+  }
+  if (changedPaths.every(isTestPath)) {
+    return {
+      outcome: "skipped",
+      reason: "the run changed tests only, so there is no fix to take away from them",
+    };
+  }
+
+  // The save point, and it is taken before anything is created so that a
+  // failure here costs nothing. `write-tree` refuses an index holding
+  // `--intent-to-add` entries, which `gitDiff` leaves behind for every new
+  // file, so the add is not optional tidying — it is what makes the tree
+  // writable. `commitAll` stages everything again later, so this is invisible
+  // to the rest of the run.
+  const staged = await runner.run(["git", "-C", worktreePath, "add", "--", ...changedPaths], {
+    cwd: worktreePath,
+    timeoutMs: stepTimeoutMs,
+  });
+  if (staged.timedOut || staged.exitCode !== 0) {
+    return {
+      outcome: "inconclusive",
+      reason: `could not stage the run's own changes to read them back — ${tail(staged)}`,
+    };
+  }
+  const written = await runner.run(["git", "-C", worktreePath, "write-tree"], {
+    cwd: worktreePath,
+    timeoutMs: stepTimeoutMs,
+  });
+  const tree = written.stdout.trim();
+  // Checked as a whole string. This becomes an argument to `git checkout`, and
+  // a partial match would let a ref-ish thing through where an object id is
+  // expected. Length is left open because the repository may be SHA-256.
+  if (written.timedOut || written.exitCode !== 0 || !/^[0-9a-f]{40,64}$/u.test(tree)) {
+    return { outcome: "inconclusive", reason: "could not write a tree for the run's own changes" };
+  }
+
+  const planned = await discoverPlan(runner, { repoPath, baseRef, stepTimeoutMs });
+  if (planned.outcome === "refused") {
+    return { outcome: "inconclusive", reason: planned.reason };
+  }
+  const { plan } = planned;
+  const testStep = plan.steps.find((step) => step.name === "test");
+  if (testStep === undefined) {
+    // Unreachable: both plans refuse without a test step. Written rather than
+    // asserted so that a third toolchain produces no finding here instead of a
+    // crash after the pull request has already been paid for.
+    return { outcome: "inconclusive", reason: "the base declares no test step" };
+  }
+
+  const cut = await runner.run(
+    ["git", "-C", repoPath, "worktree", "add", "--detach", probePath, baseRef],
+    { cwd: repoPath, timeoutMs: stepTimeoutMs },
+  );
+  if (cut.timedOut || cut.exitCode !== 0) {
+    return {
+      outcome: "inconclusive",
+      reason: `could not cut a checkout of ${baseRef} to test against — ${tail(cut)}`,
+    };
+  }
+
+  try {
+    // Safe by construction: every path this overwrites holds base content and
+    // nothing else, because the checkout was cut one command ago. The same
+    // operation against the solve worktree is the one this design refuses.
+    const laid = await runner.run(["git", "-C", probePath, "checkout", tree, "--", ...tests], {
+      cwd: probePath,
+      timeoutMs: stepTimeoutMs,
+    });
+    if (laid.timedOut || laid.exitCode !== 0) {
+      // A deleted test file lands here: it is not in the tree, so the checkout
+      // refuses. Reported rather than worked around — a run that removes a test
+      // is not one this experiment has anything to say about.
+      return {
+        outcome: "inconclusive",
+        reason: `could not lay the run's tests onto ${baseRef} — ${tail(laid)}`,
+      };
+    }
+
+    if (plan.install !== null) {
+      const installed = await runner.run(plan.install, {
+        cwd: probePath,
+        timeoutMs: installTimeoutMs,
+      });
+      if (installed.timedOut || installed.exitCode !== 0) {
+        return {
+          outcome: "inconclusive",
+          reason: `dependency install failed in the probe checkout${plan.note}`,
+        };
+      }
+    }
+
+    const ran = await runner.run(testStep.argv, {
+      cwd: probePath,
+      timeoutMs: testStep.cold ? installTimeoutMs : stepTimeoutMs,
+    });
+    // A timeout counts as red, matching `verify`'s reading of the same event,
+    // and it is the conservative direction here too: it produces `guarded`,
+    // the verdict this function is not trusted on.
+    const passed = !ran.timedOut && ran.exitCode === 0;
+    logger.info("solve.fail_first", { outcome: passed ? "vacuous" : "guarded", tests });
+    return passed ? { outcome: "vacuous", tests } : { outcome: "guarded", tests };
+  } finally {
+    const removed = await runner.run(
+      ["git", "-C", repoPath, "worktree", "remove", "--force", probePath],
+      { cwd: repoPath, timeoutMs: stepTimeoutMs },
+    );
+    if (removed.timedOut || removed.exitCode !== 0) {
+      // Logged and not returned. The finding is about the change; a leftover
+      // directory is about this machine, and losing the former to report the
+      // latter would be the wrong trade.
+      logger.warn("solve.fail_first.probe_left", { probePath, output: tail(removed) });
+    }
+  }
 }

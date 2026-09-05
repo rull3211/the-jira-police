@@ -178,7 +178,8 @@ describe("buildSolveQueueJql", () => {
     expect(buildSolveQueueJql(QUEUE)).toBe(
       'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
         'AND labels = "agent:solvable" AND labels = "agent:start" ' +
-        'AND labels NOT IN ("agent:solving", "agent:done", "agent:failed") ORDER BY updated ASC',
+        'AND labels NOT IN ("agent:solving", "agent:reviewing", "agent:review-done", ' +
+        '"agent:done", "agent:closed", "agent:failed") ORDER BY updated ASC',
     );
   });
 
@@ -188,7 +189,8 @@ describe("buildSolveQueueJql", () => {
     expect(buildSolveQueueJql({ ...QUEUE, mode: "auto" })).toBe(
       'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
         'AND labels = "agent:solvable" AND issuetype IN ("Feil") ' +
-        'AND labels NOT IN ("agent:solving", "agent:done", "agent:failed") ORDER BY updated ASC',
+        'AND labels NOT IN ("agent:solving", "agent:reviewing", "agent:review-done", ' +
+        '"agent:done", "agent:closed", "agent:failed") ORDER BY updated ASC',
     );
   });
 
@@ -257,12 +259,25 @@ describe("buildSolveQueueJql", () => {
     expect(rogue).toContain('labels = "agent:start"');
   });
 
-  it("excludes the claim and both terminal labels", () => {
+  it("excludes every state the machine can be in but the two it starts from", () => {
     // The exclusion is the entire dedupe mechanism: there is no seenKeys list
     // and no cursor behind this query.
     expect(buildSolveQueueJql(QUEUE)).toContain(
-      'labels NOT IN ("agent:solving", "agent:done", "agent:failed")',
+      'labels NOT IN ("agent:solving", "agent:reviewing", "agent:review-done", ' +
+        '"agent:done", "agent:closed", "agent:failed")',
     );
+  });
+
+  it("excludes the two states a pull request sits in, which the claim no longer covers", () => {
+    // The mutation this pins is dropping either review label from
+    // SOLVE_QUEUE_EXCLUDED_LABELS. Until D4 a ticket under review still carried
+    // agent:solving and was excluded by that; it does not, so these two are now
+    // the only thing standing between an open pull request and a second solve of
+    // the same ticket. agent:review-done is the one that matters most: it is
+    // where a ticket waits for a human, which is measured in days.
+    const jql = buildSolveQueueJql(QUEUE);
+    expect(jql).toContain('"agent:reviewing"');
+    expect(jql).toContain('"agent:review-done"');
   });
 
   it("keeps a positive label clause, which is what makes NOT IN safe", () => {

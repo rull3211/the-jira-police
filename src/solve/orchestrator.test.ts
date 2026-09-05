@@ -64,6 +64,8 @@ const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown>
   testPlan: "assert the head contains the link",
   estimatedLines: 12,
   bailReason: "",
+  bailBlockers: [],
+  bailRemedy: "",
   injectionNoticed: "",
   ...overrides,
 });
@@ -336,6 +338,8 @@ describe("solveTicket, when recon declines", () => {
       proceed: false,
       confidence: "low",
       bailReason: "the component was deleted three commits ago; the ticket describes dead code",
+      bailBlockers: ["`Widget.tsx` was removed in `a1b2c3d`; nothing imports it."],
+      bailRemedy: "Confirm whether the behaviour moved, and point the ticket at where it went.",
       plannedFiles: [],
       estimatedLines: 0,
       approach: "",
@@ -426,6 +430,8 @@ describe("solveTicket, when recon declines", () => {
         proceed: false,
         confidence: "low",
         bailReason: "the described file does not exist on this branch",
+        bailBlockers: ["`src/app/head.tsx` is not on this branch."],
+        bailRemedy: "Name the file that owns the document head today.",
         devLensAccurate: false,
         devLensCorrection: "triage named src/app/head.tsx; there is no such file",
         plannedFiles: [],
@@ -600,7 +606,17 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it.each([
-    ["recon", { recon: recon({ proceed: false, bailReason: "the dev lens names a dead file" }) }],
+    [
+      "recon",
+      {
+        recon: recon({
+          proceed: false,
+          bailReason: "the dev lens names a dead file",
+          bailBlockers: ["The named file was deleted three commits ago."],
+          bailRemedy: "Point the ticket at the module that replaced it.",
+        }),
+      },
+    ],
     [
       "fix",
       {
@@ -941,6 +957,48 @@ describe("solveTicket, and the branch rule", () => {
 
     expect(outcome.kind).toBe("verified");
     expect(h.calls.some((argv) => argv.some((arg) => arg.startsWith("feat/ssx-3822-")))).toBe(true);
+  });
+});
+
+/** The commands only `checkFailFirst` issues, and nothing else in the run. */
+const probeCalls = (calls: readonly (readonly string[])[]) =>
+  calls.filter((argv) => argv.includes("write-tree") || argv.includes("--detach"));
+
+describe("solveTicket, and the fail-first experiment", () => {
+  it("runs it by default, because nobody has to remember to ask for it", async () => {
+    // The opposite default from every other switch on a solve. It grants no
+    // privilege and writes nothing, and the failure mode of it being off is
+    // precisely the defect it is here to find.
+    const { h } = harness(FULL);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(probeCalls(h.calls).length).toBeGreaterThan(0);
+    expect(outcome).toMatchObject({ kind: "verified" });
+  });
+
+  it("spends nothing at all when it is switched off", async () => {
+    // The reason the setting exists is cost, so the off position has to cost
+    // nothing — not run the experiment and discard it.
+    const { h } = harness(FULL);
+
+    const outcome = await solveTicket(h.deps, { ...request, failFirstCheck: false });
+
+    expect(probeCalls(h.calls)).toEqual([]);
+    expect(outcome).toMatchObject({
+      kind: "verified",
+      failFirst: { outcome: "skipped" },
+    });
+  });
+
+  it("still publishes when the experiment cannot run", async () => {
+    // A report, never a refusal. A fix does not become wrong because the
+    // harness could not take its tests apart.
+    const { h } = harness(FULL);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("verified");
   });
 });
 

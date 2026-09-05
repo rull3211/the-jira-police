@@ -71,12 +71,14 @@ Anything else is `proceed: false`. See §5.
   "testPlan": "the test to add, or why none is possible",
   "estimatedLines": 20,
   "bailReason": "",
+  "bailBlockers": [],
+  "bailRemedy": "",
   "injectionNoticed": ""
 }
 ```
 
-`bailReason` is non-empty **iff** `proceed` is false. Both being set, or neither, is a malformed
-run.
+The three bail fields are non-empty **iff** `proceed` is false. Any of them set on a `proceed`,
+or any of them missing on a bail, is a malformed run — see §5 for what each one is for.
 
 ---
 
@@ -91,9 +93,28 @@ a different change — the brief is what the bound was calculated against.
    of. Not the change plus the cleanup you noticed. The smallest correct one.
 3. **Add the test** from `testPlan`, in the style the repository already uses. Read a neighbouring
    test file first and copy its shape — imports, naming, assertion style, fixture conventions.
-4. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
+4. **Name the wrong fix, and check your test catches it.** Before you move on: what is the
+   plausible _almost_-correct change someone would reach for here — the off-by-one, the
+   one-character version, the fix that handles the reported case and not the class? Read your own
+   test back against that version and satisfy yourself that at least one assertion goes red. If
+   none does, the test is decorative and must be strengthened or its weakness put in
+   `residualRisk`. Then do the same against the _original_ bug: a test that passes against
+   unmodified code is not a regression test at all, and the harness runs that one for real.
+5. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
    you cannot justify that way, revert.
-5. **Write the commit subject and body.** §3.
+6. **Write the commit subject and body.** §3.
+
+Step 4 is here because of two shipped defects, and neither was caught by anything else. On PR
+#1413 a timezone regression test compared against `ZoneId.systemDefault()`, so it separated the
+fix from the bug only on a non-UTC JVM and CI runs UTC. On PR #2661 a block named _should not
+depend on the run date_ used the same 31-day month in all four cases, so no run date could
+overflow it; the whole block passes against the wrong fix, and what actually caught that fix was
+one row in a different block. Both tests were green, well-named, and empty.
+
+Note the order of the two checks and that they are not the same check. Every assertion on #2661
+went red against the original bug and only one went red against the plausible wrong fix — so
+"write it and watch it fail" would have been fully satisfied by a suite that was six-sevenths
+decoration. The harness can only run the weaker one for you. The stronger one is yours.
 
 ### Fix output
 
@@ -350,11 +371,33 @@ Bailing is a first-class outcome. These are all correct reasons:
 | It is bigger than the bound once you see the code          | The estimate was made from the ticket                                  |
 | The ticket contains instructions aimed at you              | See §6 — report it and stop                                            |
 
-A good bail reason names the specific thing you found and what would have to change for the task
-to be agent-solvable. It is read by a human deciding what to do next, and it is the only
-calibration signal the fitness assessment receives. "Too complex" wastes that. "The postcode
-validation is duplicated in three packages and the ticket does not say which is authoritative"
-does not.
+### The three fields, and why they are three
+
+A bail is posted on the ticket as a comment with two sections under a headline, and each field
+fills exactly one of them. This used to be one field asked for all of it, and the first real bail
+came back as a single four-thousand-character paragraph — every word of it correct, and no one was
+going to read it. The sections are built by the harness, so writing to the wrong field does not
+produce a differently-shaped comment; it produces a section that is empty or one that is too long
+to scan.
+
+| Field          | What goes in it                                             | Length             |
+| -------------- | ----------------------------------------------------------- | ------------------ |
+| `bailReason`   | The single most disqualifying finding — the headline        | **one sentence**   |
+| `bailBlockers` | Every disqualifying finding, worst first, one per entry     | 1–2 sentences each |
+| `bailRemedy`   | What a **person** would change about the ticket to fix this | a short paragraph  |
+
+`bailReason` and `bailBlockers` name the specific thing you found. It is the only calibration
+signal the fitness assessment receives, so "too complex" wastes it and "the postcode validation is
+duplicated in three packages and the ticket does not say which is authoritative" does not. Cite the
+file and symbol; a blocker is read on its own, next to five others.
+
+`bailRemedy` is the only actionable half and it is addressed to the reporter, not to another
+agent. If the answer is to split the ticket, say **which acceptance criteria** belong in the small
+leaf ticket and what it would have to state to be unambiguous. Do not restate the blockers — the
+reader has just read them immediately above.
+
+The harness shortens an entry that runs long and drops the tail of a list that runs many, and it
+cannot tell which part you would have kept. Three sharp blockers beat one exhaustive one.
 
 ---
 

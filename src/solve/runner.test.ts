@@ -53,6 +53,8 @@ const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown>
   testPlan: "assert the head contains the link",
   estimatedLines: 12,
   bailReason: "",
+  bailBlockers: [],
+  bailRemedy: "",
   injectionNoticed: "",
   ...overrides,
 });
@@ -311,11 +313,49 @@ describe("parseRecon", () => {
     );
   });
 
+  it("rejects a bail that diagnoses without itemising", () => {
+    // The headline is one sentence by design now, so a bail with nothing in
+    // `bailBlockers` posts a comment whose whole content is that sentence —
+    // which is the "too complex" answer the schema spends a paragraph refusing.
+    expect(() =>
+      parseRecon(
+        recon({ proceed: false, bailReason: "two readings", bailRemedy: "say which" }),
+        "SSX-3822",
+      ),
+    ).toThrow(/itemising/u);
+  });
+
+  it("rejects a bail that says what is wrong and not what would fix it", () => {
+    // The one that matters to the person holding the ticket. Diagnosis without
+    // remedy is a comment that ends by telling a reporter their ticket cannot be
+    // done, under a heading promising to say how to make it doable.
+    expect(() =>
+      parseRecon(
+        recon({ proceed: false, bailReason: "two readings", bailBlockers: ["AK4 is ambiguous"] }),
+        "SSX-3822",
+      ),
+    ).toThrow(/actionable half/u);
+  });
+
+  it("rejects a proceed that filled in the bail fields anyway", () => {
+    // Same rule as the headline's, extended to the fields added beside it. A
+    // run that says go and also says why not has contradicted itself, and the
+    // fix pass would be handed a brief arguing against its own existence.
+    expect(() => parseRecon(recon({ bailBlockers: ["AK4 is ambiguous"] }), "SSX-3822")).toThrow(
+      /contradicted itself/u,
+    );
+    expect(() => parseRecon(recon({ bailRemedy: "split it" }), "SSX-3822")).toThrow(
+      /contradicted itself/u,
+    );
+  });
+
   it("accepts a bail that says why, and requires nothing else of it", () => {
     const verdict = parseRecon(
       recon({
         proceed: false,
         bailReason: "the validation is duplicated in three packages and the ticket says which",
+        bailBlockers: ["`postcode.ts` exists in three packages and none is marked authoritative."],
+        bailRemedy: "Say which package owns the rule, or split the ticket per package.",
         plannedFiles: [],
         approach: "",
       }),
