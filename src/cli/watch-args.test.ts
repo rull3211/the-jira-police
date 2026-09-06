@@ -1,7 +1,35 @@
 import { describe, expect, it } from "vitest";
 
+import type { TriagePayload } from "../triage/runner.ts";
+import { syntheticTicket } from "../triage/single.ts";
 import type { WatchDecision } from "../watch/decide.ts";
-import { describeDecision, watchKey, watchWrites } from "./watch-args.ts";
+import { describeDecision, describeRetriage, watchKey, watchWrites } from "./watch-args.ts";
+
+function retriagePayload(): TriagePayload {
+  return {
+    verdict: "ready-ish",
+    labels: ["dor:pass"],
+    dorPlaceholders: [],
+    recommendedNextStep: "Solve it.",
+    report: "# ✅ ACCEPT",
+    mutation: {
+      commentBody: "body",
+      labelsAdd: [],
+      labelsRemove: [],
+      component: "",
+      links: [],
+      commentAction: "update",
+    },
+    agentFitness: {
+      solvable: true,
+      plausible: false,
+      confidence: "high",
+      repo: "buy-insurance-advisor-web",
+      rationale: "the baseline arrived",
+      blockers: [],
+    },
+  };
+}
 
 describe("watchKey", () => {
   it("reads one issue key", () => {
@@ -38,21 +66,80 @@ describe("watchWrites", () => {
   });
 
   it("is on with the flag, in either position", () => {
-    expect(watchWrites(["--unsubscribe"])).toBe(true);
-    expect(watchWrites(["SSX-1234", "--unsubscribe"])).toBe(true);
-    expect(watchWrites(["--unsubscribe", "SSX-1234"])).toBe(true);
+    expect(watchWrites(["--write"])).toBe(true);
+    expect(watchWrites(["SSX-1234", "--write"])).toBe(true);
+    expect(watchWrites(["--write", "SSX-1234"])).toBe(true);
   });
 
-  it.each(["--write", "--unsub", "unsubscribe", "--Unsubscribe"])(
-    "does not accept %s as the flag",
+  it("refuses the name the flag used to have", () => {
+    // The one an operator's fingers already know. Read as a dry run it would
+    // report a clean sweep over tickets it declined to touch, which is the
+    // divergence the rename was made to close arriving through the rename.
+    expect(() => watchWrites(["--unsubscribe"])).toThrow(/--unsubscribe is now --write/);
+  });
+
+  it.each(["--wrote", "--Write", "-write", "--dry-run"])(
+    "refuses %s rather than guessing",
     (flag) => {
-      // A near miss must read as the dry run, not as the write. `--write` in
-      // particular is the name the plan uses for the finished flag, so it is
-      // the typo an operator is most likely to make, and guessing in the
-      // direction of more privilege is the one guess never worth making.
-      expect(watchWrites([flag])).toBe(false);
+      // Not "reads as the dry run": a near miss is a typo, and a typo that
+      // silently picks the safe branch is indistinguishable from a run that had
+      // nothing to do. Refusing says which of the two happened.
+      expect(() => watchWrites([flag])).toThrow(/does not know/);
     },
   );
+
+  it("still takes a bare key", () => {
+    // The positional must not be read as an unknown flag; `write` without
+    // dashes is a key-shaped argument and `watchKey` is what refuses it.
+    expect(watchWrites(["SSX-1234"])).toBe(false);
+    expect(watchWrites(["write"])).toBe(false);
+  });
+});
+
+describe("describeRetriage", () => {
+  it("names the attempt it spent, because that number is the brake", () => {
+    const line = describeRetriage({
+      kind: "retriaged",
+      count: 2,
+      reason: "the baseline is now stated",
+      ticket: syntheticTicket("SSX-1234", "https://example.atlassian.net"),
+      payload: retriagePayload(),
+    });
+
+    expect(line).toContain("attempt 2");
+    expect(line).toContain("ready-ish");
+    expect(line).toContain("the baseline is now stated");
+  });
+
+  it("gives each refusal its own words rather than one shared skip", () => {
+    // The three are *nobody answered*, *the counter is broken* and *Jira would
+    // not take the write*, and they are the difference between a watch working
+    // as designed and one that has quietly stopped counting. Collapse them and
+    // a sweep reads the same either way.
+    const lines = [
+      describeRetriage({ kind: "irrelevant", reason: "it only promises the logs" }),
+      describeRetriage({ kind: "unreserved", error: "Jira said 403" }),
+      describeRetriage({ kind: "uncountable" }),
+      describeRetriage({ kind: "no-mark" }),
+    ];
+
+    expect(new Set(lines).size).toBe(4);
+    expect(lines[0]).toContain("it only promises the logs");
+    expect(lines[1]).toContain("Jira said 403");
+  });
+
+  it("says a refusal is a refusal on every one of them", () => {
+    // The line sits under a `RETRIAGE` heading that says money was about to be
+    // spent. A follow-up that does not say it was not spent reads as a receipt.
+    for (const outcome of [
+      { kind: "irrelevant", reason: "r" },
+      { kind: "unreserved", error: "e" },
+      { kind: "uncountable" },
+      { kind: "no-mark" },
+    ] as const) {
+      expect(describeRetriage(outcome)).toContain("no re-triage");
+    }
+  });
 });
 
 describe("describeDecision", () => {

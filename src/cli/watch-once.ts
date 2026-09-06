@@ -1,22 +1,30 @@
 /**
- * Reports what the sendback watch would do, and does none of it.
+ * Reports what the sendback watch would do, and with `--write` does it.
  *
  *   node src/cli/watch-once.ts                 # every ticket carrying agent:watching
  *   node src/cli/watch-once.ts SSX-1234        # one named ticket, whatever its labels
- *   node src/cli/watch-once.ts --unsubscribe   # ... and act on the drops
+ *   node src/cli/watch-once.ts --write         # ... and act: drop, or re-triage
  *
- * **`--unsubscribe` is the only write, and the narrow name is the point.** A
- * decision has three outcomes; the re-triage hand-off is not built, so a flag
- * called `--write` would do nothing on the outcome that matters most while
- * still reporting a clean run — the divergence this project exists to catch,
- * spelled as a command-line flag. It becomes `--write` when it means it.
+ * **The flag was `--unsubscribe` until the hand-off landed**, because until then
+ * only one of three outcomes had a writer and a `--write` doing nothing on the
+ * outcome that matters most, while reporting a clean run, is the divergence this
+ * project exists to catch spelled as a command-line flag. Both have writers now.
  *
- * That ordering is deliberate rather than incidental. Unsubscribing is the only
- * action here that *reduces* what the watcher can spend: it takes tickets off
- * the list. The re-triage is what puts money on it. Shipping the brake first
- * means the engine cannot later be armed without one already in place, and it
- * means the terminals in `decideWatch` — `exhausted` and `uncountable`, both of
- * which exist to stop a runaway — are reachable before anything can run away.
+ * The order those two arrived in was deliberate rather than incidental.
+ * Unsubscribing is the action that *reduces* what the watcher can spend: it
+ * takes tickets off the list. The re-triage is what puts money on it. Shipping
+ * the brake first meant the engine could not be armed without one already in
+ * place, and that the terminals in `decideWatch` — `exhausted` and
+ * `uncountable`, both of which exist to stop a runaway — were reachable before
+ * anything could run away.
+ *
+ * **A re-triage here posts, and it is not left to `WRITE_BACK` to decide.** The
+ * watch is self-limiting only because a re-triage moves the high-water mark it
+ * measures from, and the mark is our own comment. A paid run that analysed and
+ * posted nothing would leave the ticket triggered on identical content and buy
+ * the same run again on the next sweep — §7b's infinite loop, restored by a
+ * setting in `.env` rather than by any code here. So the flag decides
+ * `WRITE_BACK` for the run, both ways, exactly as `triage:once` learned to.
  *
  * Without the flag it is still a calibration tool, which is what it was built
  * for and what it has already earned. Run against SSX-3830 on 2026-09-06 it
@@ -35,9 +43,12 @@
  * is spent while nobody is watching, and it guards the loop rather than the
  * operator: this is the command someone uses to decide whether the switch is
  * safe to arm, and gating it would mean the only way to find out is to arm it
- * first. The reading survives `--unsubscribe`, because what that flag spends is
- * bounded by tickets already on the list and every write it makes takes one
- * *off* — it cannot start a watch, only end one.
+ * first. That argument was easy while the flag only unsubscribed; it survives
+ * `--write` for a narrower reason, and the narrowness is worth stating. What
+ * this command can spend is bounded by the tickets already carrying the label,
+ * by `MAX_RETRIAGE_PER_TICKET` through a counter it writes before it spends,
+ * and by a person typing the command once. `WATCH_ENABLED` bounds the thing
+ * none of those bound: a loop that types it again.
  */
 
 import { buildSendbackWatchJql } from "../jira/jql.ts";

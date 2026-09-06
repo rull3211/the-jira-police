@@ -77,6 +77,7 @@ import { createTicketCommenter } from "./solve/commenter.ts";
 import type { TicketCommenter } from "./solve/feedback.ts";
 import { runPost } from "./triage/poster.ts";
 import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
+import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
 /** Skill that reads nothing, so it must not be made to wait on Atlassian. */
 const MOCK_SKILL = "mock-triage";
@@ -344,6 +345,29 @@ export function createSolveCommenter(settings: Settings): TicketCommenter {
     workingDirectory: process.cwd(),
     // Floored at 1ms on the same grounds as everywhere else: zero is not "no
     // timeout", it is one that expired before the session started.
+    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+  });
+}
+
+/**
+ * The watch's cheap gate: does what happened on the ticket answer the sendback?
+ *
+ * Composed here for the same reason the commenter is — a reviewer asking what
+ * this service can reach should find every answer in one file — and it is the
+ * shortest answer in it. `createRelevanceChecker` builds a session with no MCP
+ * server and no tools at all, so there is nothing to withhold and nothing to
+ * scope.
+ *
+ * `TRIAGE_TIMEOUT_MS` again, and again not a copy-paste: this is a storecode
+ * session that reads a prompt and answers, which makes the poster and the
+ * commenter its nearest relatives. It will normally finish in seconds. Sizing
+ * it from a `SOLVE_*` budget would tie a check that reads no files to a number
+ * chosen for a model reading a repository.
+ */
+export function createWatchChecker(settings: Settings): RelevanceChecker {
+  return createRelevanceChecker({
+    executable: settings.STORECODE_PATH,
+    workingDirectory: process.cwd(),
     timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
   });
 }

@@ -7,6 +7,7 @@
  */
 
 import type { WatchDecision } from "../watch/decide.ts";
+import type { RetriageOutcome } from "../watch/retriage.ts";
 
 /**
  * The one positional argument, or `null` for "sweep the queue".
@@ -31,26 +32,35 @@ export function watchKey(argv: readonly string[]): string | null {
   return positional[0] ?? null;
 }
 
+/** Every flag this command knows. Anything else is refused — see `watchWrites`. */
+const WATCH_FLAGS: ReadonlySet<string> = new Set(["--write"]);
+
 /**
- * Whether the run may act on an `unsubscribe`, and nothing else.
+ * Whether the run may act on its decisions.
  *
- * **It is `--unsubscribe` rather than `--write`, and the narrow name is the
- * honest one.** A decision has three outcomes and only one of them has a
- * writer: the re-triage hand-off is not built. A `--write` flag would therefore
- * do nothing on the outcome that matters most, while still reporting a
- * successful run — which is this project's own defect class spelled as a
- * command-line flag.
+ * **It was `--unsubscribe` until the re-triage hand-off landed, and the rename
+ * is the flag catching up with what it does.** The narrow name was honest while
+ * only one of three outcomes had a writer: a `--write` that did nothing on the
+ * outcome that matters most, while reporting a clean run, is this project's own
+ * defect class spelled as a command-line flag. Both outcomes now have writers,
+ * so the honest name is the broad one — and it has to change, because a flag
+ * that reads as a brake is the wrong label on the switch that arms the engine.
  *
- * The name also matches what the flag turns on rather than how much privilege
- * it grants, and those differ here in the reassuring direction: unsubscribing
- * only ever *stops* the watcher spending. It is the brake, and it ships before
- * the engine so that the engine cannot be armed without one.
- *
- * When the re-triage lands this becomes `--write`, which is what the plan's
- * command table has always called it.
+ * **An unrecognised flag is an error, which is what makes the rename safe.**
+ * `watchKey` filters anything beginning with `-` out of the positionals, so
+ * without this an operator's muscle memory for `--unsubscribe` would produce a
+ * silent dry run reporting a clean sweep over tickets it declined to touch —
+ * the same divergence, arriving through the rename that was meant to close it.
  */
 export function watchWrites(argv: readonly string[]): boolean {
-  return argv.includes("--unsubscribe");
+  const unknown = argv.filter((arg) => arg.startsWith("-") && !WATCH_FLAGS.has(arg));
+  if (unknown.length > 0) {
+    throw new Error(
+      `watch:once does not know ${unknown.join(", ")} (--unsubscribe is now --write); accepted: ${[...WATCH_FLAGS].join(", ")}`,
+    );
+  }
+
+  return argv.includes("--write");
 }
 
 /**
@@ -61,6 +71,31 @@ export function watchWrites(argv: readonly string[]): boolean {
  * should be scannable past, while a `RETRIAGE` is the line that says money is
  * about to be spent once anything is wired to spend it.
  */
+/**
+ * What acting on a `retriage` decision actually did, as the line under it.
+ *
+ * Four of the five outcomes are refusals and each gets its own words rather
+ * than a shared "skipped": they are the difference between *nobody answered*,
+ * *the counter is broken* and *Jira would not take the write*, and an operator
+ * reading a sweep to decide whether the watch is safe to arm needs to tell them
+ * apart. The one that spent money says so with the number it spent it against,
+ * because that number is the brake and a sweep is where you find out it moved.
+ */
+export function describeRetriage(outcome: RetriageOutcome): string {
+  switch (outcome.kind) {
+    case "retriaged":
+      return `re-triaged (attempt ${outcome.count}) → ${outcome.payload.verdict} — ${outcome.reason}`;
+    case "irrelevant":
+      return `no re-triage: ${outcome.reason}`;
+    case "unreserved":
+      return `no re-triage: the attempt would not reserve — ${outcome.error}`;
+    case "uncountable":
+      return "no re-triage: the counter on this ticket will not read";
+    case "no-mark":
+      return "no re-triage: no comment of ours to measure from";
+  }
+}
+
 export function describeDecision(key: string, decision: WatchDecision): string {
   switch (decision.kind) {
     case "retriage":
