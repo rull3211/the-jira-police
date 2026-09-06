@@ -145,3 +145,56 @@ describe("withFitnessNote", () => {
     expect(body.split(FOOTER_SENTINEL)).toHaveLength(2);
   });
 });
+
+describe("the send-back block, which is the whole of the watch a reporter can see", () => {
+  const WATCHED = fitness({
+    plausible: true,
+    blockers: ["state the expected total for a cart of two items", "name the browser it fails in"],
+  });
+
+  it("appears on a send-back that is being watched", () => {
+    // **The mutation this exists for.** `plausible` is only ever true below
+    // `ready-ish`, by the gate's own alternatives rule — so the original
+    // verdict guard suppressed the block on exactly the tickets the watch was
+    // built for. Restore the bare `return null` and F becomes a machine that
+    // subscribes to a ticket and never asks the question it is waiting on an
+    // answer to. Silent, paid for, and indistinguishable from working.
+    const note = buildFitnessNote("needs-info", WATCHED);
+
+    expect(note).not.toBeNull();
+    expect(note).toContain("state the expected total for a cart of two items");
+    expect(note).toContain("name the browser it fails in");
+  });
+
+  it("says an answer is enough, because nobody will answer a bot that promised nothing", () => {
+    // The `ready-ish` block deliberately promises nothing — a solvable ticket
+    // still waits for a human to opt it in. Here the opposite is true and it is
+    // a fact about the queue rather than a promise: the sweep runs whether or
+    // not the reporter was told. Copy the cautious wording across and the
+    // reporter is left with a to-do list and no reason to do it.
+    const note = buildFitnessNote("needs-info", WATCHED) ?? "";
+
+    expect(note).toContain("looked at again");
+    expect(note).not.toContain("Nothing picks this up on its own");
+  });
+
+  it("stays quiet on an ordinary send-back", () => {
+    // The original judgement, untouched: below `ready-ish` the fitness answer
+    // is the trivial "the ticket is not ready", which the verdict says louder,
+    // and a second copy of it is noise on a ticket a colleague is reading.
+    expect(buildFitnessNote("needs-info", fitness({ plausible: false }))).toBeNull();
+  });
+
+  it("is spliced above the footer like every other block", () => {
+    // The sentinel is how the poster finds its own last comment to update in
+    // place. A note appended after it starts posting duplicates on every
+    // re-run — and the watch re-runs by design, so this path is the one where
+    // that failure compounds rather than happening once.
+    const posted = withFitnessNote(payload({ verdict: "needs-info", agentFitness: WATCHED }));
+    const body = posted.mutation.commentBody;
+
+    expect(body).toContain("state the expected total for a cart of two items");
+    expect(body.indexOf("Agent fitness")).toBeLessThan(body.indexOf(FOOTER_SENTINEL));
+    expect(body.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
+  });
+});

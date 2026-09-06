@@ -26,20 +26,74 @@ import { FOOTER_SENTINEL } from "./gate.ts";
 import type { AgentFitness, TriagePayload } from "./runner.ts";
 
 /**
+ * The send-back block: what to add, and what happens when it is added.
+ *
+ * Two things it deliberately says that the `ready-ish` block does not.
+ *
+ * **That someone will look again.** The watch is the only part of this service
+ * whose value depends on a person outside it doing something, and a reporter who
+ * does not know the ticket is subscribed has no reason to answer a bot. The
+ * `ready-ish` block is careful to promise nothing, for a good reason — nothing
+ * claims a solvable ticket without a human opting it in. Here the opposite is
+ * true and stating it is not a promise but a fact about the queue: the sweep runs
+ * whether or not anyone is told.
+ *
+ * **That the list is exhaustive.** `blockers` is what the watch measures against,
+ * so a reporter who answers all of it has done everything that is being waited
+ * for. Saying so is what makes the list actionable rather than indicative — and
+ * the gate guarantees the list is non-empty here, so there is always something to
+ * point at.
+ */
+function buildWatchNote(fitness: AgentFitness): string {
+  const repo = fitness.repo === "" ? "" : ` · \`${fitness.repo}\``;
+
+  return [
+    "---",
+    "",
+    `🤖 **Agent fitness:** not yet — watching${repo} · confidence ${fitness.confidence}`,
+    "",
+    "This ticket is close to being fixable automatically. Fill in the following and it becomes a candidate:",
+    "",
+    ...fitness.blockers.map((blocker) => `* ${blocker}`),
+    "",
+    "That list is the whole of it — nothing else is being waited for. Answer it in the description or in a comment and this ticket is looked at again on its own; you do not need to ask anyone.",
+  ].join("\n");
+}
+
+/**
  * Renders the block, or `null` when it should not appear.
  *
- * Only `ready-ish` tickets get one. That is not an arbitrary threshold: it is
- * the same line the gate already draws, since `solvable` requires `ready-ish`.
- * Below it the fitness answer is trivially "no, the ticket is not ready", which
- * the verdict already says louder — so on a send-back the block would be noise
- * on a ticket a colleague is reading.
+ * A `ready-ish` ticket gets one because that is the line the gate already
+ * draws: `solvable` requires `ready-ish`. Below it the fitness answer is
+ * usually the trivial "no, the ticket is not ready", which the verdict says
+ * louder, so the block would be noise on a ticket a colleague is reading.
+ *
+ * ## The one exception, and it is the whole outbound half of F
+ *
+ * **`plausible` is only ever true on a send-back**, by the gate's own rule that
+ * it and `solvable` are alternatives. So the sentence above, written before
+ * `plausible` existed, suppressed the block on precisely the tickets the watch
+ * was built for — and this file's own header is the argument against that: *the
+ * blockers are not an explanation, they are a to-do list*, and kept off the
+ * ticket that list reaches nobody. The schema says the same thing in the field
+ * description a model reads: when `plausible` is true the blockers are *"a
+ * to-do list addressed to the reporter — the exact condition that would end the
+ * watch"*.
+ *
+ * Without this, F is a machine that subscribes to a ticket, waits for an answer
+ * to a question it never asked, and re-triages on whatever the reporter happened
+ * to guess. The label is the subscription and this block is the request; posting
+ * one without the other is the more expensive half of the feature running blind.
+ *
+ * It stays silent on an ordinary send-back, which is the original judgement and
+ * is untouched: `plausible: false` below `ready-ish` renders nothing.
  */
 export function buildFitnessNote(
   verdict: TriagePayload["verdict"],
   fitness: AgentFitness,
 ): string | null {
   if (verdict !== "ready-ish") {
-    return null;
+    return fitness.plausible ? buildWatchNote(fitness) : null;
   }
 
   const repo = fitness.repo === "" ? "" : ` · \`${fitness.repo}\``;
