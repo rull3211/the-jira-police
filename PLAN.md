@@ -6,9 +6,11 @@
 > half**: `pnpm start` now runs the review sweep beside the grooming loop, on its own cadence,
 > behind `SOLVE_ENABLED`. The solve half — anything that claims a ticket — is still a person
 > typing a command, and stays that way until E's remaining blockers are answered. **F has landed
-> its signal and its judgement**: triage can mark a sent-back ticket nearly-solvable and label it
-> `agent:watching`, there is a query that finds those tickets and a pure function that decides
-> whether one is worth re-triaging, and `pnpm watch:once` reports that decision without acting on it. Nothing writes. A human always merges.
+> its signal, its judgement and its engine**: triage can mark a sent-back ticket nearly-solvable
+> and label it `agent:watching`, and `pnpm watch:once` reports what the watcher would do to every
+> such ticket — with `--write`, unsubscribing the ones that are finished and re-triaging the ones
+> somebody answered, against a budget reserved on the ticket before anything is spent. **Nothing
+> loops**: a person types the command. A human always merges.
 
 ## Context
 
@@ -557,12 +559,13 @@ time; two guards covering the same case pass that test individually and defend n
 other does not. It cost nothing to find here because the mutations were run. It would have cost a
 recurring charge to find in production.
 
-**What is left in F:** the changelog read on the Jira client (authorised 2026-09-06, and the second
-amendment to the discovery-only rule after `updateLabels` — `ARCHITECTURE.md` §12 needs both);
-`watch:once <KEY> [--write]`; §7c's unsubscribe wired to a real label write; `buildFitnessNote`;
-and the daemon loop. Nothing reads `WATCH_ENABLED` or `MAX_RETRIAGE_PER_TICKET` yet, which is
-deliberate — they are declared where an operator can see them and wired when there is something to
-switch off.
+**What was left in F when this was written**, kept because the ordering it describes is what
+happened: the changelog read on the Jira client (authorised 2026-09-06, and the second amendment to
+the discovery-only rule after `updateLabels` — `ARCHITECTURE.md` §12 needs both); `watch:once <KEY>
+[--write]`; §7c's unsubscribe wired to a real label write; `buildFitnessNote`; and the daemon loop.
+All but the last two have landed in the sections below. `MAX_RETRIAGE_PER_TICKET` is now read, by
+the counter label; **`WATCH_ENABLED` is still read by nothing**, which stays deliberate — it bounds
+a loop, and there is no loop.
 
 #### F's read half and `watch:once`, landed 2026-09-06 — and the sentinel did not survive the wire
 
@@ -680,7 +683,8 @@ and shipping them inert would have meant arming the loop and the brake in the sa
 
 **It is `--unsubscribe` and not `--write`.** Three outcomes, one writer: a `--write` flag would
 silently do nothing on `retriage`, the outcome that matters most, while reporting a clean run —
-this file's own defect class, spelled as a flag. It is renamed when it means it.
+this file's own defect class, spelled as a flag. It is renamed when it means it — **which happened
+the same day the engine landed**, along with the guard that makes the rename safe.
 
 Three guards, each of which can fail while everything around it succeeds:
 
@@ -870,26 +874,71 @@ no high-water mark: every look would read as new and the first re-triage would j
 against the conversation that produced it. The note on the board says the new reason, and the test
 name says which of the two it is pinning.
 
+#### The engine, landed 2026-09-06 — reserved before it is paid for, and the flag renamed to match
+
+`runRetriage` is the thing every other module in `src/watch/` was built to bound, and the order it
+does five things in is the design rather than an implementation detail: slice, reserve on paper,
+ask whether the movement was an answer, write the reservation, run the triage. The first two are
+pure and free, so a missing high-water mark or an unreadable counter costs nothing; the check costs
+cents; the label write is the last free act before the dollars. Four refusals, four mutations, and
+the one that moves the groom above the reservation fails three tests at once.
+
+**Step 4 before step 5 is §6.3's rule arriving in the second loop.** A count written after the work
+is a receipt, and a failed receipt hands back a free run every sweep forever. A count written
+before is a reservation, and its worst case — an attempt spent on a run that then failed — is a
+number that moved on the board rather than a charge that repeats off it.
+
+**It deliberately does not take `agent:watching` off.** §7c's hand-off is a _triage_ decision, and
+the triage this function pays for already owns both that label and `agent:solvable` through
+`TRIAGE_OWNED_AGENT_LABELS`. A second writer here would be this service deciding a ticket's fitness
+from outside the component that assesses it, and the two would eventually disagree. A triage that
+leaves the label on costs nothing: its own new comment is the new mark, so the ticket reads quiet.
+
+**`--unsubscribe` became `--write`, and the rename needed a guard to be safe.** `watchKey` filters
+anything beginning with `-` out of the positionals, so an operator's muscle memory would otherwise
+have produced a silent dry run reporting a clean sweep — the divergence the rename closes, arriving
+through the rename. `watchWrites` now refuses any flag it does not know and names the old one in
+the message.
+
+**A re-triage posts, and `WRITE_BACK` does not get a vote.** The watch is self-limiting only
+because a re-triage moves the mark it measures from, and the mark is our own comment. A paid run
+that analysed and posted nothing would leave the ticket triggered on identical content and buy the
+same run next sweep — §7b's infinite loop restored by a value in `.env` rather than by any code.
+`triage:once` reached the same conclusion from the other direction.
+
+**Three copies of a fabricated ticket became one.** `triage:once` and `bot:once` each built their
+own synthetic `TicketRef` for single-run mode and the re-triage needed a third. That is the fourth
+instance of the rule this file already has: **a literal that models another module's input is a
+copy that stops agreeing the day that module changes.** `src/triage/single.ts` now holds
+`syntheticTicket` and `toTriageResult`, and its five tests pin the part that matters — the
+fabricated fields are left empty rather than filled with something plausible.
+
+**One gap, stated rather than papered over.** `watch-once.ts` ends in a top-level `await`, so the
+loop that chooses `runRetriage` over `endWatch` has no test, exactly as `runSolveRungs` has none.
+Everything either side of it is covered — `describeRetriage` in `watch-args.test.ts`, the engine in
+`retriage.test.ts` — and the wiring between them is not. Same gap D4e recorded, now with a second
+caller waiting on the harness E needs anyway.
+
 ---
 
 ## Phasing
 
-| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                                                                          |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                                                                                          |
-| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                                                                                           |
-| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                                                                                          |
-| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                                                                                          |
-| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                                                                                         |
-| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                                                                           |
-| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                                                                           |
-| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                                                                           |
-| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request                                                              |
-| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                           |
-| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                           |
-| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                           |
-| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **review half built 2026-09-06, `feat/daemon-review`.** 1944 tests; six mutations caught. Solve half still gated on the blockers below                                                         |
-| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **signal, decision and read half built 2026-09-06, `feat/sendback-watch`.** 2011 tests; twenty-five mutations caught. `watch:once` reports and writes nothing. Nothing watches yet — see below |
+| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                                                                                                                                              |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                                                                                                                                                              |
+| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                                                                                                                                                               |
+| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                                                                                                                                                              |
+| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                                                                                                                                                              |
+| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                                                                                                                                                             |
+| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                                                                                                                                               |
+| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                                                                                                                                               |
+| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                                                                                                                                               |
+| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request                                                                                                                                  |
+| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                                                                                               |
+| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                                                                                               |
+| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                                                                                               |
+| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **review half built 2026-09-06, `feat/daemon-review`.** 1944 tests; six mutations caught. Solve half still gated on the blockers below                                                                                                                             |
+| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **built 2026-09-06, `feat/sendback-watch`.** 2121 tests. `watch:once --write` unsubscribes and re-triages; the attempt is reserved on a label before anything is paid for. **Nothing loops yet** — no daemon cadence, and `WATCH_ENABLED` is still read by nothing |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the
 privilege each grants is reviewable on its own. Later branches stack rather than fan out, because
@@ -907,6 +956,10 @@ pnpm solve:once SSX-3822 --review  # ... and works the review to a handover
 pnpm solve:once SSX-3822 --advance # one review round on an existing PR
 pnpm solve:once --watch            # poll the whole review queue until it empties
 pnpm solve:once SSX-3822 --watch   # ... or just that ticket
+
+pnpm watch:once                    # every watched ticket, dry
+pnpm watch:once SSX-3830           # one ticket, dry, labelled or not
+pnpm watch:once SSX-3830 --write   # ... and act: unsubscribe, or re-triage
 ```
 
 Each flag implies the ones before it, so the command line reads as the escalation it is.
