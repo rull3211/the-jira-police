@@ -757,6 +757,82 @@ losing this costs one cheap re-check per restart, so the argument does not carry
 has no loop and cannot run away, which is why the check can land before the bound does. Seven
 mutations, seven caught.
 
+#### The poster updates its own comment in place, and both of F's bounds were built not knowing it
+
+Found 2026-09-06 while mapping the triage entry path for the re-triage hand-off — by reading
+`poster.ts`, not by a test, and no test in `src/watch/` could have found it. `buildPostPrompt`
+tells the session, even when the action is `create`, to look for a comment carrying both its own
+authorship and the exact footer sentinel and **update that one instead**; `gate.ts` requires the
+footer for the stated reason that without it _"a re-run could not update it in place and would post
+a second copy instead"_. So the considerate behaviour is deliberate, documented, and it silently
+disabled the two mechanisms F rests on.
+
+**The high-water mark never advanced.** One comment of ours, `created` pinned to the first triage
+however many runs follow. A mark built from `created` alone says this service last spoke days
+before it did, every foreign comment since stays newer than it forever, and the watch re-triages
+the same unchanged activity on every sweep. That is §7b's infinite paid loop arriving through the
+one write path nobody thought to ask about.
+
+Fixed: `updated` is read from Jira, carried through `JiraComment` → `WatchComment`, and both sides
+of every comparison go through one `touchedAt` — the later of the two timestamps, `NaN` if either
+will not read, because a partially-readable comment resolving to its earlier stamp is a mark that
+is plausibly too early and too early is the direction that spends. Four mutations caught. It also
+closes a blind spot recorded when `decide.ts` was written, by accident: a reporter who answers by
+editing their own earlier comment used to be invisible, and once `updated` is on the wire for our
+comments, withholding it from theirs would be choosing to keep missing the answers.
+
+**The count is the worse half and it is not fixed.** `ours.length - 1` only counts re-triages if a
+re-triage leaves a comment. It does not, so the number is zero forever and `MAX_RETRIAGE_PER_TICKET`
+cannot fire — the mark at least fails toward refusing, while a count stuck at zero fails toward
+paying. The arithmetic is kept, with its comment rewritten to say plainly that the brake cannot
+currently fire: it is correct over the quantity it names, it does fire on the cases that produce a
+second comment of ours (a pasted sentinel, a hand-posted verdict), and deleting a brake because the
+odometer is broken is how the odometer stays broken.
+
+**So the engine is blocked on where the count comes from, and the shape of the answer is known.**
+It must be a **reservation written before the run it authorises**, exactly as §6.3's marker is —
+posting it afterwards means a failed write hands back a free run every sweep. The comment body
+cannot carry it, because writing that body costs a paid session. A namespaced label counter can:
+`updateLabels` is REST, free, atomic enough at this concurrency, and visible on the board. What
+stops it today is that `INTAKE_INSTRUCTIONS.md` §11 lets a re-triage clear `agent:*` labels, so the
+run being counted would reset its own counter. Deciding that is F's next question and nothing
+should re-triage on a timer until it is answered.
+
+**The general lesson, which is the third instance and now a rule.** Every fixture in `src/watch/`
+builds its own comments, so the poster's idempotency was a fact about a different module that this
+module's tests quietly assumed away. After `client.test.ts`'s hand-copied label list and
+`solve-args.test.ts`'s hand-copied rung list: **a fixture that models another module's output is a
+test that cannot see that module change.**
+
+#### The slice the check is shown, landed 2026-09-06
+
+`retriageContext` is the pure half of the pre-check: everything foreign since we last spoke, and
+nothing else. It is separate from `relevance.ts` for the reason `decide.ts` is separate from
+`signals.ts` — the module that spawns a paid session should not also decide what goes into the
+prompt, because then the prompt can only be tested by paying.
+
+**It cannot reuse the decision's answer, which is why it exists.** `decideWatch` returns on its
+first trigger, correctly: one reason to look is enough. On a ticket with both a new comment and a
+description edit it names the comment and never mentions the edit, so anything reading the
+decision's own trigger string would be judging half the activity.
+
+**It imports `lastSpokeAt` and `touchedAt` rather than dating comments itself.** Two functions
+computing _when we last spoke_ from the same comments would eventually disagree, and the
+disagreement is invisible until a comment triggers the look and then does not appear in the prompt
+— a paid session asked to explain an empty page. Both dating mutations are caught, and one of them
+was live in this file for an hour before the import: the sendback was looked up by `created`, which
+stops matching the instant the poster rewrites the comment, and the check would have been handed an
+empty ask.
+
+**Ten comments, newest kept, the dropped count stated outside the fence.** Every one of these is
+attacker-controlled text going into a prompt, so it is bounded; and a check told it is seeing
+everything while seeing ten of forty is answering a different question from the one it was asked.
+The note is outside the fence because inside it is one more line a hostile comment could imitate.
+
+**The field list is filtered where the debug log is deliberately not.** Both halves are the same
+calibration lesson pointing opposite ways: a filtered _log_ can only confirm the guess it was
+filtered by, and an unfiltered _prompt_ is an invitation to reason from noise.
+
 ---
 
 ## Phasing
