@@ -196,15 +196,45 @@ describe("the terminals", () => {
   });
 
   it("unsubscribes once the attempt budget is spent", () => {
+    // Four comments at a limit of three: the sendback, then three re-triages.
     const spent = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
         ourComment("2026-09-02T10:00:00.000+0200"),
         ourComment("2026-09-03T10:00:00.000+0200"),
+        ourComment("2026-09-04T10:00:00.000+0200"),
       ],
     });
 
     expect(decideWatch(spent, 3)).toMatchObject({ kind: "unsubscribe", reason: "exhausted" });
+  });
+
+  it("does not count the sendback itself against the re-triage budget", () => {
+    // The mutation: count `ours.length` instead of `ours.length - 1` and this
+    // ticket is dropped one re-triage early — a setting whose own name promises
+    // three attempts silently delivering two. The comment that starts a watch
+    // is the reason it exists, not an attempt to end it.
+    const threeRuns = signals({
+      comments: [
+        ourComment("2026-09-01T10:00:00.000+0200"),
+        ourComment("2026-09-02T10:00:00.000+0200"),
+        ourComment("2026-09-03T10:00:00.000+0200"),
+        theirComment("2026-09-04T10:00:00.000+0200"),
+      ],
+    });
+
+    expect(decideWatch(threeRuns, 3)).toMatchObject({ kind: "retriage" });
+  });
+
+  it("gives a lone sendback its whole budget", () => {
+    const fresh = signals({
+      comments: [
+        ourComment("2026-09-01T10:00:00.000+0200"),
+        theirComment("2026-09-02T10:00:00.000+0200"),
+      ],
+    });
+
+    expect(decideWatch(fresh, 1)).toMatchObject({ kind: "retriage" });
   });
 
   it("counts the budget even when somebody is still talking", () => {
@@ -215,7 +245,8 @@ describe("the terminals", () => {
         ourComment("2026-09-01T10:00:00.000+0200"),
         ourComment("2026-09-02T10:00:00.000+0200"),
         ourComment("2026-09-03T10:00:00.000+0200"),
-        theirComment("2026-09-04T10:00:00.000+0200"),
+        ourComment("2026-09-04T10:00:00.000+0200"),
+        theirComment("2026-09-05T10:00:00.000+0200"),
       ],
     });
 

@@ -182,11 +182,25 @@ export function decideWatch(signals: WatchSignals, maxRetriage: number): WatchDe
     };
   }
 
-  if (ours.length >= maxRetriage) {
+  // **The first comment is the sendback, not a re-triage, so it is not
+  // counted.** A watched ticket exists *because* triage looked once and asked
+  // for something, and that look is the reason the watch was started rather
+  // than an attempt to end it. Counting it made `MAX_RETRIAGE_PER_TICKET=3`
+  // buy two re-triages while the setting's own name and every description of
+  // it promised three — the prose and the behaviour disagreeing about a number,
+  // which is the defect class this repository is organised around, in the one
+  // number that decides how much a ticket may cost.
+  //
+  // Subtracting rather than comparing against `maxRetriage + 1`, because the
+  // quantity this function is bounding is *re-triages* and the arithmetic
+  // should say so; a `+ 1` at the comparison is the same fix written where the
+  // next reader has to reconstruct why it is there.
+  const retriages = ours.length - 1;
+  if (retriages >= maxRetriage) {
     return {
       kind: "unsubscribe",
       reason: "exhausted",
-      note: `${ours.length} triage comments already, at a limit of ${maxRetriage} — a ticket edited this many times is a conversation rather than a signal`,
+      note: `${retriages} re-triage${retriages === 1 ? "" : "s"} already, at a limit of ${maxRetriage} — a ticket edited this many times is a conversation rather than a signal`,
     };
   }
 
