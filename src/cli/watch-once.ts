@@ -53,17 +53,33 @@
 
 import { buildSendbackWatchJql } from "../jira/jql.ts";
 import { logger } from "../logger.ts";
+import type { Settings } from "../settings.ts";
 import { describeSettings, list, numeric, readSettings, withConfigErrors } from "../settings.ts";
 import { assertIssueKey } from "../jira/client.ts";
 import type { IssueActivity, JiraClient } from "../jira/client.ts";
-import { createJiraClient, createSolveCommenter } from "../wiring.ts";
-import { decideWatch, type WatchDecision } from "../watch/decide.ts";
+import { FileSink } from "../output/sink.ts";
+import { toTriageResult } from "../triage/single.ts";
+import {
+  createGroom,
+  createJiraClient,
+  createSolveCommenter,
+  createWatchChecker,
+} from "../wiring.ts";
+import { decideWatch, type WatchDecision, type WatchSignals } from "../watch/decide.ts";
 import { endWatch } from "../watch/end.ts";
+import { type RetriageDeps, runRetriage } from "../watch/retriage.ts";
 import { toWatchSignals } from "../watch/signals.ts";
-import { describeDecision, watchKey, watchWrites } from "./watch-args.ts";
+import { describeDecision, describeRetriage, watchKey, watchWrites } from "./watch-args.ts";
 
 interface Look {
   readonly activity: IssueActivity;
+  /**
+   * Kept beside the decision rather than recomputed by the caller. `runRetriage`
+   * needs exactly what `decideWatch` was shown, and deriving it twice is two
+   * readings of one fetch that can disagree — the shape of divergence this
+   * repository keeps finding.
+   */
+  readonly signals: WatchSignals;
   readonly decision: WatchDecision;
 }
 
@@ -94,7 +110,21 @@ async function look(client: JiraClient, key: string, maxRetriage: number): Promi
     fields: [...new Set(signals.changes.flatMap((change) => change.fields))].toSorted(),
   });
 
-  return { activity, decision };
+  return { activity, signals, decision };
+}
+
+/**
+ * The same settings, with the re-triage's comment turned on.
+ *
+ * Its own function rather than an inline override, so the one line that decides
+ * whether a paid run reaches the ticket is greppable and can be argued with.
+ * The argument is in the header: the watch is bounded by its own comment moving
+ * the high-water mark, so a re-triage that does not post is a charge that
+ * repeats. `triage:once` reached the same conclusion from the other direction —
+ * that leaving `.env` in charge makes the flag decorative.
+ */
+function posting(settings: Settings): Settings {
+  return { ...settings, WRITE_BACK: "true" };
 }
 
 async function main(): Promise<void> {
@@ -124,22 +154,69 @@ async function main(): Promise<void> {
 
   const counts = { retriage: 0, quiet: 0, unsubscribe: 0 };
   let ended = 0;
+  let spent = 0;
+  let failed = 0;
 
-  // Built once and only when it could be used, because constructing it is how
-  // this command would acquire the ability to write at all. A dry run holds no
-  // commenter, which makes the refusal structural rather than a branch that
-  // could be got wrong — the same argument B1 made for `SolveDeps`.
-  const commenter = writes ? createSolveCommenter(settings) : null;
+  // Built once, and only when they could be used, because constructing them is
+  // how this command acquires the ability to write at all. A dry run holds
+  // neither, which makes the refusal structural rather than a branch that could
+  // be got wrong — the same argument B1 made for `SolveDeps`.
+  //
+  // The groom is composed with posting forced on rather than left to the
+  // configured value, for the reason in the header: a re-triage that analyses
+  // and posts nothing leaves the mark it measures from where it was, so the
+  // ticket stays triggered and buys the same run again on the next sweep.
+  const acting = writes
+    ? {
+        commenter: createSolveCommenter(settings),
+        sink: new FileSink(settings.OUTPUT_DIR),
+        retriage: {
+          client,
+          checker: createWatchChecker(settings),
+          groom: createGroom(posting(settings)),
+          baseUrl: settings.JIRA_BASE_URL,
+        } satisfies RetriageDeps,
+      }
+    : null;
 
   for (const key of keys) {
-    const { activity, decision } = await look(client, key, maxRetriage);
+    const { activity, signals, decision } = await look(client, key, maxRetriage);
     counts[decision.kind] += 1;
     process.stdout.write(`${describeDecision(key, decision)}\n`);
 
-    if (commenter !== null && decision.kind === "unsubscribe") {
-      const did = await endWatch({ client, commenter }, key, activity, decision.reason);
+    if (acting === null) {
+      continue;
+    }
+
+    if (decision.kind === "unsubscribe") {
+      const did = await endWatch(
+        { client, commenter: acting.commenter },
+        key,
+        activity,
+        decision.reason,
+      );
       if (did === "unsubscribed") {
         ended += 1;
+      }
+    }
+
+    if (decision.kind === "retriage") {
+      // Caught per ticket rather than allowed to end the sweep. `runRetriage`
+      // lets a refused verdict throw, which is `createGroom`'s contract and
+      // right for a single named run; here the attempt is already reserved, so
+      // abandoning the remaining tickets buys nothing and hides them.
+      try {
+        const outcome = await runRetriage(acting.retriage, signals);
+        process.stdout.write(`          ↳ ${describeRetriage(outcome)}\n`);
+        if (outcome.kind === "retriaged") {
+          spent += 1;
+          await acting.sink.write(toTriageResult(outcome.ticket, outcome.payload));
+        }
+      } catch (error) {
+        failed += 1;
+        const message = error instanceof Error ? error.message : String(error);
+        process.stdout.write(`          ↳ re-triage failed: ${message}\n`);
+        logger.warn("watch-once.retriage_failed", { key, error: message });
       }
     }
   }
@@ -147,13 +224,15 @@ async function main(): Promise<void> {
   logger.info("watch-once.done", {
     looked: keys.length,
     maxRetriage,
-    unsubscribing: writes,
+    writing: writes,
     ended,
     ...counts,
-    // Named rather than left implicit: this command reads and the watcher it
-    // rehearses does not, so the number that matters to a reader is what a real
-    // run would have cost, and today that is nothing.
+    // What a dry run *would* have spent, and what a writing one did. Both are
+    // reported rather than one or the other, so the two runs of this command an
+    // operator makes back to back can be compared line for line.
     wouldSpend: `${counts.retriage} re-triage run(s)`,
+    retriaged: spent,
+    retriageFailed: failed,
   });
 }
 
