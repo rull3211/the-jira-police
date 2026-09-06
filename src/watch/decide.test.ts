@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { FOOTER_SENTINEL } from "../triage/gate.ts";
-import { BLOCKER_CLEARING_FIELDS, decideWatch, isOurComment, type WatchSignals } from "./decide.ts";
+import {
+  BLOCKER_CLEARING_FIELDS,
+  decideWatch,
+  isOurComment,
+  newestForeignAt,
+  type WatchSignals,
+} from "./decide.ts";
 
 /**
  * A triage comment of ours, at a given time.
@@ -395,5 +401,118 @@ describe("the terminals", () => {
     });
 
     expect(decideWatch(forged, 3)).toEqual({ kind: "quiet" });
+  });
+});
+
+function AT(iso: string): number {
+  return Date.parse(iso);
+}
+
+describe("newestForeignAt, which is what the memo remembers", () => {
+  it("reports the newest foreign comment, not the one the decision returned on", () => {
+    // THE ONE THAT MATTERS, and the mutation is reading `WatchDecision.at`
+    // instead of calling this. `decideWatch` returns on its *first* trigger in
+    // list order, so on this ticket it names Tuesday and stops. A memo that
+    // remembered Tuesday would see Thursday as unjudged on the very next sweep
+    // and re-ask, forever — the loop the memo exists to close, restored by
+    // reading a field that looks like it means this.
+    const at = newestForeignAt(
+      signals({
+        comments: [
+          ourComment("2026-09-01T10:00:00.000+0200"),
+          theirComment("2026-09-02T08:00:00.000+0200", "first"),
+          theirComment("2026-09-04T08:00:00.000+0200", "last"),
+        ],
+      }),
+    );
+
+    expect(at).toBe(AT("2026-09-04T08:00:00.000+0200"));
+  });
+
+  it("never lets our own comment be the newest", () => {
+    // Our own comment is always at or after the high-water mark, by definition —
+    // it *is* the mark. Counting it would set the memo to the latest instant on
+    // the ticket every sweep, so nothing foreign could ever look new again and
+    // the watch would go permanently deaf while reporting healthy sweeps.
+    const at = newestForeignAt(
+      signals({
+        comments: [
+          theirComment("2026-09-02T08:00:00.000+0200", "an answer"),
+          ourComment("2026-09-03T10:00:00.000+0200"),
+        ],
+      }),
+    );
+
+    expect(at).toBeNaN();
+  });
+
+  it("counts an allowlisted field edit", () => {
+    const at = newestForeignAt(
+      signals({ changes: [{ created: "2026-09-02T09:00:00.000+0200", fields: ["description"] }] }),
+    );
+
+    expect(at).toBe(AT("2026-09-02T09:00:00.000+0200"));
+  });
+
+  it("ignores a field edit the decision would not have triggered on", () => {
+    // The mutation drops the `BLOCKER_CLEARING_FIELDS` filter, and it fails in
+    // the silent direction: a rank drag on Thursday advances the memo past a
+    // reporter's Tuesday answer, so the answer is skipped and never looked at
+    // again. This service writes labels constantly, which is the same reason
+    // `labels` must never join that set.
+    const at = newestForeignAt(
+      signals({
+        comments: [
+          ourComment("2026-09-01T10:00:00.000+0200"),
+          theirComment("2026-09-02T08:00:00.000+0200", "an answer"),
+        ],
+        changes: [{ created: "2026-09-04T09:00:00.000+0200", fields: ["labels", "Rank"] }],
+      }),
+    );
+
+    expect(at).toBe(AT("2026-09-02T08:00:00.000+0200"));
+  });
+
+  it("takes the later of a comment and a field edit", () => {
+    const at = newestForeignAt(
+      signals({
+        comments: [
+          ourComment("2026-09-01T10:00:00.000+0200"),
+          theirComment("2026-09-02T08:00:00.000+0200", "an answer"),
+        ],
+        changes: [{ created: "2026-09-03T09:00:00.000+0200", fields: ["description"] }],
+      }),
+    );
+
+    expect(at).toBe(AT("2026-09-03T09:00:00.000+0200"));
+  });
+
+  it("dates a comment by whichever timestamp is later", () => {
+    // Same rule as the decision, because a reporter who answers by editing
+    // their own earlier comment moves only `updated`. If the two dated
+    // differently the memo could remember an instant the decision never saw.
+    const at = newestForeignAt(
+      signals({
+        comments: [
+          theirComment("2026-08-20T08:00:00.000+0200", "amended", "2026-09-05T08:00:00.000+0200"),
+          ourComment("2026-09-01T10:00:00.000+0200"),
+        ],
+      }),
+    );
+
+    expect(at).toBe(AT("2026-09-05T08:00:00.000+0200"));
+  });
+
+  it("says nothing when there is no high-water mark", () => {
+    // No comment of ours means every look reads as new, which the decision
+    // unsubscribes on. Remembering an instant here would be remembering a
+    // judgement nobody made.
+    expect(
+      newestForeignAt(signals({ comments: [theirComment("2026-09-02T08:00:00.000+0200")] })),
+    ).toBeNaN();
+  });
+
+  it("says nothing when nothing foreign has happened since", () => {
+    expect(newestForeignAt(signals())).toBeNaN();
   });
 });

@@ -183,6 +183,29 @@ export function reviewIntervalMs(settings: Settings): number {
 }
 
 /**
+ * How long the daemon sleeps between sweeps of the watched tickets.
+ *
+ * A third cadence, and the slowest, for the reason the plan gave it before any
+ * of this was built: the sendback watch is the only loop here whose trigger is a
+ * *person changing their mind*. A reporter reads a sendback, goes and finds the
+ * baseline number, and comes back — an event measured in days. Checking every
+ * few minutes cannot make that answer arrive sooner and multiplies the reads and
+ * the checks that find nothing by two hundred.
+ *
+ * It is also the only cadence where a *shorter* interval is a spending decision
+ * rather than a latency one, because the memo bounding the relevance check lives
+ * in memory. A sweep that finds the same undeclined trigger it found last time
+ * costs nothing; a sweep after a restart costs one check per triggered ticket,
+ * so the number that actually governs spend here is restarts per day, not this.
+ *
+ * Same floor as the other two, and here it matters most: a zero interval against
+ * a loop that can start a paid session is not an eager sweep.
+ */
+export function watchIntervalMs(settings: Settings): number {
+  return numeric(settings, "WATCH_POLL_MS", 1);
+}
+
+/**
  * Whether a run may post, given the settings.
  *
  * A stand-in is pinned to preview whatever the operator configured. Both

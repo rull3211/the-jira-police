@@ -1,6 +1,7 @@
 /**
  * The service: poll, triage, repeat, until asked to stop — and, since Phase E,
- * look at the pull requests already under review while it does.
+ * look at the pull requests already under review while it does, and sweep the
+ * tickets triage sent back to see whether anyone answered.
  *
  *   pnpm start
  *   node src/index.ts --skill live-triage-probe --interval 30s --for 4m
@@ -13,30 +14,36 @@
  * issue mid-triage is either completed and recorded or left untouched for the
  * next run. A second signal exits immediately, for when that is too slow.
  *
- * ## Two loops, and the separation is the safety property
+ * ## Three loops, and the separation is the safety property
  *
  * The grooming loop is the one that has been running in production. The review
- * loop is new, spends an order of magnitude more per action, and shells out to
- * `git` and `gh`. **The first requirement of adding it was that it cannot stop
- * the grooming loop from doing what it did yesterday**, and the cheapest way to
- * get that is not a `try`/`catch` around a shared tick — it is two loops that
- * share only a Jira client and a shutdown signal. A `gh` that is missing, a
- * repository that was renamed, a review sweep backing off to fifteen minutes:
- * none of them are visible from the other side.
+ * loop spends an order of magnitude more per action and shells out to `git` and
+ * `gh`. The watch loop is the newest and the only one that spends with nobody
+ * having asked for anything. **The first requirement of adding either was that
+ * it cannot stop the grooming loop from doing what it did yesterday**, and the
+ * cheapest way to get that is not a `try`/`catch` around a shared tick — it is
+ * loops that share only a Jira client and a shutdown signal. A `gh` that is
+ * missing, a repository that was renamed, a review sweep backing off to fifteen
+ * minutes: none of them are visible from the others.
  *
  * They also want different cadences for different reasons — see
- * `reviewIntervalMs` — and a single tick would make the two-minute half wait
- * behind the twenty-minute-per-issue half. `TRIAGE_TIMEOUT_MS` is 20 minutes,
- * so one wedged triage would hold the review sweep for longer than a reviewer
- * takes to answer, every time.
+ * `reviewIntervalMs` and `watchIntervalMs` — and a single tick would make the
+ * two-minute one wait behind the twenty-minute-per-issue one.
+ * `TRIAGE_TIMEOUT_MS` is 20 minutes, so one wedged triage would hold the review
+ * sweep for longer than a reviewer takes to answer, every time. The watch pulls
+ * hardest of all: six hours, because its trigger is a person changing their
+ * mind.
  *
- * **What that costs, stated plainly, because nothing here bounds it:** the two
+ * **What that costs, stated plainly, because nothing here bounds it:** the three
  * loops can spend at the same time and no setting spans them. A tick's worth of
- * review rounds is bounded by `MAX_REVIEW_ROUNDS_PER_TICK` and a triage cycle by
- * the queue, and the total is the sum of two numbers nobody chose together.
+ * review rounds is bounded by `MAX_REVIEW_ROUNDS_PER_TICK`, a triage cycle by
+ * the queue, and a watch sweep by the size of the watched set — and the total is
+ * the sum of three numbers nobody chose together.
+ *
  * When the solve half joins this file it goes *inside* the review loop rather
  * than beside it, so that "advance before claiming" stays an ordering that one
- * tick can guarantee.
+ * tick can guarantee. That is the last gap: a ticket the watch hands back as
+ * `agent:solvable` is picked up by nothing here until it lands.
  */
 
 import { parseDuration } from "./duration.ts";
@@ -46,6 +53,8 @@ import { runPollCycle } from "./poller.ts";
 import { createReviewLoop } from "./review-loop.ts";
 import { type Settings, describeSettings, readSettings, withConfigErrors } from "./settings.ts";
 import { loadState } from "./state/store.ts";
+import { createWatchLoop } from "./watch-loop.ts";
+import { createWatchMemo } from "./watch/memo.ts";
 import { createJiraClient, createPollDeps, pollIntervalMs } from "./wiring.ts";
 
 /** Backoff ceiling. Long enough to stop hammering, short enough to recover unattended. */
@@ -160,6 +169,18 @@ async function main(): Promise<void> {
   // review side stops the process instead of leaving the grooming loop running
   // against a service that is half up.
   const review = createReviewLoop(settings, client, shutdown.signal, BACKOFF_CAP_MS);
+  // The watch's memo is built here rather than inside the loop because its
+  // lifetime is this process's, and this is the function that has one. A
+  // relevance check that says no writes nothing to the ticket, so the trigger
+  // survives the answer; the memo is the only record that the answer was bought.
+  // Constructed per cycle it would be no bound at all — see `watch-loop.ts`.
+  const watch = createWatchLoop(
+    settings,
+    client,
+    shutdown.signal,
+    BACKOFF_CAP_MS,
+    createWatchMemo(),
+  );
   const deps = createPollDeps(settings, client, shutdown.signal);
 
   const grooming = runLoop({
@@ -187,9 +208,10 @@ async function main(): Promise<void> {
   // signal, and each loop finishes the cycle it is in. Stopping when the first
   // one returns would kill a review round mid-push to make a poll cycle's exit
   // look tidy.
-  const [groomed, reviewed] = await Promise.all([
+  const [groomed, reviewed, watched] = await Promise.all([
     grooming,
     review === null ? Promise.resolve(null) : runLoop(review),
+    watch === null ? Promise.resolve(null) : runLoop(watch),
   ]);
 
   logger.info("service.stopped", {
@@ -197,6 +219,8 @@ async function main(): Promise<void> {
     failures: groomed.failures,
     reviewCycles: reviewed?.cycles ?? "off",
     reviewFailures: reviewed?.failures ?? "off",
+    watchCycles: watched?.cycles ?? "off",
+    watchFailures: watched?.failures ?? "off",
   });
 }
 

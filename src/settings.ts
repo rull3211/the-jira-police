@@ -267,6 +267,12 @@ export const SETTINGS = [
     fallback: "false",
   },
   {
+    name: "WATCH_POLL_MS",
+    description:
+      "How often to sweep the watched tickets. Six hours, and it is the slowest cadence in the service by two orders of magnitude because its trigger is the slowest event: a person reading a sendback, going away, and coming back with the answer. That is measured in days, so a shorter interval buys no earlier an answer and multiplies the one cost a sweep has whatever it finds — one Jira read per watched ticket, plus a relevance check for any ticket whose newest activity the memo has not already declined. Note the memo is in memory, so a restart re-asks once per triggered ticket: restarting this service every few minutes is what makes this number expensive, not lowering it.",
+    fallback: "21600000",
+  },
+  {
     name: "MAX_RETRIAGE_PER_TICKET",
     description:
       "How many times one watched ticket may be re-triaged before the watch is dropped with a comment saying so. Three. Counted from this service's own comments on the ticket rather than from disk, so it survives a restart and a second instance for the same reason the solve queue's dedupe does. A ticket edited more often than this is a conversation rather than a signal, and the watch is the one loop with no human waiting on the result, so the bound is the only thing that ends it. Note the number was chosen in the plan against a measured triage cost of $0.11 that later proved to be $1.56, so it is understated as a spending limit by roughly an order of magnitude — re-derive it before the watch runs on a timer.",

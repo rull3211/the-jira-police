@@ -240,6 +240,55 @@ export function lastSpokeAt(comments: readonly WatchComment[]): number {
 }
 
 /**
+ * When the newest thing somebody else did happened, in epoch ms.
+ *
+ * **`decideWatch` cannot answer this and `WatchDecision.at` must not be read as
+ * though it could.** The decision returns on its *first* trigger, in list order,
+ * because one reason to look is enough — so `at` is some triggering item, not
+ * the latest one. A memo keyed on it would remember an early comment, see a
+ * later one as unjudged, and re-ask forever, which is the loop it exists to
+ * close.
+ *
+ * `NaN` when there is no readable high-water mark or nothing foreign since it.
+ * Both propagate to *do not remember anything*, which costs a repeated cheap
+ * read rather than a missed answer.
+ *
+ * It is here rather than beside its caller so that it applies the same two
+ * predicates the decision does, from the same file. A second definition of
+ * *foreign* living next door would drift, and it would drift in the direction
+ * that skips a ticket the decision wanted looked at — a reporter's answer that
+ * is never read, which is silent and is the failure this whole feature is for.
+ */
+export function newestForeignAt(signals: WatchSignals): number {
+  const spokeAt = lastSpokeAt(signals.comments);
+  if (Number.isNaN(spokeAt)) {
+    return Number.NaN;
+  }
+
+  const instants: number[] = [];
+  for (const comment of signals.comments) {
+    if (isOurComment(comment)) {
+      continue;
+    }
+    const at = touchedAt(comment);
+    if (!Number.isNaN(at) && at >= spokeAt) {
+      instants.push(at);
+    }
+  }
+  for (const change of signals.changes) {
+    const at = parsed(change.created);
+    if (Number.isNaN(at) || at < spokeAt) {
+      continue;
+    }
+    if (change.fields.some((name) => BLOCKER_CLEARING_FIELDS.has(name.trim().toLowerCase()))) {
+      instants.push(at);
+    }
+  }
+
+  return instants.length === 0 ? Number.NaN : Math.max(...instants);
+}
+
+/**
  * Decides what to do about one watched ticket.
  *
  * `maxRetriage` is `MAX_RETRIAGE_PER_TICKET`. The count it bounds is read off a
