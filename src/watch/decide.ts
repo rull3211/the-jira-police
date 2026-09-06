@@ -107,9 +107,30 @@ export const BLOCKER_CLEARING_FIELDS: ReadonlySet<string> = new Set([
   "environment",
 ]);
 
+/**
+ * The footer's words, with the emphasis delimiters taken off both ends.
+ *
+ * **The delimiters do not survive the round trip, and comparing the sentinel
+ * whole would have matched nothing.** The poster writes markdown; Jira stores
+ * ADF, so `_…_` becomes a text node under an `em` mark; `renderAdf` puts marks
+ * back as `*…*`, because that is the one markdown spells emphasis with here.
+ * Every character between the delimiters is preserved and the delimiters
+ * themselves are not, so the identity check has to be about the words.
+ *
+ * Derived from `FOOTER_SENTINEL` rather than written out again, so a change to
+ * the footer moves both and the two cannot drift into disagreeing about which
+ * comments are ours — which would read every watched ticket as unwatched and
+ * re-triage the lot.
+ *
+ * Found by writing the test that renders a real ADF payload through
+ * `toWatchSignals` rather than by reasoning about it, which is the only way
+ * this class of bug is ever found.
+ */
+export const FOOTER_TEXT: string = FOOTER_SENTINEL.replace(/^[_*]+/, "").replace(/[_*]+$/, "");
+
 /** True when a comment body is one this service wrote. */
 export function isOurComment(comment: WatchComment): boolean {
-  return comment.text.includes(FOOTER_SENTINEL);
+  return comment.text.includes(FOOTER_TEXT);
 }
 
 function parsed(iso: string): number {
