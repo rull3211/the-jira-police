@@ -17,7 +17,7 @@ labelled ticket →  solve queue  →  (plans a claim, makes none)
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 1908 tests, no build step, no deployment
+Status: running end to end against production Jira. 1944 tests, no build step, no deployment
 target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -30,16 +30,18 @@ Past that queue **the whole pipeline is wired and has been driven by hand, one r
 cuts a worktree and runs the model passes under a diff bound and mechanical verification, `--pr`
 commits, pushes and opens a draft pull request, `--review` then works the review to a handover —
 and `--advance`, a separate mode rather than a rung, runs one review round against a pull request
-an earlier run left open. `--watch` polls the whole set of them on a cadence, which is the daemon's
+an earlier run left open. `--watch` polls the whole set of them on a cadence, which was the daemon's
 review step with a person still watching it. Real tickets have been claimed, solved, pushed,
 reviewed and merged this way; §15 records what each step cost.
 
 What that sentence used to say, and said for two months, was that all of it was "wired to
 nothing". That was the honest description while it held, and each grant was its own commit so a
-reviewer could see the composition change rather than take a comment's word for it. **The
-remaining inertness is now narrow enough to name in one line:** `pnpm start` is still the grooming
-loop only. Every solve, publish and review round is a person typing a command and reading the
-output. See §4 for the queue, §15 for the pipeline, and §13 for what is genuinely absent.
+reviewer could see the composition change rather than take a comment's word for it. **Half of the
+remaining inertness went 2026-09-06:** `pnpm start` now runs the review sweep as well as grooming,
+on its own cadence, behind `SOLVE_ENABLED`. What is still a person typing a command is everything
+that _starts_ a solve — the claim, the worktree, the passes and the first pull request. The daemon
+only advances pull requests that already exist. See §2 for the two loops, §4 for the queue, §15
+for the pipeline, and §13 for what is genuinely absent.
 
 ---
 
@@ -70,10 +72,11 @@ path.** A second way to mutate a ticket would be a second way to mutate it unche
 
 ```
                       ┌──────────────────────────────────────────┐
-   Jira REST          │  index.ts — daemon                       │
-   /search/jql   ◄────┤    loop.ts     when to poll, backoff     │
-   (discovery only)   │    poller.ts   one cycle                 │
+   Jira REST          │  index.ts — daemon, two loops            │
+   /search/jql   ◄────┤    loop.ts     when to tick, backoff     │
+   (discovery only)   │    poller.ts   one grooming cycle        │
                       │    store.ts    cursor + seen keys        │
+                      │    review-loop.ts  the review schedule   │
                       └──────────────┬───────────────────────────┘
                                      │ one TicketRef → one groom
                       ┌──────────────▼───────────────────────────┐
@@ -98,6 +101,45 @@ Both subprocesses go through `src/triage/session.ts`, which owns everything easy
 wrong: line-buffered NDJSON parsing, a timeout that _kills the child_ rather than merely
 rejecting, the MCP connectivity check, and the rule that exit 0 without structured output is a
 failure rather than an empty success.
+
+### Two loops, and the separation is the safety property
+
+Since 2026-09-06 `pnpm start` runs a second `runLoop` beside the grooming one: the review sweep
+(`runReviewSweep`, §4's review queue), scheduled by `createReviewLoop` in `src/review-loop.ts`.
+The diagram above is the grooming half; the review half looks at every pull request the board says
+is under review and pays for a round on the few that need one.
+
+**They are two loops rather than two steps of one tick, and the reason is arithmetic.**
+`TRIAGE_TIMEOUT_MS` is twenty minutes per issue, so a grooming cycle can legitimately occupy a tick
+for longer than a reviewer takes to answer — two and a half to four minutes, measured. Sharing a
+tick would tie the review cadence to the slowest thing grooming can do, which is how a timeout
+setting quietly becomes a review policy. `REVIEW_POLL_MS` (two minutes) and `POLL_INTERVAL_MS`
+(five) pull in opposite directions on purpose: one is a window over time, the other a question
+about a state.
+
+**The first requirement of adding the second loop was that it cannot stop the first.** The grooming
+loop is the part that has been in production for two months; the review loop shells out to `git`
+and `gh` and spends money. Two `runLoop`s in a `Promise.all` give each its own backoff and its own
+failure isolation, so a review sweep that throws every tick backs off the review side and nothing
+else. `createReviewLoop` returns `null` when `SOLVE_ENABLED` is off — a `null` rather than a loop
+that does nothing, so an operator running exactly yesterday's configuration gets one line at
+startup rather than `review.disabled` every two minutes forever.
+
+Three ordering rules, all in `createReviewLoop` and all covered by `src/review-loop.test.ts`:
+
+- **The switch is read before the dependencies.** `createSolveRunDeps` throws on a missing
+  `VAULT_PATH`; built above the switch, a grooming-only daemon would refuse to start for want of a
+  path it will never read.
+- **The dependencies are built before the loop starts, not per tick.** Inside the tick, one
+  misconfiguration is a cycle that fails identically forever and reports itself as "the cycle
+  threw". Outside it, the same mistake is one message and exit 78.
+- **Both loops are awaited together rather than raced.** A shutdown aborts the shared signal and
+  each finishes the cycle it is in; stopping when the first returns would kill a review round
+  mid-push to make a poll cycle's exit look tidy.
+
+Plainly: the two loops can spend at the same time and no setting spans them. When the solve half
+joins this file it goes _inside_ the review loop rather than beside it, so that "advance before
+claiming" (§6 of the plan) stays an ordering one tick can guarantee.
 
 ---
 
@@ -351,11 +393,18 @@ split `surveyReview` made possible (see Delivery). Four rules, each of them a bu
   request comes back as its own `ended` arm for the caller to label. The write is a visible change
   to an interface a reviewer would look at, not a line inside a loop.
 
-**Its caller is `solve:once --watch`**, which is the cycle on a timer with a person watching it —
-the hand-driven rehearsal every phase gets before the daemon runs the same thing unattended.
-`runReviewSweep` supplies the two halves and does the labelling the cycle refuses to do; `runWatch`
-adds only the loop, the cadence (`REVIEW_POLL_MS`) and the terminal. Three things in it are worth
-knowing:
+**It has two callers, and they differ only in who is watching.** `runReviewSweep` supplies the two
+halves and does the labelling the cycle refuses to do. `solve:once --watch` puts it on a timer with
+a person reading the output — the hand-driven rehearsal every phase gets first — and `runWatch`
+adds only the loop, the cadence (`REVIEW_POLL_MS`) and the terminal. Since 2026-09-06 the daemon
+calls the same function on the same cadence with nobody reading it (§2). That the two share
+`runReviewSweep` rather than each composing the cycle is the whole point of the rehearsal: what was
+watched by hand is what runs unattended, not a lookalike.
+
+`runReviewSweep` takes its `SolveDependencies` as a parameter rather than building them, for the
+reason its first bullet gives below applied one level up — both callers are loops, and a sweep that
+built its own would turn one misconfiguration into a failure on every tick, forever. Three things
+in it are worth knowing:
 
 - **The look and the act share one `SolveDependencies`, built before the cycle rather than inside
   the look.** Not for the saving — it is a command runner and a clock — but because it throws
@@ -463,9 +512,10 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 | Path                         | Role                                                                                                                        |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`               | Daemon entry point. Signal handling, `--skill` / `--interval` / `--for` overrides                                           |
+| `src/index.ts`               | Daemon entry point. Two loops, signal handling, `--skill` / `--interval` / `--for` overrides                                |
 | `src/loop.ts`                | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                        |
-| `src/poller.ts`              | One cycle. Ordering, dedupe, failure isolation, the three rules above                                                       |
+| `src/poller.ts`              | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                              |
+| `src/review-loop.ts`         | The review loop's schedule: the `SOLVE_ENABLED` switch, `REVIEW_POLL_MS`, and when the solve deps are built                 |
 | `src/wiring.ts`              | **The composition.** `createDiscover`, `createGroom`, `shouldPost`, `createPollDeps`, `createSolveDeps`                     |
 | `src/settings.ts`            | Declarative settings table + generic reader, with a `sensitive` marker                                                      |
 | `src/jira/jql.ts`            | Query builders — new-issue, solve queue, in-flight, review queue. Validation, id-vs-name quoting                            |
@@ -605,51 +655,51 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 `.env`, read via `node --env-file-if-exists`. Every setting is declared once in `src/settings.ts`;
 `describeSettings()` masks the sensitive ones so the startup dump is safe to paste.
 
-| Setting                      | Default                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JIRA_BASE_URL`              | `https://storebrand.atlassian.net`     |                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `JIRA_EMAIL`                 | —                                      | **required**                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `JIRA_AUTH`                  | —                                      | **required**, sensitive, discovery only                                                                                                                                                                                                                                                                                                                                                                           |
-| `JIRA_PROJECT`               | `SSX`                                  |                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `JIRA_COMPONENTS`            | `SSX Advisor`                          | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets                                                                                                                                                                                                                                                                                                                 |
-| `JIRA_EXCLUDED_TYPES`        | `10009`                                | Deloppgave / sub-task — arrives attached to a parent already triaged                                                                                                                                                                                                                                                                                                                                              |
-| `POLL_INTERVAL_MS`           | `300000`                               |                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `CURSOR_OVERLAP_MS`          | `120000`                               | See §4                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `FIRST_RUN_LOOKBACK_MINUTES` | `60`                                   | Deliberately short — a wide first window means one paid run per historical issue                                                                                                                                                                                                                                                                                                                                  |
-| `SKILL_NAME`                 | `mock-triage`                          | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                                                                                                                                                                                                                                                                                                                                    |
-| `VAULT_PATH`                 | —                                      | Required for the real skill; checked at wiring time, not first-ticket time                                                                                                                                                                                                                                                                                                                                        |
-| `WRITE_BACK`                 | `false`                                | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed                                                                                                                                                                                                                                                                                                                       |
-| `TRIAGE_TIMEOUT_MS`          | `1200000`                              | Raised from `600000` on 2026-09-04 after a run was killed that was slow rather than stuck (§13). Floor of 1 — zero is a timer that has already expired                                                                                                                                                                                                                                                            |
-| `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`          | Both gitignored                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `SOLVE_ENABLED`              | `false`                                | Master switch for the solve queue. Strict `"true"`. Checked at composition _and_ in the poller                                                                                                                                                                                                                                                                                                                    |
-| `SOLVE_MODE`                 | `manual`                               | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback                                                                                                                                                                                                                                                                                         |
-| `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                                 | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing                                                                                                                                                                                                                                                            |
-| `SOLVE_REPOS`                | — (**no fallback**)                    | Repository allowlist. The only solve setting without a default, deliberately: see §14.10                                                                                                                                                                                                                                                                                                                          |
-| `MAX_CONCURRENT_SOLVES`      | `1`                                    | Counted from the board via `buildInFlightJql`, never from local state                                                                                                                                                                                                                                                                                                                                             |
-| `MAX_REVIEW_ITERATIONS`      | `3`                                    | Counts **reviewer rounds only**, from the marker's third line, which is appended after the high-water mark so markers written before the split still parse. A person's request is the outside information the cap exists to protect against the absence of, so it is exempt; a mixed batch counts as human. Reaching it undrafts and keeps listening                                                              |
-| `MAX_PR_ROUNDS_TOTAL`        | `20`                                   | The absolute per-pull-request stop, deliberately **not** the same number as above. One is a policy, this is a brake, and conflating them lets a policy change disable a safety stop. Hitting it does not undraft                                                                                                                                                                                                  |
-| `SOLVE_WORKTREE_ROOT`        | — (blank means the temp dir)           | Grants nothing. Exists because macOS `tmpdir()` lands under `/private/var`, and the by-hand diff review phase C depends on needs a path a person can open                                                                                                                                                                                                                                                         |
-| `SOLVE_GITHUB_OWNER`         | — (**no fallback**)                    | The account a pull request is opened against. No default for the same reason as `SOLVE_REPOS`, plus one of its own: an owner inferred from the checkout's remote is right until somebody adds a fork as `origin`                                                                                                                                                                                                  |
-| `SOLVE_BOT_NAME`             | `jira-police`                          | Commit author. Widens nothing                                                                                                                                                                                                                                                                                                                                                                                     |
-| `SOLVE_BOT_EMAIL`            | `jira-police@users.noreply.github.com` | Commit author                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `SOLVE_GH_TIMEOUT_MS`        | `60000`                                | Every `git` and `gh` command in the delivery path. Floor of 1                                                                                                                                                                                                                                                                                                                                                     |
-| `SOLVE_GIT_TIMEOUT_MS`       | `120000`                               | The worktree commands — `fetch`, `worktree add`, `checkout`. Longer than the `gh` budget because a cold `fetch` is the one git operation that is genuinely slow                                                                                                                                                                                                                                                   |
-| `SOLVE_STEP_TIMEOUT_MS`      | `600000`                               | One discovered verification step — test, typecheck, lint                                                                                                                                                                                                                                                                                                                                                          |
-| `SOLVE_INSTALL_TIMEOUT_MS`   | `900000`                               | Dependency install, which is separate because a fresh worktree has no `node_modules` and the first install in a repository is not comparable to any later step                                                                                                                                                                                                                                                    |
-| `SOLVE_TIMEOUT_MS`           | `1800000`                              | One model pass. The setting that machine sleep defeats: a pass killed here did nothing wrong and is deliberately not retried (§13)                                                                                                                                                                                                                                                                                |
-| `SOLVE_BASE_REF`             | `origin/main`                          | What a worktree is cut from and what `verifyBase` and the fail-first probe are judged against                                                                                                                                                                                                                                                                                                                     |
-| `SOLVE_REPO_ROOT`            | — (**no fallback**)                    | Where the pilot checkouts live. No default for the same reason as `SOLVE_REPOS`: a path that survives being deleted from `.env` is a write privilege that cannot be revoked without editing source                                                                                                                                                                                                                |
-| `REVIEW_POLL_MS`             | `120000`                               | How long `--review` waits between rounds, and `--watch` between passes. Two minutes from measurement, not taste — every Copilot review on #2658 landed two and a half to four minutes after the request. A look that finds nothing costs two `gh` reads and no checkout, so lowering it is cheap — and no longer shortens the service's patience                                                                  |
-| `REVIEW_SILENCE_MS`          | `1200000`                              | How long a pull request may go with nothing happening on it before the loop hands it to a human. The only bound that catches a reviewer who never answers: every other cap reads the marker, and the marker only moves when a round runs. Measured in wall-clock from the newest dated thing on the pull request, so a cadence change is not a policy change                                                      |
-| `MAX_REVIEW_ROUNDS_PER_TICK` | `3`                                    | How many paid rounds one `--watch` pass may run across the whole watched set. The only bound in this table that bounds a _tick_ rather than a pull request, and the one that stops a reviewer who answered twenty pull requests while the machine slept from buying twenty rounds in the first pass after it wakes. Over the bound a ticket is deferred, not skipped; `0` looks at everything and acts on nothing |
-| `FAIL_FIRST_CHECK`           | `true`                                 | **The one setting that defaults on**, and the mirror of `flag()` on purpose — `!== "false"`. Every other switch fails closed so a typo cannot arm a privilege; this one grants nothing, so a typo must not silently withdraw a guard                                                                                                                                                                              |
-| `STORECODE_PATH`             | `storecode`                            | The subprocess binary. Overridable so a probe can point at a different build without editing source                                                                                                                                                                                                                                                                                                               |
-| `LOG_LEVEL`                  | `info`                                 | Widens nothing                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Setting                      | Default                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JIRA_BASE_URL`              | `https://storebrand.atlassian.net`     |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `JIRA_EMAIL`                 | —                                      | **required**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `JIRA_AUTH`                  | —                                      | **required**, sensitive, discovery only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `JIRA_PROJECT`               | `SSX`                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `JIRA_COMPONENTS`            | `SSX Advisor`                          | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `JIRA_EXCLUDED_TYPES`        | `10009`                                | Deloppgave / sub-task — arrives attached to a parent already triaged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `POLL_INTERVAL_MS`           | `300000`                               |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `CURSOR_OVERLAP_MS`          | `120000`                               | See §4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `FIRST_RUN_LOOKBACK_MINUTES` | `60`                                   | Deliberately short — a wide first window means one paid run per historical issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `SKILL_NAME`                 | `mock-triage`                          | **Defaults to the mock**, so an unconfigured service cannot post real verdicts                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `VAULT_PATH`                 | —                                      | Required for the real skill; checked at wiring time, not first-ticket time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `WRITE_BACK`                 | `false`                                | The only setting whose effect the whole team can see. Strict `"true"` — a typo fails closed                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `TRIAGE_TIMEOUT_MS`          | `1200000`                              | Raised from `600000` on 2026-09-04 after a run was killed that was slow rather than stuck (§13). Floor of 1 — zero is a timer that has already expired                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `OUTPUT_DIR` / `STATE_PATH`  | `groomed` / `state/poll.json`          | Both gitignored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `SOLVE_ENABLED`              | `false`                                | Master switch for the solve queue **and for the daemon's review loop**. Strict `"true"`. Checked at composition _and_ in the poller; off means `pnpm start` schedules the grooming loop alone and says so once at startup                                                                                                                                                                                                                                                                                                                                 |
+| `SOLVE_MODE`                 | `manual`                               | `manual` also requires `agent:start`, the single human step. An unrecognised value is a **startup error**, not a fallback                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `SOLVE_AUTO_ISSUE_TYPES`     | `Feil`                                 | Auto mode only. Not `Bug` — **this board is Norwegian**, and an English default would match nothing and make autosolve look enabled while never firing                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SOLVE_REPOS`                | — (**no fallback**)                    | Repository allowlist. The only solve setting without a default, deliberately: see §14.10                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `MAX_CONCURRENT_SOLVES`      | `1`                                    | Counted from the board via `buildInFlightJql`, never from local state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `MAX_REVIEW_ITERATIONS`      | `3`                                    | Counts **reviewer rounds only**, from the marker's third line, which is appended after the high-water mark so markers written before the split still parse. A person's request is the outside information the cap exists to protect against the absence of, so it is exempt; a mixed batch counts as human. Reaching it undrafts and keeps listening                                                                                                                                                                                                      |
+| `MAX_PR_ROUNDS_TOTAL`        | `20`                                   | The absolute per-pull-request stop, deliberately **not** the same number as above. One is a policy, this is a brake, and conflating them lets a policy change disable a safety stop. Hitting it does not undraft                                                                                                                                                                                                                                                                                                                                          |
+| `SOLVE_WORKTREE_ROOT`        | — (blank means the temp dir)           | Grants nothing. Exists because macOS `tmpdir()` lands under `/private/var`, and the by-hand diff review phase C depends on needs a path a person can open                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `SOLVE_GITHUB_OWNER`         | — (**no fallback**)                    | The account a pull request is opened against. No default for the same reason as `SOLVE_REPOS`, plus one of its own: an owner inferred from the checkout's remote is right until somebody adds a fork as `origin`                                                                                                                                                                                                                                                                                                                                          |
+| `SOLVE_BOT_NAME`             | `jira-police`                          | Commit author. Widens nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `SOLVE_BOT_EMAIL`            | `jira-police@users.noreply.github.com` | Commit author                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `SOLVE_GH_TIMEOUT_MS`        | `60000`                                | Every `git` and `gh` command in the delivery path. Floor of 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `SOLVE_GIT_TIMEOUT_MS`       | `120000`                               | The worktree commands — `fetch`, `worktree add`, `checkout`. Longer than the `gh` budget because a cold `fetch` is the one git operation that is genuinely slow                                                                                                                                                                                                                                                                                                                                                                                           |
+| `SOLVE_STEP_TIMEOUT_MS`      | `600000`                               | One discovered verification step — test, typecheck, lint                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `SOLVE_INSTALL_TIMEOUT_MS`   | `900000`                               | Dependency install, which is separate because a fresh worktree has no `node_modules` and the first install in a repository is not comparable to any later step                                                                                                                                                                                                                                                                                                                                                                                            |
+| `SOLVE_TIMEOUT_MS`           | `1800000`                              | One model pass. The setting that machine sleep defeats: a pass killed here did nothing wrong and is deliberately not retried (§13)                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `SOLVE_BASE_REF`             | `origin/main`                          | What a worktree is cut from and what `verifyBase` and the fail-first probe are judged against                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `SOLVE_REPO_ROOT`            | — (**no fallback**)                    | Where the pilot checkouts live. No default for the same reason as `SOLVE_REPOS`: a path that survives being deleted from `.env` is a write privilege that cannot be revoked without editing source                                                                                                                                                                                                                                                                                                                                                        |
+| `REVIEW_POLL_MS`             | `120000`                               | How long `--review` waits between rounds, and `--watch` and the daemon's review loop between passes. A second cadence rather than a share of `POLL_INTERVAL_MS`, because polling for new issues is a window over time and looking at a pull request is a question about a state. Two minutes from measurement, not taste — every Copilot review on #2658 landed two and a half to four minutes after the request. A look that finds nothing costs two `gh` reads and no checkout, so lowering it is cheap — and no longer shortens the service's patience |
+| `REVIEW_SILENCE_MS`          | `1200000`                              | How long a pull request may go with nothing happening on it before the loop hands it to a human. The only bound that catches a reviewer who never answers: every other cap reads the marker, and the marker only moves when a round runs. Measured in wall-clock from the newest dated thing on the pull request, so a cadence change is not a policy change                                                                                                                                                                                              |
+| `MAX_REVIEW_ROUNDS_PER_TICK` | `3`                                    | How many paid rounds one review pass may run across the whole watched set — `--watch`'s and the daemon's alike, and at $0.94 a round it is what a daemon tick's worst case is computed from and logged as at startup. The only bound in this table that bounds a _tick_ rather than a pull request, and the one that stops a reviewer who answered twenty pull requests while the machine slept from buying twenty rounds in the first pass after it wakes. Over the bound a ticket is deferred, not skipped; `0` looks at everything and acts on nothing |
+| `FAIL_FIRST_CHECK`           | `true`                                 | **The one setting that defaults on**, and the mirror of `flag()` on purpose — `!== "false"`. Every other switch fails closed so a typo cannot arm a privilege; this one grants nothing, so a typo must not silently withdraw a guard                                                                                                                                                                                                                                                                                                                      |
+| `STORECODE_PATH`             | `storecode`                            | The subprocess binary. Overridable so a probe can point at a different build without editing source                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `LOG_LEVEL`                  | `info`                                 | Widens nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 Commands:
 
 ```bash
-pnpm start --interval 20s          # the daemon — grooming only, never the solve queue
+pnpm start --interval 20s          # the daemon — grooming, plus the review sweep if SOLVE_ENABLED
 pnpm dev                           # daemon, --watch
 pnpm poll:once --dry-run           # discovery only; free, and the fastest config check
 pnpm poll:once                     # one full cycle
@@ -956,8 +1006,8 @@ who remembers them should be able to see that they were retired rather than quie
   `reviewStageTransition` mirrors the draft flag onto `agent:review-done`, and
   `completionTransition` writes `agent:done` on a merge, `agent:closed` on a close and
   `agent:failed` on a bail. `state` (`OPEN`/`CLOSED`/`MERGED`) is read, and the loop no longer
-  ends at the undraft. **The poller's review step is still absent, but it moved rather than
-  stalled** — it belongs to the daemon below, since nothing runs on a timer to call it.
+  ends at the undraft. **The review step moved to the daemon rather than stalling**, and landed
+  there 2026-09-06 — see below.
 - **Retired, 2026-09-05.** _Both reviewers._ `waiting` now asks whether anyone actionable spoke,
   not whether the requested reviewer did, so a human who comments first is acted on rather than
   collected and discarded. Every `ReviewComment` and every `ThreadComment` carries an `origin`
@@ -967,18 +1017,32 @@ who remembers them should be able to see that they were retired rather than quie
   comment's, and `exhausted` became `reviewer-exhausted` because it stopped being an ending: the
   pull request undrafts and the loop keeps listening. `MAX_PR_ROUNDS_TOTAL` still counts
   everything, since a brake a person's comment could step past is not a brake.
-- **Running it from the daemon, and this one is deliberately _last_.** Not wired into `index.ts`;
-  `pnpm start` is the grooming loop and must stay that way until everything above has been driven
-  by hand. The property the daemon adds is _nobody is watching_, which is the last property you
-  want to add rather than an early one: every phase before it can be verified by a person typing
-  a command and reading the output, and wiring the loop converts all of them at once into things
-  that happen on a timer whether or not anyone looks. It also adds no capability — by then the
-  bot can already do everything, and the daemon only changes who asks. Still needs its own slower
-  cadence and a decision about what a solve failure does to `loop.ts` backoff: a failed solve is
-  not the same event as a Jira outage, and the backoff only understands the latter.
+- **Running it from the daemon — half done, 2026-09-06, and the half that landed is the cheaper
+  one.** `pnpm start` now runs the review sweep beside the grooming loop, on `REVIEW_POLL_MS`,
+  behind `SOLVE_ENABLED`, with its own backoff (§2). What is _not_ wired is the solve queue: no
+  claim, no worktree, no first pull request happens on a timer. The daemon advances pull requests
+  a person already asked for.
 
-  The corollary is the rule to hold the line on: **a ticket claimed, solved and PR'd by hand is a
-  demonstration; the same sequence on a five-minute timer is a deployment.**
+  **That split is the ordering rule holding rather than an accident of effort.** The property the
+  daemon adds is _nobody is watching_, and it is the last property you want to add: every phase
+  before it is verifiable by a person typing a command and reading the output, and a loop converts
+  all of them at once into things that happen whether or not anyone looks. The review sweep earned
+  it — the look is two `gh` reads and free, the round is bounded per tick by
+  `MAX_REVIEW_ROUNDS_PER_TICK` and per pull request by `MAX_PR_ROUNDS_TOTAL`, and every round it
+  can run is one a person already authorised by opening the pull request. The claim is not
+  bounded that way: it starts work on a ticket nobody looked at.
+
+  What still gates the solve half is written down and unchanged: **cost per ticket per day** (§4 of
+  the plan's Verification), **machine sleep** — a slept laptop kills a pass at `SOLVE_TIMEOUT_MS`
+  and a killed pass is deliberately not retried — and a **per-ticket attempt count**, since
+  `refused` and `failed` release the ticket and auto mode would re-buy them nightly.
+
+  One thing the split already answered, which was listed as a blocker: **what a solve failure does
+  to the backoff.** Two loops means it does nothing to grooming. A review sweep that throws backs
+  off the review side alone, and `loop.ts` needs no new notion of failure kind.
+
+  The corollary is still the rule to hold the line on: **a ticket claimed, solved and PR'd by hand
+  is a demonstration; the same sequence on a five-minute timer is a deployment.**
 
 Each phase is expected to ship two hand-operated commands before it counts as done — a dry run
 that reports what it _would_ change, and a single run against one named ticket, chosen by the
@@ -1288,6 +1352,25 @@ Things that look like details and are not:
     the gap: a tool names the failing step at the top and gives the verdict at the bottom, and a
     truncation that can only preserve one of those will eventually drop the one that mattered.
 
+17. **A new loop in the daemon may not be able to stop the old one.** The grooming loop is the
+    part that has run in production for two months; the review loop shells out to `git` and `gh`
+    and spends money. They are two `runLoop`s in a `Promise.all` rather than two steps of one
+    tick, so each has its own cadence, its own backoff and its own failure isolation — a review
+    sweep that throws every tick backs off the review side and grooming does not notice.
+
+    **Everything the new loop needs is decided before either starts ticking.** `createReviewLoop`
+    reads `SOLVE_ENABLED` first and returns `null` when it is off, so a grooming-only daemon never
+    builds the solve dependencies and never refuses to start for want of a `VAULT_PATH` it will
+    not read; when it is on, those dependencies are built once, out here, so a misconfiguration is
+    one message and exit 78 rather than an identical failure every two minutes forever. The
+    general form: **a configuration error belongs at startup, and a loop is where errors go to
+    become invisible.**
+
+    It lives in `src/review-loop.ts` rather than in `index.ts` because `index.ts` runs `main` on
+    import, so anything decided there cannot be asserted about without starting a service. That is
+    not tidiness either — the ordering above is the whole of the safety property, and a safety
+    property with no test is a comment.
+
 ---
 
 ## 15. The solve pipeline
@@ -1305,8 +1388,8 @@ nothing on the solve path is moved by hand any more. A ticket goes
 `agent:failed`, and every outcome that spent a claim says so on the ticket.
 
 What is left here is one review-loop slice — human reviewers are collected and then dropped by the
-`waiting` gate (§13) — and the daemon, which is the only thing that would call any of it on a
-timer.
+`waiting` gate (§13) — and the front half of the daemon. Since 2026-09-06 the daemon does call the
+review sweep on a timer (§2); what it still will not do on a timer is claim a ticket.
 
 What is still missing entirely is listed in §13; what this _does_ is here.
 
@@ -2162,10 +2245,13 @@ The ladder itself is cumulative — `--pr` claims, solves and opens the pull req
 finished run created and implying `--solve` would mean re-solving the ticket before touching the
 review.
 
-The last thing to be wired will be the daemon, and that is deliberate too. The property it adds is
-_nobody is watching_, which is the last property you want rather than an early one: every stage
-before it can be checked by a person typing a command and reading the output, and wiring the loop
-converts all of them at once into things that happen on a timer whether or not anyone looks. It
-adds no capability — by then the bot can already do everything, and the daemon only changes who
-asks. §13 has the rule this rests on: **a ticket claimed, solved and PR'd by hand is a
+The last thing to be wired is the daemon, and it is being wired in two pieces rather than one. The
+review sweep went first, 2026-09-06; the solve queue has not gone and is what §13 lists the
+remaining blockers for. The property the daemon adds is _nobody is watching_, which is the last
+property you want rather than an early one: every stage before it can be checked by a person typing
+a command and reading the output, and wiring the loop converts all of them at once into things that
+happen on a timer whether or not anyone looks. It adds no capability — by then the bot can already
+do everything, and the daemon only changes who asks. Splitting it splits that too: what the review
+loop asks for on its own is a round on a pull request a person opened, which is the smaller half of
+the question. §13 has the rule this rests on: **a ticket claimed, solved and PR'd by hand is a
 demonstration; the same sequence on a five-minute timer is a deployment.**

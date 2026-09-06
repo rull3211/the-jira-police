@@ -22,6 +22,7 @@ import {
   createSolveRunDeps,
   githubRepoFor,
   pollIntervalMs,
+  reviewIntervalMs,
   shouldPost,
 } from "./wiring.ts";
 
@@ -145,6 +146,23 @@ describe("pollIntervalMs", () => {
   it("refuses a negative interval", () => {
     expect(() => pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "-1" }))).toThrow(
       /POLL_INTERVAL_MS must be at least 1/,
+    );
+  });
+});
+
+describe("reviewIntervalMs", () => {
+  it("reads REVIEW_POLL_MS and not the poll cadence", () => {
+    // The mutation this catches is a one-word one — returning POLL_INTERVAL_MS
+    // — and it is invisible at both defaults being plausible numbers of
+    // minutes. What it would do is tie how fast the service answers a reviewer
+    // to a setting whose description is "gap between polls".
+    const settings = settingsWith({ REVIEW_POLL_MS: "45000", POLL_INTERVAL_MS: "300000" });
+    expect(reviewIntervalMs(settings)).toBe(45_000);
+  });
+
+  it("refuses a zero interval, which is unthrottled against gh as well as Jira", () => {
+    expect(() => reviewIntervalMs(settingsWith({ REVIEW_POLL_MS: "0" }))).toThrow(
+      /REVIEW_POLL_MS must be at least 1/,
     );
   });
 });

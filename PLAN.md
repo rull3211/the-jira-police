@@ -1,9 +1,12 @@
 # the-jira-police — bug-squashing agents
 
-> **Progress, 2026-09-05.** Phases A through D4e are built and merged; the service claims a
+> **Progress, 2026-09-06.** Phases A through D4e are built and merged; the service claims a
 > ticket, solves it in an isolated worktree, opens a pull request, answers the reviewer, and
-> labels the ticket for whatever happened. 1872 tests, no build step. **D4b is built and the
-> daemon (E) is next**, and it is deliberately last. A human always merges.
+> labels the ticket for whatever happened. 1944 tests, no build step. **E has landed its review
+> half**: `pnpm start` now runs the review sweep beside the grooming loop, on its own cadence,
+> behind `SOLVE_ENABLED`. The solve half — anything that claims a ticket — is still a person
+> typing a command, and stays that way until E's remaining blockers are answered. A human always
+> merges.
 
 ## Context
 
@@ -458,22 +461,22 @@ of the feature.
 
 ## Phasing
 
-| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                             |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                             |
-| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                              |
-| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                             |
-| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                             |
-| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                            |
-| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                              |
-| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                              |
-| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                              |
-| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request |
-| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                              |
-| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                              |
-| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                              |
-| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | not started, deliberately last                                                                                                    |
-| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | not started; after E                                                                                                              |
+| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                  |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                                  |
+| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                                   |
+| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                                  |
+| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                                  |
+| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                                 |
+| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                   |
+| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                   |
+| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                   |
+| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request      |
+| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                   |
+| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                   |
+| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                   |
+| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **review half built 2026-09-06, `feat/daemon-review`.** 1944 tests; six mutations caught. Solve half still gated on the blockers below |
+| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | not started; after E                                                                                                                   |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the
 privilege each grants is reviewable on its own. Later branches stack rather than fan out, because
@@ -521,12 +524,53 @@ person typing a command and reading the result; wiring the loop converts all of 
 things that happen on a timer whether or not anyone looks. It is also the only phase that adds no
 capability — the bot can already do everything by then, and E only changes who asks it to.
 
-**`pnpm start` runs the grooming loop only until E.** A ticket claimed, solved and PR'd by hand is
-a demonstration; the same sequence on a five-minute timer is a deployment.
+**`pnpm start` claims nothing, and that is what the rule now means.** A ticket claimed, solved and
+PR'd by hand is a demonstration; the same sequence on a five-minute timer is a deployment. The
+review sweep was let past that rule on 2026-09-06 because it does not start work — every round it
+can run is one a person already authorised by opening the pull request, the look is free, and the
+spend is bounded per tick and per pull request. A claim has none of those properties, so it stays
+behind the blockers below.
 
-### What E needs that does not exist yet
+### E's review half, landed 2026-09-06 on `feat/daemon-review`
 
-- Its own cadence, slower than `POLL_INTERVAL_MS`.
+`createReviewLoop` (`src/review-loop.ts`) composes the second `runLoop`; `index.ts` awaits both in
+a `Promise.all`. Four decisions, and each is a test in `src/review-loop.test.ts`:
+
+- **Two loops, not two steps of one tick.** `TRIAGE_TIMEOUT_MS` is twenty minutes per issue and a
+  reviewer answers in two and a half to four, so a shared tick would tie the review cadence to the
+  slowest thing grooming can do — a timeout setting quietly becoming a review policy. Separate
+  loops also mean separate backoff, which **answers the blocker below about what a solve failure
+  does to `loop.ts`**: a review sweep that throws backs off the review side and grooming does not
+  notice. No new notion of failure kind was needed.
+- **The switch is read before the dependencies are built.** `createSolveRunDeps` throws on a
+  missing `VAULT_PATH`; built above the switch, a grooming-only daemon would refuse to start for
+  want of a path it never reads. `SOLVE_ENABLED` off returns `null` rather than a loop that does
+  nothing, so the log says it once at startup instead of every two minutes forever.
+- **The dependencies are built before the loop starts.** Inside the tick, one misconfiguration is
+  a cycle that fails identically forever and reports itself as "the cycle threw". `runReviewSweep`
+  therefore takes them as a parameter, which is the same argument one level down — it now has two
+  callers and both are loops.
+- **`REVIEW_ROUND_USD` is exported from `review-cycle.ts`** rather than written twice. The $0.94
+  was about to be encoded in both `--watch`'s banner and the daemon's startup log, and a number
+  telling an operator what a tick may spend is exactly the kind that gets updated in one of them.
+
+**Verified live, twice, at zero cost.** `SOLVE_ENABLED=false … --for 6s` logged
+`review.loop.disabled` and stopped with `reviewCycles: "off"`. Then `SOLVE_ENABLED=true
+MAX_REVIEW_ROUNDS_PER_TICK=0 … --for 60s` logged `review.loop.start {intervalMs: 120000,
+maxRoundsPerTick: 0, worstCasePerTickUsd: 0}`, ran the review JQL, and returned
+`review.cycle {watched: 3, acted: [], settled: 2, ended: [], unlooked: 0, deferred: 1}` in 6.2
+seconds. Both runs used a throwaway `STATE_PATH` and `--skill mock-triage`, so the real cursor was
+untouched and nothing was posted. **`deferred: 1` is the interesting number:** with the per-tick
+bound at zero, it means there is real actionable review work on the board that a daemon with the
+bound at its default would have paid for on its first tick.
+
+### What E still needs that does not exist yet
+
+- ~~Its own cadence, slower than `POLL_INTERVAL_MS`.~~ **Built: `reviewIntervalMs` reads
+  `REVIEW_POLL_MS`, floored at 1.** Two minutes rather than five, and _faster_ than grooming rather
+  than slower, which is the opposite of what this line predicted. The prediction assumed the
+  daemon's review work was a queue like the others; it is a question about a state whose answer is
+  worth having within the time a reviewer takes to reply.
 - ~~The review-advance step running **before** any new claim, selecting on `agent:reviewing` **or**
   `agent:review-done`.~~ **Built as `buildReviewQueueJql` and `runReviewCycle`, 2026-09-06,
   `feat/review-cycle`,** and given a hand-driven caller the same day as `solve:once --watch`. So
@@ -544,8 +588,13 @@ a demonstration; the same sequence on a five-minute timer is a deployment.
   single bailed ticket measured **$3.99**, and a review round $0.94. A _completed_ solve has never
   been costed at all. Three changes turned single-shot costs into recurring ones, so a per-run
   number is no longer enough. **The most overdue item here.**
-- A decision about what a failed solve cycle does to the daemon's backoff — a solve failure is not
-  the same event as a Jira outage, and `loop.ts` knows only the latter.
+- ~~A decision about what a failed solve cycle does to the daemon's backoff — a solve failure is
+  not the same event as a Jira outage, and `loop.ts` knows only the latter.~~ **Answered by the
+  two-loop shape, 2026-09-06, and the answer is that `loop.ts` needs no change.** The two events
+  are not the same, and they are also not in the same loop: a failing review sweep backs off the
+  review side alone. What is still open is the _solve_ side of it, which is the attempt count
+  below rather than a backoff question — a solve that fails deterministically should stop being
+  attempted, not be attempted more slowly.
 - **An answer to machine sleep.** A pass killed at `SOLVE_TIMEOUT_MS` because the laptop slept has
   done nothing wrong, is deliberately not retried, and silently converts a claimed ticket into an
   abandoned one. Hand-driven runs use `caffeinate`; a daemon has no such person.
@@ -567,6 +616,11 @@ a demonstration; the same sequence on a five-minute timer is a deployment.
   it is unplugged. Everything decidable was pushed into pure functions that do — `describeReviewSweep`,
   `endedState`, `completionLabelFor`, the parser, `createReviewCycleDeps` — which narrows the
   untested part to the wiring and does not close it.
+
+  **The daemon's own wiring took the same treatment rather than joining the gap**, 2026-09-06:
+  every decision E adds lives in `createReviewLoop`, which is a module and not `index.ts`, so all
+  six of them have tests that fail when unplugged. What is still untested is `runReviewSweep`'s new
+  `signal` parameter — nothing constructs its dependencies, which is this bullet, one level down.
 
 ---
 

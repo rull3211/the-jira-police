@@ -175,6 +175,20 @@ export interface ReviewCycleDeps {
   readonly watchJql?: string;
 }
 
+/**
+ * What one review round was measured to cost, in dollars.
+ *
+ * PR #2658, 22 turns, 148 seconds, 639k cache-read tokens. It is here rather
+ * than at the two places that print it because those two are a hand-driven
+ * command and an unattended daemon, and a number that tells an operator how much
+ * a tick may spend is exactly the kind of thing that gets updated in one of them.
+ *
+ * It is an order of magnitude, not a price. A round that pushes nothing is
+ * cheaper and a long argument is dearer; what it is for is putting a figure in
+ * front of whoever is about to leave this running.
+ */
+export const REVIEW_ROUND_USD = 0.94;
+
 /** A ticket a round was actually run for. */
 export interface ActedReview {
   readonly issueKey: string;

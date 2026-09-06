@@ -71,6 +71,7 @@ import {
   type ReviewCycleOutcome,
   type ReviewLook,
   type WatchedTicket,
+  REVIEW_ROUND_USD,
   runReviewCycle,
 } from "../solve/review-cycle.ts";
 import {
@@ -290,7 +291,7 @@ export async function runSolver(
  * nothing throws — the run succeeded, and turning a bookkeeping failure into a
  * command failure would tell an operator the wrong thing about the work.
  *
- * What it does instead is print the exact repair, because a label this service
+ * What it does instead is report the exact repair, because a label this service
  * failed to write is a label a person now has to write. The failure directions
  * are both survivable and worth knowing:
  *
@@ -311,6 +312,13 @@ export async function runSolver(
  * `updateLabels` sends one atomic REST call carrying both the additions and the
  * removals, so there is no window between them to lose a label in. This confirms
  * the write landed at all.
+ *
+ * **Every outcome is logged rather than printed, and the last one is why.** Three
+ * of these four are failures a person would read once; the fourth fires on every
+ * successful move, and since Phase E one of the callers is the daemon, whose
+ * stdout *is* its log. A prose line there is a line no reader can parse, emitted
+ * on the happy path, in the stream somebody would go to when the board and the
+ * pull requests disagree. The repair instructions are in the `note` field.
  */
 async function moveLabels(
   client: JiraClient,
@@ -324,7 +332,7 @@ async function moveLabels(
     change = plan(await capabilities.readLabels(issueKey));
   } catch (error) {
     if (error instanceof LabelStateError) {
-      process.stdout.write(`\n${issueKey}'s labels were left alone: ${error.message}\n`);
+      logger.info("labels.left_alone", { issueKey, reason: error.message });
       return;
     }
     throw error;
@@ -338,10 +346,12 @@ async function moveLabels(
   try {
     await capabilities.applyLabels(issueKey, change);
   } catch (error) {
-    process.stderr.write(
-      `\nCould not move ${issueKey}'s labels (${wanted}): ${error instanceof Error ? error.message : String(error)}\n` +
-        `Do it by hand; the pull request is unaffected.\n`,
-    );
+    logger.error("labels.write_failed", {
+      issueKey,
+      wanted,
+      error,
+      note: "move them by hand; the pull request is unaffected",
+    });
     return;
   }
 
@@ -349,14 +359,16 @@ async function moveLabels(
   const missing = change.add.filter((label) => !after.includes(label));
   const lingering = change.remove.filter((label) => after.includes(label));
   if (missing.length > 0 || lingering.length > 0) {
-    process.stderr.write(
-      `\n${issueKey}'s labels did not come back as written (${wanted}); they are: ${after.join(", ")}\n` +
-        `Fix them by hand — the queue reads these.\n`,
-    );
+    logger.error("labels.read_back_mismatch", {
+      issueKey,
+      wanted,
+      labels: after,
+      note: "fix them by hand — the queue reads these",
+    });
     return;
   }
 
-  process.stdout.write(`\n${issueKey} is now: ${after.join(", ")}\n`);
+  logger.info("labels.moved", { issueKey, labels: after });
 }
 
 /** The label half of a finished round: mirror the pull request's draft flag. */
@@ -866,7 +878,14 @@ function createReviewAct(
       throw new Error(`no prepared round for ${ticket.key}`);
     }
 
-    process.stdout.write(`\n${ticket.key}: round on #${String(number)}\n`);
+    // Logged rather than printed, because this function now has two callers and
+    // one of them is a daemon whose stdout *is* the log. A prose line there is a
+    // line no reader can parse, in the stream an operator would go to when the
+    // spend looks wrong — and "a round started, on this ticket, on this pull
+    // request" is what a log line is for. The watch sees it too, as JSON among
+    // the pass's own JSON, which is what that command already looks like while a
+    // round is running.
+    logger.info("review.round.started", { issueKey: ticket.key, number });
 
     const attached = await target.request.attach();
     if (attached.outcome === "refused") {
@@ -903,25 +922,29 @@ function createReviewAct(
  * reached an answer. That split is not tidiness — a write is a visible change to
  * an interface a reviewer would look at, and it should be findable at a call
  * site rather than buried in a loop body.
+ *
+ * **`runDeps` is a parameter and not built here, which it used to be.** It is a
+ * command runner and a pass runner, so sharing one across passes saves nothing
+ * worth naming; what it saves is a `SettingsError`. `createSolveRunDeps` throws
+ * on a missing `VAULT_PATH`, and both callers are loops — a sweep that built its
+ * own would turn one misconfiguration into a failure on every tick, forever,
+ * where the loop above it can only see "the cycle threw" and back off. Built by
+ * the caller before its loop starts, the same mistake is one message at startup.
  */
 export async function runReviewSweep(
   settings: Settings,
   client: JiraClient,
+  runDeps: SolveDependencies,
   issueKey: string | null,
+  signal?: AbortSignal,
 ): Promise<ReviewCycleOutcome> {
   const targets = new Map<string, ReviewTarget>();
-  // Built once, before the cycle, and shared by both halves. Not for the saving
-  // — it is a command runner and a clock — but because it throws `SettingsError`
-  // on a missing `VAULT_PATH`, and inside the look that throw is caught by the
-  // cycle and filed as one ticket's problem. A watch would then report every
-  // ticket as unlookable, every pass, forever, with the real cause named once
-  // per ticket in a list of reasons nobody reads twice.
-  const runDeps = createSolveRunDeps(settings);
   const deps = createReviewCycleDeps(
     settings,
     client,
     createReviewLook(settings, client, runDeps, targets),
     createReviewAct(runDeps, targets),
+    signal,
   );
 
   // Narrowed after the query rather than by a different one. The subscription is
@@ -1019,12 +1042,17 @@ export async function runWatch(
       `${issueKey === null ? "Every ticket under review" : issueKey}, looked at every ` +
       `${String(Math.round(pollMs / 1000))}s.\n` +
       `A look costs two gh reads; only a round costs money. At most ${String(maxRounds)} ` +
-      `round${maxRounds === 1 ? "" : "s"} per pass, roughly $${(maxRounds * 0.94).toFixed(2)}.\n` +
+      `round${maxRounds === 1 ? "" : "s"} per pass, roughly ` +
+      `$${(maxRounds * REVIEW_ROUND_USD).toFixed(2)}.\n` +
       `Ctrl-C is safe: the checkout is removed after each round and nothing is held between passes.\n\n`,
   );
 
+  // Before the loop, so a missing `VAULT_PATH` is one message rather than a
+  // refusal repeated every two minutes. See `runReviewSweep`.
+  const runDeps = createSolveRunDeps(settings);
+
   for (let pass = 1; ; pass += 1) {
-    const outcome = await runReviewSweep(settings, client, issueKey);
+    const outcome = await runReviewSweep(settings, client, runDeps, issueKey);
 
     if (outcome.watched === 0) {
       process.stdout.write(

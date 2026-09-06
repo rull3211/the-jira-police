@@ -3,10 +3,11 @@
 A service that watches the SSX Jira board, runs Storebrand's `/intake-triage` skill against every
 new ticket, checks the verdict mechanically, and posts it back.
 
-A **second queue** is being added alongside it: tickets a triage assessment marked
-`agent:solvable`, waiting to be fixed by an agent. Today that queue picks tickets and plans the
-label edit that would claim one. It cannot make the edit, cannot write code, and is not run by
-the daemon.
+A **second queue** runs alongside it: tickets a triage assessment marked `agent:solvable`, waiting
+to be fixed by an agent. That queue claims a ticket, fixes it in an isolated worktree under
+mechanical verification, opens a draft pull request and works the review to a handover. **A person
+still starts every solve** — `pnpm solve:once <KEY>`. What the daemon does on its own is advance
+pull requests that already exist, and only with `SOLVE_ENABLED` on. A human always merges.
 
 `ARCHITECTURE.md` is the design document — why grooming is three steps, which credential is
 allowed to do what, and what is deliberately unbuilt. This file is how to run it.
@@ -92,8 +93,11 @@ labels that decision was made from.
 pnpm start --skill mock-triage --interval 10s --for 1m
 ```
 
-**Grooming only.** The daemon does not run the solve queue and is not meant to yet — see
-_Phases_ below. The next section is how to work up to a real run.
+**Grooming, plus review if you asked for it.** With `SOLVE_ENABLED` unset — the default — this is
+the grooming loop and nothing else. Turn it on and a second loop runs beside it on its own cadence,
+looking at the pull requests already under review and advancing the ones that need it. **It still
+never claims a ticket:** starting a solve is a person typing `solve:once`. See _Phases_ below. The
+next section is how to work up to a real run.
 
 ---
 
@@ -109,6 +113,10 @@ single run**, so a smoke test needs no edit to `.env` and leaves nothing behind 
 | `--for <duration>`      | nothing — bounds the whole run | `--for 4m`                  |
 
 Durations take `ms`, `s`, `m`, `h`, or a bare millisecond count: `30s`, `4m`, `1.5m`, `2h`.
+
+`--interval` moves the grooming loop only. The review loop reads `REVIEW_POLL_MS` and there is no
+flag for it, which is deliberate: that cadence is how long a reviewer's reply waits, and shortening
+a smoke test should not shorten the service's patience.
 
 There is **no `--write` flag on the daemon.** Unlike `triage:once`, posting is controlled only by
 `WRITE_BACK` in the environment. A long-running unattended process should not be able to acquire
@@ -258,17 +266,17 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 
 ## Commands
 
-| Command                                                | What it does                                                                 | Writes?                     |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------- | --------------------------- |
-| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                         | no                          |
-| `pnpm poll:once`                                       | One full grooming cycle                                                      | only with `WRITE_BACK=true` |
-| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                        | `groomed/<KEY>.md`          |
-| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                       | Jira                        |
-| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock** | `groomed/<KEY>.md`          |
-| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                  | `groomed/solve-cycle.md`    |
-| `pnpm start`                                           | The daemon — **grooming only**. Takes `--skill`, `--interval`, `--for`       | only with `WRITE_BACK=true` |
-| `pnpm dev`                                             | The daemon with `--watch`; same flags                                        | as above                    |
-| `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                               | no                          |
+| Command                                                | What it does                                                                                           | Writes?                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | --------------------------- |
+| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                                                   | no                          |
+| `pnpm poll:once`                                       | One full grooming cycle                                                                                | only with `WRITE_BACK=true` |
+| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                                                  | `groomed/<KEY>.md`          |
+| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                                                 | Jira                        |
+| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                           | `groomed/<KEY>.md`          |
+| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                            | `groomed/solve-cycle.md`    |
+| `pnpm start`                                           | The daemon — grooming, plus the review loop if `SOLVE_ENABLED`. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
+| `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                  | as above                    |
+| `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                                                         | no                          |
 
 The typecheck script is **`check-types`**, not `typecheck`.
 
@@ -370,20 +378,27 @@ solver phase depends on is a person reading that worktree.
 The bug-fixing feature ships in stages, so the fitness assessment can be judged before anything
 acts on it. Triage cannot read source code, so `agent:solvable` is a _candidate_ signal.
 
-| Phase | Scope                                                      | State                |
-| ----- | ---------------------------------------------------------- | -------------------- |
-| A     | Fitness assessment in triage, `agent:solvable`             | **built**            |
-| B1    | The picker: solve queue, claim planning, cycle report      | **built**            |
-| B2    | The claim write, verified by re-reading, plus release      | **built**            |
-| C     | The solver: worktree, recon, edit, verification, diff gate | **built**            |
-| D     | Push, draft PR, reviewer requested                         | **built and run**    |
-| D2    | The Copilot review loop and undraft (`advance`)            | built, not called    |
-| E     | Run it from the daemon                                     | **last, on purpose** |
+| Phase | Scope                                                                         | State                |
+| ----- | ----------------------------------------------------------------------------- | -------------------- |
+| A     | Fitness assessment in triage, `agent:solvable`                                | **built**            |
+| B1    | The picker: solve queue, claim planning, cycle report                         | **built**            |
+| B2    | The claim write, verified by re-reading, plus release                         | **built**            |
+| C     | The solver: worktree, recon, edit, verification, diff gate                    | **built**            |
+| D     | Push, draft PR, reviewer requested                                            | **built and run**    |
+| D2–D4 | The review loop: both reviewers, threads, the round cursor, the label machine | **built and run**    |
+| E     | Run it from the daemon                                                        | **review half done** |
 
 Every phase owes two hand-operated commands before it counts as done: a dry run that reports what
 it _would_ change, and a single run against one named ticket. The daemon is last because the only
 thing it adds is that nobody is watching — a ticket claimed, solved and PR'd by hand is a
 demonstration; the same sequence on a five-minute timer is a deployment.
+
+**E ships in two pieces and only the first has landed** (2026-09-06). The daemon runs the review
+sweep: it looks at every pull request the board says is under review, which is two `gh` reads and
+free, and pays for a round on the few that need one. It does not run the solve queue, so nothing
+is claimed, no worktree is cut and no first pull request is opened without a person asking. Every
+round it can run is one somebody already authorised by opening the pull request; a claim is not
+like that, which is why the two halves are separate.
 
 D was driven end to end on 2026-09-04: SSX-3822 claimed, solved, verified, committed, pushed, and
 opened as [draft PR #2657](https://github.com/storebrand-digital/buy-insurance-advisor-web/pull/2657)

@@ -163,6 +163,25 @@ export function pollIntervalMs(settings: Settings): number {
 }
 
 /**
+ * How long the daemon sleeps between looks at the pull requests under review.
+ *
+ * A second cadence rather than a share of the first, and the two numbers pull
+ * in opposite directions on purpose. Polling for new issues is a window over
+ * time, so five minutes is a latency choice; looking at a pull request is a
+ * question about a state, and the answer is worth having within about the time
+ * a reviewer takes to reply — two and a half to four minutes, measured. Running
+ * the review sweep on `POLL_INTERVAL_MS` would tie a reviewer's turnaround to a
+ * setting whose description is "gap between polls", which is how a cadence
+ * change quietly becomes a policy change.
+ *
+ * Same floor and the same reason as above: zero is an unthrottled loop, not an
+ * eager one, and here it would be unthrottled against `gh` as well as Jira.
+ */
+export function reviewIntervalMs(settings: Settings): number {
+  return numeric(settings, "REVIEW_POLL_MS", 1);
+}
+
+/**
  * Whether a run may post, given the settings.
  *
  * A stand-in is pinned to preview whatever the operator configured. Both
