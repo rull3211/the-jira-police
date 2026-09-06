@@ -36,6 +36,7 @@
  */
 
 import { FOOTER_SENTINEL } from "../triage/gate.ts";
+import { retriageCount, retriageLabels } from "./counter.ts";
 
 /** One comment, with its ADF already rendered to text by the caller. */
 export interface WatchComment {
@@ -69,6 +70,14 @@ export interface WatchFieldChange {
 
 export interface WatchSignals {
   readonly key: string;
+  /**
+   * The ticket's labels, as Jira returned them.
+   *
+   * Read for one thing only: the re-triage counter, which lives in a label
+   * because it has to be written *before* the run it authorises and a comment
+   * cannot be — see `counter.ts`.
+   */
+  readonly labels: readonly string[];
   /** True when the ticket has been closed — `statusCategory` is `Done`. */
   readonly closed: boolean;
   readonly comments: readonly WatchComment[];
@@ -206,10 +215,11 @@ export function lastSpokeAt(comments: readonly WatchComment[]): number {
 /**
  * Decides what to do about one watched ticket.
  *
- * `maxRetriage` is `MAX_RETRIAGE_PER_TICKET`. The count it bounds is read from
- * the bot's own comments on the ticket rather than from disk, so it survives a
- * restart, a wiped `state/` and a second instance — the same reason the solve
- * queue keeps its dedupe in Jira.
+ * `maxRetriage` is `MAX_RETRIAGE_PER_TICKET`. The count it bounds is read off a
+ * label on the ticket rather than from disk, so it survives a restart, a wiped
+ * `state/` and a second instance — the same reason the solve queue keeps its
+ * dedupe in Jira. `counter.ts` has the rest of that argument, including why it
+ * is a label and not the comment §7b originally proposed.
  */
 export function decideWatch(signals: WatchSignals, maxRetriage: number): WatchDecision {
   // First, because it is free and it is the only terminal that does not depend
@@ -223,66 +233,57 @@ export function decideWatch(signals: WatchSignals, maxRetriage: number): WatchDe
     };
   }
 
-  const ours = signals.comments.filter(isOurComment);
-
-  // **A watch with no countable history is refused rather than started.**
+  // **The count is read off a label, and the first version of this read it off
+  // our own comments instead.** That was §7b's design and it was defeated by a
+  // write path nobody thought to ask about: the triage poster finds its
+  // previous comment by the footer sentinel and rewrites it in place, so a
+  // ticket triaged five times has one comment of ours and `ours.length - 1` is
+  // zero forever. The brake was arithmetic over a stuck odometer. It is also
+  // the wrong *kind* of number — a comment is a receipt written after the run,
+  // and a bound has to be a reservation written before it, or a failed write
+  // hands back a free run every sweep. See `counter.ts` for both arguments and
+  // for why a re-triage cannot clear its own counter.
   //
-  // The bound is a receipt: it is read back from comments this service already
-  // posted. So a ticket with none has no bound at all, and re-triaging it would
-  // pay for a run, post a comment, and — if that post failed for any reason —
-  // arrive back here at zero, forever. That is the marker rule from the review
-  // cursor, arriving in a second loop: a count that will not read must not read
-  // as zero, because losing the count and starting again from one is how a
-  // bounded loop quietly becomes an unbounded one.
-  //
-  // It costs the hand-labelled case: a human who adds `agent:watching`
-  // themselves gets a refusal rather than a look. That is a visible refusal
-  // with a one-command remedy, and the alternative is an unbounded spend on a
-  // ticket nobody is reading.
-  if (ours.length === 0) {
+  // `null` is not zero. A malformed counter refuses the ticket rather than
+  // reading as a fresh one, because losing a count and starting again from one
+  // is how a bounded loop quietly becomes an unbounded one.
+  const retriages = retriageCount(signals.labels);
+  if (retriages === null) {
     return {
       kind: "unsubscribe",
       reason: "uncountable",
-      note: `${signals.key} carries the watch label but no comment this service wrote, so there is nothing to count re-triage attempts from — run triage:once by hand instead of starting a watch that cannot be bounded`,
+      note: `${signals.key} carries a re-triage counter this service cannot read (${retriageLabels(signals.labels).join(", ")}), and a count that will not read must not read as zero — fix or remove the label before watching it again`,
     };
   }
 
-  // **The first comment is the sendback, not a re-triage, so it is not
-  // counted.** A watched ticket exists *because* triage looked once and asked
-  // for something, and that look is the reason the watch was started rather
-  // than an attempt to end it. Counting it made `MAX_RETRIAGE_PER_TICKET=3`
-  // buy two re-triages while the setting's own name and every description of
-  // it promised three — the prose and the behaviour disagreeing about a number,
-  // which is the defect class this repository is organised around, in the one
-  // number that decides how much a ticket may cost.
-  //
-  // Subtracting rather than comparing against `maxRetriage + 1`, because the
-  // quantity this function is bounding is *re-triages* and the arithmetic
-  // should say so; a `+ 1` at the comparison is the same fix written where the
-  // next reader has to reconstruct why it is there.
-  //
-  // **This brake cannot currently fire, and the re-triage must not ship until
-  // it can.** Counting our comments only counts re-triages if a re-triage
-  // leaves a comment, and it does not: the poster finds its previous one by the
-  // footer sentinel and rewrites it, so `ours.length` is one however many runs
-  // a ticket has had. Found while wiring the hand-off, before anything spent
-  // anything — the same discovery that forced `lastSpokeAt` to read `updated`,
-  // and the more dangerous half of it, because the mark at least fails toward
-  // refusing while a count stuck at zero fails toward paying.
-  //
-  // Kept, not deleted. It is the correct arithmetic over the quantity it names,
-  // it does fire on the cases that *do* produce a second comment of ours — a
-  // pasted sentinel, a hand-posted verdict — and deleting a brake because the
-  // odometer is broken is how the odometer stays broken. What has to change is
-  // where the count comes from, and that is a decision the plan owns: it needs
-  // a counter the watcher can write *before* the run it authorises, which the
-  // comment body is not, since writing it costs a paid session of its own.
-  const retriages = ours.length - 1;
   if (retriages >= maxRetriage) {
     return {
       kind: "unsubscribe",
       reason: "exhausted",
       note: `${retriages} re-triage${retriages === 1 ? "" : "s"} already, at a limit of ${maxRetriage} — a ticket edited this many times is a conversation rather than a signal`,
+    };
+  }
+
+  // **A watch with no comment of ours is refused rather than started, and the
+  // reason moved when the count moved.** It used to be the bound: with no
+  // comment there was nothing to count. The counter is a label now, so this
+  // ticket *is* countable — and it is still refused, because it has no
+  // high-water mark. Anything at or before the last thing we said has been seen
+  // by definition; with nothing said, the ticket's whole history reads as new
+  // and the first re-triage would be judging the sendback against the
+  // conversation that produced it.
+  //
+  // It costs the hand-labelled case: a human who adds `agent:watching` to a
+  // ticket this service has never triaged gets a refusal rather than a look.
+  // That is a visible refusal with a one-command remedy — `triage:once` writes
+  // the comment the watch needs — and the alternative is paying to re-read a
+  // ticket nobody has asked anything about.
+  const ours = signals.comments.filter(isOurComment);
+  if (ours.length === 0) {
+    return {
+      kind: "unsubscribe",
+      reason: "uncountable",
+      note: `${signals.key} carries the watch label but no comment this service wrote, so there is no high-water mark and every look would read as new — run triage:once by hand first`,
     };
   }
 

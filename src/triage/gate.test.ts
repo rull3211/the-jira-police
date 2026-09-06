@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { RETRIAGE_LABEL_PREFIX } from "../watch/counter.ts";
 import { FOOTER_SENTINEL, UnpostableError, assertPostable } from "./gate.ts";
 import {
   TriageContradictionError,
@@ -361,6 +362,28 @@ describe("the agent: namespace, which triage only partly owns", () => {
       ).toContain(`"${label}"`);
     },
   );
+
+  it("refuses to touch the watch's re-triage counter, in either direction", () => {
+    // **The whole reason the counter can live in a label.** It is a reservation
+    // written before the run it authorises, and the run it authorises is a
+    // re-triage — which §11 otherwise lets clear `agent:*`. A run that could
+    // clear its own counter is a brake wired to the thing it is braking, so the
+    // protection has to be mechanical and it has to be here. Add the counter
+    // namespace to `TRIAGE_OWNED_AGENT_LABELS` and this fails.
+    const counter = `${RETRIAGE_LABEL_PREFIX}2`;
+
+    expect(
+      violations(payload({ mutation: mutation({ labelsRemove: [counter] }) })).join(" "),
+    ).toContain(`"${counter}"`);
+    expect(
+      violations(
+        payload({
+          labels: ["dor:gaps", "route:ours", counter],
+          mutation: mutation({ labelsAdd: [counter] }),
+        }),
+      ).join(" "),
+    ).toContain(`"${counter}"`);
+  });
 });
 
 describe("agent fitness", () => {

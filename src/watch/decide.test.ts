@@ -29,6 +29,7 @@ function theirComment(created: string, text = "Baseline is 42%.", updated: strin
 function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
   return {
     key: "SSX-1234",
+    labels: ["agent:watching"],
     closed: false,
     comments: [ourComment("2026-09-01T10:00:00.000+0200")],
     changes: [],
@@ -259,25 +260,26 @@ describe("the terminals", () => {
   });
 
   it("unsubscribes once the attempt budget is spent", () => {
-    // Four comments at a limit of three: the sendback, then three re-triages.
     const spent = signals({
+      labels: ["agent:watching", "agent:retriage-3"],
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
-        ourComment("2026-09-02T10:00:00.000+0200"),
-        ourComment("2026-09-03T10:00:00.000+0200"),
-        ourComment("2026-09-04T10:00:00.000+0200"),
+        theirComment("2026-09-04T10:00:00.000+0200"),
       ],
     });
 
     expect(decideWatch(spent, 3)).toMatchObject({ kind: "unsubscribe", reason: "exhausted" });
   });
 
-  it("does not count the sendback itself against the re-triage budget", () => {
-    // The mutation: count `ours.length` instead of `ours.length - 1` and this
-    // ticket is dropped one re-triage early — a setting whose own name promises
-    // three attempts silently delivering two. The comment that starts a watch
-    // is the reason it exists, not an attempt to end it.
-    const threeRuns = signals({
+  it("counts re-triages and not comments of ours", () => {
+    // **The mutation this whole counter exists for, and the version it replaced
+    // failed it.** The poster rewrites its own comment in place, so a ticket
+    // re-triaged three times still has one comment of ours: count the comments
+    // and the brake reads zero forever on precisely the tickets that have spent
+    // the most. Count the label and the two facts stop being related — three
+    // comments of ours here, none of them re-triages, and the whole budget
+    // intact.
+    const chatty = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
         ourComment("2026-09-02T10:00:00.000+0200"),
@@ -286,10 +288,12 @@ describe("the terminals", () => {
       ],
     });
 
-    expect(decideWatch(threeRuns, 3)).toMatchObject({ kind: "retriage" });
+    expect(decideWatch(chatty, 3)).toMatchObject({ kind: "retriage" });
   });
 
-  it("gives a lone sendback its whole budget", () => {
+  it("gives an unlabelled ticket its whole budget", () => {
+    // No counter is zero, not a refusal: a ticket nothing has spent on yet is
+    // the ordinary case and the one the watch exists for.
     const fresh = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
@@ -304,11 +308,9 @@ describe("the terminals", () => {
     // The bound has to beat the trigger, or a ticket somebody edits daily is
     // re-triaged daily and the limit never fires.
     const busy = signals({
+      labels: ["agent:watching", "agent:retriage-4"],
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
-        ourComment("2026-09-02T10:00:00.000+0200"),
-        ourComment("2026-09-03T10:00:00.000+0200"),
-        ourComment("2026-09-04T10:00:00.000+0200"),
         theirComment("2026-09-05T10:00:00.000+0200"),
       ],
     });
@@ -318,9 +320,9 @@ describe("the terminals", () => {
 
   it("still has one attempt left at one below the limit", () => {
     const nearly = signals({
+      labels: ["agent:watching", "agent:retriage-2"],
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
-        ourComment("2026-09-02T10:00:00.000+0200"),
         theirComment("2026-09-03T10:00:00.000+0200"),
       ],
     });
@@ -328,11 +330,30 @@ describe("the terminals", () => {
     expect(decideWatch(nearly, 3)).toMatchObject({ kind: "retriage" });
   });
 
-  it("refuses a watch it cannot count, rather than starting one", () => {
+  it("refuses a counter it cannot read rather than treating it as a fresh ticket", () => {
     // The marker rule from the review cursor, arriving in a second loop: a
-    // count that will not read must not read as zero. With no comment of ours
-    // there is no bound, so a failed post would hand back a free run every tick
-    // forever.
+    // count that will not read must not read as zero, because losing the count
+    // and starting again from one is how a bounded loop quietly becomes an
+    // unbounded one.
+    const mangled = signals({
+      labels: ["agent:watching", "agent:retriage-lots"],
+      comments: [
+        ourComment("2026-09-01T10:00:00.000+0200"),
+        theirComment("2026-09-03T10:00:00.000+0200"),
+      ],
+    });
+
+    expect(decideWatch(mangled, 3)).toMatchObject({
+      kind: "unsubscribe",
+      reason: "uncountable",
+    });
+  });
+
+  it("refuses a watch with no comment of ours, which is the missing mark and not the count", () => {
+    // The counter is a label now, so this ticket is perfectly countable — and
+    // it is still refused, because there is no high-water mark. Every look
+    // would read as new and the first re-triage would judge the sendback
+    // against the conversation that produced it.
     const handLabelled = signals({ comments: [theirComment("2026-09-02T08:00:00.000+0200")] });
 
     expect(decideWatch(handLabelled, 3)).toMatchObject({

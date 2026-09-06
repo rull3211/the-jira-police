@@ -15,6 +15,7 @@ function theirComment(created: string, text = "Baseline is 42%.", updated: strin
 function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
   return {
     key: "SSX-1234",
+    labels: ["agent:watching"],
     closed: false,
     comments: [ourComment("2026-09-01T10:00:00.000+0200")],
     changes: [],

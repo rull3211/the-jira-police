@@ -36,6 +36,9 @@ const DONE_CATEGORY = "done";
 export function toWatchSignals(activity: IssueActivity): WatchSignals {
   return {
     key: activity.key,
+    // Carried rather than filtered: the decision reads one namespace out of
+    // them, and a filter here would be a second place that has to know which.
+    labels: activity.labels,
     closed: activity.statusCategoryKey.trim().toLowerCase() === DONE_CATEGORY,
     comments: activity.comments.map((comment) => ({
       created: comment.created,
