@@ -58,10 +58,10 @@
  * and comment are current, which is the state the recon pass is written for.
  */
 
-import type { TicketRef } from "../jira/types.ts";
 import { logger } from "../logger.ts";
-import { FileSink, type TriageResult } from "../output/sink.ts";
+import { FileSink } from "../output/sink.ts";
 import { type Settings, readSettings, withConfigErrors } from "../settings.ts";
+import { syntheticTicket, toTriageResult } from "../triage/single.ts";
 import type { AgentFitness } from "../triage/runner.ts";
 import { buildTriageOptions, createGroom, createJiraClient } from "../wiring.ts";
 import { USAGE, parseBotArgs } from "./bot-args.ts";
@@ -135,30 +135,12 @@ async function main(): Promise<void> {
 
   // Discovery is the half this command skips; only the key crosses into the
   // skill. Same construction as `triage:once`, and for the same reason.
-  const ticket: TicketRef = {
-    key: issueKey,
-    summary: `${issueKey} (summary not fetched in single-run mode)`,
-    url: `${settings.JIRA_BASE_URL}/browse/${issueKey}`,
-    created: new Date().toISOString(),
-    updated: "",
-    labels: [],
-    issueTypeId: "",
-    issueTypeName: "",
-  };
+  const ticket = syntheticTicket(issueKey, settings.JIRA_BASE_URL);
 
   process.stdout.write(`Triaging ${issueKey}…\n`);
   const payload = await createGroom(settings)(ticket);
 
-  const result: TriageResult = {
-    issueKey,
-    issueUrl: ticket.url,
-    summary: ticket.summary,
-    verdict: payload.verdict,
-    labels: payload.labels,
-    recommendedNextStep: payload.recommendedNextStep,
-    report: payload.report,
-    agentFitness: payload.agentFitness,
-  };
+  const result = toTriageResult(ticket, payload);
   await new FileSink(settings.OUTPUT_DIR).write(result);
 
   const fitness = payload.agentFitness;
