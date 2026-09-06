@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { logger } from "../logger.ts";
 
 import {
   type CommitRequest,
@@ -1173,6 +1175,41 @@ describe("readReviewThreads", () => {
           ],
         },
       ],
+    });
+  });
+
+  /** The `quiet` option on the one `solve.pr.threads_read` line a read emits. */
+  async function markFor(nodes: readonly unknown[]): Promise<boolean | undefined> {
+    let mark: boolean | undefined;
+    vi.spyOn(logger, "info").mockImplementation((message, _fields = {}, options = {}) => {
+      if (message === "solve.pr.threads_read") {
+        mark = options.quiet;
+      }
+    });
+    await readReviewThreads(fakeRunner(graphql(threadsPayload(nodes))), reviewRequest());
+    return mark;
+  }
+
+  describe("the ⏳/🔧 mark on the line this read writes every tick", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("is quiet when nothing is open, however many threads there are", async () => {
+      // The mutation: key on `threads.length` instead of `open`. A pull request
+      // whose two threads are both resolved is read on every tick for as long as
+      // it stays open, and would then be marked as news forever — which is the
+      // line the operator pasted when asking for the mark in the first place.
+      expect(await markFor([thread({ isResolved: true }), thread({ isResolved: true })])).toBe(
+        true,
+      );
+      expect(await markFor([])).toBe(true);
+    });
+
+    it("is news the moment one thread is still open", async () => {
+      expect(await markFor([thread({ isResolved: true }), thread({ isResolved: false })])).toBe(
+        false,
+      );
     });
   });
 

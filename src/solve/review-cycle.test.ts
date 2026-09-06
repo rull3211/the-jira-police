@@ -4,8 +4,10 @@ import { logger } from "../logger.ts";
 import type { AdvanceOutcome, PendingRound } from "./delivery.ts";
 import {
   type ReviewCycleDeps,
+  type ReviewCycleOutcome,
   type ReviewLook,
   type WatchedTicket,
+  isQuietCycle,
   outcomeNote,
   runReviewCycle,
 } from "./review-cycle.ts";
@@ -480,5 +482,138 @@ describe("outcomeNote", () => {
     expect(outcomeNote({ kind: "capped", rounds: 20, unresolved: "the null check" })).toBe(
       "capped rounds=20 unresolved=the null check",
     );
+  });
+});
+
+/**
+ * The ⏳/🔧 mark on the line this service writes most often.
+ *
+ * `review.cycle` fires every `REVIEW_POLL_MS` — two minutes — for every watched
+ * pull request, and on a healthy queue it says the same thing every time. The
+ * mark is what lets a person scroll past those and stop on the one that does
+ * not, so getting it wrong in the quiet direction hides a verdict.
+ */
+describe("isQuietCycle", () => {
+  const emptyCycle: ReviewCycleOutcome = {
+    watched: 0,
+    acted: [],
+    settled: [],
+    ended: [],
+    unlooked: [],
+    deferred: [],
+  };
+
+  const settle = (outcome: AdvanceOutcome): ReviewCycleOutcome => ({
+    ...emptyCycle,
+    watched: 1,
+    settled: [{ issueKey: "SSX-3835", number: 2663, outcome }],
+  });
+
+  it("calls a cycle quiet when every pull request it watched is still waiting", () => {
+    // The line the whole mark was added for: five pull requests read, none of
+    // them had said anything, and it will say so again in two minutes.
+    expect(isQuietCycle({ ...settle(WAITING), watched: 5 })).toBe(true);
+    expect(isQuietCycle(settle(READY))).toBe(true);
+  });
+
+  it("does not read `watched`, because looking at things is not doing something", () => {
+    // The mutation: add `outcome.watched === 0` to the conjunction. Every cycle
+    // on a non-empty queue is then news, which is the mark meaning nothing.
+    expect(isQuietCycle({ ...emptyCycle, watched: 5 })).toBe(true);
+  });
+
+  it("calls a cycle news when a round ran, whatever the round returned", () => {
+    const acted: ReviewCycleOutcome = {
+      ...emptyCycle,
+      watched: 1,
+      acted: [{ issueKey: "SSX-3835", number: 2663, outcome: READY }],
+    };
+
+    expect(isQuietCycle(acted)).toBe(false);
+  });
+
+  it("calls a cycle news on each of the other three arms separately", () => {
+    // Four terms in one conjunction, so four mutations. Drop any one and this
+    // fails on exactly the row it belongs to.
+    expect(
+      isQuietCycle({ ...emptyCycle, ended: [{ issueKey: "SSX-1", number: 1, state: "MERGED" }] }),
+    ).toBe(false);
+    expect(
+      isQuietCycle({ ...emptyCycle, unlooked: [{ issueKey: "SSX-1", reason: "no pull request" }] }),
+    ).toBe(false);
+    expect(isQuietCycle({ ...emptyCycle, deferred: ["SSX-1"] })).toBe(false);
+  });
+
+  it("calls a settled verdict news, which is the arm a count would have hidden", () => {
+    // This is #2663's lesson as a mark rather than as a field. A settle is
+    // `waiting` almost always, so it is tempting to treat the whole array as
+    // background — and the arms that are not `waiting` are a round that reached
+    // a verdict and will never say so again.
+    for (const outcome of [
+      { kind: "failed", stage: "verification", reason: "pnpm test exited 1" },
+      { kind: "refused", stage: "diff-gate", reasons: ["a dependency change"] },
+      { kind: "abandoned", reason: "the base build was already red" },
+      { kind: "capped", rounds: 20, unresolved: "the ordering question" },
+      { kind: "reviewer-exhausted", rounds: 3, unresolved: "the null check" },
+    ] satisfies AdvanceOutcome[]) {
+      expect(isQuietCycle(settle(outcome))).toBe(false);
+    }
+  });
+
+  it("is news if any settle is a verdict, even among quiet ones", () => {
+    // `every`, not "the first one". A verdict buried behind four waiting pull
+    // requests is the case where a person most needs the mark to be honest.
+    const mixed: ReviewCycleOutcome = {
+      ...emptyCycle,
+      watched: 3,
+      settled: [
+        { issueKey: "SSX-1", number: 1, outcome: WAITING },
+        { issueKey: "SSX-2", number: 2, outcome: { kind: "abandoned", reason: "no base" } },
+        { issueKey: "SSX-3", number: 3, outcome: READY },
+      ],
+    };
+
+    expect(isQuietCycle(mixed)).toBe(false);
+  });
+});
+
+/** Every `review.cycle` mark the run emitted, in order. */
+function captureCycleMarks(): (boolean | undefined)[] {
+  const marks: (boolean | undefined)[] = [];
+  vi.spyOn(logger, "info").mockImplementation((message, _fields = {}, options = {}) => {
+    if (message === "review.cycle") {
+      marks.push(options.quiet);
+    }
+  });
+  return marks;
+}
+
+describe("the mark on the cycle's own log line", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("marks a cycle that only waited as quiet", async () => {
+    const marks = captureCycleMarks();
+    const h = harness([ticket("SSX-3835", "2026-09-06T19:00:00.000+0000")], {
+      "SSX-3835": settledAs(2663, WAITING),
+    });
+
+    await runReviewCycle(h.deps);
+
+    expect(marks).toEqual([true]);
+  });
+
+  it("marks a cycle that ran a round as news", async () => {
+    // The mark and the fields are built from one object, so this also pins that
+    // they cannot disagree: the line below says `acted` and must not say ⏳.
+    const marks = captureCycleMarks();
+    const h = harness([ticket("SSX-3835", "2026-09-06T19:00:00.000+0000")], {
+      "SSX-3835": round(2663),
+    });
+
+    await runReviewCycle({ ...h.deps, act: () => Promise.resolve(READY) });
+
+    expect(marks).toEqual([false]);
   });
 });

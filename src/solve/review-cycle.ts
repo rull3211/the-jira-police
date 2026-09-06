@@ -304,6 +304,56 @@ function noteFor(entry: ActedReview | SettledReview): string {
   return `${entry.issueKey} #${String(entry.number)} ${outcomeNote(entry.outcome)}`;
 }
 
+/**
+ * Does this settle recur forever, or has something happened?
+ *
+ * `waiting` and `ready` are the two arms a healthy pull request sits in for
+ * days: nobody has replied yet, or it is out of draft with a human holding it.
+ * Both are true again on the next tick and the one after. Every other arm is a
+ * round that reached a verdict, and a verdict is news exactly once.
+ *
+ * Exhaustive with no `default`, for the reason `outcomeNote` gives above: an
+ * arm added to the union must be argued into one pile or the other. Defaulting
+ * it to quiet would be the dangerous direction — a new terminal outcome would
+ * arrive marked as nothing having happened.
+ */
+function settleIsQuiet(outcome: AdvanceOutcome): boolean {
+  switch (outcome.kind) {
+    case "waiting":
+    case "ready":
+      return true;
+    case "iterated":
+    case "reviewer-exhausted":
+    case "capped":
+    case "abandoned":
+    case "refused":
+    case "failed":
+      return false;
+  }
+}
+
+/**
+ * Did this cycle do anything worth a person's attention?
+ *
+ * Exported because it decides the ⏳/🔧 mark on the single line this service
+ * writes most often, and a rule that decides what a human sees is a rule that
+ * gets a test.
+ *
+ * Note what it does **not** read: `watched`. A cycle watching five quiet pull
+ * requests is the normal state of a healthy queue, and marking it as news
+ * because it looked at something would mark every tick as news — which is the
+ * mark meaning nothing at all.
+ */
+export function isQuietCycle(outcome: ReviewCycleOutcome): boolean {
+  return (
+    outcome.acted.length === 0 &&
+    outcome.ended.length === 0 &&
+    outcome.unlooked.length === 0 &&
+    outcome.deferred.length === 0 &&
+    outcome.settled.every((entry) => settleIsQuiet(entry.outcome))
+  );
+}
+
 /** Oldest touched first, so the same pull request cannot be starved twice. */
 function byUpdatedAscending(a: WatchedTicket, b: WatchedTicket): number {
   return Date.parse(a.updated) - Date.parse(b.updated);
@@ -390,18 +440,33 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
     }
   }
 
-  logger.info("review.cycle", {
+  const outcome: ReviewCycleOutcome = {
     watched: tickets.length,
-    acted: acted.map(noteFor),
-    // Not a count. A settle is `waiting` on almost every tick, which is why this
-    // was one — but the arms that are not `waiting` are a finished round that
-    // cost nothing, and hiding those behind a number hides the difference
-    // between a quiet pull request and one nothing will ever act on again.
-    settled: settled.map(noteFor),
-    ended: ended.map((entry) => `${entry.issueKey} ${entry.state}`),
-    unlooked: unlooked.map((entry) => `${entry.issueKey} ${entry.reason}`),
+    acted,
+    settled,
+    ended,
+    unlooked,
     deferred,
-  });
+  };
 
-  return { watched: tickets.length, acted, settled, ended, unlooked, deferred };
+  logger.info(
+    "review.cycle",
+    {
+      watched: outcome.watched,
+      acted: acted.map(noteFor),
+      // Not a count. A settle is `waiting` on almost every tick, which is why
+      // this was one — but the arms that are not `waiting` are a finished round
+      // that cost nothing, and hiding those behind a number hides the difference
+      // between a quiet pull request and one nothing will ever act on again.
+      settled: settled.map(noteFor),
+      ended: ended.map((entry) => `${entry.issueKey} ${entry.state}`),
+      unlooked: unlooked.map((entry) => `${entry.issueKey} ${entry.reason}`),
+      deferred,
+    },
+    // Built from the outcome rather than from the six locals, so the mark and
+    // the fields cannot describe two different cycles.
+    { quiet: isQuietCycle(outcome) },
+  );
+
+  return outcome;
 }

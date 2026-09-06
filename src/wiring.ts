@@ -108,7 +108,14 @@ export function createDiscover(
       overlapMs: numeric(settings, "CURSOR_OVERLAP_MS"),
       firstRunMinutes: numeric(settings, "FIRST_RUN_LOOKBACK_MINUTES"),
     });
-    logger.info("poll.query", { jql });
+    // `debug`, with the other three `*.query` lines. A JQL string is plumbing:
+    // it is the same every tick apart from a timestamp, it is derived from
+    // settings a reader can look up, and it says nothing about what happened —
+    // so at `info` it is pure padding around the lines that do. It stays a log
+    // line rather than being deleted because it is the first thing anyone wants
+    // when the queue returns something surprising, and `LOG_LEVEL=debug` is how
+    // you ask for it. The cursor this window was built from is on `cycle.done`.
+    logger.debug("poll.query", { jql });
     return await client.search(jql);
   };
 }
@@ -432,11 +439,14 @@ export function createSolveDeps(
     queueJql,
     inFlightJql,
     fetchQueue: async () => {
-      logger.info("solve.query", { jql: queueJql });
+      // `debug`, for the reason given at `poll.query`. Both of these strings
+      // are also handed to the cycle report verbatim, two fields above, so
+      // demoting them loses nothing a person was relying on.
+      logger.debug("solve.query", { jql: queueJql });
       return (await client.search(queueJql)).map(toSolveCandidate);
     },
     countInFlight: async () => {
-      logger.info("solve.in_flight_query", { jql: inFlightJql });
+      logger.debug("solve.in_flight_query", { jql: inFlightJql });
       return (await client.search(inFlightJql)).length;
     },
     ...(signal === undefined ? {} : { signal }),
@@ -484,7 +494,8 @@ export function createReviewCycleDeps(
     watchJql,
     maxRounds: numeric(settings, "MAX_REVIEW_ROUNDS_PER_TICK", 0),
     fetchWatched: async () => {
-      logger.info("review.query", { jql: watchJql });
+      // `debug`, for the reason given at `poll.query`.
+      logger.debug("review.query", { jql: watchJql });
       return (await client.search(watchJql)).map(toWatchedTicket);
     },
     look,

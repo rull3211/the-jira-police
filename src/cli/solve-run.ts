@@ -1265,16 +1265,24 @@ export async function runSolveClaims(
     }
   }
 
-  logger.info("solve.claims.done", {
-    found: cycle.found,
-    inFlight: cycle.inFlight,
-    capacity: cycle.capacity,
-    planned: cycle.planned.length,
-    started,
-    held,
-    deferred: cycle.deferred.length,
-    remembered: ledger.size(),
-  });
+  logger.info(
+    "solve.claims.done",
+    {
+      found: cycle.found,
+      inFlight: cycle.inFlight,
+      capacity: cycle.capacity,
+      planned: cycle.planned.length,
+      started,
+      held,
+      deferred: cycle.deferred.length,
+      remembered: ledger.size(),
+    },
+    // An empty queue is the resting state, and so is a full one that nothing
+    // could be claimed from — `capacity: 0` with a solve already running says
+    // the loop is working, not that it did something. What is news is a ticket
+    // started, or one held back after the queue had picked it.
+    { quiet: started === 0 && held === 0 },
+  );
 
   return { found: cycle.found, started, held };
 }

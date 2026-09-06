@@ -1458,12 +1458,16 @@ export async function readReviewThreads(
     threads.push({ id, isResolved, isOutdated, path, line, comments });
   }
 
-  logger.info("solve.pr.threads_read", {
-    repo,
-    number,
-    threads: threads.length,
-    open: threads.filter((thread) => !thread.isResolved).length,
-  });
+  const open = threads.filter((thread) => !thread.isResolved).length;
+  logger.info(
+    "solve.pr.threads_read",
+    { repo, number, threads: threads.length, open },
+    // `open`, not `threads.length`. A pull request with two threads both
+    // resolved is read on every tick for as long as it stays open and has
+    // nothing left to say; keying on the total would mark it as news forever,
+    // which is the shape of idle line this mark was added for.
+    { quiet: open === 0 },
+  );
   return { outcome: "read", threads };
 }
 

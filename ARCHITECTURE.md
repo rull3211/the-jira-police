@@ -554,7 +554,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 | `src/triage/fitness-note.ts` | Renders the fitness call into the comment from the field, so prose cannot disagree with it                                  |
 | `src/output/sink.ts`         | `FileSink` (reports) and the rejection artifacts                                                                            |
 | `src/output/canvas.ts`       | Slack canvas payload builders — **built, never called** (§13)                                                               |
-| `src/logger.ts`              | JSON lines to stdout/stderr; `console` is banned by lint                                                                    |
+| `src/logger.ts`              | JSON lines to stdout/stderr; `console` is banned by lint. Every line opens with `q`: ⏳ nothing happened, 🔧 something did  |
 | `src/duration.ts`            | `30s` / `4m` / `1.5h` for CLI flags                                                                                         |
 
 `wiring.ts` exists because there are five entry points — the daemon, `poll:once`, `triage:once`,
