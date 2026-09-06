@@ -2,12 +2,13 @@
 
 > **Progress, 2026-09-06.** Phases A through D4e are built and merged; the service claims a
 > ticket, solves it in an isolated worktree, opens a pull request, answers the reviewer, and
-> labels the ticket for whatever happened. 1961 tests, no build step. **E has landed its review
+> labels the ticket for whatever happened. 1995 tests, no build step. **E has landed its review
 > half**: `pnpm start` now runs the review sweep beside the grooming loop, on its own cadence,
 > behind `SOLVE_ENABLED`. The solve half — anything that claims a ticket — is still a person
 > typing a command, and stays that way until E's remaining blockers are answered. **F has landed
-> its signal**: triage can now mark a sent-back ticket nearly-solvable and label it
-> `agent:watching`, and nothing yet reads that label. A human always merges.
+> its signal and its judgement**: triage can mark a sent-back ticket nearly-solvable and label it
+> `agent:watching`, there is a query that finds those tickets and a pure function that decides
+> whether one is worth re-triaging — and nothing calls either yet. A human always merges.
 
 ## Context
 
@@ -501,26 +502,86 @@ fitness note; and then a third loop in the daemon on a cadence measured in days.
 §7b leans on is still the wrong one — it says $0.11 per re-triage and the measured number is
 $1.56, which is the argument for the bound understated by an order of magnitude.
 
+#### F's decision, landed 2026-09-06 on the same branch
+
+The second slice is the query and the judgement, still with nothing driving either:
+`buildSendbackWatchJql`, `src/watch/decide.ts`, and the two settings the decision is bounded by.
+1995 tests; seventeen mutations applied and seventeen caught, but only after the run found two
+guards that were not guards.
+
+**The trigger is keyed on the field, not on the changelog's author, which is a departure from
+§7b.** The plan proposed reading who made each change. That inherits the shared-account ambiguity
+the poster already has — it writes through an MCP session on a human's Atlassian account — and it
+breaks the day somebody else holds the credential. Keying on _which field moved_ is immune to
+both. `BLOCKER_CLEARING_FIELDS` is an **allowlist** (`description`, `summary`, `attachment`,
+`environment`) rather than a list of the fields this service writes, and the direction of the
+error is the argument: a denylist reads a sprint assignment or a rank drag as "the reporter
+responded", which does not merely buy a paid run but spends the ticket's whole
+`MAX_RETRIAGE_PER_TICKET` budget on board grooming, so the watch is exhausted by the time the
+reporter actually answers. Silent and free beats loud and expensive. The known gap is stated
+rather than papered over: a board-specific acceptance-criteria custom field is the single most
+likely real trigger and is not in the set, and inventing a name for it would read as coverage.
+
+**A watch that cannot be counted is refused rather than started.** The bound is a _receipt_ — read
+back from comments this service already posted — so a ticket with none has no bound at all, and
+re-triaging it would pay for a run whose failed post hands back a free run every tick forever.
+That is D3's marker rule arriving in a second loop. It costs the hand-labelled case, where a human
+adds `agent:watching` themselves and gets a refusal instead of a look; that is a visible refusal
+with a one-command remedy.
+
+**§7c contradicted itself and the query resolves it toward seeing more.** The section asks both
+that closed tickets be unsubscribed and that the query exclude them — but a ticket the query hides
+is a ticket nothing can unsubscribe. So `buildSendbackWatchJql` deliberately omits
+`statusCategory != Done`, mirroring `buildInFlightJql`'s existing argument, and `closed` is the
+first branch of the decision. Mutation-tested: add the filter back and a test fails.
+
+**Two of the eleven mutations survived, and the reason is worth more than the fix.** The
+self-trigger guard — the one Verification names as _"invisible in review and obvious on the
+invoice"_ — could be deleted with the suite staying green, and so could the strictness of the
+comparison beside it. Each was masking the other: `spokeAt` is the maximum over our _own_
+comments, so under a strict `at > spokeAt` nothing of ours can match whether or not it was
+skipped, and with the skip in place nothing can sit exactly on the boundary either. **Two
+redundant guards, each making the other untestable, and the house rule reporting green.** The fix
+was not to delete one but to make the pair asymmetric: a tie now counts as somebody else in both
+loops, which makes the skip the only thing holding the self-trigger and improves the answer — a
+reporter commenting in the same millisecond is now seen rather than missed. The general rule both
+loops follow came out of it and is written at the call site: **our own activity is excluded by
+kind, never by clock** — comments by the sentinel, field writes by the allowlist. Neither loop
+needs the timestamp for that job, so neither should give a tie away.
+
+This is the closest thing yet to a counter-example to the house rule as usually stated. _A guard
+is not shipped until a test fails when it is unplugged_ assumes guards are unplugged one at a
+time; two guards covering the same case pass that test individually and defend nothing that the
+other does not. It cost nothing to find here because the mutations were run. It would have cost a
+recurring charge to find in production.
+
+**What is left in F:** the changelog read on the Jira client (authorised 2026-09-06, and the second
+amendment to the discovery-only rule after `updateLabels` — `ARCHITECTURE.md` §12 needs both);
+`watch:once <KEY> [--write]`; §7c's unsubscribe wired to a real label write; `buildFitnessNote`;
+and the daemon loop. Nothing reads `WATCH_ENABLED` or `MAX_RETRIAGE_PER_TICKET` yet, which is
+deliberate — they are declared where an operator can see them and wired when there is something to
+switch off.
+
 ---
 
 ## Phasing
 
-| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                  |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                                  |
-| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                                   |
-| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                                  |
-| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                                  |
-| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                                 |
-| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                   |
-| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                   |
-| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                   |
-| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request      |
-| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                   |
-| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                   |
-| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                   |
-| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **review half built 2026-09-06, `feat/daemon-review`.** 1944 tests; six mutations caught. Solve half still gated on the blockers below |
-| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **signal built 2026-09-06, `feat/sendback-watch`.** 1961 tests; eleven mutations caught. Nothing watches yet — see below               |
+| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                                                                                  |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                                                                                                  |
+| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                                                                                                   |
+| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                                                                                                  |
+| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                                                                                                  |
+| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                                                                                                 |
+| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                                                                                   |
+| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                                                                                   |
+| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                                                                                   |
+| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request                                                                      |
+| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                                   |
+| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                                   |
+| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                                   |
+| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **review half built 2026-09-06, `feat/daemon-review`.** 1944 tests; six mutations caught. Solve half still gated on the blockers below                                                                 |
+| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **signal and decision built 2026-09-06, `feat/sendback-watch`.** 1995 tests; seventeen mutations caught, two of which survived first and were covering for each other. Nothing watches yet — see below |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the
 privilege each grants is reviewable on its own. Later branches stack rather than fan out, because
