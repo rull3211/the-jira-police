@@ -14,6 +14,7 @@ function input(overrides: Partial<RelevanceInput> = {}): RelevanceInput {
     key: "SSX-1234",
     sendback: "Add the observed baseline and the steps to reproduce.",
     comments: ["Baseline is 42%."],
+    omitted: 0,
     fields: ["description"],
     ...overrides,
   };
@@ -139,6 +140,26 @@ describe("the prompt, which is handed attacker-controlled text on both sides", (
     // that thinks both answers cost the same will resolve ambiguity by being
     // helpful, and helpful here means spending.
     expect(buildRelevancePrompt(input())).toContain("False is the safe answer");
+  });
+
+  it("says how many comments it was not shown, outside the fence", () => {
+    // Inside, the note would be one more line a hostile comment could imitate,
+    // in the one place this session is supposed to trust nothing.
+    const prompt = buildRelevancePrompt(input({ comments: ["kept"], omitted: 3 }));
+    const closed = prompt.indexOf("---END NEW COMMENTS---");
+
+    expect(prompt).toContain("3 older comments were left out");
+    expect(prompt.indexOf("3 older comments were left out")).toBeGreaterThan(closed);
+  });
+
+  it("tells the model not to assume the comments it cannot see answered", () => {
+    // Without this the omission reads as a hint that the answer is elsewhere,
+    // and "probably yes" is the expensive direction.
+    expect(buildRelevancePrompt(input({ omitted: 1 }))).toContain("do not assume the missing ones");
+  });
+
+  it("says nothing about omissions when nothing was omitted", () => {
+    expect(buildRelevancePrompt(input())).not.toContain("left out of the section above");
   });
 
   it("keeps readiness out of the question", () => {

@@ -54,6 +54,15 @@ export interface RelevanceInput {
   readonly sendback: string;
   /** What somebody else has said since, newest last. */
   readonly comments: readonly string[];
+  /**
+   * How many older foreign comments were left out of `comments`.
+   *
+   * Carried as a number rather than pushed into the list as a note, so the
+   * prompt can say it outside the fence. Inside, it would be one more line of
+   * text a hostile comment could imitate, in the one place this session is
+   * supposed to trust nothing.
+   */
+  readonly omitted: number;
   /** Which fields moved since, by Jira's own names. */
   readonly fields: readonly string[];
 }
@@ -158,6 +167,12 @@ export function buildRelevancePrompt(input: RelevanceInput): string {
     comments,
     "---END NEW COMMENTS---",
     "",
+    ...(input.omitted > 0
+      ? [
+          `${input.omitted} older comment${input.omitted === 1 ? " was" : "s were"} left out of the section above. If what you were shown does not answer the sendback, answer false — do not assume the missing ones did.`,
+          "",
+        ]
+      : []),
     `Fields edited since triage last spoke: ${changed}`,
   ].join("\n");
 }
