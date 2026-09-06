@@ -1138,6 +1138,94 @@ growing a test harness before E"_. E is here and it did not grow one.
 
 ---
 
+#### The whole chain, unattended, on SSX-3834 — 2026-09-06, and the ticket was written to fail first
+
+The first ticket to travel the entire system: created, triaged, **sent back**, answered, re-triaged,
+`agent:solvable`, claimed, solved, published, reviewed twice, undrafted, `agent:review-done`. A
+person typed two things — the reply answering the send-back, and `agent:start`. Claim to draft pull
+request was 5m36s; the whole run cost two review rounds on top of the solve.
+
+It was built as a controlled experiment, the same way SSX-3833 was. The defect
+(`formatIntegerWithThousandSeparatorAndKr(0) → " kr"`) was found and verified by hand first, so the
+right answer was known before anything ran, and the ticket was written **deliberately short of DoR**
+so the send-back path had something real to carry.
+
+**Triage's three blockers were not the three that were designed in, and the difference is the
+finding.** The ticket was written expecting failures on acceptance criteria, evidence, and value. It
+asked instead for acceptance criteria, **the scope of the fix**, and value — blocker 2 being _may the
+`if (!value)` guard change, given it flips other call sites, or must the fix stay in the wrapper?_
+That is the actual trap in the defect, found from the ticket text alone with no source access, and
+it was found by hand only because someone went looking for it. **The send-back produced a better
+question than the person who wrote the ticket had.**
+
+**And it paid off three steps downstream.** Copilot's round-1 review claimed the `NaN` regression was
+_"a likely user-visible regression"_, which is false — no caller can reach it. The round did not
+repeat that claim and did not need to; it argued from the scope boundary the answer to blocker 2 had
+established: _"Only the two zero rows in the ticket's acceptance table change behaviour now, which is
+what the ticket scoped."_ A written scope let a true claim with an inflated conclusion be acted on
+for the right reason. That is the clearest evidence so far that the watch loop produces better
+tickets rather than merely slower ones.
+
+**The AC was still wrong, and in this project's own defect class.** `if (!value)` was a catch-all: it
+absorbed `null`, `undefined`, `''`, `0` **and `NaN`**. The acceptance table enumerated the first
+three and forgot the fourth, so the solver — implementing the list exactly and faithfully — made
+`NaN` render as the string `"NaN"`. **An enumerated acceptance criterion that replaces a catch-all
+guard is only as complete as the enumeration**, and this is the same prose-versus-behaviour
+divergence the project exists to catch, arriving in a third position: not a comment drifting from
+code, but a _specification_ drifting from the code it supersedes. Recorded against the ticket's
+author, not the solver.
+
+Copilot caught it inside four minutes, from the diff alone, reasoning about the deleted code —
+_"previously it returned an empty string via the truthiness guard"_. **This is the first known-answer
+probe run against the reviewer**: the defect was found, its reachability established, and the catch
+predicted as difficult, all before the review landed. Every prior assessment of Copilot was
+after-the-fact reading of whatever it happened to say.
+
+**The regression test is not decorative, and that is the first time.** #1413 and #2661 both shipped
+tests whose names described something they did not check, which was called a pattern with a stated
+cause. The third sample breaks it:
+
+```js
+it("should return empty string for NaN without swallowing non-numeric strings", () => {
+  expect(formatIntegerWithThousandSeparator(NaN)).toBe("");
+  expect(formatIntegerWithThousandSeparator("abc")).toBe("abc");
+});
+```
+
+Both halves of the name are asserted. Round 2 then verified, unprompted and in public, that the
+suite _"fails against the naive 'just delete the falsy guard' fix (which would render `\"null\"`)"_ —
+the house rule applied by the solver to its own test, which is exactly what `SOLVE_INSTRUCTIONS.md`
+§2 asks for and had never been observed doing. It could do it because the acceptance criteria named
+the plausible wrong fix in writing. **Naming the wrong fix in the ticket is cheaper than any
+mechanism that could detect it.**
+
+**A formatted approval costs one terminal round per pull request.** Copilot's approval is a
+non-empty body with review `state: "COMMENTED"`, never `"APPROVED"`, so the general discriminator is
+unusable for this reviewer. `delivery.ts:858` reads a non-empty comment list as actionable, reserves
+a round, and pays for a pass whose input is "looks good". It is bounded — the round changes nothing,
+so the no-change rule undrafts — and here it was not even wasted, since it produced the verification
+above. But it is a fixed per-pull-request cost and belongs in the cost-per-ticket-per-day number. The
+cheap fix is unavailable for the reason the `Suppressed comments` block was left unparsed: an
+approval and a summary-only review carrying real feedback (#1413 exactly) are indistinguishable on
+the wire without reading the prose, and reading the prose is what the paid pass is for.
+
+**Four smaller findings from the same run:**
+
+- **`poller.ts:340` logs `"dry run — no label was written"` immediately before writing labels.** True
+  while `solve:once` was the only caller; false the moment `runSolveClaims` became the second, which
+  is every daemon claim. This file's subject, in this repository's own poller, found by reading the
+  log of the run that first made it false.
+- **Branch slugs drop `ø` and `å` rather than transliterating.** "Beløp på" became `bel-p-p-`. On a
+  Norwegian board that is every branch the bot will ever cut.
+- **The review tick re-reads every open bot pull request.** Four here; three (`#2660`, `#1413`,
+  `#2661`) returned `threads: 0` and exist only because nobody has merged them. Per-tick work scales
+  with _unmerged_ pull requests, not active ones — an argument for merging promptly, and a second
+  input to the cost number.
+- **`formatIntegerWithThousandSeparatorAndKr(NaN)` still returns `" kr"`**, since `??` catches only
+  `null` and `undefined`. The ticket's own symptom for a different input, unchanged by this pull
+  request and unreachable from any caller. A follow-up ticket, deliberately not scope creep on this
+  one.
+
 ## Phasing
 
 | Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -1150,7 +1238,7 @@ growing a test harness before E"_. E is here and it did not grow one.
 | **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. Not yet driven against a live pull request                                                                                                                                                                                                                                                                                                                                                     |
+| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. **Half-driven live 2026-09-06 on PR #2662**: `origin` classified both rounds as `reviewer` and the `waiting` gate admitted a formatted approval as actionable — see below. The **human** path is still undriven; no person has commented on a bot pull request while the loop was listening, so uncapped human rounds and the mixed-batch rule remain tested and unobserved                    |
 | **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
