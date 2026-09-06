@@ -26,6 +26,7 @@
  *    a rule the skill set for itself.
  */
 
+import { AGENT_LABELS } from "../solve/labels.ts";
 import { type Mutation, TriageError, type TriagePayload, assertDorCoherent } from "./runner.ts";
 
 /**
@@ -136,8 +137,24 @@ const REVISABLE_LABEL_NAMESPACES: readonly string[] = [
  * The same argument applies to removal: a re-triage that cleared `agent:solving`
  * would unclaim a solve already in flight, and the queue's idempotency rests on
  * that label being written exactly once by exactly one writer.
+ *
+ * **`agent:watching` joined it for F, and it is the first widening of this set.**
+ * It belongs on the same side of the line as `agent:solvable` by the test the
+ * paragraphs above imply: both are triage's own assessment of a ticket, neither
+ * authorises anything to touch code, and both must be *removable* by a later
+ * triage of the same ticket — a watch that outlived the gap it was watching for
+ * is the thing F exists to end. What it does authorise is spend, which is why it
+ * is bounded elsewhere rather than left to the model's restraint.
+ *
+ * Note what stayed out, because the ticket-as-data argument is unchanged and the
+ * new label does not weaken it: a ticket body can now talk this skill into
+ * putting itself on a watch list, which costs re-triage runs, and it still
+ * cannot talk it into `agent:start`, which costs a pull request.
  */
-const TRIAGE_OWNED_AGENT_LABELS: ReadonlySet<string> = new Set(["agent:solvable"]);
+const TRIAGE_OWNED_AGENT_LABELS: ReadonlySet<string> = new Set([
+  AGENT_LABELS.solvable,
+  AGENT_LABELS.watching,
+]);
 
 /** The mutation may not be posted. Carries every reason, not the first. */
 export class UnpostableError extends TriageError {
@@ -359,6 +376,78 @@ function checkAgentFitness(payload: TriagePayload): readonly string[] {
   if (!fitness.solvable && labelled) {
     violations.push(
       `the verdict's labels include "agent:solvable" while agentFitness.solvable is false — the label would authorise work the assessment declined`,
+    );
+  }
+
+  violations.push(...checkPlausible(payload));
+
+  return violations;
+}
+
+/**
+ * The two rules that keep `plausible` from becoming a second `solvable`.
+ *
+ * Separated from the block above because they guard a different cost. Every
+ * rule up there protects against a bot editing source; these protect against a
+ * ticket joining a list that buys a paid triage run every time somebody touches
+ * it. Both are worth refusing a post over, and they are not the same risk, so
+ * they are not the same paragraph.
+ *
+ * **Mutually exclusive, and stated as a rule rather than left to the model.**
+ * `plausible` means "not solvable *yet*", so a payload asserting both is not a
+ * strong opinion, it is two answers. Left unchecked, the field with the weaker
+ * consequence would drift into being a hedged version of the field with the
+ * stronger one, and the first time that mattered would be a ticket both queued
+ * for a solve and subscribed to a watch.
+ *
+ * **A watch needs a condition that can end it.** `plausible` with no blockers
+ * says the ticket is nearly solvable and cannot say what is missing. There is
+ * nothing a reporter could do to clear it, so it is a subscription with no
+ * unsubscribe — the ticket is re-triaged on every edit until a bound fires,
+ * having never been actionable. The `blockers` list is not an explanation here,
+ * it is the exit condition.
+ *
+ * The label mirror is the same both-directions check `solvable` gets and for the
+ * same reason: the field is what the watcher reads and the label is what a human
+ * reads and what the query selects on. `plausible` without the label is an
+ * assessment that never reaches the board; the label without the field is a
+ * standing charge nothing asked for.
+ *
+ * **One case this cannot check, and it is the one to remember.** A ticket
+ * already carrying `agent:watching` that is re-triaged into `plausible: false`
+ * needs the label *removed*, and the payload has no idea what is on the board —
+ * `TriagePayload` carries what the verdict asserts, never the live label set. So
+ * the rule below catches "asserting a watch while declining one" and cannot
+ * catch "declining a watch that is already running". Ending an existing watch is
+ * the watcher's job, and it is the reason the watch needs a terminal of its own
+ * rather than trusting the next triage to tidy up after it.
+ */
+function checkPlausible(payload: TriagePayload): readonly string[] {
+  const fitness = payload.agentFitness;
+  const violations: string[] = [];
+  const labelled = payload.labels.includes(AGENT_LABELS.watching);
+
+  if (fitness.plausible && fitness.solvable) {
+    violations.push(
+      `agentFitness.plausible and agentFitness.solvable are both true — plausible means "not solvable yet", so the two are alternatives and a payload asserting both has not made the call`,
+    );
+  }
+
+  if (fitness.plausible && fitness.blockers.length === 0) {
+    violations.push(
+      `agentFitness.plausible is true but blockers is empty — the blockers are what a reporter fills in to end the watch, so without them the ticket would be re-triaged on every edit with no condition that could ever clear it`,
+    );
+  }
+
+  if (fitness.plausible && !labelled) {
+    violations.push(
+      `agentFitness.plausible is true but the verdict's labels omit "${AGENT_LABELS.watching}" — nothing would subscribe to the ticket, so the assessment would never reach the board`,
+    );
+  }
+
+  if (!fitness.plausible && labelled) {
+    violations.push(
+      `the verdict's labels include "${AGENT_LABELS.watching}" while agentFitness.plausible is false — the label would put the ticket on a paid watch list the assessment did not ask for`,
     );
   }
 

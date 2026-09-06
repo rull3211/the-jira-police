@@ -77,6 +77,7 @@ import { createTicketCommenter } from "./solve/commenter.ts";
 import type { TicketCommenter } from "./solve/feedback.ts";
 import { runPost } from "./triage/poster.ts";
 import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
+import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
 /** Skill that reads nothing, so it must not be made to wait on Atlassian. */
 const MOCK_SKILL = "mock-triage";
@@ -160,6 +161,48 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
  */
 export function pollIntervalMs(settings: Settings): number {
   return numeric(settings, "POLL_INTERVAL_MS", 1);
+}
+
+/**
+ * How long the daemon sleeps between looks at the pull requests under review.
+ *
+ * A second cadence rather than a share of the first, and the two numbers pull
+ * in opposite directions on purpose. Polling for new issues is a window over
+ * time, so five minutes is a latency choice; looking at a pull request is a
+ * question about a state, and the answer is worth having within about the time
+ * a reviewer takes to reply — two and a half to four minutes, measured. Running
+ * the review sweep on `POLL_INTERVAL_MS` would tie a reviewer's turnaround to a
+ * setting whose description is "gap between polls", which is how a cadence
+ * change quietly becomes a policy change.
+ *
+ * Same floor and the same reason as above: zero is an unthrottled loop, not an
+ * eager one, and here it would be unthrottled against `gh` as well as Jira.
+ */
+export function reviewIntervalMs(settings: Settings): number {
+  return numeric(settings, "REVIEW_POLL_MS", 1);
+}
+
+/**
+ * How long the daemon sleeps between sweeps of the watched tickets.
+ *
+ * A third cadence, and the slowest, for the reason the plan gave it before any
+ * of this was built: the sendback watch is the only loop here whose trigger is a
+ * *person changing their mind*. A reporter reads a sendback, goes and finds the
+ * baseline number, and comes back — an event measured in days. Checking every
+ * few minutes cannot make that answer arrive sooner and multiplies the reads and
+ * the checks that find nothing by two hundred.
+ *
+ * It is also the only cadence where a *shorter* interval is a spending decision
+ * rather than a latency one, because the memo bounding the relevance check lives
+ * in memory. A sweep that finds the same undeclined trigger it found last time
+ * costs nothing; a sweep after a restart costs one check per triggered ticket,
+ * so the number that actually governs spend here is restarts per day, not this.
+ *
+ * Same floor as the other two, and here it matters most: a zero interval against
+ * a loop that can start a paid session is not an eager sweep.
+ */
+export function watchIntervalMs(settings: Settings): number {
+  return numeric(settings, "WATCH_POLL_MS", 1);
 }
 
 /**
@@ -325,6 +368,29 @@ export function createSolveCommenter(settings: Settings): TicketCommenter {
     workingDirectory: process.cwd(),
     // Floored at 1ms on the same grounds as everywhere else: zero is not "no
     // timeout", it is one that expired before the session started.
+    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+  });
+}
+
+/**
+ * The watch's cheap gate: does what happened on the ticket answer the sendback?
+ *
+ * Composed here for the same reason the commenter is — a reviewer asking what
+ * this service can reach should find every answer in one file — and it is the
+ * shortest answer in it. `createRelevanceChecker` builds a session with no MCP
+ * server and no tools at all, so there is nothing to withhold and nothing to
+ * scope.
+ *
+ * `TRIAGE_TIMEOUT_MS` again, and again not a copy-paste: this is a storecode
+ * session that reads a prompt and answers, which makes the poster and the
+ * commenter its nearest relatives. It will normally finish in seconds. Sizing
+ * it from a `SOLVE_*` budget would tie a check that reads no files to a number
+ * chosen for a model reading a repository.
+ */
+export function createWatchChecker(settings: Settings): RelevanceChecker {
+  return createRelevanceChecker({
+    executable: settings.STORECODE_PATH,
+    workingDirectory: process.cwd(),
     timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
   });
 }

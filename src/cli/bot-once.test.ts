@@ -11,6 +11,7 @@ const WRITE_ENABLED = { SKILL_NAME: "intake-triage", WRITE_BACK: "true" } as unk
 function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
   return {
     solvable: true,
+    plausible: false,
     confidence: "high",
     repo: "buy-insurance-advisor-web",
     rationale: "one file, an existing test to extend",

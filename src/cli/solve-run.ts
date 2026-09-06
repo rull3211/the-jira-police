@@ -17,7 +17,9 @@
  *
  * `runClaim` takes a `ClaimAuthority` and does not consult `SOLVE_MODE`. The
  * queue-driven command passes `solveMode(settings)`; the singleton command
- * passes `"named"`. Reading the setting in here would have meant the singleton
+ * passes `"named"`; the daemon passes `queueDeps.mode`, which is the same value
+ * the queue it just read was built from — one reading of the setting per tick
+ * rather than two, so the query and the claim cannot disagree about the mode. Reading the setting in here would have meant the singleton
  * command could not say what it means without also changing the operator's
  * configuration — and a caller that cannot express its own authority ends up
  * editing `.env` to get a run through, which is the worst possible place for
@@ -35,6 +37,7 @@
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
 import { logger } from "../logger.ts";
 import { type Settings, flag, numeric } from "../settings.ts";
+import type { AttemptLedger } from "../solve/attempts.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
 import {
   type AdvanceOutcome,
@@ -65,12 +68,13 @@ import {
   type SolveRequest,
   solveWithRetry,
 } from "../solve/orchestrator.ts";
-import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
+import { type SolveCycleOutcome, type SolveDeps, runSolveCycle } from "../solve/poller.ts";
 import { findPullRequest } from "../solve/pr.ts";
 import {
   type ReviewCycleOutcome,
   type ReviewLook,
   type WatchedTicket,
+  REVIEW_ROUND_USD,
   runReviewCycle,
 } from "../solve/review-cycle.ts";
 import {
@@ -290,7 +294,7 @@ export async function runSolver(
  * nothing throws — the run succeeded, and turning a bookkeeping failure into a
  * command failure would tell an operator the wrong thing about the work.
  *
- * What it does instead is print the exact repair, because a label this service
+ * What it does instead is report the exact repair, because a label this service
  * failed to write is a label a person now has to write. The failure directions
  * are both survivable and worth knowing:
  *
@@ -311,6 +315,13 @@ export async function runSolver(
  * `updateLabels` sends one atomic REST call carrying both the additions and the
  * removals, so there is no window between them to lose a label in. This confirms
  * the write landed at all.
+ *
+ * **Every outcome is logged rather than printed, and the last one is why.** Three
+ * of these four are failures a person would read once; the fourth fires on every
+ * successful move, and since Phase E one of the callers is the daemon, whose
+ * stdout *is* its log. A prose line there is a line no reader can parse, emitted
+ * on the happy path, in the stream somebody would go to when the board and the
+ * pull requests disagree. The repair instructions are in the `note` field.
  */
 async function moveLabels(
   client: JiraClient,
@@ -324,7 +335,7 @@ async function moveLabels(
     change = plan(await capabilities.readLabels(issueKey));
   } catch (error) {
     if (error instanceof LabelStateError) {
-      process.stdout.write(`\n${issueKey}'s labels were left alone: ${error.message}\n`);
+      logger.info("labels.left_alone", { issueKey, reason: error.message });
       return;
     }
     throw error;
@@ -338,10 +349,12 @@ async function moveLabels(
   try {
     await capabilities.applyLabels(issueKey, change);
   } catch (error) {
-    process.stderr.write(
-      `\nCould not move ${issueKey}'s labels (${wanted}): ${error instanceof Error ? error.message : String(error)}\n` +
-        `Do it by hand; the pull request is unaffected.\n`,
-    );
+    logger.error("labels.write_failed", {
+      issueKey,
+      wanted,
+      error,
+      note: "move them by hand; the pull request is unaffected",
+    });
     return;
   }
 
@@ -349,14 +362,16 @@ async function moveLabels(
   const missing = change.add.filter((label) => !after.includes(label));
   const lingering = change.remove.filter((label) => after.includes(label));
   if (missing.length > 0 || lingering.length > 0) {
-    process.stderr.write(
-      `\n${issueKey}'s labels did not come back as written (${wanted}); they are: ${after.join(", ")}\n` +
-        `Fix them by hand — the queue reads these.\n`,
-    );
+    logger.error("labels.read_back_mismatch", {
+      issueKey,
+      wanted,
+      labels: after,
+      note: "fix them by hand — the queue reads these",
+    });
     return;
   }
 
-  process.stdout.write(`\n${issueKey} is now: ${after.join(", ")}\n`);
+  logger.info("labels.moved", { issueKey, labels: after });
 }
 
 /** The label half of a finished round: mirror the pull request's draft flag. */
@@ -866,7 +881,14 @@ function createReviewAct(
       throw new Error(`no prepared round for ${ticket.key}`);
     }
 
-    process.stdout.write(`\n${ticket.key}: round on #${String(number)}\n`);
+    // Logged rather than printed, because this function now has two callers and
+    // one of them is a daemon whose stdout *is* the log. A prose line there is a
+    // line no reader can parse, in the stream an operator would go to when the
+    // spend looks wrong — and "a round started, on this ticket, on this pull
+    // request" is what a log line is for. The watch sees it too, as JSON among
+    // the pass's own JSON, which is what that command already looks like while a
+    // round is running.
+    logger.info("review.round.started", { issueKey: ticket.key, number });
 
     const attached = await target.request.attach();
     if (attached.outcome === "refused") {
@@ -903,25 +925,29 @@ function createReviewAct(
  * reached an answer. That split is not tidiness — a write is a visible change to
  * an interface a reviewer would look at, and it should be findable at a call
  * site rather than buried in a loop body.
+ *
+ * **`runDeps` is a parameter and not built here, which it used to be.** It is a
+ * command runner and a pass runner, so sharing one across passes saves nothing
+ * worth naming; what it saves is a `SettingsError`. `createSolveRunDeps` throws
+ * on a missing `VAULT_PATH`, and both callers are loops — a sweep that built its
+ * own would turn one misconfiguration into a failure on every tick, forever,
+ * where the loop above it can only see "the cycle threw" and back off. Built by
+ * the caller before its loop starts, the same mistake is one message at startup.
  */
 export async function runReviewSweep(
   settings: Settings,
   client: JiraClient,
+  runDeps: SolveDependencies,
   issueKey: string | null,
+  signal?: AbortSignal,
 ): Promise<ReviewCycleOutcome> {
   const targets = new Map<string, ReviewTarget>();
-  // Built once, before the cycle, and shared by both halves. Not for the saving
-  // — it is a command runner and a clock — but because it throws `SettingsError`
-  // on a missing `VAULT_PATH`, and inside the look that throw is caught by the
-  // cycle and filed as one ticket's problem. A watch would then report every
-  // ticket as unlookable, every pass, forever, with the real cause named once
-  // per ticket in a list of reasons nobody reads twice.
-  const runDeps = createSolveRunDeps(settings);
   const deps = createReviewCycleDeps(
     settings,
     client,
     createReviewLook(settings, client, runDeps, targets),
     createReviewAct(runDeps, targets),
+    signal,
   );
 
   // Narrowed after the query rather than by a different one. The subscription is
@@ -1019,12 +1045,17 @@ export async function runWatch(
       `${issueKey === null ? "Every ticket under review" : issueKey}, looked at every ` +
       `${String(Math.round(pollMs / 1000))}s.\n` +
       `A look costs two gh reads; only a round costs money. At most ${String(maxRounds)} ` +
-      `round${maxRounds === 1 ? "" : "s"} per pass, roughly $${(maxRounds * 0.94).toFixed(2)}.\n` +
+      `round${maxRounds === 1 ? "" : "s"} per pass, roughly ` +
+      `$${(maxRounds * REVIEW_ROUND_USD).toFixed(2)}.\n` +
       `Ctrl-C is safe: the checkout is removed after each round and nothing is held between passes.\n\n`,
   );
 
+  // Before the loop, so a missing `VAULT_PATH` is one message rather than a
+  // refusal repeated every two minutes. See `runReviewSweep`.
+  const runDeps = createSolveRunDeps(settings);
+
   for (let pass = 1; ; pass += 1) {
-    const outcome = await runReviewSweep(settings, client, issueKey);
+    const outcome = await runReviewSweep(settings, client, runDeps, issueKey);
 
     if (outcome.watched === 0) {
       process.stdout.write(
@@ -1135,4 +1166,115 @@ export async function runWriteRungs(
       );
     }
   }
+}
+
+/**
+ * The claim half of a daemon tick: read the queue, and start what it offers.
+ *
+ * ## It calls `runWriteRungs` rather than reimplementing the order
+ *
+ * Claim, solve, publish, hand on the claim, release on every other path — that
+ * order is the whole of B2 through D1, and a second copy of it in a loop nobody
+ * watches is the copy that stops agreeing on the day one of them changes. This
+ * repository has found that defect five times and it has never once been in the
+ * copy somebody was looking at. So the daemon climbs the same ladder the command
+ * does, to the same rung, and differs only in what it may spend.
+ *
+ * ## Three bounds, and only one of them is new
+ *
+ * `runSolveCycle` already caps `planned` at the capacity left by
+ * `MAX_CONCURRENT_SOLVES`, counted from the tickets carrying the claim label
+ * rather than from anything this process remembers — so a second instance, or a
+ * `solve:once` run alongside this one, is counted too.
+ *
+ * The queue itself is the second: in `manual` mode it asks for `agent:start`,
+ * so the daemon can only ever pick up a ticket a person has said yes to.
+ *
+ * The new one is `ledger`, and `attempts.ts` has the argument. Briefly: the
+ * outcomes that write no terminal label release the ticket exactly as they found
+ * it, so without a count the queue re-offers a failing ticket every tick forever.
+ *
+ * ## The exit code is read and thrown away, deliberately
+ *
+ * The rungs set `process.exitCode` because they were written for a command,
+ * where it answers *what should `$?` be*. A daemon's exit status answers a
+ * different question — did the service stop cleanly — and letting one refused
+ * diff gate at 3am decide it would make every later shutdown report a failure
+ * that had already been logged, handled, and released. So it is captured per
+ * ticket, reported as a field, and reset. Reset rather than ignored: leaving it
+ * set means the *next* tick cannot tell its own failure from the last one's.
+ */
+export async function runSolveClaims(
+  settings: Settings,
+  queueDeps: SolveDeps,
+  client: JiraClient,
+  ledger: AttemptLedger,
+): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
+  const cycle = await runSolveCycle(queueDeps);
+  const authority = queueDeps.mode;
+
+  let started = 0;
+  let held = 0;
+
+  for (const candidate of cycle.planned) {
+    // Checked between tickets as well as before the sweep: a solve is minutes
+    // long, and a stop that arrived during one must not be answered by starting
+    // another. The signal is the one `queueDeps` was built with, so there is no
+    // second source of truth about whether this process is going away.
+    if (queueDeps.signal?.aborted === true) {
+      break;
+    }
+
+    const key = candidate.issueKey;
+    if (ledger.exhausted(key)) {
+      held += 1;
+      continue;
+    }
+
+    // Before the claim, not after the outcome. The count is a reservation for
+    // the same reason the re-triage counter is one: a run that crashes on its
+    // way to a verdict has still spent an attempt, and a counter written
+    // afterwards hands back a free one every time the expensive path is the
+    // thing that broke.
+    ledger.attempted(key);
+
+    const before = process.exitCode;
+    try {
+      await runWriteRungs(settings, client, key, "pr", cycle, authority);
+      started += 1;
+    } catch (error) {
+      // One ticket's failure is not the tick's. `runWriteRungs` releases in a
+      // `finally`, so the claim is already back; abandoning the rest of the
+      // queue here would hide them behind it and, in the loop above, back off
+      // to the cap over a fault that belongs to one ticket.
+      logger.error("solve.claim.failed", {
+        key,
+        attempt: ledger.countFor(key),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      const code = process.exitCode;
+      process.exitCode = before;
+      if (code !== before) {
+        logger.info("solve.claim.exit_code", {
+          key,
+          code,
+          note: "the rungs' code, recorded rather than adopted: it is a command's answer, not a service's",
+        });
+      }
+    }
+  }
+
+  logger.info("solve.claims.done", {
+    found: cycle.found,
+    inFlight: cycle.inFlight,
+    capacity: cycle.capacity,
+    planned: cycle.planned.length,
+    started,
+    held,
+    deferred: cycle.deferred.length,
+    remembered: ledger.size(),
+  });
+
+  return { found: cycle.found, started, held };
 }

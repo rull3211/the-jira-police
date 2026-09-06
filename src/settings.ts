@@ -231,6 +231,12 @@ export const SETTINGS = [
     fallback: "1",
   },
   {
+    name: "MAX_SOLVE_ATTEMPTS_PER_TICKET",
+    description:
+      "How many times the daemon may claim one ticket before it stops offering it, counted in memory for as long as the process lives. It bounds the one runaway the label machine cannot: a run that is refused by the diff gate, or fails, or is abandoned for a transient reason, releases the ticket exactly as it found it — including the agent:start the claim consumed — so the queue offers it again on the very next tick, at full solve cost, with no condition that ever clears. A terminal label cannot close that, because those outcomes deliberately write none: they say nothing about whether the ticket is solvable, and labelling them would turn a slept laptop into something only a human can undo. Three, and a restart clears it, which is the same trade the sendback watch's memo makes and is recorded there. Hand-driven runs ignore this entirely — a person typing the command again is the bound.",
+    fallback: "3",
+  },
+  {
     name: "MAX_REVIEW_ITERATIONS",
     description:
       "How many times a solve may respond to the requested REVIEWER before the pull request is marked ready anyway, with the ticket comment saying the cap was hit. A cap rather than a loop, because a bot reviewer and a fixer that disagree can trade comments indefinitely and neither of them is paying. It counts reviewer rounds only: a round answering a human does not spend one, because the whole reason to bound this conversation is that nothing in it brings in information from outside it, and a person asking for a change is exactly that information. A batch holding both counts as human. Reaching this undrafts the pull request and keeps listening — it is the reviewer running out of turns, not the loop ending. MAX_PR_ROUNDS_TOTAL is what bounds every round regardless of who asked.",
@@ -258,6 +264,24 @@ export const SETTINGS = [
     name: "MAX_REVIEW_ROUNDS_PER_TICK",
     description:
       "How many pull requests one pass over the watched set may run a round for. Every other round bound is per pull request and counted from its marker; this one is per tick and is the only thing standing between a reviewer that answered twenty pull requests while the machine slept and twenty paid rounds in the first minute after it wakes — the largest single spend this service can make, on the tick nobody is watching. Three, which is roughly three dollars at the measured round cost. Tickets over the bound are deferred rather than skipped: they are still actionable, the next tick takes them, and because the set is ordered oldest-updated first the same one cannot be starved twice. Zero is meaningful and is the dry run — look at everything, spend on nothing.",
+    fallback: "3",
+  },
+  {
+    name: "WATCH_ENABLED",
+    description:
+      "Whether the sendback watch runs at all. Off by default, and it is the switch that most deserves to be: every other loop here spends money because somebody asked for something — a ticket was labelled, a reviewer commented, an operator typed a command — and this one spends it because a reporter edited a ticket, which is not a request for anything. Separate from SOLVE_ENABLED rather than folded into it, because the two grant unrelated privileges: that one lets a bot write code, this one lets it re-open a conversation it was already told to stop.",
+    fallback: "false",
+  },
+  {
+    name: "WATCH_POLL_MS",
+    description:
+      "How often to sweep the watched tickets. Six hours, and it is the slowest cadence in the service by two orders of magnitude because its trigger is the slowest event: a person reading a sendback, going away, and coming back with the answer. That is measured in days, so a shorter interval buys no earlier an answer and multiplies the one cost a sweep has whatever it finds — one Jira read per watched ticket, plus a relevance check for any ticket whose newest activity the memo has not already declined. Note the memo is in memory, so a restart re-asks once per triggered ticket: restarting this service every few minutes is what makes this number expensive, not lowering it.",
+    fallback: "21600000",
+  },
+  {
+    name: "MAX_RETRIAGE_PER_TICKET",
+    description:
+      "How many times one watched ticket may be re-triaged before the watch is dropped with a comment saying so. Three. Counted from this service's own comments on the ticket rather than from disk, so it survives a restart and a second instance for the same reason the solve queue's dedupe does. A ticket edited more often than this is a conversation rather than a signal, and the watch is the one loop with no human waiting on the result, so the bound is the only thing that ends it. Note the number was chosen in the plan against a measured triage cost of $0.11 that later proved to be $1.56, so it is understated as a spending limit by roughly an order of magnitude — re-derive it before the watch runs on a timer.",
     fallback: "3",
   },
   {

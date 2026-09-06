@@ -73,6 +73,7 @@ function payload(overrides: Partial<TriagePayload> = {}): TriagePayload {
     mutation: mutation(),
     agentFitness: {
       solvable: false,
+      plausible: false,
       confidence: "low",
       repo: "",
       rationale: "Needs a human.",
@@ -107,6 +108,7 @@ function readyish(overrides: Partial<TriagePayload> = {}): TriagePayload {
     mutation: mutation({ labelsAdd: ["dor:pass"], labelsRemove: ["dor:gaps"] }),
     agentFitness: {
       solvable: false,
+      plausible: false,
       confidence: "med",
       repo: "buy-insurance-advisor-web",
       rationale: "The deliverable is a brand asset.",

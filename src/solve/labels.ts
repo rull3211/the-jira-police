@@ -104,6 +104,25 @@ export const AGENT_LABELS = {
    */
   closed: "agent:closed",
   failed: "agent:failed",
+  /**
+   * Triage sent the ticket back and thinks it is nearly solvable — watch it.
+   *
+   * **Not part of the lifecycle above, and it is worth being blunt about that.**
+   * Every other label here is a state a ticket passes through on its way to a
+   * pull request, written by the solver, and each one excludes the ticket from
+   * the queue. This one is written by *triage*, on a ticket that never entered
+   * the queue and cannot, and it excludes nothing: a watched ticket is a
+   * send-back, so `agent:solvable` is absent and the queue's positive clause
+   * already refuses it. It lives in this object because it is the same
+   * namespace and a second vocabulary for one namespace is how the two drift —
+   * not because it is a sixth state of the same machine.
+   *
+   * The subscription *is* the label, on the same principle as the claim: state
+   * on the board rather than on disk, so it survives a restart and a person can
+   * see what the service thinks it is waiting for. What ends it is the ticket
+   * becoming ready, being closed, or the re-triage bound running out.
+   */
+  watching: "agent:watching",
 } as const;
 
 export type AgentLabel = (typeof AGENT_LABELS)[keyof typeof AGENT_LABELS];

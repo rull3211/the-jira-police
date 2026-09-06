@@ -1,10 +1,19 @@
 /**
- * The two queries this service runs, and the validation both share.
+ * The queries this service runs, and the validation all of them share.
  *
- * `buildNewIssuesJql` finds newly created issues; `buildSolveQueueJql` finds
- * issues whose labels say they are waiting to be fixed. They share nothing but
- * the helpers below, because they disagree about the one thing that matters:
- * the first selects on time and the second selects on state.
+ * There are five, and they divide on one axis. `buildNewIssuesJql` selects on
+ * **time** — what appeared since the last look — and is the only one with a
+ * cursor. The other four (`buildInFlightJql`, `buildReviewQueueJql`,
+ * `buildSolveQueueJql`, `buildSendbackWatchJql`) select on **state**: what the
+ * board says right now, with the labels themselves as the dedupe. That is why
+ * they share nothing but the helpers below, and why a ticket triaged on Monday
+ * is permanently ineligible for the first and can re-enter any of the others on
+ * Friday.
+ *
+ * (This header said "the two queries" until 2026-09-06, by which point there
+ * were four. Recorded rather than quietly corrected: a count in prose is a fact
+ * that goes stale every time the file grows, and this repository's whole
+ * subject is prose drifting away from behaviour.)
  *
  * On the new-issue query:
  *
@@ -235,6 +244,54 @@ export function buildReviewQueueJql(options: ReviewQueueJqlOptions): string {
     .map((label) => jqlValue(label, "label"))
     .join(", ");
   clauses.push(`labels IN (${watched})`);
+
+  return `${clauses.join(" AND ")} ORDER BY updated ASC`;
+}
+
+export interface SendbackWatchJqlOptions {
+  readonly project: string;
+  readonly components: readonly string[];
+}
+
+/**
+ * Builds the JQL that selects the sent-back tickets under watch.
+ *
+ * The cheapest of the five and the one that must stay that way. Its whole
+ * premise is that a ticket sitting in `agent:watching` costs nothing until
+ * somebody else touches it, so this query is a *look* — the decision about
+ * whether to pay for a re-triage is made afterwards, from the ticket's own
+ * comments and changelog, and never from membership of this set.
+ *
+ * **It deliberately does NOT filter `statusCategory != Done`, and the plan said
+ * it should.** §7c argued both halves of a contradiction in one paragraph: that
+ * a closed ticket should have its watch label removed, and that "the query
+ * already excludes these, so removal is not needed for correctness". Both
+ * cannot hold. A ticket the query cannot see is a ticket nothing can unsubscribe,
+ * so excluding closed tickets would leave `agent:watching` on them forever,
+ * claiming a subscription no loop honours — which is precisely the leak
+ * `buildReviewQueueJql` refuses two functions above, arriving here through the
+ * same clause. Including them costs nothing: a closed ticket is a look that
+ * decides "unsubscribe" without paying for anything.
+ *
+ * **No `labels NOT IN (...)`**, for `buildReviewQueueJql`'s reason. The watch
+ * ends by removing `agent:watching` in the same edit that writes whatever
+ * replaced it, so a ticket that has moved on is already outside the positive
+ * clause. A second copy of that rule is a second thing to keep in step.
+ *
+ * Oldest touched first. Unlike the solve queue this is close to arbitrary — the
+ * set is expected to be small and nothing here is capacity-bound — but a stable
+ * order makes two consecutive dry runs comparable, which is what a person
+ * calibrating this feature will actually be doing with it.
+ */
+export function buildSendbackWatchJql(options: SendbackWatchJqlOptions): string {
+  const clauses = [`project = ${assertSafe(options.project, "project")}`];
+
+  if (options.components.length > 0) {
+    const values = options.components.map((entry) => jqlValue(entry, "component")).join(", ");
+    clauses.push(`component IN (${values})`);
+  }
+
+  clauses.push(`labels = ${jqlValue(AGENT_LABELS.watching, "label")}`);
 
   return `${clauses.join(" AND ")} ORDER BY updated ASC`;
 }

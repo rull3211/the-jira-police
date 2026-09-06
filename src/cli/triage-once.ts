@@ -27,10 +27,10 @@
  * from the command line that started it.
  */
 
-import type { TicketRef } from "../jira/types.ts";
 import { logger } from "../logger.ts";
-import { FileSink, type TriageResult } from "../output/sink.ts";
+import { FileSink } from "../output/sink.ts";
 import { type Settings, readSettings, withConfigErrors } from "../settings.ts";
+import { syntheticTicket, toTriageResult } from "../triage/single.ts";
 import { buildTriageOptions, createGroom, shouldPost } from "../wiring.ts";
 
 function flagValue(argv: readonly string[], name: string): string | undefined {
@@ -77,29 +77,11 @@ async function main(): Promise<void> {
   // Discovery is what knows an issue's summary, and discovery is the half this
   // command skips. The remaining fields are unused by grooming: only the key
   // crosses into the skill.
-  const ticket: TicketRef = {
-    key: issueKey,
-    summary: `${issueKey} (summary not fetched in single-run mode)`,
-    url: `${settings.JIRA_BASE_URL}/browse/${issueKey}`,
-    created: new Date().toISOString(),
-    updated: "",
-    labels: [],
-    issueTypeId: "",
-    issueTypeName: "",
-  };
+  const ticket = syntheticTicket(issueKey, settings.JIRA_BASE_URL);
 
   const payload = await groom(ticket);
 
-  const result: TriageResult = {
-    issueKey,
-    issueUrl: ticket.url,
-    summary: ticket.summary,
-    verdict: payload.verdict,
-    labels: payload.labels,
-    recommendedNextStep: payload.recommendedNextStep,
-    report: payload.report,
-    agentFitness: payload.agentFitness,
-  };
+  const result = toTriageResult(ticket, payload);
 
   const sink = new FileSink(settings.OUTPUT_DIR);
   await sink.write(result);

@@ -273,6 +273,7 @@ describe("assertDorCoherent", () => {
     mutation: MUTATION,
     agentFitness: {
       solvable: false,
+      plausible: false,
       confidence: "low",
       repo: "",
       rationale: "Needs a human.",
@@ -476,10 +477,24 @@ describe("parseAgentFitness", () => {
     expect(parseAgentFitness({ solvable }).solvable).toBe(false);
   });
 
+  it.each([undefined, null, "yes", 1, "true", {}])("reads plausible %o as no watch", (value) => {
+    // Same asymmetry one field over, and the reason it is worth repeating: a
+    // wrong `true` here does not authorise a code change, it authorises a
+    // *recurring charge*. `plausible` is also the one subfield the schema does
+    // not require, so its absence is the ordinary case rather than a malformed
+    // reply, and absence has to read as a decline.
+    expect(parseAgentFitness({ plausible: value }).plausible).toBe(false);
+  });
+
+  it("reads a well-formed plausible", () => {
+    expect(parseAgentFitness({ plausible: true }).plausible).toBe(true);
+  });
+
   it("accepts a well-formed yes", () => {
     expect(
       parseAgentFitness({
         solvable: true,
+        plausible: false,
         confidence: "high",
         repo: "buy-insurance-advisor-web",
         rationale: "One file.",
@@ -487,6 +502,7 @@ describe("parseAgentFitness", () => {
       }),
     ).toEqual({
       solvable: true,
+      plausible: false,
       confidence: "high",
       repo: "buy-insurance-advisor-web",
       rationale: "One file.",
@@ -525,6 +541,7 @@ describe("parseAgentFitness", () => {
 
     expect(parsed.agentFitness).toEqual({
       solvable: true,
+      plausible: false,
       confidence: "med",
       repo: "r",
       rationale: "",

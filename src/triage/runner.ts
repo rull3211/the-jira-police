@@ -201,11 +201,27 @@ export type Confidence = "low" | "med" | "high";
  */
 export interface AgentFitness {
   readonly solvable: boolean;
+  /**
+   * Not solvable today, but would be if `blockers` were filled in.
+   *
+   * A second field rather than a third value of the first, and the gate keeps
+   * them mutually exclusive. `solvable` cannot carry this signal because it is
+   * forced false whenever the verdict is not `ready-ish`, which is every ticket
+   * this one is about — so the two are alternatives that happen to be spelled
+   * as booleans, and a payload with both true is a contradiction rather than a
+   * strong opinion.
+   *
+   * Fails closed the same way `solvable` does, for a weaker but real reason: a
+   * wrong `true` here does not authorise a code change, it authorises a
+   * *recurring charge*. The ticket goes on a watch list, and every edit somebody
+   * makes to it buys another triage run.
+   */
+  readonly plausible: boolean;
   readonly confidence: Confidence;
   /** Single repo the fix would land in; empty when unknown or spread across several. */
   readonly repo: string;
   readonly rationale: string;
-  /** Empty iff `solvable`. */
+  /** Empty iff `solvable`, and non-empty whenever `plausible`. */
   readonly blockers: readonly string[];
 }
 
@@ -479,6 +495,12 @@ const CONFIDENCES: readonly Confidence[] =
  *
  * `confidence` falls back to `low` rather than to the model's string, so an
  * unrecognised level cannot be read downstream as a strong one.
+ *
+ * `plausible` takes the identical `=== true` treatment and is not required by
+ * the schema, so an older skill that has never heard of it reads as "not
+ * watching this ticket" rather than as a parse failure. That is the whole reason
+ * it can be added to a live schema at all: the field is new, every payload
+ * currently in flight omits it, and omission has to be the safe answer.
  */
 export function parseAgentFitness(value: unknown): AgentFitness {
   const source =
@@ -486,6 +508,7 @@ export function parseAgentFitness(value: unknown): AgentFitness {
   const confidence = source["confidence"];
   return {
     solvable: source["solvable"] === true,
+    plausible: source["plausible"] === true,
     confidence: CONFIDENCES.includes(confidence as Confidence) ? (confidence as Confidence) : "low",
     repo: String(source["repo"] ?? ""),
     rationale: String(source["rationale"] ?? ""),

@@ -161,6 +161,18 @@ export interface JiraComment {
   readonly author: string;
   /** ISO-8601 with offset. */
   readonly created: string;
+  /**
+   * ISO-8601 with offset. Equal to `created` on a comment nobody has edited.
+   *
+   * Required rather than optional, and read even though `created` was enough
+   * for every earlier caller, because **the triage poster updates its own
+   * comment in place**: it finds the previous one by the footer sentinel and
+   * rewrites it. So on the one ticket a sendback watch cares about, `created`
+   * is pinned at the first triage forever, and a high-water mark built from it
+   * would report that this service last spoke days before it actually did —
+   * every sweep re-reading the same activity as new. See `lastSpokeAt`.
+   */
+  readonly updated: string;
   /** ADF. Attacker-controlled; rendered as data, never interpreted. */
   readonly body: unknown;
 }
@@ -191,6 +203,67 @@ export interface IssueDetail {
   readonly comments: readonly JiraComment[];
   readonly attachments: readonly JiraAttachment[];
   readonly url: string;
+}
+
+/** One changelog entry, flattened to the fields it touched. */
+export interface JiraFieldChange {
+  /** ISO-8601 with offset. */
+  readonly created: string;
+  /**
+   * Jira's `items[].field` values, as returned and not normalised.
+   *
+   * Left raw because the capitalisation varies by field type and the consumer
+   * folds case; normalising here would put the fold in the layer that cannot be
+   * tested against a decision.
+   */
+  readonly fields: readonly string[];
+}
+
+/**
+ * What a watched ticket has done since anyone last looked.
+ *
+ * Deliberately not `IssueDetail` with two more members. That type is what a
+ * *solve* needs — description, attachments, issue type — and none of it is read
+ * here, while the two things this needs are read nowhere else. Widening it
+ * would make every solve pay for a changelog fetch to serve a loop that runs on
+ * a cadence of days.
+ */
+/**
+ * What the blocker-clearing fields say *now*.
+ *
+ * The changelog names the fields that moved and this says what they hold, and
+ * both are needed for different halves of one question. A reporter answering a
+ * sendback usually does it by editing the description, so a watcher that knows
+ * `description` moved and cannot read it has to refuse every one of them — the
+ * commonest way an answer arrives, structurally unjudgeable.
+ *
+ * `description` and `environment` stay `unknown` for the same reason `body`
+ * does: they are ADF trees whose shape is Atlassian's to change, and `renderAdf`
+ * is where that vocabulary is allowed to be known.
+ */
+export interface IssueContent {
+  readonly summary: string;
+  readonly description: unknown;
+  readonly environment: unknown;
+  /**
+   * Names, types and sizes — never bytes.
+   *
+   * *"Attach the HAR"* is an ordinary sendback and a filename answers it. The
+   * contents would be a new untrusted-bytes path into a prompt, which is a
+   * privilege this read is deliberately not taking.
+   */
+  readonly attachments: readonly JiraAttachment[];
+}
+
+export interface IssueActivity {
+  readonly key: string;
+  /** Jira's `status.statusCategory.key`: `new`, `indeterminate` or `done`. */
+  readonly statusCategoryKey: string;
+  /** Every label on the ticket, so a caller can tell a real removal from a no-op. */
+  readonly labels: readonly string[];
+  readonly comments: readonly JiraComment[];
+  readonly changes: readonly JiraFieldChange[];
+  readonly content: IssueContent;
 }
 
 /**
@@ -379,6 +452,10 @@ export class JiraClient {
       id: String(raw.id ?? ""),
       author: raw.author?.displayName ?? "unknown",
       created: raw.created ?? "",
+      // Not defaulted to `created`. An absent `updated` means the payload is
+      // not the shape this code was written against, and a caller deciding
+      // whether to spend must see that rather than a plausible timestamp.
+      updated: raw.updated ?? "",
       body: raw.body,
     }));
 
@@ -406,6 +483,150 @@ export class JiraClient {
       attachments,
       url: `${this.#baseUrl}/browse/${key}`,
     };
+  }
+
+  /**
+   * The activity on one watched ticket: has it closed, who has said what, and
+   * which fields have moved.
+   *
+   * **This is the second amendment to the discovery-only rule**, authorised
+   * 2026-09-06 after `updateLabels`. It is read-only, and it is narrower than
+   * `fetchDetail`, which this credential already performs on every solve — the
+   * new capability is the changelog, and nothing else. Recorded in
+   * `ARCHITECTURE.md` §12 beside the first.
+   *
+   * **Widened the same day to the blocker-clearing fields**, and deliberately
+   * recorded as a widening rather than a third amendment. It is four more
+   * read-only fields on a request this method already makes, asking for what
+   * `fetchDetail` asks for on every solve; the two amendments before it were
+   * different in kind — one a write, one a new endpoint exposing history. What
+   * forced it: the relevance check was being told `description` had moved and
+   * never shown what it said, so it correctly refused to certify content it
+   * could not see, and the commonest way a reporter answers a sendback could
+   * therefore never produce a yes. Failing closed, invisibly, on the main path.
+   *
+   * **Both lists are paged to completion and a cap is an error, not a
+   * truncation.** The obvious implementation is one request with
+   * `expand=changelog` and `fields=comment`, which is cheaper and wrong in a way
+   * that would never show up in a log: Jira decides how much of each list to
+   * return, so the count of our own comments — which is the entire bound on how
+   * much this ticket may cost (`MAX_RETRIAGE_PER_TICKET`) — would silently be a
+   * count of *some* of them. Undercounting there hands back a free re-triage per
+   * tick, which is the runaway `decideWatch` was written to prevent, arriving
+   * one layer below it. So a list this method cannot read whole is a refusal:
+   * visible, free, and fixable, where a quiet partial read is none of those.
+   *
+   * At `MAX_PAGES` × `MAX_RESULTS_PER_PAGE` the ceiling is 500 of each. A bug
+   * ticket at that volume is a conversation rather than a signal, which is the
+   * thing the bound exists to stop watching anyway.
+   */
+  async fetchActivity(key: string): Promise<IssueActivity> {
+    assertIssueKey(key);
+
+    // Labels ride along with the status because the caller that unsubscribes a
+    // ticket has to know whether the label is on it. Asking Jira to remove one
+    // that is not there is not an error — it is a write that changes nothing
+    // and still bumps `updated`, which is the field the solve queue orders by.
+    //
+    // The content fields ride along on this same request rather than on a
+    // second one. `BLOCKER_CLEARING_FIELDS` and this list are the same set seen
+    // from two sides — the changelog says which of them moved, this says what
+    // they now hold — and fetching one without the other is what left the
+    // relevance check judging a field name.
+    const statusResponse = await this.#get(
+      `/rest/api/3/issue/${key}?fields=status,labels,summary,description,environment,attachment`,
+      "application/json",
+    );
+    const statusPayload = (await statusResponse.json()) as DetailPayload;
+    const categoryKey = statusPayload.fields?.status?.statusCategory?.key ?? "";
+
+    const comments = await this.#page<RawComment>(
+      key,
+      (startAt) =>
+        `/rest/api/3/issue/${key}/comment?startAt=${startAt}&maxResults=${MAX_RESULTS_PER_PAGE}`,
+      (payload) => payload.comments,
+      "comments",
+    );
+
+    const histories = await this.#page<RawHistory>(
+      key,
+      (startAt) =>
+        `/rest/api/3/issue/${key}/changelog?startAt=${startAt}&maxResults=${MAX_RESULTS_PER_PAGE}`,
+      (payload) => payload.values,
+      "changelog",
+    );
+
+    logger.debug("jira.activity_fetched", {
+      key,
+      statusCategory: categoryKey,
+      comments: comments.length,
+      changes: histories.length,
+    });
+
+    return {
+      key: statusPayload.key ?? key,
+      // Jira's three category keys are `new`, `indeterminate` and `done`. Only
+      // the last is a terminal, and it is compared rather than the status
+      // *name*, which is board-configurable and Norwegian on this one.
+      statusCategoryKey: categoryKey,
+      labels: statusPayload.fields?.labels ?? [],
+      comments: comments.map((raw) => ({
+        id: String(raw.id ?? ""),
+        author: raw.author?.displayName ?? "unknown",
+        created: raw.created ?? "",
+        updated: raw.updated ?? "",
+        body: raw.body,
+      })),
+      changes: histories.map((raw) => ({
+        created: raw.created ?? "",
+        fields: (raw.items ?? []).map((item) => item.field ?? ""),
+      })),
+      content: {
+        summary: statusPayload.fields?.summary ?? "",
+        description: statusPayload.fields?.description,
+        environment: statusPayload.fields?.environment,
+        attachments: (statusPayload.fields?.attachment ?? []).map((raw) => ({
+          id: String(raw.id ?? ""),
+          filename: raw.filename ?? "",
+          mimeType: raw.mimeType ?? "",
+          size: raw.size ?? 0,
+        })),
+      },
+    };
+  }
+
+  /**
+   * Reads one of Jira's `startAt`/`total` lists to the end, or refuses.
+   *
+   * Shared by both halves of `fetchActivity` because the failure they must not
+   * have is the same one, and writing it twice is how the two would come to
+   * disagree about it.
+   */
+  async #page<T>(
+    key: string,
+    path: (startAt: number) => string,
+    read: (payload: PagePayload<T>) => readonly T[] | undefined,
+    what: string,
+  ): Promise<readonly T[]> {
+    const collected: T[] = [];
+    let total = 0;
+
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const response = await this.#get(path(collected.length), "application/json");
+      const payload = (await response.json()) as PagePayload<T>;
+      const batch = read(payload) ?? [];
+      total = payload.total ?? collected.length + batch.length;
+      collected.push(...batch);
+
+      if (collected.length >= total || batch.length === 0) {
+        return collected;
+      }
+    }
+
+    throw new JiraError(
+      0,
+      `${key} has more than ${MAX_PAGES * MAX_RESULTS_PER_PAGE} ${what} (${total}); refusing a partial read, because a count of some of them reads as a count of all of them`,
+    );
   }
 
   /**
@@ -498,6 +719,7 @@ interface RawComment {
   readonly id?: string | number;
   readonly author?: { readonly displayName?: string };
   readonly created?: string;
+  readonly updated?: string;
   readonly body?: unknown;
 }
 
@@ -513,10 +735,32 @@ interface DetailPayload {
   readonly fields?: {
     readonly summary?: string;
     readonly issuetype?: { readonly name?: string };
-    readonly status?: { readonly name?: string };
+    readonly status?: {
+      readonly name?: string;
+      readonly statusCategory?: { readonly key?: string };
+    };
     readonly labels?: readonly string[];
     readonly description?: unknown;
+    readonly environment?: unknown;
     readonly comment?: { readonly comments?: readonly RawComment[] };
     readonly attachment?: readonly RawAttachment[];
   };
+}
+
+interface RawHistory {
+  readonly created?: string;
+  readonly items?: readonly { readonly field?: string }[];
+}
+
+/**
+ * The two shapes Jira uses for a paged list, in one type.
+ *
+ * `/issue/{key}/comment` names its array `comments` and `/issue/{key}/changelog`
+ * names its `values`, which is why `#page` takes a reader rather than a key: the
+ * pagination is identical and only the noun differs.
+ */
+interface PagePayload<T> {
+  readonly total?: number;
+  readonly comments?: readonly T[];
+  readonly values?: readonly T[];
 }

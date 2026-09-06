@@ -10,6 +10,7 @@ import { FileSink, formatAgentFitness, type TriageResult } from "./sink.ts";
 function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
   return {
     solvable: false,
+    plausible: false,
     confidence: "low",
     repo: "",
     rationale: "The baseline is unfilled, so there is nothing to verify against.",
@@ -54,6 +55,7 @@ describe("formatAgentFitness", () => {
     const lines = formatAgentFitness(
       fitness({
         solvable: true,
+        plausible: false,
         confidence: "high",
         repo: "buy-insurance-advisor-web",
         rationale: "Single-file build-time change with a testable AC.",
@@ -82,6 +84,27 @@ describe("formatAgentFitness", () => {
     const lines = formatAgentFitness(fitness({ blockers: ["no repo named", "AC not testable"] }));
 
     expect(lines.join("\n")).toContain("no repo named; AC not testable");
+  });
+
+  it("prints the watch on a no, whichever way it went", () => {
+    // Both halves, for the reason the "no" is printed at all: the miss this
+    // report exists to make visible is a ticket that was nearly solvable and
+    // was never looked at again, and you cannot spot that pattern without the
+    // declines beside the subscriptions.
+    expect(formatAgentFitness(fitness({ plausible: true })).join("\n")).toContain(
+      "**Nearly solvable:** 👀 yes — watching",
+    );
+    expect(formatAgentFitness(fitness({ plausible: false })).join("\n")).toContain(
+      "**Nearly solvable:** — no",
+    );
+  });
+
+  it("omits the watch line on a yes, where it could only ever say no", () => {
+    // The gate forbids both being true, so the line would be a constant — and
+    // a constant in a report is a line a reader learns to skip past.
+    expect(formatAgentFitness(fitness({ solvable: true, blockers: [] })).join("\n")).not.toContain(
+      "Nearly solvable",
+    );
   });
 });
 

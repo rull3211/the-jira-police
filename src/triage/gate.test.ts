@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { RETRIAGE_LABEL_PREFIX } from "../watch/counter.ts";
 import { FOOTER_SENTINEL, UnpostableError, assertPostable } from "./gate.ts";
 import {
   TriageContradictionError,
@@ -12,6 +13,7 @@ import {
 function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
   return {
     solvable: false,
+    plausible: false,
     confidence: "low",
     repo: "",
     rationale: "Needs a human.",
@@ -24,6 +26,7 @@ function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
 function solvable(overrides: Partial<AgentFitness> = {}): AgentFitness {
   return fitness({
     solvable: true,
+    plausible: false,
     confidence: "med",
     repo: "buy-insurance-advisor-web",
     rationale: "One file, covered by tests.",
@@ -359,6 +362,28 @@ describe("the agent: namespace, which triage only partly owns", () => {
       ).toContain(`"${label}"`);
     },
   );
+
+  it("refuses to touch the watch's re-triage counter, in either direction", () => {
+    // **The whole reason the counter can live in a label.** It is a reservation
+    // written before the run it authorises, and the run it authorises is a
+    // re-triage — which §11 otherwise lets clear `agent:*`. A run that could
+    // clear its own counter is a brake wired to the thing it is braking, so the
+    // protection has to be mechanical and it has to be here. Add the counter
+    // namespace to `TRIAGE_OWNED_AGENT_LABELS` and this fails.
+    const counter = `${RETRIAGE_LABEL_PREFIX}2`;
+
+    expect(
+      violations(payload({ mutation: mutation({ labelsRemove: [counter] }) })).join(" "),
+    ).toContain(`"${counter}"`);
+    expect(
+      violations(
+        payload({
+          labels: ["dor:gaps", "route:ours", counter],
+          mutation: mutation({ labelsAdd: [counter] }),
+        }),
+      ).join(" "),
+    ).toContain(`"${counter}"`);
+  });
 });
 
 describe("agent fitness", () => {
@@ -431,6 +456,84 @@ describe("agent fitness", () => {
     // The common case by far, and it must stay free. Every default in
     // `parseAgentFitness` lands here.
     expect(violations(payload())).toEqual([]);
+  });
+});
+
+describe("plausible, the send-back watch", () => {
+  /** A coherent watch: not solvable, blockers named, labelled on the board. */
+  function watched(overrides: Partial<TriagePayload> = {}): TriagePayload {
+    return payload({
+      verdict: "needs-info",
+      labels: ["dor:gaps", "route:ours", "agent:watching"],
+      agentFitness: fitness({ plausible: true, blockers: ["no reproduction steps"] }),
+      ...overrides,
+    });
+  }
+
+  it("allows a coherent watch", () => {
+    expect(violations(watched())).toEqual([]);
+  });
+
+  it("allows a watch on a verdict other than needs-info", () => {
+    // Deliberately NOT gated on the verdict the way `solvable` is. `solvable`
+    // needs ready-ish because it needs acceptance criteria to check work
+    // against; a watch needs only a gap somebody can fill, and an out-of-scope
+    // ticket can acquire one. Pinned so the two rules cannot be tidied into
+    // looking alike.
+    expect(violations(watched({ verdict: "out-of-scope" }))).toEqual([]);
+  });
+
+  it("refuses a payload that claims both", () => {
+    // Two answers, not a strong opinion. Left unchecked the cheap field drifts
+    // into being a hedge on the expensive one, and the ticket ends up both
+    // queued for a solve and subscribed to a watch.
+    const both = payload({
+      verdict: "ready-ish",
+      labels: ["dor:pass", "route:ours", "agent:solvable", "agent:watching"],
+      agentFitness: solvable({ plausible: true, blockers: [] }),
+    });
+
+    expect(violations(both).join(" ")).toContain("has not made the call");
+  });
+
+  it("refuses a watch with no blockers", () => {
+    // The blockers are the exit condition, not the explanation. Without them
+    // there is nothing a reporter could do to end the subscription.
+    expect(
+      violations(watched({ agentFitness: fitness({ plausible: true, blockers: [] }) })).join(" "),
+    ).toContain("no condition that could ever clear it");
+  });
+
+  it("refuses a watch that never reaches the board", () => {
+    expect(violations(watched({ labels: ["dor:gaps", "route:ours"] })).join(" ")).toContain(
+      "nothing would subscribe to the ticket",
+    );
+  });
+
+  it("refuses the label without the field behind it", () => {
+    // The direction that costs money: a ticket body talking the skill into a
+    // recurring re-triage charge nobody asked for.
+    expect(violations(watched({ agentFitness: fitness() })).join(" ")).toContain(
+      "a paid watch list the assessment did not ask for",
+    );
+  });
+
+  it("reads labels rather than the delta, like every other label check here", () => {
+    // Same reason as `agent:solvable`: §11's delta holds only labels not
+    // already on the issue, so the second run over a watched ticket omits it
+    // legitimately. A gate keyed on the delta would fire hardest on the runs
+    // least deserving of it.
+    expect(
+      violations(watched({ mutation: mutation({ labelsAdd: [], commentAction: "update" }) })),
+    ).toEqual([]);
+  });
+
+  it("lets triage retire its own agent:watching", () => {
+    // The unsubscribe half of §7c, and the reason `agent:watching` had to join
+    // TRIAGE_OWNED_AGENT_LABELS rather than only be writable.
+    expect(
+      violations(payload({ mutation: mutation({ labelsRemove: ["agent:watching"] }) })),
+    ).toEqual([]);
   });
 });
 

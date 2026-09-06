@@ -43,6 +43,7 @@ const PAYLOAD: TriagePayload = {
   },
   agentFitness: {
     solvable: false,
+    plausible: false,
     confidence: "low",
     repo: "",
     rationale: "Needs a human.",

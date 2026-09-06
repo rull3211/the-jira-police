@@ -21,6 +21,7 @@ function result(overrides: Partial<TriageResult> = {}): TriageResult {
     report: "## report",
     agentFitness: {
       solvable: false,
+      plausible: false,
       confidence: "low",
       repo: "",
       rationale: "DoR gaps.",
