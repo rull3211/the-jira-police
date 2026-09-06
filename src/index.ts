@@ -40,10 +40,14 @@
  * the queue, and a watch sweep by the size of the watched set — and the total is
  * the sum of three numbers nobody chose together.
  *
- * When the solve half joins this file it goes *inside* the review loop rather
- * than beside it, so that "advance before claiming" stays an ordering that one
- * tick can guarantee. That is the last gap: a ticket the watch hands back as
- * `agent:solvable` is picked up by nothing here until it lands.
+ * **The solve half is inside the review loop rather than beside it**, which is
+ * why there are three loops here and not four. "Advance before claiming" is §6's
+ * rule and a fourth loop could not keep it — two cadences race, and the one that
+ * wins spends the only concurrency slot on a new ticket while a pull request
+ * waits. As one tick's sequence it is guaranteed by the code rather than by the
+ * scheduler. So the chain the watch starts now finishes here: a sent-back ticket
+ * answered by its reporter is re-triaged, handed back as `agent:solvable`, and
+ * picked up by the claim step on a later tick with nobody typing anything.
  */
 
 import { parseDuration } from "./duration.ts";
@@ -51,7 +55,14 @@ import { logger } from "./logger.ts";
 import { runLoop } from "./loop.ts";
 import { runPollCycle } from "./poller.ts";
 import { createReviewLoop } from "./review-loop.ts";
-import { type Settings, describeSettings, readSettings, withConfigErrors } from "./settings.ts";
+import {
+  type Settings,
+  describeSettings,
+  numeric,
+  readSettings,
+  withConfigErrors,
+} from "./settings.ts";
+import { createAttemptLedger } from "./solve/attempts.ts";
 import { loadState } from "./state/store.ts";
 import { createWatchLoop } from "./watch-loop.ts";
 import { createWatchMemo } from "./watch/memo.ts";
@@ -168,7 +179,21 @@ async function main(): Promise<void> {
   // Built before anything starts ticking, so a configuration problem on the
   // review side stops the process instead of leaving the grooming loop running
   // against a service that is half up.
-  const review = createReviewLoop(settings, client, shutdown.signal, BACKOFF_CAP_MS);
+  //
+  // The attempt ledger is built here for the reason the watch's memo is: its
+  // lifetime is the process's. The outcomes that release a ticket without
+  // labelling it — a refused diff, a failed pass, a transiently abandoned one —
+  // put `agent:start` back exactly as they found it, so the queue offers the
+  // ticket again on the very next tick with no condition that ever clears. The
+  // ledger is the only thing that ever says no; per cycle it would say it to
+  // nothing. See `solve/attempts.ts`.
+  const review = createReviewLoop(
+    settings,
+    client,
+    shutdown.signal,
+    BACKOFF_CAP_MS,
+    createAttemptLedger(numeric(settings, "MAX_SOLVE_ATTEMPTS_PER_TICKET", 3)),
+  );
   // The watch's memo is built here rather than inside the loop because its
   // lifetime is this process's, and this is the function that has one. A
   // relevance check that says no writes nothing to the ticket, so the trigger

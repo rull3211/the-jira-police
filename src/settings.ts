@@ -231,6 +231,12 @@ export const SETTINGS = [
     fallback: "1",
   },
   {
+    name: "MAX_SOLVE_ATTEMPTS_PER_TICKET",
+    description:
+      "How many times the daemon may claim one ticket before it stops offering it, counted in memory for as long as the process lives. It bounds the one runaway the label machine cannot: a run that is refused by the diff gate, or fails, or is abandoned for a transient reason, releases the ticket exactly as it found it — including the agent:start the claim consumed — so the queue offers it again on the very next tick, at full solve cost, with no condition that ever clears. A terminal label cannot close that, because those outcomes deliberately write none: they say nothing about whether the ticket is solvable, and labelling them would turn a slept laptop into something only a human can undo. Three, and a restart clears it, which is the same trade the sendback watch's memo makes and is recorded there. Hand-driven runs ignore this entirely — a person typing the command again is the bound.",
+    fallback: "3",
+  },
+  {
     name: "MAX_REVIEW_ITERATIONS",
     description:
       "How many times a solve may respond to the requested REVIEWER before the pull request is marked ready anyway, with the ticket comment saying the cap was hit. A cap rather than a loop, because a bot reviewer and a fixer that disagree can trade comments indefinitely and neither of them is paying. It counts reviewer rounds only: a round answering a human does not spend one, because the whole reason to bound this conversation is that nothing in it brings in information from outside it, and a person asking for a change is exactly that information. A batch holding both counts as human. Reaching this undrafts the pull request and keeps listening — it is the reviewer running out of turns, not the loop ending. MAX_PR_ROUNDS_TOTAL is what bounds every round regardless of who asked.",

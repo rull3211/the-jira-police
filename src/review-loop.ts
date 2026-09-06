@@ -13,10 +13,11 @@
  * a test can read the schedule that was chosen without anything ticking.
  */
 
-import { runReviewSweep } from "./cli/solve-run.ts";
+import { runReviewSweep, runSolveClaims } from "./cli/solve-run.ts";
 import type { JiraClient } from "./jira/client.ts";
 import { logger } from "./logger.ts";
 import type { LoopOptions } from "./loop.ts";
+import type { AttemptLedger } from "./solve/attempts.ts";
 import { REVIEW_ROUND_USD } from "./solve/review-cycle.ts";
 import { type Settings, flag, numeric } from "./settings.ts";
 import { createSolveRunDeps, reviewIntervalMs } from "./wiring.ts";
@@ -46,13 +47,15 @@ import { createSolveRunDeps, reviewIntervalMs } from "./wiring.ts";
  * message and exit 78.
  *
  * `backoffCapMs` is a parameter because `index.ts` owns it and cannot be
- * imported from — it starts the service on import.
+ * imported from — it starts the service on import. `ledger` is one for the
+ * stronger reason the watch's memo is: see `runCycle` below.
  */
 export function createReviewLoop(
   settings: Settings,
   client: JiraClient,
   signal: AbortSignal,
   backoffCapMs: number,
+  ledger: AttemptLedger,
 ): LoopOptions | null {
   if (!flag(settings, "SOLVE_ENABLED")) {
     logger.info("review.loop.disabled", {
@@ -80,9 +83,26 @@ export function createReviewLoop(
 
   return {
     runCycle: async () => {
+      // ## Advance, then claim, and it is one tick rather than two loops
+      //
+      // §6 asks that a ticket already under review be moved on before any new
+      // one is picked up, and the cheapest way to guarantee an ordering is to
+      // make it a sequence in one function. Two loops on two cadences cannot
+      // promise it at all: whichever fires first wins, and at
+      // `MAX_CONCURRENT_SOLVES=1` losing that race means the slot is spent on a
+      // new solve while a pull request a human is waiting on goes unread for
+      // another tick. The cost of one tick is now the sum of both halves, which
+      // is why the interval is the review cadence rather than the poll one.
+      //
       // Null: the daemon watches the whole board. Naming one ticket is
       // `--watch`'s argument and there is nobody here to name it.
       await runReviewSweep(settings, client, runDeps, null, signal);
+
+      // Not in a `try` of its own. `runLoop` catches, and a claim sweep that
+      // throws after the review sweep has already run has lost nothing the next
+      // tick will not redo — whereas swallowing it here would back off on
+      // nothing and hide the fault from the backoff that exists to slow it.
+      await runSolveClaims(settings, client, ledger, signal);
     },
     intervalMs,
     backoffCapMs,

@@ -1024,10 +1024,66 @@ count it, and the sweep swallows a re-triage failure, so a late gate looks ident
 The first draft of that assertion lived in `watch-loop.test.ts`, passed against its own mutation,
 and was moved rather than kept. 2160 tests.
 
-**What is still not wired is the solve half.** A ticket this loop hands back as `agent:solvable` is
-picked up by nothing in `index.ts` until it lands, and `runSolveCycle` / `runWriteRungs` are still
-reachable only from the two CLIs. It goes _inside_ the review loop rather than beside it, so that
-"advance before claiming" stays an ordering one tick can guarantee.
+~~**What is still not wired is the solve half.**~~ **Wired the same day — see below.**
+
+#### The daemon claims, 2026-09-06, and the whole of the work is one counter
+
+`runSolveClaims` is thirty lines and twenty-nine of them are `runWriteRungs`. The claim half of a
+daemon tick reads the queue with `runSolveCycle`, walks `cycle.planned` — already capped by
+`MAX_CONCURRENT_SOLVES`, counted from the board rather than from anything this process
+remembers — and climbs the same ladder `solve:once` climbs, to the same rung. A second copy of
+claim-solve-publish-release in a loop nobody watches is the sixth instance of this repository's own
+defect, and the fifth was avoided nine hours earlier by extracting `runWatchSweep`.
+
+**It is one tick's sequence rather than a fourth loop, and that is §6's rule made structural.**
+Advance, then claim. Two loops on two cadences cannot promise an order at all: whichever fires
+first wins, and at `MAX_CONCURRENT_SOLVES=1` losing that race spends the only slot on a new ticket
+while a pull request a human is waiting on goes unread for another tick — every tick, for as long
+as the queue has anything in it. Swap the two `await`s and nothing else fails, because both halves
+succeed either way, which is exactly why there is now a test that reads the order of the two
+queries off a recording client.
+
+**The counter is the only genuinely new thing, and it closes the runaway D4c named as E's own.**
+The label machine bounds every outcome that _decides_ a ticket's fate. Three deliberately write no
+label — `refused` by the diff gate, `failed`, and `abandoned` for a transient reason — on the
+argument that they say nothing about whether the ticket is solvable, and that labelling them would
+turn a slept laptop into something only a human can undo. That argument is still right, and the
+price of it is that `runRelease` restores the ticket **exactly as it found it, `agent:start`
+included**. So the queue offers it again on the very next tick, at full solve cost, with no
+condition that ever clears. Manual mode does not save it: the go-ahead comes back with the rest of
+the labels, which is the property that makes a hand-driven rehearsal repeatable.
+
+`createAttemptLedger` is a `Map<string, number>` and `MAX_SOLVE_ATTEMPTS_PER_TICKET`, default 3,
+consulted before the claim rather than after the outcome — the count is a reservation, for the same
+reason the review marker's is, because a run that crashes on its way to a verdict has still spent
+an attempt. It is in memory for the same trade the watch's memo makes, and the trade is recorded
+there: losing it costs one extra attempt per ticket after a restart, which is the behaviour of the
+day before it existed, re-bounded the moment the process has ticked once. A label would survive a
+restart and be human-clearable, and is deliberately not what this is — a write per attempt on the
+path §3a's clobber risk is worst on, and a fourth `agent:` name, for a bound whose whole job is to
+stop a loop that only exists while a loop is running.
+
+Hand-driven runs never consult it. An operator running the same ticket three times is a decision,
+and a harness that refused the fourth would be answering a question nobody asked.
+
+**The exit code is captured and thrown away, which is a real difference between a command and a
+service.** `runWriteRungs` sets `process.exitCode` at twelve sites because it was written to answer
+_what should `$?` be_. A daemon's exit status answers _did the service stop cleanly_, and letting
+one refused diff gate at 3am decide it makes every later stop report a failure that was already
+logged, handled and released. So it is saved, logged as a field, and restored — restored rather
+than ignored, because leaving it set means the next tick cannot tell its own failure from the last
+one's.
+
+**Three mutations confirmed by unplugging them.** Swapping the two `await`s fails the ordering test;
+deleting the claim step fails two; `>` for `>=` in `exhausted` fails four, and that one is the
+quiet kind — an off-by-one in a spend bound reads as the bound working.
+
+**And the gap is the one D4e already recorded, now with a third caller waiting on it.** There is no
+test harness for `runWriteRungs`, so `runSolveClaims`'s own body — that the ledger is read before
+the claim rather than after the outcome, that a thrown ticket does not abandon the queue, that the
+exit code is restored — is covered by argument and by the ledger's unit tests, not by a test of the
+call site. D4e measured the same hole and called it _"the clearest argument yet for `runSolveRungs`
+growing a test harness before E"_. E is here and it did not grow one.
 
 ---
 
@@ -1047,7 +1103,7 @@ reachable only from the two CLIs. It goes _inside_ the review loop rather than b
 | **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                                                                                                                                                                                          |
 | **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                                                                                                                                                                                          |
 | **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                                                                                                                                                                                          |
-| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **review half built 2026-09-06, `feat/daemon-review`.** 1944 tests; six mutations caught. Solve half still gated on the blockers below                                                                                                                                                                                                                        |
+| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **built and claiming 2026-09-06.** 2169 tests. The review half on `feat/daemon-review`; the claim half beside it in the same tick, `runSolveClaims`, bounded by a per-ticket attempt ledger so the outcomes that release without labelling cannot be re-bought every two minutes forever                                                                      |
 | **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **built and looping 2026-09-06, `feat/sendback-watch`.** 2160 tests. `watch:once --write` unsubscribes and re-triages; the attempt is reserved on a label before anything is paid for, and the check is shown what the edited fields now say. The daemon runs the same sweep on `WATCH_POLL_MS`, six hours, bounded by a memo of what it has already declined |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the

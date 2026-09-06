@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { JiraClient } from "./jira/client.ts";
 import { createReviewLoop } from "./review-loop.ts";
 import { type Settings, SettingsError, readSettings } from "./settings.ts";
+import type { AttemptLedger } from "./solve/attempts.ts";
 
 /** Minimum environment that satisfies the required settings. */
 const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
@@ -31,6 +32,14 @@ const ARMED = {
   VAULT_PATH: "/vaults/insurance-knowledge-vault",
 };
 
+/** A ledger for the cases that never tick, and so never consult one. */
+const UNUSED_LEDGER: AttemptLedger = {
+  exhausted: () => false,
+  attempted: () => {},
+  countFor: () => 0,
+  size: () => 0,
+};
+
 describe("createReviewLoop", () => {
   it("schedules nothing when SOLVE_ENABLED is off", () => {
     const loop = createReviewLoop(
@@ -38,6 +47,7 @@ describe("createReviewLoop", () => {
       CLIENT,
       new AbortController().signal,
       900_000,
+      UNUSED_LEDGER,
     );
     expect(loop).toBeNull();
   });
@@ -54,6 +64,7 @@ describe("createReviewLoop", () => {
         CLIENT,
         new AbortController().signal,
         900_000,
+        UNUSED_LEDGER,
       ),
     ).not.toThrow();
   });
@@ -70,6 +81,7 @@ describe("createReviewLoop", () => {
         CLIENT,
         new AbortController().signal,
         900_000,
+        UNUSED_LEDGER,
       ),
     ).toThrow(SettingsError);
   });
@@ -80,6 +92,7 @@ describe("createReviewLoop", () => {
       CLIENT,
       new AbortController().signal,
       900_000,
+      UNUSED_LEDGER,
     );
     expect(loop?.intervalMs).toBe(45_000);
   });
@@ -89,7 +102,13 @@ describe("createReviewLoop", () => {
     // signal ignores Ctrl-C until its own cycle ends, and one built with the
     // default cap would back off on a schedule nobody chose.
     const controller = new AbortController();
-    const loop = createReviewLoop(settingsWith(ARMED), CLIENT, controller.signal, 123_000);
+    const loop = createReviewLoop(
+      settingsWith(ARMED),
+      CLIENT,
+      controller.signal,
+      123_000,
+      UNUSED_LEDGER,
+    );
     expect(loop?.backoffCapMs).toBe(123_000);
     expect(loop?.signal).toBe(controller.signal);
   });
@@ -103,7 +122,99 @@ describe("createReviewLoop", () => {
         CLIENT,
         new AbortController().signal,
         900_000,
+        UNUSED_LEDGER,
       ),
     ).not.toThrow();
+  });
+});
+
+/**
+ * A client that answers every query with nothing and writes down what it was
+ * asked, in order.
+ *
+ * Both halves of a tick start with a search and neither can act on an empty
+ * board, so the pair of query strings is the whole tick made observable without
+ * a repository, a `gh`, or a paid pass anywhere in it.
+ */
+function recordingClient(asked: string[]): JiraClient {
+  return {
+    search: async (jql: string) => {
+      asked.push(jql);
+      return [];
+    },
+  } as unknown as JiraClient;
+}
+
+describe("what one review tick does, in order", () => {
+  it("advances what is under review before it claims anything new", async () => {
+    // **The mutation this exists for.** §6's rule is *advance, then claim*, and
+    // it is not a preference: at `MAX_CONCURRENT_SOLVES=1` a tick that claims
+    // first spends the only slot on a new ticket, and the pull request a human
+    // is waiting on is not read until the tick after — every tick, for as long
+    // as the queue has anything in it. Swap the two `await`s in `runCycle` and
+    // nothing else in this suite notices, because both halves succeed either
+    // way. The order is the behaviour.
+    const asked: string[] = [];
+    const loop = createReviewLoop(
+      settingsWith(ARMED),
+      recordingClient(asked),
+      new AbortController().signal,
+      900_000,
+      UNUSED_LEDGER,
+    );
+
+    await loop?.runCycle();
+
+    const reviewFirst = asked.findIndex((jql) => jql.includes("agent:reviewing"));
+    const claimNext = asked.findIndex((jql) => jql.includes("agent:solvable"));
+    expect(reviewFirst).toBeGreaterThanOrEqual(0);
+    expect(claimNext).toBeGreaterThanOrEqual(0);
+    expect(reviewFirst).toBeLessThan(claimNext);
+  });
+
+  it("claims at all, which is the whole of Phase E", async () => {
+    // Before this change the tick was `runReviewSweep` alone, so the solve queue
+    // was read by nothing on a timer: a ticket the watch handed back as
+    // `agent:solvable` sat there until a person typed `solve:once`. Delete the
+    // second `await` and the assertion above still passes on its first half.
+    const asked: string[] = [];
+    const loop = createReviewLoop(
+      settingsWith(ARMED),
+      recordingClient(asked),
+      new AbortController().signal,
+      900_000,
+      UNUSED_LEDGER,
+    );
+
+    await loop?.runCycle();
+
+    expect(asked.some((jql) => jql.includes("agent:solvable"))).toBe(true);
+  });
+
+  it("does not consult the ledger for a ticket the queue did not offer", async () => {
+    // The ledger is read per candidate, not per tick. Hoisting it out — asking
+    // once and skipping the sweep — would turn one exhausted ticket into a stop
+    // on the whole queue, which looks from the board like an idle daemon rather
+    // than like a brake.
+    const ledger: AttemptLedger = {
+      exhausted: () => {
+        throw new Error("nothing was offered, so nothing should have been weighed");
+      },
+      attempted: () => {
+        throw new Error("nothing was offered, so nothing should have been claimed");
+      },
+      countFor: () => 0,
+      size: () => 0,
+    };
+
+    const loop = createReviewLoop(
+      settingsWith(ARMED),
+      recordingClient([]),
+      new AbortController().signal,
+      900_000,
+      ledger,
+    );
+
+    await expect(loop?.runCycle()).resolves.toBeUndefined();
   });
 });

@@ -34,7 +34,8 @@
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
 import { logger } from "../logger.ts";
-import { type Settings, flag, numeric } from "../settings.ts";
+import { type Settings, flag, numeric, solveMode } from "../settings.ts";
+import type { AttemptLedger } from "../solve/attempts.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
 import {
   type AdvanceOutcome,
@@ -1163,4 +1164,114 @@ export async function runWriteRungs(
       );
     }
   }
+}
+
+/**
+ * The claim half of a daemon tick: read the queue, and start what it offers.
+ *
+ * ## It calls `runWriteRungs` rather than reimplementing the order
+ *
+ * Claim, solve, publish, hand on the claim, release on every other path — that
+ * order is the whole of B2 through D1, and a second copy of it in a loop nobody
+ * watches is the copy that stops agreeing on the day one of them changes. This
+ * repository has found that defect five times and it has never once been in the
+ * copy somebody was looking at. So the daemon climbs the same ladder the command
+ * does, to the same rung, and differs only in what it may spend.
+ *
+ * ## Three bounds, and only one of them is new
+ *
+ * `runSolveCycle` already caps `planned` at the capacity left by
+ * `MAX_CONCURRENT_SOLVES`, counted from the tickets carrying the claim label
+ * rather than from anything this process remembers — so a second instance, or a
+ * `solve:once` run alongside this one, is counted too.
+ *
+ * The queue itself is the second: in `manual` mode it asks for `agent:start`,
+ * so the daemon can only ever pick up a ticket a person has said yes to.
+ *
+ * The new one is `ledger`, and `attempts.ts` has the argument. Briefly: the
+ * outcomes that write no terminal label release the ticket exactly as they found
+ * it, so without a count the queue re-offers a failing ticket every tick forever.
+ *
+ * ## The exit code is read and thrown away, deliberately
+ *
+ * The rungs set `process.exitCode` because they were written for a command,
+ * where it answers *what should `$?` be*. A daemon's exit status answers a
+ * different question — did the service stop cleanly — and letting one refused
+ * diff gate at 3am decide it would make every later shutdown report a failure
+ * that had already been logged, handled, and released. So it is captured per
+ * ticket, reported as a field, and reset. Reset rather than ignored: leaving it
+ * set means the *next* tick cannot tell its own failure from the last one's.
+ */
+export async function runSolveClaims(
+  settings: Settings,
+  client: JiraClient,
+  ledger: AttemptLedger,
+  signal?: AbortSignal,
+): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
+  const cycle = await runSolveCycle(createSolveDeps(settings, client, signal));
+  const authority = solveMode(settings);
+
+  let started = 0;
+  let held = 0;
+
+  for (const candidate of cycle.planned) {
+    // Checked between tickets as well as before the sweep: a solve is minutes
+    // long, and a shutdown that arrived during one must not be answered by
+    // starting another.
+    if (signal?.aborted === true) {
+      break;
+    }
+
+    const key = candidate.issueKey;
+    if (ledger.exhausted(key)) {
+      held += 1;
+      continue;
+    }
+
+    // Before the claim, not after the outcome. The count is a reservation for
+    // the same reason the re-triage counter is one: a run that crashes on its
+    // way to a verdict has still spent an attempt, and a counter written
+    // afterwards hands back a free one every time the expensive path is the
+    // thing that broke.
+    ledger.attempted(key);
+
+    const before = process.exitCode;
+    try {
+      await runWriteRungs(settings, client, key, "pr", cycle, authority);
+      started += 1;
+    } catch (error) {
+      // One ticket's failure is not the tick's. `runWriteRungs` releases in a
+      // `finally`, so the claim is already back; abandoning the rest of the
+      // queue here would hide them behind it and, in the loop above, back off
+      // to the cap over a fault that belongs to one ticket.
+      logger.error("solve.claim.failed", {
+        key,
+        attempt: ledger.countFor(key),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      const code = process.exitCode;
+      process.exitCode = before;
+      if (code !== before) {
+        logger.info("solve.claim.exit_code", {
+          key,
+          code,
+          note: "the rungs' code, recorded rather than adopted: it is a command's answer, not a service's",
+        });
+      }
+    }
+  }
+
+  logger.info("solve.claims.done", {
+    found: cycle.found,
+    inFlight: cycle.inFlight,
+    capacity: cycle.capacity,
+    planned: cycle.planned.length,
+    started,
+    held,
+    deferred: cycle.deferred.length,
+    remembered: ledger.size(),
+  });
+
+  return { found: cycle.found, started, held };
 }
