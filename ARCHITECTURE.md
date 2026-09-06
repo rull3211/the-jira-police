@@ -844,8 +844,8 @@ with a note saying where it came from.
 
 ## 12. Local divergence from upstream
 
-`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Four local
-changes.** The first three are to §11's label-reconciliation list; the fourth is to §1's ingest and
+`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Five local
+changes.** The first four are to §11's label-reconciliation list; the fifth is to §1's ingest and
 is the only one that changes what the skill reads:
 
 1. **`next:*`.** Skill vocabulary — the same file defines
@@ -855,6 +855,17 @@ is the only one that changes what the skill reads:
 2. **`agent:solvable`**, and note it is listed as a single label rather than as `agent:*`. The rest
    of the namespace is not the skill's: see the security boundary in §3. This is the first
    namespace shared with a writer other than the skill, so the list is narrower than a prefix.
+
+   **`agent:watching` joined it 2026-09-06** and is the same kind of label by the same test — the
+   skill's own assessment, written by nothing else, authorising no access to code. What is not the
+   same is the cost of leaving it behind. Every other entry on this list decays into a stale
+   _reading_: a contradictory `next:`, a duplicated `svc:`. This one decays into a **standing
+   charge**, because the label is a subscription to a six-hourly re-triage sweep, and the two events
+   that end that subscription — the gap gets filled, or the ticket turns out not to be nearly
+   solvable — are both this skill's own conclusions. Omitted from the removal list, the skill can
+   enter the state and not leave it, which is the one failure F exists to prevent. The harness
+   refuses a payload where `agent:watching` and `agentFitness.plausible` disagree in either
+   direction, so the pairing cannot rot quietly; the removal list is what lets the skill satisfy it.
 
 3. **The taxonomy namespaces — `team:`, `jira:`, `domain:`, `svc:`, `value:`, `effort:` — but only
    as a swap.** §11's removal list named the skill's _assessments_ and not its _facts_, while the

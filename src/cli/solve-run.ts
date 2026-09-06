@@ -17,7 +17,9 @@
  *
  * `runClaim` takes a `ClaimAuthority` and does not consult `SOLVE_MODE`. The
  * queue-driven command passes `solveMode(settings)`; the singleton command
- * passes `"named"`. Reading the setting in here would have meant the singleton
+ * passes `"named"`; the daemon passes `queueDeps.mode`, which is the same value
+ * the queue it just read was built from — one reading of the setting per tick
+ * rather than two, so the query and the claim cannot disagree about the mode. Reading the setting in here would have meant the singleton
  * command could not say what it means without also changing the operator's
  * configuration — and a caller that cannot express its own authority ends up
  * editing `.env` to get a run through, which is the worst possible place for
@@ -34,7 +36,7 @@
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
 import { logger } from "../logger.ts";
-import { type Settings, flag, numeric, solveMode } from "../settings.ts";
+import { type Settings, flag, numeric } from "../settings.ts";
 import type { AttemptLedger } from "../solve/attempts.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
 import {
@@ -66,7 +68,7 @@ import {
   type SolveRequest,
   solveWithRetry,
 } from "../solve/orchestrator.ts";
-import { type SolveCycleOutcome, runSolveCycle } from "../solve/poller.ts";
+import { type SolveCycleOutcome, type SolveDeps, runSolveCycle } from "../solve/poller.ts";
 import { findPullRequest } from "../solve/pr.ts";
 import {
   type ReviewCycleOutcome,
@@ -1204,21 +1206,22 @@ export async function runWriteRungs(
  */
 export async function runSolveClaims(
   settings: Settings,
+  queueDeps: SolveDeps,
   client: JiraClient,
   ledger: AttemptLedger,
-  signal?: AbortSignal,
 ): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
-  const cycle = await runSolveCycle(createSolveDeps(settings, client, signal));
-  const authority = solveMode(settings);
+  const cycle = await runSolveCycle(queueDeps);
+  const authority = queueDeps.mode;
 
   let started = 0;
   let held = 0;
 
   for (const candidate of cycle.planned) {
     // Checked between tickets as well as before the sweep: a solve is minutes
-    // long, and a shutdown that arrived during one must not be answered by
-    // starting another.
-    if (signal?.aborted === true) {
+    // long, and a stop that arrived during one must not be answered by starting
+    // another. The signal is the one `queueDeps` was built with, so there is no
+    // second source of truth about whether this process is going away.
+    if (queueDeps.signal?.aborted === true) {
       break;
     }
 

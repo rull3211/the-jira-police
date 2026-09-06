@@ -1074,9 +1074,34 @@ logged, handled and released. So it is saved, logged as a field, and restored �
 than ignored, because leaving it set means the next tick cannot tell its own failure from the last
 one's.
 
-**Three mutations confirmed by unplugging them.** Swapping the two `await`s fails the ordering test;
+**Four mutations confirmed by unplugging them.** Swapping the two `await`s fails the ordering test;
 deleting the claim step fails two; `>` for `>=` in `exhausted` fails four, and that one is the
-quiet kind — an off-by-one in a spend bound reads as the bound working.
+quiet kind — an off-by-one in a spend bound reads as the bound working; and building the queue
+dependencies inside the tick fails the mode test, for the reason below.
+
+**The mode question was asked from outside and the answer was wrong.** Asked 2026-09-06 — _does the
+daemon respect manual versus auto?_ — and the queue half was right by construction: `createSolveDeps`
+builds `buildSolveQueueJql` from `solveMode(settings)`, so manual asks for `agent:start` and auto
+drops it and takes `SOLVE_AUTO_ISSUE_TYPES` instead. The claim half is right too, and by the
+stronger route: `eligibility` re-checks locally what the JQL filtered for, and `SELF_AUTHORISING` is
+an allowlist of `auto` and `named` rather than a `!== "manual"` test, so any authority nobody
+thought about lands on the side that asks a person. The daemon passes `queueDeps.mode` and never
+`named`, which is the one value that would skip the human gate on the one path with no human on it.
+
+**What the question exposed is that the first draft built `SolveDeps` per tick.** `wiring.ts` builds
+both queries eagerly and says why in a comment — a malformed one _"should stop the process at
+startup rather than on whichever cycle first happens to reach the board"_ — and calling it from
+inside `runCycle` defeats that from the outside while the file asserting it stays perfectly true of
+itself. `SOLVE_MODE=automatic` was a cycle that threw every two minutes and backed off to the cap,
+reported only as `cycle_failed`, which is the exact failure `createReviewLoop`'s own header argues
+against for `VAULT_PATH` three paragraphs above the line that reintroduced it. Now built beside
+`runDeps` and passed in, which also means the query and the claim read the setting once between
+them rather than once each.
+
+**And the first mutation written for it was a no-op**, the second time this session: it added a
+second `createSolveDeps` call inside the tick while leaving the eager one in place, and reported
+green. Recorded because a mutation that does not remove the guard is not evidence about the guard,
+and the failure mode is that it reads as one.
 
 #### The watch had no outbound half, and it was one `return null`
 
@@ -1129,7 +1154,7 @@ growing a test harness before E"_. E is here and it did not grow one.
 | **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **built and claiming 2026-09-06.** 2173 tests. The review half on `feat/daemon-review`; the claim half beside it in the same tick, `runSolveClaims`, bounded by a per-ticket attempt ledger so the outcomes that release without labelling cannot be re-bought every two minutes forever                                                                                                                                                                                              |
+| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **built and claiming 2026-09-06.** 2176 tests. The review half on `feat/daemon-review`; the claim half beside it in the same tick, `runSolveClaims`, bounded by a per-ticket attempt ledger so the outcomes that release without labelling cannot be re-bought every two minutes forever                                                                                                                                                                                              |
 | **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **built and looping 2026-09-06, `feat/sendback-watch`.** 2160 tests. `watch:once --write` unsubscribes and re-triages; the attempt is reserved on a label before anything is paid for, and the check is shown what the edited fields now say. The daemon runs the same sweep on `WATCH_POLL_MS`, six hours, bounded by a memo of what it has already declined — and since 2026-09-06 the ticket carries the list of what would end the watch, which is the half a reporter can act on |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the

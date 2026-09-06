@@ -218,3 +218,63 @@ describe("what one review tick does, in order", () => {
     await expect(loop?.runCycle()).resolves.toBeUndefined();
   });
 });
+
+describe("the mode the daemon claims under, which is the human gate", () => {
+  it("asks for agent:start in manual mode, which is the default", async () => {
+    // **The most security-relevant line in the daemon.** Manual mode is the
+    // default posture and the only thing standing between "triage thinks this
+    // is fixable" and a machine writing code unasked. The daemon claims under
+    // `solveMode(settings)`, never under `named` — `named` is self-authorising
+    // because a person typed the key, and there is nobody here to type one.
+    // Hardcode the authority and the human gate is gone from the one path where
+    // nobody is watching, silently, with every other test still green.
+    const asked: string[] = [];
+    const loop = createReviewLoop(
+      settingsWith({ ...ARMED, SOLVE_MODE: "manual" }),
+      recordingClient(asked),
+      new AbortController().signal,
+      900_000,
+      UNUSED_LEDGER,
+    );
+    await loop?.runCycle();
+
+    const queue = asked.find((jql) => jql.includes("agent:solvable")) ?? "";
+    expect(queue).toContain("agent:start");
+  });
+
+  it("drops that clause in auto mode and takes an issue-type restriction instead", async () => {
+    // Auto is not manual-minus-a-check: it gives up the human label and takes
+    // on `SOLVE_AUTO_ISSUE_TYPES` in exchange. A daemon that dropped the first
+    // without applying the second would claim every solvable ticket on the
+    // board, which is the widest this service can be made to spend.
+    const asked: string[] = [];
+    const loop = createReviewLoop(
+      settingsWith({ ...ARMED, SOLVE_MODE: "auto", SOLVE_AUTO_ISSUE_TYPES: "Feil" }),
+      recordingClient(asked),
+      new AbortController().signal,
+      900_000,
+      UNUSED_LEDGER,
+    );
+    await loop?.runCycle();
+
+    const queue = asked.find((jql) => jql.includes("agent:solvable")) ?? "";
+    expect(queue).not.toContain("agent:start");
+    expect(queue).toContain("Feil");
+  });
+
+  it("refuses to start on a mode it does not recognise", () => {
+    // Not a fallback to manual. Guessing here guesses in the direction of more
+    // privilege on the reading that a typo is more likely to be a typo for
+    // "auto" than a deliberate choice — so it is a startup error, beside the
+    // setting it was read from, rather than a posture nobody chose.
+    expect(() =>
+      createReviewLoop(
+        settingsWith({ ...ARMED, SOLVE_MODE: "automatic" }),
+        CLIENT,
+        new AbortController().signal,
+        900_000,
+        UNUSED_LEDGER,
+      ),
+    ).toThrow(SettingsError);
+  });
+});

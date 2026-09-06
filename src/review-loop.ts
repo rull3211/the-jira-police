@@ -20,7 +20,7 @@ import type { LoopOptions } from "./loop.ts";
 import type { AttemptLedger } from "./solve/attempts.ts";
 import { REVIEW_ROUND_USD } from "./solve/review-cycle.ts";
 import { type Settings, flag, numeric } from "./settings.ts";
-import { createSolveRunDeps, reviewIntervalMs } from "./wiring.ts";
+import { createSolveDeps, createSolveRunDeps, reviewIntervalMs } from "./wiring.ts";
 
 /**
  * The review loop's schedule, or `null` if the solve side is switched off.
@@ -67,6 +67,15 @@ export function createReviewLoop(
   const intervalMs = reviewIntervalMs(settings);
   const maxRounds = numeric(settings, "MAX_REVIEW_ROUNDS_PER_TICK", 0);
   const runDeps = createSolveRunDeps(settings);
+  // Built here for the reason `runDeps` is, and `wiring.ts` makes the argument
+  // at the point it builds the two queries eagerly: a malformed one — an unsafe
+  // project key, auto mode with no issue types, a `SOLVE_MODE` nobody
+  // recognises — should stop the process at startup rather than on whichever
+  // cycle first reaches the board. Constructed per tick, as the first draft of
+  // this did, that guarantee is defeated from the outside while the file
+  // asserting it stays true of itself, and the operator gets a cycle that
+  // throws identically every two minutes and reports itself as `cycle_failed`.
+  const queueDeps = createSolveDeps(settings, client, signal);
 
   // The banner `--watch` prints, as a log line. The operator is the last bound
   // on what this costs, and a bound cannot act on a number it has not been
@@ -102,7 +111,7 @@ export function createReviewLoop(
       // throws after the review sweep has already run has lost nothing the next
       // tick will not redo — whereas swallowing it here would back off on
       // nothing and hide the fault from the backoff that exists to slow it.
-      await runSolveClaims(settings, client, ledger, signal);
+      await runSolveClaims(settings, queueDeps, client, ledger);
     },
     intervalMs,
     backoffCapMs,
