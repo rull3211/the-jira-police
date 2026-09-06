@@ -453,7 +453,9 @@ it would put a ticket on a paid watch list with no condition that could ever cle
 to the ticket, so `updated > ourLastComment` is true the instant we finish writing. The answer is
 the same shape as the review cursor: **compare against what someone else did, not against what
 changed** — re-triage only when the newest non-bot comment or field change is newer than our own.
-Plus `MAX_RETRIAGE_PER_TICKET` (3), counted from the bot's own comments so it survives a restart.
+Plus `MAX_RETRIAGE_PER_TICKET` (3), counted from a label on the ticket so it survives a restart —
+written from the bot's own comments until 2026-09-06, when the poster turned out to rewrite them
+in place.
 
 Unsubscribing: the label comes off when the ticket closes, or when a re-triage returns `ready-ish`
 — at which point the normal path takes over with no special case. That hand-off is the whole point
@@ -718,6 +720,12 @@ survives being documented. The subtraction is at the count rather than a `+ 1` a
 so the arithmetic says what it is bounding. Mutation: `ours.length` instead, and a ticket is
 dropped one re-triage early — caught.
 
+**Superseded within the day, and the off-by-one turned out to be the smaller half.** The count moved
+off comments entirely once the poster's in-place rewrite was found, so there is no sendback to
+subtract: the counter names re-triages and nothing else. The decision above still holds where it
+matters — the setting buys what its name says — and the fix is now structural rather than
+arithmetic.
+
 #### The relevance pre-check, landed 2026-09-06 — the cheapest session in the tree
 
 `decideWatch` answers _did somebody move_. It cannot answer _did they move in the direction we
@@ -789,14 +797,8 @@ currently fire: it is correct over the quantity it names, it does fire on the ca
 second comment of ours (a pasted sentinel, a hand-posted verdict), and deleting a brake because the
 odometer is broken is how the odometer stays broken.
 
-**So the engine is blocked on where the count comes from, and the shape of the answer is known.**
-It must be a **reservation written before the run it authorises**, exactly as §6.3's marker is —
-posting it afterwards means a failed write hands back a free run every sweep. The comment body
-cannot carry it, because writing that body costs a paid session. A namespaced label counter can:
-`updateLabels` is REST, free, atomic enough at this concurrency, and visible on the board. What
-stops it today is that `INTAKE_INSTRUCTIONS.md` §11 lets a re-triage clear `agent:*` labels, so the
-run being counted would reset its own counter. Deciding that is F's next question and nothing
-should re-triage on a timer until it is answered.
+**So the engine was blocked on where the count comes from — answered the same day, in the next
+section.**
 
 **The general lesson, which is the third instance and now a rule.** Every fixture in `src/watch/`
 builds its own comments, so the poster's idempotency was a fact about a different module that this
@@ -832,6 +834,41 @@ The note is outside the fence because inside it is one more line a hostile comme
 **The field list is filtered where the debug log is deliberately not.** Both halves are the same
 calibration lesson pointing opposite ways: a filtered _log_ can only confirm the guess it was
 filtered by, and an unfiltered _prompt_ is an invitation to reason from noise.
+
+#### The counter moved into a label, landed 2026-09-06 — and the gate was already guarding it
+
+`agent:retriage-<n>`, one label, its suffix the number, superseded in the same delta so a board
+shows one counter rather than a pile. `decideWatch` reads it instead of counting comments, and the
+two facts are now unrelated — which is the test: three comments of ours and a full budget in the
+same fixture.
+
+**It is a reservation, not a receipt, which is why it can be a label and not a comment.** §6.3
+settled the same question for the review marker: written after the run, a failed write hands back a
+free run on every sweep, forever, on the loop that spends with nobody having asked. A comment body
+cannot be a reservation, because writing one costs a paid session. `updateLabels` is REST, free, and
+applied as a server-side delta with no read-modify-write window, so the write can precede the spend.
+
+**The objection that looked fatal was already answered by code written for something else.** §11
+lets a re-triage clear `agent:*`, which would be the run resetting its own counter — except that
+`assertPostable` refuses any triage mutation touching an `agent:` label outside
+`TRIAGE_OWNED_AGENT_LABELS`, and that set is `agent:solvable` and `agent:watching`. The protection
+is mechanical, in the gate, and it now has a test that fails if the counter namespace is ever added
+to that set. Nothing in `INTAKE_INSTRUCTIONS.md` needed to change; the prose is wider than the gate
+and the gate is what runs.
+
+**`null` is not zero, in three places.** A malformed counter refuses the ticket, a reservation from
+an unreadable base is refused rather than written, and the top of the four-digit range refuses
+rather than writing a label it could not read back. Losing a count and starting again from one is
+how a bounded loop quietly becomes an unbounded one, and a pasted label must not be able to buy a
+fresh budget. Several readable counters resolve to the highest instead of refusing, because that
+shape has one ordinary cause — an add that landed and a remove that did not — and the maximum is the
+reading that spends least. Five mutations, five caught.
+
+**One refusal changed its reason rather than going away.** A ticket with no comment of ours used to
+be refused because there was nothing to count. It is countable now and still refused, because it has
+no high-water mark: every look would read as new and the first re-triage would judge the sendback
+against the conversation that produced it. The note on the board says the new reason, and the test
+name says which of the two it is pinning.
 
 ---
 
