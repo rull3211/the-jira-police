@@ -2,11 +2,12 @@
 
 > **Progress, 2026-09-06.** Phases A through D4e are built and merged; the service claims a
 > ticket, solves it in an isolated worktree, opens a pull request, answers the reviewer, and
-> labels the ticket for whatever happened. 1944 tests, no build step. **E has landed its review
+> labels the ticket for whatever happened. 1961 tests, no build step. **E has landed its review
 > half**: `pnpm start` now runs the review sweep beside the grooming loop, on its own cadence,
 > behind `SOLVE_ENABLED`. The solve half — anything that claims a ticket — is still a person
-> typing a command, and stays that way until E's remaining blockers are answered. A human always
-> merges.
+> typing a command, and stays that way until E's remaining blockers are answered. **F has landed
+> its signal**: triage can now mark a sent-back ticket nearly-solvable and label it
+> `agent:watching`, and nothing yet reads that label. A human always merges.
 
 ## Context
 
@@ -457,6 +458,49 @@ Unsubscribing: the label comes off when the ticket closes, or when a re-triage r
 — at which point the normal path takes over with no special case. That hand-off is the whole point
 of the feature.
 
+#### F's signal, landed 2026-09-06 on `feat/sendback-watch`
+
+The first slice is the signal and nothing else: `plausible` in the schema and on `AgentFitness`,
+`agent:watching` in `AGENT_LABELS`, four gate rules, and the field rendered in the artifact a human
+marks right or wrong. No query, no watcher, no re-triage. **The slice boundary is where the
+calibration happens** — the same argument that made Phase A worth living with on its own. The
+field can be wrong for weeks at no cost while nothing reads it, and how often it is wrong is the
+only thing that decides whether a watcher is worth building.
+
+Four decisions the plan did not settle:
+
+- **`plausible` is asked for, not required.** Every other `agentFitness` subfield is in the
+  schema's `required` list; a sixth would make the next run of an unchanged skill fail its own
+  schema, which is a payload rejected after the analyst has been paid. Omission reads as `false`,
+  the same "no" the whole object's omission already means.
+- **The watch is not gated on the verdict, and `solvable` still is.** `solvable` needs `ready-ish`
+  because it needs acceptance criteria to check work against; a watch needs only a gap somebody can
+  fill, and an `out-of-scope` ticket can acquire one. Pinned by a test so the two rules cannot be
+  tidied into looking alike.
+- **`TRIAGE_OWNED_AGENT_LABELS` widened for the first time**, from one entry to two. What that buys
+  an attacker is worth stating: a ticket body can now talk this skill into putting itself on a
+  watch list, which costs re-triage runs. It still cannot talk it into `agent:start`, which costs a
+  pull request.
+- **`buildFitnessNote` is deliberately untouched.** It returns `null` for every verdict but
+  `ready-ish`, which is exactly where `plausible` lives, so the reporter is told nothing yet.
+  Promising somebody a bot is watching before anything watches is this project's own defect class,
+  and the note goes in with the watcher.
+
+**One rule the gate cannot enforce, recorded rather than faked.** A ticket already carrying
+`agent:watching`, re-triaged into `plausible: false` with the label simply left out of `labels`,
+needs the label _removed_ — and `TriagePayload` carries what the verdict asserts, never the live
+label set. So the mirror catches "asserting a watch while declining one" and structurally cannot
+catch "declining a watch that is already running". Ending an existing watch is the watcher's job,
+which is the argument for `MAX_RETRIAGE_PER_TICKET` being a terminal rather than a tidy-up.
+
+1961 tests; eleven mutations applied and eleven caught.
+
+**What F still needs:** `buildSendbackWatchJql`; `src/watch/` with the not-our-own-edit rule;
+`watch:once <KEY> [--write]`; `MAX_RETRIAGE_PER_TICKET` and `WATCH_ENABLED`; §7c's unsubscribe; the
+fitness note; and then a third loop in the daemon on a cadence measured in days. The cost figure
+§7b leans on is still the wrong one — it says $0.11 per re-triage and the measured number is
+$1.56, which is the argument for the bound understated by an order of magnitude.
+
 ---
 
 ## Phasing
@@ -476,7 +520,7 @@ of the feature.
 | **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                   |
 | **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                   |
 | **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **review half built 2026-09-06, `feat/daemon-review`.** 1944 tests; six mutations caught. Solve half still gated on the blockers below |
-| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | not started; after E                                                                                                                   |
+| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **signal built 2026-09-06, `feat/sendback-watch`.** 1961 tests; eleven mutations caught. Nothing watches yet — see below               |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the
 privilege each grants is reviewable on its own. Later branches stack rather than fan out, because
