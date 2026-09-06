@@ -16,14 +16,16 @@
  * be tested by paying.
  */
 
+import { shorten } from "../text.ts";
 import {
   BLOCKER_CLEARING_FIELDS,
   isOurComment,
   lastSpokeAt,
   touchedAt,
+  type WatchContent,
   type WatchSignals,
 } from "./decide.ts";
-import type { RelevanceInput } from "./relevance.ts";
+import type { EditedField, RelevanceInput } from "./relevance.ts";
 
 /**
  * How many foreign comments the check is shown.
@@ -38,8 +40,69 @@ import type { RelevanceInput } from "./relevance.ts";
  */
 export const MAX_CONTEXT_COMMENTS = 10;
 
+/**
+ * How much of one edited field the check is shown.
+ *
+ * Generous next to a comment, because a description is the field a sendback
+ * most often asks to be filled in and the answer is usually appended to the
+ * end of one that was already long. Bounded all the same: this is
+ * attacker-controlled text going into a prompt, and "however long the reporter
+ * made it" is not a bound.
+ */
+export const MAX_FIELD_CHARS = 4000;
+
+/**
+ * How many attachments are named.
+ *
+ * Names only, so each costs a line. A ticket past this many is one where the
+ * question *did they attach what we asked for* is not going to be settled by
+ * reading a longer list.
+ */
+export const MAX_CONTEXT_ATTACHMENTS = 20;
+
 function parsed(iso: string): number {
   return Date.parse(iso);
+}
+
+/** `12345` → `12.1 KB`, so a size reads as a size rather than as a number. */
+function sizeOf(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "unknown size";
+  }
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+/**
+ * What one moved field now says.
+ *
+ * **An empty field still gets an entry.** A reporter who cleared the
+ * description moved it, and dropping the section would leave the check reading
+ * a ticket where nothing appeared to change — the same blindness this whole
+ * change is closing, arriving through an omission instead of a missing fetch.
+ * `content` is empty and the prompt says the field is empty.
+ */
+function contentOf(name: string, content: WatchContent): string {
+  switch (name) {
+    case "description":
+      return content.description;
+    case "summary":
+      return content.summary;
+    case "environment":
+      return content.environment;
+    case "attachment":
+      return content.attachments
+        .slice(0, MAX_CONTEXT_ATTACHMENTS)
+        .map(
+          (file) => `${file.filename} (${file.mimeType || "unknown type"}, ${sizeOf(file.size)})`,
+        )
+        .join("\n");
+    default:
+      // Unreachable while the caller filters on `BLOCKER_CLEARING_FIELDS`, and
+      // an empty string rather than a throw because the failure it would cause
+      // — a check told a field moved and shown nothing — is the one already
+      // being fixed, not a reason to abandon the whole re-triage.
+      return "";
+  }
 }
 
 /**
@@ -88,7 +151,7 @@ export function retriageContext(signals: WatchSignals): RelevanceInput | null {
 
   const kept = foreign.slice(-MAX_CONTEXT_COMMENTS);
 
-  const fields = [
+  const moved = [
     ...new Set(
       signals.changes
         .filter((change) => {
@@ -100,6 +163,21 @@ export function retriageContext(signals: WatchSignals): RelevanceInput | null {
         .filter((name) => BLOCKER_CLEARING_FIELDS.has(name)),
     ),
   ].toSorted();
+
+  // **Content for the fields that moved, and for no others.** The ticket's
+  // whole current state is on `signals.content` and handing all of it over
+  // would be cheaper to write and worse to answer: a description that has said
+  // the same thing since triage is not evidence the reporter responded, and a
+  // check shown it will find the sendback's words in it and say yes. The same
+  // filter argument the field *names* already carry, applied one level down.
+  const fields: readonly EditedField[] = moved.map((name) => {
+    const full = contentOf(name, signals.content).trim();
+    return {
+      name,
+      content: shorten(full, MAX_FIELD_CHARS),
+      truncated: full.length > MAX_FIELD_CHARS,
+    };
+  });
 
   return {
     key: signals.key,

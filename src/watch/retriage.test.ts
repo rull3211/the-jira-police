@@ -30,6 +30,10 @@ function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
       theirComment("2026-09-02T08:00:00.000+0200"),
     ],
     changes: [],
+    // Empty rather than absent, and spelled out in each fixture that needs it:
+    // `tsc` fails every one of them if `WatchContent` grows a field, which is
+    // what keeps four literals in step where a hand-copied *list* could not be.
+    content: { summary: "", description: "", environment: "", attachments: [] },
     ...overrides,
   };
 }

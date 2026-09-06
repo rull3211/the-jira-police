@@ -63,8 +63,27 @@ export interface RelevanceInput {
    * supposed to trust nothing.
    */
   readonly omitted: number;
-  /** Which fields moved since, by Jira's own names. */
-  readonly fields: readonly string[];
+  /** Which blocker-clearing fields moved since, and what they now say. */
+  readonly fields: readonly EditedField[];
+}
+
+/**
+ * One field that moved, with its current content.
+ *
+ * **The name and the content are one object because they were two facts for a
+ * day and that day cost the feature its main path.** The check was handed
+ * `["description"]` and nothing else, so it did the correct thing — refused to
+ * certify content it had not seen — on every ticket where a reporter answered
+ * the way reporters actually answer. The refusals were individually
+ * well-argued, which is why nothing looked wrong.
+ */
+export interface EditedField {
+  /** Jira's own name, folded to lower case: `description`, `attachment`, … */
+  readonly name: string;
+  /** What the field holds now, capped. Empty when the field is empty. */
+  readonly content: string;
+  /** True when `content` was cut to fit, so the prompt can say so outside the fence. */
+  readonly truncated: boolean;
 }
 
 export interface Relevance {
@@ -135,11 +154,16 @@ export const RELEVANCE_SCHEMA = {
  * blockers, mentions them, and supplies nothing.
  */
 export function buildRelevancePrompt(input: RelevanceInput): string {
-  const changed = input.fields.length > 0 ? input.fields.join(", ") : "none";
+  const changed =
+    input.fields.length > 0 ? input.fields.map((field) => field.name).join(", ") : "none";
   const comments =
     input.comments.length > 0
       ? input.comments.map((text, index) => `[${index + 1}]\n${text}`).join("\n\n")
       : "(no new comments)";
+  const edited = input.fields
+    .map((field) => `[${field.name}]\n${field.content || "(the field is now empty)"}`)
+    .join("\n\n");
+  const cut = input.fields.filter((field) => field.truncated).map((field) => field.name);
 
   return [
     `A triage of Jira issue ${input.key} sent it back and asked the reporter for`,
@@ -171,6 +195,32 @@ export function buildRelevancePrompt(input: RelevanceInput): string {
       ? [
           `${input.omitted} older comment${input.omitted === 1 ? " was" : "s were"} left out of the section above. If what you were shown does not answer the sendback, answer false — do not assume the missing ones did.`,
           "",
+        ]
+      : []),
+    ...(input.fields.length > 0
+      ? [
+          // **The sections say what the fields hold now, not what changed in
+          // them.** Jira's changelog carries a before and after, and showing
+          // the difference would answer a narrower question than the one being
+          // asked: a reporter may have supplied half the answer in one edit and
+          // half in another, and what matters is whether the thing asked for is
+          // on the ticket. Saying which reading it is, is the whole point of
+          // this sentence — a check that took these for diffs would read an
+          // unchanged paragraph as newly written.
+          "These fields were edited since triage last spoke. Each section shows what",
+          "the field contains NOW, not only the part that changed. Judge whether what",
+          "the sendback asked for is present in them.",
+          "",
+          "---BEGIN EDITED FIELDS---",
+          edited,
+          "---END EDITED FIELDS---",
+          "",
+          ...(cut.length > 0
+            ? [
+                `The ${cut.join(" and ")} section${cut.length === 1 ? " was" : "s were"} too long to show in full and end with an ellipsis. If what you were shown does not answer the sendback, answer false — do not assume the cut part did.`,
+                "",
+              ]
+            : []),
         ]
       : []),
     `Fields edited since triage last spoke: ${changed}`,
@@ -230,7 +280,7 @@ export function createRelevanceChecker(options: RelevanceOptions): RelevanceChec
       logger.info("watch.relevance.start", {
         key: input.key,
         comments: input.comments.length,
-        fields: input.fields,
+        fields: input.fields.map((field) => field.name),
       });
 
       const verdict = await runSession(

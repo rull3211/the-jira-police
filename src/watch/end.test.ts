@@ -11,6 +11,7 @@ function activity(labels: readonly string[]): IssueActivity {
     labels,
     comments: [],
     changes: [],
+    content: { summary: "", description: null, environment: null, attachments: [] },
   };
 }
 

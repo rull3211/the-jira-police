@@ -82,6 +82,33 @@ export interface WatchSignals {
   readonly closed: boolean;
   readonly comments: readonly WatchComment[];
   readonly changes: readonly WatchFieldChange[];
+  /**
+   * What the blocker-clearing fields hold now, keyed by the same names the
+   * changelog uses, already rendered to text.
+   *
+   * **`decideWatch` does not read this and must not.** The decision is *did
+   * somebody move*, which the changelog answers on its own; reading content
+   * here would make a free mechanical decision depend on what a field says and
+   * put judgement in the one function whose whole value is not having any. It
+   * is carried on the signals because `retriageContext` needs it and slicing
+   * the context from a second fetch would let the two disagree about what the
+   * ticket said at the instant the decision was made.
+   */
+  readonly content: WatchContent;
+}
+
+/** One attachment, as the check is shown it: what it is, never what is in it. */
+export interface WatchAttachment {
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly size: number;
+}
+
+export interface WatchContent {
+  readonly summary: string;
+  readonly description: string;
+  readonly environment: string;
+  readonly attachments: readonly WatchAttachment[];
 }
 
 export type WatchDecision =

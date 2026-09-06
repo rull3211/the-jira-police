@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { FOOTER_SENTINEL } from "../triage/gate.ts";
-import { MAX_CONTEXT_COMMENTS, retriageContext } from "./context.ts";
-import type { WatchSignals } from "./decide.ts";
+import { MAX_CONTEXT_COMMENTS, MAX_FIELD_CHARS, retriageContext } from "./context.ts";
+import type { WatchContent, WatchSignals } from "./decide.ts";
 
 function ourComment(created: string, text = "Fill in the baseline.", updated: string = created) {
   return { created, updated, text: `# ↩ SEND BACK · SSX-1234\n\n${text}\n\n${FOOTER_SENTINEL}` };
@@ -19,6 +19,10 @@ function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
     closed: false,
     comments: [ourComment("2026-09-01T10:00:00.000+0200")],
     changes: [],
+    // Empty rather than absent, and spelled out in each fixture that needs it:
+    // `tsc` fails every one of them if `WatchContent` grows a field, which is
+    // what keeps four literals in step where a hand-copied *list* could not be.
+    content: { summary: "", description: "", environment: "", attachments: [] },
     ...overrides,
   };
 }
@@ -208,7 +212,7 @@ describe("the fields, which are filtered where the debug log is not", () => {
       }),
     );
 
-    expect(context?.fields).toEqual(["description"]);
+    expect(context?.fields.map((field) => field.name)).toEqual(["description"]);
   });
 
   it("drops board grooming rather than offering it as evidence", () => {
@@ -246,7 +250,91 @@ describe("the fields, which are filtered where the debug log is not", () => {
       }),
     );
 
-    expect(context?.fields).toEqual(["description", "summary"]);
+    expect(context?.fields.map((field) => field.name)).toEqual(["description", "summary"]);
+  });
+});
+
+describe("what a moved field is shown as saying", () => {
+  function edited(content: Partial<WatchContent>, fields: readonly string[] = ["description"]) {
+    return retriageContext(
+      signals({
+        changes: [{ created: "2026-09-02T09:00:00.000+0200", fields: [...fields] }],
+        content: {
+          summary: "",
+          description: "",
+          environment: "",
+          attachments: [],
+          ...content,
+        },
+      }),
+    );
+  }
+
+  it("carries the field's current text, which is the whole point of the change", () => {
+    // THE ONE THAT MATTERS. Before this, a description edit reached the check
+    // as the word "description" and nothing else, so the check correctly
+    // refused to certify content it had not seen — on the commonest way a
+    // reporter answers a sendback. Unplug the content and every one of those
+    // becomes a well-argued no.
+    const context = edited({ description: "Observed baseline: 42% of carts." });
+
+    expect(context?.fields[0]?.content).toBe("Observed baseline: 42% of carts.");
+  });
+
+  it("shows content only for the fields that actually moved", () => {
+    // The ticket's whole state is on the signals and handing all of it over
+    // would be cheaper to write and worse to answer: a description unchanged
+    // since triage is not evidence anybody responded, and a check shown it will
+    // find the sendback's own words in it and say yes.
+    const context = edited({ description: "the new answer", summary: "untouched summary" }, [
+      "description",
+    ]);
+
+    expect(context?.fields.map((field) => field.name)).toEqual(["description"]);
+    expect(JSON.stringify(context?.fields)).not.toContain("untouched summary");
+  });
+
+  it("names an attachment without offering its bytes", () => {
+    // "Attach the HAR" is an ordinary sendback and a filename answers it.
+    // Fetching contents would be a new untrusted-bytes path into a prompt.
+    const context = edited(
+      {
+        attachments: [{ filename: "network.har", mimeType: "application/json", size: 20480 }],
+      },
+      ["attachment"],
+    );
+
+    expect(context?.fields[0]?.content).toBe("network.har (application/json, 20.0 KB)");
+  });
+
+  it("keeps an entry for a field that was emptied", () => {
+    // A reporter who cleared the description moved it. Dropping the section
+    // would leave the check reading a ticket where nothing appeared to change —
+    // the same blindness, arriving through an omission instead of a missing
+    // fetch.
+    const context = edited({ description: "" });
+
+    expect(context?.fields).toHaveLength(1);
+    expect(context?.fields[0]?.content).toBe("");
+  });
+
+  it("caps a long field and says that it capped it", () => {
+    // Attacker-controlled text going into a prompt, so "however long the
+    // reporter made it" is not a bound. The flag is separate from the content
+    // because the prompt has to say so outside the fence, where a hostile
+    // description cannot imitate the notice.
+    const context = edited({ description: "x".repeat(MAX_FIELD_CHARS + 500) });
+
+    expect(context?.fields[0]?.truncated).toBe(true);
+    expect(context?.fields[0]?.content.length).toBeLessThanOrEqual(MAX_FIELD_CHARS + 1);
+  });
+
+  it("does not flag a field that fitted", () => {
+    // An off-by-one here puts "this was cut" on a complete description, which
+    // tells the check to distrust an answer that is all there.
+    const context = edited({ description: "x".repeat(MAX_FIELD_CHARS) });
+
+    expect(context?.fields[0]?.truncated).toBe(false);
   });
 });
 

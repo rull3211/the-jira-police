@@ -1289,6 +1289,18 @@ Things that look like details and are not:
     watched ticket may cost and a count of some of them reads exactly like a count of all of
     them.
 
+    **That same GET was widened the same day, and it is recorded as a widening rather than as a
+    third amendment.** `fetchActivity` now asks for `summary,description,environment,attachment`
+    alongside `status,labels` — four read-only fields, on a request already being made, for one
+    named issue. What forced it: `BLOCKER_CLEARING_FIELDS` are content fields, and the relevance
+    check was being handed the _name_ of a field that moved with none of its text, so the
+    commonest way a reporter answers a sendback — editing the description — could only ever be
+    refused. It failed closed, so it never spent; it simply declined everything, and each refusal
+    read like judgement. The distinction from the two amendments above is deliberate and is the
+    line to hold: those added a **write** and a **new endpoint**, this asks the discovery
+    credential for more of a ticket it is already reading. Nothing about attachment **bytes** is
+    fetched — names, types and sizes only — and widening past that is a fresh decision.
+
 12. **A capability is only withheld if something withholds it.** `--allowedTools` pre-approves;
     it does not restrict. This service ran for its whole life with three comments in
     `runner.ts` and one in `poster.ts` asserting that omission from that list was denial, and it

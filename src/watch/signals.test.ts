@@ -37,6 +37,7 @@ function activity(overrides: Partial<IssueActivity> = {}): IssueActivity {
     labels: [],
     comments: [],
     changes: [],
+    content: { summary: "", description: null, environment: null, attachments: [] },
     ...overrides,
   };
 }

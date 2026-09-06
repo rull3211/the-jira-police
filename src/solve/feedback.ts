@@ -67,6 +67,7 @@ import { mkdir, appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { logger } from "../logger.ts";
+import { shorten } from "../text.ts";
 import { FOOTER_SENTINEL } from "../triage/gate.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
 
@@ -154,38 +155,6 @@ const LIMITS = {
   /** The actionable half, so it gets the most room of the three. */
   remedy: 800,
 } as const;
-
-/**
- * Trims to a length on a word boundary, marking that it did.
- *
- * The ellipsis is not decoration. A silently-cut sentence reads as a model that
- * stopped mid-thought, which is a bug report someone will file; a marked one reads
- * as a harness that shortened something, which is what happened. Cutting at a space
- * rather than at the index avoids ending inside `mapToCommerceCar.ts:162`, where the
- * fragment left behind would be a plausible-looking wrong line number.
- *
- * Nothing is lost by this: the full verdict is in the run's own log and in the
- * `unresolved`/calibration record, and the reader this comment is written for is
- * deciding whether to split a ticket, not auditing the analysis.
- */
-export function shorten(text: string, limit: number): string {
-  if (text.length <= limit) {
-    return text;
-  }
-  const cut = text.slice(0, limit);
-  // A cut that already lands on a word boundary keeps the whole word. Without
-  // this the last complete word is thrown away for nothing, which is most
-  // visible on the short limits — it turned "the validation lives" into "the
-  // validation" and made the ellipsis look like it had eaten a clause.
-  if (text[limit] === " ") {
-    return `${cut.trimEnd()}…`;
-  }
-  const space = cut.lastIndexOf(" ");
-  // A limit shorter than the first word leaves no space to cut at. Falling back
-  // to the hard slice is right: the alternative is returning the whole string,
-  // which is a cap that stops capping exactly when the text is most unusual.
-  return `${(space > limit / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
-}
 
 /**
  * The dev-lens feedback an outcome carries, if it got far enough to have any.

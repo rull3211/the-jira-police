@@ -228,6 +228,33 @@ export interface JiraFieldChange {
  * would make every solve pay for a changelog fetch to serve a loop that runs on
  * a cadence of days.
  */
+/**
+ * What the blocker-clearing fields say *now*.
+ *
+ * The changelog names the fields that moved and this says what they hold, and
+ * both are needed for different halves of one question. A reporter answering a
+ * sendback usually does it by editing the description, so a watcher that knows
+ * `description` moved and cannot read it has to refuse every one of them — the
+ * commonest way an answer arrives, structurally unjudgeable.
+ *
+ * `description` and `environment` stay `unknown` for the same reason `body`
+ * does: they are ADF trees whose shape is Atlassian's to change, and `renderAdf`
+ * is where that vocabulary is allowed to be known.
+ */
+export interface IssueContent {
+  readonly summary: string;
+  readonly description: unknown;
+  readonly environment: unknown;
+  /**
+   * Names, types and sizes — never bytes.
+   *
+   * *"Attach the HAR"* is an ordinary sendback and a filename answers it. The
+   * contents would be a new untrusted-bytes path into a prompt, which is a
+   * privilege this read is deliberately not taking.
+   */
+  readonly attachments: readonly JiraAttachment[];
+}
+
 export interface IssueActivity {
   readonly key: string;
   /** Jira's `status.statusCategory.key`: `new`, `indeterminate` or `done`. */
@@ -236,6 +263,7 @@ export interface IssueActivity {
   readonly labels: readonly string[];
   readonly comments: readonly JiraComment[];
   readonly changes: readonly JiraFieldChange[];
+  readonly content: IssueContent;
 }
 
 /**
@@ -467,6 +495,16 @@ export class JiraClient {
    * new capability is the changelog, and nothing else. Recorded in
    * `ARCHITECTURE.md` §12 beside the first.
    *
+   * **Widened the same day to the blocker-clearing fields**, and deliberately
+   * recorded as a widening rather than a third amendment. It is four more
+   * read-only fields on a request this method already makes, asking for what
+   * `fetchDetail` asks for on every solve; the two amendments before it were
+   * different in kind — one a write, one a new endpoint exposing history. What
+   * forced it: the relevance check was being told `description` had moved and
+   * never shown what it said, so it correctly refused to certify content it
+   * could not see, and the commonest way a reporter answers a sendback could
+   * therefore never produce a yes. Failing closed, invisibly, on the main path.
+   *
    * **Both lists are paged to completion and a cap is an error, not a
    * truncation.** The obvious implementation is one request with
    * `expand=changelog` and `fields=comment`, which is cheaper and wrong in a way
@@ -489,8 +527,14 @@ export class JiraClient {
     // ticket has to know whether the label is on it. Asking Jira to remove one
     // that is not there is not an error — it is a write that changes nothing
     // and still bumps `updated`, which is the field the solve queue orders by.
+    //
+    // The content fields ride along on this same request rather than on a
+    // second one. `BLOCKER_CLEARING_FIELDS` and this list are the same set seen
+    // from two sides — the changelog says which of them moved, this says what
+    // they now hold — and fetching one without the other is what left the
+    // relevance check judging a field name.
     const statusResponse = await this.#get(
-      `/rest/api/3/issue/${key}?fields=status,labels`,
+      `/rest/api/3/issue/${key}?fields=status,labels,summary,description,environment,attachment`,
       "application/json",
     );
     const statusPayload = (await statusResponse.json()) as DetailPayload;
@@ -537,6 +581,17 @@ export class JiraClient {
         created: raw.created ?? "",
         fields: (raw.items ?? []).map((item) => item.field ?? ""),
       })),
+      content: {
+        summary: statusPayload.fields?.summary ?? "",
+        description: statusPayload.fields?.description,
+        environment: statusPayload.fields?.environment,
+        attachments: (statusPayload.fields?.attachment ?? []).map((raw) => ({
+          id: String(raw.id ?? ""),
+          filename: raw.filename ?? "",
+          mimeType: raw.mimeType ?? "",
+          size: raw.size ?? 0,
+        })),
+      },
     };
   }
 
@@ -686,6 +741,7 @@ interface DetailPayload {
     };
     readonly labels?: readonly string[];
     readonly description?: unknown;
+    readonly environment?: unknown;
     readonly comment?: { readonly comments?: readonly RawComment[] };
     readonly attachment?: readonly RawAttachment[];
   };

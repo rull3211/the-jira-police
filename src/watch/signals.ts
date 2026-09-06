@@ -49,5 +49,22 @@ export function toWatchSignals(activity: IssueActivity): WatchSignals {
       created: change.created,
       fields: change.fields,
     })),
+    // Rendered here for the same reason the comment bodies are: this is the one
+    // file allowed to know what ADF is, and a description that reached the
+    // relevance prompt as raw JSON would be a paid session asked to judge a
+    // syntax tree. The attachments are copied field by field rather than passed
+    // through, so the day the client learns to fetch their bytes, adding them
+    // to the prompt is a visible edit here rather than a widening that arrives
+    // by inheritance.
+    content: {
+      summary: activity.content.summary,
+      description: renderAdf(activity.content.description),
+      environment: renderAdf(activity.content.environment),
+      attachments: activity.content.attachments.map((attachment) => ({
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+      })),
+    },
   };
 }
