@@ -618,6 +618,52 @@ a mistake there costs a re-triage rather than a line of output. That is Phase A'
 to F: **the field can be wrong for weeks at no cost while nothing reads it, and how often it is
 wrong is the only thing that decides whether the watcher is worth arming.**
 
+#### The first live run, SSX-3830, 2026-09-06 — and the calibration question was masked by the population it was asked about
+
+Driven by hand in three steps, each one `pnpm watch:once SSX-3830` against the real board, and the
+ordering was the point: the ticket was read **before** anything was done to it, then after a
+comment, then after a description edit.
+
+| state of the ticket     | comments | changes | decision                                           |
+| ----------------------- | -------- | ------- | -------------------------------------------------- |
+| untouched since triage  | 1        | 3       | `quiet`                                            |
+| a human commented       | 2        | 3       | `RETRIAGE` — a comment from somebody else at 02:59 |
+| description also edited | 2        | 4       | `RETRIAGE` — **the comment again**                 |
+
+**The first row is the one that had never been proved.** One comment, ours, sitting on the ticket,
+and the watcher declined to spend. That is the self-trigger guard — the mutation this file calls
+_invisible in review and obvious on the invoice_ — firing against a comment the poster really wrote
+and Jira really round-tripped, rather than against the hand-built `em` fixture that found the
+sentinel bug. The two halves of that seam are now closed from both ends.
+
+**The third row is a defect in the command, not in the decision.** `decideWatch` reads comments
+before the changelog and returns on the first trigger, so the field that moved is never named on
+any ticket somebody also commented on — which is precisely the ticket a reporter answering a
+sendback produces. The one question `watch:once` exists to answer is therefore invisible on the
+whole population it was pointed at, and it looked like a pass. The debug line now dumps every
+distinct field name in the changelog, unfiltered and regardless of age, because **a list filtered
+by `BLOCKER_CLEARING_FIELDS` can only ever confirm the guess it was filtered by.**
+
+With that, SSX-3830 answers it: `description`, `labels`, `resolution`, `status`. So `description`
+is spelled exactly that on this board and the allowlist is right — a guess, now an observation.
+
+**`labels` is the finding, and it is load-bearing in a way only the live names revealed.** This
+service writes labels constantly — `triaged`, `dor:*`, the whole `agent:*` machine, and F's own
+unsubscribe. Every one is a changelog entry on a watched ticket, and the comment-kind exclusion
+**cannot see them**, because they are not comments. What stops them re-triggering the watch is only
+that `labels` is not allowlisted. So the allowlist is doing two jobs at once: relevance filter, and
+the changelog's entire self-trigger defence. The general rule was already written down — _our own
+activity is excluded by kind, never by clock_ — and this is its concrete instance, which turns it
+into a constraint on anyone widening the set later: **a field this service writes must never be
+allowlisted**, which rules out `labels` permanently rather than by luck.
+
+**One open divergence, found by reading the first row.** `MAX_RETRIAGE_PER_TICKET` counts every
+comment of ours, and the original triage comment is one. So §7b's _"after three attempts the watch
+is dropped"_ buys two re-triages, not three, and a ticket re-triaged by hand three times during
+development reads `exhausted` on sight. Both readings are arguable — the first triage was a paid run
+— but the prose and the behaviour disagree, which is this project's own defect class. Decide it
+before the watcher spends, not after.
+
 ---
 
 ## Phasing

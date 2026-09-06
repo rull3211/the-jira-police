@@ -50,6 +50,20 @@ async function look(client: JiraClient, key: string, maxRetriage: number): Promi
     comments: signals.comments.length,
     changes: signals.changes.length,
     decision: decision.kind,
+    // **The calibration datum, and the decision cannot carry it.**
+    //
+    // `decideWatch` reads comments before the changelog and returns on the
+    // first trigger, so any ticket somebody has also commented on reports the
+    // comment and says nothing about the fields — which is precisely the
+    // ticket a reporter answering a sendback produces. The one question this
+    // command exists to answer would therefore be masked on exactly the
+    // population it was pointed at.
+    //
+    // Every distinct field name, whatever its age and whether or not it is
+    // allowlisted, because the failure being hunted is a name this board uses
+    // that `BLOCKER_CLEARING_FIELDS` does not: a filtered list can only ever
+    // confirm the guess it was filtered by.
+    fields: [...new Set(signals.changes.flatMap((change) => change.fields))].toSorted(),
   });
 
   return decision;
