@@ -6,7 +6,8 @@
  * and the poster that writes — and they need identical handling of the parts
  * that are easy to get subtly wrong: the line-buffered NDJSON stream, the two
  * budgets and the watchdog that must kill the child rather than merely reject,
- * the MCP connectivity check, and the rule that a run which exits 0 without
+ * the MCP connectivity check, the tool denials a run reports while still
+ * calling itself a success, and the rule that a run which exits 0 without
  * structured output is a failure rather than an empty success.
  *
  * Duplicating that between two files would mean two chances to fix a bug in
@@ -279,6 +280,92 @@ export function sessionCost(event: Record<string, unknown>): SessionCost {
 }
 
 /**
+ * A tool call the environment refused.
+ *
+ * The name and nothing else. The result event's `permission_denials` entries
+ * also carry the whole `tool_input`, and dropping it is the point rather than
+ * an omission: the 2026-09-06 probe caught a denial whose input was the body of
+ * a `.env` write, so carrying that field would copy the exact bytes a guard had
+ * just refused into a log this service writes and keeps. The name answers the
+ * question the harness is actually asking — *was a tool I granted vetoed* — and
+ * the input does not.
+ */
+export interface SessionDenial {
+  readonly tool: string;
+}
+
+/**
+ * Every tool call the run reports as refused, which is the second gate this
+ * harness could not see.
+ *
+ * `DENIED_BUILTIN_TOOLS` above reasons about `--allowedTools` and
+ * `--disallowedTools` and concludes what the session may do. A `PreToolUse`
+ * hook fires ahead of permission resolution and vetoes per call, so no
+ * permission mode this harness can pass evades it — and the solve subprocess
+ * inherits the operator's hooks, because `childEnv` passes `HOME`. One of them
+ * denied the write pass its `Write` tool on SSX-3832, the run reported a clean
+ * exit, and the only record was the model happening to mention it.
+ *
+ * ## Probed 2026-09-06, and the result event is the honest place to read it
+ *
+ * A denial arrives mid-stream as an ordinary `user` message whose `tool_result`
+ * carries `is_error: true` — by that field alone indistinguishable from a file
+ * that did not exist. What separates them is `tool_result_meta[]
+ * .non_execution_kind === "permission-rule"`, which is `null` on an ordinary
+ * error. The `result` event then repeats the whole set in `permission_denials`,
+ * which is what this reads: one place, complete, and nothing to correlate
+ * across events.
+ *
+ * **The run still says `subtype: "success"` and `is_error: false`.** That is
+ * the whole of the defect. A pass can have a tool vetoed and exit clean, so the
+ * existing check three lines below this function's only call site sees nothing.
+ *
+ * ## Two things it deliberately does not do, both measured rather than assumed
+ *
+ * A hook, a deny rule and don't-ask mode all land in the same array, all tagged
+ * `"permission-rule"`. Only the free text of the mid-stream message names a
+ * hook, and some hooks emit no recognisable prefix, so attributing a denial to
+ * a hook would undercount — quietly, and in the direction of reassurance. It is
+ * not attempted: *the environment refused a tool I granted* is the fact worth
+ * having, and its source changes nothing about what to do next.
+ *
+ * And a hook that **allows but degrades** — mutating the input, injecting
+ * context — leaves no structural signal anywhere in the stream, since both
+ * denial-bearing fields are gated on the call not executing. The quieter half
+ * of SSX-3832, a `Grep` that came back useless, is therefore *not* covered
+ * here, and this must not be read as covering it. That was the one question the
+ * probe could not answer, because authoring a hook to test it is blocked on
+ * this machine by three separate guards.
+ *
+ * ## Why nothing acts on it yet
+ *
+ * A denial is material but not automatically fatal, and this service has the
+ * counterexample in its own history: the D4c commenter run was denied
+ * `getAccessibleAtlassianResources` by don't-ask mode, worked around it, and
+ * posted the comment correctly. Failing that run would have been wrong. The
+ * obvious next consumer is `AbandonCause` — a fix pass that abandons for
+ * `judgement` while the harness watched its `Write` be vetoed is reporting
+ * `environment`, whatever it says — but the denials would have to reach the
+ * orchestrator, which means widening `PassRunner.run`, and that is a larger
+ * change than the observation it would rest on. Until then the log line is the
+ * product, and it carries the pass and the issue key in its label.
+ *
+ * Total, like `sessionCost`: this is telemetry about a run whose verdict is
+ * already decided, and a malformed array must not turn a working solve into a
+ * failed one.
+ */
+export function sessionDenials(event: Record<string, unknown>): readonly SessionDenial[] {
+  const denials = event["permission_denials"];
+  if (!Array.isArray(denials)) {
+    return [];
+  }
+  return denials.flatMap((entry: unknown) => {
+    const tool = (entry as Record<string, unknown> | null | undefined)?.["tool_name"];
+    return typeof tool === "string" && tool !== "" ? [{ tool }] : [];
+  });
+}
+
+/**
  * Runs the child and hands its `structured_output` to `parse`.
  *
  * `parse` may throw to reject the run — that is how the analyst refuses an
@@ -424,6 +511,27 @@ export async function runSession<T>(
         // whose cost would otherwise never be counted — which would make the
         // per-ticket total look best on the days it went worst.
         logger.info("session.cost", { label: options.label, ...sessionCost(event) });
+
+        // Also before the success check, and for a sharper version of the same
+        // reason: a run that was stopped by a hook reports `success`, so the
+        // denials on a run that *did* fail are the ones most worth having.
+        //
+        // `warn` rather than `info`. This is the harness being told that its
+        // own model of the session's tool surface was wrong for this run, which
+        // is not a statistic — it is the reason a $4.50 pass may have to be
+        // bought again, and under E nobody is watching the terminal.
+        const denials = sessionDenials(event);
+        if (denials.length > 0) {
+          logger.warn("session.denied", {
+            label: options.label,
+            count: denials.length,
+            // Deduplicated for reading, counted above for arithmetic: the model
+            // retries a refused call under another tool, so three denials of
+            // two tools is a different event from three denials of three.
+            tools: [...new Set(denials.map((denial) => denial.tool))].toSorted(),
+            sessionId,
+          });
+        }
 
         if (event["subtype"] !== "success" || event["is_error"] === true) {
           failure ??= new SessionError(`${options.label} failed: ${String(event["subtype"])}`);

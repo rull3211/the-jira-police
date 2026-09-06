@@ -6,6 +6,7 @@ import {
   SessionTimeoutError,
   runSession,
   sessionCost,
+  sessionDenials,
   watchdogIntervalFor,
 } from "./session.ts";
 
@@ -98,6 +99,74 @@ describe("sessionCost", () => {
       cacheReadTokens: null,
       cacheWriteTokens: null,
     });
+  });
+});
+
+describe("sessionDenials", () => {
+  /**
+   * A real denial, captured 2026-09-06 from a nested headless run whose `Write`
+   * was refused by a local guard.
+   *
+   * The `tool_input` is kept in the fixture precisely because it must not come
+   * out the other side: this is the shape of the field, and its content is the
+   * body of a `.env` write, which is what a denial's input looks like when it
+   * is worth denying.
+   */
+  const DENIED = {
+    ...RESULT,
+    permission_denials: [
+      {
+        tool_name: "Write",
+        tool_use_id: "toolu_vrtx_01MHNioehxyTTWEqpsv9ioMN",
+        tool_input: { file_path: "/tmp/hookprobe/.env", content: "FOO=bar\n" },
+      },
+    ],
+  };
+
+  it("names the tool a real denial refused", () => {
+    expect(sessionDenials(DENIED)).toStrictEqual([{ tool: "Write" }]);
+  });
+
+  // The guard, not the formatting. `toStrictEqual` above would already fail on
+  // an extra key, but this says why in the name: the refused bytes must not be
+  // copied into a log by a later change that helpfully carries more through.
+  it("does not carry the refused input out with the name", () => {
+    expect(Object.keys(sessionDenials(DENIED)[0] ?? {})).toStrictEqual(["tool"]);
+  });
+
+  // The run that was stopped still calls itself a success, which is the entire
+  // reason this array is read rather than the result's error status.
+  it("reads a denial off an event reporting success", () => {
+    expect(DENIED.subtype).toBe("success");
+    expect(sessionDenials(DENIED)).toHaveLength(1);
+  });
+
+  // Counted, not deduplicated. The model retries a refused call under another
+  // tool, so the number of attempts and the number of tools are two facts.
+  it("counts every attempt, including a second denial of the same tool", () => {
+    expect(
+      sessionDenials({
+        permission_denials: [{ tool_name: "Write" }, { tool_name: "Write" }, { tool_name: "Read" }],
+      }),
+    ).toStrictEqual([{ tool: "Write" }, { tool: "Write" }, { tool: "Read" }]);
+  });
+
+  it("reports no denials for a run that had none", () => {
+    expect(sessionDenials({ ...RESULT })).toStrictEqual([]);
+    expect(sessionDenials({ ...RESULT, permission_denials: [] })).toStrictEqual([]);
+  });
+
+  // Same rule as `sessionCost`: telemetry attached to a verdict already
+  // reached must not be able to turn a solve that worked into one that did not.
+  it.each([
+    ["a missing array", {}],
+    ["a null array", { permission_denials: null }],
+    ["an array that is not one", { permission_denials: "Write" }],
+    ["an entry that is not an object", { permission_denials: ["Write", null, 7] }],
+    ["an entry with no tool name", { permission_denials: [{ tool_use_id: "toolu_1" }] }],
+    ["an entry naming an empty tool", { permission_denials: [{ tool_name: "" }] }],
+  ])("survives %s without throwing or inventing a denial", (_label, event) => {
+    expect(sessionDenials(event as Record<string, unknown>)).toStrictEqual([]);
   });
 });
 
@@ -384,5 +453,93 @@ describe("runSession cost reporting", () => {
       expect.objectContaining({ costUsd: 0.42, turns: 7 }),
     );
     info.mockRestore();
+  });
+});
+
+describe("runSession denial reporting", () => {
+  /**
+   * The second gate, which the harness could not see until this landed.
+   *
+   * Two assertions and they pull in opposite directions on purpose. The run
+   * **resolves** — a denial is material, not fatal, and the counterexample is
+   * this service's own: the D4c commenter was denied an Atlassian tool by
+   * don't-ask mode, routed around it, and posted the right comment. And the
+   * denial is **warned** — because the same event says `subtype: "success"`,
+   * so silence here is indistinguishable from a run whose tools were all
+   * granted, which is exactly what happened on SSX-3832.
+   *
+   * The mutation: drop the log and this fails while every other test in the
+   * file still passes, which is the shape of the bug being fixed.
+   */
+  it("records a refused tool on a run that otherwise succeeded", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    await expect(
+      runSession(
+        fakeSession([
+          {
+            ...RESULT,
+            structured_output: { ok: true },
+            permission_denials: [
+              { tool_name: "Write", tool_input: { content: "FOO=bar\n" } },
+              { tool_name: "Write", tool_input: { content: "FOO=bar\n" } },
+            ],
+          },
+        ]),
+        () => "parsed",
+      ),
+    ).resolves.toBe("parsed");
+
+    expect(warn).toHaveBeenCalledWith("session.denied", {
+      label: "fake pass of SSX-1234",
+      count: 2,
+      tools: ["Write"],
+      sessionId: null,
+    });
+    warn.mockRestore();
+  });
+
+  // The guard against a log line that cries every run. `session.denied` is
+  // warn-level and meant to be read, so an empty array must say nothing.
+  it("says nothing about a run that had no tool refused", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    await expect(
+      runSession(fakeSession([{ ...RESULT, structured_output: { ok: true } }]), () => "parsed"),
+    ).resolves.toBe("parsed");
+
+    expect(warn).not.toHaveBeenCalledWith("session.denied", expect.anything());
+    warn.mockRestore();
+  });
+
+  /**
+   * Same placement argument as the cost line, one notch sharper.
+   *
+   * A denial is most interesting on the run it stopped, and that run reaches
+   * the result event with a failing `subtype`. Move this below the success
+   * check and the harness reports denials for every run except the ones where
+   * the denial mattered.
+   */
+  it("still reports the denial on a run that then failed", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    await expect(
+      runSession(
+        fakeSession([
+          {
+            type: "result",
+            subtype: "error_during_execution",
+            permission_denials: [{ tool_name: "Edit" }],
+          },
+        ]),
+        () => "parsed",
+      ),
+    ).rejects.toThrow(SessionError);
+
+    expect(warn).toHaveBeenCalledWith(
+      "session.denied",
+      expect.objectContaining({ count: 1, tools: ["Edit"] }),
+    );
+    warn.mockRestore();
   });
 });
