@@ -23,7 +23,8 @@ const BASE = {
   skillName: "intake-triage",
   executable: "storecode",
   workingDirectory: "/tmp",
-  timeoutMs: 1000,
+  idleMs: 600_000,
+  maxRunMs: 1000,
   deep: false,
   requiredMcpServers: ["atlassian"],
 } as const;

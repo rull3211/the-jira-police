@@ -122,10 +122,25 @@ describe("buildTriageOptions", () => {
     ).toThrow(/TRIAGE_TIMEOUT_MS must be at least 1/);
   });
 
-  it("carries the shipped default through unchanged", () => {
+  it("carries the shipped defaults through unchanged", () => {
     const options = buildTriageOptions(settingsWith({ SKILL_NAME: "mock-triage" }), "SSX-1");
 
-    expect(options.timeoutMs).toBe(1_200_000);
+    expect(options.maxRunMs).toBe(1_200_000);
+    expect(options.idleMs).toBe(600_000);
+  });
+
+  it("gives the silence budget its own setting rather than deriving it", () => {
+    const options = buildTriageOptions(
+      settingsWith({ SKILL_NAME: "mock-triage", SESSION_IDLE_TIMEOUT_MS: "90000" }),
+      "SSX-1",
+    );
+
+    // The pairing is the point: moving one budget must not move the other.
+    // Deriving the idle budget from the ceiling — a fraction of it, say — is
+    // the shape this rejects, because it would let raising the ceiling for a
+    // slow repository quietly buy a wedged pass an extra half hour too.
+    expect(options.idleMs).toBe(90_000);
+    expect(options.maxRunMs).toBe(1_200_000);
   });
 });
 

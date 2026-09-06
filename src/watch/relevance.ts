@@ -98,7 +98,8 @@ export interface RelevanceChecker {
 export interface RelevanceOptions {
   readonly executable: string;
   readonly workingDirectory: string;
-  readonly timeoutMs: number;
+  readonly idleMs: number;
+  readonly maxRunMs: number;
 }
 
 /**
@@ -288,7 +289,8 @@ export function createRelevanceChecker(options: RelevanceOptions): RelevanceChec
           executable: options.executable,
           args: buildRelevanceArgs(input),
           workingDirectory: options.workingDirectory,
-          timeoutMs: options.timeoutMs,
+          idleMs: options.idleMs,
+          maxRunMs: options.maxRunMs,
           env: childEnv(process.env),
           // The only session in this service that requires no MCP server, and
           // the empty list is the assertion rather than an omission: this one

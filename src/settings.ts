@@ -114,7 +114,7 @@ export const SETTINGS = [
   {
     name: "TRIAGE_TIMEOUT_MS",
     description:
-      "Per-issue wall-clock budget before the run is killed. Guards against a wedged session blocking the loop forever, and that is the only thing it is for — it is a cap, not a target, so a run that finishes in two minutes costs nothing extra for the headroom above it. Raised from 600000 on 2026-09-04: SSX-3831 blew through ten minutes and then completed in four and a half on an unchanged retry, so the same ticket varied by more than 2x and the shorter budget killed a run that was not stuck. That failure is expensive and silent-looking — the session is billed in full, the artifact is never written, and the operator sees a stack trace rather than a verdict — whereas the cost of overshooting is only that a genuinely hung run holds the queue longer before it is reaped.",
+      "Absolute ceiling on one triage run, counting only time the machine was awake. It is a cap, not a target, so a run that finishes in two minutes costs nothing extra for the headroom above it. Catching a wedged session is no longer what it is for — that is SESSION_IDLE_TIMEOUT_MS, which asks the better question and answers it sooner; this only stops a run that keeps talking and never finishes. Raised from 600000 on 2026-09-04: SSX-3831 blew through ten minutes and then completed in four and a half on an unchanged retry, so the same ticket varied by more than 2x and the shorter budget killed a run that was not stuck. That failure is expensive and silent-looking — the session is billed in full, the artifact is never written, and the operator sees a stack trace rather than a verdict — whereas the cost of overshooting is only that a genuinely hung run holds the queue longer before it is reaped. Note the variance argument is the reason a ceiling is a poor primary guard: it has to be sized for the slowest legitimate run, which is exactly what makes it useless against a fast failure.",
     fallback: "1200000",
   },
   {
@@ -184,9 +184,15 @@ export const SETTINGS = [
     fallback: "900000",
   },
   {
+    name: "SESSION_IDLE_TIMEOUT_MS",
+    description:
+      "How long any model session may go without producing a byte before it is killed. This is the budget that does the work, and it is one number for every session because silence is the same question whether the pass is triaging a ticket or editing a repository: a healthy headless run emits an NDJSON event per turn and per tool call, so it is never quiet for long. Time the machine spent asleep does not count against it — the watchdog in session.ts detects a suspend by timer drift and credits the gap back. Sized for the slowest single tool call a pass can make, not for the pass, because that is the only thing that legitimately produces silence.",
+    fallback: "600000",
+  },
+  {
     name: "SOLVE_TIMEOUT_MS",
     description:
-      "Per-pass wall-clock budget for a solve session, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones. Wall-clock means wall-clock: a machine that sleeps mid-pass spends the budget without the pass running, which killed a recon on SSX-3831 that had done nothing wrong. Harmless for a hand-driven run on a waking machine and not harmless for E, where a laptop daemon meets this every night.",
+      "Absolute ceiling on one solve session, counting only time the machine was awake. Per-pass, not per-ticket: a solve is four sessions, so a ticket may legitimately take four times this. Higher than TRIAGE_TIMEOUT_MS because the work is harder — triage reads a ticket and a vault, whereas a fix pass reads a repository it has never seen and edits it — and because the failure is worse. A killed triage costs one re-run; a killed fix pass leaves a worktree half-edited, and the pipeline deliberately does not retry it, so an overtight budget here converts slow runs into abandoned ones. This used to be a wall-clock deadline armed once at spawn, which meant a machine that slept mid-pass spent the budget without the pass running and killed a recon on SSX-3831 that had done nothing wrong. It is now sleep-excluded and it is the backstop rather than the mechanism: SESSION_IDLE_TIMEOUT_MS is what actually catches a wedged pass, and this is what stops one that streams forever.",
     fallback: "1800000",
   },
   {
@@ -396,11 +402,11 @@ export function describeSettings(settings: Settings): Record<string, string> {
  * The finite check alone was not enough, and the gap is easy to miss because
  * every value here is a duration or a count and neither has a meaningful
  * negative. `Number("-1")` is perfectly finite, so a stray minus sign used to
- * sail through and land somewhere that reads much worse than it looks:
- * `setTimeout` treats a negative delay as zero, so a negative
- * `TRIAGE_TIMEOUT_MS` does not disable the timeout, it fires it immediately and
- * kills every run at the starting line. A negative poll interval is the same
- * bug wearing a different hat — a busy loop against Jira.
+ * sail through and land somewhere that reads much worse than it looks: a
+ * negative `TRIAGE_TIMEOUT_MS` does not disable the budget, it makes the run
+ * already over it, so the watchdog kills every session on its first tick. A
+ * negative poll interval is the same bug wearing a different hat — a busy loop
+ * against Jira.
  *
  * `min` defaults to 0 because that is the weakest claim true of every caller.
  * The two settings where zero is itself nonsense pass `min: 1`; the ones where

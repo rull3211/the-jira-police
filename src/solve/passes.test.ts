@@ -51,7 +51,12 @@ async function capture(
     parse({ ok: true }),
   );
 
-  const runner = createPassRunner({ executable: "/bin/storecode", timeoutMs: 900_000, parentEnv });
+  const runner = createPassRunner({
+    executable: "/bin/storecode",
+    idleMs: 600_000,
+    maxRunMs: 900_000,
+    parentEnv,
+  });
   await runner.run("recon", { ...options, ...overrides }, (value) => value);
 
   return firstSession();
@@ -113,7 +118,11 @@ describe("createPassRunner", () => {
       runSession.mockImplementation((_s: Captured, parse: (value: unknown) => unknown) =>
         parse({}),
       );
-      const runner = createPassRunner({ executable: "/bin/storecode", timeoutMs: 1000 });
+      const runner = createPassRunner({
+        executable: "/bin/storecode",
+        idleMs: 600_000,
+        maxRunMs: 1000,
+      });
       await runner.run(pass, options, (value) => value);
       const { args } = firstSession();
       return (args[args.indexOf("--allowedTools") + 1] ?? "").split(",");
@@ -144,7 +153,11 @@ describe("createPassRunner", () => {
     );
     const parse = vi.fn(() => "parsed");
 
-    const runner = createPassRunner({ executable: "/bin/storecode", timeoutMs: 1000 });
+    const runner = createPassRunner({
+      executable: "/bin/storecode",
+      idleMs: 600_000,
+      maxRunMs: 1000,
+    });
     const result = await runner.run("fix", options, parse);
 
     expect(result).toBe("parsed");
@@ -157,7 +170,11 @@ describe("createPassRunner", () => {
     runSession.mockReset();
     runSession.mockRejectedValue(new Error("session died"));
 
-    const runner = createPassRunner({ executable: "/bin/storecode", timeoutMs: 1000 });
+    const runner = createPassRunner({
+      executable: "/bin/storecode",
+      idleMs: 600_000,
+      maxRunMs: 1000,
+    });
 
     await expect(runner.run("fix", options, (value) => value)).rejects.toThrow("session died");
     expect(runSession).toHaveBeenCalledTimes(1);

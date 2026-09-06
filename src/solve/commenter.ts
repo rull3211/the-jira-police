@@ -176,7 +176,8 @@ export const COMMENT_SCHEMA = {
 export interface CommenterOptions {
   readonly executable: string;
   readonly workingDirectory: string;
-  readonly timeoutMs: number;
+  readonly idleMs: number;
+  readonly maxRunMs: number;
 }
 
 export class CommentError extends Error {}
@@ -276,7 +277,8 @@ export function createTicketCommenter(options: CommenterOptions): TicketCommente
           executable: options.executable,
           args: buildCommentArgs(issueKey, body),
           workingDirectory: options.workingDirectory,
-          timeoutMs: options.timeoutMs,
+          idleMs: options.idleMs,
+          maxRunMs: options.maxRunMs,
           env: childEnv(process.env),
           requiredMcpServers: ["atlassian"],
           label: `Comment on ${issueKey}`,

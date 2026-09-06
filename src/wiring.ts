@@ -138,9 +138,11 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
     skillName: settings.SKILL_NAME,
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
-    // At least 1ms: zero is not "no timeout", it is a timeout that has already
-    // expired, so it would kill every run instantly instead of disabling the cap.
-    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+    // At least 1ms, both of them: zero is not "no timeout", it is a budget that
+    // has already expired, so it would kill every run on the watchdog's first
+    // tick instead of disabling the cap.
+    idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+    maxRunMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
     deep: false,
     // Requiring a live Atlassian session from a skill that reads nothing
     // would fail runs for a reason unrelated to what is being exercised.
@@ -277,7 +279,8 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
       mutation: payload.mutation,
       executable: template.executable,
       workingDirectory: template.workingDirectory,
-      timeoutMs: template.timeoutMs,
+      idleMs: template.idleMs,
+      maxRunMs: template.maxRunMs,
     });
 
     return payload;
@@ -368,7 +371,8 @@ export function createSolveCommenter(settings: Settings): TicketCommenter {
     workingDirectory: process.cwd(),
     // Floored at 1ms on the same grounds as everywhere else: zero is not "no
     // timeout", it is one that expired before the session started.
-    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+    idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+    maxRunMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
   });
 }
 
@@ -391,7 +395,8 @@ export function createWatchChecker(settings: Settings): RelevanceChecker {
   return createRelevanceChecker({
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
-    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+    idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+    maxRunMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
   });
 }
 
@@ -561,8 +566,9 @@ export function createSolveRunDeps(settings: Settings): SolveDependencies {
     passes: createPassRunner({
       executable: settings.STORECODE_PATH,
       // Floored at 1ms on the same grounds as the triage budget: zero is not
-      // "no timeout", it is a timeout that expired before the pass started.
-      timeoutMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
+      // "no timeout", it is a budget that expired before the pass started.
+      idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+      maxRunMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
     }),
   };
 }

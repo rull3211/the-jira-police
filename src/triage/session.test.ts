@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { logger } from "../logger.ts";
-import { SessionError, runSession, sessionCost } from "./session.ts";
+import {
+  SessionError,
+  SessionTimeoutError,
+  runSession,
+  sessionCost,
+  watchdogIntervalFor,
+} from "./session.ts";
 
 /**
  * A real `result` event, trimmed to the fields this reads.
@@ -109,12 +115,235 @@ function fakeSession(events: readonly Record<string, unknown>[]) {
     executable: process.execPath,
     args: ["-e", `process.stdout.write(${JSON.stringify(script)})`],
     workingDirectory: process.cwd(),
-    timeoutMs: 10_000,
+    idleMs: 600_000,
+    maxRunMs: 10_000,
     env: process.env,
     requiredMcpServers: [] as readonly string[],
     label: "fake pass of SSX-1234",
   };
 }
+
+/**
+ * A fake storecode that behaves rather than merely printing.
+ *
+ * The budgets here are in hundreds of milliseconds, which is the whole reason
+ * `watchdogIntervalFor` is a function: a fixed fifteen-second tick would make
+ * every assertion below either a fifteen-second wait or a lie.
+ */
+function behavingSession(body: string, overrides: Record<string, unknown> = {}) {
+  return {
+    executable: process.execPath,
+    args: ["-e", body],
+    workingDirectory: process.cwd(),
+    idleMs: 800,
+    maxRunMs: 60_000,
+    env: process.env,
+    requiredMcpServers: [] as readonly string[],
+    label: "fake pass of SSX-1234",
+    ...overrides,
+  };
+}
+
+/**
+ * Speaks once and then wedges, which is the case worth testing.
+ *
+ * A child that never says anything would also be caught by a deadline armed at
+ * spawn; a child that starts normally and then stops is the one the old
+ * mechanism could not see, because from its point of view a healthy long run
+ * and a run that died after ten seconds look identical until the budget
+ * expires.
+ */
+const WEDGED = 'process.stdout.write("starting\\n"); setTimeout(() => {}, 60000)';
+
+/**
+ * Talks steadily for 2.5s and then exits of its own accord.
+ *
+ * Deliberately not JSON: a line this module cannot parse is still proof the
+ * child is alive, and liveness is a question about the process rather than
+ * about the schema.
+ */
+const CHATTY =
+  'const t = setInterval(() => process.stdout.write("still here\\n"), 100); setTimeout(() => clearInterval(t), 2500)';
+
+/**
+ * The rejection, typed, and an assertion that there was one.
+ *
+ * `runSession` resolves to whatever the parser returned, so the obvious
+ * `runSession(...).catch((thrown) => thrown as SessionTimeoutError)` awaits a
+ * union with that value in it and every property read off the result is a type
+ * error. The cast is also a lie in the case that matters: a run which
+ * unexpectedly *succeeded* would carry the parsed value into the assertions
+ * below and fail somewhere that says nothing about why. This narrows by
+ * observing the rejection rather than by asserting it, and a resolution stops
+ * here with the reason.
+ */
+async function failureOf<E extends Error>(run: Promise<unknown>): Promise<E> {
+  try {
+    await run;
+  } catch (thrown) {
+    return thrown as E;
+  }
+  throw new Error("expected the session to fail, and it resolved");
+}
+
+describe("watchdogIntervalFor", () => {
+  it("uses the shipped interval for the shipped budgets", () => {
+    expect(watchdogIntervalFor(600_000, 1_800_000)).toBe(15_000);
+  });
+
+  // Enforcement can only be as fine as the tick, so a budget near or below the
+  // interval would otherwise be silently rounded up to it.
+  it("looks at least twice inside the smaller budget", () => {
+    expect(watchdogIntervalFor(1000, 60_000)).toBe(500);
+    expect(watchdogIntervalFor(60_000, 1000)).toBe(500);
+  });
+
+  it("will not become a busy loop for a budget of one millisecond", () => {
+    expect(watchdogIntervalFor(1, 1)).toBe(25);
+  });
+});
+
+describe("runSession budgets", () => {
+  /**
+   * The bug this whole mechanism replaced, stated as a test.
+   *
+   * A child that is producing output is working, and the old single
+   * `setTimeout` armed at spawn could not tell it from one that had wedged in
+   * the first second. This child talks continuously and must therefore die of
+   * the ceiling and never of the silence budget.
+   *
+   * The mutation: delete the `lastActivityAt = Date.now()` in the stdout
+   * handler and this fails, killed as `idle` at 1.5s.
+   *
+   * The budget is well above what node needs to boot, deliberately. The silence
+   * clock starts at spawn — correct in production, where it is ten minutes
+   * against a startup measured in hundreds of milliseconds — but an earlier
+   * draft of this test set it to 300ms and passed alone while failing inside
+   * the full suite, where the machine is busy enough that the child had not
+   * started before its budget expired.
+   */
+  it("does not charge a streaming pass against the silence budget", async () => {
+    const error = await failureOf(
+      runSession(behavingSession(CHATTY, { idleMs: 1500, maxRunMs: 60_000 }), () => "parsed"),
+    );
+
+    // It ran its full 2.5 seconds and exited on its own, so it was never
+    // killed — the failure here would be a SessionTimeoutError of kind
+    // `idle`, and the only thing keeping it alive is that its own chatter
+    // keeps resetting the budget.
+    expect(error).toBeInstanceOf(SessionError);
+    expect(error).not.toBeInstanceOf(SessionTimeoutError);
+    expect(error.message).toMatch(/without structured output/);
+  }, 20_000);
+
+  /**
+   * The path that had no test at all before this change: nothing anywhere
+   * asserted that a child is ever actually killed.
+   */
+  it("kills a child that has stopped talking", async () => {
+    const started = Date.now();
+    const error = await failureOf<SessionTimeoutError>(
+      runSession(behavingSession(WEDGED, { idleMs: 800 }), () => "parsed"),
+    );
+
+    expect(error).toBeInstanceOf(SessionTimeoutError);
+    expect(error.kind).toBe("idle");
+    expect(error.message).toMatch(/produced no output/);
+    // Reaped promptly rather than at the ceiling, which is sixty seconds away.
+    expect(Date.now() - started).toBeLessThan(8000);
+  });
+
+  /**
+   * The resume handle, and the reason the init event is now read for more than
+   * its MCP block.
+   *
+   * Probed 2026-09-06: a storecode transcript is written as the run goes,
+   * survives `SIGKILL`, and `--resume <id>` reads it back with the completed
+   * turns intact. So this id is the difference between a killed pass being lost
+   * work and being recoverable by hand. It exists nowhere else once the child
+   * is gone.
+   */
+  it("carries the killed run's session id out with the error", async () => {
+    const init = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "a62b6195-ea02-4c62-8331-7cd1ec3b971b",
+      mcp_servers: [],
+    });
+    const error = await failureOf<SessionTimeoutError>(
+      runSession(
+        behavingSession(`process.stdout.write(${JSON.stringify(`${init}\n`)}); ${WEDGED}`, {
+          idleMs: 800,
+        }),
+        () => "parsed",
+      ),
+    );
+
+    expect(error).toBeInstanceOf(SessionTimeoutError);
+    expect(error.sessionId).toBe("a62b6195-ea02-4c62-8331-7cd1ec3b971b");
+  });
+
+  it("reports no session id when the run never named one", async () => {
+    const error = await failureOf<SessionTimeoutError>(
+      runSession(behavingSession(WEDGED, { idleMs: 800 }), () => "parsed"),
+    );
+
+    // That it was the budget which killed it, rather than something else
+    // producing a null id for an unrelated reason.
+    expect(error).toBeInstanceOf(SessionTimeoutError);
+    // Null rather than a placeholder: an operator holding a fake id would go
+    // looking for a transcript that does not exist.
+    expect(error.sessionId).toBeNull();
+  });
+
+  /**
+   * Machine sleep, which is the failure that killed a recon on SSX-3831 that
+   * had done nothing wrong.
+   *
+   * The clock is jumped forward an hour mid-run, which is what a suspend looks
+   * like from inside this process whether or not the platform's monotonic clock
+   * ticks through one. The child is silent for the whole hour and must survive
+   * it, because it was frozen rather than quiet — and it must survive the
+   * sixty-second ceiling too, since that is sleep-excluded for the same reason.
+   *
+   * The mutation: delete the drift branch and this fails, killed as `idle`.
+   */
+  it("does not spend either budget on time the machine was asleep", async () => {
+    const realNow = Date.now.bind(Date);
+    let offset = 0;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => realNow() + offset);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const jump = setTimeout(() => {
+      offset = 3_600_000;
+    }, 500);
+
+    try {
+      const error = await failureOf(
+        runSession(
+          // The child is silent for its whole 2.5s life, which is inside both
+          // budgets; the injected hour is the only thing that could blow
+          // either, and it must blow neither. It exits by itself, so the only
+          // way this run produces a SessionTimeoutError is by being killed.
+          behavingSession("setTimeout(() => {}, 2500)", { idleMs: 3000, maxRunMs: 8000 }),
+          () => "parsed",
+        ),
+      );
+
+      expect(error).toBeInstanceOf(SessionError);
+      expect(error).not.toBeInstanceOf(SessionTimeoutError);
+      // Not an exact match: the gap is measured against a real interval, so it
+      // carries whatever scheduling jitter the tick had. Pinning the millisecond
+      // would make this a test about the machine's load.
+      const [, detail] = warn.mock.calls.find(([event]) => event === "session.slept") ?? [];
+      expect(detail).toMatchObject({ label: "fake pass of SSX-1234" });
+      expect((detail as { sleptMs: number }).sleptMs).toBeGreaterThanOrEqual(3_600_000);
+    } finally {
+      clearTimeout(jump);
+      now.mockRestore();
+      warn.mockRestore();
+    }
+  }, 20_000);
+});
 
 describe("runSession cost reporting", () => {
   it("reports what the run cost", async () => {

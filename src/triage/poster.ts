@@ -132,7 +132,8 @@ export interface PostOptions {
   readonly mutation: Mutation;
   readonly executable: string;
   readonly workingDirectory: string;
-  readonly timeoutMs: number;
+  readonly idleMs: number;
+  readonly maxRunMs: number;
 }
 
 export class PostError extends Error {}
@@ -305,7 +306,8 @@ export async function runPost(options: PostOptions): Promise<PostReceipt> {
       executable: options.executable,
       args: buildPostArgs(options),
       workingDirectory: options.workingDirectory,
-      timeoutMs: options.timeoutMs,
+      idleMs: options.idleMs,
+      maxRunMs: options.maxRunMs,
       env: childEnv(process.env),
       requiredMcpServers: ["atlassian"],
       label: `Post to ${options.issueKey}`,
