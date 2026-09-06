@@ -708,6 +708,55 @@ of guard D4e recorded shipping unguarded, because the only place it was used was
 **`fetchActivity` also reads `labels` now**, which is what lets the no-op case be told from the
 real one. Still read-only, still the same request.
 
+#### The budget divergence above, decided 2026-09-06 — the behaviour moved, not the prose
+
+`decideWatch` counts `ours.length - 1`. The sendback is the reason the watch exists rather than an
+attempt to end it, so `MAX_RETRIAGE_PER_TICKET=3` now buys the three re-triages its name and every
+description of it already promised. Chosen over rewriting the prose because the setting is a
+number a person picks in `.env` and a number that means one less than it says is a trap that
+survives being documented. The subtraction is at the count rather than a `+ 1` at the comparison,
+so the arithmetic says what it is bounding. Mutation: `ours.length` instead, and a ticket is
+dropped one re-triage early — caught.
+
+#### The relevance pre-check, landed 2026-09-06 — the cheapest session in the tree
+
+`decideWatch` answers _did somebody move_. It cannot answer _did they move in the direction we
+asked for_, and the two come apart constantly: a reporter promising to get to it next sprint, a PM
+linking a duplicate, a typo fixed in the summary. Each trips the trigger, and each would have
+bought a ~$2 triage to be told the ticket is still missing the same thing. So a re-triage is gated
+on a session that reads the sendback and the new activity and answers one boolean.
+
+**It has no tools — not a narrow allowlist, none.** Every input is in the prompt, so there is
+nothing for a tool to fetch and no reason to reach the network, the repository or Jira. It is also
+the only session here with `requiredMcpServers: []`, and the empty list is an assertion rather than
+an omission: naming `atlassian` would make the check fail whenever a server it never calls is down,
+and a failed check reads as _do not spend_, so the watch would quietly stop working for a reason
+unrelated to anything it does.
+
+**It fails closed, and closed means does not spend.** Absent, malformed, truthy-but-not-`true`, or
+a yes with no reason are all `false`. The last of those is the one worth naming: the reason field
+is the only evidence the question was engaged with rather than agreed to, and it guards the branch
+that costs money. A wrong no waits for the next thing to happen on the ticket; a wrong yes is $2
+and a comment on somebody's bug repeating itself.
+
+**It judges what was _supplied_, not whether the ticket is ready.** Readiness is triage's call and
+triage has the vault, the scorecard and the DoR rules. Asking for it here would be a second, worse
+triage whose disagreements with the real one nobody would ever see. The prompt says so explicitly,
+and a test pins it. A promise is called out by name because it is the commonest false positive
+there is: _"will add the logs tomorrow"_ mentions every blocker and supplies none.
+
+**The one thing it costs is not money.** A `no` is silent, and silence does not clear the trigger.
+The loop is self-limiting only because a re-triage posts a comment, which moves the high-water mark
+and quiets the ticket until somebody speaks again. A ticket whose latest comment is irrelevant
+stays triggered and is re-judged every sweep, on identical content, forever — §7b's infinite loop
+one layer up and two orders of magnitude cheaper per lap.
+
+That bound belongs to the daemon and needs no disk state: remember the newest foreign timestamp
+already judged, **in memory**. §1 refuses on-disk state because losing it causes a double claim;
+losing this costs one cheap re-check per restart, so the argument does not carry over. `watch:once`
+has no loop and cannot run away, which is why the check can land before the bound does. Seven
+mutations, seven caught.
+
 ---
 
 ## Phasing
