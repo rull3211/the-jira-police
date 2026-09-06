@@ -261,6 +261,18 @@ export const SETTINGS = [
     fallback: "3",
   },
   {
+    name: "WATCH_ENABLED",
+    description:
+      "Whether the sendback watch runs at all. Off by default, and it is the switch that most deserves to be: every other loop here spends money because somebody asked for something — a ticket was labelled, a reviewer commented, an operator typed a command — and this one spends it because a reporter edited a ticket, which is not a request for anything. Separate from SOLVE_ENABLED rather than folded into it, because the two grant unrelated privileges: that one lets a bot write code, this one lets it re-open a conversation it was already told to stop.",
+    fallback: "false",
+  },
+  {
+    name: "MAX_RETRIAGE_PER_TICKET",
+    description:
+      "How many times one watched ticket may be re-triaged before the watch is dropped with a comment saying so. Three. Counted from this service's own comments on the ticket rather than from disk, so it survives a restart and a second instance for the same reason the solve queue's dedupe does. A ticket edited more often than this is a conversation rather than a signal, and the watch is the one loop with no human waiting on the result, so the bound is the only thing that ends it. Note the number was chosen in the plan against a measured triage cost of $0.11 that later proved to be $1.56, so it is understated as a spending limit by roughly an order of magnitude — re-derive it before the watch runs on a timer.",
+    fallback: "3",
+  },
+  {
     name: "FAIL_FIRST_CHECK",
     description:
       "Whether a verified solve also runs its own new tests against the base, to see whether they fail when the fix is taken away. On by default, which is the opposite of every other switch here: this one grants nothing and writes nothing, and the failure mode of it being off is the thing it exists to catch — a regression test that is green against the bug it is named for. Set it to false only for cost, since it buys one extra install and one extra test run per solve. The result is reported on the pull request and never withholds one.",

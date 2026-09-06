@@ -7,6 +7,7 @@ import {
   buildNewIssuesJql,
   buildInFlightJql,
   buildReviewQueueJql,
+  buildSendbackWatchJql,
   buildSolveQueueJql,
   jqlValue,
   lookbackMinutes,
@@ -445,6 +446,56 @@ describe("buildReviewQueueJql", () => {
   it("refuses to interpolate an unsafe project or component", () => {
     expect(() => buildReviewQueueJql({ ...SCOPE, project: 'X" OR "1"="1' })).toThrow(JqlError);
     expect(() => buildReviewQueueJql({ ...SCOPE, components: ['x") OR labels = "y'] })).toThrow(
+      JqlError,
+    );
+  });
+});
+
+describe("buildSendbackWatchJql", () => {
+  const SCOPE = { project: "SSX", components: ["SSX Advisor"] };
+
+  it("builds the query verbatim", () => {
+    expect(buildSendbackWatchJql(SCOPE)).toBe(
+      'project = SSX AND component IN ("SSX Advisor") ' +
+        'AND labels = "agent:watching" ORDER BY updated ASC',
+    );
+  });
+
+  it("returns closed tickets, so that something can unsubscribe them", () => {
+    // The plan asked for `statusCategory != Done` here and also asked that a
+    // closed ticket have its watch label removed. Both cannot hold: a ticket
+    // this query hides is a ticket no loop can clean up, so the label would
+    // outlive the ticket claiming a subscription nothing honours. Including
+    // them is free — a closed ticket is a look that decides "unsubscribe"
+    // without paying for a triage run.
+    expect(buildSendbackWatchJql(SCOPE)).not.toContain("statusCategory");
+  });
+
+  it("does not restate the terminals as an exclusion", () => {
+    // agent:watching is removed in the same edit that writes whatever replaced
+    // it, so a ticket that moved on is already outside the positive clause.
+    expect(buildSendbackWatchJql(SCOPE)).not.toContain("NOT IN");
+  });
+
+  it("selects the watch label and nothing broader", () => {
+    // The mutation that matters on the invoice: widen this to the send-back
+    // verdict's own labels — needs-info, dor:gaps — and the watch subscribes to
+    // a set far too large to pay for, which is the reason `plausible` exists as
+    // a separate field at all.
+    const jql = buildSendbackWatchJql(SCOPE);
+
+    expect(jql).toContain('labels = "agent:watching"');
+    expect(jql).not.toContain("dor:gaps");
+  });
+
+  it("stays inside the configured scope, and omits the clause when there is none", () => {
+    expect(buildSendbackWatchJql(SCOPE)).toContain('component IN ("SSX Advisor")');
+    expect(buildSendbackWatchJql({ ...SCOPE, components: [] })).not.toContain("component");
+  });
+
+  it("refuses to interpolate an unsafe project or component", () => {
+    expect(() => buildSendbackWatchJql({ ...SCOPE, project: 'X" OR "1"="1' })).toThrow(JqlError);
+    expect(() => buildSendbackWatchJql({ ...SCOPE, components: ['x") OR labels = "y'] })).toThrow(
       JqlError,
     );
   });
