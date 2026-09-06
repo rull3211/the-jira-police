@@ -56,6 +56,7 @@ describe("toWatchSignals", () => {
             id: "1",
             author: "someone",
             created: "2026-09-01T10:00:00.000+0200",
+            updated: "2026-09-01T10:00:00.000+0200",
             body: footerAdf("Fill in the baseline."),
           },
         ],
@@ -63,7 +64,30 @@ describe("toWatchSignals", () => {
     );
 
     expect(signals.comments[0]?.text).not.toContain(FOOTER_SENTINEL);
-    expect(isOurComment(signals.comments[0] ?? { created: "", text: "" })).toBe(true);
+    expect(isOurComment(signals.comments[0] ?? { created: "", updated: "", text: "" })).toBe(true);
+  });
+
+  it("carries the edit timestamp, which is the one our own comment moves on", () => {
+    // The poster does not add a second comment on a re-triage; it finds its own
+    // by the sentinel and rewrites it. So `created` on our comment names the
+    // first triage forever and `updated` is the only field that says when this
+    // service last spoke. Dropping it here reads as a mark days in the past,
+    // which re-triages the same activity on every sweep.
+    const signals = toWatchSignals(
+      activity({
+        comments: [
+          {
+            id: "1",
+            author: "someone",
+            created: "2026-09-01T10:00:00.000+0200",
+            updated: "2026-09-05T14:00:00.000+0200",
+            body: footerAdf("Fill in the baseline."),
+          },
+        ],
+      }),
+    );
+
+    expect(signals.comments[0]?.updated).toBe("2026-09-05T14:00:00.000+0200");
   });
 
   it("does not claim a reporter's comment", () => {
@@ -74,6 +98,7 @@ describe("toWatchSignals", () => {
             id: "1",
             author: "reporter",
             created: "2026-09-02T08:00:00.000+0200",
+            updated: "2026-09-02T08:00:00.000+0200",
             body: {
               type: "doc",
               version: 1,
@@ -86,7 +111,7 @@ describe("toWatchSignals", () => {
       }),
     );
 
-    expect(isOurComment(signals.comments[0] ?? { created: "", text: "" })).toBe(false);
+    expect(isOurComment(signals.comments[0] ?? { created: "", updated: "", text: "" })).toBe(false);
   });
 
   it("reads closed off the category key rather than the status name", () => {
@@ -123,6 +148,7 @@ describe("toWatchSignals", () => {
             id: "1",
             author: "op",
             created: "2026-09-01T10:00:00.000+0200",
+            updated: "2026-09-01T10:00:00.000+0200",
             body: footerAdf("Fill in the baseline."),
           },
         ],

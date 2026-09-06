@@ -39,6 +39,7 @@ export function toWatchSignals(activity: IssueActivity): WatchSignals {
     closed: activity.statusCategoryKey.trim().toLowerCase() === DONE_CATEGORY,
     comments: activity.comments.map((comment) => ({
       created: comment.created,
+      updated: comment.updated,
       text: renderAdf(comment.body),
     })),
     changes: activity.changes.map((change) => ({

@@ -58,6 +58,7 @@ describe("renderTicket", () => {
             id: "1",
             author: "Daniel Bence Søke",
             created: "2026-09-04T15:38:00.831+0200",
+            updated: "2026-09-04T15:38:00.831+0200",
             body: paragraph("This is the svg that should be used"),
           },
         ],
@@ -184,6 +185,7 @@ describe("renderTicket", () => {
             id: "1999252",
             author: "Daniel Bence Søke",
             created: "2026-09-04T15:38:00.831+0200",
+            updated: "2026-09-04T15:38:00.831+0200",
             body: {
               type: "doc",
               version: 1,

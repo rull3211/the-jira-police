@@ -42,6 +42,15 @@ export interface WatchComment {
   /** ISO-8601. */
   readonly created: string;
   /**
+   * ISO-8601, equal to `created` on a comment nobody has edited.
+   *
+   * Both timestamps are read, and on our own comments that is not an
+   * improvement but a requirement — see `lastSpokeAt`. On somebody else's it
+   * closes a blind spot recorded when this file was written: a reporter who
+   * answers by editing their own earlier comment used to be invisible here.
+   */
+  readonly updated: string;
+  /**
    * The rendered body.
    *
    * Attacker-controlled: a Jira comment is written by whoever can see the
@@ -139,6 +148,62 @@ function parsed(iso: string): number {
 }
 
 /**
+ * The later of a comment's two timestamps, or `NaN` if either will not read.
+ *
+ * One rule for both sides of the comparison, and the strictness is the point:
+ * `Math.max` propagates `NaN`, so a comment this function cannot fully date is
+ * a comment nothing downstream will act on. A partially-readable comment
+ * resolving to its earlier timestamp would be a mark that is plausibly too
+ * early, and too early is the direction that spends.
+ *
+ * Exported for the same reason `lastSpokeAt` is. The re-triage context dates
+ * the very same comments, and a second dating rule living next door would
+ * eventually disagree with this one — invisibly, until a comment triggers a
+ * look and then does not appear in the prompt, which is a paid session asked to
+ * explain an empty page.
+ */
+export function touchedAt(comment: WatchComment): number {
+  return Math.max(parsed(comment.created), parsed(comment.updated));
+}
+
+/**
+ * The high-water mark: when this service last spoke on the ticket, in epoch ms.
+ *
+ * **It reads `updated`, and that is a correctness fix rather than a refinement.
+ * The triage poster does not add a comment on a re-run — it finds its own
+ * previous one by the footer sentinel and rewrites it in place.** So on exactly
+ * the ticket this feature exists for, our comment count stays at one and its
+ * `created` stays pinned at the first triage, however many times the ticket is
+ * re-triaged. A mark built from `created` alone therefore reports that this
+ * service last spoke days before it did, every foreign comment since stays
+ * newer than it forever, and the watch re-triages the same unchanged activity
+ * on every sweep — §7b's infinite paid loop, arriving through the one write
+ * path nobody thought to ask about because it does the *considerate* thing.
+ *
+ * Found by mapping the triage entry path while wiring the re-triage, not by a
+ * test, and it is worth naming why no test could have: every test in this file
+ * builds its own comments, so the poster's idempotency is a fact about a
+ * different module that this module's fixtures quietly assumed away.
+ *
+ * `NaN` when the mark cannot be established — no comment of ours, or one whose
+ * timestamps will not parse. That propagates to a refusal, which is the cheap
+ * direction; a plausible wrong number propagates to a charge.
+ *
+ * Exported because the re-triage context has to slice the ticket at exactly the
+ * same instant the decision did. Two functions computing *when we last spoke*
+ * from the same comments would eventually disagree, and the disagreement would
+ * show up as a check judging a different set of activity than the one that
+ * triggered it — which is the shape of bug that reads as a bad model answer.
+ */
+export function lastSpokeAt(comments: readonly WatchComment[]): number {
+  const ours = comments.filter(isOurComment);
+  if (ours.length === 0) {
+    return Number.NaN;
+  }
+  return Math.max(...ours.map(touchedAt));
+}
+
+/**
  * Decides what to do about one watched ticket.
  *
  * `maxRetriage` is `MAX_RETRIAGE_PER_TICKET`. The count it bounds is read from
@@ -195,6 +260,23 @@ export function decideWatch(signals: WatchSignals, maxRetriage: number): WatchDe
   // quantity this function is bounding is *re-triages* and the arithmetic
   // should say so; a `+ 1` at the comparison is the same fix written where the
   // next reader has to reconstruct why it is there.
+  //
+  // **This brake cannot currently fire, and the re-triage must not ship until
+  // it can.** Counting our comments only counts re-triages if a re-triage
+  // leaves a comment, and it does not: the poster finds its previous one by the
+  // footer sentinel and rewrites it, so `ours.length` is one however many runs
+  // a ticket has had. Found while wiring the hand-off, before anything spent
+  // anything — the same discovery that forced `lastSpokeAt` to read `updated`,
+  // and the more dangerous half of it, because the mark at least fails toward
+  // refusing while a count stuck at zero fails toward paying.
+  //
+  // Kept, not deleted. It is the correct arithmetic over the quantity it names,
+  // it does fire on the cases that *do* produce a second comment of ours — a
+  // pasted sentinel, a hand-posted verdict — and deleting a brake because the
+  // odometer is broken is how the odometer stays broken. What has to change is
+  // where the count comes from, and that is a decision the plan owns: it needs
+  // a counter the watcher can write *before* the run it authorises, which the
+  // comment body is not, since writing it costs a paid session of its own.
   const retriages = ours.length - 1;
   if (retriages >= maxRetriage) {
     return {
@@ -207,7 +289,7 @@ export function decideWatch(signals: WatchSignals, maxRetriage: number): WatchDe
   // The high-water mark: when we last spoke. Anything at or before it has been
   // seen, by definition, because it was on the ticket when the comment was
   // written.
-  const spokeAt = Math.max(...ours.map((comment) => parsed(comment.created)));
+  const spokeAt = lastSpokeAt(signals.comments);
   if (Number.isNaN(spokeAt)) {
     return {
       kind: "unsubscribe",
@@ -216,11 +298,12 @@ export function decideWatch(signals: WatchSignals, maxRetriage: number): WatchDe
     };
   }
 
-  // Somebody else's comment. `created` never moves when a comment is edited —
-  // Jira reports an `updated` this service does not fetch — so a reporter who
-  // answers by editing their own earlier comment is missed. Recorded rather
-  // than worked around: the same blind spot the review marker has, failing the
-  // same safe way.
+  // Somebody else's comment, dated by whichever of its two timestamps is
+  // later. The blind spot recorded here — a reporter who answers by editing
+  // their own earlier comment, invisible because `created` does not move — is
+  // closed, and it was closed by accident: `updated` had to be fetched for our
+  // own comments anyway, and once it is on the wire withholding it from this
+  // side would be a deliberate choice to keep missing the answers.
   //
   // **A tie counts as somebody else, in both loops, and that is what keeps the
   // self-trigger guard alive.** `>=` rather than `>` means a comment written in
@@ -241,7 +324,7 @@ export function decideWatch(signals: WatchSignals, maxRetriage: number): WatchDe
     if (isOurComment(comment)) {
       continue;
     }
-    const at = parsed(comment.created);
+    const at = touchedAt(comment);
     if (!Number.isNaN(at) && at >= spokeAt) {
       return { kind: "retriage", trigger: "a comment from somebody else", at: comment.created };
     }

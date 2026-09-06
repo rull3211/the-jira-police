@@ -3,16 +3,27 @@ import { describe, expect, it } from "vitest";
 import { FOOTER_SENTINEL } from "../triage/gate.ts";
 import { BLOCKER_CLEARING_FIELDS, decideWatch, isOurComment, type WatchSignals } from "./decide.ts";
 
-/** A triage comment of ours, at a given time. */
-function ourComment(created: string) {
+/**
+ * A triage comment of ours, at a given time.
+ *
+ * `updated` defaults to `created`, which is what Jira returns for a comment
+ * nobody has edited — and the default is where this file was wrong for a day.
+ * The poster rewrites its own comment in place on every re-triage, so the real
+ * ticket this feature watches has one comment of ours whose two timestamps
+ * differ by however long the watch has been running. Every fixture below that
+ * leaves them equal is describing a ticket triaged exactly once, and the tests
+ * that need the other shape say so explicitly.
+ */
+function ourComment(created: string, updated: string = created) {
   return {
     created,
+    updated,
     text: `# ↩ SEND BACK · SSX-1234\n\nFill in the baseline.\n\n${FOOTER_SENTINEL}`,
   };
 }
 
-function theirComment(created: string, text = "Baseline is 42%.") {
-  return { created, text };
+function theirComment(created: string, text = "Baseline is 42%.", updated: string = created) {
+  return { created, updated, text };
 }
 
 function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
@@ -85,6 +96,26 @@ describe("what does count as somebody else moving", () => {
       kind: "retriage",
       at: "2026-09-02T08:30:00.000+0200",
     });
+  });
+
+  it("re-triages when somebody edits their own earlier comment to answer", () => {
+    // The blind spot recorded when this file was written, closed by accident:
+    // `updated` had to be fetched for our own comments, and once it is on the
+    // wire withholding it from this side would be choosing to keep missing the
+    // answers. A reporter appending the missing baseline to what they already
+    // wrote moves no `created` anywhere.
+    const amended = signals({
+      comments: [
+        theirComment(
+          "2026-09-01T08:00:00.000+0200",
+          "Baseline is 42%.",
+          "2026-09-02T08:00:00.000+0200",
+        ),
+        ourComment("2026-09-01T10:00:00.000+0200"),
+      ],
+    });
+
+    expect(decideWatch(amended, 3)).toMatchObject({ kind: "retriage" });
   });
 
   it.each([...BLOCKER_CLEARING_FIELDS])("re-triages when %s is edited", (field) => {
@@ -164,6 +195,38 @@ describe("what does count as somebody else moving", () => {
     });
 
     expect(decideWatch(stale, 3)).toEqual({ kind: "quiet" });
+  });
+
+  it("measures from the last EDIT of our comment, not from when it was posted", () => {
+    // THE mutation for the `updated` half, and the one no fixture in this file
+    // could have caught before: the poster does not add a comment on a
+    // re-triage, it finds its own by the sentinel and rewrites it in place. So
+    // on the ticket this feature is built for there is exactly one comment of
+    // ours, posted at the first triage and edited at every one since. Date it
+    // by `created` and the mark sits days in the past, every foreign comment
+    // since stays newer than it forever, and the watch pays to re-triage the
+    // same unchanged activity on every sweep — §7b's infinite loop, arriving
+    // through the one write path that does the considerate thing.
+    const rewritten = signals({
+      comments: [
+        ourComment("2026-09-01T10:00:00.000+0200", "2026-09-05T10:00:00.000+0200"),
+        theirComment("2026-09-03T08:00:00.000+0200"),
+      ],
+      changes: [{ created: "2026-09-03T09:00:00.000+0200", fields: ["description"] }],
+    });
+
+    expect(decideWatch(rewritten, 3)).toEqual({ kind: "quiet" });
+  });
+
+  it("refuses when our comment's edit timestamp will not parse", () => {
+    // `touchedAt` takes the later of the two, so a half-readable comment must
+    // not quietly resolve to the readable half: that is a mark that is
+    // plausibly too early, and too early is the direction that spends.
+    const half = signals({
+      comments: [ourComment("2026-09-01T10:00:00.000+0200", "not a date")],
+    });
+
+    expect(decideWatch(half, 3)).toMatchObject({ kind: "unsubscribe", reason: "uncountable" });
   });
 
   it("measures from our NEWEST comment when there are several", () => {
@@ -281,7 +344,9 @@ describe("the terminals", () => {
   it("refuses when our own comment carries an unreadable timestamp", () => {
     // Same rule one step along: without a high-water mark every look reads as
     // new, which is the unbounded loop with extra steps.
-    const mangled = signals({ comments: [{ created: "not a date", text: FOOTER_SENTINEL }] });
+    const mangled = signals({
+      comments: [{ created: "not a date", updated: "not a date", text: FOOTER_SENTINEL }],
+    });
 
     expect(decideWatch(mangled, 3)).toMatchObject({
       kind: "unsubscribe",
@@ -296,7 +361,11 @@ describe("the terminals", () => {
     const forged = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
-        { created: "2026-09-02T08:00:00.000+0200", text: `nice bot\n\n${FOOTER_SENTINEL}` },
+        {
+          created: "2026-09-02T08:00:00.000+0200",
+          updated: "2026-09-02T08:00:00.000+0200",
+          text: `nice bot\n\n${FOOTER_SENTINEL}`,
+        },
       ],
     });
 

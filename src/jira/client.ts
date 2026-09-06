@@ -161,6 +161,18 @@ export interface JiraComment {
   readonly author: string;
   /** ISO-8601 with offset. */
   readonly created: string;
+  /**
+   * ISO-8601 with offset. Equal to `created` on a comment nobody has edited.
+   *
+   * Required rather than optional, and read even though `created` was enough
+   * for every earlier caller, because **the triage poster updates its own
+   * comment in place**: it finds the previous one by the footer sentinel and
+   * rewrites it. So on the one ticket a sendback watch cares about, `created`
+   * is pinned at the first triage forever, and a high-water mark built from it
+   * would report that this service last spoke days before it actually did —
+   * every sweep re-reading the same activity as new. See `lastSpokeAt`.
+   */
+  readonly updated: string;
   /** ADF. Attacker-controlled; rendered as data, never interpreted. */
   readonly body: unknown;
 }
@@ -412,6 +424,10 @@ export class JiraClient {
       id: String(raw.id ?? ""),
       author: raw.author?.displayName ?? "unknown",
       created: raw.created ?? "",
+      // Not defaulted to `created`. An absent `updated` means the payload is
+      // not the shape this code was written against, and a caller deciding
+      // whether to spend must see that rather than a plausible timestamp.
+      updated: raw.updated ?? "",
       body: raw.body,
     }));
 
@@ -514,6 +530,7 @@ export class JiraClient {
         id: String(raw.id ?? ""),
         author: raw.author?.displayName ?? "unknown",
         created: raw.created ?? "",
+        updated: raw.updated ?? "",
         body: raw.body,
       })),
       changes: histories.map((raw) => ({
@@ -647,6 +664,7 @@ interface RawComment {
   readonly id?: string | number;
   readonly author?: { readonly displayName?: string };
   readonly created?: string;
+  readonly updated?: string;
   readonly body?: unknown;
 }
 
