@@ -23,10 +23,14 @@ const MANIFEST = JSON.stringify({
 
 const FILES = ["src/app/head.tsx", "src/app/head.test.tsx"];
 const NUMSTAT = [`12\t3\t${FILES[0] ?? ""}`, `9\t0\t${FILES[1] ?? ""}`, ""].join(NUL);
-const OVER_CAP = [
-  ...Array.from({ length: 6 }, (_unused, index) => `1\t0\tsrc/f${String(index)}.ts`),
-  "",
-].join(NUL);
+/**
+ * A diff the gate refuses — one ordinary file and one lockfile.
+ *
+ * Six files until 2026-09-06, when the size caps were deleted and a wide diff
+ * stopped being a refusal. The test below is about `advance` not pushing a
+ * refused round, so what it needs is any refusal that is still one.
+ */
+const REFUSED_DIFF = ["1\t0\tsrc/app.ts", "8\t2\tpnpm-lock.yaml", ""].join(NUL);
 
 const IDENTITY: BotIdentity = { name: "jira-police", email: "jira-police@example.invalid" };
 
@@ -970,7 +974,7 @@ describe("advance", () => {
 
   it("does not push a round the diff gate refused", async () => {
     const h = harness({ review: review() }, [
-      { match: saw("--numstat"), reply: { stdout: OVER_CAP } },
+      { match: saw("--numstat"), reply: { stdout: REFUSED_DIFF } },
     ]);
 
     const outcome = await advance(h.deps, advanceRequest);

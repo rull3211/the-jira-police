@@ -15,13 +15,7 @@
  * real path to smuggling a change past a line-oriented parser. With `-z`, paths
  * are NUL-terminated and never quoted, and the ambiguity does not exist.
  *
- * ## The three refusal families
- *
- * **Size.** A bug fix that touches nine files is not the bug fix that was
- * triaged. The caps are low on purpose: the gate's job is to catch the run that
- * went wandering, and a legitimate fix that trips it is a cheap false positive
- * — a human looks, and either widens the cap for that ticket or agrees the
- * ticket was mis-assessed as `agent:solvable` in the first place.
+ * ## The two refusal families
  *
  * **Location.** Paths that escape the worktree, and paths inside directories
  * this service must never author. See `FORBIDDEN_PATHS`.
@@ -37,8 +31,48 @@
  *
  * That is not a diff worth reviewing carefully; it is a diff that must not
  * reach review, because the signal a reviewer would rely on to judge it is the
- * signal it tampered with. Treated as its own category, refused unconditionally
- * and never subject to a cap.
+ * signal it tampered with. Refused unconditionally, on any change of any size.
+ *
+ * ## Size is measured and never refused, and that is the third family removed
+ *
+ * There were three families until 2026-09-06, and the third was a cap:
+ * `{ maxFiles: 5, maxLines: 200 }`, hardcoded, with no setting to change it.
+ * Both halves are gone. The two families above are sound in **both**
+ * directions — a path that escaped the worktree escaped it, and a run that
+ * edited `vitest.config.ts` really has invalidated its own verification, with
+ * no judgement required. A cap is sound in one: a run that lost the plot is
+ * usually wide, but a wide diff is usually not a run that lost the plot. The
+ * gate was deriving the second from the first.
+ *
+ * **The argument against it was already written in this repository, about a
+ * different check.** `checkFailFirst` reports and never refuses, because *"a
+ * check that could withhold a good pull request would have to be right about a
+ * question it is only sound about in one direction."* Substitute "wide diff"
+ * for "vacuous test" and it is the same sentence. It was applied to the weaker
+ * case and not to this one.
+ *
+ * **Three things make a size veto specifically the wrong tool here.** It fires
+ * *after* the model pass, so it does not prevent a spend, it discards one — the
+ * round it refused on PR #2663 had already cost $1.77. It is cumulative against
+ * `SOLVE_BASE_REF`, so it measures how large the pull request has become rather
+ * than what this run did, and a round touching one new file is refused for the
+ * four the branch already had. And a human merges every pull request this
+ * service opens, so the size judgement it was making is one that a reviewer
+ * makes anyway, with context the gate does not have.
+ *
+ * **The prose it replaces claimed a recovery that did not exist**, which is why
+ * this is a rewrite rather than a deletion. It said a legitimate fix tripping
+ * the cap was *"a cheap false positive — a human looks, and either widens the
+ * cap for that ticket or agrees the ticket was mis-assessed."* There was no way
+ * to widen the cap for a ticket, and nobody looked: a `refused` round posts
+ * nothing to the pull request, so #2663's refusal was visible only in a daemon
+ * log.
+ *
+ * `files` and `lines` are still computed and still returned on success, and
+ * `solve-outcome.ts` still prints them. The measurement survives; only the veto
+ * is gone. If a bound is ever wanted again it belongs where the money is spent
+ * — before or during the pass — and not at the one point where refusing costs
+ * everything and saves nothing.
  */
 
 /** One file's entry in a numstat record. */
@@ -48,22 +82,6 @@ export interface FileChange {
   readonly added: number | null;
   readonly removed: number | null;
 }
-
-export interface DiffLimits {
-  readonly maxFiles: number;
-  /** Added plus removed, summed across every file. */
-  readonly maxLines: number;
-}
-
-/**
- * Deliberately small.
- *
- * Calibrated against the pilot's own fitness bar rather than guessed: a ticket
- * only reaches the solver with `dor:pass`, a dev lens naming an exact file, and
- * `effort:S`. A change matching that description does not touch six files. The
- * cap is a tripwire for a run that lost the plot, not a budget to spend.
- */
-export const DEFAULT_LIMITS: DiffLimits = { maxFiles: 5, maxLines: 200 };
 
 interface Rule {
   readonly pattern: RegExp;
@@ -299,10 +317,7 @@ function match(rules: readonly Rule[], path: string): Rule | undefined {
  * and reverts it, or writes only to an ignored path, reaches here looking
  * exactly like success and would otherwise open an empty PR.
  */
-export function checkDiff(
-  changes: readonly FileChange[],
-  limits: DiffLimits = DEFAULT_LIMITS,
-): DiffVerdict {
+export function checkDiff(changes: readonly FileChange[]): DiffVerdict {
   const reasons: string[] = [];
 
   if (changes.length === 0) {
@@ -337,20 +352,14 @@ export function checkDiff(
     }
   }
 
+  // Measured for the report, never compared against anything. See the header:
+  // a wide diff is not a wrong diff, and this is the one point in the run where
+  // refusing discards a pass that has already been paid for.
   const files = changes.length;
   const lines = changes.reduce(
     (total, change) => total + (change.added ?? 0) + (change.removed ?? 0),
     0,
   );
-
-  if (files > limits.maxFiles) {
-    reasons.push(
-      `${String(files)} files changed, cap is ${String(limits.maxFiles)} — a fix this wide is not the fix that was triaged`,
-    );
-  }
-  if (lines > limits.maxLines) {
-    reasons.push(`${String(lines)} lines changed, cap is ${String(limits.maxLines)}`);
-  }
 
   if (reasons.length > 0) {
     return { ok: false, reasons };

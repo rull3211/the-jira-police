@@ -50,7 +50,7 @@
  */
 
 import { logger } from "../logger.ts";
-import { checkDiff, type DiffLimits, DEFAULT_LIMITS, parseNumstat } from "./diff-gate.ts";
+import { checkDiff, parseNumstat } from "./diff-gate.ts";
 import {
   type AbandonCause,
   type FixReport,
@@ -117,7 +117,6 @@ export interface SolveRequest {
   /** Branch prefix — `fix` for a bug, `feat` for a task. Never a protected name. */
   readonly branchPrefix?: string;
   readonly vaultPath?: string;
-  readonly limits?: DiffLimits;
   /**
    * Whether to run the fail-first experiment, `FAIL_FIRST_CHECK`.
    *
@@ -766,7 +765,7 @@ async function runPipeline(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = checkDiff(changes, request.limits ?? DEFAULT_LIMITS);
+  const verdict = checkDiff(changes);
   if (!verdict.ok) {
     logger.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -949,7 +948,7 @@ async function runReviewRound(
       reasons: ["could not read the diff, so there is nothing to bound"],
     };
   }
-  const verdict = checkDiff(parseNumstat(diffText), request.limits ?? DEFAULT_LIMITS);
+  const verdict = checkDiff(parseNumstat(diffText));
   if (!verdict.ok) {
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
   }

@@ -47,11 +47,17 @@ const PATCH = [
   "",
 ].join("\n");
 
-/** Six files, which is one past `DEFAULT_LIMITS.maxFiles`. */
-const OVER_CAP = [
-  ...Array.from({ length: 6 }, (_unused, index) => `1\t0\tsrc/f${String(index)}.ts`),
-  "",
-].join(NUL);
+/**
+ * A diff the gate refuses — one ordinary file and one lockfile.
+ *
+ * This was six files, back when the gate capped file count. The caps went on
+ * 2026-09-06 and a wide diff is now accepted, so every test below that wanted
+ * "a refused diff" needed a reason that still is one. A lockfile is the right
+ * replacement rather than the convenient one: these tests are about what
+ * `solveTicket` does *around* a refusal, and a forbidden path is the family the
+ * gate is most certain about.
+ */
+const REFUSED_DIFF = ["1\t0\tsrc/app.ts", "8\t2\tpnpm-lock.yaml", ""].join(NUL);
 
 const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   proceed: true,
@@ -819,8 +825,8 @@ describe("solveTicket, at the diff gate", () => {
     expect(first.reasons).not.toEqual(second.reasons);
   });
 
-  it("refuses an over-cap diff and never runs a verification step", async () => {
-    const { h } = harness(FULL, [{ match: saw("--numstat"), reply: { stdout: OVER_CAP } }]);
+  it("refuses a forbidden path and never runs a verification step", async () => {
+    const { h } = harness(FULL, [{ match: saw("--numstat"), reply: { stdout: REFUSED_DIFF } }]);
 
     const outcome = await solveTicket(h.deps, request);
 
@@ -828,8 +834,23 @@ describe("solveTicket, at the diff gate", () => {
     expect(h.calls.some((argv) => argv[0] === "pnpm")).toBe(false);
   });
 
-  it("reports refusal reasons, since a human has to widen the bound or not", async () => {
-    const { h } = harness(FULL, [{ match: saw("--numstat"), reply: { stdout: OVER_CAP } }]);
+  it("does not refuse a wide diff, which is the cap's absence seen from here", async () => {
+    // The gate's own test proves `checkDiff` accepts it. This proves the
+    // pipeline agrees — that nothing between here and there reintroduced a
+    // bound of its own, which `SolveRequest.limits` was until 2026-09-06.
+    const wide = [
+      ...Array.from({ length: 30 }, (_unused, index) => `50\t50\tsrc/f${String(index)}.ts`),
+      "",
+    ].join(NUL);
+    const { h } = harness(FULL, [{ match: saw("--numstat"), reply: { stdout: wide } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).not.toBe("refused");
+  });
+
+  it("reports refusal reasons, since a human has to judge them", async () => {
+    const { h } = harness(FULL, [{ match: saw("--numstat"), reply: { stdout: REFUSED_DIFF } }]);
 
     const outcome = await solveTicket(h.deps, request);
 
@@ -920,7 +941,7 @@ describe("solveTicket, at verification", () => {
   it("carries the dev-lens verdict out of a refusal too", async () => {
     const { h } = harness(
       { ...FULL, recon: recon({ devLensAccurate: false, devLensCorrection: "wrong file" }) },
-      [{ match: saw("--numstat"), reply: { stdout: OVER_CAP } }],
+      [{ match: saw("--numstat"), reply: { stdout: REFUSED_DIFF } }],
     );
 
     const outcome = await solveTicket(h.deps, request);
@@ -1074,10 +1095,16 @@ describe("resolveReview", () => {
   });
 
   it("gates the whole cumulative diff, not just the round's increment", async () => {
-    // The reviewer is looking at the cumulative diff, so that is what has to
-    // stay inside the bound.
+    // The reviewer is looking at the cumulative diff, so that is what has to be
+    // clean: a lockfile anywhere in it is a problem whichever round put it
+    // there, and a round that merely fails to remove one has not fixed it.
+    //
+    // The cumulative reading was half the argument for deleting the size caps —
+    // it meant a round touching one new file was refused for the four already
+    // on the branch. It is the right reading for the path families and was the
+    // wrong one for a cap, which is the distinction that survived the delete.
     const { h } = harness({ review: review() }, [
-      { match: saw("--numstat"), reply: { stdout: OVER_CAP } },
+      { match: saw("--numstat"), reply: { stdout: REFUSED_DIFF } },
     ]);
 
     const outcome = await resolveReview(h.deps, reviewRequest);

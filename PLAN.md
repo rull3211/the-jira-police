@@ -289,11 +289,15 @@ Guards on the write pass:
   command itself, which also disposes of "no `git push` from inside the model's session".
 - **Verification is mechanical.** The harness runs the steps and reads exit codes. The model is
   never asked whether the tests passed.
-- **Diff-bounds gate.** Caps files and lines; refuses lockfiles, CI config, `.github/`, and
-  anything outside the repo. It adds a category the first draft did not have: **files that define
-  what verification means** (`package.json`, `tsconfig*`, lint and test config), refused
-  unconditionally and exempt from any cap, because a run that can edit them can make every
-  subsequent check pass while verifying nothing. It parses `--numstat -z`, since without `-z` an
+- **Diff-bounds gate.** Refuses lockfiles, CI config, `.github/`, and anything outside the repo.
+  It adds a category the first draft did not have: **files that define what verification means**
+  (`package.json`, `tsconfig*`, lint and test config), refused unconditionally, because a run that
+  can edit them can make every subsequent check pass while verifying nothing. **It no longer caps
+  files or lines** — that family was deleted 2026-09-06 and the reasoning is in the module header:
+  the path families are sound in both directions and a size cap is sound in one, it fires after
+  the pass has been paid for so it discards a spend rather than preventing one, it measures the
+  pull request cumulatively rather than the run, and a human merges every PR anyway. Size is still
+  measured and reported, just never refused. It parses `--numstat -z`, since without `-z` an
   attacker-suggested filename containing a newline can forge a numstat record.
 - Commit messages must satisfy Conventional Commits — mechanically checkable, so checked.
 

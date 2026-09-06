@@ -1816,12 +1816,8 @@ path are inspected, so a run cannot move a forbidden file somewhere innocuous an
 harmless half checked. An unparseable numstat throws rather than returning a verdict: a gate that
 does not know what it is looking at must not reach the caller looking like a gate that refused.
 
-Three refusal families:
+Two refusal families, and a third that was deleted:
 
-- **Size** — five files, two hundred lines. Calibrated against the pilot's own fitness bar rather
-  than guessed: a ticket only reaches the solver with `dor:pass`, a dev lens naming an exact file
-  and `effort:S`, and a change matching that description does not touch six files. A tripwire for
-  a run that lost the plot, not a budget to spend.
 - **Location** — paths that escape the worktree, plus the git database, the CI configuration
   directories, environment files, the agent's own instruction and skill directories, and
   lockfiles. Each is a place where a change is either unreviewable by eye or grants the run more
@@ -1830,11 +1826,30 @@ Three refusal families:
   refused rather than normalised, because a normalised path is a different string from the one git
   will act on.
 - **Verification integrity** — the subtle one, and §14.13. `package.json`, `tsconfig*.json`, the
-  lint config and the vitest config are refused **unconditionally and exempt from every cap**,
-  because they define what passing means. A one-line edit there is the dangerous size, not the
-  safe one. It is a separate list from the forbidden paths only so the refusal can say why in the
-  terms that matter: not "you touched a config file" but "you edited the scoreboard you are being
-  scored on".
+  lint config and the vitest config are refused **unconditionally, at any size**, because they
+  define what passing means. A one-line edit there is the dangerous size, not the safe one. It is
+  a separate list from the forbidden paths only so the refusal can say why in the terms that
+  matter: not "you touched a config file" but "you edited the scoreboard you are being scored on".
+- **~~Size~~** — five files, two hundred lines, hardcoded, with no setting. **Deleted
+  2026-09-06.** Both families above are sound in both directions: a path that escaped the worktree
+  escaped it, and a run that edited `vitest.config.ts` has invalidated its own verification, no
+  judgement required. A cap is sound in one — a run that lost the plot is usually wide, a wide
+  diff is usually not a run that lost the plot — and the gate was deriving the second from the
+  first. Three things made a veto the wrong tool for it specifically: it fires **after** the model
+  pass, so it discards a spend rather than preventing one; it reads the diff cumulatively against
+  `SOLVE_BASE_REF`, so it measures how large the pull request has become rather than what this run
+  did; and a human merges every pull request this service opens, so it duplicated a judgement the
+  reviewer makes anyway with more context. The argument was already written in this repository
+  about `checkFailFirst`, which reports and never refuses for the same reason, and had simply not
+  been applied here. `files` and `lines` are still computed and still printed on every verified
+  run — the measurement survived, only the veto went.
+
+  The evidence was PR #2663: a review round answering a human's request to widen a type touched
+  six files, was refused at the gate after $1.77 had been spent on the pass, and posted nothing
+  public. Four of the six files were one line each. The prose the cap shipped with claimed the
+  recovery path was that _"a human looks, and either widens the cap for that ticket or agrees the
+  ticket was mis-assessed"_ — there was no way to widen it for a ticket, and a `refused` round
+  writes nothing to the pull request, so nobody looked.
 
 An empty diff is refused too. A run that edits a file and reverts it, or writes only to an ignored
 path, otherwise reaches the end looking exactly like success and opens an empty pull request.
