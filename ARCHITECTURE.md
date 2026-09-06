@@ -718,10 +718,20 @@ pnpm bot:once SSX-1234 --claim     # ... writes the verdict, then claims the tic
 pnpm bot:once SSX-1234 --solve     # ... and runs the solver; nothing is pushed
 pnpm bot:once SSX-1234 --pr        # ... and opens the draft PR
 pnpm bot:once SSX-1234 --review    # ... and reviews it out of draft — the whole bot, one command
+pnpm watch:once                    # every agent:watching ticket; reports, writes nothing
+pnpm watch:once SSX-1234           # ... or just that one, label or no label
 pnpm check-types && pnpm lint && pnpm test
 ```
 
 Note the script is **`check-types`**, not `typecheck`.
+
+**Two different watches, and the names are close enough to be worth separating.**
+`solve:once --watch` polls a **pull request** for reviewer activity, on a cadence of minutes.
+`watch:once` is F's **sendback** watch: it asks whether a ticket a reporter was asked to fix has
+been fixed, on a cadence of days. Nothing connects them but the word.
+
+`watch:once` has no `--write`, unlike every other command here, because there is nothing to write
+yet — the re-triage and the unsubscribe are unbuilt. A flag would say otherwise.
 
 All four escalating flags are wired, and **the ladder is cumulative** — `--review` claims, solves,
 opens the pull request and then works the review. This paragraph used to say they refused, each
@@ -1191,6 +1201,15 @@ Things that look like details and are not:
 5. **Labels are a delta, unioned against live** — never a replacement array.
 6. **The footer sentinel is verbatim and load-bearing.** Change it and every existing comment
    becomes unrecognisable to its own skill, so re-runs stack instead of refresh.
+
+   **Verbatim on the way out, and not on the way back — found 2026-09-06 building the watch.**
+   The sentinel is written `_…_`; Jira stores ADF, so the underscores become an `em` mark and
+   stop being characters; `renderAdf` re-emits emphasis as `*…*`. So a reader comparing the
+   sentinel _whole_ against a comment fetched back matches nothing this service has ever posted.
+   Anything identifying our own comments therefore keys on `FOOTER_TEXT` — the sentinel with its
+   delimiters stripped, derived from it so the two cannot drift. The general rule: **the words
+   survive the round trip and the markup does not**, so identity belongs to the words.
+
 7. **`SKILL_NAME` defaults to the mock.** An unconfigured service must not be able to post.
 8. **Anything that grants privilege fails closed.** `agentFitness` is optional in the schema and
    every ambiguity in `parseAgentFitness` — absent, malformed, truthy-but-not-`true` — resolves to
@@ -1243,6 +1262,24 @@ Things that look like details and are not:
 
     Invariant 5 (_delta, never a replacement array_) now holds on both write paths rather than
     on one, which is what it was always asking for.
+
+    **The rule has a second amendment, authorised 2026-09-06: `JiraClient.fetchActivity` reads a
+    ticket's changelog.** It is read-only, so it does not touch what the first amendment was
+    about — but the standing rule is _discovery_, not _reads_, and issue history is not
+    discovery, so it is an amendment rather than an ordinary use. What it buys is the sendback
+    watch (F): the trigger for re-triaging a watched ticket is a reporter editing the field that
+    was blocking it, and the changelog is the only place that fact exists. The alternative was
+    keying on the changelog's **author** as the plan originally proposed, which is both a wider
+    read and a worse rule — the poster writes through an MCP session on a human's Atlassian
+    account, so authorship cannot separate this service from the operator, and a field-based
+    trigger is immune to whoever holds the credential.
+
+    Two bounds keep it narrow. The method reads status, comments and changelog for **one named
+    issue** and nothing else, and it is called only from the watch path. And it **refuses a
+    partial read**: both lists are paged to completion, and a ticket past the cap throws rather
+    than returning a prefix, because the count of our own comments is the whole bound on what a
+    watched ticket may cost and a count of some of them reads exactly like a count of all of
+    them.
 
 12. **A capability is only withheld if something withholds it.** `--allowedTools` pre-approves;
     it does not restrict. This service ran for its whole life with three comments in
