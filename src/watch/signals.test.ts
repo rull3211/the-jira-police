@@ -34,6 +34,7 @@ function activity(overrides: Partial<IssueActivity> = {}): IssueActivity {
   return {
     key: "SSX-1234",
     statusCategoryKey: "indeterminate",
+    labels: [],
     comments: [],
     changes: [],
     ...overrides,

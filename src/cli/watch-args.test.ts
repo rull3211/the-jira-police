@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WatchDecision } from "../watch/decide.ts";
-import { describeDecision, watchKey } from "./watch-args.ts";
+import { describeDecision, watchKey, watchWrites } from "./watch-args.ts";
 
 describe("watchKey", () => {
   it("reads one issue key", () => {
@@ -29,6 +29,30 @@ describe("watchKey", () => {
     // which is the whole class of defect this repository is about.
     expect(() => watchKey(["SSX-1", "SSX-2"])).toThrow(/at most one issue key/);
   });
+});
+
+describe("watchWrites", () => {
+  it("is off unless the flag is typed", () => {
+    expect(watchWrites([])).toBe(false);
+    expect(watchWrites(["SSX-1234"])).toBe(false);
+  });
+
+  it("is on with the flag, in either position", () => {
+    expect(watchWrites(["--unsubscribe"])).toBe(true);
+    expect(watchWrites(["SSX-1234", "--unsubscribe"])).toBe(true);
+    expect(watchWrites(["--unsubscribe", "SSX-1234"])).toBe(true);
+  });
+
+  it.each(["--write", "--unsub", "unsubscribe", "--Unsubscribe"])(
+    "does not accept %s as the flag",
+    (flag) => {
+      // A near miss must read as the dry run, not as the write. `--write` in
+      // particular is the name the plan uses for the finished flag, so it is
+      // the typo an operator is most likely to make, and guessing in the
+      // direction of more privilege is the one guess never worth making.
+      expect(watchWrites([flag])).toBe(false);
+    },
+  );
 });
 
 describe("describeDecision", () => {

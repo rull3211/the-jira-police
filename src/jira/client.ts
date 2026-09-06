@@ -220,6 +220,8 @@ export interface IssueActivity {
   readonly key: string;
   /** Jira's `status.statusCategory.key`: `new`, `indeterminate` or `done`. */
   readonly statusCategoryKey: string;
+  /** Every label on the ticket, so a caller can tell a real removal from a no-op. */
+  readonly labels: readonly string[];
   readonly comments: readonly JiraComment[];
   readonly changes: readonly JiraFieldChange[];
 }
@@ -467,8 +469,12 @@ export class JiraClient {
   async fetchActivity(key: string): Promise<IssueActivity> {
     assertIssueKey(key);
 
+    // Labels ride along with the status because the caller that unsubscribes a
+    // ticket has to know whether the label is on it. Asking Jira to remove one
+    // that is not there is not an error — it is a write that changes nothing
+    // and still bumps `updated`, which is the field the solve queue orders by.
     const statusResponse = await this.#get(
-      `/rest/api/3/issue/${key}?fields=status`,
+      `/rest/api/3/issue/${key}?fields=status,labels`,
       "application/json",
     );
     const statusPayload = (await statusResponse.json()) as DetailPayload;
@@ -503,6 +509,7 @@ export class JiraClient {
       // the last is a terminal, and it is compared rather than the status
       // *name*, which is board-configurable and Norwegian on this one.
       statusCategoryKey: categoryKey,
+      labels: statusPayload.fields?.labels ?? [],
       comments: comments.map((raw) => ({
         id: String(raw.id ?? ""),
         author: raw.author?.displayName ?? "unknown",

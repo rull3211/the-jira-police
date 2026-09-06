@@ -720,6 +720,7 @@ pnpm bot:once SSX-1234 --pr        # ... and opens the draft PR
 pnpm bot:once SSX-1234 --review    # ... and reviews it out of draft — the whole bot, one command
 pnpm watch:once                    # every agent:watching ticket; reports, writes nothing
 pnpm watch:once SSX-1234           # ... or just that one, label or no label
+pnpm watch:once --unsubscribe      # ... and act on the drops: label off, and say so if owed
 pnpm check-types && pnpm lint && pnpm test
 ```
 
@@ -730,8 +731,15 @@ Note the script is **`check-types`**, not `typecheck`.
 `watch:once` is F's **sendback** watch: it asks whether a ticket a reporter was asked to fix has
 been fixed, on a cadence of days. Nothing connects them but the word.
 
-`watch:once` has no `--write`, unlike every other command here, because there is nothing to write
-yet — the re-triage and the unsubscribe are unbuilt. A flag would say otherwise.
+**`watch:once` has `--unsubscribe` where every other command here has `--write`,** and the narrow
+name is deliberate. A watch decision has three outcomes and only one of them has a writer: the
+re-triage hand-off is still unbuilt. A flag called `--write` would therefore do nothing at all on
+the outcome that matters most while reporting a clean run, which is the divergence this codebase
+is organised around, spelled as a command-line flag. It is renamed when it earns the name.
+
+The ordering is also deliberate: unsubscribing is the only action in F that _reduces_ what the
+watcher can spend, so the brake ships before the engine and `decideWatch`'s two runaway
+terminals — `exhausted` and `uncountable` — become reachable before anything can run away.
 
 All four escalating flags are wired, and **the ladder is cumulative** — `--review` claims, solves,
 opens the pull request and then works the review. This paragraph used to say they refused, each

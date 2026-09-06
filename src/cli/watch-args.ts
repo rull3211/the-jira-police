@@ -32,6 +32,28 @@ export function watchKey(argv: readonly string[]): string | null {
 }
 
 /**
+ * Whether the run may act on an `unsubscribe`, and nothing else.
+ *
+ * **It is `--unsubscribe` rather than `--write`, and the narrow name is the
+ * honest one.** A decision has three outcomes and only one of them has a
+ * writer: the re-triage hand-off is not built. A `--write` flag would therefore
+ * do nothing on the outcome that matters most, while still reporting a
+ * successful run — which is this project's own defect class spelled as a
+ * command-line flag.
+ *
+ * The name also matches what the flag turns on rather than how much privilege
+ * it grants, and those differ here in the reassuring direction: unsubscribing
+ * only ever *stops* the watcher spending. It is the brake, and it ships before
+ * the engine so that the engine cannot be armed without one.
+ *
+ * When the re-triage lands this becomes `--write`, which is what the plan's
+ * command table has always called it.
+ */
+export function watchWrites(argv: readonly string[]): boolean {
+  return argv.includes("--unsubscribe");
+}
+
+/**
  * One ticket's decision as one line, because a sweep is read as a table.
  *
  * The three prefixes are padded to the same width and only the two that cost

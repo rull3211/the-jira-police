@@ -664,6 +664,50 @@ development reads `exhausted` on sight. Both readings are arguable — the first
 — but the prose and the behaviour disagree, which is this project's own defect class. Decide it
 before the watcher spends, not after.
 
+#### F's first write, landed 2026-09-06 — the brake before the engine
+
+`watch:once --unsubscribe` takes `agent:watching` off a ticket the decision dropped, and comments
+when the reason calls for one. 2031 tests; seven mutations caught. **The re-triage is still
+unbuilt, and the flag is named for what it does rather than for the phase.**
+
+**Unsubscribe first is an ordering argument, not an easier-first one.** It is the only action in F
+that _reduces_ what the watcher can spend — every write it makes takes a ticket off the list, and
+it cannot put one on. So it makes `decideWatch`'s two runaway terminals reachable before there is
+anything to run away: `exhausted` and `uncountable` exist to stop a loop that does not exist yet,
+and shipping them inert would have meant arming the loop and the brake in the same change.
+
+**It is `--unsubscribe` and not `--write`.** Three outcomes, one writer: a `--write` flag would
+silently do nothing on `retriage`, the outcome that matters most, while reporting a clean run —
+this file's own defect class, spelled as a flag. It is renamed when it means it.
+
+Three guards, each of which can fail while everything around it succeeds:
+
+- **`unsubscribeEdit` returns `null`, not an empty edit, on a ticket that is not watched.** Jira
+  accepts a removal of an absent label; it changes nothing and still bumps `updated`, which is what
+  the solve queue orders by and what a human reads as _somebody touched this_. Reachable rather
+  than theoretical, because `watch:once <KEY>` deliberately accepts an unlabelled ticket and a
+  closed one among those decides `unsubscribe`.
+- **`unsubscribeNote` returns `null` for `closed`.** Closing is how nearly every watch will end and
+  a comment is a $0.40 session, so commenting on all three reasons would put a recurring charge on
+  the commonest outcome to tell a reporter what they just did themselves. The two that give up on a
+  ticket that is _still open_ do pay for it, because there the silence actively misleads: a
+  reporter who answers afterwards reads it as the tool having seen the answer and declined it.
+- **The label comes off before the comment goes on.** Reversed, a failed label write leaves a
+  ticket that has been told nobody is watching it and is still on the list — so it is told again
+  every sweep, indefinitely, a bot repeating a goodbye at a session a time. This way the worst case
+  is a ticket correctly unsubscribed and one person uninformed. Same rule as the review cursor's
+  reserve-before-the-pass: **when two writes can fail independently, do the one that stops the loop
+  first.** A failed comment therefore does not throw, since the watch is already off and there is
+  nothing left to retry.
+
+**`endWatch` lives in `src/watch/end.ts` rather than in the command**, for the reason
+`watch-args.ts` exists — `watch-once.ts` ends in a top-level `await`, so anything in it runs on
+import and cannot be tested. That is not filing preference: the ordering above is exactly the kind
+of guard D4e recorded shipping unguarded, because the only place it was used was a command file.
+
+**`fetchActivity` also reads `labels` now**, which is what lets the no-op case be told from the
+real one. Still read-only, still the same request.
+
 ---
 
 ## Phasing

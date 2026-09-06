@@ -1,47 +1,64 @@
 /**
  * Reports what the sendback watch would do, and does none of it.
  *
- *   node src/cli/watch-once.ts            # every ticket carrying agent:watching
- *   node src/cli/watch-once.ts SSX-1234   # one named ticket, whatever its labels
+ *   node src/cli/watch-once.ts                 # every ticket carrying agent:watching
+ *   node src/cli/watch-once.ts SSX-1234        # one named ticket, whatever its labels
+ *   node src/cli/watch-once.ts --unsubscribe   # ... and act on the drops
  *
- * **There is no `--write` yet, and the omission is the phase boundary rather
- * than an oversight.** Everything here reads: the queue query, one issue's
- * status, its comments and its changelog. What a write would mean is a paid
- * re-triage or a label coming off, and neither is built. A flag implying
- * otherwise would be the divergence this project exists to catch, so the flag
- * arrives with the thing it turns on — which is the same argument
- * `solve-once.ts` made for having no `--dry-run` while there was only one mode.
+ * **`--unsubscribe` is the only write, and the narrow name is the point.** A
+ * decision has three outcomes; the re-triage hand-off is not built, so a flag
+ * called `--write` would do nothing on the outcome that matters most while
+ * still reporting a clean run — the divergence this project exists to catch,
+ * spelled as a command-line flag. It becomes `--write` when it means it.
  *
- * What it is for in the meantime is calibration, and that is worth a command on
- * its own. `plausible` has been landing on tickets since the first slice with
- * nothing reading it, so the population of watched tickets exists and has never
- * been looked at. This prints the decision the watcher *would* make against
- * each one, which is how you find out whether `BLOCKER_CLEARING_FIELDS` covers
- * what reporters on this board actually edit before anything is paying per
- * mistake to find out.
+ * That ordering is deliberate rather than incidental. Unsubscribing is the only
+ * action here that *reduces* what the watcher can spend: it takes tickets off
+ * the list. The re-triage is what puts money on it. Shipping the brake first
+ * means the engine cannot later be armed without one already in place, and it
+ * means the terminals in `decideWatch` — `exhausted` and `uncountable`, both of
+ * which exist to stop a runaway — are reachable before anything can run away.
+ *
+ * Without the flag it is still a calibration tool, which is what it was built
+ * for and what it has already earned. Run against SSX-3830 on 2026-09-06 it
+ * confirmed that this board spells the changed field `description`, so
+ * `BLOCKER_CLEARING_FIELDS` needed no change — and that `labels`, which this
+ * service writes constantly, is not in that set and must never be added to it,
+ * since the allowlist is the changelog's entire self-trigger defence.
  *
  * A named key skips the query and is not required to carry the label, so a
- * ticket can be examined before it is subscribed.
+ * ticket can be examined before it is subscribed. That is also why
+ * `unsubscribeEdit` refuses to write on a ticket without the label rather than
+ * sending a removal Jira would accept and ignore.
  *
  * **`WATCH_ENABLED` is deliberately not read here**, and that is the opposite
- * of how the master switch works for the daemon. The switch exists so that no
- * money is spent while nobody is watching; this command spends none and is the
- * thing an operator uses to decide whether the switch is safe to turn on.
- * Gating it would mean the only way to find out is to arm the loop first.
+ * of how the master switch works for the daemon. The switch exists so nothing
+ * is spent while nobody is watching, and it guards the loop rather than the
+ * operator: this is the command someone uses to decide whether the switch is
+ * safe to arm, and gating it would mean the only way to find out is to arm it
+ * first. The reading survives `--unsubscribe`, because what that flag spends is
+ * bounded by tickets already on the list and every write it makes takes one
+ * *off* — it cannot start a watch, only end one.
  */
 
 import { buildSendbackWatchJql } from "../jira/jql.ts";
 import { logger } from "../logger.ts";
 import { describeSettings, list, numeric, readSettings, withConfigErrors } from "../settings.ts";
 import { assertIssueKey } from "../jira/client.ts";
-import type { JiraClient } from "../jira/client.ts";
-import { createJiraClient } from "../wiring.ts";
+import type { IssueActivity, JiraClient } from "../jira/client.ts";
+import { createJiraClient, createSolveCommenter } from "../wiring.ts";
 import { decideWatch, type WatchDecision } from "../watch/decide.ts";
+import { endWatch } from "../watch/end.ts";
 import { toWatchSignals } from "../watch/signals.ts";
-import { describeDecision, watchKey } from "./watch-args.ts";
+import { describeDecision, watchKey, watchWrites } from "./watch-args.ts";
 
-async function look(client: JiraClient, key: string, maxRetriage: number): Promise<WatchDecision> {
-  const signals = toWatchSignals(await client.fetchActivity(key));
+interface Look {
+  readonly activity: IssueActivity;
+  readonly decision: WatchDecision;
+}
+
+async function look(client: JiraClient, key: string, maxRetriage: number): Promise<Look> {
+  const activity = await client.fetchActivity(key);
+  const signals = toWatchSignals(activity);
   const decision = decideWatch(signals, maxRetriage);
 
   logger.debug("watch.looked", {
@@ -66,11 +83,12 @@ async function look(client: JiraClient, key: string, maxRetriage: number): Promi
     fields: [...new Set(signals.changes.flatMap((change) => change.fields))].toSorted(),
   });
 
-  return decision;
+  return { activity, decision };
 }
 
 async function main(): Promise<void> {
   const named = watchKey(process.argv.slice(2));
+  const writes = watchWrites(process.argv.slice(2));
 
   const settings = readSettings();
   logger.info("watch-once.settings", describeSettings(settings));
@@ -94,16 +112,32 @@ async function main(): Promise<void> {
   }
 
   const counts = { retriage: 0, quiet: 0, unsubscribe: 0 };
+  let ended = 0;
+
+  // Built once and only when it could be used, because constructing it is how
+  // this command would acquire the ability to write at all. A dry run holds no
+  // commenter, which makes the refusal structural rather than a branch that
+  // could be got wrong — the same argument B1 made for `SolveDeps`.
+  const commenter = writes ? createSolveCommenter(settings) : null;
 
   for (const key of keys) {
-    const decision = await look(client, key, maxRetriage);
+    const { activity, decision } = await look(client, key, maxRetriage);
     counts[decision.kind] += 1;
     process.stdout.write(`${describeDecision(key, decision)}\n`);
+
+    if (commenter !== null && decision.kind === "unsubscribe") {
+      const did = await endWatch({ client, commenter }, key, activity, decision.reason);
+      if (did === "unsubscribed") {
+        ended += 1;
+      }
+    }
   }
 
   logger.info("watch-once.done", {
     looked: keys.length,
     maxRetriage,
+    unsubscribing: writes,
+    ended,
     ...counts,
     // Named rather than left implicit: this command reads and the watcher it
     // rehearses does not, so the number that matters to a reader is what a real
