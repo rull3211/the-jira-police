@@ -299,7 +299,8 @@ On a confirmed `y`, perform these writes (only these):
 - **Labels — UNION, never clobber.** READ the ticket's current labels (already fetched in §1), then
   write `current ∪ skill-set` via `mcp__atlassian__editJiraIssue` — never a bare replacement array.
   On a verdict change, remove ONLY the skill's own stale namespaced labels (`route:*`, `dup:*`,
-  `dor:*`, `tier:*`, `intake:*`, `next:*`, `agent:solvable`); never touch a human label. The
+  `dor:*`, `tier:*`, `intake:*`, `next:*`, `agent:solvable`, `agent:watching`); never touch a
+  human label. The
   preview's LABEL DELTA is exactly this reconciliation.
 
   **Revisable taxonomy — remove only as part of a swap.** `team:*`, `jira:*`, `domain:*`, `svc:*`,
@@ -323,6 +324,17 @@ On a confirmed `y`, perform these writes (only these):
   `agent:failed` are that bot's own lifecycle. This skill sets and clears its own assessment and
   nothing else — it must never add `agent:start`, since a ticket that could talk the skill into
   granting that would have talked it into authorising itself. Local change; not yet upstream.
+
+  `agent:watching` joined it on 2026-09-06 and is the same kind of thing: this skill's own
+  assessment that a send-back is nearly solvable, set by nothing else. **It is listed here because
+  it must come off, and the failure of omitting it is not a stale label.** It subscribes the ticket
+  to a paid re-triage sweep, so a watch that is never removed is a standing charge with no
+  condition that can end it — and the two ways it ends are both this skill's to write: the gap gets
+  filled, in which case the same run adds `agent:solvable` and the ticket moves to the solve queue,
+  or the re-triage concludes the ticket is not nearly solvable after all. Set it when you set
+  `agentFitness.plausible: true`, remove it whenever `plausible` is false; the harness refuses the
+  post if those two disagree in either direction, so there is no way to leave one behind quietly.
+  Local change; not yet upstream.
 
 - Apply the detected **component** via `mcp__atlassian__editJiraIssue`
   (`{"components":[{"name":"<exact live name>"}]}`) — ONLY one of the four policy streams
