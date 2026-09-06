@@ -7,6 +7,7 @@ import type { AgentFitness, Mutation, TriagePayload } from "./runner.ts";
 function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
   return {
     solvable: false,
+    plausible: false,
     confidence: "med",
     repo: "buy-insurance-advisor-web",
     rationale: "The deliverable is a brand asset.",

@@ -131,6 +131,15 @@ export async function clearRejection(directory: string, issueKey: string): Promi
  * rationale and blockers print either way; only `repo` is conditional, because
  * it is routinely empty when the answer is no and an empty field teaches
  * nothing.
+ *
+ * **`plausible` prints only on a "no", and the omission is the same argument
+ * running the other way.** The gate forbids it from being true beside a "yes",
+ * so on a solvable ticket the line could only ever read "no" — a constant, and
+ * a constant in a report is a line a reader learns to skip. On a "no" it is the
+ * opposite: that is the whole population the watch selects from, and a wrong
+ * `false` there is a ticket that quietly never gets looked at again. That
+ * failure is invisible unless the field is on the page next to the blockers it
+ * points at, which is why the two lines are adjacent.
  */
 export function formatAgentFitness(fitness: AgentFitness): readonly string[] {
   const verdict = fitness.solvable ? "🤖 yes" : "— no";
@@ -139,6 +148,9 @@ export function formatAgentFitness(fitness: AgentFitness): readonly string[] {
     "## Agent fitness",
     "",
     `- **Solvable by an agent:** ${verdict} (confidence: ${fitness.confidence})`,
+    ...(fitness.solvable
+      ? []
+      : [`- **Nearly solvable:** ${fitness.plausible ? "👀 yes — watching" : "— no"}`]),
     ...(fitness.repo === "" ? [] : [`- **Repo:** \`${fitness.repo}\``]),
     `- **Rationale:** ${fitness.rationale === "" ? "—" : fitness.rationale}`,
     `- **Blockers:** ${fitness.blockers.length > 0 ? fitness.blockers.join("; ") : "—"}`,

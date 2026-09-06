@@ -128,6 +128,15 @@ export const TRIAGE_SCHEMA = {
     agentFitness: {
       type: "object",
       additionalProperties: false,
+      // `plausible` is absent from this list while every other subfield is on
+      // it, and the asymmetry is deliberate. The five below have been in the
+      // schema since Phase A and every run since has supplied them; adding a
+      // sixth to the same list would make the next run of an unchanged skill
+      // fail its own schema — a payload rejected after the analyst has already
+      // been paid for. Omission reads as `false`, which is the same "no" the
+      // whole object's omission means, so nothing is lost by asking rather
+      // than requiring. Promote it once the skill has been emitting it for a
+      // while and the absence would be a real surprise.
       required: ["solvable", "confidence", "repo", "rationale", "blockers"],
       // Deliberately absent from the top-level `required` list. Two reasons,
       // and they point the same way.
@@ -151,6 +160,16 @@ export const TRIAGE_SCHEMA = {
           description:
             'True ONLY if ALL of: the verdict is "ready-ish"; the fault is localised to one repo you can name; the acceptance criteria are concrete enough that a passing test could demonstrate the fix; and the change does not need a product decision, a design, a schema/API migration, or credentials. If the verdict is anything other than "ready-ish", this MUST be false — a ticket that does not meet Definition of Ready has nothing an agent could verify itself against. When true, you MUST also include the label "agent:solvable" in the top-level `labels` array. NEVER emit any other `agent:*` label: "agent:start" in particular is a human authorisation and is not yours to grant.',
         },
+        plausible: {
+          type: "boolean",
+          // Deliberately the *narrow* half of a send-back rather than a second
+          // opinion about it. `needs-info` is far too broad to subscribe to —
+          // most of it will never be agent work, and every re-look is a paid
+          // run — so this field's whole job is to pick the few tickets where a
+          // named, fillable gap is the only thing in the way.
+          description:
+            'True if this ticket is NOT solvable today but WOULD BE if the items you list in `blockers` were filled in by the reporter. This is the narrow case: a send-back with a concrete, fillable gap — missing reproduction steps, an unspecified expected value, an acceptance criterion nobody has made testable — and nothing else standing in the way. It is NOT "this might be automatable one day". If the ticket would still need a product decision, a design, a migration, or work in more than one repository once the blockers were filled, this is false. MUST be false whenever `solvable` is true; the two are alternatives, not a scale. MUST NOT be true with an empty `blockers` array — "nearly solvable but I cannot say what is missing" is a guess, and it would put the ticket on a watch list with no condition that could ever clear it. When true, you MUST also include the label "agent:watching" in the top-level `labels` array, and when it is false that label MUST NOT appear there.',
+        },
         confidence: {
           type: "string",
           enum: ["low", "med", "high"],
@@ -171,7 +190,7 @@ export const TRIAGE_SCHEMA = {
           type: "array",
           items: { type: "string" },
           description:
-            'What stands in the way, one short phrase each — e.g. "needs a product decision on copy", "touches the payment schema", "no reproduction steps". MUST be empty when `solvable` is true, and should name at least one item when it is false.',
+            'What stands in the way, one short phrase each — e.g. "needs a product decision on copy", "touches the payment schema", "no reproduction steps". MUST be empty when `solvable` is true, and should name at least one item when it is false. When `plausible` is true this list is not an explanation but a to-do list addressed to the reporter — it is the exact condition that would end the watch, so write each entry as something a person can go and do.',
         },
       },
     },
