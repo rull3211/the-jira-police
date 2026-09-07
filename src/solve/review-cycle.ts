@@ -50,6 +50,30 @@
  * pull request was merged — and a merged pull request left unnoticed keeps its
  * `agent:review-done` label, stays in this query, and is looked at forever.
  *
+ * **The cycle's log line is the daemon's only record, so it carries what
+ * happened and not how many times something happened.** Written after the round
+ * on PR #2663, which returned an early non-success 144 ms after the pass and
+ * left no trace of which one. This line said `acted: ["SSX-3835"]` and threw the
+ * `AdvanceOutcome` away, and `settled` and `unlooked` were bare counts, so a
+ * $2.02 round was unattributable after the fact from three reductions in one
+ * statement.
+ *
+ * **The other channel does not cover it either, which is why this line is the
+ * fix rather than a second one.** `runReviewSweep` does read the returned
+ * outcome — the terminal labels are written from it — but the *report*,
+ * `describeReviewSweep`, is printed by `--watch` and never by the daemon. And
+ * even that would not have named this round's arm: it renders `acted` as
+ * `entry.outcome.kind` alone and `settled` as a count, so it says `abandoned`
+ * without the reason and hides a settle that is no longer `waiting`. It carries
+ * the full text of an `unlooked`, under a comment making exactly this argument
+ * about exactly that field. The argument was right and was applied to one of
+ * four.
+ *
+ * Every arm here logs its discriminating detail, and none of it is truncated:
+ * `shorten` exists for text going somewhere it has to fit, and its own argument
+ * is that the full version is in the log — which makes shortening *here* the one
+ * place that claim stops being true.
+ *
  * ## What it deliberately does not do
  *
  * It does not claim, solve, or open anything. The set it reads is the set that
@@ -237,6 +261,116 @@ const NOTHING: ReviewCycleOutcome = {
   deferred: [],
 };
 
+/**
+ * One `AdvanceOutcome` as one line, for the log the header describes.
+ *
+ * Deliberately a `switch` over `kind` rather than `JSON.stringify(outcome)`.
+ * Two of these arms carry a whole model pass — `iterated` holds `responses`,
+ * `threads` and `unresolved` — and a line that dumped them would be unreadable
+ * in exactly the situation it exists for, which is a person scrolling a
+ * daemon's log at midnight asking why a round did nothing. What each arm needs
+ * is the field that *discriminates within* it: the stage a failure reached, the
+ * reason an abandon gave, whether an iteration pushed. Everything else is on
+ * the pull request.
+ *
+ * Exhaustive with no `default`, so an outcome added to the union is a type
+ * error here rather than a round that logs `undefined`. That is the same
+ * argument `chainDecision`'s stopping `default` makes from the other side: a
+ * new arm must be argued about, not defaulted.
+ */
+export function outcomeNote(outcome: AdvanceOutcome): string {
+  switch (outcome.kind) {
+    case "waiting":
+      return `waiting quiet=${outcome.quietMs === null ? "unknown" : `${String(outcome.quietMs)}ms`}`;
+    case "ready":
+      return `ready rounds=${String(outcome.rounds)}`;
+    case "iterated":
+      return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
+    case "reviewer-exhausted":
+      return `reviewer-exhausted rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
+    case "capped":
+      return `capped rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
+    case "stalled":
+      return `stalled attempts=${String(outcome.attempts)}: ${outcome.reason}`;
+    case "synced":
+      return `synced round=${String(outcome.round)} behind=${String(outcome.behind)} conflicts=${outcome.conflicts.length === 0 ? "none" : outcome.conflicts.join(",")}`;
+    case "abandoned":
+      return `abandoned: ${outcome.reason}`;
+    case "refused":
+      return `refused at ${outcome.stage}: ${outcome.reasons.join("; ")}`;
+    case "failed":
+      return `failed at ${outcome.stage}: ${outcome.reason}`;
+  }
+}
+
+/** A ticket and the verdict it reached, in the shape the log line wants. */
+function noteFor(entry: ActedReview | SettledReview): string {
+  return `${entry.issueKey} #${String(entry.number)} ${outcomeNote(entry.outcome)}`;
+}
+
+/**
+ * Does this settle recur forever, or has something happened?
+ *
+ * `waiting` and `ready` are the two arms a healthy pull request sits in for
+ * days: nobody has replied yet, or it is out of draft with a human holding it.
+ * Both are true again on the next tick and the one after. Every other arm is a
+ * round that reached a verdict, and a verdict is news exactly once.
+ *
+ * Exhaustive with no `default`, for the reason `outcomeNote` gives above: an
+ * arm added to the union must be argued into one pile or the other. Defaulting
+ * it to quiet would be the dangerous direction — a new terminal outcome would
+ * arrive marked as nothing having happened.
+ */
+function settleIsQuiet(outcome: AdvanceOutcome): boolean {
+  switch (outcome.kind) {
+    case "waiting":
+    case "ready":
+      return true;
+    case "iterated":
+    case "reviewer-exhausted":
+    case "capped":
+    // Loud, and it is the arm where that matters most. A stall repeats on every
+    // tick exactly as `waiting` does, so the recurrence argument above would
+    // file it as quiet — and the whole reason the outcome exists is that a
+    // wedged pull request went four days without anything saying so. It is the
+    // one settle that both recurs forever and is news, so the rule bends here
+    // rather than being restated: a bound firing is reported the first time and
+    // every time, because the alternative is the silence it was built to break.
+    case "stalled":
+    case "abandoned":
+    case "refused":
+    case "failed":
+    // Loud, and it is a commit on somebody's branch: a merge the bot made and
+    // pushed while a reviewer was reading. It also does not recur — the branch
+    // is current afterwards — so filing it as quiet would hide the one round
+    // that changed the pull request without answering anybody.
+    case "synced":
+      return false;
+  }
+}
+
+/**
+ * Did this cycle do anything worth a person's attention?
+ *
+ * Exported because it decides the ⏳/🔧 mark on the single line this service
+ * writes most often, and a rule that decides what a human sees is a rule that
+ * gets a test.
+ *
+ * Note what it does **not** read: `watched`. A cycle watching five quiet pull
+ * requests is the normal state of a healthy queue, and marking it as news
+ * because it looked at something would mark every tick as news — which is the
+ * mark meaning nothing at all.
+ */
+export function isQuietCycle(outcome: ReviewCycleOutcome): boolean {
+  return (
+    outcome.acted.length === 0 &&
+    outcome.ended.length === 0 &&
+    outcome.unlooked.length === 0 &&
+    outcome.deferred.length === 0 &&
+    outcome.settled.every((entry) => settleIsQuiet(entry.outcome))
+  );
+}
+
 /** Oldest touched first, so the same pull request cannot be starved twice. */
 function byUpdatedAscending(a: WatchedTicket, b: WatchedTicket): number {
   return Date.parse(a.updated) - Date.parse(b.updated);
@@ -323,14 +457,33 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
     }
   }
 
-  logger.info("review.cycle", {
+  const outcome: ReviewCycleOutcome = {
     watched: tickets.length,
-    acted: acted.map((entry) => entry.issueKey),
-    settled: settled.length,
-    ended: ended.map((entry) => `${entry.issueKey} ${entry.state}`),
-    unlooked: unlooked.length,
-    deferred: deferred.length,
-  });
+    acted,
+    settled,
+    ended,
+    unlooked,
+    deferred,
+  };
 
-  return { watched: tickets.length, acted, settled, ended, unlooked, deferred };
+  logger.info(
+    "review.cycle",
+    {
+      watched: outcome.watched,
+      acted: acted.map(noteFor),
+      // Not a count. A settle is `waiting` on almost every tick, which is why
+      // this was one — but the arms that are not `waiting` are a finished round
+      // that cost nothing, and hiding those behind a number hides the difference
+      // between a quiet pull request and one nothing will ever act on again.
+      settled: settled.map(noteFor),
+      ended: ended.map((entry) => `${entry.issueKey} ${entry.state}`),
+      unlooked: unlooked.map((entry) => `${entry.issueKey} ${entry.reason}`),
+      deferred,
+    },
+    // Built from the outcome rather than from the six locals, so the mark and
+    // the fields cannot describe two different cycles.
+    { quiet: isQuietCycle(outcome) },
+  );
+
+  return outcome;
 }

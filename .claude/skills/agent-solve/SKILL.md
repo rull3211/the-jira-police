@@ -28,7 +28,7 @@ being asked to follow — it is the absence of a tool. Do not plan around it or 
 
 ## The four passes
 
-One skill, four invocations, with different capabilities. **The capability difference is enforced
+One skill, five invocations, with different capabilities. **The capability difference is enforced
 by the harness's flags, not by this file** — a skill file cannot restrict itself, and text here
 saying "do not edit" would be a description of intent, not a control.
 
@@ -43,17 +43,23 @@ saying "do not edit" would be a description of intent, not a control.
    that is a good outcome. Simpler means clearer, not shorter.
 4. **`--review`** — one round of resolving reviewer feedback. May answer without touching code;
    a review that raised only questions is legitimately resolved by answering them.
+5. **`--merge`** — resolve the conflicts stopping this branch taking its base branch. Given the
+   conflicted paths and **not** the review: a branch that will not take its base cannot be built,
+   so there is nothing a review round could answer a reviewer from, and this round answers nobody
+   on purpose. Its scope is git's list of conflicted files, exactly.
 
 Each pass is its own session rather than four turns of one, so a pass cannot carry a capability
 past the point it was granted for, and so a pass that dies cannot leave a later one reasoning
 from half a conversation.
 
 Recon runs first and its verdict is honoured: if it says stop, the fix pass never starts and no
-model ever gets write access for that ticket.
+model ever gets write access for that ticket. That ordering covers the first four. `--merge`
+belongs to none of it — it runs when the base has moved under a pull request that already exists,
+which is a fact about two histories rather than a stage of solving a ticket.
 
-`SOLVE_INSTRUCTIONS.md` §1, §2, §2a and §2b are the contracts for the four, in that order. This
-list must match them and the argument builder in `src/solve/runner.ts`; it previously said "two
-passes" and named only the first two, while both of those already had four.
+`SOLVE_INSTRUCTIONS.md` §1, §2, §2a, §2b and §2c are the contracts for the five, in that order.
+This list must match them and the argument builder in `src/solve/runner.ts`; it previously said
+"two passes" and named only the first two, while both of those already had four.
 
 ## Usage
 
@@ -61,6 +67,7 @@ passes" and named only the first two, while both of those already had four.
 - `/agent-solve <ISSUE-KEY> --fix` — make the change described by the recon verdict
 - `/agent-solve <ISSUE-KEY> --simplify` — a cold read of the diff, bounded to the fix's files
 - `/agent-solve <ISSUE-KEY> --review` — resolve one round of reviewer feedback
+- `/agent-solve <ISSUE-KEY> --merge` — resolve the conflicts blocking the base branch merge
 - `--brief <path>` — the recon verdict, passed into the fix pass
 - `--vault <path>` — vault location, for conventions and domain terms
 

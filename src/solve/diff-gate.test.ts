@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DEFAULT_LIMITS,
   DiffParseError,
   type FileChange,
   checkDiff,
@@ -109,7 +108,7 @@ describe("parseNumstat", () => {
   });
 });
 
-describe("checkDiff — the plan's four named refusals", () => {
+describe("checkDiff — the plan's named refusals", () => {
   it("refuses a lockfile", () => {
     expect(reasonsFor([ok("pnpm-lock.yaml")])).toContain("dependency change");
     expect(reasonsFor([ok("packages/web/package-lock.json")])).toContain("dependency change");
@@ -123,11 +122,28 @@ describe("checkDiff — the plan's four named refusals", () => {
     expect(reasonsFor([ok("../../somewhere/else")])).toContain("inside the worktree");
   });
 
-  it("refuses a diff over either cap", () => {
-    const wide = ["a", "b", "c", "d", "e", "f"].map((name) => ok(`src/${name}.ts`));
-    expect(reasonsFor(wide)).toContain("cap is 5");
+  it("does not refuse on size, however wide the diff is", () => {
+    // The fourth family, removed 2026-09-06. This is the mutation guard for its
+    // absence: restore either cap and this test fails, which is the only way an
+    // absent rule can be held in place by a test at all.
+    //
+    // The numbers are deliberately far past the caps that used to exist
+    // (5 files, 200 lines) rather than one past them, so that a reinstated cap
+    // is caught whatever value someone picks for it.
+    const wide = Array.from({ length: 40 }, (_unused, index) =>
+      ok(`src/f${String(index)}.ts`, 200),
+    );
 
-    expect(reasonsFor([ok("src/a.ts", 300, 0)])).toContain("cap is 200");
+    expect(checkDiff(wide)).toEqual({ ok: true, files: 40, lines: 8040 });
+  });
+
+  it("still measures what it no longer refuses", () => {
+    // The veto went; the measurement did not. `solve-outcome.ts` prints these
+    // two numbers on every verified run, so a reviewer is still told how wide
+    // the change was — which was the half of the cap worth keeping.
+    const verdict = checkDiff([ok("src/a.ts", 10, 5), ok("src/b.ts", 1, 0)]);
+
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 16 });
   });
 });
 
@@ -187,9 +203,11 @@ describe("checkDiff — verification integrity", () => {
   });
 
   it("refuses these regardless of how small the change is", () => {
-    // Not subject to a cap. A one-line edit to the manifest is the dangerous
-    // size, not the safe one.
-    const verdict = checkDiff([ok("package.json", 1, 1)], { maxFiles: 99, maxLines: 9999 });
+    // Size does not enter into it, and never did — this rule was exempt from
+    // the caps back when there were caps. A one-line edit to the manifest is
+    // the dangerous size, not the safe one, because the danger is what the line
+    // says rather than how many there are.
+    const verdict = checkDiff([ok("package.json", 1, 1)]);
 
     expect(verdict.ok).toBe(false);
   });
@@ -259,7 +277,7 @@ describe("checkDiff — the rest", () => {
     expect(verdict.ok ? [] : verdict.reasons).toHaveLength(1);
   });
 
-  it("counts a rename's destination against the caps, via the parser", () => {
+  it("counts both halves of a rename, via the parser", () => {
     const verdict = checkDiff(parseNumstat(`40\t10\t${NUL}src/old.ts${NUL}src/new.ts${NUL}`));
 
     expect(verdict).toEqual({ ok: true, files: 2, lines: 50 });
@@ -269,11 +287,5 @@ describe("checkDiff — the rest", () => {
     expect(
       reasonsFor(parseNumstat(`0\t0\t${NUL}.github/workflows/ci.yml${NUL}docs/ci.yml${NUL}`)),
     ).toContain("CI privilege");
-  });
-
-  it("uses caps a caller can tighten but that default low", () => {
-    expect(DEFAULT_LIMITS).toEqual({ maxFiles: 5, maxLines: 200 });
-    expect(checkDiff([ok("src/a.ts", 1, 0)], { maxFiles: 1, maxLines: 1 }).ok).toBe(true);
-    expect(checkDiff([ok("src/a.ts", 1, 1)], { maxFiles: 1, maxLines: 1 }).ok).toBe(false);
   });
 });

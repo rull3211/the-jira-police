@@ -250,6 +250,17 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  * working, and a non-zero exit would teach a daemon's backoff to treat the
  * safety stop as an outage — retrying the one pull request that has already
  * proved it should be left alone.
+ *
+ * `stalled` exits zero by that same argument and is the hardest of the three to
+ * leave alone, because a stall is unambiguously something being broken — the
+ * checkout could not be cut, three times running — and every instinct says an
+ * exit code is where that belongs. It is not, for two reasons. The breakage was
+ * already reported: each of those attempts returned `failed`/`worktree` and set
+ * `$?` non-zero at the time, so a stall adds no information a caller has not
+ * had three times. And what a non-zero exit *does* is drive retry, which is the
+ * one behaviour a stall exists to stop. It would take the pull request the
+ * service has just decided to leave alone and make it the pull request the
+ * daemon comes back to soonest.
  */
 export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
   return outcome.kind === "failed" || outcome.kind === "refused";
@@ -346,6 +357,27 @@ export function chainDecision(outcome: AdvanceOutcome, silenceMs: number): Chain
             why: `round ${String(outcome.round)} ${outcome.pushed ? "pushed" : "answered without pushing"}, so the reviewer gets another look`,
           };
     }
+    case "synced": {
+      // The third outcome that continues, and it has to be argued in rather than
+      // left to the `default` arm below. A merge round answers the *base*, not
+      // the reviewer: the feedback that was waiting is still waiting, unread, and
+      // stopping here would end the chain one step before the round that reads
+      // it — on a pull request the loop had just made buildable again.
+      //
+      // Not `silent`. A merge round did work, so the wall-clock quiet bound must
+      // reset; treating it as silence would let a branch that keeps needing the
+      // base merged trip the absent-reviewer brake, which measures the reviewer
+      // and would be measuring us.
+      //
+      // It cannot spin, because a merge round reserves like any other and so
+      // spends one of `MAX_PR_ROUNDS_TOTAL`. A base that kept moving would run
+      // the count out and stop at `capped`, which is the right ending for it.
+      return {
+        stop: false,
+        silent: false,
+        why: `round ${String(outcome.round)} merged ${String(outcome.behind)} commit(s) of the base in, so the next round reads the review against a current branch`,
+      };
+    }
     case "ready": {
       return { stop: true, silent: false, why: "nothing left to act on — undrafted" };
     }
@@ -361,6 +393,18 @@ export function chainDecision(outcome: AdvanceOutcome, silenceMs: number): Chain
         stop: true,
         silent: false,
         why: "MAX_PR_ROUNDS_TOTAL reached — the pull request is left in draft for a human",
+      };
+    }
+    case "stalled": {
+      // Not `silent`, even though nothing was heard from the reviewer either.
+      // `silent` drives the wall-clock quiet bound, and a stall is the opposite
+      // claim: there was work to do every time, and every time this side could
+      // not get to it. Marking it silent would file a local breakage as a slow
+      // reviewer, which is where it hid for four days.
+      return {
+        stop: true,
+        silent: false,
+        why: `${String(outcome.attempts)} attempts to start a round have failed in a row — leaving it; the last said: ${outcome.reason}`,
       };
     }
     case "abandoned": {
@@ -555,6 +599,27 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         `Nothing ran and the pull request was left as it is, still a draft if it was one. ` +
         `Something is wrong for this to have cost twenty rounds; read it before raising the cap.` +
         `\nUnresolved:\n${outcome.unresolved}`
+      );
+    }
+    case "stalled": {
+      return (
+        `STALLED — ${String(outcome.attempts)} attempts to start a round have failed in a row, so this pull request is being left alone. ` +
+        `No round was reserved by any of them, which is why no round cap noticed. ` +
+        `The failure is on this side, not the reviewer's: read the marker comment on the pull request for the list, ` +
+        `and clear whatever is holding the checkout before running this again.` +
+        `\nThe last attempt said: ${outcome.reason}`
+      );
+    }
+    case "synced": {
+      // Says out loud that the reviewer was not read, because the round looks
+      // like every other one from the outside — it reserved, it cost money, it
+      // pushed a commit — and an operator who took it for a review round would
+      // read the reviewer's silence as agreement.
+      return (
+        (outcome.conflicts.length === 0
+          ? `SYNCED — round ${String(outcome.round)} merged ${String(outcome.behind)} commit(s) of the base in cleanly and pushed.`
+          : `SYNCED — round ${String(outcome.round)} merged ${String(outcome.behind)} commit(s) of the base in, resolving conflicts in ${outcome.conflicts.join(", ")}, and pushed.`) +
+        `\nThe review was not read this round: a branch its base will not merge into cannot be verified, so the merge went first. The next round answers the reviewer.`
       );
     }
     case "abandoned": {

@@ -229,6 +229,42 @@ export function reviewOrigin(login: string, reviewer: string): ReviewOrigin {
   return matchesReviewer(login, reviewer) ? "reviewer" : "human";
 }
 
+/**
+ * Accounts whose comments are not events on a pull request at all.
+ *
+ * One entry, and it is the one that was measured. PR #2663 carries two
+ * `:rocket: Application Deployed` notices from `github-actions`, and the marker
+ * shows what they cost: `round 7` and `round 9`, each a paid pass whose entire
+ * published output was a sentence saying the only comment was a deploy notice.
+ * Worse than the money — a CI account does not match the requested reviewer, so
+ * it classified as `human`, and human rounds are deliberately exempt from
+ * `MAX_REVIEW_ITERATIONS`. Continuous integration was the one input to this
+ * loop that could spend without a cap.
+ *
+ * **Narrow on purpose, and the failure direction says why.** A name that is not
+ * on this list reaches the loop and costs a round, visibly, on a pull request
+ * somebody reads. A list wide enough to swallow a reviewer would silence the
+ * review itself and look exactly like a reviewer that never answered. So this
+ * is not `*[bot]`: the reviewer *is* a bot, and `matchesReviewer` is checked
+ * first only as a second lock on that door rather than as the thing holding it.
+ */
+const AUTOMATION_AUTHORS: ReadonlySet<string> = new Set(["github-actions"]);
+
+/**
+ * Whether a login is an automation account rather than a party to the review.
+ *
+ * The `[bot]` suffix is stripped before comparing because the same account is
+ * spelled two ways by the two transports this file reads — `gh pr view --json`
+ * returned `github-actions` on #2663, while GraphQL and the events API say
+ * `github-actions[bot]`. Keying on one spelling would work until the day the
+ * comment arrived over the other one.
+ */
+function isAutomation(login: string, reviewer: string): boolean {
+  return (
+    !matchesReviewer(login, reviewer) && AUTOMATION_AUTHORS.has(login.replace(/\[bot\]$/u, ""))
+  );
+}
+
 export interface ReviewComment {
   readonly author: string;
   readonly body: string;
@@ -307,14 +343,23 @@ export interface ReviewState {
    */
   readonly createdAt: string;
   /**
-   * The newest instant among *all* entries, including the ones dropped below.
+   * The newest instant among every entry that counts as an event, including
+   * the ones `comments` drops below.
    *
-   * Computed before the filtering, which is the point. `comments` drops
-   * whitespace-only bodies, the reviewer's own error notice, and anything that
-   * was pure boilerplate — every one of which is still something that happened,
-   * and an approving review with an empty body is the commonest of them. A
-   * silence clock reading the filtered list would report a pull request as
-   * untouched for hours because the only thing on it was an approval.
+   * Computed before that filtering, which is the point. `comments` drops
+   * whitespace-only bodies, the reviewer's own error notice, the reviewer's
+   * green light, and anything that was pure boilerplate — every one of which is
+   * still something that happened, and an approving review with an empty body
+   * is the commonest of them. A silence clock reading the filtered list would
+   * report a pull request as untouched for hours because the only thing on it
+   * was an approval.
+   *
+   * **One exception, and it is a different question rather than an exception to
+   * the rule above.** Automation authors (`isAutomation`) are removed before
+   * this is computed, because a deploy notice is not an event on the pull
+   * request at all — and it is triggered by *our own* push, so counting it
+   * would let the loop reset its own silence clock and never notice a reviewer
+   * that has gone away.
    *
    * Our own comments are counted too. See `silence.ts`: the asymmetry between
    * waiting too long and giving up too early decides it.
@@ -1141,7 +1186,17 @@ export async function readReview(
     };
   }
 
-  const entries = [...reviews, ...comments];
+  // **Automation is dropped here, before anything is derived from the list**,
+  // because the claim is not "a deploy notice is not feedback" but "a deploy
+  // notice is not an event on this pull request". All three fields below read
+  // this array, and it has to be the same answer in all three: dropped from
+  // `comments` alone, a CI notice would still report that somebody responded —
+  // which on a draft pull request is the difference between waiting for a
+  // review and undrafting on the strength of a robot saying a URL exists. It
+  // comes out of `newestAt` for a further reason: the notice is triggered by
+  // our own push, so leaving it in lets the loop reset its own silence clock
+  // and never notice a reviewer that has gone away.
+  const entries = [...reviews, ...comments].filter((entry) => !isAutomation(entry.login, reviewer));
   const fromReviewer = entries.filter((entry) => matchesReviewer(entry.login, reviewer));
   return {
     outcome: "read",
@@ -1151,18 +1206,31 @@ export async function readReview(
       // response — and so is a review whose whole substance is inline, which
       // arrives here as an entry with nothing in it. Treating either as silence
       // would leave the loop waiting on a reviewer that has already finished.
+      //
+      // **The green light is the sharpest case of that and the reason this line
+      // must not be tidied into reading `comments`.** It is dropped below, so a
+      // pull request whose only response is `🟢 Approval recommended` has an
+      // empty comment list and a reviewer who has plainly spoken. Reading the
+      // filtered list here would call that silence, and `advance` undrafts on
+      // *responded plus nothing to do* — so the pull request the loop has
+      // finished with would stay a draft until the silence brake gave up on it.
+      // Two drops, deliberately at different depths: automation is not an
+      // event, an approval is an event with nothing in it.
       anyoneResponded: entries.some((entry) => !isOurs(entry.body ?? "")),
       reviewerErrored: fromReviewer.some((entry) => isReviewerError(entry.body)),
       // Whitespace-only bodies are dropped here and not above: they are a
       // response for the purpose of "has the reviewer spoken", and nothing at
       // all for the purpose of "what should the model change". The reviewer's
       // own error notice goes the same way and for the same reason — there is
-      // nothing in it to change.
+      // nothing in it to change — and so does its green light, which is a
+      // reviewer saying it wants nothing changed. Paying a pass to answer an
+      // approval is the same waste as paying one to answer a crash report.
       //
-      // That second drop is scoped to the reviewer, not applied to every entry.
-      // A human quoting the failure in a comment is asking for something, and
-      // matching on text alone would delete a person's message because a bot
-      // had used the same words.
+      // Both of those drops are scoped to the reviewer, not applied to every
+      // entry. A human quoting the failure in a comment is asking for
+      // something, and a human writing "approval recommended" is a person
+      // approving with words a bot happens to share; matching on text alone
+      // would delete a person's message in either case.
       comments: entries.flatMap((entry) => {
         // Chrome comes off before the blank check rather than after, so a
         // review whose body was *only* boilerplate drops out entirely instead
@@ -1173,7 +1241,7 @@ export async function readReview(
             : entry.body;
         return body === null ||
           body.trim() === "" ||
-          (matchesReviewer(entry.login, reviewer) && isReviewerError(body))
+          (matchesReviewer(entry.login, reviewer) && (isReviewerError(body) || isGreenLight(body)))
           ? []
           : [
               {
@@ -1188,7 +1256,9 @@ export async function readReview(
       state,
       isDraft,
       createdAt,
-      // Every entry, before the filtering above. See `ReviewState.newestAt`.
+      // Every entry the loop counts as an event, before the filtering above —
+      // so an approval and a blank review still move it, and an automation
+      // notice never existed to move it. See `ReviewState.newestAt`.
       newestAt: newestInstant(entries.map((entry) => entry.createdAt ?? "")) ?? "",
     },
   };
@@ -1214,6 +1284,48 @@ const REVIEWER_ERROR = [/encountered an error/iu, /unable to review/iu];
 /** Whether a review body is the reviewer saying it failed rather than a review. */
 function isReviewerError(body: string | null): boolean {
   return body !== null && REVIEWER_ERROR.every((phrase) => phrase.test(body));
+}
+
+/**
+ * The reviewer's verdict line when it has nothing to ask for.
+ *
+ * Copilot opens every review with one of three headings — observed across
+ * #2658, #2661 and #2663: `### 🟢 Approval recommended`, `### 🟡 Changes
+ * recommended`, `### 🔵 Needs a closer look`. The green one is not feedback. It
+ * is the reviewer saying the argument is over, and the loop was paying a full
+ * round to reach that conclusion for itself: #2661's `bot: round 1` is
+ * *"approval noted, no changes needed this round"* and #2663's `round 6` says
+ * the same thing in different words. Two rounds, one per pull request, to
+ * publish an acknowledgement nobody needed.
+ *
+ * **Two fragments, both required**, exactly as `REVIEWER_ERROR` needs two: the
+ * phrase alone is something a human plausibly writes *about* a review, and the
+ * marker alone is a green circle. Together they are a heading only this
+ * reviewer emits.
+ */
+const REVIEWER_GREEN_LIGHT = [/\u{1F7E2}/u, /approval recommended/iu];
+
+/**
+ * Whether the reviewer's body is a green light and nothing else.
+ *
+ * **Only the verdict line is examined**, not the whole body. A review that
+ * *quotes* the green heading while its own verdict is `🔵 Needs a closer look`
+ * is a review with something in it, and matching anywhere would drop it — which
+ * is the one failure this whole family of matchers is written to avoid, since a
+ * dropped review is a request nobody answers and nothing says so.
+ *
+ * What it does not have to guard is the case that looks most dangerous: a green
+ * light carrying inline comments. Those are threads, read over GraphQL by
+ * `readReviewThreads`, and an open thread keeps the inbox non-empty on its own.
+ * The reviewer approving in the summary while objecting on a line is therefore
+ * still a round, by construction rather than by rule.
+ */
+function isGreenLight(body: string | null): boolean {
+  if (body === null) {
+    return false;
+  }
+  const verdict = body.split("\n").find((line) => line.trim() !== "") ?? "";
+  return REVIEWER_GREEN_LIGHT.every((phrase) => phrase.test(verdict));
 }
 
 /**
@@ -1458,12 +1570,16 @@ export async function readReviewThreads(
     threads.push({ id, isResolved, isOutdated, path, line, comments });
   }
 
-  logger.info("solve.pr.threads_read", {
-    repo,
-    number,
-    threads: threads.length,
-    open: threads.filter((thread) => !thread.isResolved).length,
-  });
+  const open = threads.filter((thread) => !thread.isResolved).length;
+  logger.info(
+    "solve.pr.threads_read",
+    { repo, number, threads: threads.length, open },
+    // `open`, not `threads.length`. A pull request with two threads both
+    // resolved is read on every tick for as long as it stays open and has
+    // nothing left to say; keying on the total would mark it as news forever,
+    // which is the shape of idle line this mark was added for.
+    { quiet: open === 0 },
+  );
   return { outcome: "read", threads };
 }
 

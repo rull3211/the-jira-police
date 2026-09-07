@@ -215,14 +215,25 @@ async function main(): Promise<void> {
     runCycle: async () => {
       const state = await loadState(settings.STATE_PATH);
       const outcome = await runPollCycle(state, deps);
-      logger.info("cycle.done", {
-        found: outcome.found,
-        skipped: outcome.skipped,
-        triaged: outcome.triaged,
-        failed: outcome.failed,
-        abandoned: outcome.abandoned,
-        cursor: outcome.state.cursor,
-      });
+      logger.info(
+        "cycle.done",
+        {
+          found: outcome.found,
+          skipped: outcome.skipped,
+          triaged: outcome.triaged,
+          failed: outcome.failed,
+          abandoned: outcome.abandoned,
+          cursor: outcome.state.cursor,
+        },
+        // `found` and `skipped` are deliberately not read. A cycle that found
+        // forty tickets and had already seen all forty did nothing, and on a
+        // board this size that is every cycle. What makes it news is that the
+        // service *spent* something: a triage, a failure, or a ticket left
+        // behind.
+        {
+          quiet: outcome.triaged === 0 && outcome.failed === 0 && outcome.abandoned === 0,
+        },
+      );
     },
     intervalMs,
     backoffCapMs: BACKOFF_CAP_MS,

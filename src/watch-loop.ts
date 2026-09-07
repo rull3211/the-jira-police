@@ -138,7 +138,18 @@ export function createWatchLoop(
     runCycle: async () => {
       const keys = (await client.search(jql)).map((ticket) => ticket.key);
       const outcome = await runWatchSweep({ client, maxRetriage, memo, acting, report }, keys);
-      logger.info("watch.cycle.done", { ...outcome, remembered: memo.size() });
+      logger.info(
+        "watch.cycle.done",
+        { ...outcome, remembered: memo.size() },
+        // A sweep that only looked is the normal state of this loop: watched
+        // tickets change when a reporter edits one, which is a thing measured
+        // in days. News is a re-triage that ran or threw, or a watch coming
+        // off. `outcome.quiet` is **not** read here and must not be — it is a
+        // count of tickets nobody touched, not a verdict on the sweep, and the
+        // two words meaning different things one line apart is why the mark is
+        // an argument to the logger rather than a field it looks for.
+        { quiet: outcome.retriaged === 0 && outcome.failed === 0 && outcome.ended === 0 },
+      );
     },
     intervalMs,
     backoffCapMs,

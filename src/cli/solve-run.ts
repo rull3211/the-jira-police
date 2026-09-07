@@ -45,6 +45,8 @@ import {
   type PendingRound,
   advance,
   publish,
+  recordFailedStart,
+  runMergeRound,
   runRound,
   surveyReview,
 } from "../solve/delivery.ts";
@@ -77,13 +79,8 @@ import {
   REVIEW_ROUND_USD,
   runReviewCycle,
 } from "../solve/review-cycle.ts";
-import {
-  type Worktree,
-  type WorktreeResult,
-  attachWorktree,
-  branchNameFor,
-  removeWorktree,
-} from "../solve/worktree.ts";
+import { type SyncedAttachResult, attachSynced } from "../solve/base-sync.ts";
+import { type Worktree, branchNameFor, removeWorktree } from "../solve/worktree.ts";
 import {
   NotSolvableError,
   buildAdvanceRequest,
@@ -95,6 +92,7 @@ import {
   createReviewCycleDeps,
   createSolveDeps,
   createSolveRunDeps,
+  botIdentityOf,
   createTicketReader,
 } from "../wiring.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
@@ -596,15 +594,20 @@ export async function runAdvance(
   // failure: `advance` decides there is nothing to answer and never calls the
   // source, so there is no checkout, no install, and nothing to remove.
   let worktree: Worktree | null = null;
-  const attach = async (): Promise<WorktreeResult> => {
-    const attached = await attachWorktree(deps.commands, {
+  const attach = async (): Promise<SyncedAttachResult> => {
+    const attached = await attachSynced(deps.commands, {
       issueKey,
       branch,
       repoPath: base.repoPath,
       parentDirectory: base.parentDirectory,
       timeoutMs: base.gitTimeoutMs,
+      baseRef: base.baseRef,
+      identity: botIdentityOf(settings),
     });
-    if (attached.outcome === "created") {
+    // A conflicted attach owns a checkout too, and it is the same checkout the
+    // merge round is about to work in. Recording it here rather than only on
+    // `created` is what keeps the cleanup below the one owner of it.
+    if (attached.outcome === "created" || attached.outcome === "conflicted") {
       worktree = attached.worktree;
       process.stdout.write(`\nAdvancing #${String(found.number)} in ${attached.worktree.path}\n`);
     }
@@ -832,15 +835,19 @@ function createReviewLook(
     }
 
     const holder: { worktree: Worktree | null } = { worktree: null };
-    const attach = async (): Promise<WorktreeResult> => {
-      const attached = await attachWorktree(deps.commands, {
+    const attach = async (): Promise<SyncedAttachResult> => {
+      const attached = await attachSynced(deps.commands, {
         issueKey: ticket.key,
         branch,
         repoPath: base.repoPath,
         parentDirectory: base.parentDirectory,
         timeoutMs: base.gitTimeoutMs,
+        baseRef: base.baseRef,
+        identity: botIdentityOf(settings),
       });
-      if (attached.outcome === "created") {
+      // Both outcomes that carry a checkout, so the `finally` in `act` removes
+      // the one a merge round worked in as well as the one a review round did.
+      if (attached.outcome === "created" || attached.outcome === "conflicted") {
         holder.worktree = attached.worktree;
       }
       return attached;
@@ -867,8 +874,15 @@ function createReviewLook(
  * `advance` because `advance` would survey again. A second survey between the
  * look and the round is not merely wasted: it would read a comment posted in the
  * intervening seconds and run against a batch the cycle's bound never counted.
+ *
+ * **Exported only so its refusal branch can be tested**, which is a small
+ * concession with a specific reason. This is the daemon's copy of `advance`'s
+ * tail, so it is the copy that ran on #2663 every two minutes for four days,
+ * and D4e already measured that a call-site mutation in this file survives the
+ * whole suite. A duplicated branch that nothing constructs is where the two
+ * copies drift, and the direction they drifted last time was silence.
  */
-function createReviewAct(
+export function createReviewAct(
   deps: SolveDependencies,
   targets: Map<string, ReviewTarget>,
 ): (ticket: WatchedTicket, pending: PendingRound, number: number) => Promise<AdvanceOutcome> {
@@ -892,27 +906,58 @@ function createReviewAct(
 
     const attached = await target.request.attach();
     if (attached.outcome === "refused") {
-      // Nothing has been reserved — the reservation is on the far side of the
-      // checkout — so the next tick will decide the same thing again, which is
-      // right for a checkout that failed for a local reason.
-      return { kind: "failed", stage: "worktree", reason: attached.reason };
+      // No *round* has been reserved — the reservation is on the far side of
+      // the checkout — so the next tick will decide the same thing again, which
+      // is right for a checkout that failed for a local reason and is a wedge
+      // if it stays right. The attempt is therefore counted where every round
+      // cap can see it, which is the marker comment, and this is the daemon's
+      // copy of the same call `advance` makes.
+      return await recordFailedStart(deps.commands, target.request, pending, attached.reason);
     }
 
-    const result = await runRound(deps, target.request, attached.worktree, pending);
-
-    if (target.holder.worktree !== null) {
-      // Kept only for a refusal, where the diff is the evidence an operator
-      // needs to decide whether the gate or the pass was wrong. Everything else
-      // either pushed its work or wrote nothing.
-      await removeWorktree(
-        deps.commands,
-        target.holder.worktree,
-        result.kind === "refused" ? "keep-as-evidence" : "discard",
-        target.request.gitTimeoutMs,
-      );
+    // The checkout's fate is decided in a `finally`, because a round has a
+    // third ending the old code did not have a branch for: it can throw.
+    // `runRound` raises on a parse refusal, and when it did, the removal below
+    // was skipped entirely — the worktree survived by accident rather than by
+    // policy, and every later tick refused to attach to it. The comment that
+    // used to sit here asserted a trichotomy the code did not enforce
+    // ("everything else either pushed its work or wrote nothing"), which a
+    // crash falsifies. This project's own defect class, at the site of the bug.
+    //
+    // Necessary and *not* sufficient, and the distinction is the whole design:
+    // a `finally` runs for a throw and not for a `kill -9`, an OOM, or a laptop
+    // that slept through `SOLVE_TIMEOUT_MS` — a failure this service has
+    // already recorded once. Recovering from a checkout that nobody tidied is
+    // `attachWorktree`'s job, and that is what makes the deadlock unreachable
+    // rather than merely rarer.
+    let result: AdvanceOutcome | undefined;
+    try {
+      // Which round is decided by the checkout, not by the survey. A branch its
+      // base will not merge into cannot be verified, so there is nothing a
+      // review round could answer a reviewer *from*; the merge is the round,
+      // and it reserves its own. Inside the same `try` as the review round
+      // because the checkout it works in needs the same removal, and this
+      // function's whole reason for existing is that a branch duplicated
+      // between here and `advance` is a branch that drifts.
+      result =
+        attached.outcome === "conflicted"
+          ? await runMergeRound(deps, target.request, attached, pending)
+          : await runRound(deps, target.request, attached.worktree, pending);
+      return result;
+    } finally {
+      if (target.holder.worktree !== null) {
+        // A throw leaves no outcome to read, and its diff is exactly the
+        // evidence an operator needs to tell a bad gate from a bad pass, so it
+        // is kept on the same terms as a refusal. Keeping is only safe because
+        // `attachWorktree` now salvages what it finds instead of refusing it.
+        await removeWorktree(
+          deps.commands,
+          target.holder.worktree,
+          result === undefined || result.kind === "refused" ? "keep-as-evidence" : "discard",
+          target.request.gitTimeoutMs,
+        );
+      }
     }
-
-    return result;
   };
 }
 
@@ -1265,16 +1310,24 @@ export async function runSolveClaims(
     }
   }
 
-  logger.info("solve.claims.done", {
-    found: cycle.found,
-    inFlight: cycle.inFlight,
-    capacity: cycle.capacity,
-    planned: cycle.planned.length,
-    started,
-    held,
-    deferred: cycle.deferred.length,
-    remembered: ledger.size(),
-  });
+  logger.info(
+    "solve.claims.done",
+    {
+      found: cycle.found,
+      inFlight: cycle.inFlight,
+      capacity: cycle.capacity,
+      planned: cycle.planned.length,
+      started,
+      held,
+      deferred: cycle.deferred.length,
+      remembered: ledger.size(),
+    },
+    // An empty queue is the resting state, and so is a full one that nothing
+    // could be claimed from — `capacity: 0` with a solve already running says
+    // the loop is working, not that it did something. What is news is a ticket
+    // started, or one held back after the queue had picked it.
+    { quiet: started === 0 && held === 0 },
+  );
 
   return { found: cycle.found, started, held };
 }

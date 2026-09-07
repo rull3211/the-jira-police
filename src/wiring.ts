@@ -65,7 +65,7 @@ import { createCommandRunner } from "./solve/exec.ts";
 import { repoFromLabels } from "./solve/labels.ts";
 import type { SolveDependencies, SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
 import type { AdvanceRequest, PublishRequest, WorktreeSource } from "./solve/delivery.ts";
-import type { FindPrRequest } from "./solve/pr.ts";
+import type { BotIdentity, FindPrRequest } from "./solve/pr.ts";
 import { createPassRunner } from "./solve/passes.ts";
 import { composePullRequest } from "./solve/pr-text.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
@@ -108,7 +108,14 @@ export function createDiscover(
       overlapMs: numeric(settings, "CURSOR_OVERLAP_MS"),
       firstRunMinutes: numeric(settings, "FIRST_RUN_LOOKBACK_MINUTES"),
     });
-    logger.info("poll.query", { jql });
+    // `debug`, with the other three `*.query` lines. A JQL string is plumbing:
+    // it is the same every tick apart from a timestamp, it is derived from
+    // settings a reader can look up, and it says nothing about what happened —
+    // so at `info` it is pure padding around the lines that do. It stays a log
+    // line rather than being deleted because it is the first thing anyone wants
+    // when the queue returns something surprising, and `LOG_LEVEL=debug` is how
+    // you ask for it. The cursor this window was built from is on `cycle.done`.
+    logger.debug("poll.query", { jql });
     return await client.search(jql);
   };
 }
@@ -138,9 +145,11 @@ export function buildTriageOptions(settings: Settings, issueKey: string): Triage
     skillName: settings.SKILL_NAME,
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
-    // At least 1ms: zero is not "no timeout", it is a timeout that has already
-    // expired, so it would kill every run instantly instead of disabling the cap.
-    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+    // At least 1ms, both of them: zero is not "no timeout", it is a budget that
+    // has already expired, so it would kill every run on the watchdog's first
+    // tick instead of disabling the cap.
+    idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+    maxRunMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
     deep: false,
     // Requiring a live Atlassian session from a skill that reads nothing
     // would fail runs for a reason unrelated to what is being exercised.
@@ -277,7 +286,8 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
       mutation: payload.mutation,
       executable: template.executable,
       workingDirectory: template.workingDirectory,
-      timeoutMs: template.timeoutMs,
+      idleMs: template.idleMs,
+      maxRunMs: template.maxRunMs,
     });
 
     return payload;
@@ -368,7 +378,8 @@ export function createSolveCommenter(settings: Settings): TicketCommenter {
     workingDirectory: process.cwd(),
     // Floored at 1ms on the same grounds as everywhere else: zero is not "no
     // timeout", it is one that expired before the session started.
-    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+    idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+    maxRunMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
   });
 }
 
@@ -391,7 +402,8 @@ export function createWatchChecker(settings: Settings): RelevanceChecker {
   return createRelevanceChecker({
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
-    timeoutMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
+    idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+    maxRunMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
   });
 }
 
@@ -427,11 +439,14 @@ export function createSolveDeps(
     queueJql,
     inFlightJql,
     fetchQueue: async () => {
-      logger.info("solve.query", { jql: queueJql });
+      // `debug`, for the reason given at `poll.query`. Both of these strings
+      // are also handed to the cycle report verbatim, two fields above, so
+      // demoting them loses nothing a person was relying on.
+      logger.debug("solve.query", { jql: queueJql });
       return (await client.search(queueJql)).map(toSolveCandidate);
     },
     countInFlight: async () => {
-      logger.info("solve.in_flight_query", { jql: inFlightJql });
+      logger.debug("solve.in_flight_query", { jql: inFlightJql });
       return (await client.search(inFlightJql)).length;
     },
     ...(signal === undefined ? {} : { signal }),
@@ -479,7 +494,8 @@ export function createReviewCycleDeps(
     watchJql,
     maxRounds: numeric(settings, "MAX_REVIEW_ROUNDS_PER_TICK", 0),
     fetchWatched: async () => {
-      logger.info("review.query", { jql: watchJql });
+      // `debug`, for the reason given at `poll.query`.
+      logger.debug("review.query", { jql: watchJql });
       return (await client.search(watchJql)).map(toWatchedTicket);
     },
     look,
@@ -561,8 +577,9 @@ export function createSolveRunDeps(settings: Settings): SolveDependencies {
     passes: createPassRunner({
       executable: settings.STORECODE_PATH,
       // Floored at 1ms on the same grounds as the triage budget: zero is not
-      // "no timeout", it is a timeout that expired before the pass started.
-      timeoutMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
+      // "no timeout", it is a budget that expired before the pass started.
+      idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+      maxRunMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
     }),
   };
 }
@@ -691,7 +708,7 @@ export function buildPublishRequest(
     commit: outcome.commit,
     title,
     body,
-    identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
+    identity: botIdentityOf(settings),
     timeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
   };
 }
@@ -709,6 +726,20 @@ export function buildPublishRequest(
  */
 export function baseBranchOf(baseRef: string): string {
   return baseRef.startsWith("origin/") ? baseRef.slice("origin/".length) : baseRef;
+}
+
+/**
+ * The name and address this service puts on a commit.
+ *
+ * One function rather than the same object literal at each call site. It was
+ * written out twice here and needed a third and fourth for the base-sync
+ * merge, which is the point at which "two identical literals" becomes the
+ * defect this repository keeps naming: the two spellings are of *whose commit
+ * this is*, and a commit attributed to nobody in particular is not a thing to
+ * discover from a git log a week later.
+ */
+export function botIdentityOf(settings: Settings): BotIdentity {
+  return { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL };
 }
 
 /**
@@ -793,9 +824,10 @@ export function buildAdvanceRequest(
     cwd: base.repoPath,
     repo: githubRepoFor(settings, base.repoPath),
     number,
-    identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
+    identity: botIdentityOf(settings),
     maxRounds: numeric(settings, "MAX_REVIEW_ITERATIONS", 0),
     maxTotalRounds: numeric(settings, "MAX_PR_ROUNDS_TOTAL", 1),
+    maxFailedStarts: numeric(settings, "MAX_FAILED_STARTS", 1),
     ghTimeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
   };
 }

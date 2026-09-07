@@ -65,6 +65,11 @@ const attach = (overrides: Partial<AttachRequest> = {}): AttachRequest => ({
   ...overrides,
 });
 
+/** The index of the first recorded call whose argv contains every one of `words`. */
+function at(runner: { calls: string[][] }, ...words: string[]): number {
+  return runner.calls.findIndex((argv) => words.every((word) => argv.includes(word)));
+}
+
 /** The reason of an attach refusal, or "" if it was not refused. */
 function refused(result: Awaited<ReturnType<typeof attachWorktree>>): string {
   return result.outcome === "refused" ? result.reason : "";
@@ -646,52 +651,206 @@ describe("attachWorktree, when the checkout is already there", () => {
     expect(runner.calls.some((argv) => argv.includes("merge"))).toBe(false);
   });
 
-  it("refuses a checkout with uncommitted changes, before comparing anything", async () => {
-    // The worst thing this module could do: a review round commits everything
-    // it finds, so reusing a dirty worktree answers a reviewer with a human's
-    // work in progress, pushed under our name.
-    const dirty: CommandResult = { ...OK, stdout: " M src/app/page.tsx\n?? notes.txt\n" };
-    const runner = fakeRunner(upTo(listing(), dirty));
-
-    expect(refused(await attachWorktree(runner, attach()))).toContain("uncommitted changes");
-    expect(runner.calls.some((argv) => argv.includes("rev-list"))).toBe(false);
-  });
-
-  it("refuses a checkout that is ahead of the remote", async () => {
-    const runner = fakeRunner(upTo(listing(), OK, counts(1, 0)));
-
-    expect(refused(await attachWorktree(runner, attach()))).toContain("1 commit(s) ahead");
-  });
-
-  it("refuses a count it cannot read rather than assuming zero", async () => {
-    // Unplug this and an unparseable answer reads as "in sync", which is the
-    // ahead case wearing a disguise: commits nobody reviewed, built on and
-    // pushed to an open pull request.
-    const runner = fakeRunner(upTo(listing(), OK, { ...OK, stdout: "warning: no upstream\n" }));
-
-    expect(refused(await attachWorktree(runner, attach()))).toContain("could not read how");
-  });
-
-  it("refuses a worktree at the path that is on some other branch", async () => {
-    const runner = fakeRunner(upTo(listing("fix/ssx-9999-something-else")));
-
-    expect(refused(await attachWorktree(runner, attach()))).toContain(
-      "on fix/ssx-9999-something-else rather than fix/ssx-3822-favicon-is-missing",
-    );
-  });
-
-  it("refuses a detached checkout at the path", async () => {
-    const runner = fakeRunner(upTo(listing(null)));
-
-    expect(refused(await attachWorktree(runner, attach()))).toContain("on a detached HEAD");
-  });
-
   it("refuses when the worktree listing cannot be read", async () => {
     const runner = fakeRunner([OK, OK, FAIL]);
 
     expect(refused(await attachWorktree(runner, attach()))).toContain(
       "could not list the repository's worktrees",
     );
+  });
+
+  it("refuses when the state of the worktree cannot be read, and moves nothing", async () => {
+    // A *read* failure, so it retries. Moving a checkout whose contents we
+    // could not look at would be acting on no information at all.
+    const runner = fakeRunner(upTo(listing(), FAIL));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain(
+      "could not read the state of the worktree",
+    );
+    expect(runner.calls.some((argv) => argv.includes("move"))).toBe(false);
+  });
+
+  it("refuses a count it cannot read rather than assuming zero", async () => {
+    // Unplug this and an unparseable answer reads as "in sync", which is the
+    // ahead case wearing a disguise: commits nobody reviewed, built on and
+    // pushed to an open pull request. Still a read failure, so still a refusal.
+    const runner = fakeRunner(upTo(listing(), OK, { ...OK, stdout: "warning: no upstream\n" }));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain("could not read how");
+    expect(runner.calls.some((argv) => argv.includes("move"))).toBe(false);
+  });
+});
+
+/**
+ * The four states that used to be refusals, and the deadlock that made them one
+ * bug rather than four judgement calls.
+ *
+ * SSX-3835 sat wedged for four days behind the first of them. The path is a
+ * pure function of the issue key, so the checkout a round refuses is the
+ * checkout the next round finds; none of these states clears itself; and the
+ * refusal is free, so no cap counts it and no cost signal moves. Each of these
+ * tests therefore asserts the same two things — the loop got a worktree, and
+ * nothing was destroyed to give it one — because those are the two halves the
+ * old refusals were trading against each other.
+ */
+describe("attachWorktree, when the checkout at the path cannot be reused", () => {
+  const branch = "fix/ssx-3822-favicon-is-missing";
+  const path = "/tmp/solve/SSX-3822";
+
+  const listing = (checkedOut: string | null = branch): CommandResult => ({
+    ...OK,
+    stdout: [
+      `worktree ${path}`,
+      "HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      checkedOut === null ? "detached" : `branch refs/heads/${checkedOut}`,
+      "",
+    ].join("\n"),
+  });
+
+  const counts = (ahead: number, behind: number): CommandResult => ({
+    ...OK,
+    stdout: `${String(ahead)}\t${String(behind)}\n`,
+  });
+
+  const dirty: CommandResult = { ...OK, stdout: " M src/app/page.tsx\n?? notes.txt\n" };
+
+  /** fetch, rev-parse, worktree list, status, then whatever follows. */
+  const upTo = (
+    list: CommandResult,
+    status: CommandResult = OK,
+    ...rest: readonly CommandResult[]
+  ): readonly CommandResult[] => [OK, OK, list, status, ...rest];
+
+  it("salvages a dirty checkout instead of stopping the loop on top of it", async () => {
+    const runner = fakeRunner(upTo(listing(), dirty));
+
+    expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
+    expect(at(runner, "worktree", "move")).toBeGreaterThan(-1);
+    expect(at(runner, "worktree", "add")).toBeGreaterThan(-1);
+  });
+
+  it("moves the dirty checkout aside rather than discarding it", async () => {
+    // The refusal this replaces was right about what it protected, and the
+    // protection has to survive the replacement: uncommitted work is somebody's
+    // unbacked-up work, and it is usually not recoverable from anywhere else.
+    const runner = fakeRunner(upTo(listing(), dirty));
+
+    await attachWorktree(runner, attach());
+
+    const move = runner.calls[at(runner, "worktree", "move")];
+    expect(move?.slice(0, 5)).toEqual([
+      "git",
+      "-C",
+      "/repos/buy-insurance-advisor-web",
+      "worktree",
+      "move",
+    ]);
+    expect(move?.[5]).toBe(path);
+    expect(move?.[6]).toMatch(/^\/tmp\/solve\/SSX-3822-salvaged-\S+$/u);
+    for (const destructive of ["remove", "--force", "-f", "--hard", "clean", "-B"]) {
+      expect(runner.calls.some((argv) => argv.includes(destructive))).toBe(false);
+    }
+  });
+
+  it("frees the branch name in the order git will accept, or not at all", async () => {
+    // Git refuses to check out a branch checked out in another worktree, so the
+    // detach has to precede the rebuild; and it refuses to delete a branch
+    // checked out anywhere, so the delete has to follow the detach. Reorder any
+    // pair and the sequence fails on a live repository while every stub in this
+    // file still answers OK.
+    const runner = fakeRunner(upTo(listing(), dirty));
+
+    await attachWorktree(runner, attach());
+
+    const detach = at(runner, "checkout", "--detach");
+    const move = at(runner, "worktree", "move");
+    const remove = at(runner, "branch", "-D");
+    const add = at(runner, "worktree", "add");
+    expect(detach).toBeGreaterThan(-1);
+    expect(runner.calls[detach]?.slice(0, 3)).toEqual(["git", "-C", path]);
+    expect(detach).toBeLessThan(move);
+    expect(move).toBeLessThan(remove);
+    expect(remove).toBeLessThan(add);
+  });
+
+  it("salvages a checkout that is ahead, keeping the unreviewed commits reachable", async () => {
+    // `branch -D` is only safe because the detach happened first: HEAD in the
+    // moved worktree still points at the tip, so deleting the name destroys no
+    // history. Drop the detach and this is the one case where the salvage
+    // becomes the data loss the refusal was avoiding.
+    const runner = fakeRunner(upTo(listing(), OK, counts(1, 0)));
+
+    expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
+    const detach = at(runner, "checkout", "--detach");
+    // Asserted present before it is asserted early: `-1 < anything` is true, so
+    // an ordering check alone passes most loudly when the step is missing.
+    expect(detach).toBeGreaterThan(-1);
+    expect(detach).toBeLessThan(at(runner, "branch", "-D"));
+  });
+
+  it("salvages a checkout that cannot be fast-forwarded", async () => {
+    const runner = fakeRunner(upTo(listing(), OK, counts(0, 2), FAIL));
+
+    expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
+    expect(at(runner, "worktree", "move")).toBeGreaterThan(-1);
+  });
+
+  it("salvages a checkout on some other branch, and leaves that branch alone", async () => {
+    // The name in our way is the one the cold path is about to create. A branch
+    // that merely happens to be checked out here is somebody else's, may carry
+    // unpushed work of its own, and is not ours to detach or delete.
+    const runner = fakeRunner(upTo(listing("fix/ssx-9999-something-else")));
+
+    expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
+    expect(at(runner, "worktree", "move")).toBeGreaterThan(-1);
+    expect(at(runner, "checkout", "--detach")).toBe(-1);
+    expect(at(runner, "branch", "-D")).toBe(-1);
+  });
+
+  it("salvages a detached checkout without deleting a branch it never held", async () => {
+    const runner = fakeRunner(upTo(listing(null)));
+
+    expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
+    expect(at(runner, "worktree", "move")).toBeGreaterThan(-1);
+    expect(at(runner, "branch", "-D")).toBe(-1);
+  });
+
+  it("checks cleanliness before comparing, so a dirty checkout is never merged into", async () => {
+    const runner = fakeRunner(upTo(listing(), dirty));
+
+    await attachWorktree(runner, attach());
+
+    expect(runner.calls.some((argv) => argv.includes("rev-list"))).toBe(false);
+    expect(runner.calls.some((argv) => argv.includes("merge"))).toBe(false);
+  });
+
+  it("refuses when the checkout cannot be moved aside, rather than building over it", async () => {
+    // A half-salvage is worse than the state it started from, and the refusal
+    // has to carry both facts: what was wrong, and that the repair did not run.
+    const runner = fakeRunner(upTo(listing(), dirty, OK, FAIL));
+
+    const reason = refused(await attachWorktree(runner, attach()));
+
+    expect(reason).toContain("has uncommitted changes");
+    expect(reason).toContain("moving the worktree aside failed");
+    expect(at(runner, "branch", "-D")).toBe(-1);
+    expect(at(runner, "worktree", "add")).toBe(-1);
+  });
+
+  it("refuses when the branch cannot be freed, rather than colliding on it", async () => {
+    const runner = fakeRunner(upTo(listing(), dirty, FAIL));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain("detaching HEAD failed");
+    expect(at(runner, "worktree", "move")).toBe(-1);
+  });
+
+  it("refuses when the stale branch cannot be deleted", async () => {
+    const runner = fakeRunner(upTo(listing(), dirty, OK, OK, FAIL));
+
+    expect(refused(await attachWorktree(runner, attach()))).toContain(
+      "deleting the local branch failed",
+    );
+    expect(at(runner, "worktree", "add")).toBe(-1);
   });
 });
 

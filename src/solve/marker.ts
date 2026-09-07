@@ -69,6 +69,17 @@ const LAST_READ = "Last read: ";
  */
 const REVIEWER_ROUNDS = "Reviewer rounds: ";
 
+/**
+ * Attempts that never became rounds, and the second line appended rather than
+ * inserted — the rule above applies unchanged to every line added after it.
+ *
+ * Written only when it is non-zero, which is nearly always. That is legibility
+ * rather than economy: a marker on a healthy pull request should not carry a
+ * line saying nothing has gone wrong, and the round trip survives it precisely
+ * because an absent line reads as zero.
+ */
+const FAILED_STARTS = "Failed starts: ";
+
 export interface Marker {
   /**
    * Rounds already spent on this pull request, whoever asked for them. Never
@@ -90,6 +101,31 @@ export interface Marker {
    * otherwise rather than clamping it.
    */
   readonly reviewerCount: number;
+  /**
+   * Consecutive attempts that decided on a round and never reached one.
+   *
+   * **The hole this fills is that every other bound counts rounds.** `count` and
+   * `reviewerCount` only move when a round *reserves*, so a tick that fails
+   * before the reservation is invisible to `MAX_REVIEW_ITERATIONS`, to
+   * `MAX_PR_ROUNDS_TOTAL`, and to every cost signal — it spends nothing, which
+   * is exactly why nothing notices. `REVIEW_SILENCE_MS` plugged the same hole
+   * for the reviewer who never answers; this plugs it for the round that never
+   * starts.
+   *
+   * SSX-3835 is what it is for. A round threw, left a dirty worktree, and
+   * `attachWorktree` refused that checkout on every tick for four days. The
+   * refusals were free and identical, so no cap fired, no label moved and no
+   * comment was written: a loop failing every two minutes and a loop with
+   * nothing to do were indistinguishable from every angle a person could look
+   * from. Reset to zero by any reservation, because the number that matters is
+   * *consecutive* — a pull request that starts a round has demonstrated the
+   * obstacle is gone, and one bad tick a fortnight is not a stall.
+   *
+   * Bounded by `MAX_FAILED_STARTS`. Absent from a marker means zero; see
+   * `parseMarker`, where the reading is the opposite of `reviewerCount`'s and
+   * for a reason.
+   */
+  readonly failedStarts: number;
   /**
    * The high-water mark: the newest comment this loop has already handled.
    *
@@ -140,6 +176,7 @@ export function renderMarker(marker: Marker): string {
     `${MARKER_PREFIX}${String(marker.count)}`,
     `${LAST_READ}${marker.lastRead}`,
     `${REVIEWER_ROUNDS}${String(marker.reviewerCount)}`,
+    ...(marker.failedStarts === 0 ? [] : [`${FAILED_STARTS}${String(marker.failedStarts)}`]),
     "",
     ...marker.rounds.map((round) => `- ${round}`),
   ];
@@ -233,13 +270,43 @@ export function parseMarker(body: string): ParseMarkerResult {
     }
   }
 
+  // **Absent means zero, which is the opposite reading to `reviewerCount`'s,
+  // and the two are not inconsistent.** Both pick the side whose mistake is
+  // recoverable. There, guessing low would hand back a whole budget on every
+  // pull request open at the format change; here, guessing anything but zero
+  // would announce a stall on a pull request nothing has ever gone wrong with —
+  // and a bound that fires because a line was added is a bound that stops
+  // healthy work. A marker written before this line existed genuinely records
+  // no failures, because nothing was counting them.
+  const failedLine = lines.find((line) => line.startsWith(FAILED_STARTS));
+  let failedStarts = 0;
+  if (failedLine !== undefined) {
+    const failedText = failedLine.slice(FAILED_STARTS.length).trim();
+    if (!COUNT.test(failedText)) {
+      return {
+        outcome: "unreadable",
+        reason: `"${failedText}" is not a whole number of failed starts`,
+      };
+    }
+    failedStarts = Number.parseInt(failedText, 10);
+    if (!Number.isSafeInteger(failedStarts)) {
+      return {
+        outcome: "unreadable",
+        reason: `${failedText} is too large to be a failed-start count`,
+      };
+    }
+  }
+
   const rounds = lines
     .slice(2)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("- "))
     .map((line) => line.slice(2));
 
-  return { outcome: "parsed", marker: { count, reviewerCount, lastRead, rounds } };
+  return {
+    outcome: "parsed",
+    marker: { count, reviewerCount, failedStarts, lastRead, rounds },
+  };
 }
 
 /**

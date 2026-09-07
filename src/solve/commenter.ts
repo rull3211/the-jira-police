@@ -28,10 +28,11 @@
  * reopen exactly that door for the sake of a comment that does not need it.
  * A commenter comments.
  *
- * **No reads, and therefore no idempotency — which is now a real limitation
- * rather than a defended choice.** The poster is granted `getJiraIssue` and
- * `atlassianUserInfo` so it can refresh its comment in place; without them a
- * re-run stacks a second one.
+ * **No ticket reads, and therefore no idempotency — which is now a real
+ * limitation rather than a defended choice.** The poster is granted
+ * `getJiraIssue` and `atlassianUserInfo` so it can refresh its comment in place;
+ * without them a re-run stacks a second one. (`getAccessibleAtlassianResources`
+ * is granted below and does not change this: it names sites, not issues.)
  *
  * That used to be free. A comment was posted in the same breath as
  * `agent:failed`, which takes the ticket out of the queue, so a second one could
@@ -50,10 +51,15 @@
  * running. Recorded here rather than fixed, because the thing doing the
  * retrying does not exist yet.
  *
- * The result is one write tool and no read tools, which makes this the
- * narrowest MCP surface in the tree, and narrow enough that the blast radius
- * is legible from the type without reading the implementation — the same
- * standard `ClaimCapabilities` and `TicketCommenter` are held to.
+ * The result is one write tool and one read, and it is still the narrowest MCP
+ * surface in the tree — narrow enough that the blast radius is legible from the
+ * type without reading the implementation, which is the same standard
+ * `ClaimCapabilities` and `TicketCommenter` are held to.
+ *
+ * The read is not a softening of that standard but a consequence of it: the
+ * write's own required parameter has to come from somewhere, and a surface so
+ * narrow that its one tool cannot be called is not narrow, it is broken. See
+ * `COMMENTER_TOOLS` for what that cost.
  *
  * ## "No read tools" was true of MCP and false of the session
  *
@@ -99,14 +105,46 @@ import { childEnv } from "../triage/runner.ts";
 import { DENIED_BUILTIN_TOOLS, runSession } from "../triage/session.ts";
 
 /**
- * One write tool, no read tools.
+ * One write tool, and the one read that write cannot be called without.
  *
- * Compare `POSTER_TOOLS`, which has three of each. Every absence here is
- * deliberate and argued in the module header; the one worth repeating is
- * `editJiraIssue`, whose set semantics are the reason label writes do not go
- * through MCP at all.
+ * Every absence here is deliberate and argued in the module header; the one
+ * worth repeating is `editJiraIssue`, whose set semantics are the reason label
+ * writes do not go through MCP at all.
+ *
+ * ## Why the second entry exists, and what it cost to leave it out
+ *
+ * `cloudId` is a **required** parameter of `addCommentToJiraIssue`, and nothing
+ * in the prompt supplies one. The session has exactly two ways to obtain it:
+ * this tool, or `atlassianUserInfo`. The list shipped with neither, and under
+ * `--permission-mode dontAsk` the allowlist does gate MCP names — so both were
+ * denied and the only granted tool was uncallable.
+ *
+ * It went unnoticed for a day because the first live run had `Read` and
+ * improvised: it went hunting through the repository for Jira configuration and
+ * posted anyway. Denying the reads was right, and it removed the workaround
+ * without anyone checking whether a supported route existed. **The list was
+ * audited three times for what it granted and never once for whether the grant
+ * could be exercised.** SSX-3835 and SSX-3836 both reached a verdict, both wrote
+ * `agent:failed`, and neither said why on the ticket — which is precisely the
+ * dead-end-with-a-name this module was written to prevent.
+ *
+ * The fix is the narrowest one available. This tool returns the site identifiers
+ * the credential can reach and nothing else: no ticket content, no issue data,
+ * no secrets. It is the same grant `ALLOWED_TOOLS` makes to the analyst for the
+ * same reason, and it does **not** reopen the idempotency question in the
+ * header — resolving a site is not reading a ticket, so a re-run still stacks a
+ * second comment.
+ *
+ * Resolving the `cloudId` in the harness and passing it in the prompt would be
+ * better still, since a parameter supplied cannot be denied. It is not done here
+ * because the harness does not know one either: deriving it means a new endpoint
+ * on the REST credential, which is reserved for discovery, and widening that is
+ * a decision about the rule rather than a plumbing choice.
  */
-export const COMMENTER_TOOLS: readonly string[] = ["mcp__atlassian__addCommentToJiraIssue"];
+export const COMMENTER_TOOLS: readonly string[] = [
+  "mcp__atlassian__addCommentToJiraIssue",
+  "mcp__atlassian__getAccessibleAtlassianResources",
+];
 
 /**
  * Tools withheld.
@@ -176,7 +214,8 @@ export const COMMENT_SCHEMA = {
 export interface CommenterOptions {
   readonly executable: string;
   readonly workingDirectory: string;
-  readonly timeoutMs: number;
+  readonly idleMs: number;
+  readonly maxRunMs: number;
 }
 
 export class CommentError extends Error {}
@@ -276,7 +315,8 @@ export function createTicketCommenter(options: CommenterOptions): TicketCommente
           executable: options.executable,
           args: buildCommentArgs(issueKey, body),
           workingDirectory: options.workingDirectory,
-          timeoutMs: options.timeoutMs,
+          idleMs: options.idleMs,
+          maxRunMs: options.maxRunMs,
           env: childEnv(process.env),
           requiredMcpServers: ["atlassian"],
           label: `Comment on ${issueKey}`,

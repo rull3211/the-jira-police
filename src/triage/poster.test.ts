@@ -43,7 +43,8 @@ function options(overrides: Partial<Mutation> = {}): PostOptions {
     mutation: mutation(overrides),
     executable: "storecode",
     workingDirectory: "/tmp",
-    timeoutMs: 1000,
+    idleMs: 600_000,
+    maxRunMs: 1000,
   };
 }
 

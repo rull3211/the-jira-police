@@ -43,8 +43,10 @@ import { buildSolveArgs, type Pass, type SolveRunOptions } from "./runner.ts";
 export interface PassRunnerConfig {
   /** The Claude Code executable. Configuration, never a model-supplied value. */
   readonly executable: string;
-  /** Wall-clock bound on one pass. */
-  readonly timeoutMs: number;
+  /** Silence budget for one pass; see `SessionOptions.idleMs`. */
+  readonly idleMs: number;
+  /** Awake-time ceiling on one pass; see `SessionOptions.maxRunMs`. */
+  readonly maxRunMs: number;
   readonly parentEnv?: NodeJS.ProcessEnv;
 }
 
@@ -68,7 +70,8 @@ export function createPassRunner(config: PassRunnerConfig): PassRunner {
           args: buildSolveArgs(pass, options),
           // The worktree. See property 1 above.
           workingDirectory: options.worktreePath,
-          timeoutMs: config.timeoutMs,
+          idleMs: config.idleMs,
+          maxRunMs: config.maxRunMs,
           env: childEnv(parentEnv, options.vaultPath),
           // Empty on purpose. See property 3 above.
           requiredMcpServers: [],

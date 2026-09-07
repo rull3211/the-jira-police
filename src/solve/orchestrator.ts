@@ -50,10 +50,20 @@
  */
 
 import { logger } from "../logger.ts";
-import { checkDiff, type DiffLimits, DEFAULT_LIMITS, parseNumstat } from "./diff-gate.ts";
+import {
+  abortMerge,
+  acceptResolution,
+  beginMerge,
+  commitMerge,
+  pushBranch,
+  type BaseSyncRequest,
+} from "./base-sync.ts";
+import { checkDiff, parseNumstat } from "./diff-gate.ts";
+import type { BotIdentity } from "./pr.ts";
 import {
   type AbandonCause,
   type FixReport,
+  type MergeReport,
   type Pass,
   type ReconVerdict,
   type ReviewReport,
@@ -62,6 +72,7 @@ import {
   composeCommitMessage,
   type CommitMessage,
   parseFix,
+  parseMerge,
   parseRecon,
   parseReview,
   parseSimplify,
@@ -78,8 +89,10 @@ import {
 import {
   type CommandRunner,
   createWorktree,
+  failed,
   removeWorktree,
   type RemoveResult,
+  why,
   type Worktree,
   type WorktreeRequest,
 } from "./worktree.ts";
@@ -117,7 +130,6 @@ export interface SolveRequest {
   /** Branch prefix — `fix` for a bug, `feat` for a task. Never a protected name. */
   readonly branchPrefix?: string;
   readonly vaultPath?: string;
-  readonly limits?: DiffLimits;
   /**
    * Whether to run the fail-first experiment, `FAIL_FIRST_CHECK`.
    *
@@ -766,7 +778,7 @@ async function runPipeline(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = checkDiff(changes, request.limits ?? DEFAULT_LIMITS);
+  const verdict = checkDiff(changes);
   if (!verdict.ok) {
     logger.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -832,6 +844,238 @@ async function runPipeline(
     files: verdict.files,
     lines: verdict.lines,
   };
+}
+
+export type ConflictRoundOutcome =
+  /** The branch already contained its base. Nothing ran, nothing was paid for. */
+  | { readonly kind: "current" }
+  /** It merged cleanly this time, and is pushed. No pass was needed. */
+  | { readonly kind: "merged"; readonly behind: number }
+  /** The pass declined to resolve it. The merge is aborted; a human is needed. */
+  | { readonly kind: "abandoned"; readonly reason: string }
+  /** The harness declines to accept the resolution. The merge is aborted. */
+  | { readonly kind: "refused"; readonly reason: string }
+  /** Resolved, and the tests are red against the result. The merge is aborted. */
+  | {
+      readonly kind: "failed";
+      readonly reason: string;
+      readonly verification: VerificationResult;
+    }
+  /** Resolved, verified, committed and pushed. */
+  | {
+      readonly kind: "resolved";
+      readonly report: MergeReport;
+      readonly behind: number;
+      readonly verification: VerificationResult;
+    };
+
+export interface ConflictRoundRequest extends SolveRequest {
+  readonly worktree: Worktree;
+  /** Whose name goes on the merge commit. */
+  readonly identity: BotIdentity;
+}
+
+/**
+ * What the pass is told about the conflict.
+ *
+ * The paths and nothing else. Not the conflicted text: the session's working
+ * directory *is* the worktree and it has `Read`, so pasting file contents into
+ * the prompt would be handing it a copy of something it can open — a copy that
+ * can go stale the moment it edits anything, which is the worst kind.
+ *
+ * The list is git's, which is the property that makes the rest of this round
+ * checkable. Every later question — did it resolve them, did it touch anything
+ * else — is asked against this set rather than against what the pass says it
+ * did.
+ */
+function renderConflict(baseRef: string, behind: number, files: readonly string[]): string {
+  return [
+    `Merging ${baseRef} into this branch, which is ${String(behind)} commit(s) behind it.`,
+    "",
+    "git reports these paths conflicted:",
+    ...files.map((file) => `- ${file}`),
+  ].join("\n");
+}
+
+/**
+ * One attempt at merging a base that will not merge itself.
+ *
+ * ## Why this is a round of its own rather than a step in one
+ *
+ * A branch that will not take its base cannot be verified — `pnpm install`,
+ * typecheck and test all run against a tree that does not exist yet — so a
+ * review round layered on top of an unresolved conflict would be answering a
+ * reviewer from a state nobody can build. This round therefore spends itself
+ * entirely on the merge and answers nobody. The reviewer's thread stays
+ * unanswered on purpose, which is also what brings the next tick back here.
+ *
+ * ## The merge is re-run rather than kept
+ *
+ * `base-sync.ts` aborted the conflict it found in the attach path, and this
+ * starts a fresh one. That is not waste: the merge is deterministic and costs
+ * milliseconds, and the alternative is a conflicted working tree sitting
+ * through a reservation and a model start-up while `attachWorktree`'s
+ * cleanliness check would salvage it out from under this function.
+ *
+ * ## Nothing the pass says about the tree is believed
+ *
+ * The pass writes a report and the harness reads git. `acceptResolution` asks
+ * whether the paths are unmerged, whether markers survive, and whether anything
+ * outside the conflicted set moved; `verify` asks whether the result builds.
+ * The report's own `resolutions` are checked for *coherence* — that they name
+ * files git actually flagged — and are otherwise a record for a human, not
+ * evidence.
+ *
+ * Every exit but `current`, `merged` and `resolved` leaves the checkout as it
+ * was found, because a conflicted tree left behind is the state the next tick
+ * salvages.
+ */
+export async function resolveConflict(
+  deps: SolveDependencies,
+  request: ConflictRoundRequest,
+): Promise<ConflictRoundOutcome> {
+  const staged = await prepareSkillRoot(request.parentDirectory, `${request.issueKey}-merge`);
+  if (staged.outcome === "refused") {
+    return { kind: "abandoned", reason: staged.reason };
+  }
+  try {
+    return await runConflictRound(deps, request, staged.path);
+  } finally {
+    await removeSkillRoot(staged.path);
+  }
+}
+
+async function runConflictRound(
+  deps: SolveDependencies,
+  request: ConflictRoundRequest,
+  skillRootPath: string,
+): Promise<ConflictRoundOutcome> {
+  const { issueKey, worktree, identity } = request;
+  const { commands, passes } = deps;
+  const sync: BaseSyncRequest = {
+    issueKey,
+    branch: worktree.branch,
+    worktreePath: worktree.path,
+    baseRef: request.baseRef,
+    identity,
+    timeoutMs: request.gitTimeoutMs,
+  };
+
+  const started = await beginMerge(commands, sync);
+  if (started.outcome === "current") {
+    return { kind: "current" };
+  }
+  if (started.outcome === "refused") {
+    return { kind: "refused", reason: started.reason };
+  }
+  if (started.outcome === "merged") {
+    // It conflicted when the attach path tried and does not now, which happens
+    // when the base moved between the two. Push it and spend nothing else.
+    const pushed = await pushBranch(commands, sync);
+    return pushed.outcome === "pushed"
+      ? { kind: "merged", behind: started.behind }
+      : { kind: "refused", reason: pushed.reason };
+  }
+
+  const { behind, files } = started;
+  /** Every failure below leaves a merge in progress, so every one aborts it. */
+  const undo = async (outcome: ConflictRoundOutcome): Promise<ConflictRoundOutcome> => {
+    await abortMerge(commands, worktree.path, request.gitTimeoutMs);
+    return outcome;
+  };
+
+  const mergeRun = await runPass(
+    passes,
+    "merge",
+    {
+      issueKey,
+      worktreePath: worktree.path,
+      ticket: request.ticket,
+      conflict: renderConflict(request.baseRef, behind, files),
+      skillRootPath,
+      ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
+    },
+    (output) => parseMerge(output, issueKey),
+  );
+  if (!mergeRun.ok) {
+    logger.info("solve.crashed", {
+      issueKey,
+      pass: "merge",
+      reason: mergeRun.reason,
+      worktreePath: worktree.path,
+    });
+    return await undo({ kind: "abandoned", reason: mergeRun.reason });
+  }
+  const report = mergeRun.value;
+
+  if (!report.resolved) {
+    logger.info("solve.abandoned", {
+      issueKey,
+      pass: "merge",
+      reason: report.abandoned,
+      worktreePath: worktree.path,
+    });
+    return await undo({ kind: "abandoned", reason: report.abandoned });
+  }
+
+  // Checked before the tree is, because it is the cheap half and because a
+  // report naming a file git never flagged is a report about some other
+  // situation — most likely one the pass invented for itself, which is the
+  // failure mode the review loop already met when it argued with a comment
+  // nobody had written.
+  const claimed = report.resolutions.map((resolution) => resolution.path);
+  const unasked = claimed.filter((path) => !files.includes(path));
+  if (unasked.length > 0) {
+    return await undo({
+      kind: "refused",
+      reason: `the pass reported resolving files git did not flag: ${unasked.join(", ")}`,
+    });
+  }
+
+  const accepted = await acceptResolution(commands, {
+    worktreePath: worktree.path,
+    conflicted: files,
+    timeoutMs: request.gitTimeoutMs,
+  });
+  if (!accepted.ok) {
+    return await undo({ kind: "refused", reason: accepted.reason });
+  }
+
+  const verification = await verify(commands, verifyRequestOf(request, worktree));
+  if (verification.outcome === "refused") {
+    return await undo({ kind: "refused", reason: verification.reason });
+  }
+  if (verification.outcome === "failed") {
+    // Aborted rather than pushed. A red merge commit on a branch under review
+    // replaces one problem a reviewer can see with one they cannot, and the
+    // conflict is still there to be tried again with the next base.
+    return await undo({ kind: "failed", reason: verification.reason, verification });
+  }
+
+  const committed = await commitMerge(commands, sync);
+  if (failed(committed)) {
+    return await undo({
+      kind: "refused",
+      reason: `could not commit the merge (${why(committed)})`,
+    });
+  }
+
+  // Not `undo` — the merge is committed, so `merge --abort` has nothing to
+  // abort. `pushBranch` undoes it by resetting to `ORIG_HEAD`, which is the
+  // same discard by the only route still available.
+  const pushed = await pushBranch(commands, sync);
+  if (pushed.outcome === "refused") {
+    return { kind: "refused", reason: pushed.reason };
+  }
+
+  logger.info("solve.base.resolved", {
+    issueKey,
+    branch: worktree.branch,
+    baseRef: request.baseRef,
+    behind,
+    files: claimed,
+  });
+  return { kind: "resolved", report, behind, verification };
 }
 
 export type ReviewRoundOutcome =
@@ -949,7 +1193,7 @@ async function runReviewRound(
       reasons: ["could not read the diff, so there is nothing to bound"],
     };
   }
-  const verdict = checkDiff(parseNumstat(diffText), request.limits ?? DEFAULT_LIMITS);
+  const verdict = checkDiff(parseNumstat(diffText));
   if (!verdict.ok) {
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
   }

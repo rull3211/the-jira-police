@@ -123,7 +123,10 @@ export interface TriageRunOptions {
   readonly executable: string;
   /** Directory to run in — must be where the skill and vault are resolvable. */
   readonly workingDirectory: string;
-  readonly timeoutMs: number;
+  /** Silence budget for the run; see `SessionOptions.idleMs`. */
+  readonly idleMs: number;
+  /** Awake-time ceiling on the run; see `SessionOptions.maxRunMs`. */
+  readonly maxRunMs: number;
   readonly deep: boolean;
   /**
    * Absolute path to the insurance-knowledge-vault clone.
@@ -561,7 +564,8 @@ export async function runTriage(options: TriageRunOptions): Promise<TriagePayloa
       executable: options.executable,
       args: buildArgs(options),
       workingDirectory: options.workingDirectory,
-      timeoutMs: options.timeoutMs,
+      idleMs: options.idleMs,
+      maxRunMs: options.maxRunMs,
       env: childEnv(process.env, options.vaultPath),
       requiredMcpServers: options.requiredMcpServers,
       label: `Triage of ${options.issueKey}`,

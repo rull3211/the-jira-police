@@ -1,8 +1,12 @@
 # the-jira-police — bug-squashing agents
 
-> **Progress, 2026-09-06.** Phases A through D4e are built and merged; the service claims a
+> **Progress, 2026-09-07.** Phases A through D4e are built and merged; the service claims a
 > ticket, solves it in an isolated worktree, opens a pull request, answers the reviewer, and
-> labels the ticket for whatever happened. 2011 tests, no build step. **E has landed its review
+> labels the ticket for whatever happened. 2326 tests, no build step. **A review branch is now
+> kept current with its base** — merged and pushed before every round, and a conflict spends a
+> round on a pass that tries to resolve it rather than wedging the pull request (§6.4). **Two
+> inputs no longer cost a round**: a deploy notice is not an event on the pull request, and the
+> reviewer's own approval is answered by undrafting rather than by a paid pass (§6.5). **E has landed its review
 > half**: `pnpm start` now runs the review sweep beside the grooming loop, on its own cadence,
 > behind `SOLVE_ENABLED`. The solve half — anything that claims a ticket — is still a person
 > typing a command, and stays that way until E's remaining blockers are answered. **F has landed
@@ -289,11 +293,15 @@ Guards on the write pass:
   command itself, which also disposes of "no `git push` from inside the model's session".
 - **Verification is mechanical.** The harness runs the steps and reads exit codes. The model is
   never asked whether the tests passed.
-- **Diff-bounds gate.** Caps files and lines; refuses lockfiles, CI config, `.github/`, and
-  anything outside the repo. It adds a category the first draft did not have: **files that define
-  what verification means** (`package.json`, `tsconfig*`, lint and test config), refused
-  unconditionally and exempt from any cap, because a run that can edit them can make every
-  subsequent check pass while verifying nothing. It parses `--numstat -z`, since without `-z` an
+- **Diff-bounds gate.** Refuses lockfiles, CI config, `.github/`, and anything outside the repo.
+  It adds a category the first draft did not have: **files that define what verification means**
+  (`package.json`, `tsconfig*`, lint and test config), refused unconditionally, because a run that
+  can edit them can make every subsequent check pass while verifying nothing. **It no longer caps
+  files or lines** — that family was deleted 2026-09-06 and the reasoning is in the module header:
+  the path families are sound in both directions and a size cap is sound in one, it fires after
+  the pass has been paid for so it discards a spend rather than preventing one, it measures the
+  pull request cumulatively rather than the run, and a human merges every PR anyway. Size is still
+  measured and reported, just never refused. It parses `--numstat -z`, since without `-z` an
   attacker-suggested filename containing a newline can forge a numstat record.
 - Commit messages must satisfy Conventional Commits — mechanically checkable, so checked.
 
@@ -491,6 +499,113 @@ already on the pull request — and then the instability rule spends the _next_ 
 it. The loop was manufacturing the instability it is written to survive.
 
 A human always merges. The bot has no merge path.
+
+#### 6.4 The branch has to be kept current with its base, landed 2026-09-07 on `feat/review-branch-sync`
+
+**PR #2661 burned twenty rounds and roughly $16 on one inline nitpick, and none of them could
+have worked.** The branch was cut before `main` gained `"packageManager": "pnpm@9.15.9"`, so
+every round paid for a review pass and was then refused at verification, because
+`--frozen-lockfile` under pnpm 11 will not read a lockfile pnpm 9 wrote. The branch was seven
+commits behind a repository that had already been fixed. **That closes the pnpm blocker recorded
+against D2 and retires the `/tmp/pnpm9bin` shim** — and it is the least interesting half, because
+the class it belongs to does not close with it: any branch left open long enough goes stale
+against a base that moved, and the loop had no way to notice.
+
+**Policy, chosen rather than derived: merge the base in and push it straight away.** A merge held
+locally makes the checkout _ahead_ of `origin`, which `attachWorktree` treats as unusable, so the
+next tick salvages it and rebuilds — the churn that produced fifteen `-salvaged-` directories on
+one wedged pull request. Pushing in the same breath keeps `origin` the single answer to what is
+on the branch.
+
+**The placement is the whole cost argument.** `syncWithBase` runs from the attach path, _before_
+the reservation, so a failure is a failed start — free, bounded at three — rather than a paid
+round bounded at twenty. #2661 spent twenty precisely because its failure surfaced on the
+expensive side of that line.
+
+**A conflict is a third outcome, not a refusal**, and it is the one place this section departs
+from what refusing would have been cheapest. A refusal means _this side cannot start_; a conflict
+is the opposite — the checkout is fine, the branch is fine, and there is work only a pass can do.
+So `attachSynced` hands back `conflicted` carrying the worktree, the behind-count and git's own
+`--diff-filter=U` list, and both callers reserve a round for the merge pass. **Every merge
+conflict is to be attempted by the bot** rather than parked for a human, which was a decision
+taken deliberately against the alternative of refusing the start.
+
+**A merge round moves exactly one counter.** `MAX_PR_ROUNDS_TOTAL` moves, because the round costs
+money and a base that kept moving must eventually stop the loop rather than spin it.
+`MAX_REVIEW_ITERATIONS` does not, because it bounds an argument between two machines and no
+machine was answered. The `Last read` high-water mark does not, because nothing read a comment
+and advancing it would silently mark the reviewer's point handled. `chainDecision` continues on
+`synced` and does not file it as silence: the feedback that was waiting is still waiting, and
+treating a round that pushed a commit as quiet would let the absent-reviewer brake measure us
+instead of the reviewer.
+
+**Nothing the resolver says about the tree is believed.** `acceptResolution` stages exactly the
+paths git flagged — never `-A` — then asks git four questions: is anything still unmerged, is a
+conflict marker left, did the pass touch anything outside the conflicted set, did it leave a new
+file behind. An unanswered question fails closed; a `git grep` exiting above 1 is git failing to
+look. `=======` is not searched for, because it is a legal Markdown heading underline. And the
+conflicted text is fenced as data with a delimiter the fence knows the name of: a conflicted file
+holds code from a branch anybody with write access pushed, which puts it in the same class as
+ticket text.
+
+Three commits, on the standing rule that a thing is built inert before it is wired: `syncWithBase`
+and `attachSynced` (the base merged in before a round), `beginMerge`/`acceptResolution` and the
+`merge` pass (built, called by nothing), then the wiring — `advance` and the daemon's
+`createReviewAct` both choosing the round from the checkout rather than from the survey. 2308
+tests; eleven mutations this stage, eleven caught, one of them only after `review-cycle.test.ts`
+grew a row for it.
+
+**A gap it does not close, found while writing it: the review round has no `verifyBase`.**
+`verifyBase` is called from `solveTicket` and nowhere else, so `resolveReview`'s `failed` is not
+relative to a base anyone proved green. On the solve path a red build before the change is
+`unusable-base` and says so; on a review round the same redness is attributed to the round. Now
+that the base is merged in every round, a base that is broken upstream lands in the branch and
+the round takes the blame for it. Recorded, not fixed.
+
+#### 6.5 Two watcher escapes, landed 2026-09-07 on `feat/watcher-escapes`
+
+**Two inputs were costing rounds to be told nothing, and the receipts are on two live pull
+requests.** #2663 carries two `:rocket: Application Deployed` notices from `github-actions`, and
+its marker shows rounds 7 and 9 spent publishing a sentence saying the only comment was a deploy
+notice. #2661 `round 1` and #2663 `round 6` are the same waste against the reviewer's own approval
+— `### 🟢 Approval recommended`, answered by a paid pass whose output was an acknowledgement.
+
+**The CI half was the more serious, because it was uncapped.** `github-actions` does not match the
+requested reviewer, so `reviewOrigin` classified it `human`, and human rounds are deliberately
+exempt from `MAX_REVIEW_ITERATIONS` (§6.2). Continuous integration was the one input to this loop
+that could spend without a bound.
+
+Both are drops in `readReview`, and each then inherits a path that already exists: `surveyReview`
+returns `ready` on an empty inbox, which undrafts over `gh` and reserves nothing. Filtering at the
+source cost no new mechanism.
+
+**The two drops are at deliberately different depths, and that is the whole safety argument.**
+Automation comes out of `entries` _before_ `anyoneResponded`, `comments` and `newestAt` are
+derived, because the claim is not "a deploy notice is not feedback" but "a deploy notice is not an
+event on this pull request" — and it is triggered by our own push, so leaving it in `newestAt`
+lets the loop reset its own silence clock and never notice a reviewer that has gone away. The
+green light comes out of `comments` **only**. It has to keep counting as a response, because
+`advance` undrafts on _responded plus nothing to do_: drop it from both and a pull request whose
+only answer is an approval never leaves draft, on every tick, until the silence brake gives up.
+Automation is not an event; an approval is an event with nothing in it.
+
+**Narrow in both directions, and the failure directions say why.** `AUTOMATION_AUTHORS` has one
+entry and is explicitly not `*[bot]` — the reviewer _is_ a bot, and a list wide enough to swallow
+it would silence the review while looking exactly like a reviewer that never answered. The green
+light is matched on the verdict line only, so a review whose own verdict is `🔵 Needs a closer
+look` while quoting the green heading is still read, and it is scoped to the reviewer, so a person
+writing the same words keeps their comment. The case that looks most dangerous needs no rule at
+all: a green light carrying inline comments is threads, and an open thread keeps the inbox
+non-empty by construction.
+
+**The structural signal was rejected in favour of the prose one**, which is the opposite of this
+file's usual preference. Copilot submits every review as `COMMENTED` whatever it concludes — only
+humans (carlmagl, ceciliesn) ever submit `APPROVED` — so the state field cannot tell an approval
+from an objection, and the heading is the only thing that can.
+
+2326 tests; eleven mutations, all caught, including the one this stage was warned about: drop the
+green light from `anyoneResponded` too and both the unit fact and the end-to-end outcome go red,
+the latter with `waiting` where `ready` belongs.
 
 ### 7. Sendback subscription — watching the nearly-solvable (F)
 
@@ -1281,22 +1396,22 @@ the wire without reading the prose, and reading the prose is what the paid pass 
 
 ## Phasing
 
-| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. **Half-driven live 2026-09-06 on PR #2662**: `origin` classified both rounds as `reviewer` and the `waiting` gate admitted a formatted approval as actionable — see below. The **human** path is still undriven; no person has commented on a bot pull request while the loop was listening, so uncapped human rounds and the mixed-batch rule remain tested and unobserved                    |
-| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **built and claiming 2026-09-06.** 2176 tests. The review half on `feat/daemon-review`; the claim half beside it in the same tick, `runSolveClaims`, bounded by a per-ticket attempt ledger so the outcomes that release without labelling cannot be re-bought every two minutes forever                                                                                                                                                                                              |
-| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **built and looping 2026-09-06, `feat/sendback-watch`.** 2160 tests. `watch:once --write` unsubscribes and re-triages; the attempt is reserved on a label before anything is paid for, and the check is shown what the edited fields now say. The daemon runs the same sweep on `WATCH_POLL_MS`, six hours, bounded by a memo of what it has already declined — and since 2026-09-06 the ticket carries the list of what would end the watch, which is the half a reporter can act on |
+| Phase   | Scope                                                                                                                           | New privilege                                      | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A**   | `agentFitness` schema + gate rule + `agent:solvable`                                                                            | none                                               | built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **B1**  | Second poller, both queries, label machine, `solve:once`                                                                        | none                                               | built, verified live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **B2**  | The claim write + read-back-and-verify, release, comment                                                                        | Jira label writes                                  | built, driven by hand                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **C**   | Real solver: worktree, recon, edit, mechanical verification, diff gate                                                          | `Write`/`Edit` — **not `Bash`**                    | built, driven by hand                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **D1**  | Push, draft PR, request review                                                                                                  | `git push`, `gh`                                   | built; real PRs merged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **D2**  | Wire `advance` — the `--advance` mode                                                                                           | the bot pushes to an existing PR unprompted        | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **D3**  | Inline comments + review cursor + reply comment + thread resolution                                                             | the bot answers and closes a reviewer's comment    | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **D4a** | The label slice — the four coordinated edits                                                                                    | the bot moves a ticket through its whole lifecycle | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **D4b** | **Both reviewers (§6.2)** — `origin`, the `waiting` gate, round classification, the marker's second count, `reviewer-exhausted` | none beyond D2                                     | **built 2026-09-05, `feat/review-human-rounds`.** 1872 tests; twelve mutations caught. **Driven live, both origins.** On PR #2662, 2026-09-06, `origin` classified both rounds as `reviewer` and the `waiting` gate admitted a formatted approval as actionable — see below. The **human** path was driven the evening before on **PR #2661**: a person asked for a leap-year test in an ordinary comment and the loop pushed `test(utils): cover leap-day issue dates` four minutes later, covering both the leap-year and non-leap-year branches. The marker read `iteration count 3` / `Reviewer rounds: 2`, with round 2 tagged `human` — so classification, the uncapped-human rule and a real fix all held in one run. **Still unobserved: the mixed-batch rule** — no round has yet read a human and a reviewer comment in the same batch. **This row said the human path was undriven until 2026-09-06, written from the plan rather than from the pull request it links to; the run had already happened** |
+| **D4c** | The bail terminal — `agent:failed` plus the reason                                                                              | the bot closes a ticket against itself             | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **D4d** | `--review`, the fifth rung — the whole chain in one command                                                                     | the first loop with nobody between iterations      | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **D4e** | Every outcome reports on the ticket                                                                                             | none; removes a silence                            | done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **E**   | **Run it from the daemon**                                                                                                      | **runs unattended**                                | **built and claiming 2026-09-06.** 2176 tests. The review half on `feat/daemon-review`; the claim half beside it in the same tick, `runSolveClaims`, bounded by a per-ticket attempt ledger so the outcomes that release without labelling cannot be re-bought every two minutes forever                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **F**   | Sendback subscription (§7)                                                                                                      | re-triage spend with nobody asking                 | **built and looping 2026-09-06, `feat/sendback-watch`.** 2160 tests. `watch:once --write` unsubscribes and re-triages; the attempt is reserved on a label before anything is paid for, and the check is shown what the edited fields now say. The daemon runs the same sweep on `WATCH_POLL_MS`, six hours, bounded by a memo of what it has already declined — and since 2026-09-06 the ticket carries the list of what would end the watch, which is the half a reporter can act on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 **Each phase is branched out.** One implementation branch per phase, never on `main`, so the
 privilege each grants is reviewable on its own. Later branches stack rather than fan out, because
@@ -1419,15 +1534,39 @@ bound at its default would have paid for on its first tick.
   review side alone. What is still open is the _solve_ side of it, which is the attempt count
   below rather than a backoff question — a solve that fails deterministically should stop being
   attempted, not be attempted more slowly.
-- **An answer to machine sleep.** A pass killed at `SOLVE_TIMEOUT_MS` because the laptop slept has
+- ~~**An answer to machine sleep.** A pass killed at `SOLVE_TIMEOUT_MS` because the laptop slept has
   done nothing wrong, is deliberately not retried, and silently converts a claimed ticket into an
-  abandoned one. Hand-driven runs use `caffeinate`; a daemon has no such person.
-- **An answer to the second gate.** The solve subprocess inherits the operator's `PreToolUse`
-  hooks, and one denied a write pass its `Write` tool. `runner.ts` reasons about
-  `--allowedTools`/`--disallowedTools` and concludes the solver has `Write`; a hook this harness
-  never sees can veto that per call. It is content-based rather than path-based, and it degraded a
-  _read_ tool in the same session before any write was attempted — a pass that cannot `Grep`
-  produces a worse answer rather than an error.
+  abandoned one. Hand-driven runs use `caffeinate`; a daemon has no such person.~~ **Answered
+  2026-09-06, `fix/session-sleep-budgets`.** The single wall-clock `setTimeout` armed at spawn
+  became two budgets and a watchdog: `SESSION_IDLE_TIMEOUT_MS`, which any byte on stdout or stderr
+  resets, and the existing `SOLVE_TIMEOUT_MS`/`TRIAGE_TIMEOUT_MS` recast as a ceiling on _waking_
+  time. Sleep is inferred from timer drift rather than from a clock API, which is correct whether
+  or not the platform's monotonic clock ticks through a suspend. `caffeinate` is now a convenience
+  rather than the mechanism. **And the killed pass turns out not to be lost work**: probed the same
+  day, the transcript is written as the run goes, survives `SIGKILL`, and `--resume <id>` reads it
+  back with the completed turns intact. The `session_id` was on the wire in the init event the
+  whole time and was being discarded; `SessionTimeoutError` now carries it out. Nothing resumes
+  automatically — that would be state on disk, which §1 refuses — but an operator holding the id
+  can pick the pass back up by hand.
+- **An answer to the second gate — half of it, and the half that is left cannot be read off the
+  stream.** The solve subprocess inherits the operator's `PreToolUse` hooks, and one denied a write
+  pass its `Write` tool. `runner.ts` reasons about `--allowedTools`/`--disallowedTools` and
+  concludes the solver has `Write`; a hook this harness never sees can veto that per call.
+  **`sessionDenials` makes the veto visible, 2026-09-06.** Probed: a denial arrives mid-stream as
+  an ordinary `tool_result` with `is_error: true`, told apart from a file that did not exist only
+  by `tool_result_meta[].non_execution_kind`, and the `result` event repeats the set in
+  `permission_denials` — while still reporting `subtype: "success"` and `is_error: false`, which is
+  the whole reason nothing here saw it. Every run now warns `session.denied` with the count and the
+  tools, and the label already names the pass and the ticket. Three things it does not do, each for
+  a measured reason. It does not attribute a denial to a hook: hooks, deny rules and don't-ask mode
+  share one tag, only free text names a hook, and some hooks emit no prefix, so the attempt would
+  undercount in the direction of reassurance. It does not fail the run: this service's own D4c
+  commenter was denied an Atlassian tool, routed around it, and posted the right comment. And it
+  cannot see the quieter half at all — a hook that **allows but degrades**, which is how a `Grep`
+  came back useless on SSX-3832, leaves no structural signal, because both denial-bearing fields
+  are gated on the call not executing. What is still owed is a consumer: a fix pass that abandons
+  for `judgement` while the harness watched its `Write` be vetoed is reporting `environment`,
+  whatever it says, and wiring that means widening `PassRunner.run`.
 - **A transient/deterministic split plus a per-ticket attempt count.** `refused` and `failed`
   still release, so auto mode can spend repeatedly on a ticket whose diff the harness would not
   judge. Also the only answer to D4e's stacking problem, where a re-claimed ticket is re-commented

@@ -589,17 +589,35 @@ need one. That half deliberately claimed nothing: every round it could run was o
 already authorised by opening the pull request, and a claim is not like that. The second half is
 the solve queue, and it went in on 2026-09-06; the daemon now claims tickets on its own.
 
-**Two things are still unobserved, and a demo should say so rather than imply otherwise:**
+**The human review path is driven, and PR #2661 is the receipt.** On 2026-09-05 a person asked
+_"Can you add a test for a leap-year issue date?"_ in an ordinary comment; four minutes later the
+loop had pushed `test(utils): cover leap-day issue dates`, covering both branches — 29 February to
+29 February when the birth year is also a leap year, and to 1 March when it is not. The marker
+records the part that matters:
 
-- **The human review path.** `MAX_REVIEW_ITERATIONS` counts bot rounds only, and a batch with any
-  human comment in it does not increment — built, mutation-tested, and never once exercised,
-  because no person has commented on a bot pull request while the loop was listening. The
-  uncapped-human rule is the least-proved thing in the chain, and it is also the one that spends
-  money if it is wrong.
-- **Cost per ticket per day.** Single-run costs are measured — triage $1.56, recon $1.58, a review
-  round $0.94 — but three things here turn one-off costs into recurring ones: uncapped human
-  rounds, a per-tick review sweep that scales with unmerged pull requests, and the re-triage
-  watch. Nobody has metered a day.
+```
+bot: iteration count 3
+Reviewer rounds: 2
+
+- round 1 — reading 1 comment(s) and 0 thread(s)
+- round 2 — human, reading 1 comment(s) and 0 thread(s)
+- round 3 — reviewer, reading 1 comment(s) and 0 thread(s)
+```
+
+Three rounds, **two billed**. So all three halves held at once: `origin` classified a real human
+comment as `human`, the round did not increment the reviewer budget, and the answer was a genuine
+test rather than an acknowledgement.
+
+> This section claimed the human path was _"never once exercised"_ until 2026-09-06. It had been
+> exercised the previous evening, on a pull request linked from this very file. The claim was
+> written from the plan rather than from the pull request — which is the same failure the service
+> catches in tickets, committed here by its own author. **Check the artifact, not the note about
+> the artifact.**
+
+**One thing genuinely is unmeasured: cost per ticket per day.** Single-run costs are known — triage
+$1.56, recon $1.58, a review round $0.94 — but three things turn one-off costs into recurring ones:
+uncapped human rounds, a per-tick review sweep that scales with unmerged pull requests, and the
+re-triage watch. Nobody has metered a day.
 
 D was driven end to end on 2026-09-04: SSX-3822 claimed, solved, verified, committed, pushed, and
 opened as [draft PR #2657](https://github.com/storebrand-digital/buy-insurance-advisor-web/pull/2657)
