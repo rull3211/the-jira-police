@@ -988,7 +988,21 @@ export function parseReview(value: unknown, issueKey: string): ReviewReport {
   // touching code is the right response. What is never acceptable is a round
   // that neither changed anything nor said anything, because that is
   // indistinguishable from the loop having silently stopped working.
-  if (report.responses.length === 0) {
+  //
+  // **Both channels count, and checking only `responses` was a deadlock.** The
+  // schema splits the answer in two by where it gets posted: `responses` is for
+  // feedback with no thread to reply to — a summary review or an overall
+  // verdict — and `threadAnswers` is one entry per inline thread. They are
+  // disjoint, so a review consisting only of line comments must leave
+  // `responses` empty, and this guard used to reject exactly that.
+  //
+  // It stayed latent because every reviewer the loop had ever seen was Copilot,
+  // which always posts a summary body alongside its inline comments. The first
+  // human review — four line comments, no overall verdict, PR #2663 — crashed
+  // the round, and the crash left a dirty worktree that `attachWorktree` then
+  // refused on every subsequent tick, for free, with no label and no comment to
+  // say so. A parser reading one of two fields cost four days of silence.
+  if (report.responses.length === 0 && report.threadAnswers.length === 0) {
     throw new SolveParseError(
       `${issueKey}: review round answered none of the reviewer's comments — a comment considered and declined must still be recorded, or a human cannot tell it from one that was missed`,
     );

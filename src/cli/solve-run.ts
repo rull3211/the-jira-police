@@ -898,21 +898,39 @@ function createReviewAct(
       return { kind: "failed", stage: "worktree", reason: attached.reason };
     }
 
-    const result = await runRound(deps, target.request, attached.worktree, pending);
-
-    if (target.holder.worktree !== null) {
-      // Kept only for a refusal, where the diff is the evidence an operator
-      // needs to decide whether the gate or the pass was wrong. Everything else
-      // either pushed its work or wrote nothing.
-      await removeWorktree(
-        deps.commands,
-        target.holder.worktree,
-        result.kind === "refused" ? "keep-as-evidence" : "discard",
-        target.request.gitTimeoutMs,
-      );
+    // The checkout's fate is decided in a `finally`, because a round has a
+    // third ending the old code did not have a branch for: it can throw.
+    // `runRound` raises on a parse refusal, and when it did, the removal below
+    // was skipped entirely — the worktree survived by accident rather than by
+    // policy, and every later tick refused to attach to it. The comment that
+    // used to sit here asserted a trichotomy the code did not enforce
+    // ("everything else either pushed its work or wrote nothing"), which a
+    // crash falsifies. This project's own defect class, at the site of the bug.
+    //
+    // Necessary and *not* sufficient, and the distinction is the whole design:
+    // a `finally` runs for a throw and not for a `kill -9`, an OOM, or a laptop
+    // that slept through `SOLVE_TIMEOUT_MS` — a failure this service has
+    // already recorded once. Recovering from a checkout that nobody tidied is
+    // `attachWorktree`'s job, and that is what makes the deadlock unreachable
+    // rather than merely rarer.
+    let result: AdvanceOutcome | undefined;
+    try {
+      result = await runRound(deps, target.request, attached.worktree, pending);
+      return result;
+    } finally {
+      if (target.holder.worktree !== null) {
+        // A throw leaves no outcome to read, and its diff is exactly the
+        // evidence an operator needs to tell a bad gate from a bad pass, so it
+        // is kept on the same terms as a refusal. Keeping is only safe because
+        // `attachWorktree` now salvages what it finds instead of refusing it.
+        await removeWorktree(
+          deps.commands,
+          target.holder.worktree,
+          result === undefined || result.kind === "refused" ? "keep-as-evidence" : "discard",
+          target.request.gitTimeoutMs,
+        );
+      }
     }
-
-    return result;
   };
 }
 

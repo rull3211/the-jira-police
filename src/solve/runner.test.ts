@@ -862,11 +862,55 @@ describe("parseReview", () => {
     expect(report.changed).toBe(false);
   });
 
-  it("rejects a round that answered nothing", () => {
-    // Indistinguishable from the loop having silently stopped working.
-    expect(() => parseReview(review({ responses: [] }), "SSX-3822")).toThrow(
-      /answered none of the reviewer's comments/u,
-    );
+  // The four shapes a review can arrive in, enumerated rather than sampled.
+  //
+  // Every fixture in this file used to carry a non-empty `responses` and an
+  // empty `threadAnswers`, because every reviewer the loop had ever processed
+  // was Copilot and Copilot always posts a summary body. That is a suite drawn
+  // from one reviewer, and it stopped testing the day a human left four line
+  // comments and no overall verdict: `responses` was correctly empty, the guard
+  // read only that field, and the round crashed. The table is the fix for the
+  // class — a sampled fixture set cannot tell you which corner it is missing.
+  describe("the two answer channels", () => {
+    it("accepts a summary-only review", () => {
+      const report = parseReview(
+        review({ responses: ["Explained why the guard is needed."], threadAnswers: [] }),
+        "SSX-3822",
+      );
+
+      expect(report.responses).toHaveLength(1);
+    });
+
+    it("accepts an inline-only review, which has nothing to put in responses", () => {
+      // The regression. `responses` covers feedback with *no thread*, so a
+      // review of only line comments must leave it empty — and that is the
+      // shape the guard used to reject.
+      const report = parseReview(
+        review({ responses: [], threadAnswers: [answer()] }),
+        "SSX-3822",
+      );
+
+      expect(report.threadAnswers).toHaveLength(1);
+      expect(report.responses).toHaveLength(0);
+    });
+
+    it("accepts a review answered on both channels", () => {
+      const report = parseReview(
+        review({ responses: ["Declined the boilerplate offer."], threadAnswers: [answer()] }),
+        "SSX-3822",
+      );
+
+      expect(report.responses).toHaveLength(1);
+      expect(report.threadAnswers).toHaveLength(1);
+    });
+
+    it("rejects a round that answered on neither", () => {
+      // Indistinguishable from the loop having silently stopped working, and
+      // the only one of the four that is a real refusal.
+      expect(() =>
+        parseReview(review({ responses: [], threadAnswers: [] }), "SSX-3822"),
+      ).toThrow(/answered none of the reviewer's comments/u);
+    });
   });
 
   it("accepts a round that abandoned after touching something", () => {

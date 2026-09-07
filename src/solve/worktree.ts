@@ -337,8 +337,7 @@ export interface AttachRequest {
  * is every hand-driven run — attaching could not succeed even once.
  *
  * So an existing worktree is reused, but only after it has been *proved* to be
- * the thing we would have built. Three checks, and each refuses rather than
- * repairs, because each failure means somebody else is holding this checkout:
+ * the thing we would have built. Three checks:
  *
  * - **on the expected branch**, or it is a different piece of work at a
  *   coincidental path,
@@ -348,13 +347,43 @@ export interface AttachRequest {
  * - **not ahead of `origin`**, or there are commits here the reviewer has never
  *   seen and a fast-forward would be a lie about what was reviewed.
  *
- * Behind is the one state that is repaired instead of refused, with
- * `merge --ff-only`: it is what a checkout looks like after somebody pushed to
- * the branch, the merge cannot invent a commit, and refusing would put us back
- * where this started. Nothing here ever discards a commit or an edit; every
- * destructive resolution (`-B`, `reset --hard`, `add --force`) was considered
- * and rejected for that reason, since the value being protected is work a
- * person did and did not tell us about.
+ * Behind is repaired in place with `merge --ff-only`: it is what a checkout
+ * looks like after somebody pushed to the branch, and the merge cannot invent a
+ * commit. Nothing here ever discards a commit or an edit; every destructive
+ * resolution (`-B`, `reset --hard`, `add --force`) was considered and rejected
+ * for that reason, since the value being protected is work a person did and did
+ * not tell us about.
+ *
+ * ## Failing those checks used to stop the loop, and that was the bug
+ *
+ * Found 2026-09-06 with SSX-3835 four days into a silent wedge. Each of the
+ * three failures above returned a refusal, and the argument for that — *somebody
+ * else is holding this checkout* — reads as prudence and is a deadlock. The
+ * path is `<parentDirectory>/<issueKey>`, a pure function of the ticket, so the
+ * checkout the round refused is the checkout the *next* round finds. None of
+ * the three states clears itself. And the refusal is free: it happens before
+ * any session starts, so no cap counts it, no cost moves, and nothing is
+ * labelled or commented. The loop retried the same failure every two minutes
+ * for four days at $0 and told nobody.
+ *
+ * The invariant that was violated is worth naming, because it is not specific
+ * to worktrees: **a tick's ability to make progress must not depend on the
+ * previous tick having tidied up.** The dirt here was almost always our own —
+ * a round that threw before its cleanup ran — and a `finally` narrows that
+ * window without closing it, since `kill -9`, an OOM and a laptop that slept
+ * through `SOLVE_TIMEOUT_MS` all skip it, and this service has already recorded
+ * the last of those. Durability has to live in the next tick's recovery.
+ *
+ * So a state failure now **salvages**: the checkout is moved aside intact
+ * (`salvageWorktree`) and the cold path below rebuilds from the remote. Nothing
+ * is deleted, so the argument that made these refusals attractive is preserved
+ * — a human's work is still there, at a path named in the log — while the loop
+ * stops depending on somebody noticing.
+ *
+ * A *read* failure still refuses, and the split is the whole design: git being
+ * unavailable, or answering with counts that will not parse, might succeed on
+ * the next tick, so retrying is right and moving a checkout we could not read
+ * is not. Refuse what may pass later; salvage what never will.
  */
 export async function attachWorktree(
   runner: CommandRunner,
@@ -403,7 +432,20 @@ export async function attachWorktree(
 
   const existing = worktreeAt(listed.stdout, path);
   if (existing.present) {
-    return reuseWorktree(runner, request, existing.branch, opts);
+    const reused = await reuseWorktree(runner, request, existing.branch, opts);
+    if (reused.outcome !== "salvage") {
+      return reused;
+    }
+    // The checkout is unusable and the reason is a *state* rather than a failed
+    // read, so it is moved out of the way and the cold path below rebuilds from
+    // the remote. Refusing here instead — which is what this did — is what
+    // wedged the loop: the path is derived from the issue key, so the next tick
+    // finds the same checkout, refuses for the same reason, and does so for
+    // free, which means no cap fires and no cost signal moves.
+    const salvaged = await salvageWorktree(runner, request, existing.branch, reused.reason, opts);
+    if (salvaged !== null) {
+      return salvaged;
+    }
   }
 
   const added = await runner.run(
@@ -469,28 +511,44 @@ export function worktreeAt(
 }
 
 /**
- * Reuses the checkout already at the path, or refuses and touches nothing.
+ * A checkout that cannot be reused and whose state can be moved out of the way.
  *
- * The three refusals and the one repair are argued in `attachWorktree`'s
- * header. What is worth saying here is the ordering: cleanliness is checked
- * before the fast-forward, so a worktree somebody is working in is never
- * merged into, and the ahead/behind counts are read in one command so the two
- * numbers describe the same instant.
+ * Distinct from a refusal, and the line between them is the transient/
+ * deterministic split. A failed *read* — git did not answer, the counts came
+ * back unparseable — might succeed next tick, so it refuses and the loop
+ * retries. A *state* the checkout is in will be the same state next tick and
+ * for ever, so refusing is a permanent stop dressed as a retry.
+ */
+interface SalvageNeeded {
+  readonly outcome: "salvage";
+  /** Why it cannot be reused, as a clause that follows "the checkout at <path>". */
+  readonly reason: string;
+}
+
+const salvage = (reason: string): SalvageNeeded => ({ outcome: "salvage", reason });
+
+/**
+ * Reuses the checkout already at the path, or says what is wrong with it.
+ *
+ * The repairs are argued in `attachWorktree`'s header. What is worth saying
+ * here is the ordering: cleanliness is checked before the fast-forward, so a
+ * worktree somebody is working in is never merged into, and the ahead/behind
+ * counts are read in one command so the two numbers describe the same instant.
  */
 async function reuseWorktree(
   runner: CommandRunner,
   request: AttachRequest,
   branchAt: string | null,
   opts: CommandOptions,
-): Promise<WorktreeResult> {
+): Promise<WorktreeResult | SalvageNeeded> {
   const { issueKey, branch, repoPath, parentDirectory } = request;
   const path = `${parentDirectory}/${issueKey}`;
   const remote = `origin/${branch}`;
   const refuse = (reason: string): WorktreeResult => ({ outcome: "refused", issueKey, reason });
 
   if (branchAt !== branch) {
-    return refuse(
-      `a worktree is already at ${path}, on ${branchAt === null ? "a detached HEAD" : branchAt} rather than ${branch} — that is somebody else's checkout at a path we derive from the issue key, and moving it is not this command's decision`,
+    return salvage(
+      `it is on ${branchAt === null ? "a detached HEAD" : branchAt} rather than ${branch}`,
     );
   }
 
@@ -499,9 +557,14 @@ async function reuseWorktree(
     return refuse(`could not read the state of the worktree at ${path} (${why(status)})`);
   }
   if (status.stdout.trim() !== "") {
-    return refuse(
-      `the worktree at ${path} has uncommitted changes — a review round commits everything it finds, so continuing would answer the reviewer with somebody else's work in progress, under our name`,
-    );
+    // Still never committed from — a review round commits everything it finds,
+    // and answering a reviewer with somebody else's work in progress under our
+    // name is the thing this guard exists to prevent. What changed is the
+    // remedy: the changes are moved aside intact rather than left in place with
+    // the loop stopped on top of them. Note the dirt is usually *ours*, from a
+    // round that threw before its cleanup ran, and git cannot tell us whose it
+    // is — so prevention is not available and preservation is.
+    return salvage("it has uncommitted changes");
   }
 
   const counts = await runner.run(
@@ -524,20 +587,116 @@ async function reuseWorktree(
   }
 
   if (ahead > 0) {
-    return refuse(
-      `the worktree at ${path} is ${String(ahead)} commit(s) ahead of ${remote} — the reviewer has not seen them, and a round that built on them would push work nobody asked to review`,
+    return salvage(
+      `it is ${String(ahead)} commit(s) ahead of ${remote}, which the reviewer has not seen`,
     );
   }
 
   if (behind > 0) {
     const merged = await runner.run(["git", "-C", path, "merge", "--ff-only", remote], opts);
     if (failed(merged)) {
-      return refuse(`could not fast-forward ${path} to ${remote} (${why(merged)})`);
+      // A fast-forward that will not apply is a statement about the checkout,
+      // not about git being unavailable, so it salvages rather than refusing.
+      return salvage(`it cannot be fast-forwarded to ${remote} (${why(merged)})`);
     }
   }
 
   logger.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: true, behind });
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
+}
+
+/**
+ * Moves an unusable checkout aside so the canonical path can be rebuilt.
+ *
+ * Returns `null` on success, meaning *carry on* — the caller falls through to
+ * the cold path and `worktree add` runs exactly as it would on a machine that
+ * had never seen this ticket. A `WorktreeResult` is a refusal, and it is
+ * returned whenever a step fails, because a half-salvage is worse than the
+ * state it started from: a moved worktree whose branch is still checked out
+ * there, or a deleted branch whose worktree is still at the canonical path,
+ * are both things the cold path would trip over with a less legible error.
+ *
+ * ## Nothing is deleted, and that is the whole licence for this function
+ *
+ * The refusals this replaces were right about what they were protecting:
+ * uncommitted edits, and commits the remote has never seen, both of which can
+ * be somebody's unbacked-up work. Salvage keeps every byte of it. The directory
+ * is *moved*, not removed, and the log names where it went, so the recovery is
+ * a `cd` rather than a reflog expedition.
+ *
+ * ## The order is forced by git, not chosen
+ *
+ * 1. `checkout --detach` in the worktree. Git refuses to check out a branch
+ *    that is already checked out in another worktree, so the cold path's
+ *    `add -b <branch>` cannot run while this checkout holds the name. Detaching
+ *    is the one operation that frees a branch name while touching neither the
+ *    working tree nor the commit — dirty files stay dirty, and HEAD still
+ *    points at the same commit, which is what keeps the "ahead" commits
+ *    reachable after step 3. Skipped when the checkout is on some *other*
+ *    branch: that name is not in our way, and detaching it would be a change to
+ *    somebody else's checkout for no benefit.
+ * 2. `worktree move` to a timestamped sibling. Frees the canonical path.
+ * 3. `branch -D`, and only for a branch we detached in step 1. Git refuses to
+ *    delete a branch checked out elsewhere, which is why it cannot come first;
+ *    and by this point every commit on it is reachable from the salvaged
+ *    worktree's detached HEAD, so `-D` destroys no history. A branch we did
+ *    *not* detach is left alone — it may carry unpushed work of its own, and if
+ *    it then collides, the cold path's refusal says so by name.
+ *
+ * ## A failed step refuses, and that is a wedge with a bound around it
+ *
+ * If `worktree move` fails deterministically — a locked worktree, a permission
+ * problem — every tick refuses identically, which is the shape of the deadlock
+ * this function exists to remove. The difference is that it is now the *only*
+ * such path rather than the ordinary one, and the attempt counter in the pull
+ * request marker is what stops it: unlike the state refusals, a salvage failure
+ * is a failure to start that something counts. This function must not ship
+ * without that counter.
+ */
+async function salvageWorktree(
+  runner: CommandRunner,
+  request: AttachRequest,
+  branchAt: string | null,
+  reason: string,
+  opts: CommandOptions,
+): Promise<WorktreeResult | null> {
+  const { issueKey, branch, repoPath, parentDirectory } = request;
+  const path = `${parentDirectory}/${issueKey}`;
+  const refuse = (step: string, result: CommandResult): WorktreeResult => ({
+    outcome: "refused",
+    issueKey,
+    reason: `the checkout at ${path} ${reason}, and it could not be moved aside: ${step} failed (${why(result)})`,
+  });
+
+  const heldByUs = branchAt === branch;
+  if (heldByUs) {
+    const detached = await runner.run(["git", "-C", path, "checkout", "--detach"], opts);
+    if (failed(detached)) {
+      return refuse("detaching HEAD", detached);
+    }
+  }
+
+  // Colons are legal in a path and awkward in every shell, so the timestamp is
+  // flattened. It is only there to keep two salvages of the same ticket from
+  // colliding; nothing reads it back.
+  const salvagePath = `${path}-salvaged-${new Date().toISOString().replaceAll(/[:.]/gu, "-")}`;
+  const moved = await runner.run(
+    ["git", "-C", repoPath, "worktree", "move", path, salvagePath],
+    opts,
+  );
+  if (failed(moved)) {
+    return refuse("moving the worktree aside", moved);
+  }
+
+  if (heldByUs) {
+    const deleted = await runner.run(["git", "-C", repoPath, "branch", "-D", branch], opts);
+    if (failed(deleted)) {
+      return refuse("deleting the local branch", deleted);
+    }
+  }
+
+  logger.warn("solve.worktree.salvaged", { issueKey, path, salvagePath, branch, reason });
+  return null;
 }
 
 /**
