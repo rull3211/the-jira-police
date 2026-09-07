@@ -79,6 +79,19 @@ export function readScope(
 }
 
 /**
+ * The line a pass sees above the directory list, and the skill quotes verbatim.
+ *
+ * A constant rather than an inline string because it is a join between two
+ * things that cannot see each other: this module writes the block into the
+ * prompt, and `SOLVE_INSTRUCTIONS.md` §0a tells the pass what to do with it by
+ * quoting this heading to say which block it means. Reworded here and the
+ * contract points at a section of the prompt that no longer exists, silently,
+ * because one side is a string literal and the other is Markdown. A test in
+ * `skill-root.test.ts` fails instead.
+ */
+export const READ_SCOPE_HEADING = "Other checkouts on this machine, readable for context:";
+
+/**
  * The sentence handed to a pass naming what it may read.
  *
  * Says *read* twice and says why, because the failure to guard against is not a
@@ -95,7 +108,7 @@ export function describeReadScope(dirs: readonly string[]): string {
     return "";
   }
   return [
-    "Other checkouts on this machine, readable for context:",
+    READ_SCOPE_HEADING,
     ...dirs.map((dir) => `- ${dir}`),
     "",
     "Read them to check a claim about another service instead of asserting one.",

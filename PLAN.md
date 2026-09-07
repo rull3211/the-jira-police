@@ -409,6 +409,38 @@ the way `ADVANCE_KINDS` fixes it: a `Record` over the union, so the compiler own
 
 2386 tests; twenty-two mutations, all caught.
 
+**And it shipped without the half that makes any of it work, which was noticed by being asked
+rather than by a test.** The commit above touched nineteen files and no skill file. The capability
+reached the pass as a block of text assembled in `runner.ts`; the *contract* the same prompt tells
+the pass to follow **exactly** — `SKILL.md` and `SOLVE_INSTRUCTIONS.md` — still described a session
+that could see one repository. That is not a documentation lag. §8 is the list of things a pass is
+told to _state plainly_, and its first entry was _"you read a snapshot of one repository and cannot
+see its dependents"_, so a run with four checkouts on its prompt was under instruction to write
+into its own report that it could not see them. Between the two documents the pass was handed a
+contradiction, and the one it was told to obey was the wrong one.
+
+Corrected 2026-09-07, same branch: §0 lists the checkouts among what a pass is given; **§0a** is
+the new section that says what they are for, that they are somebody's dirty working copies rather
+than `origin/main`, and that a write into one withholds the whole run; recon gains a step that
+spends them on the cross-service question, and turns _"the other side is not in the list"_ into a
+`bailBlockers` entry rather than an assumption; §2b's `checked` basis widens to cover evidence read
+from another checkout, which is the strongest reply a review round can make and the one a reviewer
+of a single repository cannot; §4's `nothing outside the worktree` names the readable checkouts as
+the place that bound is now easy to cross; SKILL.md gets **readable is not writable**.
+
+The coupling this creates is the interesting part, because it is the same defect one level up: §0a
+locates its subject by quoting the prompt's heading, and the heading is a string literal in
+`read-scope.ts`. Reword it and the contract points at a block of the prompt that no longer exists,
+with nothing failing. So the heading is now the exported `READ_SCOPE_HEADING` and a test in
+`skill-root.test.ts` reads the installed contract and asserts both halves are present. Two
+mutations, both caught. 2387 tests.
+
+**Triage's fitness rubric was checked and deliberately not widened.** `agentFitness.solvable`
+requires _"the fault is localised to one repo you can name"_ and `plausible` excludes work in more
+than one repository. Both are about where the change **lands**, which this grant does not touch —
+a pass may now read five checkouts and may still only write to one. Loosening either would turn a
+reading convenience into a scope expansion, which is the confusion §5b exists to prevent.
+
 ### 6. Delivery: pull request → review → iterate → handover
 
 ```

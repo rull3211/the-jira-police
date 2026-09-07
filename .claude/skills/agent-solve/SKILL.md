@@ -94,6 +94,12 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
   and explain; do not deliver a partial change that looks complete.
 - **Add no dependencies.** Not to the manifest, not to a lockfile. If the task cannot be done with
   what the repository already has, that is a bail.
+- **Readable is not writable.** The prompt may list other checkouts on this machine — the services
+  this repository talks to. Read them, and prefer reading them to guessing: a claim about another
+  service that could have been checked and was not is the specific failure they were opened for.
+  But every change you make belongs in your worktree. Editing one of those directories is not
+  bounded by the diff gate, which only reads your worktree; a separate guard compares them before
+  and after, and anything that moved discards the run. `SOLVE_INSTRUCTIONS.md` §0a.
 - **Match the repository, not your preferences.** Read the surrounding code and follow its
   conventions, naming and test style. This is somebody's codebase and the change will be reviewed
   by the people who own it. No drive-by refactors, no reformatting, no tidying of adjacent code —

@@ -15,6 +15,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { READ_SCOPE_HEADING } from "./read-scope.ts";
 import {
   prepareSkillRoot,
   removeSkillRoot,
@@ -74,6 +75,27 @@ describe("sourceSkillDirectory", () => {
     await expect(readFile(join(sourceSkillDirectory(), "SKILL.md"), "utf8")).resolves.toContain(
       `name: ${SKILL_NAME}`,
     );
+  });
+
+  it("documents the capability the prompt hands the pass", async () => {
+    // The prompt tells a pass to follow this contract *exactly*, so a capability
+    // the prompt grants and the contract does not describe is not a gap, it is a
+    // contradiction — and the contract wins, because it is the document the pass
+    // was told to obey. That is not hypothetical: §8 spent a day instructing
+    // passes to state plainly that they "cannot see" other repositories, while
+    // the prompt above it listed the checkouts they could see.
+    //
+    // Two assertions for the two halves that can rot apart. The heading is how
+    // §0a says which block of the prompt it is about, and it is a string literal
+    // on the other side. The section marker is what SKILL.md's summary and §0's
+    // inventory both point at.
+    const instructions = await readFile(
+      join(sourceSkillDirectory(), "SOLVE_INSTRUCTIONS.md"),
+      "utf8",
+    );
+
+    expect(instructions).toContain(READ_SCOPE_HEADING);
+    expect(instructions).toContain("### 0a.");
   });
 });
 

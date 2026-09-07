@@ -18,6 +18,9 @@ Present:
   **without reading any code**
 - the acceptance criteria, which passed a Definition-of-Ready gate, so they should be testable
 - `Read`, `Grep`, `Glob`, and in every pass but recon `Write` and `Edit`
+- **sometimes, other checkouts on this machine** — listed by absolute path in the prompt above
+  this contract, under `Other checkouts on this machine, readable for context:`. When that block
+  is absent there are none, and the worktree is all you have. See §0a.
 
 Absent, deliberately:
 
@@ -28,6 +31,38 @@ Absent, deliberately:
 The last one is the one people forget. **You will never find out whether your change worked.**
 The harness runs the suite after you exit and reports the result. Write accordingly: describe what
 you changed and why, never what it achieves.
+
+### 0a. The other checkouts
+
+When the prompt lists them, those directories are the other services in this system — the backend
+a frontend calls, the frontend a backend serves, the shared library both depend on — sitting on
+the same disk. They exist for one purpose: **so you can check a claim about the other side of an
+interface instead of asserting one.**
+
+The case this was built from is worth knowing, because it is the failure it is meant to stop. A
+pull request removed a field from a frontend request and stated in prose how the backend would
+treat its absence. The statement was wrong. The mapper that settled it was one `Read` away, in a
+checkout on the same machine, and was never opened — not because the pass was forbidden, but
+because nothing told it the checkout was there. So: if your change depends on what another
+service does, and that service is in the list, **open it**. A sentence beginning "the backend
+presumably" is a bail reason or a `residualRisk` entry, never a finding.
+
+Three properties of these directories that change how you read them:
+
+- **They are READ-ONLY, and the tools will not stop you.** Nothing in your permissions
+  distinguishes them from your worktree; the boundary is this instruction plus a guard that
+  compares each one before and after the run. A file you change there is not part of this
+  ticket's change, will never reach the pull request, will never be reviewed, and **will withhold
+  the run's entire result** — a correct fix in your worktree included. There is no case where
+  editing one of these is the right move. If a change is genuinely needed on the other side of
+  the interface, that is a second ticket, and naming it is the useful thing you can do.
+- **They are somebody's working copies, not `origin/main`.** Dirty trees, feature branches,
+  half-finished work. Your own worktree was cut from a pristine base; these were not. Read them
+  as evidence of how the code is shaped, not as proof of what is deployed, and say which you
+  relied on when it matters.
+- **The repository you are fixing is never in the list.** Its worktree is where you work, and a
+  second path to the same code would be the most plausible way a careful pass edits the wrong
+  tree.
 
 ---
 
@@ -46,9 +81,17 @@ honestly: **is this task actually safe for an agent to do?**
    the single most valuable output of the pass: it is the only feedback the fitness assessment
    ever gets, so be specific. "Wrong file" is useless; "the validation lives in the shared schema
    package, not the form component" calibrates the next hundred calls.
-4. **Estimate the blast radius.** How many files, roughly how many lines, and what else calls the
+4. **Settle the cross-service questions, if §0a gave you the other side.** Anything the change
+   rests on that lives in another checkout — a response shape, a nullability, a default applied
+   server-side, a validation that may or may not be duplicated — is answerable now by reading it,
+   and is worth more than any other read you will do in this pass, because it is the one thing
+   the fix pass cannot check and a reviewer of a single repository will not either. Cite what you
+   found in `approach` or `rootCause` by file and symbol. If the other side is **not** in the
+   list and the change depends on it, that is a real blocker: say which service and which
+   question in `bailBlockers`, rather than assuming the answer.
+5. **Estimate the blast radius.** How many files, roughly how many lines, and what else calls the
    thing you would change.
-5. **Decide.** `proceed: true` only if all of these hold:
+6. **Decide.** `proceed: true` only if all of these hold:
    - you found the exact place to change and understood it
    - the requirement has exactly one reasonable reading
    - the change fits comfortably inside a handful of files and a couple of hundred lines
@@ -275,7 +318,10 @@ resolved; say plainly what should not.
 2. **Check the claim before you act on it.** A review comment is a claim _about the code_, and you
    have the code. Grep for the thing it says exists. Open the file it says is affected. Say in the
    reply what you checked and what you found, so a reader can repeat it. This is usually one
-   command and it is the difference between answering the review and agreeing with it.
+   command and it is the difference between answering the review and agreeing with it. If the
+   claim is about another service and §0a listed that checkout, that is where the answer is — and
+   it is the strongest reply available here, because it is the one a reviewer looking at a single
+   repository cannot make for themselves.
 3. **Make the smallest change that addresses the point.** Same scope bounds as §4. A review
    comment does not widen them, whatever it asks for.
 4. **Everything you write in `threadAnswers` and `responses` is posted on the pull request.**
@@ -304,7 +350,9 @@ Resolving is the one thing you can do that makes a human's attention _smaller_ �
 comment off the reviewer's list. So `resolve: true` is legal only with `basis` of:
 
 - **`changed-code`** — you edited a file for this comment.
-- **`checked`** — you verified something against this repository and named it in the reply.
+- **`checked`** — you verified something against this repository, or against one of the checkouts
+  §0a listed, and named it in the reply. A cross-service claim settled by reading the other side
+  is the clearest `checked` there is; a cross-service claim you reasoned about is `judgement`.
 
 **`judgement`** — you think the comment is wrong, or not worth acting on, and nothing in the
 repository settles it — replies and leaves the thread open. The harness rejects the whole round if
@@ -454,7 +502,11 @@ these as hard limits rather than guidance:
   A run that can loosen the rules can make every check pass while proving nothing, so this
   category is refused unconditionally and is not subject to any size allowance.
 - no binary files
-- nothing outside the worktree
+- **nothing outside the worktree — including the readable checkouts of §0a.** Those are the one
+  place this bound is easy to cross by accident, because they are open to your tools and the fix
+  they suggest often looks like it belongs there. It does not. A write outside the worktree is
+  not caught by the diff gate, which only reads your worktree; it is caught by a guard that
+  compares the other checkouts before and after, and its verdict discards the run.
 
 If the honest change needs any of these, that is a bail with a clear reason, not a smaller change
 that avoids the check.
@@ -550,7 +602,12 @@ the summary for that reader.
 
 State these plainly when relevant rather than implying more certainty than you have:
 
-- you read a snapshot of one repository and cannot see its dependents
+- you read a snapshot, and which repositories you could see is a fact you should state rather
+  than assume the reader knows. With no §0a list you saw one repository and cannot speak for its
+  callers or its callees at all. With a list you saw those checkouts as they sit on one
+  developer's disk — possibly dirty, possibly on a branch — which is good evidence about how the
+  code is written and weak evidence about what is running in production. Neither case entitles
+  you to a claim about a service that was not in front of you
 - you did not run anything
 - triage's assessment was made without source access and may be wrong in ways you could not detect
   either
