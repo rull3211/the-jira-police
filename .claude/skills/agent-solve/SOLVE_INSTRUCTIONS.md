@@ -101,7 +101,7 @@ a different change — the brief is what the bound was calculated against.
    `residualRisk`. Then do the same against the _original_ bug: a test that passes against
    unmodified code is not a regression test at all, and the harness runs that one for real.
 5. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
-   you cannot justify that way, revert.
+   you cannot justify that way, revert — and hold every comment in it against the rule below.
 6. **Write the commit subject and body.** §3.
 
 Step 4 is here because of two shipped defects, and neither was caught by anything else. On PR
@@ -115,6 +115,44 @@ Note the order of the two checks and that they are not the same check. Every ass
 went red against the original bug and only one went red against the plausible wrong fix — so
 "write it and watch it fail" would have been fully satisfied by a suite that was six-sevenths
 decoration. The harness can only run the weaker one for you. The stronger one is yours.
+
+### Comments: the default is none
+
+**Write a comment only when the code cannot carry the meaning, and expect that to be rare.** This
+is strictest in frontend code — React, TypeScript, CSS modules, Formik — where the framework
+already supplies the vocabulary and a well-named symbol says the thing the comment was going to
+say.
+
+The reason is the one this whole harness exists for. A comment is a second copy of the logic that
+no compiler, no linter and no test ever checks against the first, so every one you write is a
+thing that can quietly become false while looking like documentation. Prose that has drifted from
+behaviour is the defect class this project keeps finding in other people's code, and it is not a
+different class when a bot writes it.
+
+Do not write:
+
+- a comment restating the line under it
+- a comment narrating the change you just made — that is `commitBody` and the pull request body,
+  neither of which is in the file a year from now
+- a comment explaining a field to a reviewer who is one line away from reading the field
+- a comment justifying an obvious early return, empty string or `null`
+- a section banner over three lines of ordinary code
+
+Do write, when it applies: a **why** the code genuinely cannot express — a workaround for a named
+upstream bug, an ordering that looks arbitrary and is not, a value chosen against the obvious one
+for a reason someone measured. The test is whether you can name the reader and what they would
+get wrong without it. If you cannot name both, delete it. A doc comment stating the contract of
+something exported is a different thing and is fine where the repository already does it; match
+the neighbours.
+
+If the code needs a comment to be followable, the first move is to make the code followable —
+rename the variable, split the expression, lift the condition into a predicate. Reach for the
+comment after that has failed, not instead of it.
+
+**This rule came from a review.** PR #2663 shipped four comments explaining fields it touched. A
+human reviewer opened a thread on each of the four and marked every one 🧹; deleting them cost a
+round. Nothing in this file had asked for those comments and nothing had forbidden them, which is
+why the rule is written down rather than left to taste.
 
 ### Fix output
 
@@ -174,15 +212,18 @@ when they do, clarity wins. Fewer lines is not the goal and is frequently the en
 3. Look for the ordinary things: an intermediate variable used once _and named worse than the
    expression it holds_, a guard that cannot fire, an abstraction with one caller, a comment
    restating the line below it, a nested conditional that flattens, an option nobody passes.
-4. **Simplify in the direction of explicit.** Specifically:
+4. **Apply §2's comment rule to the diff, including to comments the fix pass wrote.** Its default
+   is none, and this pass is the last chance to hold the diff to it. A comment survives only if
+   you can name the reader and what they would get wrong without it.
+5. **Simplify in the direction of explicit.** Specifically:
    - no nested ternaries — an `if`/`else` chain or a `switch` reads better every time
    - no dense one-liners assembled from three operations
    - no cleverness that needs a moment's thought to unpack
    - a well-named intermediate variable is usually _more_ readable than inlining it, so inline
      only when the name was adding nothing
-5. Change only how the code is expressed. **If a change would alter what it does, it is out of
+6. Change only how the code is expressed. **If a change would alter what it does, it is out of
    scope for this pass however much better it looks.**
-6. You may only touch files the fix pass already changed. The harness checks this against the fix
+7. You may only touch files the fix pass already changed. The harness checks this against the fix
    report and discards the run if you went outside that set — widening the diff is the opposite of
    simplifying it.
 
@@ -193,7 +234,9 @@ Do not:
 - prioritise "fewer lines" over readability
 - remove an abstraction that was genuinely organising the code
 - combine concerns into one function because two felt like a lot
-- delete a comment explaining _why_ — only ones restating _what_
+- delete a comment carrying a _why_ that passes §2's test — a workaround for a named bug, an
+  ordering that looks arbitrary and is not. Comments restating _what_ go, and so do ones whose
+  reader you cannot name; that is not over-simplification, it is the rule
 - make the code harder to debug, step through, or extend
 
 The test to apply to every edit: **would a reviewer reading this cold understand it faster than
