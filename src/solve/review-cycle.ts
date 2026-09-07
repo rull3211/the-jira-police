@@ -290,6 +290,8 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
       return `reviewer-exhausted rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
     case "capped":
       return `capped rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
+    case "stalled":
+      return `stalled attempts=${String(outcome.attempts)}: ${outcome.reason}`;
     case "abandoned":
       return `abandoned: ${outcome.reason}`;
     case "refused":
@@ -325,6 +327,14 @@ function settleIsQuiet(outcome: AdvanceOutcome): boolean {
     case "iterated":
     case "reviewer-exhausted":
     case "capped":
+    // Loud, and it is the arm where that matters most. A stall repeats on every
+    // tick exactly as `waiting` does, so the recurrence argument above would
+    // file it as quiet — and the whole reason the outcome exists is that a
+    // wedged pull request went four days without anything saying so. It is the
+    // one settle that both recurs forever and is news, so the rule bends here
+    // rather than being restated: a bound firing is reported the first time and
+    // every time, because the alternative is the silence it was built to break.
+    case "stalled":
     case "abandoned":
     case "refused":
     case "failed":

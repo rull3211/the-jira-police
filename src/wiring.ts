@@ -813,6 +813,7 @@ export function buildAdvanceRequest(
     identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
     maxRounds: numeric(settings, "MAX_REVIEW_ITERATIONS", 0),
     maxTotalRounds: numeric(settings, "MAX_PR_ROUNDS_TOTAL", 1),
+    maxFailedStarts: numeric(settings, "MAX_FAILED_STARTS", 1),
     ghTimeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
   };
 }

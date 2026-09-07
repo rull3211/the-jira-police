@@ -253,6 +253,18 @@ export interface SurveyRequest {
    * and is expected to be relaxed, this one is a brake on the machinery.
    */
   readonly maxTotalRounds: number;
+  /**
+   * `MAX_FAILED_STARTS` — how many ticks in a row may decide on a round and
+   * never reach one before the pull request is left to a person.
+   *
+   * The third bound over one marker, and the axis the other two cannot see.
+   * `maxRounds` and `maxTotalRounds` are both counted from rounds that
+   * *reserved*, so a failure before the reservation moves neither and costs
+   * nothing — which is what let SSX-3835 fail every two minutes for four days
+   * without a cap firing, a label moving or a cent being spent. Bound attempts,
+   * not rounds.
+   */
+  readonly maxFailedStarts: number;
   readonly ghTimeoutMs: number;
 }
 
@@ -454,6 +466,27 @@ export type AdvanceOutcome =
    * cost twenty rounds.
    */
   | { readonly kind: "capped"; readonly rounds: number; readonly unresolved: string }
+  /**
+   * `MAX_FAILED_STARTS` reached: this pull request has decided on a round and
+   * failed to reach one, N ticks running, and will be left alone until a person
+   * looks. Nothing ran, nothing is undrafted, no money was spent — on this tick
+   * or on any of the ones being counted.
+   *
+   * **Not `capped` with a different number, and not `failed` with a bigger
+   * one.** `capped` says a pull request cost twenty rounds, which is a claim
+   * about spend and sends a reader looking for twenty rounds of work; this says
+   * the opposite, that it cost nothing at all and that the nothing is the
+   * problem. And `failed` is the honest report of *one* tick that could not
+   * start, which is often transient and right to retry — this is the statement
+   * that retrying has been tried and is not working, which is a different fact
+   * with a different remedy.
+   *
+   * `reason` is the last recorded failure rather than all N, because they are
+   * the same one: the states that produce this do not vary between ticks, which
+   * is precisely why counting them is worth doing. The full history is on the
+   * marker comment, where a human reading the pull request will find it.
+   */
+  | { readonly kind: "stalled"; readonly attempts: number; readonly reason: string }
   /** The resolution pass declined. A human takes the pull request from here. */
   | { readonly kind: "abandoned"; readonly reason: string }
   | {
@@ -703,6 +736,108 @@ const cursorFailed = (reason: string): AdvanceOutcome => ({
 });
 
 /**
+ * How a failed start is written into the marker's own history list.
+ *
+ * A prefix rather than a separate field, because the list is what a human reads
+ * off the pull request and interleaving the failures with the rounds is the
+ * whole point: four "failed to start" bullets under one round is a legible
+ * story, and the same four in a counter elsewhere is a number.
+ *
+ * It is also parsed back — see `lastFailedStart` — which makes it a format and
+ * not a phrasing. Changing the wording without changing both is caught.
+ */
+const FAILED_START_NOTE = "failed to start — ";
+
+/**
+ * The reason recorded by the most recent failed start, or a stand-in.
+ *
+ * Read out of the history rather than kept in a field of its own, because the
+ * alternative is a second thing to write on every failure and a second thing
+ * that can disagree with the count. The stand-in is reached only when the
+ * bullets were lost — a marker edited by hand, most likely — and it must not
+ * pretend to know: the count is still trustworthy, and it is the count the
+ * bound reads.
+ */
+function lastFailedStart(marker: Marker | null): string {
+  const notes = (marker?.rounds ?? []).filter((line) => line.startsWith(FAILED_START_NOTE));
+  const last = notes.at(-1);
+  return last === undefined
+    ? "the marker records the attempts but not their reasons"
+    : last.slice(FAILED_START_NOTE.length);
+}
+
+/**
+ * Records an attempt that decided on a round and never reached one.
+ *
+ * **The counter has to be written from the one place that has no checkout**,
+ * which is why it lives in the marker comment rather than anywhere on disk or
+ * in the worktree: the failure being counted is the failure to *get* a
+ * worktree. `gh` needs only a working directory, and the survey already proved
+ * one is available by reading the pull request through it.
+ *
+ * Returns the `failed`/`worktree` outcome unchanged. The counting is a side
+ * effect on purpose — this tick's honest report is still that the checkout
+ * could not be cut, and turning the third such report into a different kind
+ * would hide the first two.
+ *
+ * **A failed marker write does not fail the round harder.** It is logged and
+ * the original reason is returned, because the two failures have nothing to do
+ * with each other and the second is loud elsewhere: a `gh` that cannot write
+ * cannot read either, so the next survey returns `failed`/`read` and says so.
+ * What is lost is one increment, which delays the bound by a tick.
+ */
+export async function recordFailedStart(
+  commands: SolveDependencies["commands"],
+  request: SurveyRequest,
+  pending: PendingRound,
+  reason: string,
+): Promise<AdvanceOutcome> {
+  const { marker, failedStarts } = pending;
+  const attempts = failedStarts + 1;
+  const written = await reserve(commands, {
+    worktreePath: request.cwd,
+    repo: request.repo,
+    number: request.number,
+    timeoutMs: request.ghTimeoutMs,
+    marker: {
+      // Every round number is left exactly as it was. A tick that never ran a
+      // round must not consume one — that is the whole distinction this counter
+      // exists to draw, and spending a round here would let a stall exhaust
+      // `MAX_PR_ROUNDS_TOTAL` and be reported as an argument that went too long.
+      count: marker?.count ?? 0,
+      reviewerCount: marker?.reviewerCount ?? 0,
+      failedStarts: attempts,
+      // The high-water mark does not move either, so the comments this tick
+      // decided to answer are still unanswered next tick. Advancing it here
+      // would silently drop a reviewer's request on the way to a stall.
+      lastRead: marker?.lastRead ?? NEVER_READ,
+      // No attempt number on the bullet. `Failed starts:` already carries the
+      // count, and the suffix would come back out through `lastFailedStart` and
+      // into an outcome that states the same number in its own field — which
+      // reads, in the one line a daemon logs, as two counts that could disagree.
+      rounds: [...(marker?.rounds ?? []), `${FAILED_START_NOTE}${reason}`],
+    },
+    ...(pending.markerId === null ? {} : { commentId: pending.markerId }),
+  });
+  if (written.outcome === "failed") {
+    logger.warn("solve.review.failed_start_unrecorded", {
+      issueKey: request.issueKey,
+      number: request.number,
+      attempts,
+      reason: written.reason,
+    });
+  } else {
+    logger.warn("solve.review.failed_start", {
+      issueKey: request.issueKey,
+      number: request.number,
+      attempts,
+      reason,
+    });
+  }
+  return { kind: "failed", stage: "worktree", reason };
+}
+
+/**
  * What the survey found when it found work.
  *
  * Carried forward rather than re-read, and that is deliberate: the round runs
@@ -722,6 +857,14 @@ export interface PendingRound {
   readonly markerId: string | null;
   readonly round: number;
   readonly reviewerRound: number;
+  /**
+   * Consecutive attempts on this pull request that never reached a round.
+   *
+   * Carried so both endings can write it without re-reading the marker: a round
+   * that reserves clears it, and one that cannot attach adds to it. Reading it
+   * again at either point would let a tick clear a failure it never saw.
+   */
+  readonly failedStarts: number;
   /** Whether a person is in this batch. See the classification below. */
   readonly humanRound: boolean;
   /**
@@ -768,7 +911,7 @@ export async function surveyReview(
   commands: SolveDependencies["commands"],
   request: SurveyRequest,
 ): Promise<SurveyOutcome> {
-  const { repo, number, issueKey, maxRounds, maxTotalRounds } = request;
+  const { repo, number, issueKey, maxRounds, maxTotalRounds, maxFailedStarts } = request;
   const gh = { worktreePath: request.cwd, repo, number, timeoutMs: request.ghTimeoutMs };
 
   const read = await readReview(commands, gh);
@@ -823,6 +966,7 @@ export async function surveyReview(
   const marker = previous?.outcome === "parsed" ? previous.marker : null;
   const round = marker?.count ?? 0;
   const reviewerRound = marker?.reviewerCount ?? 0;
+  const failedStarts = marker?.failedStarts ?? 0;
 
   /**
    * Hands the pull request to a human, if it is not already in their hands.
@@ -915,6 +1059,26 @@ export async function surveyReview(
     );
   }
 
+  // **Last, because it bounds attempts to start a round and this is the only
+  // path that attempts one.** Every return above either needs no checkout
+  // (`ready` and `reviewer-exhausted` undraft over `gh` alone) or has already
+  // stopped for a better reason, so checking earlier would report a stall on
+  // ticks that were never going to attach — and would stop a pull request from
+  // being undrafted by the one outcome that can still do it for free.
+  if (failedStarts >= maxFailedStarts) {
+    logger.error("solve.review.stalled", {
+      issueKey,
+      number,
+      attempts: failedStarts,
+      reason: lastFailedStart(marker),
+    });
+    return settled({
+      kind: "stalled",
+      attempts: failedStarts,
+      reason: lastFailedStart(marker),
+    });
+  }
+
   return {
     outcome: "round",
     pending: {
@@ -924,6 +1088,7 @@ export async function surveyReview(
       markerId: located.outcome === "found" ? located.comment.id : null,
       round,
       reviewerRound,
+      failedStarts,
       humanRound,
       isDraft: review.isDraft,
     },
@@ -952,11 +1117,13 @@ export async function advance(
 
   const attached = await request.attach();
   if (attached.outcome === "refused") {
-    // Before the reservation, so nothing has been counted. The pull request is
-    // exactly as the survey found it and the next look will decide the same
+    // Before the reservation, so no *round* has been counted. The pull request
+    // is exactly as the survey found it and the next look will decide the same
     // thing again, which is the right behaviour for a checkout that failed for
-    // a local reason.
-    return { kind: "failed", stage: "worktree", reason: attached.reason };
+    // a local reason — right once, and a wedge if it is right forever. So the
+    // attempt is counted even though the round is not, which is the only
+    // counting that happens on this side of the reservation.
+    return await recordFailedStart(deps.commands, request, surveyed.pending, attached.reason);
   }
 
   return runRound(deps, request, attached.worktree, surveyed.pending);
@@ -1037,6 +1204,14 @@ export async function runRound(
       // numbers are written together, so a round can never advance one and lose
       // the other to a second failed write.
       reviewerCount: humanRound ? reviewerRound : reviewerRound + 1,
+      // **Reaching here is the reset.** A reservation is proof that the
+      // machinery works on this pull request right now — the checkout was cut
+      // and the marker is writable — so the failures that came before it are
+      // history rather than a trend, and carrying them forward would stall a
+      // pull request that had recovered. The bound is on *consecutive* failed
+      // starts for the same reason `MAX_REVIEW_WAITS` counts consecutive waits:
+      // a slow start and a stuck one differ only in whether one ever succeeds.
+      failedStarts: 0,
       lastRead: newestOf(comments, marker?.lastRead ?? NEVER_READ),
       rounds: [
         ...(marker?.rounds ?? []),

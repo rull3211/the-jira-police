@@ -250,6 +250,17 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
  * working, and a non-zero exit would teach a daemon's backoff to treat the
  * safety stop as an outage — retrying the one pull request that has already
  * proved it should be left alone.
+ *
+ * `stalled` exits zero by that same argument and is the hardest of the three to
+ * leave alone, because a stall is unambiguously something being broken — the
+ * checkout could not be cut, three times running — and every instinct says an
+ * exit code is where that belongs. It is not, for two reasons. The breakage was
+ * already reported: each of those attempts returned `failed`/`worktree` and set
+ * `$?` non-zero at the time, so a stall adds no information a caller has not
+ * had three times. And what a non-zero exit *does* is drive retry, which is the
+ * one behaviour a stall exists to stop. It would take the pull request the
+ * service has just decided to leave alone and make it the pull request the
+ * daemon comes back to soonest.
  */
 export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
   return outcome.kind === "failed" || outcome.kind === "refused";
@@ -361,6 +372,18 @@ export function chainDecision(outcome: AdvanceOutcome, silenceMs: number): Chain
         stop: true,
         silent: false,
         why: "MAX_PR_ROUNDS_TOTAL reached — the pull request is left in draft for a human",
+      };
+    }
+    case "stalled": {
+      // Not `silent`, even though nothing was heard from the reviewer either.
+      // `silent` drives the wall-clock quiet bound, and a stall is the opposite
+      // claim: there was work to do every time, and every time this side could
+      // not get to it. Marking it silent would file a local breakage as a slow
+      // reviewer, which is where it hid for four days.
+      return {
+        stop: true,
+        silent: false,
+        why: `${String(outcome.attempts)} attempts to start a round have failed in a row — leaving it; the last said: ${outcome.reason}`,
       };
     }
     case "abandoned": {
@@ -555,6 +578,15 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         `Nothing ran and the pull request was left as it is, still a draft if it was one. ` +
         `Something is wrong for this to have cost twenty rounds; read it before raising the cap.` +
         `\nUnresolved:\n${outcome.unresolved}`
+      );
+    }
+    case "stalled": {
+      return (
+        `STALLED — ${String(outcome.attempts)} attempts to start a round have failed in a row, so this pull request is being left alone. ` +
+        `No round was reserved by any of them, which is why no round cap noticed. ` +
+        `The failure is on this side, not the reviewer's: read the marker comment on the pull request for the list, ` +
+        `and clear whatever is holding the checkout before running this again.` +
+        `\nThe last attempt said: ${outcome.reason}`
       );
     }
     case "abandoned": {

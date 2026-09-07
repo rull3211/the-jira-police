@@ -186,6 +186,62 @@ const marker = (bodies: readonly string[]): boolean =>
 const markerWritten = (h: Harness): boolean =>
   h.calls.some((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv));
 
+/**
+ * The body of the newest marker write, whichever mutation carried it.
+ *
+ * Both, deliberately: a pull request with no marker yet is posted to and one
+ * with a marker is edited, and the attempt counter has to survive either. A
+ * helper reading only `addComment` — which is what `posts` does, for the reply
+ * channel — would report an empty string for every test whose fixture supplies
+ * a marker, and an assertion on an empty string is one that cannot fail.
+ */
+const markerBody = (h: Harness): string =>
+  h.calls
+    .filter((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv))
+    .map((argv) => (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length))
+    .at(-1) ?? "";
+
+/** The refusal `attachWorktree` gives when it cannot hand over a checkout. */
+const refusedCheckout: WorktreeResult = {
+  outcome: "refused",
+  issueKey: "SSX-3822",
+  reason: "the worktree has uncommitted changes",
+};
+
+/**
+ * A pull request whose marker records starts that never became rounds.
+ *
+ * Written out rather than built from `markerComment`, because the two lines
+ * these tests are about — the count and the note it points at — are exactly
+ * what a fifth positional parameter would bury. It also pins the note's format
+ * from outside the module that writes it: the prefix is parsed back out by
+ * `lastFailedStart`, so it is a format and not a phrasing.
+ */
+const stalling = (attempts: number, reviews?: readonly unknown[]): Rule => ({
+  match: saw("pr", "view"),
+  reply: {
+    stdout: reviewJson({
+      // Named explicitly so a test can ask for a pull request that is over the
+      // bound and has nothing to answer — the pair the ordering of the check
+      // turns on, and one the default reviewer review cannot express.
+      ...(reviews === undefined ? {} : { reviews }),
+      comments: [
+        {
+          author: { login: "rull3211" },
+          body:
+            `bot: iteration count 1\n` +
+            `Last read: 2026-09-05T08:00:00Z\n` +
+            `Reviewer rounds: 1\n` +
+            `Failed starts: ${String(attempts)}\n\n` +
+            `- failed to start — the worktree has uncommitted changes`,
+          createdAt: "2026-09-05T09:00:00Z",
+          id: "IC_marker",
+        },
+      ],
+    } as never),
+  },
+});
+
 /** A pull request that already carries a marker saying `count` rounds are gone. */
 const spent = (count: number, lastRead = "2026-09-05T08:00:00Z"): Rule => ({
   match: saw("pr", "view"),
@@ -451,6 +507,7 @@ const advanceRequest: AdvanceRequest = {
   identity: IDENTITY,
   maxRounds: 3,
   maxTotalRounds: 20,
+  maxFailedStarts: 3,
   ghTimeoutMs: 60_000,
 };
 
@@ -897,25 +954,166 @@ describe("advance", () => {
   });
 
   it("reports a refused checkout as its own stage, before anything is spent", async () => {
-    // Its own stage rather than `read` or `resolve`, because of where it now
+    // Its own stage rather than `read` or `resolve`, because of where it
     // happens: after the round has been decided and before it is reserved. No
-    // marker has moved and no pass has run, so the honest report is that the
+    // round has moved and no pass has run, so the honest report is that the
     // machine could not get to the work — not that the work failed.
     const h = harness({}, []);
-    const refusal: WorktreeResult = {
-      outcome: "refused",
-      issueKey: "SSX-1",
-      reason: "the branch is checked out elsewhere",
-    };
 
     const outcome = await advance(h.deps, {
       ...advanceRequest,
-      attach: () => Promise.resolve(refusal),
+      attach: () => Promise.resolve(refusedCheckout),
     });
 
     expect(outcome).toMatchObject({ kind: "failed", stage: "worktree" });
-    expect(markerWritten(h)).toBe(false);
     expect(h.seen).toEqual([]);
+  });
+
+  it("counts the attempt even though it counts no round", async () => {
+    // The hole every other bound shares: `MAX_REVIEW_ITERATIONS` and
+    // `MAX_PR_ROUNDS_TOTAL` are read out of the marker and the marker only
+    // moves when a round reserves, so a failure on this side of the checkout is
+    // invisible to both. SSX-3835 spent four days here. The write is the only
+    // thing that makes the failure countable, so it is asserted separately from
+    // the outcome above.
+    const h = harness({}, []);
+
+    await advance(h.deps, { ...advanceRequest, attach: () => Promise.resolve(refusedCheckout) });
+
+    expect(markerWritten(h)).toBe(true);
+    expect(markerBody(h)).toContain("Failed starts: 1");
+    expect(markerBody(h)).toContain("failed to start — the worktree has uncommitted changes");
+  });
+
+  it("does not spend a round on an attempt that never got one", async () => {
+    // The other half, and the direction that fails silently. Writing the
+    // attempt through the same marker the rounds live in makes it easy to bump
+    // the round while recording the attempt — and a stall would then exhaust
+    // `MAX_PR_ROUNDS_TOTAL` and be reported as an argument that went too long.
+    // Four rounds gone but the reviewer budget untouched, so the survey still
+    // decides on a round rather than settling as exhausted before it gets here.
+    // The reviewer's comment is dated, which matters for the second assertion:
+    // an undated one cannot move the high-water mark whatever the code does, so
+    // the fixture would pass the cursor claim by having nothing to advance to.
+    const h = harness({}, [
+      board({
+        count: 4,
+        reviewerCount: 0,
+        comments: [dated("the wrapper element looks unnecessary", "2026-09-05T10:00:00Z")],
+      }),
+    ]);
+
+    await advance(h.deps, { ...advanceRequest, attach: () => Promise.resolve(refusedCheckout) });
+
+    expect(markerBody(h)).toContain("iteration count 4");
+    // And the high-water mark stays where it was, so the comments this attempt
+    // decided to answer are still unanswered next tick rather than skipped.
+    expect(markerBody(h)).toContain("Last read: 2026-09-05T08:00:00Z");
+  });
+
+  it("keeps counting across attempts rather than restarting at one", async () => {
+    // A counter that reset on each attempt would never reach the bound, which
+    // is the failure mode that looks exactly like the bound being absent.
+    const h = harness({}, [stalling(2)]);
+
+    await advance(h.deps, { ...advanceRequest, attach: () => Promise.resolve(refusedCheckout) });
+
+    expect(markerBody(h)).toContain("Failed starts: 3");
+  });
+
+  it("still reports the checkout failure when the attempt cannot be recorded", async () => {
+    // Two unrelated failures, and flattening them would lose the one an
+    // operator can act on. A `gh` that cannot write cannot read either, so the
+    // next survey says so on its own; what must not happen is the round
+    // reporting a comment problem when the problem is the worktree.
+    const h = harness({}, [
+      { match: asked("updateIssueComment"), reply: { exitCode: 1, stderr: "gh: 404" } },
+      { match: asked("addComment"), reply: { exitCode: 1, stderr: "gh: 404" } },
+    ]);
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      attach: () => Promise.resolve(refusedCheckout),
+    });
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      stage: "worktree",
+      reason: refusedCheckout.reason,
+    });
+  });
+
+  it("stops attempting once the bound is reached, and does not attach to find out", async () => {
+    // The brake. It fires from the survey, before `attach` is called, because
+    // the whole point is to stop paying for the attempt — and on a salvaging
+    // worktree an attempt is a full checkout and install rather than the free
+    // refusal it used to be.
+    const h = harness({}, [stalling(3)]);
+    let attached = 0;
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      attach: () => {
+        attached += 1;
+        return Promise.resolve(refusedCheckout);
+      },
+    });
+
+    expect(outcome).toMatchObject({ kind: "stalled", attempts: 3 });
+    expect(attached).toBe(0);
+    expect(markerWritten(h)).toBe(false);
+  });
+
+  it("carries the last reason into the stall, so the log names the cause", async () => {
+    // A stall that says only "three attempts failed" sends an operator to read
+    // the marker to find out what for. The reason is already on the marker; the
+    // outcome carries it so the one line a daemon logs is enough.
+    const h = harness({}, [stalling(3)]);
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      attach: () => Promise.resolve(refusedCheckout),
+    });
+
+    // The kind is asserted alongside the reason, not left to the test above.
+    // A `failed`/`worktree` outcome carries the identical string, so a
+    // reason-only assertion is green with the bound unplugged entirely.
+    expect(outcome).toMatchObject({
+      kind: "stalled",
+      reason: "the worktree has uncommitted changes",
+    });
+  });
+
+  it("does not report a stall on a tick that was never going to attach", async () => {
+    // The check is last in the survey, and this is why. Every earlier return
+    // either needs no checkout or has already stopped for a better reason, so a
+    // stall reported here would be a verdict about work this tick never
+    // intended to do — and on the `ready` path it would stop a pull request
+    // being undrafted by the one outcome that can still do it, over `gh`, for
+    // nothing. Move the check to the top of the survey and this goes red.
+    // Over the bound *and* with nothing to answer: no comment and no thread, so
+    // the survey's own verdict is `ready` and it undrafts over `gh` alone.
+    const h = harness({}, [stalling(3, [{ author: { login: "copilot" }, body: "" }])]);
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      attach: () => Promise.resolve(refusedCheckout),
+    });
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(ran(h, "pr", "ready")).toBe(true);
+  });
+
+  it("lets a pull request that recovered start counting again", async () => {
+    // The bound is on consecutive attempts. A reservation proves the machinery
+    // works on this pull request right now, so the failures before it are
+    // history — and carrying them forward would stall a pull request that had
+    // already recovered.
+    const h = harness({ review: review() }, [stalling(2)]);
+
+    await advance(h.deps, advanceRequest);
+
+    expect(markerBody(h)).not.toContain("Failed starts:");
   });
 
   it("does not re-mark a pull request ready that is already out of draft", async () => {

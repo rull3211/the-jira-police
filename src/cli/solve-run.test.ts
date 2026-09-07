@@ -1,25 +1,38 @@
 /**
- * The first test in this file, and it exists because of what is *not* here.
+ * Two functions from `solve-run.ts`, and both are here because of what is *not*.
  *
- * `solve-run.ts` has no test harness — nothing in this tree constructs its
- * dependencies, which is why D4e could measure that its own call-site mutation
- * survives. That gap is recorded at the call site and is not closed here. This
- * file covers one function, for one reason: `sleep` is the only line in the
- * review chain that has to hold the process open, it did the opposite for a
- * day, and the failure is invisible to every kind of test this repository
- * currently writes.
+ * `solve-run.ts` has no general test harness — nothing in this tree constructs
+ * `runSolveRungs`'s dependencies, which is why D4e could measure that its own
+ * call-site mutation survives the whole suite. That gap is recorded at the call
+ * site and is still not closed. What is covered here is the two places where
+ * the *absence* of a test was itself the defect:
  *
- * It has to be a child process. A unit test cannot observe "the event loop
- * stayed alive" from inside a runner that is itself holding the loop open —
- * Vitest's own timers, workers and file handles keep the process up no matter
- * what `sleep` does, so an in-process assertion would pass against both the
- * broken version and the fixed one. The thing being tested is a property of a
- * program, so the test runs a program.
+ * `sleep` is the only line in the review chain that has to hold the process
+ * open, it did the opposite for a day, and the failure is invisible to every
+ * kind of test this repository usually writes. It has to be a child process. A
+ * unit test cannot observe "the event loop stayed alive" from inside a runner
+ * that is itself holding the loop open — Vitest's own timers, workers and file
+ * handles keep the process up no matter what `sleep` does, so an in-process
+ * assertion would pass against both the broken version and the fixed one. The
+ * thing being tested is a property of a program, so the test runs a program.
+ *
+ * `createReviewAct`'s refused-checkout branch is the daemon's copy of a branch
+ * `advance` also has, and the copy that ran against PR #2663 every two minutes
+ * for four days without recording a thing. `delivery.test.ts` covers the other
+ * copy thoroughly; that coverage is exactly what made this one look tested. A
+ * duplicated branch nothing constructs is where two copies drift, and the
+ * direction they drifted last time was silence.
  */
 
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
+
+import { createReviewAct } from "./solve-run.ts";
+import type { AdvanceRequest, PendingRound } from "../solve/delivery.ts";
+import type { SolveDependencies } from "../solve/orchestrator.ts";
+import type { WatchedTicket } from "../solve/review-cycle.ts";
+import type { CommandResult, CommandRunner } from "../solve/worktree.ts";
 
 const SOLVE_RUN = fileURLToPath(new URL("./solve-run.ts", import.meta.url));
 
@@ -91,5 +104,154 @@ describe("sleep", () => {
     );
 
     expect(status).toBe(0);
+  });
+});
+
+/** The refusal `attachWorktree` gives when it will not hand over a checkout. */
+const REFUSAL = "the worktree at /tmp/solve/SSX-3835 has uncommitted changes";
+
+/** The marker comment already on the pull request, so the write is an edit. */
+const MARKER_ID = "IC_marker";
+
+const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+
+const ticket: WatchedTicket = {
+  key: "SSX-3835",
+  summary: "Warranty type is not carried onto the offer",
+  url: "https://example.invalid/browse/SSX-3835",
+  labels: ["agent:reviewing"],
+  updated: "2026-09-05T09:00:00Z",
+};
+
+/**
+ * A round the survey has already decided on, one attempt in.
+ *
+ * `failedStarts: 1` rather than `0` so the assertion below reads `2` and not
+ * `1`: a call site that wrote a constant, or re-derived the count from an empty
+ * marker, would land on `1` and look right.
+ */
+const pending: PendingRound = {
+  comments: [],
+  threads: [],
+  marker: {
+    count: 1,
+    reviewerCount: 1,
+    failedStarts: 1,
+    lastRead: "2026-09-05T08:00:00Z",
+    rounds: ["failed to start — the worktree has uncommitted changes"],
+  },
+  markerId: MARKER_ID,
+  round: 2,
+  reviewerRound: 2,
+  failedStarts: 1,
+  humanRound: false,
+  isDraft: true,
+};
+
+interface ActHarness {
+  readonly deps: SolveDependencies;
+  readonly act: ReturnType<typeof createReviewAct>;
+  readonly calls: readonly (readonly string[])[];
+}
+
+/**
+ * One watched ticket whose checkout cannot be handed over.
+ *
+ * `passes` throws rather than returning a stub. The claim this test makes is
+ * partly about what did *not* happen — no pass runs on a round that never got a
+ * worktree — and a stub that quietly answers would let that half pass silently.
+ */
+function actHarness(): ActHarness {
+  const calls: (readonly string[])[] = [];
+  const commands: CommandRunner = {
+    run: (argv) => {
+      calls.push(argv);
+      return Promise.resolve({
+        ...OK,
+        stdout: JSON.stringify({
+          data: { updateIssueComment: { issueComment: { id: MARKER_ID } } },
+        }),
+      });
+    },
+  };
+  const deps: SolveDependencies = {
+    commands,
+    passes: {
+      run: () => {
+        throw new Error("a round ran without a checkout");
+      },
+    },
+  };
+
+  const request: AdvanceRequest = {
+    issueKey: ticket.key,
+    ticket: ticket.summary,
+    summary: ticket.summary,
+    repoPath: "/repos/buy-insurance-advisor-web",
+    parentDirectory: "/tmp/solve",
+    baseRef: "origin/main",
+    gitTimeoutMs: 30_000,
+    stepTimeoutMs: 300_000,
+    installTimeoutMs: 600_000,
+    attach: () =>
+      Promise.resolve({ outcome: "refused", issueKey: ticket.key, reason: REFUSAL } as const),
+    cwd: "/repos/buy-insurance-advisor-web",
+    now: Date.parse("2026-09-05T10:00:00Z"),
+    repo: "acme/advisor",
+    number: 2663,
+    identity: { name: "jira-police", email: "jira-police@example.invalid" },
+    maxRounds: 3,
+    maxTotalRounds: 20,
+    maxFailedStarts: 3,
+    ghTimeoutMs: 60_000,
+  };
+
+  const targets = new Map([[ticket.key, { request, holder: { worktree: null } }]]);
+  return { deps, act: createReviewAct(deps, targets), calls };
+}
+
+/** The body of the marker write the run made, or `""` if it made none. */
+const written = (h: ActHarness): string =>
+  h.calls
+    .filter((argv) => argv.includes("graphql"))
+    .map((argv) => (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length))
+    .at(-1) ?? "";
+
+describe("createReviewAct", () => {
+  it("reports a refused checkout without pretending a round ran", async () => {
+    const h = actHarness();
+
+    const outcome = await h.act(ticket, pending, 2663);
+
+    expect(outcome).toEqual({ kind: "failed", stage: "worktree", reason: REFUSAL });
+  });
+
+  it("counts the attempt in the marker, which is the only place a bound can see it", async () => {
+    const h = actHarness();
+
+    await h.act(ticket, pending, 2663);
+
+    // The whole of #2663's four days: this branch returned the refusal and
+    // wrote nothing, so every cap read a marker that said the pull request was
+    // idle while a tick was failing on it every two minutes. Revert the call to
+    // a plain `{ kind: "failed", stage: "worktree" }` and this is the assertion
+    // that goes red — the outcome above is identical either way, which is why
+    // it cannot be the one guarding this.
+    expect(written(h)).toContain("Failed starts: 2");
+  });
+
+  it("spends no round on an attempt that never had one", async () => {
+    const h = actHarness();
+
+    await h.act(ticket, pending, 2663);
+
+    // Both counters stand still and the cursor does not move. A failed start
+    // that consumed a round would let a wedged pull request exhaust
+    // `MAX_PR_ROUNDS_TOTAL` and be reported as an argument that went too long;
+    // one that advanced `Last read` would drop the reviewer's comments on the
+    // way there, unanswered and now invisible.
+    expect(written(h)).toContain("bot: iteration count 1");
+    expect(written(h)).toContain("Reviewer rounds: 1");
+    expect(written(h)).toContain("Last read: 2026-09-05T08:00:00Z");
   });
 });

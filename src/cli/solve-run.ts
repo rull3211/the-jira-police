@@ -45,6 +45,7 @@ import {
   type PendingRound,
   advance,
   publish,
+  recordFailedStart,
   runRound,
   surveyReview,
 } from "../solve/delivery.ts";
@@ -867,8 +868,15 @@ function createReviewLook(
  * `advance` because `advance` would survey again. A second survey between the
  * look and the round is not merely wasted: it would read a comment posted in the
  * intervening seconds and run against a batch the cycle's bound never counted.
+ *
+ * **Exported only so its refusal branch can be tested**, which is a small
+ * concession with a specific reason. This is the daemon's copy of `advance`'s
+ * tail, so it is the copy that ran on #2663 every two minutes for four days,
+ * and D4e already measured that a call-site mutation in this file survives the
+ * whole suite. A duplicated branch that nothing constructs is where the two
+ * copies drift, and the direction they drifted last time was silence.
  */
-function createReviewAct(
+export function createReviewAct(
   deps: SolveDependencies,
   targets: Map<string, ReviewTarget>,
 ): (ticket: WatchedTicket, pending: PendingRound, number: number) => Promise<AdvanceOutcome> {
@@ -892,10 +900,13 @@ function createReviewAct(
 
     const attached = await target.request.attach();
     if (attached.outcome === "refused") {
-      // Nothing has been reserved — the reservation is on the far side of the
-      // checkout — so the next tick will decide the same thing again, which is
-      // right for a checkout that failed for a local reason.
-      return { kind: "failed", stage: "worktree", reason: attached.reason };
+      // No *round* has been reserved — the reservation is on the far side of
+      // the checkout — so the next tick will decide the same thing again, which
+      // is right for a checkout that failed for a local reason and is a wedge
+      // if it stays right. The attempt is therefore counted where every round
+      // cap can see it, which is the marker comment, and this is the daemon's
+      // copy of the same call `advance` makes.
+      return await recordFailedStart(deps.commands, target.request, pending, attached.reason);
     }
 
     // The checkout's fate is decided in a `finally`, because a round has a

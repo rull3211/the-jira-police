@@ -255,6 +255,12 @@ export const SETTINGS = [
     fallback: "20",
   },
   {
+    name: "MAX_FAILED_STARTS",
+    description:
+      "How many times in a row a round may be decided on and never reached before the pull request is left alone, counted from the marker comment. It closes the hole every other round bound shares: MAX_REVIEW_ITERATIONS and MAX_PR_ROUNDS_TOTAL are both read out of the marker and the marker only moves when a round reserves, so an attempt that dies before the reservation — a checkout that cannot be cut, most of all — is invisible to both, and a pull request can be retried forever without a single cap so much as noticing. That is not hypothetical: SSX-3835 spent four days doing exactly this, once every two minutes, and the only reason it cost nothing was that the failure happened to be free. Bound attempts, not rounds. Three, because the failures worth retrying are transient and clear on the next tick, while the ones that do not clear never will however long they are given. Any successful reservation resets it to zero, so this counts a stuck pull request rather than an unlucky one.",
+    fallback: "3",
+  },
+  {
     name: "REVIEW_POLL_MS",
     description:
       "How often to look at a pull request under review. Two minutes, from measurement rather than taste: every Copilot review on PR #2658 landed two and a half to four minutes after the review was requested, so a shorter interval buys nothing and a longer one adds dead time to every round. A look that finds nothing costs two gh reads, no checkout and no model call, so this is cheap to lower — and lowering it no longer shortens the service's patience, which it used to, because that is now REVIEW_SILENCE_MS in wall-clock time rather than a count of ticks.",

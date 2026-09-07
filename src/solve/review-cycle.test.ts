@@ -483,6 +483,15 @@ describe("outcomeNote", () => {
       "capped rounds=20 unresolved=the null check",
     );
   });
+
+  it("names the cause of a stall, not just the count", () => {
+    // A line reading only "stalled attempts=3" sends whoever is reading the log
+    // to the pull request to find out what for. The reason is already carried on
+    // the outcome, and this is the one place a daemon prints it.
+    expect(
+      outcomeNote({ kind: "stalled", attempts: 3, reason: "the worktree has uncommitted changes" }),
+    ).toBe("stalled attempts=3: the worktree has uncommitted changes");
+  });
 });
 
 /**
@@ -555,6 +564,12 @@ describe("isQuietCycle", () => {
       { kind: "abandoned", reason: "the base build was already red" },
       { kind: "capped", rounds: 20, unresolved: "the ordering question" },
       { kind: "reviewer-exhausted", rounds: 3, unresolved: "the null check" },
+      // The arm the recurrence rule above would file as quiet, and the one it
+      // must not. A stall repeats every tick exactly as `waiting` does — which
+      // is how #2663 went four days without anything saying so — and it is
+      // news every one of those times, because the whole outcome exists to
+      // break that silence.
+      { kind: "stalled", attempts: 3, reason: "the worktree has uncommitted changes" },
     ] satisfies AdvanceOutcome[]) {
       expect(isQuietCycle(settle(outcome))).toBe(false);
     }

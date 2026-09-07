@@ -327,6 +327,7 @@ const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
   iterated: null,
   "reviewer-exhausted": null,
   capped: null,
+  stalled: null,
   abandoned: null,
   refused: null,
   failed: null,
@@ -360,6 +361,11 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   },
   { kind: "reviewer-exhausted", rounds: 3, unresolved: "this still allocates on every render" },
   { kind: "capped", rounds: 20, unresolved: "the reviewer and the pass disagree about the type" },
+  {
+    kind: "stalled",
+    attempts: 3,
+    reason: "the worktree at /tmp/solve/SSX-3822 has uncommitted changes",
+  },
   { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
   { kind: "failed", stage: "push", reason: "the remote rejected the push" },
@@ -439,6 +445,11 @@ describe("reviewStageAfter", () => {
       ["iterated", "review-done"],
       ["reviewer-exhausted", "review-done"],
       ["capped", null],
+      // The draft flag is untouched, exactly as `capped` leaves it. A stall
+      // never reached the checkout, so it has no opinion about whether the pull
+      // request is finished — and writing `review-done` here would tell a board
+      // the agentic cycle ended well on the one pull request it could not open.
+      ["stalled", null],
       ["abandoned", null],
       ["refused", null],
       ["failed", null],
@@ -478,6 +489,11 @@ describe("isAdvanceFailureExit", () => {
       iterated: false,
       "reviewer-exhausted": false,
       capped: false,
+      // Zero, and it is the counter-intuitive one: a stall is something being
+      // broken. The N attempts that produced it each exited non-zero already,
+      // and a non-zero code here would drive a daemon's backoff to retry the
+      // one pull request that has just been declared not worth retrying.
+      stalled: false,
       abandoned: false,
       refused: true,
       failed: true,
@@ -505,6 +521,7 @@ describe("chainDecision", () => {
       ["iterated", true],
       ["reviewer-exhausted", true],
       ["capped", true],
+      ["stalled", true],
       ["abandoned", true],
       ["refused", true],
       ["failed", true],

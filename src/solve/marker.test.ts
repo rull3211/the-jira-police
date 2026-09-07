@@ -16,6 +16,7 @@ function marker(overrides: Partial<Marker> = {}): Marker {
   return {
     count: 3,
     reviewerCount: 3,
+    failedStarts: 0,
     lastRead: "2026-09-05T10:22:31Z",
     rounds: ["narrowed the type", "answered without changing code", "split the helper"],
     ...overrides,
@@ -78,6 +79,24 @@ describe("renderMarker", () => {
     expect(lines[2]).toBe("Reviewer rounds: 2");
   });
 
+  it("appends the attempt count rather than inserting it", () => {
+    // The same compatibility guarantee as the line above, and the rule it
+    // states applies unchanged to every line added after it: the first two are
+    // positional, so anything new goes at the end of the header block. Putting
+    // this fourth is what keeps markers already sitting on open pull requests
+    // readable — and by this file's own rule, unreadable means unadvanceable.
+    const lines = renderMarker(marker({ reviewerCount: 2, failedStarts: 1 })).split("\n");
+    expect(lines[2]).toBe("Reviewer rounds: 2");
+    expect(lines[3]).toBe("Failed starts: 1");
+  });
+
+  it("says nothing at all when nothing has gone wrong", () => {
+    // Legibility rather than economy, and the round trip survives it precisely
+    // because an absent line reads as zero. A marker on a healthy pull request
+    // should not carry a line reporting that no attempt has failed.
+    expect(renderMarker(marker({ failedStarts: 0 }))).not.toContain("Failed starts");
+  });
+
   it("round-trips a marker whose rounds were not all the reviewer's", () => {
     const mixed = marker({ count: 5, reviewerCount: 2 });
     expect(parseMarker(renderMarker(mixed))).toEqual({ outcome: "parsed", marker: mixed });
@@ -97,10 +116,44 @@ describe("parseMarker", () => {
       marker: {
         count: 2,
         reviewerCount: 2,
+        failedStarts: 0,
         lastRead: "2026-09-05T10:22:31Z",
         rounds: ["narrowed the type", "split the helper"],
       },
     });
+  });
+
+  it("reads a missing attempt count as none rather than refusing", () => {
+    // The opposite reading to the one the count itself gets two tests below,
+    // and deliberately so. Both pick the recoverable mistake: an unreadable
+    // round count read as zero *removes* a brake, while an absent attempt line
+    // read as anything but zero would apply one to a pull request that has
+    // never failed to start — and every marker written before this line existed
+    // is exactly that pull request.
+    const result = parseMarker("bot: iteration count 2\nLast read: 2026-09-05T10:22:31Z");
+    expect(result.outcome === "parsed" && result.marker.failedStarts).toBe(0);
+  });
+
+  it("reads the attempt count back out of a marker that carries one", () => {
+    const result = parseMarker(
+      "bot: iteration count 2\nLast read: 2026-09-05T10:22:31Z\nFailed starts: 3",
+    );
+    expect(result.outcome === "parsed" && result.marker.failedStarts).toBe(3);
+  });
+
+  it("refuses an attempt count it cannot read, and does not read it as zero", () => {
+    // Zero is the brake released. It is the right answer for a line that is
+    // absent — that marker predates the line — and the wrong one for a line
+    // that is present and mangled, because something wrote it and the number it
+    // meant was not nothing.
+    expect(
+      unreadable("bot: iteration count 2\nLast read: 2026-09-05T10:00:00Z\nFailed starts: three"),
+    ).toContain("not a whole number");
+  });
+
+  it("keeps the attempt count across a round trip", () => {
+    const parsed = parseMarker(renderMarker(marker({ failedStarts: 2 })));
+    expect(parsed.outcome === "parsed" && parsed.marker.failedStarts).toBe(2);
   });
 
   it("keeps the instant exactly as it was written", () => {

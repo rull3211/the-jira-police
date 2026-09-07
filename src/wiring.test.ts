@@ -775,6 +775,23 @@ describe("buildPublishRequest", () => {
     expect(request.body).toContain("SSX-3822");
   });
 
+  it("carries the bound on attempts that never became rounds", () => {
+    // Three numbers now, and this is the one that counts a different thing.
+    // Both caps above are read off the marker and the marker only moves when a
+    // round reserves, so neither can see an attempt that died before the
+    // reservation — which is what wedged #2663 for four days. Unwired, the
+    // request would carry whatever `AdvanceRequest` was last given and the
+    // brake would be a setting nothing reads.
+    const request = buildAdvanceRequest(
+      settingsWith({ ...PUBLISH_ENV, MAX_FAILED_STARTS: "5" }),
+      advanceBase(),
+      attachSource,
+      1,
+    );
+
+    expect(request.maxFailedStarts).toBe(5);
+  });
+
   it("does not name a reviewer, so the delivery default applies", () => {
     // `exactOptionalPropertyTypes` makes absence real, and `requestReview` falls
     // back to @copilot. Passing an empty string here would ask for a reviewer
