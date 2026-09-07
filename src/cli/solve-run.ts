@@ -78,10 +78,10 @@ import {
   REVIEW_ROUND_USD,
   runReviewCycle,
 } from "../solve/review-cycle.ts";
+import { attachSynced } from "../solve/base-sync.ts";
 import {
   type Worktree,
   type WorktreeResult,
-  attachWorktree,
   branchNameFor,
   removeWorktree,
 } from "../solve/worktree.ts";
@@ -96,6 +96,7 @@ import {
   createReviewCycleDeps,
   createSolveDeps,
   createSolveRunDeps,
+  botIdentityOf,
   createTicketReader,
 } from "../wiring.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
@@ -598,12 +599,14 @@ export async function runAdvance(
   // source, so there is no checkout, no install, and nothing to remove.
   let worktree: Worktree | null = null;
   const attach = async (): Promise<WorktreeResult> => {
-    const attached = await attachWorktree(deps.commands, {
+    const attached = await attachSynced(deps.commands, {
       issueKey,
       branch,
       repoPath: base.repoPath,
       parentDirectory: base.parentDirectory,
       timeoutMs: base.gitTimeoutMs,
+      baseRef: base.baseRef,
+      identity: botIdentityOf(settings),
     });
     if (attached.outcome === "created") {
       worktree = attached.worktree;
@@ -834,12 +837,14 @@ function createReviewLook(
 
     const holder: { worktree: Worktree | null } = { worktree: null };
     const attach = async (): Promise<WorktreeResult> => {
-      const attached = await attachWorktree(deps.commands, {
+      const attached = await attachSynced(deps.commands, {
         issueKey: ticket.key,
         branch,
         repoPath: base.repoPath,
         parentDirectory: base.parentDirectory,
         timeoutMs: base.gitTimeoutMs,
+        baseRef: base.baseRef,
+        identity: botIdentityOf(settings),
       });
       if (attached.outcome === "created") {
         holder.worktree = attached.worktree;

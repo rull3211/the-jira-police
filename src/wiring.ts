@@ -65,7 +65,7 @@ import { createCommandRunner } from "./solve/exec.ts";
 import { repoFromLabels } from "./solve/labels.ts";
 import type { SolveDependencies, SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
 import type { AdvanceRequest, PublishRequest, WorktreeSource } from "./solve/delivery.ts";
-import type { FindPrRequest } from "./solve/pr.ts";
+import type { BotIdentity, FindPrRequest } from "./solve/pr.ts";
 import { createPassRunner } from "./solve/passes.ts";
 import { composePullRequest } from "./solve/pr-text.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
@@ -708,7 +708,7 @@ export function buildPublishRequest(
     commit: outcome.commit,
     title,
     body,
-    identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
+    identity: botIdentityOf(settings),
     timeoutMs: numeric(settings, "SOLVE_GH_TIMEOUT_MS", 1),
   };
 }
@@ -726,6 +726,20 @@ export function buildPublishRequest(
  */
 export function baseBranchOf(baseRef: string): string {
   return baseRef.startsWith("origin/") ? baseRef.slice("origin/".length) : baseRef;
+}
+
+/**
+ * The name and address this service puts on a commit.
+ *
+ * One function rather than the same object literal at each call site. It was
+ * written out twice here and needed a third and fourth for the base-sync
+ * merge, which is the point at which "two identical literals" becomes the
+ * defect this repository keeps naming: the two spellings are of *whose commit
+ * this is*, and a commit attributed to nobody in particular is not a thing to
+ * discover from a git log a week later.
+ */
+export function botIdentityOf(settings: Settings): BotIdentity {
+  return { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL };
 }
 
 /**
@@ -810,7 +824,7 @@ export function buildAdvanceRequest(
     cwd: base.repoPath,
     repo: githubRepoFor(settings, base.repoPath),
     number,
-    identity: { name: settings.SOLVE_BOT_NAME, email: settings.SOLVE_BOT_EMAIL },
+    identity: botIdentityOf(settings),
     maxRounds: numeric(settings, "MAX_REVIEW_ITERATIONS", 0),
     maxTotalRounds: numeric(settings, "MAX_PR_ROUNDS_TOTAL", 1),
     maxFailedStarts: numeric(settings, "MAX_FAILED_STARTS", 1),

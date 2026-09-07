@@ -115,8 +115,15 @@ export interface WorktreeRequest {
 /** Jira keys this service will act on. Anything else is refused unparsed. */
 const ISSUE_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/u;
 
-/** Remote-tracking refs only, and only ones made of safe characters. */
-const BASE_REF = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
+/**
+ * Remote-tracking refs only, and only ones made of safe characters.
+ *
+ * Exported so `base-sync.ts` checks the base against the same rule this module
+ * cuts worktrees from. Two spellings of "what a base ref may look like" is one
+ * spelling too many when the looser of them decides what gets merged into a
+ * branch under review.
+ */
+export const BASE_REF = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 
 /** What a finished branch name is allowed to look like, checked as a whole. */
 const BRANCH = /^[a-z]+\/[a-z][a-z0-9]*-\d{1,7}-[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -198,11 +205,20 @@ export function branchNameFor(issueKey: string, summary: string, prefix = "fix")
   return isWorkBranch(branch) ? branch : null;
 }
 
-function failed(result: CommandResult): boolean {
+/**
+ * A command that did not do what it was asked.
+ *
+ * Exported for `base-sync.ts`, which runs git in the checkout this module
+ * hands over and must read a failure the same way. `pr.ts` has a third copy,
+ * predating both; it is left alone rather than folded in here, because moving
+ * it is a change to the publish path and this is not that commit.
+ */
+export function failed(result: CommandResult): boolean {
   return result.timedOut || result.exitCode !== 0;
 }
 
-function why(result: CommandResult): string {
+/** Why a command failed, in a clause short enough to put in a refusal. */
+export function why(result: CommandResult): string {
   if (result.timedOut) {
     return "timed out";
   }
