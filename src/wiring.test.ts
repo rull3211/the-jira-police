@@ -579,6 +579,62 @@ describe("buildSolveRequest", () => {
     ).toThrow(SettingsError);
   });
 
+  it("resolves the readable checkouts under the same root the write repo comes from", () => {
+    // The motivating case is PR #2663: a frontend fix against an API endpoint
+    // that a pass could only verify by reading the service on the other side of
+    // it. The names are resolved here rather than passed through, so nothing
+    // downstream ever sees an operator-supplied string that is not a path this
+    // function built.
+    const request = buildSolveRequest(
+      settingsWith({ ...SOLVE_ENV, SOLVE_READ_DIRS: "commerce-rest-api, buy-insurance-web" }),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.readDirs).toEqual(["/repos/commerce-rest-api", "/repos/buy-insurance-web"]);
+  });
+
+  it("does not list the repository being solved among the ones to read", () => {
+    // It is already the worktree's origin and is `--add-dir`'d nowhere: naming
+    // it here would tell a write pass that the developer's own working copy —
+    // dirty, on a feature branch — is part of its context.
+    const request = buildSolveRequest(
+      settingsWith({
+        ...SOLVE_ENV,
+        SOLVE_READ_DIRS: "buy-insurance-advisor-web, commerce-rest-api",
+      }),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.readDirs).toEqual(["/repos/commerce-rest-api"]);
+  });
+
+  it("drops a name that is not a repository name rather than joining it onto the root", () => {
+    // `join("/repos", "../..")` is a directory above the root, and these paths
+    // reach `--add-dir`. A traversal in a discovery convenience is still a
+    // traversal.
+    const request = buildSolveRequest(
+      settingsWith({ ...SOLVE_ENV, SOLVE_READ_DIRS: "../.., /etc, commerce-rest-api" }),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.readDirs).toEqual(["/repos/commerce-rest-api"]);
+  });
+
+  it("reads no other checkout at all when the setting is unset", () => {
+    // The same no-fallback rule `SOLVE_REPOS` has, for the same reason: a
+    // default here would be a privilege that survives being deleted from `.env`.
+    const request = buildSolveRequest(
+      settingsWith(SOLVE_ENV),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.readDirs).toEqual([]);
+  });
+
   it("puts the worktree somewhere that is obviously not the repository", () => {
     // A failed run keeps its worktree for inspection. It should be findable and
     // it should not be sitting inside a checkout somebody works in.

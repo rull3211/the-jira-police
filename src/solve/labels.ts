@@ -257,6 +257,18 @@ const IMPL_UNCERTAIN = "impl-uncertain";
 const REPO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
+ * The same question asked of a name that came from `.env` rather than a label.
+ *
+ * Exported so `SOLVE_READ_DIRS` can reuse the pattern instead of copying it.
+ * A second regex spelled the same way is the defect this repository keeps
+ * catching in its own tests — one copy gets the `..` fix and the other does not,
+ * and the one that does not is joined to a directory.
+ */
+export function isRepoName(value: string): boolean {
+  return REPO_NAME.test(value);
+}
+
+/**
  * The repository a ticket names, or `null` if it does not name exactly one.
  *
  * Every ambiguous answer is `null`, including two `svc:` labels at once. The

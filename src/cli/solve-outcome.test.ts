@@ -40,6 +40,36 @@ const verified = {
   worktree,
 } as unknown as SolveOutcome;
 
+/**
+ * Every solve outcome kind there is, checked by the compiler.
+ *
+ * The three tables below say they cover "every outcome kind" and none of them
+ * did: each was pinned against `OUTCOMES`, and `OUTCOMES` was a list somebody
+ * wrote once. `escaped` was added to `SolveOutcome`, wired through the
+ * orchestrator, the ticket comment and the exit code, and all three tables
+ * stayed green while testing none of it — including the one whose comment
+ * promises that "a new SolveOutcome member reaches this test before it reaches
+ * production". It did not.
+ *
+ * This is the fourth instance of the same defect after `client.test.ts`,
+ * `solve-args.test.ts` and this file's own review-round tables, so it gets the
+ * guard `ADVANCE_KINDS` already gives the other union in this file rather than
+ * a fourth correction: a `Record` over the union, so adding a kind without
+ * adding it here is a type error, and the fixture is compared to these keys at
+ * runtime.
+ */
+const SOLVE_KINDS: Record<SolveOutcome["kind"], null> = {
+  "no-worktree": null,
+  bailed: null,
+  abandoned: null,
+  refused: null,
+  escaped: null,
+  failed: null,
+  crashed: null,
+  "unusable-base": null,
+  verified: null,
+};
+
 /** One of every kind, so the exhaustiveness claims below are about all of them. */
 const OUTCOMES: readonly SolveOutcome[] = [
   { kind: "no-worktree", reason: "the summary yields no usable fix/ branch name" },
@@ -73,6 +103,12 @@ const OUTCOMES: readonly SolveOutcome[] = [
     worktree,
   },
   {
+    kind: "escaped",
+    paths: ["/git/commerce-rest-api"],
+    would: "verified",
+    worktree,
+  },
+  {
     kind: "failed",
     reason: "2 tests failed",
     verification: {} as never,
@@ -100,6 +136,17 @@ const OUTCOMES: readonly SolveOutcome[] = [
 function exitKey(outcome: SolveOutcome): string {
   return outcome.kind === "abandoned" ? `abandoned:${outcome.cause}` : outcome.kind;
 }
+
+describe("the solve-outcome fixture", () => {
+  it("has an example of every kind the type admits", () => {
+    // The guard the three tables below were each missing, and the only one of
+    // the four that cannot be satisfied by editing a literal: the keys come
+    // from the compiler. Every "covers every outcome kind" claim in this file
+    // is downstream of this one assertion.
+    const present = new Set(OUTCOMES.map((outcome) => outcome.kind));
+    expect([...present].toSorted()).toEqual(Object.keys(SOLVE_KINDS).toSorted());
+  });
+});
 
 describe("isFailureExit", () => {
   it("does not fail the shell on a bail", () => {
@@ -136,6 +183,7 @@ describe("isFailureExit", () => {
       "abandoned:judgement": false,
       "abandoned:environment": true,
       refused: true,
+      escaped: true,
       failed: true,
       crashed: true,
       "unusable-base": true,
@@ -807,6 +855,7 @@ describe("terminalLabelAfter", () => {
     "abandoned:judgement": "failed",
     "abandoned:environment": null,
     refused: null,
+    escaped: null,
     failed: null,
     crashed: null,
     "unusable-base": null,
@@ -869,6 +918,7 @@ describe("reportsToTicket", () => {
     "abandoned:judgement": true,
     "abandoned:environment": true,
     refused: true,
+    escaped: true,
     failed: true,
     crashed: true,
     "unusable-base": true,

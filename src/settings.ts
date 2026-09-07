@@ -160,6 +160,17 @@ export const SETTINGS = [
     // makes the answer to "which code can this touch" readable.
   },
   {
+    name: "SOLVE_READ_DIRS",
+    description:
+      "Comma-separated names of OTHER checkouts under SOLVE_REPO_ROOT that a pass may read for context — the backend a frontend calls, the shared library both depend on. Names, not paths, so this cannot point outside SOLVE_REPO_ROOT. It grants no write: the only repository a run may change is still the one its svc: label named, and SOLVE_REPOS still decides that. It exists because a pass reasoning about how another service behaves will produce a confident answer with or without the code — PR #2663 asserted what a backend mapper did rather than reading it — and a wrong answer about somebody else's service is the expensive kind. Blank means no checkout but the one being solved.",
+    // No fallback, for the same reason as SOLVE_REPOS and SOLVE_REPO_ROOT.
+    // Unlike those two this grants only reads, so the argument is weaker — but
+    // it is the same argument, and the checkouts here are a developer's own
+    // working copies rather than fresh clones. A default would name directories
+    // nobody typed and, since `readSettings` cannot tell blank from unset,
+    // emptying it would not take them away again.
+  },
+  {
     name: "SOLVE_BASE_REF",
     description:
       "The ref a solve branches from and targets. origin/main by default, and fetched immediately before branching so a solve never starts from a stale local ref. Configurable because not every repository calls it main; changing it does not widen anything, since the branch created from it is still a fresh implementation branch and the push guard still refuses protected names.",

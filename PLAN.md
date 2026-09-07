@@ -339,6 +339,76 @@ environment. A test whose vacuity is environment-dependent — one reading `Zone
 say — gets opposite verdicts on a UTC runner and a developer's laptop. A probe that inherits the
 operator's environment cannot answer a question about CI's.
 
+#### 5b. Cross-repo reads, landed 2026-09-07 on `feat/cross-repo-reads` — and the confinement nobody had
+
+Asked for as a convenience: _let the passes read the other checkouts in the local git folder for
+discovery, and keep the writes on the solve repo._ The motivating case is PR #2663 — a frontend fix
+against an API endpoint that can only be verified by reading the service on the other side of it.
+
+**Three probes were run with the exact flag shape `buildSolveArgs` produces, and they invert the
+request.**
+
+| probe                                                       | result             |
+| ----------------------------------------------------------- | ------------------ |
+| read an absolute path in a sibling checkout, cwd in another | **read succeeded** |
+| `Write` to a path outside the worktree                      | **wrote**          |
+| the same, without `--permission-mode dontAsk`               | **wrote anyway**   |
+
+So the worktree is not a boundary in either direction, `--add-dir` is not what makes one, and the
+permission mode is not either. **The read access being asked for already existed; the write
+confinement being assumed did not.** This is the `--allowedTools` finding of 2026-09-04 in the
+other direction, and in the same place: three comments in `runner.ts` asserted a boundary the
+harness does not have. Rewritten in the same commit, header table included.
+
+**The prompt and the flag go to different sets of passes, deliberately, and both directions are
+mutation-tested.** `--add-dir` widens the workspace for _every_ tool a pass holds, so it goes to
+the read-only recon pass alone — on a write pass it would authorise. The prompt block naming the
+directories goes to **every** pass including the write ones, because there it forbids: it says the
+paths are read-only and that a fix written into one will be reported as an escape. A write pass
+never told the other checkouts exist is the PR #2663 failure, and that happened on a write pass.
+
+`SOLVE_READ_DIRS` is a `.env` allowlist of names resolved under `SOLVE_REPO_ROOT`, with the same
+no-fallback rule as `SOLVE_REPOS` and for the same reason. Names are validated with the label
+regex rather than joined blind: `join(root, "../..")` is a directory above the root, and these
+paths reach `--add-dir`.
+
+**The guard is detection, not prevention, and the distinction is not a compromise to be tidied
+later.** Prevention needs a `PreToolUse` hook — the one mechanism observed to actually gate a solve
+subprocess, when a local hook denied the SSX-3832 write pass its `Write` tool. That is a change to
+files this repository does not own. What ships instead is `escape.ts`: `git status --porcelain
+-uall` over the repo, the vault and the read dirs, before the run and again after it, with any
+difference withholding the outcome.
+
+- **The diff gate cannot see this and never could.** It parses `git diff` _inside the worktree_, so
+  a write to a sibling checkout is not refused by it — it is invisible to it.
+- **A read that fails counts as changed.** The two ways `git status` fails are the two an escape
+  would cause, and reading either as "no change" is the guard reporting success because it went
+  blind.
+- **The vault joins the watched set rather than leaving the `--add-dir` list.** It is passed to
+  every pass including the write ones and passes legitimately need its conventions, so the
+  exposure is closed by watching it, not by withdrawing it.
+- **Known gap: `git status` does not report ignored files.** Listing them would mean walking
+  `node_modules` in every checkout on every pass.
+- **The solve path gets its own `escaped` kind; the review path gets a `write-escape` refusal.**
+  Not an inconsistency: `SolveOutcome.refused` requires a dev lens and an escape can override
+  outcomes that carry none, so inventing one would put a fabricated row in the record that
+  calibrates the fitness call. A review round has no lens and no calibration row.
+- **`escaped` releases the ticket and reports it.** An escape says nothing about whether the ticket
+  is solvable, so labelling it `agent:failed` would convert a transient into something only a human
+  can clear — the same split `terminalLabelAfter` and `reportsToTicket` already draw.
+- **The headline names the innocent explanation out loud.** The guard cannot distinguish a stray
+  write from the operator saving a file in a sibling checkout while the solve ran, and it is not
+  allowed to imply it can.
+
+**A fourth instance of the literal-list defect, and this time in the test written to prevent the
+third.** `escaped` was added to `SolveOutcome`, wired through the orchestrator, the ticket comment
+and the exit code, and all three "covers every outcome kind" tables in `solve-outcome.test.ts`
+stayed green — including the one whose comment promises that "a new SolveOutcome member reaches
+this test before it reaches production". Each was pinned against a hand-written fixture list. Fixed
+the way `ADVANCE_KINDS` fixes it: a `Record` over the union, so the compiler owns the key set.
+
+2386 tests; twenty-two mutations, all caught.
+
 ### 6. Delivery: pull request → review → iterate → handover
 
 ```
@@ -1658,7 +1728,9 @@ compatibility case that only exists once.
 
 ## Out of scope
 
-Auto-merge. Multi-repo. Cross-repo changes. Reopening `agent:done` tickets. Bot-noise tickets
+Auto-merge. Multi-repo. Cross-repo _changes_ — reads landed 2026-09-07 (§5b) and the two are not
+the same grant: a pass may read every checkout on the machine and may write to one worktree, which
+is now watched rather than merely asserted. Reopening `agent:done` tickets. Bot-noise tickets
 (CVE/GHSA/SNYK/dependency bumps) — currently discarded at intake, and the most agent-fixable class
 there is, so worth revisiting once the pilot has a track record.
 

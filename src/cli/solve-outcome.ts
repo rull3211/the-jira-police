@@ -55,6 +55,12 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
     outcome.kind === "no-worktree" ||
     outcome.kind === "crashed" ||
     outcome.kind === "unusable-base" ||
+    // No question was answered and the run was paid for, which is the rule
+    // above applied unchanged. It is also the outcome an operator most needs
+    // `$?` to be non-zero for: the run looks otherwise successful, and under a
+    // daemon a zero here would let a pipeline move on from a solve that wrote
+    // into a repository nobody is watching.
+    outcome.kind === "escaped" ||
     (outcome.kind === "abandoned" && outcome.cause === "environment")
   );
 }
@@ -102,6 +108,11 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
  * accepted — neither a verdict about the ticket nor a fault of the machine — and
  * a re-run may well succeed, so they stay retryable. The cost of that is honest
  * and worth stating: auto mode can still spend repeatedly on one of them.
+ *
+ * `escaped` releases too, and for the stronger version of the same reason: its
+ * commonest cause is expected to be the operator editing their own checkout
+ * while a solve ran, which is not a fact about the ticket at all. It joins the
+ * list of outcomes waiting on E's attempt count rather than getting a label.
  * Bounding *that* wants a per-ticket attempt count rather than a terminal label,
  * and it belongs with E, where the thing doing the retrying first exists.
  */
@@ -208,6 +219,22 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
     }
     case "refused": {
       return `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nWorktree kept at ${outcome.worktree.path}`;
+    }
+    case "escaped": {
+      // Prints `git status` for the operator rather than the paths alone. The
+      // first question anyone asks here is "was that me?", and this run cannot
+      // answer it — but the command that can is short, and an operator who has
+      // to compose it themselves will instead assume the machine is wrong.
+      return [
+        `ESCAPED — something outside this run's working copy changed while it ran, so nothing is being offered${
+          outcome.would === "verified"
+            ? " (the change itself had passed every check)"
+            : ` (the run was otherwise ${outcome.would})`
+        }.`,
+        ...outcome.paths.map((path) => `  ${path} — inspect with: git -C ${path} status`),
+        `If that was your own editing, re-run; this guard cannot tell your writes from a pass's.`,
+        `Worktree kept at ${outcome.worktree.path}`,
+      ].join("\n");
     }
     case "failed": {
       return `FAILED — ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;

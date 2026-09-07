@@ -184,9 +184,17 @@ function lensOf(outcome: SolveOutcome): { accurate: boolean; correction: string 
   // is decided before recon runs, so there is no lens to be accurate or
   // inaccurate about. Scoring the fitness call on a run that never read the
   // code would credit or blame triage for a broken build.
+  //
+  // `escaped` joins them on the second reason. It overrides whatever the run
+  // concluded, so the lens it would carry belongs to a verdict this outcome has
+  // just withdrawn — and the run's honest state is that nobody knows whether
+  // the change was any good, which includes not knowing whether triage's guess
+  // about it was right. `would` keeps the withdrawn verdict legible without
+  // letting it into the calibration record.
   return outcome.kind === "no-worktree" ||
     outcome.kind === "crashed" ||
-    outcome.kind === "unusable-base"
+    outcome.kind === "unusable-base" ||
+    outcome.kind === "escaped"
     ? null
     : (outcome.devLens ?? null);
 }
@@ -254,6 +262,23 @@ function headline(outcome: SolveOutcome): string {
       return `An agent made a change, but the harness would not judge it (${outcome.stage}), so nothing here says whether the change was any good: ${outcome.reasons
         .map((reason) => safeText(reason))
         .join("; ")}`;
+    }
+    case "escaped": {
+      // Two things this sentence has to do, and the second is why it is long.
+      // It has to withhold the run — nothing here becomes a pull request — and
+      // it has to name the other explanation out loud, because the guard cannot
+      // distinguish a stray write from the operator saving a file in one of
+      // these checkouts while the solve ran. A reader who is not told that will
+      // read a machine accusing them of nothing in particular.
+      return `Files changed outside this run's own working copy while it was in flight, so nothing it produced is being offered${
+        outcome.would === "verified"
+          ? " — including a change that had otherwise passed every check"
+          : ""
+      }. Checkouts affected: ${outcome.paths
+        .map((path) => safeText(path))
+        .join(
+          ", ",
+        )}. If you were editing those yourself while this ran, that is the likely cause and the run can simply be repeated.`;
     }
     case "failed": {
       return `An agent made a change and this repository's own checks rejected it: ${safeText(

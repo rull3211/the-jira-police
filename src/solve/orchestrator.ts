@@ -59,6 +59,7 @@ import {
   type BaseSyncRequest,
 } from "./base-sync.ts";
 import { checkDiff, parseNumstat } from "./diff-gate.ts";
+import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
 import type { BotIdentity } from "./pr.ts";
 import {
   type AbandonCause,
@@ -130,6 +131,16 @@ export interface SolveRequest {
   /** Branch prefix — `fix` for a bug, `feat` for a task. Never a protected name. */
   readonly branchPrefix?: string;
   readonly vaultPath?: string;
+  /**
+   * Other checkouts a pass may read, absolute paths, from `SOLVE_READ_DIRS`.
+   *
+   * Named to every pass in its prompt and `--add-dir`'d on the read-only one —
+   * `read-scope.ts` and `runner.ts` explain the asymmetry. Also the set the
+   * write-escape guard watches, which is why one value serves both: a directory
+   * a pass was told about and the guard was not is precisely the case the guard
+   * exists for.
+   */
+  readonly readDirs?: readonly string[];
   /**
    * Whether to run the fail-first experiment, `FAIL_FIRST_CHECK`.
    *
@@ -237,6 +248,37 @@ export type SolveOutcome =
       readonly stage: "diff-gate" | "verification";
       readonly reasons: readonly string[];
       readonly devLens: DevLensFeedback;
+      readonly worktree: Worktree;
+    }
+  /**
+   * Something outside the worktree changed while this run was in flight.
+   *
+   * Its own kind rather than a third `refused` stage, and the reason is the one
+   * `crashed` already gives: every exhaustive switch should have to be edited
+   * to admit it. A reader who takes this for a diff-gate verdict has concluded
+   * "the change was too big" from a fact about a *different repository*.
+   *
+   * **It overrides whatever the pipeline concluded, including `verified`.** A
+   * run that produced a green diff and also wrote into somebody else's checkout
+   * has not earned a pull request, because the pull request would contain the
+   * first thing and not the second, and `diff-gate.ts` reads only the worktree
+   * so nothing else in this service can see the difference.
+   *
+   * **`paths` is evidence, not an accusation, and the renderer must say so.**
+   * The guard compares `git status` before and after; it cannot tell a pass's
+   * write from the operator opening a file in their editor during the thirty
+   * minutes a solve takes. On a hand-driven run a person can answer that in a
+   * second. Under E, where nobody is watching and the operator is working in
+   * these very checkouts, false positives are expected and are one more input
+   * to the transient-versus-deterministic split E already owes.
+   *
+   * `would` carries what the run had concluded, because a reader's first
+   * question is whether the fix itself was any good.
+   */
+  | {
+      readonly kind: "escaped";
+      readonly paths: readonly string[];
+      readonly would: SolveOutcome["kind"];
       readonly worktree: Worktree;
     }
   /**
@@ -487,13 +529,67 @@ export async function solveTicket(
     // than not starting one.
     return { kind: "no-worktree", reason: staged.reason };
   }
+  const watched = watchedDirs(request);
+  const before = await snapshotRepos(deps.commands, watched, request.gitTimeoutMs);
   try {
-    return await runPipeline(deps, request, staged.path);
+    const outcome = await runPipeline(deps, request, staged.path);
+    const after = await snapshotRepos(deps.commands, watched, request.gitTimeoutMs);
+    return escapeVerdict(request.issueKey, outcome, escapedRepos(before, after));
   } finally {
     // Always, including on the paths that keep the worktree. A failed run's
     // worktree is evidence; a copy of a skill that is still in git is not.
     await removeSkillRoot(staged.path);
   }
+}
+
+/**
+ * The checkouts a run must leave exactly as it found them.
+ *
+ * The repository first, and it is the one that matters most: the worktree is
+ * cut from it, so it is the checkout a confused pass is likeliest to reach for,
+ * and on this operator's machine it is somebody's working copy with uncommitted
+ * work in it. The vault next, which is `--add-dir`'d on every pass including
+ * the write ones — an exposure that shipped unnoticed and is closed here by
+ * watching it rather than by withdrawing it, since the passes legitimately read
+ * the conventions it holds. Then the read-only checkouts, which is the whole
+ * reason this guard was written in the same change that opened them.
+ *
+ * Not the worktree itself: writing there is the job. Not the skill root: it is
+ * a staged copy that is deleted either way, and `skill-root.ts` owns it.
+ *
+ * `git worktree add`, `git fetch` and `git branch -d` all write inside `.git`
+ * and none of them appear in `git status`, so the harness's own git traffic
+ * against the repository does not trip this.
+ */
+function watchedDirs(request: SolveRequest): readonly string[] {
+  const candidates = [request.repoPath, request.vaultPath ?? "", ...(request.readDirs ?? [])];
+  return [...new Set(candidates.filter((path) => path !== ""))];
+}
+
+/**
+ * Folds an escape into the run's verdict, or leaves the verdict alone.
+ *
+ * Two things it deliberately does not do. It does not override `no-worktree`:
+ * that outcome means `createWorktree` refused, so no pass ever started and
+ * anything that moved was moved by somebody else — reporting it as this run's
+ * escape would be a false accusation with no candidate. And it does not swallow
+ * the finding in either case; the log line goes out before the branch, because
+ * a guard whose only quiet path is also its silent path is the failure this
+ * repository keeps finding in its own code.
+ */
+function escapeVerdict(
+  issueKey: string,
+  outcome: SolveOutcome,
+  paths: readonly string[],
+): SolveOutcome {
+  if (paths.length === 0) {
+    return outcome;
+  }
+  logger.info("solve.escape", { issueKey, paths, would: outcome.kind });
+  if (outcome.kind === "no-worktree") {
+    return outcome;
+  }
+  return { kind: "escaped", paths, would: outcome.kind, worktree: outcome.worktree };
 }
 
 /** One run, plus whatever a second one produced. */
@@ -642,6 +738,7 @@ async function runPipeline(
     ticket: request.ticket,
     skillRootPath,
     ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
+    ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
   };
 
   // ---- recon -------------------------------------------------------------
@@ -994,6 +1091,7 @@ async function runConflictRound(
       conflict: renderConflict(request.baseRef, behind, files),
       skillRootPath,
       ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
+      ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
     },
     (output) => parseMerge(output, issueKey),
   );
@@ -1081,9 +1179,20 @@ async function runConflictRound(
 export type ReviewRoundOutcome =
   | { readonly kind: "no-change"; readonly report: ReviewReport }
   | { readonly kind: "abandoned"; readonly reason: string }
+  /**
+   * `write-escape` is the same guard `solveTicket` runs, reported differently.
+   *
+   * A solve gets its own `escaped` kind because the outcomes an escape can
+   * override there — `crashed`, `unusable-base` — carry no dev lens, and
+   * `SolveOutcome.refused` requires one; inventing a lens would put a
+   * fabricated row in the record that calibrates the fitness call. A review
+   * round has no lens and no calibration row, so the refusal it already has is
+   * the honest shape: the harness will not offer this work, and the paths that
+   * decided that are in `reasons` where the renderer already prints them.
+   */
   | {
       readonly kind: "refused";
-      readonly stage: "diff-gate" | "verification";
+      readonly stage: "diff-gate" | "verification" | "write-escape";
       readonly reasons: readonly string[];
     }
   | { readonly kind: "failed"; readonly reason: string; readonly verification: VerificationResult }
@@ -1122,8 +1231,26 @@ export async function resolveReview(
   if (staged.outcome === "refused") {
     return { kind: "abandoned", reason: staged.reason };
   }
+  // The review pass is a write pass, so it gets the same guard as the three
+  // above it. It needs it more, if anything: a solve that escapes has produced
+  // nothing anyone has seen, while a review round is answering a human on a
+  // pull request that is already open, and pushing there is one step closer to
+  // a merge than anything `solveTicket` can do.
+  const watched = watchedDirs(request);
+  const before = await snapshotRepos(deps.commands, watched, request.gitTimeoutMs);
   try {
-    return await runReviewRound(deps, request, staged.path);
+    const outcome = await runReviewRound(deps, request, staged.path);
+    const after = await snapshotRepos(deps.commands, watched, request.gitTimeoutMs);
+    const escaped = escapedRepos(before, after);
+    if (escaped.length === 0) {
+      return outcome;
+    }
+    logger.info("solve.escape", {
+      issueKey: request.issueKey,
+      paths: escaped,
+      would: outcome.kind,
+    });
+    return { kind: "refused", stage: "write-escape", reasons: [describeEscape(escaped)] };
   } finally {
     await removeSkillRoot(staged.path);
   }
@@ -1147,6 +1274,7 @@ async function runReviewRound(
       reviewFeedback: request.reviewFeedback,
       skillRootPath,
       ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
+      ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
     },
     (output) => parseReview(output, issueKey),
   );

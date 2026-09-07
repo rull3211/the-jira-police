@@ -521,9 +521,14 @@ export type AdvanceOutcome =
     }
   /** The resolution pass declined. A human takes the pull request from here. */
   | { readonly kind: "abandoned"; readonly reason: string }
+  /**
+   * `write-escape` says a checkout outside the worktree changed while the round
+   * ran, so nothing it produced is pushed. See `ReviewRoundOutcome` for why an
+   * escape is a refusal here and a kind of its own on the solve path.
+   */
   | {
       readonly kind: "refused";
-      readonly stage: "diff-gate" | "verification";
+      readonly stage: "diff-gate" | "verification" | "write-escape";
       readonly reasons: readonly string[];
     }
   | {

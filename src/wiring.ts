@@ -67,6 +67,7 @@ import type { SolveDependencies, SolveOutcome, SolveRequest } from "./solve/orch
 import type { AdvanceRequest, PublishRequest, WorktreeSource } from "./solve/delivery.ts";
 import type { BotIdentity, FindPrRequest } from "./solve/pr.ts";
 import { createPassRunner } from "./solve/passes.ts";
+import { readScope } from "./solve/read-scope.ts";
 import { composePullRequest } from "./solve/pr-text.ts";
 import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
 import type { ReviewCycleDeps, WatchedTicket } from "./solve/review-cycle.ts";
@@ -653,11 +654,24 @@ export function buildSolveRequest(
     );
   }
 
+  // The other checkouts on this machine, and the reason this is not simply
+  // `SOLVE_READ_DIRS` handed through: a name that is not a repository name is
+  // dropped rather than joined onto the root, because `join` would happily turn
+  // `..` into a path above it, and the one flag these directories reach is
+  // `--add-dir`. Rejections are logged rather than thrown — a typo in a
+  // discovery convenience must not stop a ticket being solved, but it must not
+  // be silent either, or the operator concludes the allowlist is being honoured.
+  const scope = readScope(settings.SOLVE_REPO_ROOT, list(settings, "SOLVE_READ_DIRS"), repo);
+  if (scope.rejected.length > 0) {
+    logger.warn("solve.read_dirs_rejected", { issueKey: detail.key, names: scope.rejected });
+  }
+
   return {
     issueKey: detail.key,
     ticket,
     summary: detail.summary,
     repoPath: join(settings.SOLVE_REPO_ROOT, repo),
+    readDirs: scope.dirs,
     parentDirectory: worktreeRoot(settings),
     baseRef: settings.SOLVE_BASE_REF,
     vaultPath: settings.VAULT_PATH,

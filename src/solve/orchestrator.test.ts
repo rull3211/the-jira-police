@@ -1025,6 +1025,148 @@ describe("solveTicket, and the fail-first experiment", () => {
   });
 });
 
+/**
+ * The escape guard's own read, and nothing else in the run.
+ *
+ * Keyed on `-uall` rather than on `status`, because `worktree.ts` asks a
+ * different question with the first two words of the same command and a test
+ * that counted both would pass while measuring the wrong one.
+ */
+const snapshots = (calls: readonly (readonly string[])[]) =>
+  calls.filter((argv) => argv.includes("status") && argv.includes("-uall"));
+
+/** Which checkout each snapshot was of, in the order they were taken. */
+const snapshotted = (calls: readonly (readonly string[])[]) =>
+  snapshots(calls).map((argv) => argv[argv.indexOf("-C") + 1] ?? "");
+
+const READ_DIRS = ["/git/commerce-rest-api", "/git/insurance-knowledge-vault"];
+
+/** A request that watches all three kinds of directory the guard knows about. */
+const watchedRequest: SolveRequest = {
+  ...request,
+  vaultPath: "/git/insurance-knowledge-vault",
+  readDirs: READ_DIRS,
+};
+
+describe("solveTicket, and the write-escape guard", () => {
+  it("reads every watched checkout before the run and again after it", async () => {
+    // Two snapshots per directory, and the vault named twice in the request
+    // yields one entry: it is `--add-dir`'d on every pass including the write
+    // ones, so it is the checkout most likely to be written to and the least
+    // likely to be listed in SOLVE_READ_DIRS as well. Counting it twice would
+    // double every comparison against it for no gain.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, watchedRequest);
+
+    const dirs = [request.repoPath, "/git/insurance-knowledge-vault", "/git/commerce-rest-api"];
+    expect(snapshotted(h.calls)).toEqual([...dirs, ...dirs]);
+  });
+
+  it("does not watch the worktree it is there to bound", async () => {
+    // The worktree is where the run is supposed to write. Snapshotting it would
+    // report every solve as an escape, which is the failure mode that gets a
+    // guard switched off rather than fixed.
+    const { h } = harness(FULL);
+
+    await solveTicket(h.deps, watchedRequest);
+
+    expect(snapshotted(h.calls)).not.toContain(worktree.path);
+  });
+
+  it("withholds a verified change when a watched checkout moved under it", async () => {
+    // The one that matters. `diff-gate` reads `git diff` inside the worktree,
+    // so a write to a sibling checkout is not refused by it — it is invisible
+    // to it. Without this the run publishes.
+    const { h } = harness(FULL, [
+      {
+        match: afterBase((argv) => argv.includes("-uall") && argv.includes(READ_DIRS[0] ?? "")),
+        reply: { stdout: " M src/main/java/Cart.java\n" },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, watchedRequest);
+
+    expect(outcome).toMatchObject({
+      kind: "escaped",
+      paths: [READ_DIRS[0]],
+      would: "verified",
+    });
+  });
+
+  it("keeps the withheld verdict rather than replacing it with silence", async () => {
+    // `would` is what stops the escape from erasing the run. A refusal that
+    // arrives as "something moved" and nothing else sends an operator looking
+    // for a fault in the harness instead of in their own editor.
+    const { h } = harness(
+      {
+        recon: recon({
+          proceed: false,
+          confidence: "low",
+          bailReason: "the component was deleted three commits ago",
+          bailBlockers: ["`Widget.tsx` was removed in `a1b2c3d`; nothing imports it."],
+          bailRemedy: "Confirm whether the behaviour moved, and say where it went.",
+          plannedFiles: [],
+          estimatedLines: 0,
+          approach: "",
+          testPlan: "",
+        }),
+      },
+      [
+        {
+          match: afterBase((argv) => argv.includes("-uall") && argv.includes(READ_DIRS[0] ?? "")),
+          reply: { stdout: " M src/main/java/Cart.java\n" },
+        },
+      ],
+    );
+
+    const outcome = await solveTicket(h.deps, watchedRequest);
+
+    expect(outcome).toMatchObject({ kind: "escaped", would: "bailed" });
+  });
+
+  it("does not override an outcome that has no worktree to report", async () => {
+    // `escaped` carries a worktree, and `no-worktree` is the one kind with
+    // none. Converting it would either invent one or hand every consumer of
+    // `outcome.worktree` an undefined on the unhappiest path there is.
+    const { h } = harness({}, [
+      {
+        match: afterBase((argv) => argv.includes("-uall")),
+        reply: { stdout: " M src/main/java/Cart.java\n" },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, { ...watchedRequest, branchPrefix: "main" });
+
+    expect(outcome.kind).toBe("no-worktree");
+  });
+
+  it("publishes as normal when nothing outside the worktree moved", async () => {
+    const { h } = harness(FULL);
+
+    const outcome = await solveTicket(h.deps, watchedRequest);
+
+    expect(outcome.kind).toBe("verified");
+  });
+
+  it("reads a checkout it cannot read as changed, not as clean", async () => {
+    // A `git status` that fails is the guard losing its evidence, and the two
+    // ways it can fail are exactly the two an escape would cause: a directory
+    // deleted, and a repository left mid-operation. Reading either as "no
+    // change" is the guard reporting success because it went blind.
+    const { h } = harness(FULL, [
+      {
+        match: afterBase((argv) => argv.includes("-uall") && argv.includes(READ_DIRS[0] ?? "")),
+        reply: { exitCode: 128, stderr: "not a git repository" },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, watchedRequest);
+
+    expect(outcome).toMatchObject({ kind: "escaped", paths: [READ_DIRS[0]] });
+  });
+});
+
 const reviewRequest = {
   ...request,
   worktree,
@@ -1139,7 +1281,11 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, reviewRequest);
 
     expect(outcome).toMatchObject({ kind: "abandoned" });
-    expect(h.calls).toEqual([]);
+    // The escape guard's two reads are excluded rather than tolerated: they are
+    // of other checkouts, never of the worktree, which is the property this
+    // test is about. Comparing against the raw call list would have made the
+    // test fail for a guard doing exactly what it is for.
+    expect(h.calls.filter((argv) => !argv.includes("-uall"))).toEqual([]);
   });
 
   it("builds the round's own commit message, with the trailer", async () => {
@@ -1164,6 +1310,36 @@ describe("resolveReview", () => {
     });
 
     const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome.kind).toBe("resolved");
+  });
+
+  it("refuses the round when a watched checkout moved under it", async () => {
+    // The review pass is a write pass and had no guard at all until this. It is
+    // the more exposed of the two paths: the round's output goes onto a pull
+    // request a human is already reading, so an escape here is one step from a
+    // merge, where an escaped solve has shown nobody anything.
+    const { h } = harness({ review: review() }, [
+      {
+        match: afterBase((argv) => argv.includes("-uall") && argv.includes(READ_DIRS[0] ?? "")),
+        reply: { stdout: " M src/main/java/Cart.java\n" },
+      },
+    ]);
+
+    const outcome = await resolveReview(h.deps, {
+      ...reviewRequest,
+      readDirs: READ_DIRS,
+      vaultPath: "/git/insurance-knowledge-vault",
+    });
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "write-escape" });
+    expect(outcome).toMatchObject({ reasons: [expect.stringContaining(READ_DIRS[0] ?? "")] });
+  });
+
+  it("resolves as normal when nothing outside the worktree moved", async () => {
+    const { h } = harness({ review: review() });
+
+    const outcome = await resolveReview(h.deps, { ...reviewRequest, readDirs: READ_DIRS });
 
     expect(outcome.kind).toBe("resolved");
   });

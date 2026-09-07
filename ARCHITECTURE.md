@@ -472,6 +472,17 @@ storecode -p "/intake-triage SSX-1234 --no-write --no-html" \
   tool never enters the model's tool list, so there is no call to permit. Comma-separated form
   verified (`bash=NO write=NO read=YES`). Both flags are passed — the allowlist still suppresses
   prompts and documents intent — but only one of them is load-bearing. See §14.12.
+- **The filesystem is not a boundary either, and this document used to imply it was.** Three
+  probes 2026-09-07, with the exact flag shape `buildSolveArgs` produces: a pass read an absolute
+  path in a sibling checkout with no `--add-dir` naming it; a pass with `Write` pre-approved wrote
+  to a path outside its worktree; and it did so again with `--permission-mode dontAsk` removed. So
+  the working directory confines nothing, `--add-dir` is not what grants a read, and no permission
+  mode the harness can pass changes it. `--add-dir` widens the _workspace_ for every tool a pass
+  holds, which is why it is given to the read-only recon pass and withheld from the write passes,
+  and why the prompt block naming `SOLVE_READ_DIRS` goes to all of them — on a write pass the flag
+  would authorise and the prose forbids. What actually catches a stray write is `escape.ts`, which
+  snapshots the watched checkouts before and after each run; the only mechanism observed to _stop_
+  one is a `PreToolUse` hook, which lives outside this repository. See PLAN.md §5b.
 - **Whether MCP tool names are honoured by `--disallowedTools` is _unverified_.** A bare
   `storecode -p` run has no MCP server connected, so the probe returned `edit=NO get=NO` and
   distinguished nothing. The Atlassian mutators are named in both denylists on principle, and an
@@ -689,6 +700,7 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `SOLVE_TIMEOUT_MS`           | `1800000`                              | One model pass. The setting that machine sleep defeats: a pass killed here did nothing wrong and is deliberately not retried (§13)                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `SOLVE_BASE_REF`             | `origin/main`                          | What a worktree is cut from and what `verifyBase` and the fail-first probe are judged against                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `SOLVE_REPO_ROOT`            | — (**no fallback**)                    | Where the pilot checkouts live. No default for the same reason as `SOLVE_REPOS`: a path that survives being deleted from `.env` is a write privilege that cannot be revoked without editing source                                                                                                                                                                                                                                                                                                                                                        |
+| `SOLVE_READ_DIRS`            | — (**no fallback**)                    | Other checkouts under `SOLVE_REPO_ROOT` a pass may read for context, by name. Named to every pass in its prompt and `--add-dir`'d on the read-only one only; the same set the write-escape guard watches. No default for the same reason as `SOLVE_REPOS`, and names are validated rather than joined blind, since `join(root, "../..")` is a directory above the root                                                                                                                                                                                    |
 | `REVIEW_POLL_MS`             | `120000`                               | How long `--review` waits between rounds, and `--watch` and the daemon's review loop between passes. A second cadence rather than a share of `POLL_INTERVAL_MS`, because polling for new issues is a window over time and looking at a pull request is a question about a state. Two minutes from measurement, not taste — every Copilot review on #2658 landed two and a half to four minutes after the request. A look that finds nothing costs two `gh` reads and no checkout, so lowering it is cheap — and no longer shortens the service's patience |
 | `REVIEW_SILENCE_MS`          | `1200000`                              | How long a pull request may go with nothing happening on it before the loop hands it to a human. The only bound that catches a reviewer who never answers: every other cap reads the marker, and the marker only moves when a round runs. Measured in wall-clock from the newest dated thing on the pull request, so a cadence change is not a policy change                                                                                                                                                                                              |
 | `MAX_REVIEW_ROUNDS_PER_TICK` | `3`                                    | How many paid rounds one review pass may run across the whole watched set — `--watch`'s and the daemon's alike, and at $0.94 a round it is what a daemon tick's worst case is computed from and logged as at startup. The only bound in this table that bounds a _tick_ rather than a pull request, and the one that stops a reviewer who answered twenty pull requests while the machine slept from buying twenty rounds in the first pass after it wakes. Over the bound a ticket is deferred, not skipped; `0` looks at everything and acts on nothing |
@@ -1634,13 +1646,18 @@ directory and from `--add-dir`, and neither pointed here — so all four passes 
 sending a slash command that resolved to nothing. Probed from a foreign directory:
 `Unknown command: /agent-solve`.
 
-The obvious fix is `--add-dir <the-jira-police>`, and it is the wrong one. The same probe
-established that `--add-dir` plus a pre-approved `Write` is write access to everything in the
-added directory — so making the skill readable that way would hand every pass this service's own
-source, its settings and its gates, which is the one directory a solve pass must not be able to
-edit. Instead the harness copies the two skill files into a throwaway directory, adds _that_, and
-deletes it afterwards. The pass gets exactly the text it needs to resolve the command and no path
-back to the repository that wrote it.
+The obvious fix is `--add-dir <the-jira-police>`, and it is still the wrong one, though **the
+reason written here first was stronger than the facts support.** It said `--add-dir` plus a
+pre-approved `Write` is write access to everything in the added directory, implying the converse:
+that a directory left out is safe. The 2026-09-07 probes above refute the converse — a pass wrote
+outside its worktree with no `--add-dir` involved at all — so withholding the flag was never the
+thing keeping this service's source, settings and gates from being edited. Nothing was. What the
+flag does change is what the pass is _pointed at_: a session told the harness's own repository is
+part of its workspace will read and edit it as a matter of course, where one that is not has to
+go looking. Instead the harness copies the two skill files into a throwaway directory, adds
+_that_, and deletes it afterwards — so the pass gets exactly the text it needs to resolve the
+command and is never handed a path back to the repository that wrote it. The distinction to keep
+is that this is a narrowing of attention, not a wall, and the wall does not exist.
 
 Worth generalising: the failure was not that a guard was missing but that **a string was assumed
 to resolve**. Nothing in the type system distinguishes a slash command that dispatches from one

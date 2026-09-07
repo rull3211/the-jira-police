@@ -178,11 +178,14 @@ describe("buildSolveArgs", () => {
   });
 
   it("does not add the repository the service itself lives in", () => {
-    // `--add-dir` grants write to a pass that pre-approves `Write` — probed
-    // 2026-09-04, it succeeded. Adding this repository would put `runner.ts`
-    // (these denylists) and `diff-gate.ts` (the bound on the change) inside the
-    // solver's reach, and the diff gate only ever inspects the worktree, so
-    // neither edit would show up anywhere.
+    // A pass that pre-approves `Write` can write into an `--add-dir` directory
+    // — probed 2026-09-04, it succeeded — and, as of the 2026-09-07 probe, it
+    // can write outside every directory it was given as well, so this assertion
+    // is no longer the thing keeping `runner.ts` (these denylists) and
+    // `diff-gate.ts` (the bound on the change) out of the solver's reach. It is
+    // still worth keeping: naming a directory is an invitation, and the diff
+    // gate only ever inspects the worktree, so an edit here would show up
+    // nowhere. `escape.ts` is what now notices one.
     const argv = buildSolveArgs("fix", {
       ...options,
       vaultPath: "/vault",
@@ -191,6 +194,40 @@ describe("buildSolveArgs", () => {
     for (const dir of flags(argv, "--add-dir")) {
       expect(dir).not.toContain("the-jira-police");
     }
+  });
+
+  const withReads: SolveRunOptions = { ...options, readDirs: ["/git/commerce-rest-api"] };
+
+  it("adds the readable checkouts on the read-only pass", () => {
+    expect(flags(buildSolveArgs("recon", withReads), "--add-dir")).toEqual([
+      "/git/commerce-rest-api",
+    ]);
+  });
+
+  // Mutation: drop the `writes` condition. `--add-dir` widens the workspace for
+  // every tool a pass holds, so on a pass that pre-approves `Write` it is an
+  // offer to edit another team's checkout rather than a grant to read one.
+  it.each([...PASSES].filter((pass) => pass !== "recon"))(
+    "does not add the readable checkouts on the %s pass, which can write",
+    (pass) => {
+      expect(flags(buildSolveArgs(pass, withReads), "--add-dir")).toEqual([]);
+    },
+  );
+
+  // Mutation: gate the prompt text on the same `writes` flag as the flag above.
+  // The two are deliberately different — the flag is withheld from write passes
+  // because it would authorise, and the prompt is given to them because it
+  // forbids. A write pass that is never told the other checkouts exist is the
+  // PR #2663 failure, which happened on a write pass.
+  it.each(PASSES)("tells the %s pass what it may read, write pass or not", (pass) => {
+    const prompt = buildSolvePrompt(pass, withReads);
+
+    expect(prompt).toContain("/git/commerce-rest-api");
+    expect(prompt).toContain("READ-ONLY");
+  });
+
+  it("says nothing about other checkouts when none are configured", () => {
+    expect(buildSolvePrompt("recon", options)).not.toContain("readable for context");
   });
 });
 
