@@ -2,9 +2,11 @@
 
 > **Progress, 2026-09-07.** Phases A through D4e are built and merged; the service claims a
 > ticket, solves it in an isolated worktree, opens a pull request, answers the reviewer, and
-> labels the ticket for whatever happened. 2308 tests, no build step. **A review branch is now
+> labels the ticket for whatever happened. 2326 tests, no build step. **A review branch is now
 > kept current with its base** — merged and pushed before every round, and a conflict spends a
-> round on a pass that tries to resolve it rather than wedging the pull request (§6.4). **E has landed its review
+> round on a pass that tries to resolve it rather than wedging the pull request (§6.4). **Two
+> inputs no longer cost a round**: a deploy notice is not an event on the pull request, and the
+> reviewer's own approval is answered by undrafting rather than by a paid pass (§6.5). **E has landed its review
 > half**: `pnpm start` now runs the review sweep beside the grooming loop, on its own cadence,
 > behind `SOLVE_ENABLED`. The solve half — anything that claims a ticket — is still a person
 > typing a command, and stays that way until E's remaining blockers are answered. **F has landed
@@ -559,6 +561,51 @@ relative to a base anyone proved green. On the solve path a red build before the
 `unusable-base` and says so; on a review round the same redness is attributed to the round. Now
 that the base is merged in every round, a base that is broken upstream lands in the branch and
 the round takes the blame for it. Recorded, not fixed.
+
+#### 6.5 Two watcher escapes, landed 2026-09-07 on `feat/watcher-escapes`
+
+**Two inputs were costing rounds to be told nothing, and the receipts are on two live pull
+requests.** #2663 carries two `:rocket: Application Deployed` notices from `github-actions`, and
+its marker shows rounds 7 and 9 spent publishing a sentence saying the only comment was a deploy
+notice. #2661 `round 1` and #2663 `round 6` are the same waste against the reviewer's own approval
+— `### 🟢 Approval recommended`, answered by a paid pass whose output was an acknowledgement.
+
+**The CI half was the more serious, because it was uncapped.** `github-actions` does not match the
+requested reviewer, so `reviewOrigin` classified it `human`, and human rounds are deliberately
+exempt from `MAX_REVIEW_ITERATIONS` (§6.2). Continuous integration was the one input to this loop
+that could spend without a bound.
+
+Both are drops in `readReview`, and each then inherits a path that already exists: `surveyReview`
+returns `ready` on an empty inbox, which undrafts over `gh` and reserves nothing. Filtering at the
+source cost no new mechanism.
+
+**The two drops are at deliberately different depths, and that is the whole safety argument.**
+Automation comes out of `entries` _before_ `anyoneResponded`, `comments` and `newestAt` are
+derived, because the claim is not "a deploy notice is not feedback" but "a deploy notice is not an
+event on this pull request" — and it is triggered by our own push, so leaving it in `newestAt`
+lets the loop reset its own silence clock and never notice a reviewer that has gone away. The
+green light comes out of `comments` **only**. It has to keep counting as a response, because
+`advance` undrafts on _responded plus nothing to do_: drop it from both and a pull request whose
+only answer is an approval never leaves draft, on every tick, until the silence brake gives up.
+Automation is not an event; an approval is an event with nothing in it.
+
+**Narrow in both directions, and the failure directions say why.** `AUTOMATION_AUTHORS` has one
+entry and is explicitly not `*[bot]` — the reviewer _is_ a bot, and a list wide enough to swallow
+it would silence the review while looking exactly like a reviewer that never answered. The green
+light is matched on the verdict line only, so a review whose own verdict is `🔵 Needs a closer
+look` while quoting the green heading is still read, and it is scoped to the reviewer, so a person
+writing the same words keeps their comment. The case that looks most dangerous needs no rule at
+all: a green light carrying inline comments is threads, and an open thread keeps the inbox
+non-empty by construction.
+
+**The structural signal was rejected in favour of the prose one**, which is the opposite of this
+file's usual preference. Copilot submits every review as `COMMENTED` whatever it concludes — only
+humans (carlmagl, ceciliesn) ever submit `APPROVED` — so the state field cannot tell an approval
+from an objection, and the heading is the only thing that can.
+
+2326 tests; eleven mutations, all caught, including the one this stage was warned about: drop the
+green light from `anyoneResponded` too and both the unit fact and the end-to-end outcome go red,
+the latter with `waiting` where `ready` belongs.
 
 ### 7. Sendback subscription — watching the nearly-solvable (F)
 
