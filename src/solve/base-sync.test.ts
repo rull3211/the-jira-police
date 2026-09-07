@@ -243,7 +243,7 @@ describe("attachSynced", () => {
     expect(ran(git, "push origin fix/ssx-3833-date-of-birth")).toBe(true);
   });
 
-  it("hands back a conflict as a refusal, which is a failed start and not a round", async () => {
+  it("hands a conflict back as a third outcome, with the checkout and what git flagged", async () => {
     const git = fakeGit({
       "worktree list": LISTED,
       "rev-list --left-right": out("0\t0\n"),
@@ -254,11 +254,26 @@ describe("attachSynced", () => {
 
     const result = await attachSynced(git, attachRequest);
 
-    // A refusal here reaches `recordFailedStart`, bounded at three, rather than
-    // the reservation, bounded at twenty and paid for each time. That placement
-    // is the whole reason the sync runs in the attach path.
-    expect(result.outcome).toBe("refused");
-    expect(result.outcome === "refused" && result.reason).toContain("src/utils/DateUtils.ts");
+    // Not a refusal. A refusal reaches `recordFailedStart`, bounded at three and
+    // free, which is the right home for *this side cannot start* — and a
+    // conflict is not that: the checkout is fine, the branch is fine, and there
+    // is work to do that only a pass can do. So it comes back as its own outcome
+    // carrying the worktree, and the caller reserves a round for the merge pass
+    // rather than counting a failed start against a run that started perfectly.
+    expect(result.outcome).toBe("conflicted");
+    if (result.outcome !== "conflicted") {
+      return;
+    }
+    expect(result.worktree.path).toBe(`${attachRequest.parentDirectory}/${attachRequest.issueKey}`);
+    expect(result.worktree.branch).toBe(attachRequest.branch);
+    expect(result.behind).toBe(7);
+    // Read out of `--diff-filter=U`, never from a model: these paths decide what
+    // a resolver is allowed to have touched.
+    expect(result.files).toEqual(["src/utils/DateUtils.ts"]);
+    // Aborted before the handover. Conflict markers are uncommitted changes, and
+    // leaving them on disk is how the next tick's cleanliness check salvages away
+    // the state the resolver was going to work on. `beginMerge` re-cuts it.
+    expect(ran(git, "merge --abort")).toBe(true);
   });
 
   it("returns the attach refusal untouched rather than syncing a checkout it has not got", async () => {

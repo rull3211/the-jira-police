@@ -154,6 +154,26 @@ interface ActHarness {
   readonly calls: readonly (readonly string[])[];
 }
 
+/** The checkout the merge round works in, which is the one the `finally` removes. */
+const conflictedWorktree = {
+  issueKey: ticket.key,
+  path: "/tmp/solve/SSX-3835",
+  branch: "fix/ssx-3835-warranty-type",
+  repoPath: "/repos/buy-insurance-advisor-web",
+} as const;
+
+const REFUSING_ATTACH: AdvanceRequest["attach"] = () =>
+  Promise.resolve({ outcome: "refused", issueKey: ticket.key, reason: REFUSAL } as const);
+
+/** An attach that got a clean checkout and a base that will not merge into it. */
+const CONFLICTED_ATTACH: AdvanceRequest["attach"] = () =>
+  Promise.resolve({
+    outcome: "conflicted",
+    worktree: conflictedWorktree,
+    behind: 7,
+    files: ["src/utils/DateUtils.ts"],
+  } as const);
+
 /**
  * One watched ticket whose checkout cannot be handed over.
  *
@@ -161,11 +181,23 @@ interface ActHarness {
  * partly about what did *not* happen — no pass runs on a round that never got a
  * worktree — and a stub that quietly answers would let that half pass silently.
  */
-function actHarness(): ActHarness {
+function actHarness(attach: AdvanceRequest["attach"] = REFUSING_ATTACH): ActHarness {
   const calls: (readonly string[])[] = [];
   const commands: CommandRunner = {
     run: (argv) => {
       calls.push(argv);
+      // A branch that already contains its base, so the merge round below
+      // reaches a verdict without a pass. Everything else answers the marker
+      // edit, which is the only other call the refusal path makes.
+      if (argv.includes("rev-list")) {
+        return Promise.resolve({ ...OK, stdout: "0\n" });
+      }
+      // Only the GraphQL call gets a body. Answering every command with that
+      // JSON would make `git status --porcelain` read as a dirty checkout, and
+      // the merge round would refuse before it reached the question under test.
+      if (!argv.includes("graphql")) {
+        return Promise.resolve(OK);
+      }
       return Promise.resolve({
         ...OK,
         stdout: JSON.stringify({
@@ -193,8 +225,7 @@ function actHarness(): ActHarness {
     gitTimeoutMs: 30_000,
     stepTimeoutMs: 300_000,
     installTimeoutMs: 600_000,
-    attach: () =>
-      Promise.resolve({ outcome: "refused", issueKey: ticket.key, reason: REFUSAL } as const),
+    attach,
     cwd: "/repos/buy-insurance-advisor-web",
     now: Date.parse("2026-09-05T10:00:00Z"),
     repo: "acme/advisor",
@@ -214,7 +245,9 @@ function actHarness(): ActHarness {
 const written = (h: ActHarness): string =>
   h.calls
     .filter((argv) => argv.includes("graphql"))
-    .map((argv) => (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length))
+    .map((argv) =>
+      (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length),
+    )
     .at(-1) ?? "";
 
 describe("createReviewAct", () => {
@@ -238,6 +271,28 @@ describe("createReviewAct", () => {
     // that goes red — the outcome above is identical either way, which is why
     // it cannot be the one guarding this.
     expect(written(h)).toContain("Failed starts: 2");
+  });
+
+  it("spends the round on the merge when the base will not go into the branch", async () => {
+    // The daemon's own path, and the one that has to agree with `advance`. A
+    // review round here would run `pnpm install`, typecheck and test against a
+    // tree that does not exist yet, then answer a reviewer from whatever came
+    // out — so the checkout decides the round, not the survey. `passes` throws,
+    // which is the other half of the claim: this branch is already current, so
+    // the merge round reaches its verdict without paying for a pass.
+    const h = actHarness(CONFLICTED_ATTACH);
+
+    const outcome = await h.act(ticket, pending, 2663);
+
+    expect(outcome).toEqual({ kind: "synced", round: 3, behind: 0, conflicts: [] });
+    // Reserved like any other round, and the history line says which kind it
+    // was: a merge round answers nobody, so a marker that recorded it as an
+    // ordinary round would leave the reviewer's silence looking like assent.
+    expect(written(h)).toContain("bot: iteration count 3");
+    expect(written(h)).toContain("round 3 — merge");
+    // And neither of the two counters a merge has no business moving.
+    expect(written(h)).toContain("Reviewer rounds: 2");
+    expect(written(h)).toContain("Last read: 2026-09-05T08:00:00Z");
   });
 
   it("spends no round on an attempt that never had one", async () => {

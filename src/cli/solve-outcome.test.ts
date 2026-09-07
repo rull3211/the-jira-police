@@ -331,6 +331,7 @@ const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
   abandoned: null,
   refused: null,
   failed: null,
+  synced: null,
 };
 
 /** One of every review-round kind, so the tables below are about all of them. */
@@ -369,6 +370,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   { kind: "abandoned", reason: "the reviewer is asking for a schema change" },
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
   { kind: "failed", stage: "push", reason: "the remote rejected the push" },
+  { kind: "synced", round: 4, behind: 7, conflicts: ["src/utils/DateUtils.ts"] },
 ];
 
 describe("the review-round fixture", () => {
@@ -453,6 +455,13 @@ describe("reviewStageAfter", () => {
       ["abandoned", null],
       ["refused", null],
       ["failed", null],
+      // A merge round touches the branch and not the pull request, so the draft
+      // flag is exactly as it was and the label must not move. `reviewing` would
+      // be the tempting answer — the round did work, and work means still
+      // working — but the label mirrors the flag rather than the activity, and a
+      // merge round that ran after an undraft would silently pull the ticket
+      // back out of `review-done` while a human was reading the pull request.
+      ["synced", null],
     ]);
   });
 });
@@ -497,6 +506,10 @@ describe("isAdvanceFailureExit", () => {
       abandoned: false,
       refused: true,
       failed: true,
+      // A merge round that reached this outcome did what it set out to do. The
+      // failures on that path are `failed`/`merge` and `refused`, which are
+      // already non-zero above.
+      synced: false,
     });
   });
 });
@@ -525,6 +538,11 @@ describe("chainDecision", () => {
       ["abandoned", true],
       ["refused", true],
       ["failed", true],
+      // The third continuing outcome, and the only one that continues without
+      // the reviewer having said anything new. The feedback that was waiting is
+      // still waiting: the merge answered the base, not the review, so stopping
+      // here would end the chain one round before the round that reads it.
+      ["synced", false],
     ]);
   });
 
@@ -608,6 +626,27 @@ describe("describeAdvanceOutcome", () => {
     });
     expect(text).toContain("REFUSED");
     expect(text).toContain("Nothing was pushed");
+  });
+
+  it("does not let a merge round read like a round that answered the reviewer", () => {
+    // From the outside a merge round looks like every other one: it reserved,
+    // it cost money, it pushed a commit. The one thing it did not do is read
+    // the review — so an operator who took it for a review round would read the
+    // reviewer's continuing silence as agreement with an answer never given.
+    const clean = describeAdvanceOutcome({ kind: "synced", round: 3, behind: 7, conflicts: [] });
+    expect(clean).toContain("SYNCED");
+    expect(clean).toContain("7 commit(s)");
+    expect(clean).toContain("The review was not read this round");
+
+    // And the conflicted case names the files, because a merge the bot resolved
+    // by itself is the one commit on that branch a human should read.
+    const resolved = describeAdvanceOutcome({
+      kind: "synced",
+      round: 3,
+      behind: 7,
+      conflicts: ["src/utils/DateUtils.ts"],
+    });
+    expect(resolved).toContain("src/utils/DateUtils.ts");
   });
 
   it("says out loud when the reviewer was not asked to look again", () => {

@@ -76,6 +76,7 @@ import type {
   CommandOptions,
   CommandResult,
   CommandRunner,
+  Worktree,
   WorktreeResult,
 } from "./worktree.ts";
 
@@ -518,6 +519,24 @@ export interface SyncedAttachRequest extends AttachRequest {
 }
 
 /**
+ * A checkout, a refusal, or a checkout whose base will not merge into it.
+ *
+ * A superset of `WorktreeResult` rather than a replacement for it, so a caller
+ * that still hands out a plain `attachWorktree` keeps type-checking and only
+ * the callers that can *do* something with a conflict have to handle one.
+ */
+export type SyncedAttachResult =
+  | WorktreeResult
+  | {
+      readonly outcome: "conflicted";
+      /** Attached and clean. The merge was aborted before this was returned. */
+      readonly worktree: Worktree;
+      readonly behind: number;
+      /** The paths git flagged, capped. Read from git, never from a model. */
+      readonly files: readonly string[];
+    };
+
+/**
  * A checkout for a review round: attached to the branch, and current with base.
  *
  * **One function because there are two call sites**, `runAdvance` and the
@@ -527,19 +546,24 @@ export interface SyncedAttachRequest extends AttachRequest {
  * every two minutes for four days recording nothing; the fix for a duplicated
  * branch is to stop duplicating it, not to remember harder.
  *
- * The signature is `attachWorktree`'s, so callers keep the `WorktreeSource`
- * shape and nothing downstream learns a new outcome. That is a deliberate limit
- * on this change rather than the finished design: a conflicted merge is
- * currently a refusal, which stalls the pull request for a human after
- * `MAX_FAILED_STARTS` attempts. Handing the conflict to a pass that tries to
- * resolve it needs an outcome `delivery.ts` can route on, and that is the next
- * commit — the point of doing it second is that the resolver must not be the
- * thing that first proves this plumbing works.
+ * ## A conflict is a third outcome rather than a refusal
+ *
+ * It used to be one. A refusal costs nothing and is counted as a failed start,
+ * so a branch whose base would not merge stalled the pull request for a human
+ * after `MAX_FAILED_STARTS` ticks — correct while nothing could resolve a
+ * conflict, and wrong now that something can. `conflicted` carries the attached
+ * worktree with it, because the checkout is fine: the merge is what failed, and
+ * the resolver needs exactly that checkout to try it again.
+ *
+ * **The merge is not left in progress here.** `syncWithBase` aborts it, so the
+ * tree handed back is clean and the reuse check on the next tick has nothing to
+ * salvage. The resolver re-runs the merge behind its own reservation, which is
+ * what keeps a conflicted tree from sitting through a model start-up.
  */
 export async function attachSynced(
   runner: CommandRunner,
   request: SyncedAttachRequest,
-): Promise<WorktreeResult> {
+): Promise<SyncedAttachResult> {
   const attached = await attachWorktree(runner, request);
   if (attached.outcome === "refused") {
     return attached;
@@ -562,9 +586,10 @@ export async function attachSynced(
   }
   if (synced.outcome === "conflicted") {
     return {
-      outcome: "refused",
-      issueKey: request.issueKey,
-      reason: `${request.branch} is ${String(synced.behind)} commit(s) behind ${request.baseRef} and the merge conflicts in ${synced.files.join(", ")} — the branch has to be brought up to date before a round can verify anything against it`,
+      outcome: "conflicted",
+      worktree: attached.worktree,
+      behind: synced.behind,
+      files: synced.files,
     };
   }
 

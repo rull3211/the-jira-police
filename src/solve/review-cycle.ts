@@ -292,6 +292,8 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
       return `capped rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
     case "stalled":
       return `stalled attempts=${String(outcome.attempts)}: ${outcome.reason}`;
+    case "synced":
+      return `synced round=${String(outcome.round)} behind=${String(outcome.behind)} conflicts=${outcome.conflicts.length === 0 ? "none" : outcome.conflicts.join(",")}`;
     case "abandoned":
       return `abandoned: ${outcome.reason}`;
     case "refused":
@@ -338,6 +340,11 @@ function settleIsQuiet(outcome: AdvanceOutcome): boolean {
     case "abandoned":
     case "refused":
     case "failed":
+    // Loud, and it is a commit on somebody's branch: a merge the bot made and
+    // pushed while a reviewer was reading. It also does not recur — the branch
+    // is current afterwards — so filing it as quiet would hide the one round
+    // that changed the pull request without answering anybody.
+    case "synced":
       return false;
   }
 }

@@ -357,6 +357,27 @@ export function chainDecision(outcome: AdvanceOutcome, silenceMs: number): Chain
             why: `round ${String(outcome.round)} ${outcome.pushed ? "pushed" : "answered without pushing"}, so the reviewer gets another look`,
           };
     }
+    case "synced": {
+      // The third outcome that continues, and it has to be argued in rather than
+      // left to the `default` arm below. A merge round answers the *base*, not
+      // the reviewer: the feedback that was waiting is still waiting, unread, and
+      // stopping here would end the chain one step before the round that reads
+      // it — on a pull request the loop had just made buildable again.
+      //
+      // Not `silent`. A merge round did work, so the wall-clock quiet bound must
+      // reset; treating it as silence would let a branch that keeps needing the
+      // base merged trip the absent-reviewer brake, which measures the reviewer
+      // and would be measuring us.
+      //
+      // It cannot spin, because a merge round reserves like any other and so
+      // spends one of `MAX_PR_ROUNDS_TOTAL`. A base that kept moving would run
+      // the count out and stop at `capped`, which is the right ending for it.
+      return {
+        stop: false,
+        silent: false,
+        why: `round ${String(outcome.round)} merged ${String(outcome.behind)} commit(s) of the base in, so the next round reads the review against a current branch`,
+      };
+    }
     case "ready": {
       return { stop: true, silent: false, why: "nothing left to act on — undrafted" };
     }
@@ -587,6 +608,18 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         `The failure is on this side, not the reviewer's: read the marker comment on the pull request for the list, ` +
         `and clear whatever is holding the checkout before running this again.` +
         `\nThe last attempt said: ${outcome.reason}`
+      );
+    }
+    case "synced": {
+      // Says out loud that the reviewer was not read, because the round looks
+      // like every other one from the outside — it reserved, it cost money, it
+      // pushed a commit — and an operator who took it for a review round would
+      // read the reviewer's silence as agreement.
+      return (
+        (outcome.conflicts.length === 0
+          ? `SYNCED — round ${String(outcome.round)} merged ${String(outcome.behind)} commit(s) of the base in cleanly and pushed.`
+          : `SYNCED — round ${String(outcome.round)} merged ${String(outcome.behind)} commit(s) of the base in, resolving conflicts in ${outcome.conflicts.join(", ")}, and pushed.`) +
+        `\nThe review was not read this round: a branch its base will not merge into cannot be verified, so the merge went first. The next round answers the reviewer.`
       );
     }
     case "abandoned": {

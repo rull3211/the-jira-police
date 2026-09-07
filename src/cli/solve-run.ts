@@ -46,6 +46,7 @@ import {
   advance,
   publish,
   recordFailedStart,
+  runMergeRound,
   runRound,
   surveyReview,
 } from "../solve/delivery.ts";
@@ -78,13 +79,8 @@ import {
   REVIEW_ROUND_USD,
   runReviewCycle,
 } from "../solve/review-cycle.ts";
-import { attachSynced } from "../solve/base-sync.ts";
-import {
-  type Worktree,
-  type WorktreeResult,
-  branchNameFor,
-  removeWorktree,
-} from "../solve/worktree.ts";
+import { type SyncedAttachResult, attachSynced } from "../solve/base-sync.ts";
+import { type Worktree, branchNameFor, removeWorktree } from "../solve/worktree.ts";
 import {
   NotSolvableError,
   buildAdvanceRequest,
@@ -598,7 +594,7 @@ export async function runAdvance(
   // failure: `advance` decides there is nothing to answer and never calls the
   // source, so there is no checkout, no install, and nothing to remove.
   let worktree: Worktree | null = null;
-  const attach = async (): Promise<WorktreeResult> => {
+  const attach = async (): Promise<SyncedAttachResult> => {
     const attached = await attachSynced(deps.commands, {
       issueKey,
       branch,
@@ -608,7 +604,10 @@ export async function runAdvance(
       baseRef: base.baseRef,
       identity: botIdentityOf(settings),
     });
-    if (attached.outcome === "created") {
+    // A conflicted attach owns a checkout too, and it is the same checkout the
+    // merge round is about to work in. Recording it here rather than only on
+    // `created` is what keeps the cleanup below the one owner of it.
+    if (attached.outcome === "created" || attached.outcome === "conflicted") {
       worktree = attached.worktree;
       process.stdout.write(`\nAdvancing #${String(found.number)} in ${attached.worktree.path}\n`);
     }
@@ -836,7 +835,7 @@ function createReviewLook(
     }
 
     const holder: { worktree: Worktree | null } = { worktree: null };
-    const attach = async (): Promise<WorktreeResult> => {
+    const attach = async (): Promise<SyncedAttachResult> => {
       const attached = await attachSynced(deps.commands, {
         issueKey: ticket.key,
         branch,
@@ -846,7 +845,9 @@ function createReviewLook(
         baseRef: base.baseRef,
         identity: botIdentityOf(settings),
       });
-      if (attached.outcome === "created") {
+      // Both outcomes that carry a checkout, so the `finally` in `act` removes
+      // the one a merge round worked in as well as the one a review round did.
+      if (attached.outcome === "created" || attached.outcome === "conflicted") {
         holder.worktree = attached.worktree;
       }
       return attached;
@@ -931,7 +932,17 @@ export function createReviewAct(
     // rather than merely rarer.
     let result: AdvanceOutcome | undefined;
     try {
-      result = await runRound(deps, target.request, attached.worktree, pending);
+      // Which round is decided by the checkout, not by the survey. A branch its
+      // base will not merge into cannot be verified, so there is nothing a
+      // review round could answer a reviewer *from*; the merge is the round,
+      // and it reserves its own. Inside the same `try` as the review round
+      // because the checkout it works in needs the same removal, and this
+      // function's whole reason for existing is that a branch duplicated
+      // between here and `advance` is a branch that drifts.
+      result =
+        attached.outcome === "conflicted"
+          ? await runMergeRound(deps, target.request, attached, pending)
+          : await runRound(deps, target.request, attached.worktree, pending);
       return result;
     } finally {
       if (target.holder.worktree !== null) {

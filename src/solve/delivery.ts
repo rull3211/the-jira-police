@@ -67,10 +67,16 @@ import {
   parseMarker,
   renderMarker,
 } from "./marker.ts";
-import { type ReviewRoundRequest, type SolveDependencies, resolveReview } from "./orchestrator.ts";
+import type { SyncedAttachResult } from "./base-sync.ts";
+import {
+  type ReviewRoundRequest,
+  type SolveDependencies,
+  resolveConflict,
+  resolveReview,
+} from "./orchestrator.ts";
 import type { CommitMessage, ThreadAnswer } from "./runner.ts";
 import { quietFor } from "./silence.ts";
-import type { Worktree, WorktreeResult } from "./worktree.ts";
+import type { Worktree } from "./worktree.ts";
 
 export interface PublishRequest {
   readonly worktree: Worktree;
@@ -199,7 +205,7 @@ export async function publish(
  * worktree, because the caller also has to remove the ones it kept as evidence
  * and two owners of one directory is worse than one owner and a long function.
  */
-export type WorktreeSource = () => Promise<WorktreeResult>;
+export type WorktreeSource = () => Promise<SyncedAttachResult>;
 
 /**
  * Everything needed to look at a pull request, and nothing needed to act on one.
@@ -487,6 +493,32 @@ export type AdvanceOutcome =
    * marker comment, where a human reading the pull request will find it.
    */
   | { readonly kind: "stalled"; readonly attempts: number; readonly reason: string }
+  /**
+   * The round spent itself bringing the branch up to date with its base, and
+   * answered nobody.
+   *
+   * Its own kind because it is neither of the two things a reader would
+   * otherwise take it for. It is not `ready`: nothing about the review was
+   * looked at, so undrafting on it would hand a human a pull request on the
+   * strength of a merge. And it is not `iterated`: no reviewer was answered, no
+   * thread was touched, and the marker's reviewer count did not move — calling
+   * it a round of review would spend the reviewer's budget on a merge.
+   *
+   * The reviewer's comments are deliberately left unread, which is what brings
+   * the next tick straight back to them. A branch that will not take its base
+   * cannot be verified, so a review round on top of one answers from a tree
+   * nobody can build; the merge goes first and the argument keeps.
+   *
+   * `conflicts` is empty when the merge went in clean — which happens when the
+   * base moved between the attach and the round — and holds the paths the pass
+   * resolved when it did not.
+   */
+  | {
+      readonly kind: "synced";
+      readonly round: number;
+      readonly behind: number;
+      readonly conflicts: readonly string[];
+    }
   /** The resolution pass declined. A human takes the pull request from here. */
   | { readonly kind: "abandoned"; readonly reason: string }
   | {
@@ -515,6 +547,18 @@ export type AdvanceOutcome =
          * still exactly where the survey found it.
          */
         | "worktree"
+        /**
+         * The base would not merge and the attempt to resolve it did not get
+         * far enough to have an opinion — the merge would not start, the tree
+         * came back in a state the harness would not accept, or the merge
+         * commit would not commit or push.
+         *
+         * Separate from `verification`, which is the merge resolving cleanly
+         * and the result being red. That one is a fact about the code and is
+         * worth a reader's attention; this one is a fact about a git command,
+         * and the pull request is exactly where it was.
+         */
+        | "merge"
         | "verification"
         | "commit"
         | "push"
@@ -1125,8 +1169,119 @@ export async function advance(
     // counting that happens on this side of the reservation.
     return await recordFailedStart(deps.commands, request, surveyed.pending, attached.reason);
   }
+  if (attached.outcome === "conflicted") {
+    return await runMergeRound(deps, request, attached, surveyed.pending);
+  }
 
   return runRound(deps, request, attached.worktree, surveyed.pending);
+}
+
+/**
+ * Spends a round on the merge instead of on the review.
+ *
+ * The reservation is written first, exactly as `runRound` writes it and for the
+ * same reason: the brake has to fail closed, so a marker that will not update
+ * means no pass runs. Two differences, and both are about what a merge is not.
+ *
+ * **The reviewer's count does not move.** `MAX_REVIEW_ITERATIONS` bounds an
+ * argument between two machines; this round is not part of that argument and
+ * spending it would tell a reviewer the loop was out of turns because a base
+ * moved. `MAX_PR_ROUNDS_TOTAL` *does* count it, because that one is a brake on
+ * the machinery and a merge round costs money like any other.
+ *
+ * **The high-water mark does not move.** Nothing here reads a comment, so
+ * advancing it would mark feedback as handled by a round that never looked at
+ * it — the reviewer's point would be silently dropped and the pull request
+ * would look answered. Leaving it is what makes the next tick come back to it.
+ *
+ * The cheap outcomes (`current`, `merged`) still cost a reservation, which is
+ * deliberate: the alternative is deciding whether to reserve by first running
+ * the thing the reservation is meant to gate. Over-counting a spend brake makes
+ * a loop stop early; under-counting one makes it never stop.
+ */
+export async function runMergeRound(
+  deps: SolveDependencies,
+  request: AdvanceRequest,
+  conflict: {
+    readonly worktree: Worktree;
+    readonly behind: number;
+    readonly files: readonly string[];
+  },
+  pending: PendingRound,
+): Promise<AdvanceOutcome> {
+  const { commands } = deps;
+  const { repo, number, issueKey } = request;
+  const { marker, round, reviewerRound } = pending;
+
+  const reserved = await reserve(commands, {
+    worktreePath: conflict.worktree.path,
+    repo,
+    number,
+    timeoutMs: request.ghTimeoutMs,
+    marker: {
+      count: round + 1,
+      reviewerCount: reviewerRound,
+      failedStarts: 0,
+      lastRead: marker?.lastRead ?? NEVER_READ,
+      rounds: [
+        ...(marker?.rounds ?? []),
+        `round ${String(round + 1)} — merge, ${String(conflict.behind)} commit(s) behind ${request.baseRef} and conflicting in ${conflict.files.join(", ")}`,
+      ],
+    },
+    ...(pending.markerId === null ? {} : { commentId: pending.markerId }),
+  });
+  if (reserved.outcome === "failed") {
+    return {
+      kind: "failed",
+      stage: "cursor",
+      reason: `the merge round was not reserved, so it did not run — ${reserved.reason}`,
+    };
+  }
+
+  const resolved = await resolveConflict(deps, { ...request, worktree: conflict.worktree });
+  const synced = (behind: number, conflicts: readonly string[]): AdvanceOutcome => ({
+    kind: "synced",
+    round: round + 1,
+    behind,
+    conflicts,
+  });
+
+  switch (resolved.kind) {
+    case "current": {
+      // The base moved between the attach and here, so there was nothing left
+      // to merge. Reported as a sync of zero commits rather than as a failure:
+      // the branch is current, which is the state this round exists to reach.
+      return synced(0, []);
+    }
+    case "merged": {
+      return synced(resolved.behind, []);
+    }
+    case "resolved": {
+      logger.info("solve.review.merged", {
+        issueKey,
+        number,
+        round: round + 1,
+        behind: resolved.behind,
+        files: resolved.report.resolutions.map((resolution) => resolution.path),
+      });
+      return synced(
+        resolved.behind,
+        resolved.report.resolutions.map((resolution) => resolution.path),
+      );
+    }
+    case "abandoned": {
+      return { kind: "abandoned", reason: resolved.reason };
+    }
+    case "failed": {
+      // The merge resolved and the result is red. `refused` rather than
+      // `failed`, on the same rule the review round uses: the steps ran and
+      // gave an answer, and the answer is that this must not be pushed.
+      return { kind: "refused", stage: "verification", reasons: [resolved.reason] };
+    }
+    default: {
+      return { kind: "failed", stage: "merge", reason: resolved.reason };
+    }
+  }
 }
 
 /**

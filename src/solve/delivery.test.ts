@@ -198,7 +198,9 @@ const markerWritten = (h: Harness): boolean =>
 const markerBody = (h: Harness): string =>
   h.calls
     .filter((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv))
-    .map((argv) => (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length))
+    .map((argv) =>
+      (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length),
+    )
     .at(-1) ?? "";
 
 /** The refusal `attachWorktree` gives when it cannot hand over a checkout. */
@@ -386,6 +388,24 @@ function harness(
 
   return { deps: { commands, passes }, calls, seen };
 }
+
+/**
+ * Matches the first time only, which is how a two-state git read is scripted.
+ *
+ * The merge round reads `--diff-filter=U` twice and must get different answers:
+ * once for what git flagged, and once afterwards to prove nothing is unmerged
+ * any more. A rule answering both the same way makes the second read vacuous.
+ */
+const once = (match: (argv: readonly string[]) => boolean) => {
+  let used = false;
+  return (argv: readonly string[]): boolean => {
+    if (used || !match(argv)) {
+      return false;
+    }
+    used = true;
+    return true;
+  };
+};
 
 /** Did any command match? Used for "and then it stops" assertions. */
 const ran = (h: Harness, ...needles: readonly string[]): boolean =>
@@ -1914,5 +1934,130 @@ describe("advance's round classification", () => {
 
     expect(outcome).toMatchObject({ kind: "reviewer-exhausted", rounds: 3 });
     expect(ran(h, "pr", "ready")).toBe(true);
+  });
+});
+
+describe("advance's merge round", () => {
+  const CONFLICTED = "src/utils/DateUtils.ts";
+
+  /** An attach that got a clean checkout and a base that will not merge into it. */
+  const conflicted: AdvanceRequest = {
+    ...advanceRequest,
+    attach: () =>
+      Promise.resolve({
+        outcome: "conflicted",
+        worktree,
+        behind: 7,
+        files: [CONFLICTED],
+      } as const),
+  };
+
+  /** A reviewer waiting for an answer, so the survey does not return `waiting`. */
+  const WAITING_REVIEWER = dated("this still allocates on every render", "2026-09-05T10:00:00Z");
+
+  /** Seven commits behind, and the merge goes through on its own. */
+  const BEHIND: Rule = { match: saw("rev-list", "--count"), reply: { stdout: "7\n" } };
+
+  it("spends a round on the base and leaves the review where it found it", async () => {
+    const h = harness({}, [
+      board({ count: 2, reviewerCount: 1, reviews: [WAITING_REVIEWER] }),
+      BEHIND,
+    ]);
+
+    const outcome = await advance(h.deps, conflicted);
+
+    expect(outcome).toEqual({ kind: "synced", round: 3, behind: 7, conflicts: [] });
+    const body = markerBody(h);
+    // The total moves, because a merge round costs money like any other and
+    // `MAX_PR_ROUNDS_TOTAL` is a brake on the machinery rather than a policy
+    // about reviewers.
+    expect(body).toContain("iteration count 3");
+    // The reviewer's own budget does not. `MAX_REVIEW_ITERATIONS` bounds an
+    // argument between two machines, and spending one of its turns here would
+    // tell a reviewer the loop was out of turns because a base moved.
+    expect(body).toContain("Reviewer rounds: 1");
+    // And the high-water mark does not, because nothing read a comment. Moving
+    // it would mark the reviewer's point as handled by a round that never
+    // looked at it, and the pull request would sit there looking answered.
+    expect(body).toContain("Last read: 2026-09-05T08:00:00Z");
+    expect(body).not.toContain("2026-09-05T10:00:00Z");
+    // Said out loud on the pull request, because a round that answers nobody is
+    // otherwise indistinguishable from a round that ignored the review.
+    expect(body).toContain("round 3 — merge");
+  });
+
+  it("does not touch the branch when the round could not be reserved", async () => {
+    // The reservation is the brake, so it fails closed here exactly as it does
+    // for a review round: no marker, no round — including the git half, which
+    // is what would otherwise push a merge commit nothing had counted.
+    const h = harness({}, [
+      { match: asked("addComment"), reply: { exitCode: 1, stderr: "gh: rate limited" } },
+      BEHIND,
+    ]);
+
+    const outcome = await advance(h.deps, conflicted);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "cursor" });
+    expect(ran(h, "merge")).toBe(false);
+    expect(ran(h, "push")).toBe(false);
+    expect(h.seen).toEqual([]);
+  });
+
+  it("reports a branch that turned out to be current as a sync of nothing", async () => {
+    // The base moved between the attach that found the conflict and this round.
+    // Not a failure: the branch contains its base, which is the state the round
+    // exists to reach, and no scripted pass means reaching one throws.
+    const h = harness({}, [
+      board({ count: 0, reviewerCount: 0, reviews: [WAITING_REVIEWER] }),
+      { match: saw("rev-list", "--count"), reply: { stdout: "0\n" } },
+    ]);
+
+    const outcome = await advance(h.deps, conflicted);
+
+    expect(outcome).toEqual({ kind: "synced", round: 1, behind: 0, conflicts: [] });
+    expect(h.seen).toEqual([]);
+  });
+
+  it("carries the resolved paths out of the pass's report", async () => {
+    const h = harness(
+      {
+        merge: {
+          resolved: true,
+          resolutions: [{ path: CONFLICTED, took: "both", why: "kept both sides" }],
+          summary: "merged origin/main",
+          abandoned: "",
+          injectionNoticed: "",
+        },
+      },
+      [
+        board({ count: 0, reviewerCount: 0, reviews: [WAITING_REVIEWER] }),
+        BEHIND,
+        { match: saw("merge", "--no-edit"), reply: { exitCode: 1, stderr: "CONFLICT (content)" } },
+        { match: once(saw("--diff-filter=U")), reply: { stdout: `${CONFLICTED}\n` } },
+        // `git grep` exits 1 when it finds nothing, which is the answer being
+        // hoped for. The fake's default of 0 would read as *markers found*.
+        { match: saw("grep"), reply: { exitCode: 1 } },
+      ],
+    );
+
+    const outcome = await advance(h.deps, conflicted);
+
+    expect(outcome).toEqual({ kind: "synced", round: 1, behind: 7, conflicts: [CONFLICTED] });
+    expect(h.seen.map((run) => run.pass)).toEqual(["merge"]);
+  });
+
+  it("does not call a merge that would not push a sync", async () => {
+    // `pushBranch` resets to `ORIG_HEAD` when the push fails, so the branch is
+    // as it was and nothing downstream may read this as merged. `merge` rather
+    // than `verification`: the steps never gave a verdict, the plumbing broke.
+    const h = harness({}, [
+      board({ count: 0, reviewerCount: 0, reviews: [WAITING_REVIEWER] }),
+      BEHIND,
+      { match: saw("push"), reply: { exitCode: 1, stderr: "! [rejected]" } },
+    ]);
+
+    const outcome = await advance(h.deps, conflicted);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "merge" });
   });
 });

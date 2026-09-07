@@ -570,6 +570,13 @@ describe("isQuietCycle", () => {
       // news every one of those times, because the whole outcome exists to
       // break that silence.
       { kind: "stalled", attempts: 3, reason: "the worktree has uncommitted changes" },
+      // A merge round is the quietest-looking loud arm: nobody was answered, no
+      // review was read, and the next tick will go back to the same feedback.
+      // It is still a commit the bot pushed to somebody's branch while they
+      // were reading it, and unlike `waiting` it does not recur — the branch is
+      // current afterwards. Filing it as quiet hides the only round that
+      // changed a pull request without talking to anyone.
+      { kind: "synced", round: 4, behind: 7, conflicts: ["src/utils/DateUtils.ts"] },
     ] satisfies AdvanceOutcome[]) {
       expect(isQuietCycle(settle(outcome))).toBe(false);
     }
