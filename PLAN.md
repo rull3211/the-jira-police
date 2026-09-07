@@ -1,8 +1,10 @@
 # the-jira-police — bug-squashing agents
 
-> **Progress, 2026-09-06.** Phases A through D4e are built and merged; the service claims a
+> **Progress, 2026-09-07.** Phases A through D4e are built and merged; the service claims a
 > ticket, solves it in an isolated worktree, opens a pull request, answers the reviewer, and
-> labels the ticket for whatever happened. 2011 tests, no build step. **E has landed its review
+> labels the ticket for whatever happened. 2308 tests, no build step. **A review branch is now
+> kept current with its base** — merged and pushed before every round, and a conflict spends a
+> round on a pass that tries to resolve it rather than wedging the pull request (§6.4). **E has landed its review
 > half**: `pnpm start` now runs the review sweep beside the grooming loop, on its own cadence,
 > behind `SOLVE_ENABLED`. The solve half — anything that claims a ticket — is still a person
 > typing a command, and stays that way until E's remaining blockers are answered. **F has landed
@@ -495,6 +497,68 @@ already on the pull request — and then the instability rule spends the _next_ 
 it. The loop was manufacturing the instability it is written to survive.
 
 A human always merges. The bot has no merge path.
+
+#### 6.4 The branch has to be kept current with its base, landed 2026-09-07 on `feat/review-branch-sync`
+
+**PR #2661 burned twenty rounds and roughly $16 on one inline nitpick, and none of them could
+have worked.** The branch was cut before `main` gained `"packageManager": "pnpm@9.15.9"`, so
+every round paid for a review pass and was then refused at verification, because
+`--frozen-lockfile` under pnpm 11 will not read a lockfile pnpm 9 wrote. The branch was seven
+commits behind a repository that had already been fixed. **That closes the pnpm blocker recorded
+against D2 and retires the `/tmp/pnpm9bin` shim** — and it is the least interesting half, because
+the class it belongs to does not close with it: any branch left open long enough goes stale
+against a base that moved, and the loop had no way to notice.
+
+**Policy, chosen rather than derived: merge the base in and push it straight away.** A merge held
+locally makes the checkout _ahead_ of `origin`, which `attachWorktree` treats as unusable, so the
+next tick salvages it and rebuilds — the churn that produced fifteen `-salvaged-` directories on
+one wedged pull request. Pushing in the same breath keeps `origin` the single answer to what is
+on the branch.
+
+**The placement is the whole cost argument.** `syncWithBase` runs from the attach path, _before_
+the reservation, so a failure is a failed start — free, bounded at three — rather than a paid
+round bounded at twenty. #2661 spent twenty precisely because its failure surfaced on the
+expensive side of that line.
+
+**A conflict is a third outcome, not a refusal**, and it is the one place this section departs
+from what refusing would have been cheapest. A refusal means _this side cannot start_; a conflict
+is the opposite — the checkout is fine, the branch is fine, and there is work only a pass can do.
+So `attachSynced` hands back `conflicted` carrying the worktree, the behind-count and git's own
+`--diff-filter=U` list, and both callers reserve a round for the merge pass. **Every merge
+conflict is to be attempted by the bot** rather than parked for a human, which was a decision
+taken deliberately against the alternative of refusing the start.
+
+**A merge round moves exactly one counter.** `MAX_PR_ROUNDS_TOTAL` moves, because the round costs
+money and a base that kept moving must eventually stop the loop rather than spin it.
+`MAX_REVIEW_ITERATIONS` does not, because it bounds an argument between two machines and no
+machine was answered. The `Last read` high-water mark does not, because nothing read a comment
+and advancing it would silently mark the reviewer's point handled. `chainDecision` continues on
+`synced` and does not file it as silence: the feedback that was waiting is still waiting, and
+treating a round that pushed a commit as quiet would let the absent-reviewer brake measure us
+instead of the reviewer.
+
+**Nothing the resolver says about the tree is believed.** `acceptResolution` stages exactly the
+paths git flagged — never `-A` — then asks git four questions: is anything still unmerged, is a
+conflict marker left, did the pass touch anything outside the conflicted set, did it leave a new
+file behind. An unanswered question fails closed; a `git grep` exiting above 1 is git failing to
+look. `=======` is not searched for, because it is a legal Markdown heading underline. And the
+conflicted text is fenced as data with a delimiter the fence knows the name of: a conflicted file
+holds code from a branch anybody with write access pushed, which puts it in the same class as
+ticket text.
+
+Three commits, on the standing rule that a thing is built inert before it is wired: `syncWithBase`
+and `attachSynced` (the base merged in before a round), `beginMerge`/`acceptResolution` and the
+`merge` pass (built, called by nothing), then the wiring — `advance` and the daemon's
+`createReviewAct` both choosing the round from the checkout rather than from the survey. 2308
+tests; eleven mutations this stage, eleven caught, one of them only after `review-cycle.test.ts`
+grew a row for it.
+
+**A gap it does not close, found while writing it: the review round has no `verifyBase`.**
+`verifyBase` is called from `solveTicket` and nowhere else, so `resolveReview`'s `failed` is not
+relative to a base anyone proved green. On the solve path a red build before the change is
+`unusable-base` and says so; on a review round the same redness is attributed to the round. Now
+that the base is merged in every round, a base that is broken upstream lands in the branch and
+the round takes the blame for it. Recorded, not fixed.
 
 ### 7. Sendback subscription — watching the nearly-solvable (F)
 
