@@ -9,9 +9,11 @@ import { describe, expect, it, vi } from "vitest";
 // unused is the small, real sign of that change.
 import type { Pass, SolveRunOptions } from "./runner.ts";
 import {
+  type ConflictRoundRequest,
   type PassRunner,
   type SolveDependencies,
   type SolveRequest,
+  resolveConflict,
   resolveReview,
   solveTicket,
   solveWithRetry,
@@ -1164,6 +1166,295 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, reviewRequest);
 
     expect(outcome.kind).toBe("resolved");
+  });
+});
+
+/**
+ * The guards on a round that resolves a merge conflict.
+ *
+ * The subject here is not whether the model resolves anything well — nothing in
+ * this file can know that. It is that **the harness believes git and not the
+ * report**, and that every way this round can end badly leaves the checkout
+ * exactly as it was found. A conflicted tree left on disk is not a mess, it is
+ * the state the next tick's reuse check moves aside and rebuilds, which is how
+ * one wedged pull request made fifteen salvaged worktrees.
+ */
+const CONFLICTED_FILE = "src/utils/DateUtils.ts";
+
+const merge = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  resolved: true,
+  resolutions: [
+    {
+      path: CONFLICTED_FILE,
+      took: "both",
+      why: "kept the branch's constructor fix and main's new named export",
+    },
+  ],
+  summary: "merged origin/main, keeping both sides of the date helper",
+  abandoned: "",
+  injectionNoticed: "",
+  ...overrides,
+});
+
+/** Matches the first time only, which is how a two-state git read is scripted. */
+function once(match: (argv: readonly string[]) => boolean) {
+  let spent = false;
+  return (argv: readonly string[]): boolean => {
+    if (spent || !match(argv)) {
+      return false;
+    }
+    spent = true;
+    return true;
+  };
+}
+
+/**
+ * A branch seven commits behind, conflicting in one file, resolved by the pass.
+ *
+ * The `--diff-filter=U` read answers twice and differently on purpose: once
+ * before the pass, where it is the conflict, and once after, where an empty
+ * answer is what *resolved* means. A fake that answered the same both times
+ * would make the second read untestable, and that read is the whole gate.
+ */
+const conflicting = (): readonly Rule[] => [
+  { match: saw("rev-list", "--count"), reply: { stdout: "7\n" } },
+  { match: saw("merge", "--no-edit"), reply: { exitCode: 1, stderr: "CONFLICT (content)" } },
+  { match: once(saw("--diff-filter=U")), reply: { stdout: `${CONFLICTED_FILE}\n` } },
+  // `git grep` exits 1 when it finds nothing, which is the answer being hoped
+  // for. Left to the fake's default of exit 0 it would read as *markers found*.
+  { match: saw("grep"), reply: { exitCode: 1 } },
+];
+
+const conflictRequest: ConflictRoundRequest = {
+  ...request,
+  worktree,
+  identity: { name: "jira-police", email: "jira-police@example.invalid" },
+};
+
+/** Every argv the round ran, one string each. */
+const ranAll = (h: Harness): string[] => h.calls.map((argv) => argv.join(" "));
+const ran = (h: Harness, match: string): boolean => ranAll(h).some((line) => line.includes(match));
+
+describe("resolveConflict", () => {
+  it("resolves, verifies, commits and pushes, in that order", async () => {
+    const { h } = harness({ merge: merge() }, conflicting());
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toMatchObject({ kind: "resolved", behind: 7 });
+    const lines = ranAll(h);
+    const at = (match: string): number => lines.findIndex((line) => line.includes(match));
+    // The push is last and the verification is before the commit: a merge
+    // commit that does not build is worse on a branch under review than the
+    // conflict it replaced, because the conflict is at least visible.
+    expect(at("run test")).toBeLessThan(at("commit --no-edit"));
+    expect(at("commit --no-edit")).toBeLessThan(at(`push origin ${worktree.branch}`));
+  });
+
+  it("hands the pass git's conflicted paths, and no other pass's input", async () => {
+    const { h } = harness({ merge: merge() }, conflicting());
+
+    await resolveConflict(h.deps, conflictRequest);
+
+    const options = h.seen[0]?.options;
+    expect(options?.conflict).toContain(CONFLICTED_FILE);
+    expect(options?.conflict).toContain("origin/main");
+    // A merge is a fact about two histories, not about the review. Handing this
+    // pass the reviewer's comments would invite it to fix the ticket here, in a
+    // commit whose message says only that it merged.
+    expect(options?.reviewFeedback).toBeUndefined();
+    expect(options?.brief).toBeUndefined();
+  });
+
+  it("spends nothing when the branch already contains its base", async () => {
+    // No scripted pass: reaching one throws, which is the assertion.
+    const { h } = harness({}, [{ match: saw("rev-list", "--count"), reply: { stdout: "0\n" } }]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toEqual({ kind: "current" });
+    expect(h.seen).toEqual([]);
+  });
+
+  it("pushes a merge that no longer conflicts without paying for a pass", async () => {
+    // The base moved between the attach that found the conflict and this round.
+    const { h } = harness({}, [{ match: saw("rev-list", "--count"), reply: { stdout: "7\n" } }]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toEqual({ kind: "merged", behind: 7 });
+    expect(h.seen).toEqual([]);
+    expect(ran(h, `push origin ${worktree.branch}`)).toBe(true);
+  });
+
+  it("aborts and abandons when the pass declines to resolve it", async () => {
+    const { h } = harness(
+      {
+        merge: merge({
+          resolved: false,
+          resolutions: [],
+          abandoned: "both sides rewrote the same function and only a human knows which is wanted",
+        }),
+      },
+      conflicting(),
+    );
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toMatchObject({ kind: "abandoned" });
+    expect(ran(h, "merge --abort")).toBe(true);
+    expect(ran(h, "push")).toBe(false);
+  });
+
+  it("refuses a report naming files git never flagged, before touching the tree", async () => {
+    const { h } = harness(
+      {
+        merge: merge({
+          resolutions: [
+            { path: "src/secrets.ts", took: "branch", why: "kept ours" },
+            {
+              path: CONFLICTED_FILE,
+              took: "both",
+              why: "kept the branch's constructor fix and main's named export",
+            },
+          ],
+        }),
+      },
+      conflicting(),
+    );
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused" });
+    expect(outcome.kind === "refused" ? outcome.reason : "").toContain("src/secrets.ts");
+    // Nothing was staged, because the report describes a situation that is not
+    // the one git reported and there is no reason to believe the rest of it.
+    expect(ran(h, "add --")).toBe(false);
+    expect(ran(h, "merge --abort")).toBe(true);
+  });
+
+  it("refuses when a conflict marker survives, whatever the report says", async () => {
+    const { h } = harness({ merge: merge() }, [
+      // Ahead of `conflicting()`, whose own grep rule answers "nothing found":
+      // the fake takes the first matching rule.
+      { match: saw("grep"), reply: { exitCode: 0, stdout: `${CONFLICTED_FILE}:14:<<<<<<< HEAD` } },
+      ...conflicting(),
+    ]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    // Markers commit perfectly happily, and they fail almost every language's
+    // parser — so verification would usually catch this. *Usually* is not the
+    // standard for a commit that lands on a branch a human is reviewing.
+    expect(outcome).toMatchObject({ kind: "refused" });
+    expect(ran(h, "commit --no-edit")).toBe(false);
+    expect(ran(h, "merge --abort")).toBe(true);
+  });
+
+  it("refuses when the marker check could not run at all", async () => {
+    // `git grep` exits 1 for "nothing found" and 0 for "found something", so
+    // anything above 1 is git failing to look rather than an answer. Reading it
+    // as clean would turn every broken grep into a silent yes, which is the one
+    // direction this check must not fail in: the tree it cannot read is a tree
+    // about to be committed onto a branch under review.
+    const { h } = harness({ merge: merge() }, [
+      { match: saw("grep"), reply: { exitCode: 128, stderr: "fatal: unable to read index" } },
+      ...conflicting(),
+    ]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused" });
+    expect(ran(h, "commit --no-edit")).toBe(false);
+    expect(ran(h, "merge --abort")).toBe(true);
+  });
+
+  it("refuses when a path is still unmerged after the pass", async () => {
+    // The `--diff-filter=U` read answers the same both times, so the file the
+    // pass claimed to resolve is still conflicted.
+    const { h } = harness({ merge: merge() }, [
+      { match: saw("rev-list", "--count"), reply: { stdout: "7\n" } },
+      { match: saw("merge", "--no-edit"), reply: { exitCode: 1 } },
+      { match: saw("--diff-filter=U"), reply: { stdout: `${CONFLICTED_FILE}\n` } },
+      { match: saw("grep"), reply: { exitCode: 1 } },
+    ]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused" });
+    expect(outcome.kind === "refused" ? outcome.reason : "").toContain("still unmerged");
+    expect(ran(h, "commit --no-edit")).toBe(false);
+  });
+
+  it("refuses when the pass changed something the merge did not conflict on", async () => {
+    const { h } = harness({ merge: merge() }, [
+      ...conflicting(),
+      // The unstaged read, which is everything the pass touched outside the
+      // paths that were staged as resolved.
+      {
+        match: (argv) =>
+          argv.includes("--name-only") && !argv.includes("--diff-filter=U") && !argv.includes("-z"),
+        reply: { stdout: "src/app/head.tsx\n" },
+      },
+    ]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused" });
+    expect(ran(h, "commit --no-edit")).toBe(false);
+    expect(ran(h, "merge --abort")).toBe(true);
+  });
+
+  it("refuses when the pass left a new file behind", async () => {
+    const { h } = harness({ merge: merge() }, [
+      ...conflicting(),
+      { match: saw("ls-files", "--others"), reply: { stdout: "src/app/notes.md\n" } },
+    ]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    // The same hole the diff gate had: a bound that only reads tracked files
+    // bounds nothing, because writing a new one steps straight past it.
+    expect(outcome).toMatchObject({ kind: "refused" });
+    expect(ran(h, "commit --no-edit")).toBe(false);
+  });
+
+  it("aborts rather than pushing a merge whose tests are red", async () => {
+    const { h } = harness({ merge: merge() }, [
+      ...conflicting(),
+      { match: saw("run", "test"), reply: { exitCode: 1 } },
+    ]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed" });
+    expect(ran(h, "push")).toBe(false);
+    expect(ran(h, "merge --abort")).toBe(true);
+  });
+
+  it("undoes the merge commit when the push fails", async () => {
+    const { h } = harness({ merge: merge() }, [
+      ...conflicting(),
+      { match: saw("push"), reply: { exitCode: 1, stderr: "rejected" } },
+    ]);
+
+    const outcome = await resolveConflict(h.deps, conflictRequest);
+
+    // `merge --abort` cannot help here: the merge is committed, so `ORIG_HEAD`
+    // is the only route back. Without it the checkout is ahead of `origin`,
+    // which is the state the next attach salvages.
+    expect(outcome).toMatchObject({ kind: "refused" });
+    expect(ran(h, "reset --hard ORIG_HEAD")).toBe(true);
+  });
+
+  it("stages only the paths git flagged, never everything it finds", async () => {
+    const { h } = harness({ merge: merge() }, conflicting());
+
+    await resolveConflict(h.deps, conflictRequest);
+
+    const add = h.calls.find((argv) => argv.includes("add"));
+    expect(add?.slice(-2)).toEqual(["--", CONFLICTED_FILE]);
+    expect(add).not.toContain("-A");
   });
 });
 

@@ -47,26 +47,37 @@
  * from the attach path, where three cheap attempts stall the pull request for a
  * human instead of buying seventeen more copies of the same answer.
  *
- * ## Conflicts are reported, never resolved silently, and never left in place
- *
- * A conflicted merge is aborted before this function returns, and the paths are
- * handed back for a caller to act on. Two things it deliberately does not do:
+ * ## Conflicts are never resolved silently, and never left lying about
  *
  * - **No `-X ours` or `-X theirs`.** A whole-side strategy resolves a conflict
  *   by discarding one author's change unread, and it does it to every file at
- *   once. That is the one outcome worse than refusing.
+ *   once. That is the one outcome worse than refusing. A conflict is resolved
+ *   by something that read both sides, or it is not resolved.
  * - **No half-finished merge left on disk.** Conflict markers in the working
- *   tree are uncommitted changes, so leaving them would make the next tick's
- *   reuse check salvage the checkout — the loop would tidy away the very state
- *   the resolver was supposed to look at. The merge is cheap to redo and
- *   deterministic, so the resolver re-runs it under its own supervision.
+ *   tree are uncommitted changes, so leaving them makes the next tick's reuse
+ *   check salvage the checkout — the loop tidies away the very state a resolver
+ *   was supposed to look at.
+ *
+ * That second rule is why the merge is split in two. {@link syncWithBase} is
+ * for callers who cannot resolve anything: it aborts a conflict and reports the
+ * paths. {@link beginMerge} is for the one caller that can, and is the only
+ * function here that returns with a merge still in progress — a handover,
+ * owed either a {@link commitMerge} or an {@link abortMerge} by whoever took
+ * it. Both spellings of *merge the base in* are the same six commands, because
+ * the alternative is two of them drifting over what counts as a conflict.
  */
 
 import { logger } from "../logger.ts";
 import { isWorkBranch } from "./branch.ts";
 import type { BotIdentity } from "./pr.ts";
 import { attachWorktree, BASE_REF, failed, why } from "./worktree.ts";
-import type { AttachRequest, CommandOptions, CommandRunner, WorktreeResult } from "./worktree.ts";
+import type {
+  AttachRequest,
+  CommandOptions,
+  CommandResult,
+  CommandRunner,
+  WorktreeResult,
+} from "./worktree.ts";
 
 export interface BaseSyncRequest {
   readonly issueKey: string;
@@ -108,24 +119,281 @@ const MAX_CONFLICT_FILES = 20;
  */
 const refuse = (reason: string): BaseSyncResult => ({ outcome: "refused", reason });
 
+/** git, in the checkout, as nobody in particular — for reads and for `--abort`. */
+const gitIn = (worktreePath: string, ...argv: readonly string[]): readonly string[] => [
+  "git",
+  "-C",
+  worktreePath,
+  ...argv,
+];
+
 /**
- * Merges the base into the checkout and pushes the result, or explains itself.
+ * git, in the checkout, with a name on whatever it commits.
+ *
+ * `-c` before `-C`, copied from `pr.ts` and load-bearing rather than
+ * stylistic: after `-C`, git parses these as arguments to the subcommand and
+ * the commit is attributed to whatever global config the machine happens to
+ * carry, or to nobody at all. Passing the identity per invocation also keeps it
+ * out of the worktree's own config, where it would outlive this command and
+ * sign whatever ran next.
+ */
+const signedGit = (
+  worktreePath: string,
+  identity: BotIdentity,
+  ...argv: readonly string[]
+): readonly string[] => [
+  "git",
+  "-c",
+  `user.name=${identity.name}`,
+  "-c",
+  `user.email=${identity.email}`,
+  "-C",
+  worktreePath,
+  ...argv,
+];
+
+/**
+ * The paths git says are conflicted, capped, newest read each time.
+ *
+ * Empty when the read itself failed, which callers must not read as *resolved*:
+ * every one of them uses this either to describe a conflict that has already
+ * been reported by a non-zero merge, or to confirm a resolution — and in the
+ * second case an unreadable answer has to fail closed. Both call sites do.
+ */
+export async function conflictedPaths(
+  runner: CommandRunner,
+  worktreePath: string,
+  timeoutMs: number,
+): Promise<readonly string[]> {
+  const conflicts = await runner.run(
+    gitIn(worktreePath, "diff", "--name-only", "--diff-filter=U"),
+    { cwd: worktreePath, timeoutMs },
+  );
+  if (failed(conflicts)) {
+    return [];
+  }
+  return conflicts.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .slice(0, MAX_CONFLICT_FILES);
+}
+
+/**
+ * Puts the checkout back the way it was found, and says whether it managed to.
+ *
+ * Called on every path that leaves a merge unfinished, including the ones that
+ * are already refusing for some other reason: a half-merged tree is
+ * uncommitted changes, so leaving one makes the next tick's reuse check salvage
+ * the checkout rather than reuse it.
+ */
+export async function abortMerge(
+  runner: CommandRunner,
+  worktreePath: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const aborted = await runner.run(gitIn(worktreePath, "merge", "--abort"), {
+    cwd: worktreePath,
+    timeoutMs,
+  });
+  if (failed(aborted)) {
+    logger.error("solve.base.abort_failed", { worktreePath, reason: why(aborted) });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Commits a merge whose conflicts somebody has resolved in the working tree.
+ *
+ * `--no-edit` for the reason the merge itself uses it: git's own merge wording
+ * is what commitlint's default ignores are written against, and a subject of
+ * our own invention would have to be Conventional Commits to survive the pilot
+ * repository's hook. It is also not ours to invent — the accurate description
+ * of this commit is *merge, with conflicts resolved*, and git already says that.
+ */
+export async function commitMerge(
+  runner: CommandRunner,
+  request: Pick<BaseSyncRequest, "worktreePath" | "identity" | "timeoutMs">,
+): Promise<CommandResult> {
+  const { worktreePath, identity, timeoutMs } = request;
+  return await runner.run(signedGit(worktreePath, identity, "commit", "--no-edit"), {
+    cwd: worktreePath,
+    timeoutMs,
+  });
+}
+
+export type PushResult =
+  | { readonly outcome: "pushed" }
+  /** The push failed and the merge has been undone. Nothing is left locally. */
+  | { readonly outcome: "refused"; readonly reason: string };
+
+/**
+ * Pushes the branch, and undoes the merge if it will not go.
+ *
+ * The undo is what keeps *"origin is the single answer to what is on this
+ * branch"* true. `ORIG_HEAD` is set by `git merge` and names the commit the
+ * branch was on immediately before it — and `git commit` does not move it, so
+ * this discards our own merge commit and nothing else whether the merge
+ * committed itself or a resolver committed it afterwards. The tree was proved
+ * clean before the merge began, so there is no other work here to lose.
+ */
+export async function pushBranch(
+  runner: CommandRunner,
+  request: Pick<BaseSyncRequest, "issueKey" | "branch" | "worktreePath" | "timeoutMs">,
+): Promise<PushResult> {
+  const { issueKey, branch, worktreePath, timeoutMs } = request;
+  const opts: CommandOptions = { cwd: worktreePath, timeoutMs };
+
+  const pushed = await runner.run(gitIn(worktreePath, "push", "origin", branch), opts);
+  if (!failed(pushed)) {
+    return { outcome: "pushed" };
+  }
+
+  const undone = await runner.run(gitIn(worktreePath, "reset", "--hard", "ORIG_HEAD"), opts);
+  if (failed(undone)) {
+    logger.error("solve.base.undo_failed", { issueKey, branch, reason: why(undone) });
+  }
+  return {
+    outcome: "refused",
+    reason: `merged into ${branch} but could not push it (${why(pushed)})`,
+  };
+}
+
+export type ResolutionCheck =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * The resolution is not accepted, and the caller owes the checkout an abort.
+ *
+ * Every `false` from {@link acceptResolution} leaves a merge in progress, which
+ * is the one thing about that function a caller cannot forget and be fine.
+ */
+const decline = (reason: string): ResolutionCheck => ({ ok: false, reason });
+
+/**
+ * A conflict marker at the start of a line, which is git's own spelling.
+ *
+ * `=======` is deliberately absent: it is a legal Markdown heading underline
+ * and a legal line of a hundred other things, so matching it would refuse
+ * resolutions that are correct. The two arrow markers and the `|||||||` of a
+ * diff3 merge cannot occur by accident at the start of a line followed by a
+ * space, and one of them is always present when a hunk is left unresolved.
+ */
+const CONFLICT_MARKER = "^(<<<<<<<|>>>>>>>|\\|\\|\\|\\|\\|\\|\\|) ";
+
+/**
+ * Checks that a resolution resolved the conflict, and nothing else.
+ *
+ * The model's own report is not consulted here on purpose. A pass that says it
+ * resolved three files has made a claim about a working tree it also had write
+ * access to, which is the one kind of assertion this service never takes on
+ * trust — so every question below is asked of git, and the answers are exit
+ * codes rather than prose.
+ *
+ * Four questions, and the last two are the bound rather than the check:
+ *
+ * 1. **Are any paths still unmerged?** The direct question, asked after the
+ *    conflicted paths are staged, since staging is what marks one resolved.
+ * 2. **Is a conflict marker left in any of them?** A pass can stage a file with
+ *    the markers still in it, and git will commit that happily. It compiles in
+ *    almost no language, so verification would usually catch it — *usually* is
+ *    not the standard for a commit that lands on a branch under review.
+ * 3. **Was anything outside the conflicted set changed?** The merge itself
+ *    already changed other files, and those arrive staged; an *unstaged* change
+ *    is one the pass made, and this round is not the place to make it.
+ * 4. **Was a new file left behind?** Same rule, by the route the diff gate
+ *    learned the hard way: a bound that only looks at tracked files does not
+ *    bound anything, because writing a new file evades it entirely.
+ */
+export async function acceptResolution(
+  runner: CommandRunner,
+  request: {
+    readonly worktreePath: string;
+    /** The paths git marked conflicted, read before the pass ran. */
+    readonly conflicted: readonly string[];
+    readonly timeoutMs: number;
+  },
+): Promise<ResolutionCheck> {
+  const { worktreePath, conflicted, timeoutMs } = request;
+  const opts: CommandOptions = { cwd: worktreePath, timeoutMs };
+
+  // Exactly the paths git marked, never `-A`. Staging is the act that says
+  // "this one is resolved", so staging a path git did not complain about would
+  // be answering a question nobody asked.
+  const staged = await runner.run(gitIn(worktreePath, "add", "--", ...conflicted), opts);
+  if (failed(staged)) {
+    return decline(`could not stage the resolved files (${why(staged)})`);
+  }
+
+  const unmerged = await conflictedPaths(runner, worktreePath, timeoutMs);
+  if (unmerged.length > 0) {
+    return decline(`still unmerged after the pass: ${unmerged.join(", ")}`);
+  }
+
+  // `git grep` with no revision searches the working tree. Exit 1 is "no
+  // matches", which is the answer being hoped for; anything above 1 is git
+  // failing to look, and an unanswered question fails closed.
+  const markers = await runner.run(
+    gitIn(worktreePath, "grep", "-I", "-n", "-E", CONFLICT_MARKER, "--", ...conflicted),
+    opts,
+  );
+  if (markers.timedOut || markers.exitCode > 1) {
+    return decline(`could not check for leftover conflict markers (${why(markers)})`);
+  }
+  if (markers.exitCode === 0) {
+    return decline(
+      `conflict markers are still in the tree: ${markers.stdout.trim().slice(0, 300)}`,
+    );
+  }
+
+  const stray = await runner.run(gitIn(worktreePath, "diff", "--name-only"), opts);
+  if (failed(stray)) {
+    return decline(`could not check what else the pass changed (${why(stray)})`);
+  }
+  if (stray.stdout.trim() !== "") {
+    return decline(
+      `the pass changed files the merge did not conflict on: ${stray.stdout.trim().split("\n").join(", ").slice(0, 300)}`,
+    );
+  }
+
+  const untracked = await runner.run(
+    gitIn(worktreePath, "ls-files", "--others", "--exclude-standard"),
+    opts,
+  );
+  if (failed(untracked)) {
+    return decline(`could not check for new files (${why(untracked)})`);
+  }
+  if (untracked.stdout.trim() !== "") {
+    return decline(
+      `the pass left new files behind: ${untracked.stdout.trim().split("\n").join(", ").slice(0, 300)}`,
+    );
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Merges the base in and stops there — **including when it conflicts**.
+ *
+ * The one function in this module that can return with a merge still in
+ * progress on disk, which is the whole reason it is separate from
+ * {@link syncWithBase}: a resolver needs the conflict markers to look at, and
+ * every other caller needs them gone. So `conflicted` here is a *handover*, and
+ * whoever receives it owes the checkout either {@link commitMerge} or
+ * {@link abortMerge} before it is left alone.
  *
  * Reads first and writes only if it must: a branch that already contains its
- * base costs two `rev-parse`-class commands and returns `current`.
+ * base costs three read-only commands and returns `current`.
  */
-export async function syncWithBase(
+export async function beginMerge(
   runner: CommandRunner,
   request: BaseSyncRequest,
 ): Promise<BaseSyncResult> {
   const { issueKey, branch, worktreePath, baseRef, identity, timeoutMs } = request;
   const opts: CommandOptions = { cwd: worktreePath, timeoutMs };
-  const git = (...argv: readonly string[]): readonly string[] => [
-    "git",
-    "-C",
-    worktreePath,
-    ...argv,
-  ];
+  const git = (...argv: readonly string[]): readonly string[] => gitIn(worktreePath, ...argv);
 
   // Re-checked here rather than assumed of the caller, for the reason
   // `attachWorktree` re-checks it: this function makes a commit and pushes it,
@@ -187,76 +455,61 @@ export async function syncWithBase(
   // pilot repository runs commitlint on every commit, whose default ignores
   // cover git's merge wording and would reject a hand-written subject that did
   // not happen to be Conventional Commits.
-  //
-  // `-c` before `-C`, per `pr.ts`: passing the identity per invocation means it
-  // cannot be left behind in the worktree's config for whatever runs next.
   const merged = await runner.run(
-    [
-      "git",
-      "-c",
-      `user.name=${identity.name}`,
-      "-c",
-      `user.email=${identity.email}`,
-      "-C",
-      worktreePath,
-      "merge",
-      "--no-edit",
-      baseRef,
-    ],
+    signedGit(worktreePath, identity, "merge", "--no-edit", baseRef),
     opts,
   );
-  if (failed(merged)) {
-    const conflicts = await runner.run(git("diff", "--name-only", "--diff-filter=U"), opts);
-    const files = failed(conflicts)
-      ? []
-      : conflicts.stdout
-          .split("\n")
-          .map((line) => line.trim())
-          .filter((line) => line !== "");
-
-    // Aborted whether or not the paths could be read, and the abort's own
-    // failure does not change the answer: what matters is that no half-merged
-    // tree is left for the next tick's reuse check to salvage. A failed abort
-    // is logged and the checkout is unusable either way, which the caller finds
-    // out on the next attach rather than being told twice here.
-    const aborted = await runner.run(git("merge", "--abort"), opts);
-    if (failed(aborted)) {
-      logger.error("solve.base.abort_failed", { issueKey, branch, reason: why(aborted) });
-    }
-
-    if (files.length === 0) {
-      // No conflicted paths means the merge failed for some other reason — a
-      // hook, a lock, an unrelated local modification git noticed first — and
-      // that is not something a resolver can be handed.
-      return refuse(`could not merge ${baseRef} into ${branch} (${why(merged)})`);
-    }
-    logger.warn("solve.base.conflicted", {
-      issueKey,
-      branch,
-      baseRef,
-      behind,
-      files: files.slice(0, MAX_CONFLICT_FILES),
-    });
-    return { outcome: "conflicted", behind, files: files.slice(0, MAX_CONFLICT_FILES) };
+  if (!failed(merged)) {
+    return { outcome: "merged", behind };
   }
 
-  const pushed = await runner.run(git("push", "origin", branch), opts);
-  if (failed(pushed)) {
-    // Undone, because a merge that only exists locally is the state
-    // `attachWorktree` salvages: next tick sees the checkout ahead of `origin`,
-    // moves it aside and rebuilds. `ORIG_HEAD` is set by the merge itself and
-    // names the commit this branch was on a moment ago, so this discards our
-    // own merge commit and nothing else — the tree was proved clean above, so
-    // there is no other work here to lose.
-    const undone = await runner.run(git("reset", "--hard", "ORIG_HEAD"), opts);
-    if (failed(undone)) {
-      logger.error("solve.base.undo_failed", { issueKey, branch, reason: why(undone) });
-    }
-    return refuse(`merged ${baseRef} into ${branch} but could not push it (${why(pushed)})`);
+  const files = await conflictedPaths(runner, worktreePath, timeoutMs);
+  if (files.length === 0) {
+    // No conflicted paths means the merge failed for some other reason — a
+    // hook, a lock, an unrelated local modification git noticed first — and
+    // that is not something a resolver can be handed. Aborted here rather than
+    // by the caller, because the caller is being told there is no conflict and
+    // would have no reason to think there was anything to clean up.
+    await abortMerge(runner, worktreePath, timeoutMs);
+    return refuse(`could not merge ${baseRef} into ${branch} (${why(merged)})`);
+  }
+  logger.warn("solve.base.conflicted", { issueKey, branch, baseRef, behind, files });
+  return { outcome: "conflicted", behind, files };
+}
+
+/**
+ * Merges the base into the checkout and pushes the result, or explains itself.
+ *
+ * {@link beginMerge} plus the two endings a caller who cannot resolve a
+ * conflict needs: push what merged cleanly, abort what did not. Everything
+ * that only wants a current branch calls this one.
+ */
+export async function syncWithBase(
+  runner: CommandRunner,
+  request: BaseSyncRequest,
+): Promise<BaseSyncResult> {
+  const { issueKey, branch, worktreePath, baseRef, timeoutMs } = request;
+
+  const started = await beginMerge(runner, request);
+  if (started.outcome === "conflicted") {
+    // Aborted whether or not the abort works: what matters is that no
+    // half-merged tree is left for the next tick's reuse check to salvage, and
+    // a checkout that would not abort is unusable either way — which the caller
+    // finds out on the next attach rather than being told twice here.
+    await abortMerge(runner, worktreePath, timeoutMs);
+    return started;
+  }
+  if (started.outcome !== "merged") {
+    return started;
   }
 
-  logger.info("solve.base.merged", { issueKey, branch, baseRef, behind });
-  return { outcome: "merged", behind };
+  const pushed = await pushBranch(runner, request);
+  if (pushed.outcome === "refused") {
+    return refuse(pushed.reason);
+  }
+
+  logger.info("solve.base.merged", { issueKey, branch, baseRef, behind: started.behind });
+  return started;
 }
 
 export interface SyncedAttachRequest extends AttachRequest {

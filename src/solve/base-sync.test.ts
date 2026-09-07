@@ -39,7 +39,7 @@ function fakeGit(replies: Readonly<Record<string, CommandResult>> = {}): Command
       calls.push([...argv]);
       const line = argv.join(" ");
       const key = Object.keys(replies).find((match) => line.includes(match));
-      return Promise.resolve(key === undefined ? OK : replies[key]);
+      return Promise.resolve(key === undefined ? OK : (replies[key] ?? OK));
     },
   };
 }
