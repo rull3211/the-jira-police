@@ -135,8 +135,23 @@ function payload(overrides: Record<string, unknown> = {}): string {
 
 const HEAD_SHA = "9f1c2ab3d4e5f60718293a4b5c6d7e8f90a1b2c3";
 
-/** A review that said something, so the chrome tests have something to keep. */
-const APPROVED = "### 🟢 Approval recommended\n\nThe change is narrowly scoped.";
+/**
+ * A review that said something, so the chrome tests have something to keep.
+ *
+ * The 🟡 heading and not the 🟢 one, which this fixture used to carry: a green
+ * light is now dropped from `comments` in its own right, so the chrome tests
+ * would have passed on a body that never reached them and stopped testing
+ * chrome the day the green-light rule landed.
+ */
+const SUBSTANTIVE = "### 🟡 Changes recommended\n\nOne thing below.";
+
+/**
+ * Copilot's approval heading, copied rather than paraphrased.
+ *
+ * The `###` is part of it: what arrives is a markdown heading, and a matcher
+ * written against a bare phrase would pass a fixture and miss the real thing.
+ */
+const GREEN_LIGHT = "### 🟢 Approval recommended\n\nThe change is narrowly scoped.";
 
 /**
  * Copilot's trailing promotional block, copied from PR #1413 rather than
@@ -922,12 +937,12 @@ describe("readReview", () => {
     // publicly, so a timezone bugfix carried a paragraph about not adding a
     // SKILL.md.
     const runner = fakeRunner(
-      view(payload({ reviews: [{ author: { login: "copilot" }, body: APPROVED + PROMO }] })),
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: SUBSTANTIVE + PROMO }] })),
     );
 
     const result = await readReview(runner, reviewRequest());
 
-    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toBe(APPROVED);
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toBe(SUBSTANTIVE);
   });
 
   it("leaves the same footer alone when a human quotes it", async () => {
@@ -968,6 +983,200 @@ describe("readReview", () => {
 
     // Still a response — the reviewer spoke — but there is nothing in it to act on.
     expect(result.outcome === "read" && result.review.anyoneResponded).toBe(true);
+    expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
+  });
+
+  // Copied from PR #2663, where two of these cost rounds 7 and 9.
+  const DEPLOY_NOTICE = ":rocket: Application Deployed\n\nhttps://pr-2663.example.dev";
+
+  it("does not spend a round answering a deployment notice", async () => {
+    // The notice classified as `human`, and human rounds are exempt from
+    // `MAX_REVIEW_ITERATIONS`, so continuous integration was the one input to
+    // this loop that could spend without a cap.
+    const runner = fakeRunner(
+      view(payload({ comments: [{ author: { login: "github-actions" }, body: DEPLOY_NOTICE }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
+  });
+
+  it("does not let a deployment notice stand in for a reviewer having responded", async () => {
+    // Filter automation out of `comments` alone and this is what is left: an
+    // empty inbox plus somebody having spoken, which is exactly the shape
+    // `advance` undrafts on. A draft pull request would be handed to a human on
+    // the strength of a robot saying a URL exists.
+    const runner = fakeRunner(
+      view(payload({ comments: [{ author: { login: "github-actions" }, body: DEPLOY_NOTICE }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" && result.review.anyoneResponded).toBe(false);
+  });
+
+  it("does not let a deployment notice reset the silence clock", async () => {
+    // The notice is triggered by our own push, so counting it would let the
+    // loop restart its own clock every round and never notice a reviewer that
+    // has gone away.
+    const runner = fakeRunner(
+      view(
+        payload({
+          comments: [
+            {
+              author: { login: "github-actions" },
+              body: DEPLOY_NOTICE,
+              createdAt: "2026-09-07T09:00:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.newestAt : null).toBe("");
+  });
+
+  it.each(["github-actions", "github-actions[bot]"])(
+    "recognises the automation account spelled %j",
+    async (login) => {
+      // `gh pr view --json` returned the bare name on #2663; GraphQL and the
+      // events API say `[bot]`. Keying on one spelling works until the comment
+      // arrives over the other transport.
+      const runner = fakeRunner(view(payload({ comments: [{ author: { login } }] })));
+
+      const result = await readReview(runner, reviewRequest());
+
+      expect(result.outcome === "read" && result.review.anyoneResponded).toBe(false);
+    },
+  );
+
+  it("keeps a comment from a bot that is not on the automation list", async () => {
+    // Deliberately not `*[bot]`. A list wide enough to swallow a reviewer would
+    // silence the review itself and look exactly like a reviewer that never
+    // answered — the one failure nobody recovers from by noticing.
+    const runner = fakeRunner(
+      view(
+        payload({ comments: [{ author: { login: "dependabot[bot]" }, body: "bump the lock" }] }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments : []).toHaveLength(1);
+  });
+
+  it("reads the requested reviewer even if it is named on the automation list", async () => {
+    // The second lock on the door the narrow list is already holding: whoever
+    // was asked for a review is a party to it, whatever else they are.
+    const runner = fakeRunner(
+      view(
+        payload({ comments: [{ author: { login: "github-actions" }, body: "one thing below" }] }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest({ reviewer: "github-actions" }));
+
+    expect(result.outcome === "read" ? result.review.comments : []).toHaveLength(1);
+  });
+
+  it("does not spend a round acknowledging the reviewer's approval", async () => {
+    // #2661's `bot: round 1` and #2663's `round 6` are both paid passes whose
+    // entire published output was a sentence noting that the reviewer approved.
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: GREEN_LIGHT }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
+  });
+
+  it("still counts the approval as the reviewer having responded, so the PR can undraft", async () => {
+    // **The mutation this exists for.** Drop the green light from
+    // `anyoneResponded` as well as from `comments` and a pull request whose
+    // only response is an approval never undrafts: `advance` returns `waiting`
+    // on every tick and it sits in draft until the silence brake gives up. Two
+    // drops at deliberately different depths — automation is not an event, an
+    // approval is an event with nothing in it.
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: GREEN_LIGHT }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" && result.review.anyoneResponded).toBe(true);
+  });
+
+  it("counts the approval on the silence clock too", async () => {
+    const runner = fakeRunner(
+      view(
+        payload({
+          reviews: [
+            {
+              author: { login: "copilot" },
+              body: GREEN_LIGHT,
+              submittedAt: "2026-09-07T09:00:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.newestAt : null).toBe("2026-09-07T09:00:00Z");
+  });
+
+  it("keeps the same words when they come from somebody who is not the reviewer", async () => {
+    // Scoped to the reviewer on exactly the grounds the error-notice drop is. A
+    // person writing "approval recommended" is a person approving, and a person
+    // approving in a comment often asks for something in the next sentence.
+    const runner = fakeRunner(
+      view(payload({ comments: [{ author: { login: "a-human" }, body: GREEN_LIGHT }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments : []).toHaveLength(1);
+  });
+
+  it("reads a review that only quotes the approval heading", async () => {
+    // Match anywhere in the body rather than on the verdict line and this
+    // review disappears — a dropped review is a request nobody answers, and
+    // nothing says so.
+    const body =
+      "### 🔵 Needs a closer look\n\nThe earlier `### 🟢 Approval recommended` was premature.";
+    const runner = fakeRunner(view(payload({ reviews: [{ author: { login: "copilot" }, body }] })));
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.body : null).toBe(body);
+  });
+
+  it.each([
+    ["the marker without the phrase", "### 🟢 Looks good\n\nOne nit below."],
+    ["the phrase without the marker", "Approval recommended, but read the note first."],
+  ])("keeps a verdict line carrying %s", async (_case, body) => {
+    // Both fragments are required, exactly as `REVIEWER_ERROR` needs two: the
+    // phrase alone is something a reviewer plausibly writes on the way to
+    // asking for a change, and the marker alone is a green circle.
+    const runner = fakeRunner(view(payload({ reviews: [{ author: { login: "copilot" }, body }] })));
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments : []).toHaveLength(1);
+  });
+
+  it("finds the verdict line under a blank first line", async () => {
+    const runner = fakeRunner(
+      view(payload({ reviews: [{ author: { login: "copilot" }, body: `\n\n${GREEN_LIGHT}` }] })),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
   });
 

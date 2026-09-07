@@ -573,6 +573,113 @@ describe("advance", () => {
     expect(h.seen).toEqual([]);
   });
 
+  it("undrafts on an approval instead of paying a round to acknowledge it", async () => {
+    // The whole point of dropping the green light, end to end: the reviewer has
+    // said it wants nothing, so the inbox is empty and the pull request goes to
+    // a human for free. `h.seen` empty is the saving — #2661's `bot: round 1`
+    // and #2663's `round 6` were both paid passes that produced a sentence
+    // noting an approval.
+    //
+    // **And `ready` rather than `waiting` is the guard the user asked for.**
+    // Drop the green light from `anyoneResponded` as well as from `comments`
+    // and this goes red with `waiting`: the pull request stays a draft, on
+    // every tick, until the silence brake gives up on a reviewer that already
+    // answered.
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: JSON.stringify({
+            state: "OPEN",
+            isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
+            reviews: [
+              {
+                author: { login: "copilot" },
+                body: "### 🟢 Approval recommended\n\nThe change is narrowly scoped.",
+              },
+            ],
+            comments: [],
+            reviewRequests: [],
+          }),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(ran(h, "pr", "ready")).toBe(true);
+    expect(h.seen).toEqual([]);
+  });
+
+  it("keeps waiting when the only thing on the pull request is a deploy notice", async () => {
+    // The opposite depth, and the reason the two escapes are not one rule.
+    // Continuous integration is not a party to the review, so its notice must
+    // not open the gate — undrafting here would hand a human a pull request no
+    // reviewer had looked at, on the strength of a robot saying a URL exists.
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: JSON.stringify({
+            state: "OPEN",
+            isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
+            reviews: [],
+            comments: [
+              {
+                author: { login: "github-actions" },
+                body: ":rocket: Application Deployed\n\nhttps://pr-2663.example.dev",
+                createdAt: "2026-09-05T09:30:00Z",
+              },
+            ],
+            reviewRequests: [],
+          }),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "waiting" });
+    expect(ran(h, "pr", "ready")).toBe(false);
+    expect(h.seen).toEqual([]);
+  });
+
+  it("measures the silence from the reviewer's last word, not from the last deploy", async () => {
+    // The notice is triggered by our own push, so counting it would let the
+    // loop reset its own clock every round: a reviewer that has gone away would
+    // never look quiet, and the silence brake would never fire.
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: JSON.stringify({
+            state: "OPEN",
+            isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
+            reviews: [],
+            comments: [
+              {
+                author: { login: "github-actions" },
+                body: ":rocket: Application Deployed",
+                createdAt: "2026-09-05T09:59:00Z",
+              },
+            ],
+            reviewRequests: [],
+          }),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    // A full hour from the pull request's own creation. Count the notice and
+    // this reads one minute instead.
+    expect(outcome).toEqual({ kind: "waiting", quietMs: 3_600_000 });
+  });
+
   it("resolves a round, pushes it and asks the reviewer again", async () => {
     const h = harness({ review: review() });
 
