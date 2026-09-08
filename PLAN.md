@@ -402,13 +402,10 @@ RETROFIT` as a verdict and named an untraceable commit as evidence of it; the re
   alleging invention, and it was relayed at full strength. The evidence supported "not in
   `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
   delegated on the two sharpest accusations.
-- **A line number read without its context.** This entry claimed `test-hooks.sh:93` _asserted_ the
-  bare-push hole by listing `git push` among the commands that must stay silent. It does not: twelve
-  lines above it the fixture switches to `feat/ordinary`, where allowing a bare push is correct. The
-  hole was only ever that no case exercised a protected branch. Shipped to `main` in `e9483c1`,
-  caught the next day by running the guard instead of re-reading it — which is the same _cite
-  `file:line`, never a recollection_ rule failing in its other direction: the citation was exact and
-  the reading of it was not.
+- **A line number read without its context**, and the only one of the four that reached `main`. It
+  is therefore the only one that outlives this entry: the record is under
+  [what was learned](#a-citation-can-be-exact-and-still-be-read-wrongly-and-that-one-shipped), so
+  that deleting §13 does not delete a correction to something shipped.
 
 **What would make this the wrong idea.** Two things. The prose corrections that already shipped
 read, at a glance, as weakening the rules — they are not: _never work on `main`_ and _a human
@@ -475,6 +472,30 @@ mechanism ahead of evidence. The `Stop` hook remains declined (§12).
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### A citation can be exact and still be read wrongly, and that one shipped
+
+Rescued from §13's method failures, which are deleted when that entry closes. This one survives
+because it is the only one of the four that reached `main`, and a correction to something shipped
+must outlive the audit that found it.
+
+The claim was that `test-hooks.sh:93` **asserted** the bare-push hole, by listing a push among the
+commands that must stay silent. It does not. Twelve lines above it the fixture switches to
+`feat/ordinary`, where allowing a push is correct and the assertion says so. The hole was never
+asserted or denied — it was simply that no case exercised a protected branch.
+
+Shipped to `main` in `e9483c1`, corrected the next day in `a94c005`, and found by **running the
+guard rather than re-reading the file**.
+
+**What it sharpens.** `STARTING.md` says _cite `file:line`, never a recollection_, and the failure
+here is that rule's other direction: the citation was exact, and the reading of it was wrong. A
+precise line number is evidence about **one line** and carries no information about the twelve above
+it that set up the state it runs in — while looking, in a report, exactly like a verified claim. The
+rule as written defends against vagueness; it says nothing about a precise reference read without
+its context, which is the more convincing of the two failures.
+
+One instance, so it stays here rather than becoming a rule. The second instance would earn an
+amendment to that bullet in `STARTING.md`.
 
 ### The war stories are the asset, and length pressure comes for them first
 
