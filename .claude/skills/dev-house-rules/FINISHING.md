@@ -42,11 +42,16 @@ because each is a separate act rather than a restatement of a rule:
 
 - [ ] Documents falsified → rewritten in **this** commit
 - [ ] Anything shipped → its `PLAN.md` entry deleted, not struck through
-- [ ] Structure moved → `ARCHITECTURE.md`'s map moved with it
+- [ ] Structure moved →
+      [`ARCHITECTURE.md`'s map](STARTING.md#architecturemd-is-the-map-and-this-section-is-only-how-to-read-one)
+      moved with it
 - [ ] A cited number moved, or a heading was renamed → `pnpm docs:check` is green
 - [ ] Each new guard → the mutation you watched fail, named in the commit message
 - [ ] Driven against a real target, not only its own tests
-- [ ] The capability is reachable by one command, in `package.json` and in `USAGE`
+- [ ] **A person has _used_ it** — run the command, opened the page, looked at the board. Nudge;
+      never block on it. [→](PROVING.md#step-4-is-the-one-that-gets-dropped-and-dropping-it-is-invisible)
+- [ ] The capability is reachable by one command, in `package.json` and in
+      [`USAGE`](PROVING.md#every-capability-gets-a-one-line-command-and-it-pays-for-itself-immediately)
 - [ ] The command handed over, safe form first, with what would falsify it
 - [ ] Orphans deleted in this commit — a symbol, a setting, a mechanism it replaced
 - [ ] Any merged branch deleted, **including the local ref**
@@ -73,7 +78,7 @@ measurement that can be re-taken.
 
 - a bug reached `main` without being caught
 - something was implemented wrongly and the mistake survived tests, review and a run
-- a run was paid for and taught nothing
+- a run was paid for and [taught nothing](BUILDING.md#a-failure-must-explain-itself-on-the-first-run)
 - a rule here was **followed** and the defect happened anyway — the highest-value case
 - a rule here was skipped, and would have caught it
 
@@ -107,9 +112,10 @@ things:
 
 This is not ceremony. The developer holds context the transcript does not — what was tried before,
 what a rule cost last time it was enforced, whether the incident is representative. A correction
-from them is evidence, and the right response to one is to **check before agreeing**, not to fold.
-Silently rewriting a rule destroys the argument that justified it, which is the same defect class
-this whole document is about, applied to the document itself.
+from them is evidence, and the right response to one is to
+[**check before agreeing**](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
+not to fold. Silently rewriting a rule destroys the argument that justified it, which is the same
+defect class this whole document is about, applied to the document itself.
 
 ### Where an amendment goes
 
@@ -128,17 +134,21 @@ holding.
 
 ### Keeping it honest as it grows
 
-- **Prefer amending a section to adding one.** Two sections making one argument is the violation
-  described in _two questions that agree today_, committed by the file that describes it. Check for
-  contradiction with what is already here.
+- **The rules matter more as the project grows, not less.** Everything here scales with the number
+  of things nobody has re-read lately, which is the only honest answer to "is this worth it".
+- **Prefer amending a section to adding one.** Two sections making one argument is a violation of
+  [two questions that agree today](BUILDING.md#two-questions-that-agree-today-are-still-two-questions)
+  — and the split made it easier to commit, because the second section can now be in another file
+  where nothing puts the two side by side. Check for contradiction with what is already here.
 - **Delete rules that stopped being true.** Same rule as `PLAN.md`. A rule about a subsystem that no
   longer exists is noise that makes the rest look optional.
-- **Keep the war story linked.** A rule stripped of its incident is an opinion, and the next person
-  under time pressure will correctly identify it as one. Moving the stories out of the rules was a
-  length decision, not a demotion; a rule that loses its link has lost its evidence. `pnpm
-docs:check` fails on a link that no longer resolves, so renaming a heading in `INCIDENTS.md`
-  cannot quietly disconnect the rule that cites it — which is the only reason the stories were safe
-  to move out at all.
+- **Keep the war story linked, and keep only the claim beside the rule.** A rule stripped of its
+  incident is an opinion, and the next person under time pressure will correctly identify it as one.
+  So the rule carries the one-line claim and the link; `INCIDENTS.md` carries the story. Re-telling
+  the story in both places is the cite-don't-copy rule broken by the file that states it, and it is
+  the failure this split is most likely to drift back into. `pnpm docs:check` fails on a link that no
+  longer resolves, so renaming a heading in `INCIDENTS.md` cannot quietly disconnect the rule that
+  cites it — which is the only reason the stories were safe to keep in a separate file at all.
 - **Watch for survivorship bias.** Every rule here came from a defect that was _caught_. The ones
   that escaped unnoticed wrote no rule and left no trace, so **the absence of a section is not
   evidence of the absence of a problem** — which is the strongest argument for the loop and for

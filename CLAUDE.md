@@ -18,8 +18,9 @@ rather than routed to.
 Both are enforced mechanically by `.claude/hooks/`, and the guards have their own suite:
 `pnpm test:hooks`. Run it if you change one.
 
-**Do not stack branches deeply.** Each unmerged branch gates the ones above it. When the stack
-grows, stop and ask for the base to be merged rather than building another floor on it.
+**Do not stack branches deeply** — three stacked here once turned an incremental plan into a
+waterfall. The rule and the story are in
+[`dev-house-rules/STARTING.md`](.claude/skills/dev-house-rules/STARTING.md#phase-a-privilege-and-drive-it-by-hand-first).
 
 ## The working contract, by phase
 

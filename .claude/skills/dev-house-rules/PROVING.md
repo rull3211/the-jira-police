@@ -20,15 +20,10 @@ you have shipped a decoration and a false sense of coverage, which is worse than
 State the mutation in the commit message. "Nine mutations caught" is the unit of work here.
 
 **Unplug the _plausible wrong implementation_, not the bug.** This is the refinement, and it was
-measured rather than reasoned. Replaying seven shipped assertions:
-
-| the new assertions go red against | count      |
-| --------------------------------- | ---------- |
-| the **original** bug              | **7 of 7** |
-| the **plausible wrong fix**       | **1 of 7** |
-
-Classic red-green was fully satisfied by a suite that was six-sevenths decorative. Red-green unplugs
-the _defect_; this rule unplugs the _almost-correct change_. Only the second catches anything.
+measured rather than reasoned: replaying seven shipped assertions, all seven went red against the
+original bug and **one** against the plausible wrong fix. Classic red-green unplugs the _defect_ and
+was fully satisfied by a suite that was six-sevenths decorative; this rule unplugs the
+_almost-correct change_, and only it catches anything.
 [→ the fail-first replay](INCIDENTS.md#the-fail-first-replay)
 
 **A mutation that no test can kill but the type checker does is fine** — say so where it would
@@ -126,7 +121,8 @@ you have already learned. The loop below is what does the learning.
 2. **test** — the guard, and the mutation that proves it. Then stop trusting it.
 3. **run** — dry first, because it is free, then against one named real target. Machine-checked:
    read exit codes and artifacts, never a model's claim that it worked. **A run that can fail
-   without saying why is not a turn of this loop** — it is a charge with no lesson attached.
+   without saying why is not a turn of this loop** — it is a charge with no lesson attached, so
+   [instrument the failure path first](BUILDING.md#instrument-the-failure-path-first).
 4. **human** — a person **uses the feature**: runs it, looks at what it produced, tries the case the
    ticket describes. Functional testing, not review. See below; this is the step that gets dropped.
 5. **reevaluate** — write down what the run taught, fix the prose it falsified, and re-plan the next
@@ -268,12 +264,13 @@ text, a report worth reading, and an exit code. Not a debug entry point left whe
 
 The whole queue dry is **$0**; an advance with an empty inbox is **$0** and 2.5 seconds; a review
 round on an open pull request is **$0.94**; a full solve to a bail is **$3.99**, and that is the
-cheap path. The numbers are cited above and are not re-derived here.
+cheap path. Every one of those was measured on a real run, and each is
+[recorded where it was measured](INCIDENTS.md#the-ticket-that-cost-fourteen-times-its-estimate).
 
 **Without a rung for the step you are debugging, every attempt costs the whole chain.** The review
 loop was iterated on at $0.94 a round precisely because `--advance` existed; through `--solve` each
 of those turns would have re-solved the ticket first. And the cost of learning something slowly is
-real: a wrong fitness call was paid for **three times** before it was diagnosed.
+real: a wrong fitness call was paid for **three times at $1.97** before it was diagnosed.
 [→](INCIDENTS.md#the-fitness-call-that-was-refused-three-times-for-two-wrong-reasons)
 
 The time argument is the same argument. A command turns "set up the state, then reproduce the bug"

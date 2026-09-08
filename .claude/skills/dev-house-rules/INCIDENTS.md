@@ -4,9 +4,10 @@
 generalisation of something that got through, and this is where the something lives.
 
 **Read direction: rules cite incidents.** `STARTING.md`, `BUILDING.md`, `PROVING.md` and
-`FINISHING.md` link here from the rule an incident produced. This file links back so that a rule
-being deleted (§16) can be checked against what it rested on — but nothing needs to read this file
-top to bottom, and it is not on the path of doing any work.
+`FINISHING.md` link here from the rule an incident produced. This file links back so that
+[a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against what it
+rested on — but nothing needs to read this file top to bottom, and it is not on the path of doing
+any work.
 
 **Append-only, and dated.** New incidents go at the bottom. An entry is never edited to make it look
 better; if a later run refutes it, that is a new entry, because a corrected story loses the thing
@@ -522,9 +523,10 @@ of the stack could fix. Nothing could merge until the base did.
 
 ## 2026-09-08
 
-_The four entries below came out of a single reachability-and-prose sweep. That the sweep found
-this much is itself the finding — a sweep is what you run when the discipline has already failed,
-and every item in it was free to delete at the time and expensive to adjudicate afterwards._
+_The first four entries under this date came out of a single reachability-and-prose sweep, up to
+and including the precondition with two enforcers. That the sweep found this much is itself the
+finding — a sweep is what you run when the discipline has already failed, and every item in it was
+free to delete at the time and expensive to adjudicate afterwards._
 
 ### The credential that stopped being discovery-only
 
@@ -593,7 +595,8 @@ Twenty-six local branches were already merged into `origin/main` with their remo
 `main` was twenty commits behind — so the hook, which measured against local `main`, counted nine
 merged branches as stacked and kept counting them after the cleanup. Two defects in one number: the
 branches should not have existed, and the base should have been the remote-tracking ref. The fix was
-both.
+both — the stale branches deleted, and `stackBase` in `.claude/hooks/lib.sh` reading `origin/main`
+in place of the local ref, falling back to it only when there is no remote to read.
 
 The general form is worth more than the fix: **a measurement taken against a ref that only moves
 when a human remembers to move it is not a measurement of the project.** Prefer the ref that tracks
@@ -654,6 +657,12 @@ guards](BUILDING.md#fail-closed-except-guards-which-fail-open).
 `pnpm docs:check` was written to stop a number cited in prose from drifting away from the tree. It
 knows three facts — the test count, the test-file count, the settings count — and it finds them in
 the documents by pattern.
+
+**It exists because of one unremarkable commit.** A deletion moved the test count, which was cited
+in two documents, and only one of them was updated — the kind of drift that is caught by whoever
+next happens to grep, or not at all. That is the whole of the evidence behind _numbers in prose rot
+like facts_, and it is deliberately thin: the rule is a hypothesis with one instance, and the check
+below is what makes a second instance impossible rather than merely unlikely.
 
 The first version scanned a line at a time and reported **green while seeing half the citations**.
 `oxfmt` reflows Markdown, and it had already wrapped `PLAN.md`'s copy between "64" and "files", so

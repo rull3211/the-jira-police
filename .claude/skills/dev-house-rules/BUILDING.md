@@ -282,9 +282,7 @@ It matters more here than in a repository with one author, for two reasons that 
 
 - **The stack is a real cost and it is measured mechanically.** `.claude/hooks/branch-stack.sh` puts
   a deep stack in front of a human before another branch is created, and the threshold is three from
-  evidence. A backlog padded with branches that merged weeks ago makes that prompt fire on a stack
-  that does not exist, and **a guard that cannot be satisfied is one people learn to click past** —
-  which costs the guard, not just the accuracy.
+  evidence. A backlog of long-merged branches makes that prompt fire on a stack that does not exist.
 - **A stale branch is a plausible-looking wrong answer to "what is in flight".** That is the defect
   class applied to the repository itself, and the branch name is the part that makes it convincing.
 
