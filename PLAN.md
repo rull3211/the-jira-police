@@ -367,10 +367,12 @@ not reach.
 commit`, any global flag before the subcommand, and every non-git write are allowed; bare `git
 push` from `main` is allowed. Nothing anywhere addresses rule 2 — `gh pr merge --squash --admin`
   is unguarded, and ruleset 22571207 requires **0 approvals and no status checks**, so the intended
-  command defeats it. 57 assertions, none covering any of this — and the bare-push hole is not
-  merely uncovered but **asserted**: `test-hooks.sh:93` lists `git push` among the commands that
-  must stay silent, which is right on a feature branch and wrong on `main`. The fix is to make that
-  case branch-sensitive rather than to delete the assertion.
+  command defeats it. 57 assertions, none covering any of this. **Correction, 2026-09-09:** an
+  earlier revision of this bullet said `test-hooks.sh:93` _asserted_ the bare-push hole. It does
+  not. That loop runs on `feat/ordinary`, where allowing `git push` is correct; the hole is simply
+  that no case ever exercises a bare push from a protected branch. The claim was made by reading a
+  line number without reading which fixture branch was checked out above it — the same
+  adjacent-and-plausible error this entry records twice already.
 - **Hardening those guards is worth doing; watching one fire is not possible from here.**
   Registration is the operator's and outside this tree (§12), so a tightened guard is still built
   inert. That is this repository's own phasing rather than an obstacle — but it does mean every item
@@ -408,6 +410,50 @@ reader to stop checking the other ones. For what remains: every item above is a 
 and this repository's own evidence is that checks on documents catch less than driving a command
 does. If the next session has budget for exactly one of these, the guard hardening is worth more than
 the whole `docs:check` list, and the wiring is worth more than the guards.
+
+---
+
+### 14. Closing three of the guard bypasses §13 measured
+
+Started 2026-09-09, taking the top three items of §13's guard bullet and leaving the fourth. Each
+was measured against `branch-guard.sh` by feeding it payloads before any change, so the "before"
+column is observed rather than inferred:
+
+| command                              | HEAD     | today | wanted |
+| ------------------------------------ | -------- | ----- | ------ |
+| `gh pr merge 15 --squash --admin`    | any      | ALLOW | DENY   |
+| `git -C . commit -m x`               | `main`   | ALLOW | DENY   |
+| `git --no-pager commit -m x`         | `main`   | ALLOW | DENY   |
+| `git -c user.name=x commit -m x`     | `main`   | ALLOW | DENY   |
+| `git push`                           | `main`   | ALLOW | DENY   |
+| `git push`                           | `feat/…` | ALLOW | ALLOW  |
+| `git switch -c feat/x`, `git status` | `main`   | ALLOW | ALLOW  |
+| `gh pr create --draft`, `gh pr view` | any      | ALLOW | ALLOW  |
+
+**Why rule 2 first.** It is the only rule with no mechanical enforcement anywhere in this tree, and
+it is the cheaper of the two to guard because nothing legitimate resembles it: an agent here never
+merges, so a flat refusal on `gh pr merge` costs nothing. Rule 1 already has partial coverage.
+
+**One thing about rule 2 that cannot be settled from here.** The operator's outer layer refuses
+mutating GitHub API calls — found by having a probe blocked while it was only ever going to be fed
+to a local script as a string. Whether that layer also covers `gh pr merge` is unknowable without
+running `gh pr merge`, which is the one command that must never be run to find out. So this guard is
+defence in depth and is written as though nothing else exists, which is the assumption §12 now tells
+every reader to make anyway.
+
+**Deliberately not in scope: the non-git write class.** `sed -i`, `>`, `>>`, `tee`, `cp`, `rm` are
+all still allowed on a protected branch. That is one hole rather than three, it cannot be closed by
+enumeration, and it needs a decision about how many false positives a floor may cost. Left open in
+§13 on purpose rather than half-done here.
+
+**What would make this the wrong idea.** Two things, and the first is structural: an agent is
+writing the guard that constrains it, together with the tests that say the guard works. Hardening
+only tightens, and a weakened guard shows up as a deleted assertion, so the diff is reviewable — but
+it wants a more adversarial read than a normal one, and that is the reviewer's cost, not the
+author's. The second is that a tightened guard is still registered to nothing (§12), so none of this
+can be observed refusing anything; it is proved by `test:hooks` and hand-fed payloads only. If the
+false-positive rate on `git -C` turns out to bite real work, the global-flag change is the one to
+reconsider first.
 
 ---
 
