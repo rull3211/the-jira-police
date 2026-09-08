@@ -1,0 +1,84 @@
+# The second party.
+#
+# This repository has one developer and its merged pull requests carry zero
+# reviews, so nothing has ever checked a change except the agent that wrote it.
+# That is the gap this file closes, and it is a bigger one than "run the tests":
+# the house rules' §7 position is that a model's claim to have run something is
+# not evidence it ran, and until now the finishing checklist in §17 was asserted
+# by the party being checked.
+#
+# So the point is not the commands. They are the same four a developer runs by
+# hand. The point is that they run on a machine nobody is logged into, against
+# the pushed ref rather than a working tree, whether or not anyone remembered.
+#
+# There is no build step (Node strips types at runtime) and no deploy: this is
+# not a deployed service. Adding one here would be a stage that never runs and
+# §15 would have it deleted.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A superseded run tells you about a commit nobody is looking at any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Each step is one of the commands in the finishing checklist, named the
+    # same way, so a red run points at the rule it broke rather than at a log.
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned rather than floated. `packageManager` in package.json is the
+      # single source for the version; `run_install: false` because the cache
+      # below has to be configured before anything is fetched.
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          # Read from `engines.node` rather than written out here. A second
+          # literal is a second thing to update, and §14 is explicit that a
+          # fact lives in one place and is cited from the others.
+          #
+          # The cost, stated rather than discovered later: `engines.node` is a
+          # range, so this floats to the newest Node satisfying it. That is the
+          # honest reading of a package that claims to support ">=24" — but it
+          # means a new major can turn this red on a pull request that did not
+          # touch anything. If that becomes annoying rather than informative,
+          # pin the major here and accept the duplicate literal.
+          node-version-file: package.json
+          cache: pnpm
+
+      # --frozen-lockfile is the whole reason this step is not `pnpm install`.
+      # A lockfile the CI is allowed to rewrite is a lockfile that proves
+      # nothing about what a developer will get.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # `continue-on-error` is deliberately absent everywhere below. A check
+      # that cannot fail the run is a check that reports rather than guards,
+      # and §5 says a guard fails closed.
+      - name: Types
+        run: pnpm check-types
+
+      - name: Lint
+        run: pnpm lint
+
+      # Formatting is checked, never applied. A CI job that rewrites the tree
+      # and pushes it is a second author on the branch.
+      - name: Format
+        run: pnpm format:check
+
+      - name: Tests
+        run: pnpm test
