@@ -299,6 +299,55 @@ considered it" survives the session that considered it.
 
 ---
 
+### 13. The house rules are one file, and the parts of it that get used are not the parts that get read
+
+Requested 2026-09-02, out of a survey of how other projects carry rules for an agent. Two numbers
+from it decide the shape:
+
+- Vendor guidance is **CLAUDE.md under 200 lines, a skill body under 500**. `SKILL.md` is **884**.
+  A file that long is read by the model that goes looking for it and skimmed by every other one,
+  which puts the finishing checklist — the most-used thing in the repository — behind eight hundred
+  lines of argument.
+- Of 257 rule files sampled across the popular collections, **four contain the word "because"**. So
+  the war stories are the one genuinely differentiated thing here and the instinct to cut them for
+  length is exactly backwards. They move; they do not shrink.
+
+**What is being attempted.** Split by phase, because the document already is one: `CLAUDE.md`
+becomes the orchestrator and routes to a phase; each phase is a flat sibling file beside `SKILL.md`,
+matching the convention `intake-triage/` and `agent-solve/` already use — no `references/` directory,
+because a layout used by one skill in three is a layout somebody has to learn. Every incident moves
+to `INCIDENTS.md`, dated, **and each rule keeps a link to the one that created it** — the rule is the
+claim and the incident is the evidence, and a claim whose evidence has been filed elsewhere is the
+kind of assertion this document exists to distrust.
+
+**What would make it the wrong idea, stated before rather than after:**
+
+- **Splitting a document is how a document starts disagreeing with itself.** Four files can drift
+  from each other in a way one cannot, and this repository's entire subject is prose drifting from
+  the thing it describes. The mitigation is that the split is by _phase_ — the phases are disjoint,
+  so a rule has one home — and that `SKILL.md` keeps the index rather than a summary. If it ends up
+  restating the phases, the split has failed and the honest move is to put it back.
+- **A rule nobody reaches is worse than a long file.** The current file is skimmed; a routed one can
+  be missed entirely if the route is wrong. So the two non-negotiables stay in `CLAUDE.md` itself,
+  where they auto-load, and are not routed to.
+- **`INCIDENTS.md` is append-only and will grow forever.** That is intended — it is the evidence
+  base — but it means the link direction matters: rules cite incidents, never the reverse, so the
+  growing file is never on the reading path.
+
+**Also in scope, from the same survey and separately authorised:** `pnpm docs:check`, which asserts
+that every count cited in prose (`2367 tests`, `46 settings`, `21 assertions`) still matches the
+code, and is wired into CI. It closes the survey's two remaining findings at once — there is no
+mechanism today that notices stale prose, and the same numbers are copied into two documents each.
+**Note what it changes about §14:** once a number is _verified_ in two places, copying it stops
+being the violation, because the drift can no longer be silent. Cite-don't-copy is a rule about
+unverifiable facts.
+
+**Deferred deliberately, and recorded so the next session does not re-propose them:** the
+cost-per-ticket meter (§6 keeps its rule, loses the cost prose), `.claude/ENVIRONMENT.md`, and an
+`AGENTS.md` symlink.
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 ### Two redundant guards, each making the other untestable, with the suite reporting green
