@@ -694,3 +694,36 @@ of them a space that turned out not to be one, which is why patterns are now bui
 **The rules** — [a guard is not shipped until a test fails when it is
 unplugged](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged); [fail closed,
 except guards](BUILDING.md#fail-closed-except-guards-which-fail-open).
+
+---
+
+## 2026-09-09
+
+### The commit message that was refused as the act it described
+
+The commit hardening `branch-guard.sh` described the hole it closed in literal command form — a bare
+push, naming no branch, following its upstream to a protected one. An outer guard matched the push
+verb and the branch name in that text and refused the commit as a direct push to `main`.
+
+There was no push in it. The operation was a local commit on a feature branch, before the refusal
+and after it; only the wording changed.
+
+**The same defect was already in the diff being committed, one assertion away.** The new rule-2
+check was mutated five ways before shipping, and the fifth was the plausible wrong fix: match `gh`
+anywhere in the text rather than at command position. It fails exactly one assertion — a commit
+message that merely _mentions_ merging. Without that single case, this guard would have shipped with
+the property that had just been used against it.
+
+**This is not a complaint about the outer guard.** At that layer a coarse matcher that fails closed
+on ambiguous text is defensible: the cost of a miss is an unreviewed commit on `main`, and the cost
+of a false positive is a reworded sentence. The lesson is for guards written _here_, where the same
+trade was available and nearly taken for a much weaker reason — the unanchored pattern was simply
+shorter.
+
+**What makes this failure direction distinct** from the two above it is who pays. A guard that fails
+open is invisible; a guard that fails closed onto its own remedy traps you loudly and gets fixed. A
+guard that taxes _writing about itself_ is neither — it works perfectly, and it steadily annoys the
+only people who maintain it, until one of them removes it while genuinely believing it is noise.
+
+**The rule** — [fail closed, except
+guards](BUILDING.md#fail-closed-except-guards-which-fail-open).
