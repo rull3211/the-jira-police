@@ -18,7 +18,8 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:hooks": ".claude/hooks/test-hooks.sh"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

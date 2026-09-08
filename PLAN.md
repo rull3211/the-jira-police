@@ -260,6 +260,43 @@ alive only by being carried forward in conversation.
   unavailable, and the automation comments are not ours. A board this service can be blocked by and
   cannot unblock is a fact about the tool surface that the daemon should be known to have.
 
+### 12. The development guardrails are built and not wired
+
+Requested 2026-09-08, from a question worth restating because it is the one this whole item answers:
+_how do we make sure the agent follows the house rules the moment it steps into this project?_ Until
+now the answer was that nothing did. The rules existed in a skill that is **model-invoked**, so
+whether they were read depended on whether the model chose to read them, and the case where that is
+least likely — a narrow prompt late in a long session — is the case where they matter most.
+
+**Built, on `chore/agent-guardrails`:** `CLAUDE.md`, which auto-loads every session and carries the
+two non-negotiable rules and the pointer to the working contract; `.claude/hooks/branch-guard.sh`
+(deny writes and protected-branch pushes), `branch-stack.sh` (ask a human when the stack is deep),
+`session-brief.sh` (state the contract and the repository's shape at session start, including after
+a compaction), `lib.sh`, and `test-hooks.sh` — 57 assertions behind `pnpm test:hooks`, eleven
+mutations watched to fail.
+
+**Not built, and it is the half that matters: none of it is wired.** The hooks are registered in
+`.claude/settings.json`, which this environment does not permit the agent to write, so the block has
+to be pasted by a person. Until then this is the exact shape §15 calls a bug rather than dead code —
+built, tested, and reachable by nothing.
+
+**And it cannot be verified in the session that writes it.** Claude Code snapshots hook
+configuration at session start, so the wiring test has to run in a _fresh_ session:
+
+```
+git switch -c test/wiring-probe   # expect a prompt if the stack is deep (branch-stack)
+git switch main                   # then ask the agent to edit any file
+                                  # expect a refusal naming 'main' (branch-guard)
+```
+
+If the first is silent in a fresh session, the configuration is not being read at all and nothing
+else is worth testing. **`pnpm test:hooks` proves the scripts; only that probe proves the
+enforcement**, and the distinction is the same one §5 draws about a guard that looks installed.
+
+Two things deliberately not built, because they were offered and declined: a `Stop` hook gating a
+turn on verification, and a drift reporter comparing prose against code. Recorded so that "we
+considered it" survives the session that considered it.
+
 ---
 
 ## What was learned, and is recorded nowhere else
