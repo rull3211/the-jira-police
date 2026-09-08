@@ -260,7 +260,7 @@ alive only by being carried forward in conversation.
   unavailable, and the automation comments are not ours. A board this service can be blocked by and
   cannot unblock is a fact about the tool surface that the daemon should be known to have.
 
-### 12. The development guardrails are built and not wired
+### 12. The development guardrails are built, and registering them is not this repository's to do
 
 Requested 2026-09-08, from a question worth restating because it is the one this whole item answers:
 _how do we make sure the agent follows the house rules the moment it steps into this project?_ Until
@@ -275,14 +275,18 @@ two non-negotiable rules and the pointer to the working contract; `.claude/hooks
 a compaction), `lib.sh`, and `test-hooks.sh` — 57 assertions behind `pnpm test:hooks`, eleven
 mutations watched to fail.
 
-**Not built, and it is the half that matters: none of it is wired.** The hooks are registered in
-`.claude/settings.json`, which this environment does not permit the agent to write, so the block has
-to be pasted by a person. Until then this is the exact shape BUILDING.md calls a bug rather than dead
-code —
-built, tested, and reachable by nothing.
+**Registration is not in this repository, and that is the arrangement rather than a gap.** Hook
+configuration belongs to the operator and is held outside this tree; the environment refuses the
+agent both read and write access to it, which is the correct way round — anything that could
+register the guards that constrain it could also unregister them. So no commit here makes a guard
+fire, and no commit here can report whether one does. **Behave as though they are unregistered**:
+the two rules in `CLAUDE.md` bind on their own authority, never on a guard's. What was once filed
+here as pending work is closed as out of scope, and the prose that described it as pending has been
+corrected.
 
-**And it cannot be verified in the session that writes it.** Claude Code snapshots hook
-configuration at session start, so the wiring test has to run in a _fresh_ session:
+**Which leaves the one thing genuinely open: nothing in this tree can verify enforcement.** Claude
+Code snapshots hook configuration at session start, so the check must be run by a person in a
+_fresh_ session:
 
 ```
 git switch -c test/wiring-probe   # expect a prompt if the stack is deep (branch-stack)
@@ -293,7 +297,9 @@ git switch main                   # then ask the agent to edit any file
 If the first is silent in a fresh session, the configuration is not being read at all and nothing
 else is worth testing. **`pnpm test:hooks` proves the scripts; only that probe proves the
 enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
-installed.
+installed. Note how narrow the first half was until recently: those 57 assertions borrowed the
+developer's git identity, so they passed on one laptop and could not run anywhere else at all. CI
+caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI step.
 
 One thing deliberately not built, because it was offered and declined: a `Stop` hook gating a turn
 on verification. Recorded so that "we considered it" survives the session that considered it.
@@ -361,9 +367,15 @@ not reach.
 commit`, any global flag before the subcommand, and every non-git write are allowed; bare `git
 push` from `main` is allowed. Nothing anywhere addresses rule 2 — `gh pr merge --squash --admin`
   is unguarded, and ruleset 22571207 requires **0 approvals and no status checks**, so the intended
-  command defeats it. 57 assertions, none covering any of this.
-- **`.claude/settings.json` is nobody's in this session but the operator's.** It is the only item
-  here that no agent can do, and until it lands every item above is theoretical.
+  command defeats it. 57 assertions, none covering any of this — and the bare-push hole is not
+  merely uncovered but **asserted**: `test-hooks.sh:93` lists `git push` among the commands that
+  must stay silent, which is right on a feature branch and wrong on `main`. The fix is to make that
+  case branch-sensitive rather than to delete the assertion.
+- **Hardening those guards is worth doing; watching one fire is not possible from here.**
+  Registration is the operator's and outside this tree (§12), so a tightened guard is still built
+  inert. That is this repository's own phasing rather than an obstacle — but it does mean every item
+  above can only be proved by `test:hooks` and by hand-feeding payloads to the script, never by
+  observing a refusal.
 
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,

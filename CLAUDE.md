@@ -15,12 +15,15 @@ rather than routed to.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
 
-**Nothing mechanical is holding either of these today, so you are.** Guards for the first are
-written and tested — `.claude/hooks/`, with their own suite, `pnpm test:hooks` — but
-`.claude/settings.json` has never been committed, so nothing registers them and they run on
-nothing. Rule 2 has no guard at all. Both rules bind exactly as hard as if they did; the difference
-is only that breaking one will not be caught. `PLAN.md` §12 carries the wiring as open work, and it
-is the operator's to do. Run `pnpm test:hooks` if you change a guard.
+**Assume nothing mechanical is holding either of these, because you cannot check.** Guards for the
+first are written and tested in `.claude/hooks/`, with their own suite — `pnpm test:hooks`, run it
+if you change one. Whether they are ever _registered_ is not decided in this repository: hook
+configuration belongs to the operator, lives outside this tree, and is deliberately neither readable
+nor writable from here. No commit can tell you whether a guard will fire, and the agent a guard
+constrains is the last one who should be wiring it — so this is not a gap waiting on a file, it is
+the arrangement. Rule 2 has no guard in this tree at all. Both rules bind exactly as hard as if they
+were enforced; the only difference is that breaking one may not be caught. `PLAN.md` §12 records
+what is built and what it does not cover.
 
 **Do not stack branches deeply** — three stacked here once turned an incremental plan into a
 waterfall. The rule and the story are in

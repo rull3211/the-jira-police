@@ -45,9 +45,9 @@ green.
 
 ## The two that are not advisory
 
-Everything else is recoverable if you get it wrong. These are not — and right now your good
-intentions are the whole of the enforcement, because the guards are written but not registered
-(`PLAN.md` §12):
+Everything else is recoverable if you get it wrong. These are not — and you should assume your own
+compliance is the whole of the enforcement, because whether the guards are registered is decided
+outside this tree and cannot be read from inside it (`PLAN.md` §12):
 
 1. **Never work on `main` or any protected branch.** Branch first. One implementation branch per
    reviewable unit of privilege. Do not look for a way around this — ask.
@@ -56,8 +56,9 @@ intentions are the whole of the enforcement, because the guards are written but 
 
 If you change a hook, run `pnpm test:hooks`. It caught a branch name containing a `"` breaking the
 denial JSON, which made the guard fail _open_ while still looking installed. Note what that suite
-can and cannot say: it proves the scripts, and the scripts are currently wired to nothing, which is
-the same _looks installed_ failure one level up.
+can and cannot say: it proves the scripts, not that anything runs them. It could not even say that
+much until `8ad1a31` — the assertions borrowed the developer's git identity, so they passed on one
+machine and collapsed on the first clean one.
 
 ---
 
