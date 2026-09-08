@@ -260,7 +260,7 @@ alive only by being carried forward in conversation.
   unavailable, and the automation comments are not ours. A board this service can be blocked by and
   cannot unblock is a fact about the tool surface that the daemon should be known to have.
 
-### 12. The development guardrails are built and not wired
+### 12. The development guardrails are built, and registering them is not this repository's to do
 
 Requested 2026-09-08, from a question worth restating because it is the one this whole item answers:
 _how do we make sure the agent follows the house rules the moment it steps into this project?_ Until
@@ -275,13 +275,18 @@ two non-negotiable rules and the pointer to the working contract; `.claude/hooks
 a compaction), `lib.sh`, and `test-hooks.sh` — 57 assertions behind `pnpm test:hooks`, eleven
 mutations watched to fail.
 
-**Not built, and it is the half that matters: none of it is wired.** The hooks are registered in
-`.claude/settings.json`, which this environment does not permit the agent to write, so the block has
-to be pasted by a person. Until then this is the exact shape §15 calls a bug rather than dead code —
-built, tested, and reachable by nothing.
+**Registration is not in this repository, and that is the arrangement rather than a gap.** Hook
+configuration belongs to the operator and is held outside this tree; the environment refuses the
+agent both read and write access to it, which is the correct way round — anything that could
+register the guards that constrain it could also unregister them. So no commit here makes a guard
+fire, and no commit here can report whether one does. **Behave as though they are unregistered**:
+the two rules in `CLAUDE.md` bind on their own authority, never on a guard's. What was once filed
+here as pending work is closed as out of scope, and the prose that described it as pending has been
+corrected.
 
-**And it cannot be verified in the session that writes it.** Claude Code snapshots hook
-configuration at session start, so the wiring test has to run in a _fresh_ session:
+**Which leaves the one thing genuinely open: nothing in this tree can verify enforcement.** Claude
+Code snapshots hook configuration at session start, so the check must be run by a person in a
+_fresh_ session:
 
 ```
 git switch -c test/wiring-probe   # expect a prompt if the stack is deep (branch-stack)
@@ -291,15 +296,142 @@ git switch main                   # then ask the agent to edit any file
 
 If the first is silent in a fresh session, the configuration is not being read at all and nothing
 else is worth testing. **`pnpm test:hooks` proves the scripts; only that probe proves the
-enforcement**, and the distinction is the same one §5 draws about a guard that looks installed.
+enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
+installed. Note how narrow the first half was until recently: those 57 assertions borrowed the
+developer's git identity, so they passed on one laptop and could not run anywhere else at all. CI
+caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI step.
 
-Two things deliberately not built, because they were offered and declined: a `Stop` hook gating a
-turn on verification, and a drift reporter comparing prose against code. Recorded so that "we
-considered it" survives the session that considered it.
+One thing deliberately not built, because it was offered and declined: a `Stop` hook gating a turn
+on verification. Recorded so that "we considered it" survives the session that considered it.
+
+A general drift reporter comparing prose against code was declined here too, and **the narrow half
+of it shipped anyway** on 2026-09-08 as `pnpm docs:check`. The distinction is worth keeping: what
+was declined was a reporter that judges whether prose is _true_, which is a model call on every
+document; what was built checks the handful of prose facts that are _countable_, which is a regex
+and an exit code. The rest is still declined.
+
+---
+
+### 13. What an audit of the house rules against the tree left open
+
+Run 2026-09-08 against the rules on this branch, by spot-check rather than by reading: drive every
+command, then test each falsifiable claim the rules make about the repository. **Eight findings;
+six held, one was wrong, one was overstated in a way that would have destroyed evidence.** Both
+failures are recorded below, because the way they were reached is more useful than the findings.
+
+**What the audit confirmed first**, so the defects are read in proportion: all five checks green;
+plan-before-work followed in `af61f41`/`1e64ed4` with the entry written and then deleted; every
+symbol `BUILDING.md` names present, including `FAIL_FIRST_CHECK`'s `!== "false"` asymmetry; the
+literal-list rule derived at the sites it names; six entry points exactly. Of eighteen incidents
+sampled, thirteen trace to a SHA whose diff or message carries the incident's own details, and **no
+claimed defect turned out never to have existed.**
+
+The three defects that were only prose have been corrected on this branch, which is why they are no
+longer listed here: the four sentences claiming a mechanical guarantee, the module map's test-file
+count, and two citations that named the wrong document. What is below is what a document edit could
+not reach.
+
+**Open, and not this branch's job:**
+
+- **The count class, not the instance.** A fourth `FACT` now pins the bare-count phrasing, but that
+  is one site, not the class. Measured across tracked markdown on 2026-09-08 — a number followed by
+  up to two words and a count noun — there are **17 distinct such phrases against 4 declared
+  sites**, and the next new phrasing drifts exactly as the module map's did.
+  Two things learned while pinning it argue for the class fix rather than more instances. First,
+  provenance: `96998cc` wrote 65 and 64 **in the same commit**, and its message claims _"that count
+  is cited as fact in two documents and was updated in both."_ The contradiction was born
+  complete-looking; it never drifted, so no amount of watching-for-drift would have caught it.
+  Second, the new `FACT` failed on its first run against **this entry**, which was describing the
+  wrong count rather than asserting it — prose about a number and prose claiming one are
+  indistinguishable to a regex, and here the call was made by rewording. The class fix is
+  `expectSites` one level up: every count-noun phrase must be either a declared site or an
+  explicitly listed historical figure, which forces that current-versus-war-story call to be written
+  down instead of made silently. `PLAN.md:275`'s "57 assertions" is current and uncited;
+  `ARCHITECTURE.md:1863`'s "1245 passing tests" is history.
+- **`docs-check.ts` has no test.** 331 lines enforcing prose discipline, and `PROVING.md`'s central
+  rule is not satisfied for it. The class check above is not hand-watchable, so these two are one
+  unit: whoever writes the class check writes `docs-check.test.ts` with it.
+- **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links; `CLAUDE.md`'s
+  own routing table is backticks, so deleting a phase file keeps it green; the repository's real
+  cross-reference system — **87 `§N`/`invariant N` references** — is unchecked entirely.
+- **Cost figures are facts with many homes.** `$0.94` in five files, `$0.11` in five, `$3.99` in
+  three, `$4.50` in three, outside the `docs:check` exemption rule 3 grants.
+- **A citation to a document outside the tree cannot be checked, and does not look different.**
+  `docs:check` can only resolve what it can open, so an out-of-tree quotation is exempt by nature
+  while reading exactly like a verifiable one — which is how two of them were misattributed to
+  `PLAN.md` for as long as they existed. The convention now is to name the source and say it is
+  outside the tree ([`INCIDENTS.md`](.claude/skills/dev-house-rules/INCIDENTS.md) header); the
+  convention is prose, and nothing enforces it. The mechanical version would be a marker the check
+  recognises, so an unmarked unresolvable citation fails rather than passing silently.
+- **The guards fail open in ways `test:hooks` does not reach.** On a protected branch, `git -C .
+commit`, any global flag before the subcommand, and every non-git write are allowed; bare `git
+push` from `main` is allowed. Nothing anywhere addresses rule 2 — `gh pr merge --squash --admin`
+  is unguarded, and ruleset 22571207 requires **0 approvals and no status checks**, so the intended
+  command defeats it. 57 assertions, none covering any of this — and the bare-push hole is not
+  merely uncovered but **asserted**: `test-hooks.sh:93` lists `git push` among the commands that
+  must stay silent, which is right on a feature branch and wrong on `main`. The fix is to make that
+  case branch-sensitive rather than to delete the assertion.
+- **Hardening those guards is worth doing; watching one fire is not possible from here.**
+  Registration is the operator's and outside this tree (§12), so a tightened guard is still built
+  inert. That is this repository's own phasing rather than an obstacle — but it does mean every item
+  above can only be proved by `test:hooks` and by hand-feeding payloads to the script, never by
+  observing a refusal.
+
+**A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
+branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
+which is **blind to every squash- and rebase-merged branch**. `chore/agent-guardrails` has an
+identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
+these accumulate, and it is one instance of a possible rule rather than a rule.
+
+**Three method failures, recorded and deliberately not generalised** — each is one instance, and
+each is a defect this repository already has an incident for, committed while auditing for it:
+
+- **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
+  a shared row looks like, and it was read as a missing row because a finding had predicted one.
+  Row-counting also assumed one setting per row. Deriving the answer — iterate `SETTINGS`, check
+  each name — gives 46 of 46 present. `STARTING.md`'s "finding something adjacent and believing it".
+- **A number that invited an inference about what it controls.** `git rev-list --count main..HEAD`
+  is 3 and `branch-stack.sh`'s threshold is 3, so the hook was said to be at its limit. It counts
+  unmerged branches into `origin/main` — currently **one**. The `capacity: 0` incident exactly.
+- **An adversarial subagent returns what it was primed for.** The prompt offered `SUSPECTED
+RETROFIT` as a verdict and named an untraceable commit as evidence of it; the report came back
+  alleging invention, and it was relayed at full strength. The evidence supported "not in
+  `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
+  delegated on the two sharpest accusations.
+
+**What would make this the wrong idea.** Two things. The prose corrections that already shipped
+read, at a glance, as weakening the rules — they are not: _never work on `main`_ and _a human
+merges_ stay absolute, and only the claim about what enforces them changed. The honest objection was
+that if wiring the hooks were imminent, those edits would be churn; the counter is that the prose had
+been false for as long as it had existed, and a rule that overstates its own enforcement teaches a
+reader to stop checking the other ones. For what remains: every item above is a check on documents,
+and this repository's own evidence is that checks on documents catch less than driving a command
+does. If the next session has budget for exactly one of these, the guard hardening is worth more than
+the whole `docs:check` list, and the wiring is worth more than the guards.
 
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### The war stories are the asset, and length pressure comes for them first
+
+From the 2026-09-02 survey that produced the phased house rules. Two numbers, and they point in
+opposite directions:
+
+- Vendor guidance is **`CLAUDE.md` under 200 lines and a skill body under 500**. `SKILL.md` was
+  **884**, with the finishing checklist — the most-used thing in it — behind eight hundred lines of
+  argument.
+- Of **257 rule files sampled across the popular collections, four contain the word "because"**.
+
+So the obvious response to the first number is to cut the reasoning, and the second number says the
+reasoning is the only genuinely differentiated thing here. They move; they do not shrink. That is
+why `INCIDENTS.md` exists and why it is append-only and off the reading path — and why
+`pnpm docs:check` verifies the links into it, since a rule that loses its link to an incident has
+quietly become an opinion.
+
+The layout decision is worth keeping too: the phase files are **flat siblings** of `SKILL.md`, not a
+`references/` subdirectory, because `intake-triage/` and `agent-solve/` are already flat and a
+layout used by one skill in three is a layout somebody has to learn.
 
 ### Two redundant guards, each making the other untestable, with the suite reporting green
 

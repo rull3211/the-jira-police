@@ -3,17 +3,17 @@
 # This repository has one developer and its merged pull requests carry zero
 # reviews, so nothing has ever checked a change except the agent that wrote it.
 # That is the gap this file closes, and it is a bigger one than "run the tests":
-# the house rules' §7 position is that a model's claim to have run something is
-# not evidence it ran, and until now the finishing checklist in §17 was asserted
-# by the party being checked.
+# the house rules' position (PROVING.md, "the loop") is that a model's claim to
+# have run something is not evidence it ran, and until now the finishing
+# checklist in FINISHING.md was asserted by the party being checked.
 #
 # So the point is not the commands. They are the same four a developer runs by
 # hand. The point is that they run on a machine nobody is logged into, against
 # the pushed ref rather than a working tree, whether or not anyone remembered.
 #
 # There is no build step (Node strips types at runtime) and no deploy: this is
-# not a deployed service. Adding one here would be a stage that never runs and
-# §15 would have it deleted.
+# not a deployed service. Adding one here would be a stage that never runs, and
+# BUILDING.md's dead-code rule would have it deleted.
 
 name: ci
 
@@ -48,8 +48,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           # Read from `engines.node` rather than written out here. A second
-          # literal is a second thing to update, and §14 is explicit that a
-          # fact lives in one place and is cited from the others.
+          # literal is a second thing to update, and STARTING.md is explicit
+          # that a fact lives in one place and is cited from the others.
           #
           # The cost, stated rather than discovered later: `engines.node` is a
           # range, so this floats to the newest Node satisfying it. That is the
@@ -68,7 +68,7 @@ jobs:
 
       # `continue-on-error` is deliberately absent everywhere below. A check
       # that cannot fail the run is a check that reports rather than guards,
-      # and §5 says a guard fails closed.
+      # and BUILDING.md's rule is that a guard fails closed.
       - name: Types
         run: pnpm check-types
 
@@ -82,3 +82,18 @@ jobs:
 
       - name: Tests
         run: pnpm test
+
+      # The hook guards are not vitest, so `pnpm test` above does not touch
+      # them — and they are the only mechanical enforcement of the two rules
+      # that are not advisory. One of them once failed open on a branch name
+      # containing a quote while still looking installed, which is the whole
+      # argument for running them somewhere nobody can forget.
+      - name: Hook guards
+        run: pnpm test:hooks
+
+      # Numbers cited in prose, checked against the tree. Its own step rather
+      # than part of Tests: it collects the suite with `vitest list` instead of
+      # running it, so it costs about a second, and a failure here means a
+      # document is lying rather than that the code is broken.
+      - name: Docs
+        run: pnpm docs:check

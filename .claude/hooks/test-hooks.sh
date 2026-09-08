@@ -18,6 +18,30 @@
 
 set -uo pipefail
 
+# The fixtures are real repositories, so `git commit` needs an identity — and
+# for as long as this suite existed it borrowed the developer's. That made it
+# 57-green on a laptop and unrunnable anywhere else. The first CI run that ever
+# executed it died on `empty ident name`: no fixture reached its initial commit,
+# so no fixture had a `main` ref, and 22 assertions failed describing that
+# instead of describing the guards. The suite was never wrong about the hooks;
+# it was only ever a statement about the machine it ran on.
+#
+# So it now supplies its own identity and reads no ambient configuration at all.
+# Comment out the two identity pairs and run in a clean environment and the CI
+# failure returns exactly — 22 failed, 35 passed — which is how this fix was
+# checked.
+#
+# The two config-neutralising lines are reasoned rather than measured, and are
+# marked as such deliberately: a developer's `commit.gpgsign`, `core.hooksPath`
+# or `init.defaultBranch` would leak into fixtures that exist to make assertions
+# about git state, but demonstrating that needs a hostile config file written to
+# disk, which the operator's guards refuse. They are cheap and they fail safe;
+# they are not evidence-backed the way the lines above them are.
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_SYSTEM=/dev/null
+export GIT_AUTHOR_NAME='hook tests' GIT_AUTHOR_EMAIL='hook-tests@invalid'
+export GIT_COMMITTER_NAME='hook tests' GIT_COMMITTER_EMAIL='hook-tests@invalid'
+
 HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 pass=0
 fail=0

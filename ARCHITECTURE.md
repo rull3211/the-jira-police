@@ -655,7 +655,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-71 production modules, 65 test files. Grouped by what they belong to rather than alphabetically,
+71 production modules, 64 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -761,6 +761,7 @@ because the grouping is the architecture.
 | `src/cli/bot-args.ts`      | The same ladder, with an issue key always required                                   |
 | `src/cli/watch-once.ts`    | What the sendback watch would do; `--write` does it                                  |
 | `src/cli/watch-args.ts`    | Its argument and output shapes, kept out of a file that ends in a top-level `await`  |
+| `src/cli/docs-check.ts`    | `pnpm docs:check`. Development tooling, not a service entry point — see below        |
 
 **Output**
 
@@ -771,7 +772,11 @@ because the grouping is the architecture.
 `wiring.ts` exists because there are six entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once` and `watch:once` — and a difference in how they wire the same pipeline
 would be a bug
-that only shows up in production. The two solve commands go further than sharing `wiring.ts`: their
+that only shows up in production. `docs-check.ts` is the seventh file in that directory and is
+deliberately not a seventh entry point: it composes nothing, reads no settings, and touches neither
+Jira nor a repository. It lives here because this is where a file you can run lives, and it is
+called out rather than left to be counted, since "six" above is a claim about the composition and a
+new CLI file is exactly what would quietly falsify it. The two solve commands go further than sharing `wiring.ts`: their
 write rungs are literally the same functions, in `src/cli/solve-run.ts`, so a command file is now
 argument parsing plus a call into the one module that writes to Jira, a worktree or GitHub.
 `triage:once` used to build its options by hand; the copy drifted the moment the real skill grew
