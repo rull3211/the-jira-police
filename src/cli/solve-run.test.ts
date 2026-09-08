@@ -2,7 +2,7 @@
  * Two functions from `solve-run.ts`, and both are here because of what is *not*.
  *
  * `solve-run.ts` has no general test harness — nothing in this tree constructs
- * `runSolveRungs`'s dependencies, which is why D4e could measure that its own
+ * `runWriteRungs`'s dependencies, which is why D4e could measure that its own
  * call-site mutation survives the whole suite. That gap is recorded at the call
  * site and is still not closed. What is covered here is the two places where
  * the *absence* of a test was itself the defect:

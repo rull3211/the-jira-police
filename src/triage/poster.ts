@@ -2,10 +2,19 @@
  * The WRITER half: applies an already-decided, already-checked mutation to Jira.
  *
  * It is a separate storecode run rather than plain HTTP for the reason that
- * governs this whole service — the Jira REST credential is for discovery only,
- * so every mutation goes through an Atlassian MCP session and lands as a real
+ * governs this whole service — the Jira REST credential does not make *this*
+ * mutation, so it goes through an Atlassian MCP session and lands as a real
  * Jira user rather than a service account. `childEnv` withholds the REST
  * credential from this subprocess exactly as it does from the analyst.
+ *
+ * That reason used to be stated as *"the REST credential is for discovery
+ * only"*, and that is no longer true: `updateLabels` writes `agent:*` labels
+ * over REST, because MCP's `editJiraIssue` has set semantics and cannot add one
+ * label without rewriting all of them (`jira/client.ts`, `ARCHITECTURE.md` §12).
+ * The amendment is labels-only and namespace-bound, so it does not reach this
+ * path — the verdict comment is ADF, and `triaged`/`dor:*`/`svc:*` are outside
+ * the `agent:` namespace `assertOwnedLabel` permits. The split is intact; the
+ * sentence that justified it was not.
  *
  * Everything about it is arranged to stop it thinking:
  *

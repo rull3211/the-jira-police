@@ -12,10 +12,16 @@
  * what it is: **this service keeps producing its best reasoning on the one
  * channel nobody reads.**
  *
- * It is a separate storecode run rather than plain HTTP for the reason that
- * governs the whole service — the Jira REST credential is for discovery only,
- * so a mutation goes through an Atlassian MCP session and lands as a real Jira
- * user. `childEnv` withholds that credential from the subprocess.
+ * It is a separate storecode run rather than plain HTTP because a Jira comment
+ * is not something the REST credential is permitted to write: that credential's
+ * one write is `updateLabels`, labels only and `agent:`-namespaced. So a comment
+ * goes through an Atlassian MCP session and lands as a real Jira user, and
+ * `childEnv` withholds the REST credential from the subprocess.
+ *
+ * The older phrasing — *"the REST credential is for discovery only"* — is no
+ * longer accurate and is not what makes this a separate run. What does is the
+ * shape of the amendment (`jira/client.ts`, `ARCHITECTURE.md` §12): labels only,
+ * so there is no comment-shaped hole in it to widen through.
  *
  * ## It is narrower than the triage poster, in two ways that are the point
  *
@@ -138,8 +144,10 @@ import { DENIED_BUILTIN_TOOLS, runSession } from "../triage/session.ts";
  * Resolving the `cloudId` in the harness and passing it in the prompt would be
  * better still, since a parameter supplied cannot be denied. It is not done here
  * because the harness does not know one either: deriving it means a new endpoint
- * on the REST credential, which is reserved for discovery, and widening that is
- * a decision about the rule rather than a plumbing choice.
+ * on the REST credential. That credential has been amended twice — `updateLabels`
+ * and the changelog read — and both times deliberately and in writing, because a
+ * widening is a decision about the rule rather than a plumbing choice. This would
+ * be a third, and nobody has asked for it.
  */
 export const COMMENTER_TOOLS: readonly string[] = [
   "mcp__atlassian__addCommentToJiraIssue",

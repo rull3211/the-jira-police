@@ -142,8 +142,24 @@ export type UnsubscribeReason = "closed" | "exhausted" | "uncountable";
  * criteria in a custom field, a reporter filling that in is the single most
  * likely trigger there is and it is not in this set — Jira reports custom
  * fields in the changelog under their own names, and inventing one here would
- * be a guess that reads as coverage. Add it once somebody has looked at a real
- * changelog on a real sent-back ticket.
+ * be a guess that reads as coverage.
+ *
+ * Somebody has now looked. SSX-3830, 2026-09-06, driven by hand: the distinct
+ * field names in a real sent-back ticket's changelog were `description`,
+ * `labels`, `resolution`, `status`. So `description` is spelled exactly that on
+ * this board and the allowlist is right — a guess, now an observation. No
+ * custom acceptance-criteria field appeared, so the gap above is unobserved
+ * rather than closed, and one ticket is one ticket.
+ *
+ * `labels` is the finding, and it constrains anyone widening this set. This
+ * service writes labels constantly — `triaged`, `dor:*`, the whole `agent:*`
+ * machine, and F's own unsubscribe — and every one is a changelog entry on a
+ * watched ticket that the comment-kind exclusion cannot see, because they are
+ * not comments. The only thing stopping them re-triggering the watch is that
+ * `labels` is not allowlisted. So this set is doing two jobs: relevance filter,
+ * and the changelog's entire self-trigger defence. Hence the rule: **a field
+ * this service writes must never be allowlisted**, which rules out `labels`
+ * permanently rather than by luck.
  */
 export const BLOCKER_CLEARING_FIELDS: ReadonlySet<string> = new Set([
   "description",

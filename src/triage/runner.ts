@@ -109,9 +109,6 @@ export const ANALYST_DENIED_TOOLS: readonly string[] = [
   "mcp__atlassian__createIssueLink",
 ];
 
-/** MCP servers that must report `connected` before the run is trusted. */
-export const REQUIRED_MCP_SERVERS: readonly string[] = ["atlassian"];
-
 export interface TriageRunOptions {
   readonly issueKey: string;
   /**
