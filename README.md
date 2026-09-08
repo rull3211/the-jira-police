@@ -60,7 +60,7 @@ flowchart TD
     MODE -->|auto| QUEUE
     HUMAN --> QUEUE
 
-    subgraph SOLVE["③ Review loop — REVIEW_POLL_MS, 2 min · claims, then advances"]
+    subgraph SOLVE["③ Review loop — REVIEW_POLL_MS, 2 min · advances, then claims"]
         QUEUE["solve queue<br/>capacity = MAX_CONCURRENT_SOLVES"]
         CLAIM["claim · agent:solving<br/>read back and verify"]
         WT["git worktree from origin/main<br/>branch fix/ssx-nnnn-slug"]
@@ -69,6 +69,8 @@ flowchart TD
         WRITE["write pass<br/>Read/Grep/Glob/Edit/Write · no Bash"]
         CHECK{"verify + diff gate<br/>+ fail-first check"}
         PUBLISH["push → draft PR<br/>@copilot requested<br/>agent:reviewing"]
+        SYNC{"has the base moved?<br/>merge it and push"}
+        MERGEPASS["merge pass<br/>conflicted paths only<br/>never -X ours/theirs"]
         INBOX{"unread review<br/>or open thread?"}
         ROUND["round · reserve the marker first<br/>fix · reply · resolve · push"]
         UNDRAFT["undraft<br/>agent:review-done"]
@@ -84,7 +86,11 @@ flowchart TD
     WRITE --> CHECK
     CHECK -->|refused| RELEASED([claim released · reason posted])
     CHECK -->|passed| PUBLISH
-    PUBLISH --> INBOX
+    PUBLISH --> SYNC
+    SYNC -->|"clean, or already current"| INBOX
+    SYNC -->|conflicts| MERGEPASS
+    MERGEPASS -->|resolved| INBOX
+    MERGEPASS -->|"still conflicted · 3 tries"| STUCK([left for a human])
     INBOX -->|"yes · reviewer"| ROUND
     INBOX -->|"yes · human — uncapped"| ROUND
     ROUND -->|"pushed — still working"| INBOX
@@ -101,6 +107,30 @@ flowchart TD
 ```
 
 **The two yellow boxes are the only places a person is required.** Everything else runs unattended.
+
+### Five passes, five sessions
+
+The boxes labelled recon, write, round and merge are separate `storecode` invocations of the
+`agent-solve` skill, not turns of one conversation:
+
+| Pass         | Tools                                | Given                            |
+| ------------ | ------------------------------------ | -------------------------------- |
+| `--recon`    | `Read` `Grep` `Glob` — **read-only** | the ticket                       |
+| `--fix`      | …plus `Write` `Edit`                 | the recon verdict                |
+| `--simplify` | same as `fix`                        | the diff, and **not** the ticket |
+| `--review`   | same as `fix`                        | the reviewer's comments          |
+| `--merge`    | same as `fix`                        | the conflicted paths only        |
+
+**None of them has `Bash`**, so there is no git, no test runner and no package manager inside any
+model session. The harness runs every command itself and reads exit codes; the model is never
+asked whether the tests passed.
+
+Separate sessions rather than five turns is the safety property: a pass cannot carry a capability
+past the point it was granted for, and a pass that dies cannot leave a later one reasoning from
+half a conversation. Recon runs first and its verdict is honoured — if it says stop, the fix pass
+never starts and **no model gets write access for that ticket at all**. `--simplify` is given the
+diff and not the ticket deliberately: showing it the requirement would invite it to reconsider the
+change instead of the way the change is written.
 
 ### The labels are the state machine
 
@@ -166,6 +196,11 @@ pnpm install
 cp .env.example .env    # then fill in JIRA_EMAIL, JIRA_AUTH, VAULT_PATH
 ```
 
+Those three are all grooming needs. **Solving needs three more with no defaults** —
+`SOLVE_REPO_ROOT`, `SOLVE_REPOS` and `SOLVE_GITHUB_OWNER` — and each one is unset rather than
+guessed because a default there is a privilege that survives being deleted from `.env`. See
+Settings.
+
 Check it without spending anything:
 
 ```bash
@@ -196,9 +231,9 @@ Lists the new tickets discovery found and stops. Free.
 pnpm triage:once SSX-1234 --skill intake-triage
 ```
 
-Runs the real skill (~~3–8 min, **~~$1.56** measured), writes `groomed/SSX-1234.md`, and posts
-**nothing**. The
-report contains the verdict, the label delta, the DoR check, and the **agent-fitness call** —
+Runs the real skill — 3–8 minutes, **$1.56 measured** — writes `groomed/SSX-1234.md`, and posts
+**nothing**. The report contains the verdict, the label delta, the DoR check, and the
+**agent-fitness call** —
 whether this ticket looks safely fixable by an agent, with the reasoning.
 
 Add `--write` to actually post the comment and labels:
@@ -479,8 +514,13 @@ command that proves the whole chain, and the one to run for a demo:
 caffeinate -i pnpm bot:once SSX-1234 --review
 ```
 
-`caffeinate` because a laptop that sleeps mid-pass hits `SOLVE_TIMEOUT_MS`, and a killed pass is
-deliberately not retried.
+`caffeinate` is belt-and-braces rather than the fix it used to be. A laptop that slept mid-pass
+once spent `SOLVE_TIMEOUT_MS` without the pass running — it killed a recon on SSX-3831 that had
+done nothing wrong, and a killed pass is deliberately not retried. **Both budgets now exclude
+sleep**: `SESSION_IDLE_TIMEOUT_MS` is a silence budget whose watchdog detects a suspend by timer
+drift and credits the gap back, and `SOLVE_TIMEOUT_MS` counts only time the machine was awake.
+What `caffeinate` still buys is that a sleeping machine makes no progress at all, which on a run
+this long is worth a flag.
 
 **The last three are modes, not rungs, and the parser refuses to combine them with one.**
 `--advance` and `--watch` act on pull requests that finished runs created, so implying `--solve`
@@ -536,29 +576,43 @@ there is no build step here.
 
 Full table in `ARCHITECTURE.md` §10. The ones that matter for a demo:
 
-| Setting                   | Default       | Notes                                                                    |
-| ------------------------- | ------------- | ------------------------------------------------------------------------ |
-| `JIRA_EMAIL`, `JIRA_AUTH` | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket      |
-| `VAULT_PATH`              | —             | Required by the real skill; checked at startup, not on the first ticket  |
-| `SKILL_NAME`              | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post         |
-| `WRITE_BACK`              | `false`       | The only setting the whole team can see the effect of. Strict `"true"`   |
-| `SOLVE_ENABLED`           | `false`       | Master switch for the solve queue. Strict `"true"`                       |
-| `SOLVE_MODE`              | `manual`      | `manual` also requires the human's `agent:start` label                   |
-| `SOLVE_REPOS`             | —             | Repository allowlist, **no default**. Unset means nothing is allowed     |
-| `SOLVE_GITHUB_OWNER`      | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it  |
-| `SOLVE_WORKTREE_ROOT`     | —             | Where worktrees are cut. Blank means the system temp directory           |
-| `WATCH_ENABLED`           | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built      |
-| `MAX_RETRIAGE_PER_TICKET` | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend   |
-| `MAX_CONCURRENT_SOLVES`   | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot      |
-| `MAX_REVIEW_ITERATIONS`   | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design   |
-| `MAX_PR_ROUNDS_TOTAL`     | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above   |
-| `FAIL_FIRST_CHECK`        | `true`        | **The only setting that defaults on** — it withdraws a guard, not grants |
+| Setting                         | Default       | Notes                                                                     |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------- |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket       |
+| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket   |
+| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post          |
+| `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`    |
+| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                        |
+| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                    |
+| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in |
+| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed      |
+| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write       |
+| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it   |
+| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory            |
+| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built       |
+| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days    |
+| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend    |
+| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot       |
+| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design    |
+| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above    |
+| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see        |
+| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                           |
+| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back   |
+| `FAIL_FIRST_CHECK`              | `true`        | **The only setting that defaults on** — it withdraws a guard, not grants  |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
 request. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
 open in a file browser, because macOS puts the default under `/private/var` and the diff review the
 solver phase depends on is a person reading that worktree.
+
+**`SOLVE_REPO_ROOT` is the one that stops a solve before it starts, and it has no fallback on
+purpose.** A ticket's repository is resolved as `SOLVE_REPO_ROOT/<name>`, where the name comes from
+the ticket's own `svc:` label — so a guessed default would be a path the solver reads and fetches
+in that nobody chose. Unset, `buildSolveRequest` throws `SettingsError` naming it, which is a
+better failure than a checkout it invented. `SOLVE_READ_DIRS` sits beside it and is names, not
+paths, so it cannot point outside the root; it exists because a pass reasoning about a service
+whose code it has not read will produce a confident answer anyway.
 
 ---
 
@@ -623,7 +677,41 @@ D was driven end to end on 2026-09-04: SSX-3822 claimed, solved, verified, commi
 opened as [draft PR #2657](https://github.com/storebrand-digital/buy-insurance-advisor-web/pull/2657)
 with Copilot requested. Copilot itself then failed — its app installation cannot read pull requests
 in that repository — which is an org permission to grant and not a thing this codebase can fix.
-It is recorded here because it is the reason D2 stays uncalled: see `reviewerErrored` in
-`src/solve/pr.ts` for why a reviewer's own error must not be read as an approval.
+It is recorded here for `reviewerErrored` (`src/solve/pr.ts`): a reviewer's own error arrives as an
+ordinary `COMMENTED` review, indistinguishable from feedback, and reading it as an approval would
+have undrafted a pull request nobody reviewed. That line used to end _"it is the reason D2 stays
+uncalled"_; D2 has been wired since 2026-09-05 and the daemon has been calling it since 09-06.
+
+### The most expensive lesson so far: a branch that had not heard
+
+**PR #2661, 2026-09-07 — one inline nitpick from a human reviewer cost about $16.** Seventeen
+consecutive rounds did the same four things: attach, reserve, pay for a review pass that wrote the
+correct rename, then refuse at verification because `pnpm install` would not run. No commit, no
+push, and — because the round never got far enough to reply — no comment on the thread, so the
+reviewer's comment was handed straight back to the next tick. It stopped when
+`MAX_PR_ROUNDS_TOTAL` fired at twenty.
+
+The cause was seven commits: `origin/main` had gained a `packageManager` pin and **the branch was
+cut before that merge**. The repository was fixed; the branch had not heard. That is not a pnpm
+story — everything a branch inherits from its base can be fixed on `main` while a pull request
+under review keeps failing on the old copy, and all the reviewer sees is a red build and a bot
+that keeps not fixing it.
+
+Three things came out of it, and all three are in:
+
+- **`base-sync.ts`** merges the base into the branch and **pushes in the same breath**, before any
+  round reserves. Holding the merge locally would break `attachWorktree`'s rule that a checkout may
+  not be ahead of `origin`, so the next tick would move it aside and rebuild — which is how one
+  wedged pull request produced fifteen `-salvaged-` directories in a week.
+- **A fifth pass, `--merge`**, for when the base will not merge cleanly. It is given git's list of
+  conflicted paths and **not** the review, deliberately: a branch that will not take its base
+  cannot be built, so there is nothing a review round could answer from. There is no `-X ours` or
+  `-X theirs` anywhere — a whole-side strategy resolves a conflict by discarding one author's
+  change unread, to every file at once, which is the one outcome worse than refusing.
+- **`MAX_FAILED_STARTS`**, because the sync runs on the _cheap_ side of the reservation line and
+  every other cap counts rounds. An attempt that dies before reserving moves no marker, so
+  `MAX_REVIEW_ITERATIONS` and `MAX_PR_ROUNDS_TOTAL` both sit at zero while a pull request retries
+  forever. SSX-3835 did exactly that, once every two minutes for four days; it cost nothing only
+  because that particular failure happened to be free.
 
 A human always merges. The bot has no merge path.

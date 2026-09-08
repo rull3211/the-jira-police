@@ -26,7 +26,7 @@ ask. Everything that protects the repository is mechanical and lives **outside**
 no `git`, no test runner and no package manager available to you. This is not a rule you are
 being asked to follow — it is the absence of a tool. Do not plan around it or ask for it.
 
-## The four passes
+## The five passes
 
 One skill, five invocations, with different capabilities. **The capability difference is enforced
 by the harness's flags, not by this file** — a skill file cannot restrict itself, and text here
@@ -48,7 +48,7 @@ saying "do not edit" would be a description of intent, not a control.
    so there is nothing a review round could answer a reviewer from, and this round answers nobody
    on purpose. Its scope is git's list of conflicted files, exactly.
 
-Each pass is its own session rather than four turns of one, so a pass cannot carry a capability
+Each pass is its own session rather than five turns of one, so a pass cannot carry a capability
 past the point it was granted for, and so a pass that dies cannot leave a later one reasoning
 from half a conversation.
 

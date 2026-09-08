@@ -1,9 +1,17 @@
 /**
  * Where a finished triage report goes.
  *
- * Two implementations are planned: a local-file sink (v1, always on) and a
- * Slack canvas sink. The canvas one is gated on access that has not been
- * confirmed yet, so the interface exists to keep that swap cheap.
+ * One implementation: the local-file sink below, always on.
+ *
+ * A second was planned — a Slack canvas sink — and its renderers and edit-request
+ * builders were written before the Slack access they needed was confirmed. That
+ * access never arrived, so for the life of the project the module had no caller
+ * outside its own tests, and `formatChecklistLine` here had none at all. Both
+ * were deleted 2026-09-08 by a dead-code sweep rather than kept as an interface
+ * "to make the swap cheap": an abstraction whose second implementation is
+ * unreachable is not proven flexible, only untested, and this one had drifted
+ * out of anything that would notice. `git log -- src/output/canvas.ts` has it if
+ * the access ever lands.
  */
 
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -155,13 +163,6 @@ export function formatAgentFitness(fitness: AgentFitness): readonly string[] {
     `- **Rationale:** ${fitness.rationale === "" ? "—" : fitness.rationale}`,
     `- **Blockers:** ${fitness.blockers.length > 0 ? fitness.blockers.join("; ") : "—"}`,
   ];
-}
-
-/** One line, suitable for a canvas checklist item or a terminal summary. */
-export function formatChecklistLine(result: TriageResult): string {
-  const emoji = VERDICT_EMOJI[result.verdict];
-  const labels = result.labels.length > 0 ? ` · ${result.labels.join(" ")}` : "";
-  return `- [ ] ${emoji} [${result.issueKey}](${result.issueUrl}) — ${result.summary}${labels}`;
 }
 
 /**

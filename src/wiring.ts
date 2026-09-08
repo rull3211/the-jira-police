@@ -15,11 +15,19 @@
  *              and nothing else.
  *
  * `WRITE_BACK` does not soften that split, it leans on it. The REST credential
- * stays read-only and discovery-only — it is withheld from the subprocess
- * entirely (`WITHHELD_FROM_CHILD` in the runner) — so every mutation is made by
- * the skill's own MCP session, as that session's own Jira user. Which means the
- * comments are attributable to a real account, and revoking the write is a
- * matter of this one setting rather than of re-scoping a token.
+ * is withheld from the subprocess entirely (`WITHHELD_FROM_CHILD` in the
+ * runner), so every *grooming* mutation is made by the skill's own MCP session,
+ * as that session's own Jira user. Which means the comments are attributable to
+ * a real account, and revoking the write is a matter of this one setting rather
+ * than of re-scoping a token.
+ *
+ * This used to say the credential "stays read-only and discovery-only". It does
+ * not, and this is the module that falsifies it: `applyLabelChange` below calls
+ * `client.updateLabels`, which is a REST write. The amendment is bounded to the
+ * `agent:` namespace at the credential (`jira/client.ts`), so grooming's own
+ * `triaged`/`dor:*` labels and its verdict comment are still MCP's and the split
+ * described above holds — but the blanket claim was false, in the same file that
+ * makes it false.
  *
  * Grooming is itself three steps, composed here and nowhere else:
  *

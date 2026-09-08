@@ -9,7 +9,6 @@ import {
   claimTransition,
   completionTransition,
   eligibility,
-  isEligible,
   isNoopEdit,
   isTerminal,
   labelEdit,
@@ -40,21 +39,21 @@ describe("eligibility", () => {
 
   it("refuses a started ticket triage never marked solvable", () => {
     // `agent:start` on its own is a human pointing at a ticket nobody assessed.
-    expect(isEligible([AGENT_LABELS.start], "manual")).toBe(false);
-    expect(isEligible([AGENT_LABELS.start], "auto")).toBe(false);
+    expect(eligibility([AGENT_LABELS.start], "manual").eligible).toBe(false);
+    expect(eligibility([AGENT_LABELS.start], "auto").eligible).toBe(false);
   });
 
   it("refuses a ticket with no agent labels at all", () => {
-    expect(isEligible([], "auto")).toBe(false);
-    expect(isEligible(["bug", "dor:pass"], "auto")).toBe(false);
+    expect(eligibility([], "auto").eligible).toBe(false);
+    expect(eligibility(["bug", "dor:pass"], "auto").eligible).toBe(false);
   });
 
   it("treats an unrecognised authority as manual rather than as auto", () => {
     // `solveMode` refuses such a value, so this can only arrive via a caller
     // that read the mode from somewhere else. It still must not skip the human.
-    expect(isEligible([AGENT_LABELS.solvable], "Auto" as ClaimAuthority)).toBe(false);
-    expect(isEligible([AGENT_LABELS.solvable], "" as ClaimAuthority)).toBe(false);
-    expect(isEligible([AGENT_LABELS.solvable], "Named" as ClaimAuthority)).toBe(false);
+    expect(eligibility([AGENT_LABELS.solvable], "Auto" as ClaimAuthority).eligible).toBe(false);
+    expect(eligibility([AGENT_LABELS.solvable], "" as ClaimAuthority).eligible).toBe(false);
+    expect(eligibility([AGENT_LABELS.solvable], "Named" as ClaimAuthority).eligible).toBe(false);
   });
 
   describe("the named authority — an operator typed the key", () => {
@@ -78,7 +77,7 @@ describe("eligibility", () => {
       (blocker) => {
         // Naming a ticket does not override the dedupe. Somebody else's claim
         // is not ceremony an operator gets to skip.
-        expect(isEligible([AGENT_LABELS.solvable, blocker], "named")).toBe(false);
+        expect(eligibility([AGENT_LABELS.solvable, blocker], "named").eligible).toBe(false);
       },
     );
 
@@ -99,8 +98,8 @@ describe("eligibility", () => {
     (blocker) => {
       // This is the whole dedupe mechanism. There is no seenKeys list behind
       // this queue, so a ticket that reads as claimable twice is solved twice.
-      expect(isEligible([...AUTHORISED, blocker], "manual")).toBe(false);
-      expect(isEligible([AGENT_LABELS.solvable, blocker], "auto")).toBe(false);
+      expect(eligibility([...AUTHORISED, blocker], "manual").eligible).toBe(false);
+      expect(eligibility([AGENT_LABELS.solvable, blocker], "auto").eligible).toBe(false);
     },
   );
 
@@ -112,8 +111,8 @@ describe("eligibility", () => {
     // would catch them drifting apart is the one below.
     expect(SOLVE_QUEUE_EXCLUDED_LABELS).toContain(AGENT_LABELS.reviewing);
     expect(SOLVE_QUEUE_EXCLUDED_LABELS).toContain(AGENT_LABELS.reviewDone);
-    expect(isEligible([...AUTHORISED, AGENT_LABELS.reviewing], "manual")).toBe(false);
-    expect(isEligible([...AUTHORISED, AGENT_LABELS.reviewDone], "manual")).toBe(false);
+    expect(eligibility([...AUTHORISED, AGENT_LABELS.reviewing], "manual").eligible).toBe(false);
+    expect(eligibility([...AUTHORISED, AGENT_LABELS.reviewDone], "manual").eligible).toBe(false);
   });
 
   it("refuses a claim on every label the queue query excludes", () => {
@@ -121,8 +120,8 @@ describe("eligibility", () => {
     // anything the query filters must also be refused here, or a ticket arriving
     // from a retry, a CLI or a hand-written query walks straight past the guard.
     for (const blocker of SOLVE_QUEUE_EXCLUDED_LABELS) {
-      expect(isEligible([...AUTHORISED, blocker], "manual")).toBe(false);
-      expect(isEligible([AGENT_LABELS.solvable, blocker], "auto")).toBe(false);
+      expect(eligibility([...AUTHORISED, blocker], "manual").eligible).toBe(false);
+      expect(eligibility([AGENT_LABELS.solvable, blocker], "auto").eligible).toBe(false);
     }
   });
 
@@ -186,8 +185,8 @@ describe("claimTransition", () => {
     // The round trip that makes the queue idempotent: apply the claim, and the
     // same ticket must now fail the same predicate.
     const after = applyEdit(AUTHORISED, claimTransition(AUTHORISED, "manual"));
-    expect(isEligible(after, "manual")).toBe(false);
-    expect(isEligible(after, "auto")).toBe(false);
+    expect(eligibility(after, "manual").eligible).toBe(false);
+    expect(eligibility(after, "auto").eligible).toBe(false);
     expect(() => claimTransition(after, "auto")).toThrow(LabelStateError);
   });
 });
@@ -219,8 +218,8 @@ describe("reviewTransition", () => {
   it("keeps a reviewing ticket out of the queue in both modes", () => {
     const claimed = [AGENT_LABELS.solvable, AGENT_LABELS.solving];
     const reviewing = applyEdit(claimed, reviewTransition(claimed));
-    expect(isEligible(reviewing, "manual")).toBe(false);
-    expect(isEligible(reviewing, "auto")).toBe(false);
+    expect(eligibility(reviewing, "manual").eligible).toBe(false);
+    expect(eligibility(reviewing, "auto").eligible).toBe(false);
   });
 
   it("refuses to move to review without the claim", () => {
@@ -288,8 +287,8 @@ describe("reviewStageTransition", () => {
 
   it("keeps a ticket out of the queue in either stage", () => {
     for (const labels of [REVIEWING, REVIEW_DONE]) {
-      expect(isEligible(labels, "manual")).toBe(false);
-      expect(isEligible(labels, "auto")).toBe(false);
+      expect(eligibility(labels, "manual").eligible).toBe(false);
+      expect(eligibility(labels, "auto").eligible).toBe(false);
     }
   });
 });
@@ -348,7 +347,7 @@ describe("completionTransition", () => {
     for (const outcome of ["done", "closed", "failed"] as const) {
       const after = applyEdit(REVIEWING, completionTransition(REVIEWING, outcome));
       expect(isTerminal(after)).toBe(true);
-      expect(isEligible(after, "auto")).toBe(false);
+      expect(eligibility(after, "auto").eligible).toBe(false);
     }
   });
 });

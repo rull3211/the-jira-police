@@ -125,8 +125,6 @@ export const AGENT_LABELS = {
   watching: "agent:watching",
 } as const;
 
-export type AgentLabel = (typeof AGENT_LABELS)[keyof typeof AGENT_LABELS];
-
 /**
  * Who is vouching for a claim.
  *
@@ -373,10 +371,6 @@ export function eligibility(labels: readonly string[], authority: ClaimAuthority
   }
 
   return { eligible: true };
-}
-
-export function isEligible(labels: readonly string[], authority: ClaimAuthority): boolean {
-  return eligibility(labels, authority).eligible;
 }
 
 /**
