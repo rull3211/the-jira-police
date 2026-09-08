@@ -1086,8 +1086,15 @@ zero poll interval is an unthrottled loop against Jira rather than an eager one.
 
 ## 11. Test doubles and the testing rule
 
-Two stand-in skills live in `.claude/skills/`, and between them they are the reason any of this
-could be tested before the real skill was available:
+`.claude/skills/` holds five directories and only four are the service's. `intake-triage` (§12) and
+`agent-solve` (§24) are the real ones; the two below are their stand-ins. **`dev-house-rules` is not
+a runtime skill at all** — it is the development discipline for this repository, read by whoever is
+editing it and by nothing the service runs. That is structural rather than a convention:
+`prepareSkillRoot` stages `agent-solve` alone into a root that "must contain nothing else", so a
+directory added here cannot reach a pass.
+
+The two stand-ins are between them the reason any of this could be tested before the real skill was
+available:
 
 - **`mock-triage`** — derives its verdict from the issue key, reads nothing, calls no tools.
   Exercises the whole pipeline with no Jira and no vault.
