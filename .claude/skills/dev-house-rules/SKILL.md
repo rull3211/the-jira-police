@@ -45,16 +45,19 @@ green.
 
 ## The two that are not advisory
 
-Everything else is recoverable if you get it wrong. These are not, and both are enforced by
-`.claude/hooks/` rather than by your good intentions:
+Everything else is recoverable if you get it wrong. These are not — and right now your good
+intentions are the whole of the enforcement, because the guards are written but not registered
+(`PLAN.md` §12):
 
 1. **Never work on `main` or any protected branch.** Branch first. One implementation branch per
-   reviewable unit of privilege. Do not look for a way around the hook — ask.
+   reviewable unit of privilege. Do not look for a way around this — ask.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
 
 If you change a hook, run `pnpm test:hooks`. It caught a branch name containing a `"` breaking the
-denial JSON, which made the guard fail _open_ while still looking installed.
+denial JSON, which made the guard fail _open_ while still looking installed. Note what that suite
+can and cannot say: it proves the scripts, and the scripts are currently wired to nothing, which is
+the same _looks installed_ failure one level up.
 
 ---
 

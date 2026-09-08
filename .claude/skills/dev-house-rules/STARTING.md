@@ -175,8 +175,10 @@ Each of those first three steps is
 which is what makes the ordering enforceable rather than aspirational.
 
 **One branch per privilege, never `main`.** A human always merges; this service has no merge path
-and neither do you. Both are enforced by `.claude/hooks/`, and the guards have their own suite —
-`pnpm test:hooks`. Run it if you change one.
+and neither do you. Guards for the first are written and tested — `.claude/hooks/`, suite
+`pnpm test:hooks`, run it if you change one — but nothing registers them yet and the second has no
+guard at all (`PLAN.md` §12). Neither rule is any less binding for that; the only difference is
+that breaking one will not be caught.
 
 **Do not stack branches deeply.** Each unmerged branch gates the ones above it. When the stack
 grows, stop and ask for the base to be merged rather than building another floor on it, and delete

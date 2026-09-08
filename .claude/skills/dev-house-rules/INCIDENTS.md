@@ -13,6 +13,16 @@ any work.
 better; if a later run refutes it, that is a new entry, because a corrected story loses the thing
 that made it worth keeping. Entries are removed only when the subsystem they describe is gone.
 
+**Some sources sit outside this tree, and must say so.** Several entries quote the plan-mode
+planning documents written before a phase. Those are not `PLAN.md`, they are not in the repository,
+and `pnpm docs:check` structurally cannot open them — so it cannot tell such a citation from one
+that resolves. An unverifiable citation that announces itself is a known gap; one that reads like
+every other citation is a silent one, which is this file's own subject applied to itself. Two
+entries — [`capacity: 0`](#the-capacity-number-that-was-read-for-two-days-as-a-blocker) and
+[D4a](#the-three-phases-stacked-on-one-branch) — said "the plan" and were read as meaning `PLAN.md`,
+where neither string has ever appeared. Corrected 2026-09-08 by naming the source. That is a
+pointer being fixed, not a story being softened; the quotations are verbatim and unchanged.
+
 **Why the stories are kept at all.** A rule stripped of its incident is an opinion, and the next
 person under time pressure will correctly identify it as one. When a rule looks expensive, the story
 is the argument for paying.
@@ -462,8 +472,9 @@ supports](BUILDING.md#verbose-is-not-volume-and-this-is-the-half-that-gets-overc
 
 ### The capacity number that was read for two days as a blocker
 
-A cycle report printed `capacity: 0`, and that was recorded in the plan as the thing gating an
-end-to-end run. It was not. `runSolveCycle` computes capacity, and the hand-driven path is called
+A cycle report printed `capacity: 0`, and that was recorded as the thing gating an end-to-end run —
+in the plan-mode planning document for the solve phases, which is not `PLAN.md` and is not in this
+tree. It was not gating anything. `runSolveCycle` computes capacity, and the hand-driven path is called
 anyway when an issue key is named, so it had never consulted the number. The blocker was an
 inference from a report rather than a reading of the code, and it stood for two days.
 
@@ -506,8 +517,9 @@ session](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-yo
 ### The three phases stacked on one branch
 
 Three implementation branches were stacked rather than fanned out, each editing code the one below
-it was the first to call. The cost was recorded in the plan at the time, in the plan's own words:
-_"D4a's end-to-end test gates all three."_
+it was the first to call. The cost was written down at the time, in the plan-mode planning document
+for the solve phases — not `PLAN.md`, and not in this tree — in its own words:
+_"the cost is that D4a's end-to-end test gates all three."_
 
 That sentence is the loop degrading into a waterfall, visible in advance and accepted anyway. A run
 that fails tells you _which change broke it_ only if there was one change.

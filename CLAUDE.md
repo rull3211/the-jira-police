@@ -10,13 +10,17 @@ Everything else is recoverable if you get it wrong. These two are not, so they a
 rather than routed to.
 
 1. **Never work on `main` or any protected branch.** Branch first — `feat/`, `fix/`, `chore/`,
-   `docs/`, `refactor/`. One implementation branch per reviewable unit of privilege. A hook enforces
-   this; do not look for a way around it, ask instead.
+   `docs/`, `refactor/`. One implementation branch per reviewable unit of privilege. Do not look for
+   a way around this; ask instead.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
 
-Both are enforced mechanically by `.claude/hooks/`, and the guards have their own suite:
-`pnpm test:hooks`. Run it if you change one.
+**Nothing mechanical is holding either of these today, so you are.** Guards for the first are
+written and tested — `.claude/hooks/`, with their own suite, `pnpm test:hooks` — but
+`.claude/settings.json` has never been committed, so nothing registers them and they run on
+nothing. Rule 2 has no guard at all. Both rules bind exactly as hard as if they did; the difference
+is only that breaking one will not be caught. `PLAN.md` §12 carries the wiring as open work, and it
+is the operator's to do. Run `pnpm test:hooks` if you change a guard.
 
 **Do not stack branches deeply** — three stacked here once turned an incremental plan into a
 waterfall. The rule and the story are in

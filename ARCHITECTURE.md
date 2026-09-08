@@ -655,7 +655,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-71 production modules, 65 test files. Grouped by what they belong to rather than alphabetically,
+71 production modules, 64 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**

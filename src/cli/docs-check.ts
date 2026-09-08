@@ -184,6 +184,28 @@ const FACTS: readonly Fact[] = [
     cited: citation("all", CAPTURED, "settings", "are", "read"),
     expectSites: 1,
   },
+  /**
+   * The same number as the fact above, in the one place it is written as a bare
+   * count rather than as "<N> tests in <N> files" — the module map's header.
+   * It is a separate entry because the phrasing is what the check matches on,
+   * and that is exactly how this site went wrong: `96998cc` updated both of the
+   * canonical-phrasing sites and wrote 65 here, in the same commit whose message
+   * says the count "was updated in both" documents.
+   *
+   * This pins one more phrasing. It does not close the class: a count written in
+   * a third form is still invisible, and there are 20 count-noun phrases in
+   * tracked markdown against 4 declared sites. The class fix is `expectSites`
+   * one level up — every count-noun phrase must be a declared site or a listed
+   * historical figure — and it is too large to hand-watch, so it arrives with
+   * this file's first test rather than before it. Recorded in `PLAN.md` §13.
+   */
+  {
+    what: "test files, written as a bare count",
+    actual: suite.files,
+    phrase: "<N> test files",
+    cited: citation(CAPTURED, "test", "files"),
+    expectSites: 1,
+  },
 ];
 
 const files = markdownFiles(ROOT);
