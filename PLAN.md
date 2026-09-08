@@ -306,6 +306,92 @@ and an exit code. The rest is still declined.
 
 ---
 
+### 13. An audit of the house rules against the tree, and the six defects that survived checking
+
+Run 2026-09-08 against the rules on this branch, by spot-check rather than by reading: drive every
+command, then test each falsifiable claim the rules make about the repository. **Eight findings;
+six held, one was wrong, one was overstated in a way that would have destroyed evidence.** Both
+failures are recorded below, because the way they were reached is more useful than the findings.
+
+**What the audit confirmed first**, so the defects are read in proportion: all five checks green;
+plan-before-work followed in `af61f41`/`1e64ed4` with the entry written and then deleted; every
+symbol `BUILDING.md` names present, including `FAIL_FIRST_CHECK`'s `!== "false"` asymmetry; the
+literal-list rule derived at the sites it names; six entry points exactly. Of eighteen incidents
+sampled, thirteen trace to a SHA whose diff or message carries the incident's own details, and **no
+claimed defect turned out never to have existed.**
+
+**Shipping on this branch** (delete these three when the fix commit lands):
+
+- **Four sentences assert a mechanical guarantee that does not exist.** `CLAUDE.md:13` and `:18`,
+  `dev-house-rules/SKILL.md:48`, `STARTING.md:178`. There is no `.claude/settings.json` in any
+  commit, so the hooks are registered to nothing. §12 has said so since it was written; these four
+  say the opposite in the present tense, and `BUILDING.md:231` calls built-but-unwired a bug.
+  Two-thirds of the damage is this branch's own — `CLAUDE.md:18` is `1e64ed4`, not `6a8cba7`.
+- **`ARCHITECTURE.md:658` says 65 test files; `:22` says 64.** 64 is right. The interesting half is
+  the provenance: `96998cc` wrote both numbers **in the same commit**, and its message claims _"that
+  count is cited as fact in two documents and was updated in both."_ It was born complete-looking,
+  not drifted. Fixed, plus a fourth `FACT` pinning the bare `<N> test files` phrasing.
+- **Two citations in `INCIDENTS.md` name the wrong document.** The D4a sentence and `capacity: 0`
+  are attributed to "the plan … in the plan's own words"; neither string is in any revision of
+  `PLAN.md`. Both are real and verbatim — in the plan-mode planning document for the solve phases,
+  which is outside the tree. Corrected by naming the source, never by deleting: the records are
+  true and only the pointer is wrong.
+
+**Open, and not this branch's job:**
+
+- **The count class, not the instance.** A fourth `FACT` pins one phrasing. Measured across tracked
+  markdown there are **20 count-noun phrases and 3 declared sites**; the next new phrasing drifts
+  exactly as 65 did. The class fix is `expectSites` one level up — every count-noun phrase must be
+  either a declared site or an explicitly listed historical figure, which also forces the
+  current-versus-war-story call to be written down instead of made silently. `PLAN.md:275`'s "57
+  assertions" is current and uncited; `ARCHITECTURE.md:1863`'s "1245 passing tests" is history.
+- **`docs-check.ts` has no test.** 331 lines enforcing prose discipline, and `PROVING.md`'s central
+  rule is not satisfied for it. The class check above is not hand-watchable, so these two are one
+  unit: whoever writes the class check writes `docs-check.test.ts` with it.
+- **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links; `CLAUDE.md`'s
+  own routing table is backticks, so deleting a phase file keeps it green; the repository's real
+  cross-reference system — **87 `§N`/`invariant N` references** — is unchecked entirely.
+- **Cost figures are facts with many homes.** `$0.94` in five files, `$0.11` in five, `$3.99` in
+  three, `$4.50` in three, outside the `docs:check` exemption rule 3 grants.
+- **The guards fail open in ways `test:hooks` does not reach.** On a protected branch, `git -C .
+commit`, any global flag before the subcommand, and every non-git write are allowed; bare `git
+push` from `main` is allowed. Nothing anywhere addresses rule 2 — `gh pr merge --squash --admin`
+  is unguarded, and ruleset 22571207 requires **0 approvals and no status checks**, so the intended
+  command defeats it. 57 assertions, none covering any of this.
+- **`.claude/settings.json` is nobody's in this session but the operator's.** It is the only item
+  here that no agent can do, and until it lands every item above is theoretical.
+
+**A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
+branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
+which is **blind to every squash- and rebase-merged branch**. `chore/agent-guardrails` has an
+identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
+these accumulate, and it is one instance of a possible rule rather than a rule.
+
+**Three method failures, recorded and deliberately not generalised** — each is one instance, and
+each is a defect this repository already has an incident for, committed while auditing for it:
+
+- **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
+  a shared row looks like, and it was read as a missing row because a finding had predicted one.
+  Row-counting also assumed one setting per row. Deriving the answer — iterate `SETTINGS`, check
+  each name — gives 46 of 46 present. `STARTING.md`'s "finding something adjacent and believing it".
+- **A number that invited an inference about what it controls.** `git rev-list --count main..HEAD`
+  is 3 and `branch-stack.sh`'s threshold is 3, so the hook was said to be at its limit. It counts
+  unmerged branches into `origin/main` — currently **one**. The `capacity: 0` incident exactly.
+- **An adversarial subagent returns what it was primed for.** The prompt offered `SUSPECTED
+RETROFIT` as a verdict and named an untraceable commit as evidence of it; the report came back
+  alleging invention, and it was relayed at full strength. The evidence supported "not in
+  `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
+  delegated on the two sharpest accusations.
+
+**What would make this the wrong idea.** Correcting the four sentences is the change most likely to
+be read as weakening the rules. It is not: _never work on `main`_ and _a human merges_ stay
+absolute, and only the claim about what enforces them changes. If wiring `settings.json` is
+imminent, three of these edits are churn and the honest move is to wire it and leave the prose —
+but the prose has been false for as long as it has existed, and a rule that overstates its own
+enforcement teaches a reader to stop checking the other ones.
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 ### The war stories are the asset, and length pressure comes for them first
