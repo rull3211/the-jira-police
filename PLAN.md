@@ -422,6 +422,58 @@ the whole `docs:check` list, and the wiring is worth more than the guards.
 
 ---
 
+### 14. Four lessons were written down and filed where nothing loads them
+
+**What is being attempted.** Route four lessons from the 2026-09-08/09 sessions onto a reading path,
+write the rule they share, and put one check behind it that fires without anybody remembering.
+
+**Why now, and what the four have in common.** Each was noticed, understood, and written up at
+length — none was missed. Each then went somewhere no rule and no reader ever loads:
+
+- The hook suite borrowed the developer's git identity, so it was green on one laptop and could not
+  run anywhere else. Written into `SKILL.md` as a bare SHA, `8ad1a31`, where every other rule in
+  that file cites an `INCIDENTS.md` anchor. Resolvable only by `git show`, which makes it the
+  unverifiable-citation class from §13 — committed one day after that class was documented, in the
+  file documenting it.
+- `test-hooks.sh:93` was claimed to assert something it does not, and the claim shipped to `main`.
+  Recorded as the fourth of §13's method failures — inside an entry that rule 2 says is **deleted**
+  when the audit closes. The correction is currently scheduled to be thrown away.
+- A guard refusing prose as if it were the act produced a design rule about anchoring. It lived in a
+  commit message and a code comment until `74ced9b`.
+- §14, the previous holder of this number, was deleted when the guard shipped — but the rule the
+  guard produced had not been written, so the work was not finished. _Delete the entry when it
+  ships_ quietly assumes the prose half ships with the code half.
+
+**What it would let us do.** Turn the finishing checklist's one unmechanised question — _did
+something get through that these rules do not cover?_ — from a thing a reader may skip in silence
+into a claim that must be written and can be contradicted. Three layers, agreed 2026-09-09:
+
+1. A PR body carries `Rules owed: none` or `Rules owed: <these>`, produced by a **fresh context**
+   given the diff and the rules, and primed with no verdict vocabulary — §13's third method failure
+   is an adversarial subagent returning what it was primed for.
+2. CI fails a pull request whose body has no such line. It cannot judge the answer; it guarantees
+   the question was answered, and it is the only part of this that fires independently of the agent.
+3. `FINISHING.md`: re-read the phase file, never recall it. This session ran the checklist from
+   memory after a compaction and got the six commands right and the four judgement questions wrong.
+
+**What would make it the wrong idea.** Three things. First, the honest objection: every layer here
+is a check on documents, and §13 says checks on documents catch less than driving a command does —
+layer 2 is a lint on a text field, not a test. Second, layer 1 costs a model call per pull request
+and could degrade into a rubber stamp that makes the omission _look_ examined; if it ever emits
+`none` on a diff that plainly owes something, it is worse than nothing and should be deleted rather
+than tuned. Third, and unfixable by any of this: an agent writing `Rules owed: none` in good faith
+about a rule it has silently reinterpreted defeats all three layers. The class was surfaced by a
+human asking twice. Nothing below replaces that; it only lowers how often it is needed.
+
+**Not attempted, and recorded so it is not re-argued.** A rule that a blocked command is an incident
+to be written up — rejected on the ground that _"record what it taught you before you re-attempt or
+reword"_ reads as blessing the reword, and a rule that can be read as permission will be. A
+`docs:check` rule failing a bare SHA cited without an incident anchor, and a CI check requiring
+"What was learned" to grow when a numbered entry is deleted: both offered, both declined for now as
+mechanism ahead of evidence. The `Stop` hook remains declined (§12).
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 ### The war stories are the asset, and length pressure comes for them first
