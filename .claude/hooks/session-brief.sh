@@ -30,8 +30,10 @@ unmerged="$(countLines "$(unmergedBranches "$repo" "$base")")"
 cat <<BRIEF
 This repository has a working contract: .claude/skills/dev-house-rules/SKILL.md.
 Read it before changing code or prose. It is not a style guide — every rule in it
-generalises a defect that already shipped here, and the war story is attached to
-each one. CLAUDE.md summarises what is non-negotiable; the skill has the reasoning.
+generalises a defect that already shipped here, and each one links to the incident
+that produced it in INCIDENTS.md. SKILL.md is an index: the rules are split by phase
+into STARTING, BUILDING, PROVING and FINISHING, so load the one you are in rather
+than all four. CLAUDE.md states what is non-negotiable; the skill has the reasoning.
 
 Repository state: branch '$branch', $dirty uncommitted file(s), $unmerged branch(es) unmerged into $base.
 BRIEF

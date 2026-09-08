@@ -19,7 +19,8 @@
     "format:check": "oxfmt --check",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:hooks": ".claude/hooks/test-hooks.sh"
+    "test:hooks": ".claude/hooks/test-hooks.sh",
+    "docs:check": "node src/cli/docs-check.ts"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

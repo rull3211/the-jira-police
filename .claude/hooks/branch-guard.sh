@@ -6,7 +6,7 @@
 # This exists because the rule it enforces is the one whose violation cannot be
 # undone by the person who notices. Everything else in the house rules is a
 # recoverable mistake; a commit on `main` is not, and neither is a push to it.
-# So this fails closed (SKILL.md §5) and denies rather than asks.
+# So this fails closed (BUILDING.md, "fail closed") and denies rather than asks.
 #
 # Denial text is fed back to the model, so it is written to tell the agent what
 # to do next rather than only what it may not do.

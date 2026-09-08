@@ -6,8 +6,8 @@
 # It returns "ask", not "deny", deliberately. Stacking is sometimes right — a
 # phase that edits code the phase below it is the first to call has nowhere else
 # to go. What is never right is stacking *without anyone deciding to*. So this is
-# a guard in the SKILL.md §5 sense: it fails open, and its job is to make the
-# decision visible at the moment it is being made.
+# a guard in BUILDING.md's "except guards" sense: it fails open, and its job is
+# to make the decision visible at the moment it is being made.
 #
 # The threshold is 3 from evidence rather than taste: three phases stacked on one
 # base here once forced the plan to record that the bottom one's end-to-end test

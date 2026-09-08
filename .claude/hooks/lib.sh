@@ -2,7 +2,7 @@
 #
 # Shared by branch-stack.sh and session-brief.sh, which both have to answer one
 # question: how many branches are stacked up unmerged. It is one fact, so it has
-# one implementation — two copies of a count is the shape SKILL.md §14 warns
+# one implementation — two copies of a count is the shape STARTING.md warns
 # about, and here the two would drift in opposite directions.
 #
 # Nothing in here is a guard. It is measurement, and every function fails soft:
