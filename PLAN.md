@@ -270,10 +270,11 @@ least likely — a narrow prompt late in a long session — is the case where th
 
 **Built, on `chore/agent-guardrails`:** `CLAUDE.md`, which auto-loads every session and carries the
 two non-negotiable rules and the pointer to the working contract; `.claude/hooks/branch-guard.sh`
-(deny writes and protected-branch pushes), `branch-stack.sh` (ask a human when the stack is deep),
-`session-brief.sh` (state the contract and the repository's shape at session start, including after
-a compaction), `lib.sh`, and `test-hooks.sh` — 57 assertions behind `pnpm test:hooks`, eleven
-mutations watched to fail.
+(deny writes and pushes on a protected branch, and deny `gh pr merge` from any branch),
+`branch-stack.sh` (ask a human when the stack is deep), `session-brief.sh` (state the contract and
+the repository's shape at session start, including after a compaction), `lib.sh`, and
+`test-hooks.sh` — 74 assertions behind `pnpm test:hooks`; eleven mutations watched to fail when it
+was first written, five more when rule 2 was guarded.
 
 **Registration is not in this repository, and that is the arrangement rather than a gap.** Hook
 configuration belongs to the operator and is held outside this tree; the environment refuses the
@@ -297,7 +298,7 @@ git switch main                   # then ask the agent to edit any file
 If the first is silent in a fresh session, the configuration is not being read at all and nothing
 else is worth testing. **`pnpm test:hooks` proves the scripts; only that probe proves the
 enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
-installed. Note how narrow the first half was until recently: those 57 assertions borrowed the
+installed. Note how narrow the first half was until recently: those assertions borrowed the
 developer's git identity, so they passed on one laptop and could not run anywhere else at all. CI
 caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI step.
 
@@ -346,8 +347,9 @@ not reach.
   indistinguishable to a regex, and here the call was made by rewording. The class fix is
   `expectSites` one level up: every count-noun phrase must be either a declared site or an
   explicitly listed historical figure, which forces that current-versus-war-story call to be written
-  down instead of made silently. `PLAN.md:275`'s "57 assertions" is current and uncited;
-  `ARCHITECTURE.md:1863`'s "1245 passing tests" is history.
+  down instead of made silently. §12's hook-assertion count is current and uncited — and duly went
+  stale within a day of being named here, twice; `ARCHITECTURE.md:1863`'s "1245 passing tests" is
+  history.
 - **`docs-check.ts` has no test.** 331 lines enforcing prose discipline, and `PROVING.md`'s central
   rule is not satisfied for it. The class check above is not hand-watchable, so these two are one
   unit: whoever writes the class check writes `docs-check.test.ts` with it.
@@ -363,21 +365,21 @@ not reach.
   outside the tree ([`INCIDENTS.md`](.claude/skills/dev-house-rules/INCIDENTS.md) header); the
   convention is prose, and nothing enforces it. The mechanical version would be a marker the check
   recognises, so an unmarked unresolvable citation fails rather than passing silently.
-- **The guards fail open in ways `test:hooks` does not reach.** On a protected branch, `git -C .
-commit`, any global flag before the subcommand, and every non-git write are allowed; bare `git
-push` from `main` is allowed. Nothing anywhere addresses rule 2 — `gh pr merge --squash --admin`
-  is unguarded, and ruleset 22571207 requires **0 approvals and no status checks**, so the intended
-  command defeats it. 57 assertions, none covering any of this. **Correction, 2026-09-09:** an
-  earlier revision of this bullet said `test-hooks.sh:93` _asserted_ the bare-push hole. It does
-  not. That loop runs on `feat/ordinary`, where allowing `git push` is correct; the hole is simply
-  that no case ever exercises a bare push from a protected branch. The claim was made by reading a
-  line number without reading which fixture branch was checked out above it — the same
-  adjacent-and-plausible error this entry records twice already.
-- **Hardening those guards is worth doing; watching one fire is not possible from here.**
-  Registration is the operator's and outside this tree (§12), so a tightened guard is still built
-  inert. That is this repository's own phasing rather than an obstacle — but it does mean every item
-  above can only be proved by `test:hooks` and by hand-feeding payloads to the script, never by
-  observing a refusal.
+- **One guard hole is left, and it is the one enumeration cannot close.** On a protected branch
+  every non-git write still passes: `sed -i`, `>`, `>>`, `tee`, `cp`, `mv`, `rm`, and any
+  interpreter handed a script. `Edit`/`Write` are refused unconditionally, so this is the Bash-shaped
+  way around them. It needs a decision nobody has made yet — how many false positives a floor may
+  cost — and shipping half of it would be worse than leaving it named. The rule-1 flag bypasses and
+  rule 2 itself were closed on 2026-09-09; this was deliberately not.
+- **Rule 2 has a guard here now, and the layer above it still cannot be surveyed.** The operator's
+  outer tooling refuses mutating GitHub API calls — observed, when a probe was blocked that was only
+  ever going to be fed to a local script as a string. Whether it also covers `gh pr merge` cannot be
+  established without running `gh pr merge`, so it is unknown and will stay unknown. Separately,
+  ruleset 22571207 requires **0 approvals and no status checks**, so nothing on the GitHub side would
+  refuse the merge if the command ever ran.
+- **Nothing here can be watched working.** Registration is the operator's and outside this tree
+  (§12), so every guard in it is built inert; the whole of the evidence is `pnpm test:hooks` and
+  hand-fed payloads, never an observed refusal.
 
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
@@ -385,7 +387,7 @@ which is **blind to every squash- and rebase-merged branch**. `chore/agent-guard
 identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
 these accumulate, and it is one instance of a possible rule rather than a rule.
 
-**Three method failures, recorded and deliberately not generalised** — each is one instance, and
+**Four method failures, recorded and deliberately not generalised** — each is one instance, and
 each is a defect this repository already has an incident for, committed while auditing for it:
 
 - **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
@@ -400,6 +402,13 @@ RETROFIT` as a verdict and named an untraceable commit as evidence of it; the re
   alleging invention, and it was relayed at full strength. The evidence supported "not in
   `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
   delegated on the two sharpest accusations.
+- **A line number read without its context.** This entry claimed `test-hooks.sh:93` _asserted_ the
+  bare-push hole by listing `git push` among the commands that must stay silent. It does not: twelve
+  lines above it the fixture switches to `feat/ordinary`, where allowing a bare push is correct. The
+  hole was only ever that no case exercised a protected branch. Shipped to `main` in `e9483c1`,
+  caught the next day by running the guard instead of re-reading it — which is the same _cite
+  `file:line`, never a recollection_ rule failing in its other direction: the citation was exact and
+  the reading of it was not.
 
 **What would make this the wrong idea.** Two things. The prose corrections that already shipped
 read, at a glance, as weakening the rules — they are not: _never work on `main`_ and _a human
@@ -410,50 +419,6 @@ reader to stop checking the other ones. For what remains: every item above is a 
 and this repository's own evidence is that checks on documents catch less than driving a command
 does. If the next session has budget for exactly one of these, the guard hardening is worth more than
 the whole `docs:check` list, and the wiring is worth more than the guards.
-
----
-
-### 14. Closing three of the guard bypasses §13 measured
-
-Started 2026-09-09, taking the top three items of §13's guard bullet and leaving the fourth. Each
-was measured against `branch-guard.sh` by feeding it payloads before any change, so the "before"
-column is observed rather than inferred:
-
-| command                              | HEAD     | today | wanted |
-| ------------------------------------ | -------- | ----- | ------ |
-| `gh pr merge 15 --squash --admin`    | any      | ALLOW | DENY   |
-| `git -C . commit -m x`               | `main`   | ALLOW | DENY   |
-| `git --no-pager commit -m x`         | `main`   | ALLOW | DENY   |
-| `git -c user.name=x commit -m x`     | `main`   | ALLOW | DENY   |
-| `git push`                           | `main`   | ALLOW | DENY   |
-| `git push`                           | `feat/…` | ALLOW | ALLOW  |
-| `git switch -c feat/x`, `git status` | `main`   | ALLOW | ALLOW  |
-| `gh pr create --draft`, `gh pr view` | any      | ALLOW | ALLOW  |
-
-**Why rule 2 first.** It is the only rule with no mechanical enforcement anywhere in this tree, and
-it is the cheaper of the two to guard because nothing legitimate resembles it: an agent here never
-merges, so a flat refusal on `gh pr merge` costs nothing. Rule 1 already has partial coverage.
-
-**One thing about rule 2 that cannot be settled from here.** The operator's outer layer refuses
-mutating GitHub API calls — found by having a probe blocked while it was only ever going to be fed
-to a local script as a string. Whether that layer also covers `gh pr merge` is unknowable without
-running `gh pr merge`, which is the one command that must never be run to find out. So this guard is
-defence in depth and is written as though nothing else exists, which is the assumption §12 now tells
-every reader to make anyway.
-
-**Deliberately not in scope: the non-git write class.** `sed -i`, `>`, `>>`, `tee`, `cp`, `rm` are
-all still allowed on a protected branch. That is one hole rather than three, it cannot be closed by
-enumeration, and it needs a decision about how many false positives a floor may cost. Left open in
-§13 on purpose rather than half-done here.
-
-**What would make this the wrong idea.** Two things, and the first is structural: an agent is
-writing the guard that constrains it, together with the tests that say the guard works. Hardening
-only tightens, and a weakened guard shows up as a deleted assertion, so the diff is reviewable — but
-it wants a more adversarial read than a normal one, and that is the reviewer's cost, not the
-author's. The second is that a tightened guard is still registered to nothing (§12), so none of this
-can be observed refusing anything; it is proved by `test:hooks` and hand-fed payloads only. If the
-false-positive rate on `git -C` turns out to bite real work, the global-flag change is the one to
-reconsider first.
 
 ---
 

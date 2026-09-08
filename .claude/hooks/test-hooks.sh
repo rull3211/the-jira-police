@@ -138,6 +138,22 @@ for w in "git commit -m x" "git merge feat/x" "git rebase feat/x" "git revert HE
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
+# The bypasses the write-list missed until 2026-09-09, every one of them
+# measured as allowed before the fix. The regex required the subcommand to sit
+# immediately after `git`, so any global option in front of it walked past.
+for w in "git -C . commit -m x" "git --no-pager commit -m x" \
+  "git -c user.name=x commit -m x" "git -C /x -c a=b commit -m y"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# A bare push names no branch, so the push check above cannot see it, and it
+# goes to `main` anyway through the upstream. It is caught as a write instead.
+# The pair to this is "allows: git push" on a feature branch above: the command
+# is identical and only the branch decides, which is the whole point.
+expect "on main refuses: git push" DENY \
+  "$(bash_payload "git push" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+
 for r in "git switch -c feat/x" "git checkout -b feat/x" "git status" "git log" \
   "git diff" "git fetch origin" "pnpm test" "ls"; do
   expect "on main allows: $r" SILENT \
@@ -147,6 +163,36 @@ done
 git -C "$main_repo" switch -q feat/ordinary
 expect "off main: a commit is fine" SILENT \
   "$(bash_payload "git commit -m x" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+
+# Rule 2: a human merges, always. Until 2026-09-09 nothing in this tree enforced
+# it at all, and every command below was allowed from every branch.
+#
+# Both fixtures are checked because rule 2 is not a question about where you are
+# standing, and the feature branch is the case that matters: that is where an
+# agent is when its pull request goes green and merging becomes tempting.
+for m in "gh pr merge 15 --squash --admin" "gh pr merge --auto 15" \
+  "gh --repo o/r pr merge 15" "pnpm test && gh pr merge 15" \
+  "gh api repos/o/r/pulls/1/merge"; do
+  expect "off main refuses: $m" DENY \
+    "$(bash_payload "$m" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+git -C "$main_repo" switch -q main
+expect "on main refuses: gh pr merge 15" DENY \
+  "$(bash_payload "gh pr merge 15" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+git -C "$main_repo" switch -q feat/ordinary
+
+# The line between guarding the act and censoring the word, which is why the
+# match is anchored to command position rather than looked for anywhere in the
+# text. `PLAN.md` discusses `gh pr merge` at length and so do commit messages in
+# this repository; a guard that stopped you writing about itself would be turned
+# off the same day. The last case here is the one that catches that mistake.
+for ok in "gh pr view 15" "gh pr create --draft" "gh pr checks" "gh pr ready" \
+  "gh api repos/o/r/pulls/15 --jq .mergeable" \
+  "git commit -m 'docs: explain why gh pr merge is refused'"; do
+  expect "off main allows: $ok" SILENT \
+    "$(bash_payload "$ok" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
 
 echo
 echo "branch-stack.sh"

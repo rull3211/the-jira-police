@@ -15,15 +15,16 @@ rather than routed to.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
 
-**Assume nothing mechanical is holding either of these, because you cannot check.** Guards for the
-first are written and tested in `.claude/hooks/`, with their own suite — `pnpm test:hooks`, run it
-if you change one. Whether they are ever _registered_ is not decided in this repository: hook
-configuration belongs to the operator, lives outside this tree, and is deliberately neither readable
-nor writable from here. No commit can tell you whether a guard will fire, and the agent a guard
-constrains is the last one who should be wiring it — so this is not a gap waiting on a file, it is
-the arrangement. Rule 2 has no guard in this tree at all. Both rules bind exactly as hard as if they
-were enforced; the only difference is that breaking one may not be caught. `PLAN.md` §12 records
-what is built and what it does not cover.
+**Assume nothing mechanical is holding either of these, because you cannot check.** Both now have
+guards written and tested in `.claude/hooks/` — `branch-guard.sh` refuses writes and pushes on a
+protected branch, and refuses `gh pr merge` from every branch — with their own suite,
+`pnpm test:hooks`, which you run if you change one. But whether anything ever _registers_ them is
+not decided in this repository: hook configuration belongs to the operator, lives outside this tree,
+and is deliberately neither readable nor writable from here. No commit can tell you whether a guard
+will fire, and the agent a guard constrains is the last one who should be wiring it — so this is not
+a gap waiting on a file, it is the arrangement. Both rules bind exactly as hard as if they were
+enforced; the only difference is that breaking one may not be caught. `PLAN.md` §12 records what is
+built and what it does not cover.
 
 **Do not stack branches deeply** — three stacked here once turned an incremental plan into a
 waterfall. The rule and the story are in
