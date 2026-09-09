@@ -400,12 +400,40 @@ describe("runSession budgets", () => {
 
       expect(error).toBeInstanceOf(SessionError);
       expect(error).not.toBeInstanceOf(SessionTimeoutError);
-      // Not an exact match: the gap is measured against a real interval, so it
-      // carries whatever scheduling jitter the tick had. Pinning the millisecond
-      // would make this a test about the machine's load.
-      const [, detail] = warn.mock.calls.find(([event]) => event === "session.slept") ?? [];
-      expect(detail).toMatchObject({ label: "fake pass of SSX-1234" });
-      expect((detail as { sleptMs: number }).sleptMs).toBeGreaterThanOrEqual(3_600_000);
+      // Not an exact match: drift is `now - lastTickAt - tickMs`, so the figure
+      // carries the tick's scheduling jitter and is inherently up to one whole
+      // interval out. The comment here used to say that and then assert
+      // `>= 3_600_000` against an observed 3_600_001 — one millisecond of
+      // margin, which is pinning the millisecond by another name. That
+      // assertion failed intermittently under a loaded full-suite run.
+      //
+      // CI printed the value: **3_599_999**. One millisecond under, which is
+      // the injected hour arriving a millisecond early — a timer is allowed to
+      // fire before `Date.now()` agrees it is due, so the first gap can measure
+      // 1499 against a 1500 period. Nothing exotic, and nothing to do with a
+      // second event.
+      //
+      // That is worth spelling out because the first diagnosis written here was
+      // wrong and was argued from a measurement. A probe on macOS — a 300ms
+      // interval with a 700ms block inside one tick — gave gaps of 301, 301,
+      // 300, 700, 301 and never one below the period, and that was taken as
+      // proof the hour's drift could only land at or above 3_600_000, so the
+      // failing value had to be some other `session.slept` event. The probe
+      // never measured the case that matters: the *first* gap, against a
+      // timestamp taken before `setInterval` exists. CI, on other hardware,
+      // produced the counter-example on its first run.
+      //
+      // So: a tolerance of one tick rather than none, because that is the real
+      // precision of a figure computed as `now - lastTickAt - tickMs`. The
+      // largest event rather than the first is kept as well — it costs nothing
+      // and every session in this file shares one label, so `.find()` could not
+      // tell two apart if there ever were two.
+      const slept = warn.mock.calls.filter(([event]) => event === "session.slept");
+      expect(slept.length).toBeGreaterThan(0);
+      const details = slept.map(([, detail]) => detail as { label: string; sleptMs: number });
+      const biggest = details.reduce((a, b) => (b.sleptMs > a.sleptMs ? b : a));
+      expect(biggest).toMatchObject({ label: "fake pass of SSX-1234" });
+      expect(biggest.sleptMs).toBeGreaterThan(3_600_000 - watchdogIntervalFor(3000, 8000));
     } finally {
       clearTimeout(jump);
       now.mockRestore();

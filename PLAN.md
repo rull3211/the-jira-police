@@ -540,10 +540,44 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 `SOLVE_INSTRUCTIONS.md` ones.
 
 **The legal vocabulary, which the resolver now parses rather than being told:** `ARCHITECTURE.md`
-§1–15 plus its §14 invariants 1–17; `PLAN.md` §1–14; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
+§1–15 plus its §14 invariants 1–17; `PLAN.md` §1–15; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
 `SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten cited tokens are in none of them.
 
 <!-- refs:on -->
+
+
+### 15. One branch still in flight, and the order they had to land in
+
+**Branch:** `fix/section-resolver`, which is now the only one left. **Delete this entry when it
+merges** — it is a hand-off, not a plan, and it exists because the session that produced both ends
+before either lands.
+
+**`fix/slept-assertion` (PR #22) — merged.** Its half of the ordering is done, and the paragraph
+below is kept rather than deleted because the correction it records outlived the branch: the fix was
+right and the published reason was wrong, and that is the part worth carrying.
+
+**The fix is right and the published reason was wrong.** It replaces
+a `.find()`-first-event assertion with largest-event-plus-one-tick-tolerance in
+`src/triage/session.test.ts`. The fix needs no change. The **diagnosis** shipped in the commit
+message and PR body claims the failing value was a second `session.slept` event, because a local
+probe showed no gap could come in under the interval. CI then printed `expected 3599999 to be
+greater than or equal to 3600000` — 3,599,999 **is** the injected hour, one millisecond early,
+because a timer may fire before `Date.now()` agrees it is due, and the probe never measured the
+first gap against a stamp taken before `setInterval` exists. Corrected in the test comment and in
+`INCIDENTS.md`; **the commit message and the PR body still carry the wrong story** unless this
+entry is being read after they were amended.
+
+**`fix/section-resolver` (PR #21) — built, and now green.** It adds `src/cli/section-refs.ts` and its
+11 tests, routes `sectionReferences()` through `maskDisabled`, and holds `KNOWN_DANGLING` at exactly
+39. Its CI was red **only** because the branch predated #22 and so still ran the one-millisecond
+assertion. That prediction held: `origin/main` was merged in once #22 landed, and the suite went to
+2390 passing without the branch's own code being touched. The prediction is left here on purpose —
+it is the cheapest kind of evidence, a stated expectation that a later run either confirms or kills.
+
+**One open question, deliberately not answered by either branch.** `sectionReferences()` counts
+`§N` tokens across `src/` and may now be an orphan superseded by the resolver, which resolves the
+same tokens rather than counting them. Leaving it costs a `docs:check` fact that moves whenever
+test fixtures do — it already jumped 106 → 141 on fixtures alone. Propose before deleting.
 
 ---
 
