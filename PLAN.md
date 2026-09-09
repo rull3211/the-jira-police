@@ -411,6 +411,49 @@ its test: it is the only item whose absence has already produced two shipped con
 
 ---
 
+### 14. The session brief does not survive the moment it was written for
+
+**What is being attempted.** Make `session-brief.sh` behave differently when it fires with
+`trigger=compact`: inline the content a compacted context has provably lost — the two non-advisory
+rules and the finishing checklist's four judgement questions — instead of pointing at the file that
+holds them.
+
+**Why now, and it is measured rather than argued.** This session's transcript has three compaction
+boundaries, and **all three are immediately followed by a `git commit`** — lines 611→612,
+1353→1354, 2002→2003 — with no read of any rule file in between. That is not coincidence and it is
+worth stating as a mechanism: compaction fires when context is exhausted, context is most exhausted
+at the end of a unit of work, and the end of a unit of work is when the finishing checklist runs.
+**The most rule-dense moment in the workflow is systematically executed by the most degraded context
+available.** Rule-file reads against `git commit` calls, by stretch: 8:13 before the first
+compaction, then 1:23, then 5:10, then 0:6. The stretch with no reads at all produced four rule
+violations in one commit, found by a fresh-context audit and fixed in `6a10be6`.
+
+**What the current hook gets wrong**, beyond not being registered so far as anyone can tell:
+
+- Its header says it fires with `source=compact`. The field is **`trigger`**, and the values are
+  `startup|resume|clear|compact|fork`. The comment describes a payload that does not exist.
+- It injects a **pointer** — _"Read it before changing code or prose."_ A pointer is exactly what a
+  compacted context discounts, because it has a confident summary and reads the line as satisfied.
+- Committing is neither changing code nor changing prose, so the sentence does not name the one
+  action that empirically follows a compaction three times out of three.
+
+**What would make this the wrong idea.** Three things. First, the whole finding is downstream of an
+unknown: if the hook was never registered, then what was measured is the absence of a hook rather
+than the weakness of its wording, and only the operator can say which (§12). The fix is worth making
+either way, which is why it is not blocked on the answer — but the confidence attached to it should
+be. Second, injecting content rather than a pointer costs tokens on every compaction forever, and a
+brief that grows will eventually be skimmed exactly like the pointer it replaced; if it passes about
+sixty lines, it has become the thing it was fixing. Third, `n` is three boundaries in one session,
+all with the same operator on the same kind of work, and one of the four stretches behaved fine —
+so this is a hypothesis with an unusually clean mechanism, not a law.
+
+**Deliberately not built:** a `PreToolUse` guard refusing `git commit` when the branch has no
+`PLAN.md` entry. It is the only version with an exit code, and it is also the version most likely to
+refuse a correct one-line fix — the failure `BUILDING.md` now has a rule about, where a guard
+acquires an enemy among the people who maintain it. It waits for a second instance.
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 ### A citation can be exact and still be read wrongly, and that one shipped
