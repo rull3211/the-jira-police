@@ -436,38 +436,11 @@ here is genuinely the cheaper half — and the thing still worth more than any o
 which is not ours (§12). If the next session has budget for exactly one, take the class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
 
-### 14. Context is the scarce resource, and nothing in the rules says how to spend it
+### 14. The citations that were never written down
 
-**Branch:** `feat/checklist-in-claude-md`
-
-**What is being attempted.** Four amendments to the house rules, and two new derived counts, all
-from one finding: this repository's whole thesis is that files outlive contexts, and it had never
-written down how to work that way.
-
-- **`Found by` on every incident.** 35 entries record what broke; seven name what caught it, in five
-  different phrasings, so the set cannot be counted and `CLAUDE.md`'s claim that defects here are
-  found by real runs rather than by the suite cannot be checked. One field name turns seven
-  anecdotes into a tally. Older entries are left alone — append-only is the stronger convention.
-- **Subagents, as a way to spend context rather than only a hazard.** The rules mentioned them three
-  times, all cautionary. Nothing said to read wide in a subagent and decide in the main context,
-  which is the technique that makes a long session survivable. It ships with its counterweight:
-  claims are verified before they are relayed, and the diagnosis is verified separately from the
-  findings, because both failed that way in this session.
-- **Electing the compaction boundary.** `/compact` appeared nowhere in the tree. The commit is the
-  moment the context is disposable and the only boundary you can see coming.
-- **`PLAN.md` entries keyed by branch**, so `CLAUDE.md`'s resuming row can be followed at all.
-
-**Why now.** An audit found roughly 39 `§N` citations pointing at sections that were never written.
-See the entry below; the fix is its own branch, and this entry covers only the rules and the counts.
-
-**What would make this the wrong idea.** Three of the four amendments are prose about how to think,
-and this repository's evidence is that prose catches less than a command does. `Found by` is the
-only one that produces data, and it produces it slowly. If they read as advice rather than as rules
-with incidents attached, they will be skipped like any other advice.
-
-### 15. The citations that were never written down
-
-**Not started.** Sized only; the fix is its own branch.
+**Not started.** Sized only, and the sizing is the asset — the list below cost a full-tree audit plus
+a `git log --all` check, and regenerating it is the expensive part. **Branch:** none yet; take one
+off `main`, since this touches `src/` and `ARCHITECTURE.md` and is independent of anything stacked.
 
 Roughly **39 dangling `§N` citations** in shipped source. The first diagnosis — that a renumbering
 stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **none of the 54 historical
@@ -495,6 +468,48 @@ matters most:
 
 **What would make this the wrong idea.** Item 2 is a large mechanical diff across `src/` with real
 judgement in it, and a batch pass by an agent is how 39 confident references to nothing got here.
+
+#### The sites, so nobody pays for the audit twice
+
+**Provenance, because it decides how far to trust each row.** The list came from a subagent sweep;
+the totals and line numbers are its work and are **unverified in bulk**. Verified by hand: that
+`ARCHITECTURE.md:619` and `:1095` say what they are quoted as saying, that three sampled `src/`
+lines match verbatim, and — against all 54 revisions of `PLAN.md` via `git log --all` — that `§3a`,
+`§5b`, `§7b` and `§6.1c` have never existed there in any form. Re-check a row before editing it.
+
+Dangling, grouped by the token they cite. None of these tokens has ever been a heading anywhere:
+
+| token   | sites                                                                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `§7b`   | `watch-loop.ts:71`, `cli/watch-once.ts:25`, `watch/counter.ts:5`, `watch/decide.ts:232,314,329`, `watch/decide.test.ts:219`, `watch/memo.ts:13`, `watch/relevance.ts:35` |
+| `§6.1c` | `solve/pr.ts:438,1706`, `solve/commenter.ts:10`, `solve/delivery.ts:302,317`, `cli/solve-outcome.ts:324,485`, `cli/solve-outcome.test.ts:598`                            |
+| `§6.1`  | `ARCHITECTURE.md:426`, `cli/solve-outcome.ts:314`, `cli/solve-run.ts:569,1013`, `jira/jql.ts:208`                                                                        |
+| `§3a`   | `ARCHITECTURE.md:880`, `solve/attempts.ts:38`, `solve/commenter.ts:29`, `solve/commenter.test.ts:63`                                                                     |
+| `§6.3`  | `solve/delivery.ts:1417`, `watch/counter.ts:14`, `watch/retriage.ts:23`, `watch/retriage.test.ts:141`                                                                    |
+| `§7c`   | `jira/jql.ts:266`, `watch/retriage.ts:32`, `triage/gate.test.ts:532`                                                                                                     |
+| `§3c`   | `cli/solve-outcome.ts:522,533`, `jira/jql.ts:221`                                                                                                                        |
+| `§6.2`  | `solve/delivery.ts:1045`                                                                                                                                                 |
+| `§5b`   | `ARCHITECTURE.md:619` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                              |
+| `§24`   | `ARCHITECTURE.md:1095` — self-reference in a file whose sections stop at 15; intended target is almost certainly §15, "The solve pipeline"                               |
+
+**In range and silently repointed — the harder half, because nothing will ever flag these:**
+
+- "§1 refuses on-disk state" — `solve/attempts.ts:31`, `watch/relevance.ts:40`, `watch/memo.ts:21,26`,
+  `solve/review-cycle.ts:24,26`. That rule is now `ARCHITECTURE.md §5`; `PLAN.md §1` is the model
+  question.
+- "§6's rule is _advance, then claim_" — `index.ts:44`, `review-loop.ts:97`, `review-loop.test.ts:150`.
+  Now `ARCHITECTURE.md §2` (L143); `PLAN.md §6` is the second gate.
+- `ARCHITECTURE.md:1215` — "the gate in §2 of the plan"; `PLAN.md §2` is now cost per ticket.
+
+**Clean, and worth knowing so the resolver is not written to re-check them:** all 7 `invariant N`
+references (`README.md:447`, `ARCHITECTURE.md:1511,1635,1726,1735,1750`, `solve/claim.ts:26`) cite
+invariants 5, 11 and 13 and are correct; every `§14.N` sub-reference resolves; the ~57 `§11`
+citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as are the
+`SOLVE_INSTRUCTIONS.md` ones.
+
+**Targets the resolver must know about:** `ARCHITECTURE.md` §1–15 plus its §14 invariants 1–17;
+`PLAN.md` §1–14; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`; `SOLVE_INSTRUCTIONS.md` §0–8 with
+`0a`/`2a`/`2b`/`2c`.
 
 ---
 
