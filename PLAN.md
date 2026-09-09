@@ -545,7 +545,6 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 
 <!-- refs:on -->
 
-
 ### 15. One branch still in flight, and the order they had to land in
 
 **Branch:** `fix/section-resolver`, which is now the only one left. **Delete this entry when it
@@ -568,8 +567,7 @@ first gap against a stamp taken before `setInterval` exists. Corrected in the te
 entry is being read after they were amended.
 
 **`fix/section-resolver` (PR #21) — built, and now green.** It adds `src/cli/section-refs.ts` and its
-11 tests, routes `sectionReferences()` through `maskDisabled`, and holds `KNOWN_DANGLING` at exactly
-39. Its CI was red **only** because the branch predated #22 and so still ran the one-millisecond
+11 tests, routes `sectionReferences()` through `maskDisabled`, and holds `KNOWN_DANGLING` at exactly 39. Its CI was red **only** because the branch predated #22 and so still ran the one-millisecond
 assertion. That prediction held: `origin/main` was merged in once #22 landed, and the suite went to
 2390 passing without the branch's own code being touched. The prediction is left here on purpose —
 it is the cheapest kind of evidence, a stated expectation that a later run either confirms or kills.
