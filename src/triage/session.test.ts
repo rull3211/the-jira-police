@@ -400,12 +400,36 @@ describe("runSession budgets", () => {
 
       expect(error).toBeInstanceOf(SessionError);
       expect(error).not.toBeInstanceOf(SessionTimeoutError);
-      // Not an exact match: the gap is measured against a real interval, so it
-      // carries whatever scheduling jitter the tick had. Pinning the millisecond
-      // would make this a test about the machine's load.
-      const [, detail] = warn.mock.calls.find(([event]) => event === "session.slept") ?? [];
-      expect(detail).toMatchObject({ label: "fake pass of SSX-1234" });
-      expect((detail as { sleptMs: number }).sleptMs).toBeGreaterThanOrEqual(3_600_000);
+      // Not an exact match: drift is `now - lastTickAt - tickMs`, so the figure
+      // carries the tick's scheduling jitter and is inherently up to one whole
+      // interval out. The comment here used to say that and then assert
+      // `>= 3_600_000` against an observed 3_600_001 — one millisecond of
+      // margin, which is pinning the millisecond by another name. That
+      // assertion failed intermittently under a loaded full-suite run.
+      //
+      // Two things are ruled out by measurement rather than by argument. Node
+      // re-arms an interval after its callback returns, so a gap is never
+      // shorter than the period — probed directly at a 300ms interval with a
+      // 700ms block inside one tick: gaps 301, 301, 300, 700, 301, and none
+      // below the period. And `lastTickAt` is seeded before `setInterval` is
+      // created, so the first gap is at least a full interval. The injected
+      // hour's own drift can therefore only ever land at or above 3_600_000,
+      // which means the value that failed was a *different* `session.slept`
+      // event — and the label cannot tell them apart, because every session in
+      // this file is built with the same one.
+      //
+      // So: the largest event rather than the first, and a tolerance of one
+      // tick rather than none. What is being claimed is that an hour of machine
+      // sleep was credited as sleep, not that it was measured to the
+      // millisecond. The exact source of the extra event is not established —
+      // it did not reproduce in 28 clean runs, nor under ten spinning cores —
+      // and that is written here rather than guessed at.
+      const slept = warn.mock.calls.filter(([event]) => event === "session.slept");
+      expect(slept.length).toBeGreaterThan(0);
+      const details = slept.map(([, detail]) => detail as { label: string; sleptMs: number });
+      const biggest = details.reduce((a, b) => (b.sleptMs > a.sleptMs ? b : a));
+      expect(biggest).toMatchObject({ label: "fake pass of SSX-1234" });
+      expect(biggest.sleptMs).toBeGreaterThan(3_600_000 - watchdogIntervalFor(3000, 8000));
     } finally {
       clearTimeout(jump);
       now.mockRestore();

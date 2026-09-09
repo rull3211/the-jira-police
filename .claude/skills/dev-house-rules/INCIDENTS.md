@@ -1074,3 +1074,46 @@ suite, the type checker and the hook tests were all green throughout, and `docs:
 caught it one step later as the wrong problem.
 
 **The rule** — [commit before you mutate](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged).
+
+---
+
+## 2026-09-09
+
+### The assertion with one millisecond of margin
+
+`session.test.ts` proves that an hour of machine sleep is charged to neither budget, by jumping the
+clock forward an hour mid-run and asserting the detected drift. Its comment said the right thing —
+_"Pinning the millisecond would make this a test about the machine's load"_ — and the assertion
+under it was `toBeGreaterThanOrEqual(3_600_000)` against an observed **3,600,001**. One millisecond
+of margin, which is pinning the millisecond by another name. It failed roughly one full-suite run in
+thirty and passed every time it was run alone.
+
+**What the measurements ruled out is more useful than the fix.** Two plausible stories were killed
+before anything was edited. First, that a tick running late leaves the next one measuring a gap
+shorter than the interval: Node re-arms an interval after its callback returns, so it does not — a
+300ms interval with a 700ms block inside one tick gives gaps of 301, 301, 300, 700, 301, and none
+below the period. Second, that the first gap could be short: `lastTickAt` is seeded before
+`setInterval` is created, so it is at least a full interval. The injected hour's own drift can
+therefore only land at or above 3,600,000, which means the number that failed **was not the injected
+hour** — it was a second `session.slept` event, taken first by `.find()`. Nothing distinguished
+them, because every session in that file is built with the same label.
+
+**It did not reproduce**, in 28 clean runs or under ten spinning cores, and the source of the second
+event is still unestablished. That is written into the test rather than resolved, because the
+alternative was to pick whichever story sounded best and present a guess as a diagnosis. The fix
+asserts the largest event rather than the first and allows one tick of tolerance, which is the
+measurement's real precision.
+
+**A test that fails one run in thirty is not a flake, it is an unowned defect.** The suite is the
+thing everything else is judged against, and an assertion that fails on load teaches the next reader
+to re-run rather than to look — which is the same reflex that would hide a real intermittent bug in
+the drift detector this test exists to guard.
+
+**Found by** a full-suite run that happened to be competing with a formatter, then reported by a
+human who pasted the failure. No check found it; three earlier full-suite runs in the same session
+were green, and one of them was green **after** the failure had already been seen and dismissed as
+noise.
+
+**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code);
+[a guard is not shipped until a test fails when it is unplugged](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged).
+No new rule proposed: one instance is a hypothesis.
