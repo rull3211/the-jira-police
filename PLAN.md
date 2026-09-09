@@ -292,12 +292,14 @@ two non-negotiable rules and the pointer to the working contract; `.claude/hooks
 `branch-stack.sh` (ask a human when the stack is deep), `session-brief.sh` (state the contract and
 the repository's shape at session start, and after a compaction inline the two non-advisory rules
 and the finishing checklist's four judgement questions, extracted from their source files at run
-time), `lib.sh`, and `test-hooks.sh` — 99 assertions behind `pnpm test:hooks`; eleven mutations
+time), `lib.sh`, and `test-hooks.sh` — 107 assertions behind `pnpm test:hooks`; eleven mutations
 watched to fail when it was first written, five more when rule 2 was guarded, three more for the
 compaction brief — a stale pasted copy of each of its two extractions, and a regression to the
 unbounded stdin read that hung the suite. Two more on 2026-09-09, with the exit-code assertions:
 `deny()` switched to `exit 2`, which the original 93 did not notice at all, and the restored
-`paste -sd ', '` delimiter bug.
+`paste -sd ', '` delimiter bug. Two more when `pull` joined the write list: dropping it back out
+fails four assertions, and dropping the `([[:space:]]|$)` that terminates the alternation fails the
+one that keeps `git pull-request` allowed.
 
 One thing deliberately not built here as well: a `PreToolUse` guard refusing `git commit` when the
 branch has no `PLAN.md` entry. It is the only version of the compaction fix with an exit code behind
@@ -653,6 +655,41 @@ goes green** — do not debug it before then.
 `§N` tokens across `src/` and may now be an orphan superseded by the resolver, which resolves the
 same tokens rather than counting them. Leaving it costs a `docs:check` fact that moves whenever
 test fixtures do — it already jumped 106 → 141 on fixtures alone. Propose before deleting.
+
+### 16. `git pull` reaches a protected branch and `git merge` does not
+
+**Branch:** `fix/pull-on-protected-branch`, stacked one deep on `chore/probe-result` (PR #24).
+**Delete this entry when it ships.**
+
+**Stacked deliberately, and this is the exception the depth rule contemplates rather than a
+violation of it.** Both branches edit `test-hooks.sh`; off `main` the conflict is certain rather
+than likely, and resolving a conflict in the file that asserts the guard is the worst place to be
+resolving one. One level, one reviewable unit of privilege, and it lands after #24.
+
+**What is wrong.** `branch-guard.sh`'s mutate list carries `merge` and not `pull`. Measured against
+the script itself, with `CLAUDE_PROJECT_DIR` pointed at a throwaway repository whose HEAD is `main`:
+
+```
+git pull                          allowed
+git pull --ff-only origin main    allowed
+git pull --rebase                 allowed
+git merge --ff-only origin/main   REFUSED
+```
+
+A bare `git pull` on a protected branch can create a merge commit on it, which is rule 1 by a
+spelling the list does not recognise. `pull` is `merge` with a fetch in front.
+
+**Why it was missed, which matters more than the hole.** The list was assembled from commands that
+_sound_ mutating, and `pull` sounds like a read. That is a defect in how the list was derived, not a
+typo in it, so the fix is worth nothing without the assertions: the same reasoning would omit the
+same command again.
+
+**What would make this the wrong change.** `git pull` on a feature branch is the ordinary way work
+gets updated here and must stay allowed — the guard keys on HEAD, so it already is, and there is an
+assertion for it rather than an argument. The second risk is over-matching: `git pull-request`
+(measured: currently allowed) must stay allowed, which the existing `([[:space:]]|$)` terminator
+gives for free, and which is the same class as the bare-substring bug that once refused `fix/domain`
+for containing `main`. Both cases get an assertion or the change does not ship.
 
 ---
 

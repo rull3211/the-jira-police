@@ -134,14 +134,15 @@ result; it does not stop you misreading which case you are in.
    (`pnpm test:hooks`, "which you run if you change one"). Neutering `branch-guard.sh` is a one-line
    diff. Review is what stops it; the harness block covers the wiring, not the wire.
 4. **A rule is owed to `PROVING.md`.** See below — this is the only item that is not about hooks.
-5. **`git pull` is not in `branch-guard.sh`'s mutate list, and it should be.** Measured on
-   `main` after registration merged: `git merge --ff-only origin/main` is refused there and
-   `git pull --ff-only origin main` is not, though a bare `git pull` on a protected branch can
-   create a merge commit on it. The list already carries `merge`; `pull` is the same act with a
-   fetch in front. It is deliberately **not** fixed in the probe-result commit — it changes what the
-   guard refuses, so it is its own reviewable unit, and `git pull` on a feature branch must stay
-   allowed. Note the shape rather than just the hole: the list was assembled from commands that
-   sound mutating, and `pull` sounds like a read.
+5. **`git pull` was not in `branch-guard.sh`'s mutate list, and now is** — on
+   `fix/pull-on-protected-branch`, kept out of the probe-result commit because it changes what the
+   guard refuses. Measured on `main` after registration merged: `git merge --ff-only origin/main`
+   was refused there and `git pull --ff-only origin main` was not, though a bare `git pull` on a
+   protected branch can create a merge commit on it. `pull` is `merge` with a fetch in front.
+   Note the shape rather than just the hole: the list was assembled from commands that _sound_
+   mutating, and `pull` sounds like a read — so the fix is worth little without the assertions,
+   because the same reasoning would omit the same command again. `git pull` on a feature branch
+   stays allowed, and there is an assertion for that rather than an argument.
 
 ## The rule this work owes, at five instances
 

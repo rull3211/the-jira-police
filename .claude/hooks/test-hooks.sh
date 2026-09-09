@@ -119,6 +119,16 @@ for target in "git push -u origin fix/domain" "git push -u origin feat/main-thin
     "$(bash_payload "$target" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
+# `pull` joined the write list on 2026-09-09, and this half is the constraint on
+# that change rather than a formality. Updating a feature branch from upstream is
+# the ordinary way work moves here; a guard that refused it would be switched off
+# within the day. Only HEAD decides, which the paired refusals on `main` below
+# assert with these same commands.
+for target in "git pull" "git pull --rebase" "git pull --ff-only origin main"; do
+  expect "allows: $target" SILENT \
+    "$(bash_payload "$target" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
 expect "malformed stdin does not crash" SILENT \
   "$(printf 'not json' | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 expect "empty stdin does not crash" SILENT \
@@ -154,8 +164,22 @@ done
 expect "on main refuses: git push" DENY \
   "$(bash_payload "git push" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 
+# `merge` was on the write list and `pull` was not, so on `main` these four were
+# every one of them measured as allowed while `git merge --ff-only origin/main`
+# was refused — the same act with a fetch in front, and the one that can leave a
+# merge commit on the protected branch. The `-C .` spelling is here because the
+# global-option run in front of the subcommand is a bypass this list has already
+# been caught by once.
+for w in "git pull" "git pull --rebase" "git pull --ff-only origin main" "git -C . pull"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# `git pull-request` is the negative case that keeps the terminator honest: drop
+# the `([[:space:]]|$)` after the alternation and `pull` swallows this, which is
+# the same defect as a bare substring match on `main` refusing `fix/domain`.
 for r in "git switch -c feat/x" "git checkout -b feat/x" "git status" "git log" \
-  "git diff" "git fetch origin" "pnpm test" "ls"; do
+  "git diff" "git fetch origin" "git pull-request" "pnpm test" "ls"; do
   expect "on main allows: $r" SILENT \
     "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
