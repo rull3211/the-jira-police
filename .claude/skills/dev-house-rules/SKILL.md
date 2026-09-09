@@ -32,7 +32,7 @@ links to the next.
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **1** [STARTING](STARTING.md)   | the four-document contract · writing the plan before the work · finding your way around · phasing a privilege · picking a branch                                                 |
 | **2** [BUILDING](BUILDING.md)   | the defect class · two questions that agree today · fail closed · state in the remote system · untrusted input · failures that explain themselves · bailing honestly · dead code |
-| **3** [PROVING](PROVING.md)     | mutation-testing a guard · tests that stop testing · measure don't assume · **the loop** · every capability gets a command                                                       |
+| **3** [PROVING](PROVING.md)     | mutation-testing a guard · tests that stop testing · measure don't assume · **state the case your check does not cover** · **the loop** · every capability gets a command        |
 | **4** [FINISHING](FINISHING.md) | the commands to run · the checklist · the postmortem · how to amend these rules                                                                                                  |
 | [INCIDENTS](INCIDENTS.md)       | the evidence. Cited from the rules; **not on the reading path** for doing work                                                                                                   |
 

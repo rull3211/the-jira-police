@@ -190,7 +190,10 @@ of a silent hook. The seventh ignored a command this file supplies, three lines 
 purpose of not guessing that number. Knowing the mechanism is not the same as checking the case, and
 neither is owning the check.
 
-`INCIDENTS.md` said the candidate rule — **state which case your check does not cover before quoting
-it as evidence** — waits for a third instance. It has seven. **Propose it to `PROVING.md` rather
-than adding it silently**, per `FINISHING.md`: say what you want to change and why, before changing
-it.
+**This is now a rule and no longer a candidate.** `INCIDENTS.md` held it awaiting a third instance;
+it reached seven, was proposed in #24's body, and is written into
+[`PROVING.md`](../dev-house-rules/PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code)
+— _state which case your check does not cover, before you quote it as evidence._
+
+Keep this list anyway. It is the evidence behind the rule, and this file is where the next instance
+will be made: every claim below about what the guards do is a claim about the case that was run.
