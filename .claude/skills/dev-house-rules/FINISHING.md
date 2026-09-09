@@ -9,6 +9,24 @@ Previous: [PROVING.md](PROVING.md) · Index: [SKILL.md](SKILL.md) · Evidence:
 
 ---
 
+## Re-read the phase file, never recall it
+
+**Open this file when you reach this phase, even if you are sure you know what is in it.** One file
+read, every time.
+
+`STARTING.md` already says a memory of a codebase is a claim you have stopped checking. A remembered
+checklist is the sharpest case of that, because what memory keeps is the **executable** part — six
+commands with exit codes — and what it drops is the part with no exit code behind it. The remembered
+version of this page is _run the commands_, and it feels complete, because everything it contains is
+green.
+
+The risk is highest exactly where it is least visible: **after a compaction**, in a context that
+inherited a summary of the work rather than the work. That context has a confident account of the
+rules and has never read them.
+[→](INCIDENTS.md#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them)
+
+---
+
 ## Run these
 
 ```
@@ -18,9 +36,10 @@ oxfmt <changed docs> && pnpm check-types && pnpm lint && pnpm test && pnpm docs:
 If the change touched `.claude/hooks/`, add `pnpm test:hooks` — those guards are not covered by
 vitest, and they are the only mechanical enforcement of the two rules that are not advisory.
 
-CI runs the same commands against the pushed ref, which is the only reason they are ever run when
-nobody remembered. Do not soften a red check; a check that cannot fail the run reports rather than
-guards.
+CI runs those commands against the pushed ref, which is the only reason they are ever run when
+nobody remembered, plus one check that is not a command anybody runs by hand: the pull request body
+must carry a `Rules owed:` line — see below. Do not soften a red check; a check that cannot fail the
+run reports rather than guards.
 
 ---
 
@@ -36,7 +55,9 @@ because each is a separate act rather than a restatement of a rule:
 - [ ] **What did the run refute?** Write it down before starting the next turn. If nothing was
       refuted, either the prediction was not recorded or the run was too small to be informative.
 - [ ] **Did something get through that these rules do not cover?** Then the rules are the thing to
-      fix, not just the code. Propose the amendment, with the incident attached — see below.
+      fix, not just the code. Propose the amendment, with the incident attached — see below. **This
+      is the one that gets skipped in silence**, so its answer is written into the pull request body
+      either way: [`Rules owed:`](#the-rules-you-owe-are-written-down-or-they-are-not-owed).
 
 **And the rules you have already read, one line each:**
 
@@ -59,6 +80,42 @@ because each is a separate act rather than a restatement of a rule:
 **Commit messages carry the argument, not the summary.** The diff shows what changed; the message is
 the only place _why_ survives. Record the reasoning that was wrong on the way, too — a decision
 whose rejected alternatives are lost gets relitigated every six months.
+
+---
+
+## The rules you owe are written down, or they are not owed
+
+The fourth question above — _did something get through that these rules do not cover?_ — is the only
+item on this page with no exit code behind it, and it is skipped in silence. Nobody decides not to
+answer it; it simply is not answered, and nothing anywhere records that.
+
+**So the answer is an artifact.** Every pull request body carries one of:
+
+```
+Rules owed: none
+Rules owed: <what, and where it is being written>
+```
+
+This does not make the answer correct. It makes it a **claim**, visible to a reviewer, which is the
+only kind of error this project reliably catches. It is the same move `PLAN.md` §13 argues for on the
+count class: force a judgement call to be written down rather than made silently.
+
+**CI fails a pull request whose body has no such line.** It cannot tell a true `none` from a false
+one — it guarantees the question was answered, nothing more. That is deliberately the whole of its
+job, and it is the only part of this that fires without the agent choosing to comply.
+
+**Produce the line from a context that did not do the work.** Self-audit in the pass that wrote the
+change shares the blind spot that caused the omission: the same reasoning that skipped a rule
+concludes that no rule was skipped. Hand a fresh context the diff and the rules and ask it which
+rules the change touches and which are unsatisfied — and **prime it with nothing else**. Offering it
+a verdict to reach is how an adversarial subagent was once talked into alleging invention; the
+finding was relayed at full strength and was wrong.
+[→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms)
+
+**What none of this catches**, stated because the gap is the point: a rule silently reinterpreted,
+where `Rules owed: none` is written in good faith. The class this rule comes from surfaced because a
+human asked twice. Nothing here replaces that reader; it lowers how often they must think to ask.
+[→](INCIDENTS.md#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them)
 
 ---
 

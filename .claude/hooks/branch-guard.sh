@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 #
-# PreToolUse guard: the agent never writes on a protected branch, and never
-# pushes to one.
+# PreToolUse guard for both of CLAUDE.md's non-advisory rules: the agent never
+# writes on a protected branch or pushes to one, and never merges anything.
 #
-# This exists because the rule it enforces is the one whose violation cannot be
-# undone by the person who notices. Everything else in the house rules is a
-# recoverable mistake; a commit on `main` is not, and neither is a push to it.
-# So this fails closed (BUILDING.md, "fail closed") and denies rather than asks.
+# This exists because the rules it enforces are the ones whose violation cannot
+# be undone by the person who notices. Everything else in the house rules is a
+# recoverable mistake; a commit on `main` is not, a push to it is not, and a
+# merged pull request is not. So this fails closed (BUILDING.md, "fail closed")
+# and denies rather than asks.
 #
 # Denial text is fed back to the model, so it is written to tell the agent what
 # to do next rather than only what it may not do.
@@ -49,6 +50,32 @@ command_text="$(
   ' 2>/dev/null || true
 )"
 
+# Rule 2, and it is not a question about which branch you are standing on: this
+# repository has no merge path and neither does the agent. Checked before the
+# branch logic for exactly that reason.
+#
+# The refusal can be flat because nothing legitimate here resembles it. `gh pr
+# view`, `create`, `checks`, `diff`, `ready`, `comment` and every read are
+# untouched; only the merge verb goes.
+#
+# Anchored to command position rather than matched anywhere in the text, which
+# is the difference between guarding the act and censoring the words. Prose
+# discusses `gh pr merge` constantly — PLAN.md does, commit messages in this
+# repository do — and a guard that refused to let you write about itself would
+# be turned off within the day.
+#
+# `gh api` is matched separately because the same act has a second spelling: a
+# request to a pull request's merge endpoint. Matching the `/merge` path segment
+# rather than the word keeps `--jq .mergeable` and `mergeStateStatus` readable.
+gh_at_command_position='(^|[;&|(]|&&|\|\|)[[:space:]]*gh[[:space:]]+'
+if printf '%s' "$command_text" | grep -Eq \
+  "${gh_at_command_position}(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*pr[[:space:]]+merge([[:space:]]|$)"; then
+  deny "A human merges in this repository, always — rule 2 of CLAUDE.md. This service has no merge path and neither do you, so 'gh pr merge' is refused from every branch. Your side of the work ends with the pull request open and the review answered; hand it over. If you believe it must land now, say so and ask rather than looking for another route."
+fi
+if printf '%s' "$command_text" | grep -Eq "${gh_at_command_position}api[^;&|]*/merge([^[:alnum:]]|$)"; then
+  deny "This calls a pull request's merge endpoint directly, which is rule 2 of CLAUDE.md by another spelling: a human merges, always. Open or update the pull request and hand it over instead."
+fi
+
 # A push naming a protected branch, from any branch. Word-boundaried on purpose:
 # a bare substring match refuses `fix/domain`, which contains "main".
 if printf '%s' "$command_text" | grep -q 'git[[:space:]]\{1,\}push'; then
@@ -71,11 +98,29 @@ fi
 # is the fail-open direction, chosen here because Edit/Write/NotebookEdit is the
 # path that actually matters and it is covered unconditionally, while the cost
 # of the closed direction is the trap above.
+#
+# Two things the first version of this list got wrong, both measured by feeding
+# payloads to this script rather than by reading it:
+#
+#   `git -C . commit`, `git --no-pager commit` and `git -c user.name=x commit`
+#   were all allowed on `main`. The subcommand was required to sit immediately
+#   after `git`, so any global option in front of it walked straight past. The
+#   run of options is now consumed first. The cost is a false positive on
+#   `git -C /some/other/repo commit`, which is a real command and is now refused
+#   while HEAD here is protected; that is the fail-closed direction and the
+#   remedy the denial names — branch — is cheap.
+#
+#   `push` was absent, so a bare `git push` from `main` was allowed. The check
+#   above only fires when the command *names* a protected branch, and a bare
+#   push names nothing while going straight to `main` via its upstream. Standing
+#   on a protected branch there is no push worth allowing, so it joins the list
+#   rather than getting a special case; off a protected branch it is untouched,
+#   which is the ordinary way work leaves this machine.
 mutates=yes
 if [ -n "$command_text" ]; then
   mutates=no
   if printf '%s' "$command_text" | grep -Eq \
-    'git[[:space:]]+(commit|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))'; then
+    'git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([[:space:]]|$)'; then
     mutates=yes
   fi
 fi

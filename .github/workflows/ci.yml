@@ -7,9 +7,15 @@
 # have run something is not evidence it ran, and until now the finishing
 # checklist in FINISHING.md was asserted by the party being checked.
 #
-# So the point is not the commands. They are the same four a developer runs by
-# hand. The point is that they run on a machine nobody is logged into, against
-# the pushed ref rather than a working tree, whether or not anyone remembered.
+# So the point is mostly not the commands. Every step below but the last is one
+# a developer runs by hand; the point is that they run on a machine nobody is
+# logged into, against the pushed ref rather than a working tree, whether or not
+# anyone remembered.
+#
+# The last step is the exception and is the only one here with no hand-run
+# equivalent, because what it reads is the pull request body rather than the
+# tree. It exists because the finishing checklist has one question with no exit
+# code behind it, and a question with no exit code is skipped in silence.
 #
 # There is no build step (Node strips types at runtime) and no deploy: this is
 # not a deployed service. Adding one here would be a stage that never runs, and
@@ -97,3 +103,58 @@ jobs:
       # document is lying rather than that the code is broken.
       - name: Docs
         run: pnpm docs:check
+
+      # The one check here that is not a command, and cannot be.
+      #
+      # FINISHING.md's fourth question — did something get through that these
+      # rules do not cover? — is the only item on that page with nothing
+      # mechanical behind it, and it went unanswered in silence for as long as
+      # it existed. Four lessons were written up carefully and filed where
+      # nothing loads them before anyone noticed, and what noticed was a person
+      # asking.
+      #
+      # This cannot tell a true `Rules owed: none` from a false one, and does
+      # not try. It guarantees the question was answered, which is the whole of
+      # its job: it turns an omission from invisible into red.
+      #
+      # Skipped on push, where there is no body to read. That is a real hole —
+      # anything reaching `main` outside a pull request is unchecked by this —
+      # and it is the same hole as rule 2 itself, which says nothing reaches
+      # `main` that way.
+      #
+      # The body is read through the environment and never interpolated into
+      # the script. A pull request body is untrusted input from anyone who can
+      # open one, and `${{ }}` inside a `run:` block is exactly how untrusted
+      # input becomes execution.
+      - name: Rules owed
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Anchored to the start of a line, so prose that merely mentions the
+          # phrase does not satisfy it — measured: drop the `^` and "there are
+          # no Rules owed: at all" passes. Everything before the phrase is the
+          # set of ways a person legitimately writes a line in Markdown: a list
+          # marker, a heading, bold. Rejecting `- Rules owed: none` would be a
+          # false positive on a correct answer, which is how a check earns the
+          # contempt that gets it deleted.
+          pattern='^[[:space:]]*([-*+][[:space:]]+)?(#+[[:space:]]*)?\*{0,2}Rules owed:'
+          if printf '%s' "$PR_BODY" | grep -Eq "$pattern"; then
+            printf '%s' "$PR_BODY" | grep -E "$pattern"
+            exit 0
+          fi
+          echo "::error::No 'Rules owed:' line in this pull request body."
+          cat <<'EOF'
+          FINISHING.md asks, on the way out: did something get through that these
+          rules do not cover? Answer it in the pull request body, either
+
+              Rules owed: none
+              Rules owed: <what, and where it is being written>
+
+          A `none` you have actually checked is a fine answer. An unanswered
+          question is not, which is the only thing this step can tell apart.
+
+          See .claude/skills/dev-house-rules/FINISHING.md — "The rules you owe
+          are written down, or they are not owed".
+          EOF
+          exit 1

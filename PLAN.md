@@ -270,10 +270,11 @@ least likely — a narrow prompt late in a long session — is the case where th
 
 **Built, on `chore/agent-guardrails`:** `CLAUDE.md`, which auto-loads every session and carries the
 two non-negotiable rules and the pointer to the working contract; `.claude/hooks/branch-guard.sh`
-(deny writes and protected-branch pushes), `branch-stack.sh` (ask a human when the stack is deep),
-`session-brief.sh` (state the contract and the repository's shape at session start, including after
-a compaction), `lib.sh`, and `test-hooks.sh` — 57 assertions behind `pnpm test:hooks`, eleven
-mutations watched to fail.
+(deny writes and pushes on a protected branch, and deny `gh pr merge` from any branch),
+`branch-stack.sh` (ask a human when the stack is deep), `session-brief.sh` (state the contract and
+the repository's shape at session start, including after a compaction), `lib.sh`, and
+`test-hooks.sh` — 74 assertions behind `pnpm test:hooks`; eleven mutations watched to fail when it
+was first written, five more when rule 2 was guarded.
 
 **Registration is not in this repository, and that is the arrangement rather than a gap.** Hook
 configuration belongs to the operator and is held outside this tree; the environment refuses the
@@ -297,7 +298,7 @@ git switch main                   # then ask the agent to edit any file
 If the first is silent in a fresh session, the configuration is not being read at all and nothing
 else is worth testing. **`pnpm test:hooks` proves the scripts; only that probe proves the
 enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
-installed. Note how narrow the first half was until recently: those 57 assertions borrowed the
+installed. Note how narrow the first half was until recently: those assertions borrowed the
 developer's git identity, so they passed on one laptop and could not run anywhere else at all. CI
 caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI step.
 
@@ -309,6 +310,27 @@ of it shipped anyway** on 2026-09-08 as `pnpm docs:check`. The distinction is wo
 was declined was a reporter that judges whether prose is _true_, which is a model call on every
 document; what was built checks the handful of prose facts that are _countable_, which is a regex
 and an exit code. The rest is still declined.
+
+**A fourth guardrail shipped on 2026-09-09, and it does not guard the code.** CI's `Rules owed` step
+fails a pull request whose body does not answer `FINISHING.md`'s fourth question. It is the only
+check in that workflow with no hand-run equivalent, because what it reads is the pull request body
+rather than the tree, and it is worth being exact about how little it proves: **it cannot tell a
+true `Rules owed: none` from a false one.** It guarantees the question was answered. Everything
+above it in this section guards the repository; this one guards a habit, and a habit that had failed
+four times in two sessions before anyone noticed.
+
+**Its disposal condition, written while it is still new.** If the fresh-context audit that produces
+that line ever returns `none` on a diff that plainly owes something, the step is worse than nothing —
+it will have made an unexamined omission _look_ examined — and it should be deleted rather than
+tuned. A rule with a stated way to die is one somebody can actually retire.
+
+Three more declined on the same day, recorded so they are not re-argued. **A rule making a blocked
+command an incident to write up**: rejected because "record what it taught you before you re-attempt
+or reword" reads as blessing the reword, and a rule that can be read as permission will be. **A
+`docs:check` rule failing a bare SHA cited without an incident anchor**, and **a CI check requiring
+"What was learned" to grow whenever a numbered entry is deleted**: both would have caught a real
+defect from this session, and both are mechanism ahead of evidence at one instance each. The second
+is the more tempting and the more dangerous — it would fire on every ordinary deletion.
 
 ---
 
@@ -346,8 +368,9 @@ not reach.
   indistinguishable to a regex, and here the call was made by rewording. The class fix is
   `expectSites` one level up: every count-noun phrase must be either a declared site or an
   explicitly listed historical figure, which forces that current-versus-war-story call to be written
-  down instead of made silently. `PLAN.md:275`'s "57 assertions" is current and uncited;
-  `ARCHITECTURE.md:1863`'s "1245 passing tests" is history.
+  down instead of made silently. §12's hook-assertion count is current and uncited — and duly went
+  stale within a day of being named here, twice; `ARCHITECTURE.md:1863`'s "1245 passing tests" is
+  history.
 - **`docs-check.ts` has no test.** 331 lines enforcing prose discipline, and `PROVING.md`'s central
   rule is not satisfied for it. The class check above is not hand-watchable, so these two are one
   unit: whoever writes the class check writes `docs-check.test.ts` with it.
@@ -363,19 +386,21 @@ not reach.
   outside the tree ([`INCIDENTS.md`](.claude/skills/dev-house-rules/INCIDENTS.md) header); the
   convention is prose, and nothing enforces it. The mechanical version would be a marker the check
   recognises, so an unmarked unresolvable citation fails rather than passing silently.
-- **The guards fail open in ways `test:hooks` does not reach.** On a protected branch, `git -C .
-commit`, any global flag before the subcommand, and every non-git write are allowed; bare `git
-push` from `main` is allowed. Nothing anywhere addresses rule 2 — `gh pr merge --squash --admin`
-  is unguarded, and ruleset 22571207 requires **0 approvals and no status checks**, so the intended
-  command defeats it. 57 assertions, none covering any of this — and the bare-push hole is not
-  merely uncovered but **asserted**: `test-hooks.sh:93` lists `git push` among the commands that
-  must stay silent, which is right on a feature branch and wrong on `main`. The fix is to make that
-  case branch-sensitive rather than to delete the assertion.
-- **Hardening those guards is worth doing; watching one fire is not possible from here.**
-  Registration is the operator's and outside this tree (§12), so a tightened guard is still built
-  inert. That is this repository's own phasing rather than an obstacle — but it does mean every item
-  above can only be proved by `test:hooks` and by hand-feeding payloads to the script, never by
-  observing a refusal.
+- **One guard hole is left, and it is the one enumeration cannot close.** On a protected branch
+  every non-git write still passes: `sed -i`, `>`, `>>`, `tee`, `cp`, `mv`, `rm`, and any
+  interpreter handed a script. `Edit`/`Write` are refused unconditionally, so this is the Bash-shaped
+  way around them. It needs a decision nobody has made yet — how many false positives a floor may
+  cost — and shipping half of it would be worse than leaving it named. The rule-1 flag bypasses and
+  rule 2 itself were closed on 2026-09-09; this was deliberately not.
+- **Rule 2 has a guard here now, and the layer above it still cannot be surveyed.** The operator's
+  outer tooling refuses mutating GitHub API calls — observed, when a probe was blocked that was only
+  ever going to be fed to a local script as a string. Whether it also covers `gh pr merge` cannot be
+  established without running `gh pr merge`, so it is unknown and will stay unknown. Separately,
+  ruleset 22571207 requires **0 approvals and no status checks**, so nothing on the GitHub side would
+  refuse the merge if the command ever ran.
+- **Nothing here can be watched working.** Registration is the operator's and outside this tree
+  (§12), so every guard in it is built inert; the whole of the evidence is `pnpm test:hooks` and
+  hand-fed payloads, never an observed refusal.
 
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
@@ -383,7 +408,7 @@ which is **blind to every squash- and rebase-merged branch**. `chore/agent-guard
 identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
 these accumulate, and it is one instance of a possible rule rather than a rule.
 
-**Three method failures, recorded and deliberately not generalised** — each is one instance, and
+**Four method failures, recorded and deliberately not generalised** — each is one instance, and
 each is a defect this repository already has an incident for, committed while auditing for it:
 
 - **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
@@ -398,6 +423,10 @@ RETROFIT` as a verdict and named an untraceable commit as evidence of it; the re
   alleging invention, and it was relayed at full strength. The evidence supported "not in
   `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
   delegated on the two sharpest accusations.
+- **A line number read without its context**, and the only one of the four that reached `main`. It
+  is therefore the only one that outlives this entry: the record is under
+  [what was learned](#a-citation-can-be-exact-and-still-be-read-wrongly-and-that-one-shipped), so
+  that deleting §13 does not delete a correction to something shipped.
 
 **What would make this the wrong idea.** Two things. The prose corrections that already shipped
 read, at a glance, as weakening the rules — they are not: _never work on `main`_ and _a human
@@ -412,6 +441,30 @@ the whole `docs:check` list, and the wiring is worth more than the guards.
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### A citation can be exact and still be read wrongly, and that one shipped
+
+Rescued from §13's method failures, which are deleted when that entry closes. This one survives
+because it is the only one of the four that reached `main`, and a correction to something shipped
+must outlive the audit that found it.
+
+The claim was that `test-hooks.sh:93` **asserted** the bare-push hole, by listing a push among the
+commands that must stay silent. It does not. Twelve lines above it the fixture switches to
+`feat/ordinary`, where allowing a push is correct and the assertion says so. The hole was never
+asserted or denied — it was simply that no case exercised a protected branch.
+
+Shipped to `main` in `e9483c1`, corrected the next day in `a94c005`, and found by **running the
+guard rather than re-reading the file**.
+
+**What it sharpens.** `STARTING.md` says _cite `file:line`, never a recollection_, and the failure
+here is that rule's other direction: the citation was exact, and the reading of it was wrong. A
+precise line number is evidence about **one line** and carries no information about the twelve above
+it that set up the state it runs in — while looking, in a report, exactly like a verified claim. The
+rule as written defends against vagueness; it says nothing about a precise reference read without
+its context, which is the more convincing of the two failures.
+
+One instance, so it stays here rather than becoming a rule. The second instance would earn an
+amendment to that bullet in `STARTING.md`.
 
 ### The war stories are the asset, and length pressure comes for them first
 

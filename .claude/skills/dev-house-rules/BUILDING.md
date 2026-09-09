@@ -83,6 +83,17 @@ version of the same hook failed the other way and refused every command on `main
 its own denial text recommends. Escape what you interpolate, and let reads through.
 [→](INCIDENTS.md#the-guardrails-built-with-nothing-in-the-plan)
 
+**A text-matching guard has a third failure direction: refusing the description instead of the
+deed.** `branch-guard.sh` looks for a merge command at _command position_ — at the start of the
+line, or after `;`, `&&`, `||`, `|` — rather than anywhere in the text. Prose about this guard is
+ordinary work here: `PLAN.md` discusses merging at length, and so do commit messages. The unanchored
+version is a real candidate, not a straw one — it was written, measured as the plausible wrong fix,
+and **exactly one assertion separates the two**. Nor is the failure hypothetical: the commit adding
+this very check was refused by an outer guard that matched a push verb and a protected branch name
+inside the _message_. The cost of getting this wrong is not the blocked command. It is that the
+guard acquires an enemy, and the people most motivated to disable it are the ones maintaining it.
+[→](INCIDENTS.md#the-commit-message-that-was-refused-as-the-act-it-described)
+
 ---
 
 ## State lives in the remote system
