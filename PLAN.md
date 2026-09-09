@@ -348,14 +348,25 @@ whichever merges second; the collision is textual, and §12 is the one to keep.
 reads hook configuration at session start, so the check must be run by a person in a _fresh_ session:
 
 ```
-git switch -c test/wiring-probe   # expect a prompt if the stack is deep (branch-stack)
-git switch main                   # then ask the agent to edit any file
-                                  # expect a refusal naming 'main' (branch-guard)
+# start the session and type nothing  → expect the brief (session-brief)
+git switch main                       # setup, not a check
+git switch -c test/wiring-probe       # expect a prompt (branch-stack)
+git switch main                       # then ask the agent to edit any file
+                                      # expect a refusal naming 'main' (branch-guard)
 ```
 
-If the first is silent in a fresh session, the configuration is not being read at all and nothing
-else is worth testing. **`pnpm test:hooks` proves the scripts; only that probe proves the
-enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
+**The `git switch main` before the branch creation is load-bearing, and an earlier revision of this
+block left it out.** `unmergedBranches` in `lib.sh` excludes HEAD from the count deliberately, so a
+feature branch is absent from its own stack: with three pull requests open, the count is 3 from
+`main` and 2 from any of them, and 2 does not meet the threshold. Created from `chore/register-hooks`
+the prompt is **correctly** silent, which the old ordering would have read as a dead hook. Confirm
+the number the hook will see rather than inferring it from open pull requests —
+`. .claude/hooks/lib.sh && countLines "$(unmergedBranches "$PWD" "$(stackBase "$PWD")")"`.
+
+If the **brief** is silent in a fresh session, the configuration is not being read at all and nothing
+else is worth testing. Do not draw that conclusion from a silent branch-stack prompt; it has an
+innocent explanation and the brief does not. **`pnpm test:hooks` proves the scripts; only that probe
+proves the enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
 installed. Note how narrow the first half was until recently: those assertions borrowed the
 developer's git identity, so they passed on one laptop and could not run anywhere else at all. CI
 caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI step.

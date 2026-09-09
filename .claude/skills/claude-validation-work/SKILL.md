@@ -48,20 +48,39 @@ Run in a **fresh session**, by a **human**, in this order. Nothing before step 1
 | #   | do this                                                | expect                                                                 |
 | --- | ------------------------------------------------------ | ---------------------------------------------------------------------- |
 | 1   | start a session and type nothing                       | the brief: contract pointer, branch, uncommitted count, unmerged count |
-| 2   | `git switch -c test/wiring-probe`                      | a **prompt** — not a refusal — from `branch-stack.sh`                  |
-| 3   | `git switch main`, then ask the agent to edit any file | a **hard refusal** naming `main`, from `branch-guard.sh`               |
+| 2   | `git switch main`                                      | nothing yet — this is setup for 3 and 4, not a check                   |
+| 3   | `git switch -c test/wiring-probe`                      | a **prompt** — not a refusal — from `branch-stack.sh`                  |
+| 4   | `git switch main`, then ask the agent to edit any file | a **hard refusal** naming `main`, from `branch-guard.sh`               |
 
-**If step 1 is silent, stop.** The configuration is not being read at all and steps 2 and 3 prove
+**If step 1 is silent, stop.** The configuration is not being read at all and the rest proves
 nothing. Check that the file exists and parses before looking at anything else.
 
-**Step 2 should fire on the first attempt** as long as three or more branches are unmerged into
-`main`; that was true when this was written (`fix/section-resolver`, `fix/slept-assertion`, and this
-one). If they have since merged, the stack is shallow and a silent step 2 means nothing — create two
-throwaway branches first, or skip to step 3.
+**Step 3 must be run from `main`, and the ordering above is the whole point.** `unmergedBranches` in
+`lib.sh` **excludes the branch you are standing on**, deliberately and for a good reason documented
+there — a threshold that counts your own branch can never be satisfied. The consequence for this
+probe is easy to miss: run step 3 from a feature branch and that branch is not in its own count, so
+three open pull requests measure as two, the threshold of 3 is not met, and **the prompt is correctly
+silent**. From `main` the same three measure as three and it fires.
+
+**So a silent step 3 is only evidence if you ran it from `main`.** Confirm the number the hook will
+see before believing anything about the result:
+
+```
+. .claude/hooks/lib.sh && countLines "$(unmergedBranches "$PWD" "$(stackBase "$PWD")")"
+```
+
+Three or more and step 3 should fire. Fewer, and the stack is genuinely shallow: create throwaway
+branches until that command prints 3, or skip to step 4.
+
+**This paragraph replaces one that got it wrong**, and the error is worth keeping because it is the
+fourth instance of the rule this work owes to `PROVING.md`. The old text claimed the stack was deep
+enough and listed `fix/section-resolver`, `fix/slept-assertion` "and this one" — counting HEAD, which
+`lib.sh` drops. A branch count was quoted as evidence without stating which case it excludes, by the
+same session that wrote the exclusion.
 
 **Clean up:** `git switch chore/register-hooks && git branch -D test/wiring-probe`.
 
-## Step 3 is the one to bet against, and both outcomes are already decided
+## Step 4 is the one to bet against, and both outcomes are already decided
 
 Every hook here does `printf` the decision JSON and `exit 0`. The published hook reference documents
 **exit 2** as the blocking status and is unclear on whether a `deny` carried on stdout with exit 0 is
@@ -71,10 +90,10 @@ the right refusal and says nothing about whether the runtime acts on it.
 
 Written down before the probe runs, so the result cannot be rationalised after the fact:
 
-- **Step 3 refuses.** Exit 0 with the JSON is honoured. Add an exit-code assertion to
+- **Step 4 refuses.** Exit 0 with the JSON is honoured. Add an exit-code assertion to
   `test-hooks.sh` anyway, so nobody has to rediscover this, and record the observed behaviour in
   §12.
-- **Step 3 lets the edit through.** `deny()` in `branch-guard.sh` gets `exit 2`, and the suite gets
+- **Step 4 lets the edit through.** `deny()` in `branch-guard.sh` gets `exit 2`, and the suite gets
   the assertion that would have caught it. **Do not make the same change to `branch-stack.sh`** — its
   decision is `ask`, and exit 2 would convert a prompt into a hard refusal, which is the failure
   BUILDING.md warns about, where a guard acquires an enemy among the people who maintain it.
@@ -102,18 +121,28 @@ Written down before the probe runs, so the result cannot be rationalised after t
    diff. Review is what stops it; the harness block covers the wiring, not the wire.
 4. **A rule is owed to `PROVING.md`.** See below — this is the only item that is not about hooks.
 
-## The rule this work owes, at three instances
+## The rule this work owes, at four instances
 
-The session that registered these hooks made the same mistake three times, and each time a single
-command refuted it. **Only the third is written up on this branch** — the other two are in `INCIDENTS.md`
-on `fix/slept-assertion` and arrive with PR #22, so do not go looking for them here:
+The work that registered these hooks made the same mistake four times, and each time a single
+command refuted it. **The third and fourth are written up on this branch** — the first two are in
+`INCIDENTS.md` on `fix/slept-assertion` and arrive with PR #22, so do not go looking for them here:
 
 - A probe measured the wrong case and its output was quoted as proof; CI produced the counter-example
   on its first run.
 - A mutation silently restricted itself to line 1, changed nothing, and reported a clean pass.
 - A report that "developers may add settings" was read as "the constraint is not real", twice in
   succession — the write ban and then the read ban, each refuted about a minute after being denied.
+- **This file's own probe**, above: a branch count was quoted as evidence that step 3 would fire,
+  without stating that `lib.sh` excludes HEAD from it. Three open pull requests measure as two from a
+  feature branch, so the step could not have fired and its silence would have been read as a broken
+  hook. Refuted by one command — `countLines "$(unmergedBranches ...)"` — printing `2`. The same
+  claim had already been copied into PR #23's body before anyone ran it.
+
+The fourth is the sharpest of the four, and the reason to keep it: the exclusion it failed to account
+for is **documented at length in `lib.sh` by the same session that then quoted the count**. Knowing
+the mechanism is not the same as checking the case, which is precisely what the rule is for.
 
 `INCIDENTS.md` says the candidate rule — **state which case your check does not cover before quoting
-it as evidence** — waits for a third instance. It has one. **Propose it to `PROVING.md` rather than
-adding it silently**, per `FINISHING.md`: say what you want to change and why, before changing it.
+it as evidence** — waits for a third instance. It now has two more. **Propose it to `PROVING.md`
+rather than adding it silently**, per `FINISHING.md`: say what you want to change and why, before
+changing it.
