@@ -777,6 +777,19 @@ somewhere no rule and no reader ever opens.
   but the rule the guard produced had not been written. _Delete the entry when it ships_ assumes the
   prose half ships with the code half.
 
+**And then the same number failed the other way, in the branch fixing all of the above.** A new §14
+was written for this work, the work shipped, and the entry was left standing — so `PLAN.md`
+advertised as _not built_ three layers sitting in the diff below it. Deleted too early on one day,
+kept too late on the next, by the same reader holding the same rule. What survived the deletion went
+to §12, which already holds the declined `Stop` hook and the declined drift reporter.
+
+**Which says something about the rule and not only about the reader.** _Delete it when it ships_
+sounds like one action at one moment, and it is two: a plan entry and the work it describes finish
+at different times, and neither ending announces itself. The reliable question is not _did this
+ship_ but **is any sentence in `PLAN.md` now describing something that exists** — asked while
+looking at the file, which is why it is on the checklist and not left to memory. This one was caught
+by a person asking where the additions belonged.
+
 **The common cause is not forgetting; it is that writing something down feels like filing it.** The
 subjective signal — _I thought about this carefully and put it in words_ — is identical whether the
 words land on a reading path or in a commit message nobody will open again.
