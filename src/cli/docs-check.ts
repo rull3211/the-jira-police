@@ -38,7 +38,14 @@
  * redirected", "57 assertions behind pnpm test:hooks"), what a run cost, and
  * anything else that is a measurement of one past run rather than a property of
  * the tree. Those are history, not state, and a check that re-derived them would
- * be asserting that the past has not changed. They stay a matter of reading.
+ * be asserting that the past has not changed.
+ *
+ * **They no longer stay a matter of reading, though.** Each one is now listed in
+ * `HISTORICAL` below with a sentence saying why it is history, and the class
+ * check that reads that list fails on any count-noun phrase which is neither a
+ * declared site nor a listed figure. So the current-versus-history call is still
+ * a judgement — it is just one somebody has to write down and a reviewer can
+ * disagree with, rather than one made by not adding a `FACT`.
  *
  * **The line is what the number measures, not what it is about.** `$4.50` is
  * history and is not checked. *How many documents repeat `$4.50`* is a property
@@ -54,6 +61,14 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { SETTINGS } from "../settings.ts";
+import {
+  type CheckedSite,
+  citation,
+  countPhrasesIn,
+  type HistoricalFigure,
+  staleHistorical,
+  unaccountedPhrases,
+} from "./count-phrases.ts";
 import { CHECKLIST_QUESTIONS, pinnedProseProblems } from "./pinned-prose.ts";
 import {
   type DocumentShape,
@@ -70,22 +85,24 @@ function say(line: string): void {
   process.stdout.write(`${line}\n`);
 }
 
-const SKIP_DIRS = new Set(["node_modules", ".git", "state", "groomed", "dist", "coverage"]);
+/** Skipped wherever they appear, because they nest. */
+const SKIP_ANYWHERE = new Set(["node_modules", ".git"]);
 
 /**
- * What separates two words of a citation: a space, unless the formatter
- * wrapped the line there — and if the citation sits inside a blockquote, the
- * continuation line carries the `> ` marker as well.
+ * Runtime and build output, skipped **only at the repository root**.
+ *
+ * It used to be one set matched by bare name at any depth, and that quietly
+ * excluded `src/state/` — a real source directory whose name collides with the
+ * runtime store's output directory. So `src/state/store.ts` was invisible to
+ * every walker here: it was not counted as a production module and any `§N` in
+ * it was not counted as a section reference. Found by the production-module
+ * `FACT` disagreeing with `find` by exactly one, which is the whole argument for
+ * deriving a number twice before trusting either.
  */
-const GAP = String.raw`\s+(?:>\s*)?`;
+const SKIP_AT_ROOT = new Set(["state", "groomed", "dist", "coverage"]);
 
-/**
- * A citation pattern, built from its words. Global, because one document may
- * cite the same fact twice. Pass each word separately; there is deliberately
- * no way to write the space yourself.
- */
-function citation(...words: readonly string[]): RegExp {
-  return new RegExp(words.join(GAP), "g");
+function skip(dir: string, entry: string): boolean {
+  return SKIP_ANYWHERE.has(entry) || (dir === ROOT && SKIP_AT_ROOT.has(entry));
 }
 
 interface Fact {
@@ -118,7 +135,7 @@ interface Citation {
  */
 function markdownFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (SKIP_DIRS.has(entry)) {
+    if (skip(dir, entry)) {
       continue;
     }
     const path = join(dir, entry);
@@ -132,14 +149,15 @@ function markdownFiles(dir: string, found: string[] = []): string[] {
 }
 
 /**
- * Every `.ts` in the tree. Two callers want it for opposite reasons:
+ * Every `.ts` under a directory. Three callers want it for different reasons:
  * `sectionReferences` counts a population that is about code and not about
- * prose, and the resolver reads these because a `§N` in a doc comment is a
- * citation like any other.
+ * prose, the resolver reads these because a `§N` in a doc comment is a citation
+ * like any other, and `productionModules` passes `src/` rather than `ROOT`
+ * because the module map counts the service, not the tooling around it.
  */
 function typescriptFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (SKIP_DIRS.has(entry)) {
+    if (skip(dir, entry)) {
       continue;
     }
     const path = join(dir, entry);
@@ -188,6 +206,18 @@ function sectionReferences(): number {
     found += (maskDisabled(readFileSync(file, "utf8")).match(/§\d/gu) ?? []).length;
   }
   return found;
+}
+
+/**
+ * Modules that are not tests, under `src/` only.
+ *
+ * `vitest.config.ts` sits at the root and is excluded deliberately: the module
+ * map counts what the service is made of, and the test runner's own
+ * configuration is not part of it. Stated here because the alternative reading
+ * is one off-by-one away and nothing else in the tree says which was meant.
+ */
+function productionModules(): number {
+  return typescriptFiles(join(ROOT, "src")).filter((file) => !file.endsWith(".test.ts")).length;
 }
 
 /**
@@ -286,22 +316,31 @@ const FACTS: readonly Fact[] = [
    * canonical-phrasing sites and wrote 65 here, in the same commit whose message
    * says the count "was updated in both" documents.
    *
-   * This pins one more phrasing. It does not close the class: a count written in
-   * a third form is still invisible, and there are 20 count-noun phrases in
-   * tracked markdown against 4 declared sites. The class fix is `expectSites`
-   * one level up — every count-noun phrase must be a declared site or a listed
-   * historical figure — and it is too large to hand-watch, so it arrives with
-   * this file's first test rather than before it. Recorded in `PLAN.md` §13.
-   *
-   * `pinned-prose.test.ts` is not that test and does not discharge this. It
-   * covers a sibling module extracted so that it *could* be tested; nothing
-   * below this line — no count, no `expectSites`, no link — is under a test yet.
+   * This pins one more phrasing, and **the class fix it asked for now runs
+   * below** — see the unaccounted-phrase check and `count-phrases.ts`. A count
+   * written in a third form is no longer invisible: it has to be declared here
+   * or listed as history, and this entry is one of the declarations.
    */
   {
     what: "test files, written as a bare count",
     actual: suite.files,
     phrase: "<N> test files",
     cited: citation(CAPTURED, "test", "files"),
+    expectSites: 1,
+  },
+  /**
+   * The other half of the module map's header, and the first thing the class
+   * check below found. It read "72 production modules" while `src/` held 73 —
+   * stale before this commit added the 74th, never drifted *visibly* because
+   * nothing was watching the noun. Derived rather than counted by hand: every
+   * `.ts` under `src/` that is not a test, which is what "production module"
+   * means everywhere else in this document.
+   */
+  {
+    what: "production modules",
+    actual: productionModules(),
+    phrase: "<N> production modules",
+    cited: citation(CAPTURED, "production", "modules"),
     expectSites: 1,
   },
   {
@@ -322,8 +361,12 @@ const FACTS: readonly Fact[] = [
 
 const problems: string[] = [];
 
+/** Every site a `FACT` matched, so the class check below knows what is watched. */
+const checkedSites: CheckedSite[] = [];
+
 for (const fact of FACTS) {
   const sites = citationsOf(fact, files);
+  checkedSites.push(...sites);
   const before = problems.length;
 
   if (sites.length < fact.expectSites) {
@@ -350,6 +393,131 @@ for (const fact of FACTS) {
   const shown = sites.length === 0 ? "no sites" : `${sites.length} site(s)`;
   say(`${mark} ${fact.what}: ${fact.actual}, ${shown}`);
 }
+
+/**
+ * Numbers in prose that are a measurement of one past run, not a property of
+ * the tree — so they are read rather than derived.
+ *
+ * **This list is the current-versus-history call, written down.** Until it
+ * existed the call was made by silence: whoever wrote a number and did not add
+ * a `FACT` had decided it was history, and nobody could tell that from having
+ * forgotten. Every entry here is a claim a reviewer can disagree with, and an
+ * entry that stops matching its phrase fails the run rather than sitting there
+ * blessing whatever lands on that file, value and noun next.
+ *
+ * The bar for adding one: the number describes a run that has already happened
+ * and cannot be re-derived from the tree as it stands. If it can be re-derived,
+ * it belongs in `FACTS` instead.
+ */
+const HISTORICAL: readonly HistoricalFigure[] = [
+  {
+    file: ".claude/skills/claude-validation-work/SKILL.md",
+    value: 93,
+    noun: "assertions",
+    why: "the hook suite as it stood before the exit-code assertions; the point of the sentence is that none of those 93 checked one",
+  },
+  {
+    file: ".claude/skills/dev-house-rules/BUILDING.md",
+    value: 21,
+    noun: "assertions",
+    why: "the guard with no production caller, as it was found. Re-deriving it would assert the past has not changed",
+  },
+  {
+    file: ".claude/skills/dev-house-rules/INCIDENTS.md",
+    value: 21,
+    noun: "assertions",
+    why: "same incident, told where the evidence lives",
+  },
+  {
+    file: ".claude/skills/dev-house-rules/INCIDENTS.md",
+    value: 57,
+    noun: "assertions",
+    why: "the hook suite at the moment rule 2 was guarded, quoted to date the incident",
+  },
+  {
+    file: ".claude/skills/dev-house-rules/INCIDENTS.md",
+    value: 87,
+    noun: "assertions",
+    why: "the suite when the branch-name quoting defect was found",
+  },
+  {
+    file: ".claude/skills/dev-house-rules/INCIDENTS.md",
+    value: 186,
+    noun: "assertions",
+    why: "the write-verb audit's before-and-after, 107 to 186. It equals today's count by coincidence of timing; the sentence is about the change, and pinning it to the tree would make an incident rewrite itself",
+  },
+  {
+    file: ".claude/skills/dev-house-rules/PROVING.md",
+    value: 87,
+    noun: "assertions",
+    why: "the same suite snapshot as the incident it cites",
+  },
+  {
+    file: ".claude/skills/dev-house-rules/PROVING.md",
+    value: 21,
+    noun: "assertions",
+    why: "the unreferenced-guard incident, cited from the rule it produced",
+  },
+  {
+    file: "ARCHITECTURE.md",
+    value: 264,
+    noun: "tests",
+    why: "the suite size on the day deleting assertPostable left it green. The number is the argument: that many tests, and none of them noticed",
+  },
+  {
+    file: "ARCHITECTURE.md",
+    value: 21,
+    noun: "assertions",
+    why: "the isEligible finding, stated twice in one passage because the second use contradicts the first",
+  },
+  {
+    file: "ARCHITECTURE.md",
+    value: 4562,
+    noun: "tests",
+    why: "insurance-commerce-rest-api's suite, not ours. Another repository's count can never be derived from this tree",
+  },
+  {
+    file: "PLAN.md",
+    value: 4562,
+    noun: "tests",
+    why: "the same foreign suite, cited where the base-check cost is argued",
+  },
+  {
+    file: "PLAN.md",
+    value: 4562,
+    noun: "tests",
+    why: "and again in the dev-lens calibration item; two homes for one foreign number, which is exactly the drift this file is about and still not ours to derive",
+  },
+];
+
+const phrases = files.flatMap((file) =>
+  countPhrasesIn(relative(ROOT, file), readFileSync(file, "utf8")),
+);
+const unaccounted = unaccountedPhrases(phrases, checkedSites, HISTORICAL);
+const stale = staleHistorical(phrases, HISTORICAL);
+
+for (const phrase of unaccounted) {
+  problems.push(
+    `${phrase.file}:${phrase.line} writes "${phrase.text}", and nothing is watching it.\n` +
+      `  Either it is a property of the tree — add a FACT in src/cli/docs-check.ts so it is\n` +
+      `  checked wherever it appears — or it is a measurement of one past run, in which case\n` +
+      `  add it to HISTORICAL with a sentence saying why. Deciding in silence is the defect.`,
+  );
+}
+
+if (stale.length > 0) {
+  problems.push(
+    `HISTORICAL has ${stale.length} entry(s) matching no phrase in the tree:\n` +
+      stale.map((entry) => `    ${entry.file} — ${entry.value} ${entry.noun}`).join("\n") +
+      `\n  The prose moved and the blessing did not. Delete the entry or repoint it, or it will\n` +
+      `  quietly excuse the next count that lands on the same file, value and noun.`,
+  );
+}
+
+say(
+  `${unaccounted.length === 0 && stale.length === 0 ? "ok  " : "FAIL"} count-noun phrases: ` +
+    `${phrases.length} found, ${checkedSites.length} checked, ${HISTORICAL.length} historical`,
+);
 
 /**
  * Prose that is deliberately copied, and is therefore checked in every place it

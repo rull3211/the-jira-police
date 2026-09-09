@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2390 tests in 66 files, no build step, no
+Status: running end to end against production Jira. 2413 tests in 67 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -655,7 +655,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-72 production modules, 66 test files. Grouped by what they belong to rather than alphabetically,
+74 production modules, 67 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**

@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2390 tests in 66
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2413 tests in 67
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -288,35 +288,25 @@ while it ran — is an
 [incident](.claude/skills/dev-house-rules/INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way),
 not a plan item. What is left below is only what is still missing.
 
-- **The count class, not the instance.** A fourth `FACT` now pins the bare-count phrasing, but that
-  is one site, not the class. Measured across tracked markdown on 2026-09-08 — a number followed by
-  up to two words and a count noun — there are **17 distinct such phrases against 4 declared
-  sites**, and the next new phrasing drifts exactly as the module map's did.
-  Two things learned while pinning it argue for the class fix rather than more instances. First,
-  provenance: `96998cc` wrote 65 and 64 **in the same commit**, and its message claims _"that count
-  is cited as fact in two documents and was updated in both."_ The contradiction was born
-  complete-looking; it never drifted, so no amount of watching-for-drift would have caught it.
-  Second, the new `FACT` failed on its first run against **this entry**, which was describing the
-  wrong count rather than asserting it — prose about a number and prose claiming one are
-  indistinguishable to a regex, and here the call was made by rewording. The class fix is
-  `expectSites` one level up: every count-noun phrase must be either a declared site or an
-  explicitly listed historical figure, which forces that current-versus-war-story call to be written
-  down instead of made silently. The hook-assertion count that the retired §12 carried was current
-  and uncited — and duly went stale within a day of being named here, twice, the third time being
-  what retired the section; `ARCHITECTURE.md:1863`'s "1245 passing tests" is history. Deleting that
-  instance removed neither the class nor the next one.
-- **`docs-check.ts` still has no test of its own.** The pinned-prose check that ships with the
-  `CLAUDE.md` copy was put in `pinned-prose.ts` precisely so it could have one — importing
-  `docs-check.ts` from a test runs `vitest list`, which spawns vitest inside vitest — and its 12
-  cases are mutation-tested against four wrong implementations. That is the first test this command
-  has ever had and it covers none of the original 374 lines: the counts, the `expectSites` logic and
-  the link walker are all still only `PROVING.md`'s central rule unsatisfied. The extraction is the
-  pattern for closing the rest, and the class check above is still not hand-watchable, so these
-  remain one unit: whoever writes the class check writes `docs-check.test.ts` with it.
+- **The count class is checked, but only for nouns somebody listed.** `count-phrases.ts` now closes
+  the class: every count-noun phrase in tracked markdown must be a declared `FACT` site or an
+  explicitly listed historical figure, so the current-versus-war-story call is written down instead
+  of made by silence. The cost is stated in the module and repeated here because it is the next
+  gap — **a count about a noun that is not in `COUNTED_NOUNS` is invisible to it.** Scoping to nouns
+  is what took the population from 539 shape-matches to something small enough that every entry
+  carries a reason, and the alternative found nothing better; but the check cannot report the phrase
+  it was never taught to see, so growing that list stays a human act. Adding a noun is one line.
+- **`docs-check.ts`'s own logic is still mostly untested.** Two of its checks were extracted so they
+  could be — `pinned-prose.ts` and `count-phrases.ts`, because importing `docs-check.ts` from a test
+  runs `vitest list`, which spawns vitest inside vitest. What is left in the file itself is the part
+  with no test: the `FACT` table's derivation of each count from the tree, the `expectSites` logic,
+  and the link walker. The extraction is the pattern for closing the rest — take the pure decision
+  out, leave the I/O behind — and nothing forces it, so it will happen the next time one of those
+  three is edited or not at all.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **107 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **108 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 39 point at sections that have never existed** (below,
   "The citations that were never written down"). What is still unresolved is which _document_ a
