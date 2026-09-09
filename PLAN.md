@@ -597,6 +597,36 @@ budget stops being a budget, raising `KNOWN_DANGLING` to fit is the failure the 
 comment warns about. Then the honest move is to fix the references the same week or to admit the
 resolver is aspirational and say so where it is documented — not to widen the number and leave it.
 
+### 20. The scaffolding audit exists as a prompt somebody typed twice
+
+**Branch:** `docs/scaffolding-audit-skill`, stacked on `fix/unverified-claims`.
+
+**What is being attempted.** Turning the audit that produced §19 and most of
+`fix/unverified-claims` into `.claude/skills/scaffolding-audit/SKILL.md`, so it is invocable
+rather than retyped. The audit is the highest-yield thing anyone has run against this tree — it
+found a live hole in `branch-guard.sh`, a walker that excluded a real source directory, and a
+resolver checking a narrower population than its own budget claims — and none of that is
+repeatable today, because the instruction that produced it exists only in a transcript.
+
+**Why now, and why it is a skill rather than a document.** `claude-validation-work` is the
+precedent and the argument: it is the same shape — a probe protocol plus what each result did and
+did not settle — and being a skill is what makes it addressable by name from a fresh context. A
+document nobody is pointed at is a document nobody reads, and this one is worthless unless it is
+read at the start of a session rather than found halfway through.
+
+**The two design decisions worth arguing with.** First, it carries an _already known_ list, so an
+audit cannot spend its budget rediscovering the cheap findings and report a satisfying list of
+nothing new; the cost is that the list rots, and a stale one actively suppresses a real finding.
+Second, it forbids fixing anything, because the last audit was authorised to fix five findings and
+shipped rather more — separating audit from repair removes the mechanism instead of relying on the
+auditor's restraint.
+
+**What would make it the wrong idea.** If the audit is only ever run by a human typing a fresh
+prompt, a skill is a fourth place for the same instruction to drift, and this tree already fails
+that way more than any other. The honest test is whether it gets invoked by name at least once
+without being asked for; if the next audit here is run from a hand-written prompt anyway, delete
+the skill rather than reconciling it.
+
 ---
 
 ## What was learned, and is recorded nowhere else

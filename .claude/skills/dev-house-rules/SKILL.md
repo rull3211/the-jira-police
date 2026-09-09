@@ -65,6 +65,13 @@ much until `8ad1a31` — [the assertions borrowed the developer's git
 identity](INCIDENTS.md#the-suite-that-was-a-statement-about-one-laptop), so they passed on one
 machine and collapsed on the first clean one.
 
+**And if the question is how much of any of this to believe, that is its own skill.**
+[`scaffolding-audit`](../scaffolding-audit/SKILL.md) audits the rules, the guards and the checks
+themselves rather than the product code — by running probes rather than by reading, because reading
+these documents and reporting that they are clear is the null result. It is also where the failure
+class this tree keeps producing is written down: a green check answering a narrower question than
+everyone thinks it is asking.
+
 ---
 
 ## The shortest possible version
