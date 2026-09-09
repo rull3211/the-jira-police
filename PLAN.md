@@ -379,9 +379,12 @@ not a plan item. What is left below is only what is still missing.
   the link walker are all still only `PROVING.md`'s central rule unsatisfied. The extraction is the
   pattern for closing the rest, and the class check above is still not hand-watchable, so these
   remain one unit: whoever writes the class check writes `docs-check.test.ts` with it.
-- **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links; `CLAUDE.md`'s
-  own routing table is backticks, so deleting a phase file keeps it green; the repository's real
-  cross-reference system — **87 `§N`/`invariant N` references** — is unchecked entirely.
+- **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
+  to a directory rather than a file is still invisible to it — which is why the "where the truth
+  lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
+  repository's real cross-reference system — **87 `§N`/`invariant N` references** — is unchecked
+  entirely. `CLAUDE.md`'s own routing table was the third gap here and is now closed: its filenames
+  are links, so deleting a phase file fails the check by name instead of keeping it green.
 - **Nothing checks that an incident is reachable from a rule.** `docs:check` verifies that a link
   _resolves_, never that one _exists_, so the direction `FINISHING.md` makes explicit — the rule
   links to the incident, never the reverse — is unenforced in the only direction that matters.

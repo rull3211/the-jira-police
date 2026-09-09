@@ -36,16 +36,22 @@ waterfall. The rule and the story are in
 optional reading and it is not a style guide; every rule in it is the generalisation of a defect
 that already got through here. It is split the way a change is — **load the phase you are in**:
 
-| you are about to                          | load                                                  |
-| ----------------------------------------- | ----------------------------------------------------- |
-| start anything that is not a one-line fix | `dev-house-rules/STARTING.md`                         |
-| write or delete code                      | `dev-house-rules/BUILDING.md`                         |
-| add a guard, a test, or run the thing     | `dev-house-rules/PROVING.md`                          |
-| commit, or amend the rules themselves     | `dev-house-rules/FINISHING.md`                        |
-| ask _why_ a rule exists                   | `dev-house-rules/INCIDENTS.md` — cited from each rule |
+| when you are                                 | load                                                                                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| resuming work you did not start              | `git status`, `git log --oneline -5`, this branch's [`PLAN.md`](PLAN.md) entry — then the row below that matches what you are about to do |
+| starting anything that is not a one-line fix | [STARTING.md](.claude/skills/dev-house-rules/STARTING.md)                                                                                 |
+| writing or deleting code                     | [BUILDING.md](.claude/skills/dev-house-rules/BUILDING.md)                                                                                 |
+| adding a guard, a test, or running the thing | [PROVING.md](.claude/skills/dev-house-rules/PROVING.md)                                                                                   |
+| committing, or amending the rules themselves | [FINISHING.md](.claude/skills/dev-house-rules/FINISHING.md)                                                                               |
+| asking _why_ a rule exists                   | [INCIDENTS.md](.claude/skills/dev-house-rules/INCIDENTS.md) — cited from each rule                                                        |
 
-`dev-house-rules/SKILL.md` is the index and the shortest possible summary. Start there if you do not
-know which phase you are in.
+**The first row is the one that gets skipped, because nothing announces that it applies.** A
+compacted context, or a session picking up a branch somebody else left, inherits an account of the
+work rather than the work — so it knows the rules and not its own position, and the phase rows all
+read as though you are starting. You are not: find out where you are before matching a row.
+
+[SKILL.md](.claude/skills/dev-house-rules/SKILL.md) is the index and the shortest possible summary.
+Start there if you do not know which phase you are in.
 
 **Every rule in there is provisional.** They are amended from incidents rather than from theory, so
 read each as a hypothesis that has survived so far. If one is wrong, say so and propose the change
@@ -74,12 +80,12 @@ hook that would print it unasked is not registered here, whether it ever is belo
 
 ## Where the truth lives
 
-| file                              | answers                                                 |
-| --------------------------------- | ------------------------------------------------------- |
-| `README.md`                       | how to run it, what each command does                   |
-| `ARCHITECTURE.md`                 | how it works, why it is shaped this way, the module map |
-| `PLAN.md`                         | what is **not** built yet, and what was learned         |
-| `.claude/skills/dev-house-rules/` | how we work, and what went wrong last time              |
+| file                                                       | answers                                                 |
+| ---------------------------------------------------------- | ------------------------------------------------------- |
+| [README.md](README.md)                                     | how to run it, what each command does                   |
+| [ARCHITECTURE.md](ARCHITECTURE.md)                         | how it works, why it is shaped this way, the module map |
+| [PLAN.md](PLAN.md)                                         | what is **not** built yet, and what was learned         |
+| [dev-house-rules](.claude/skills/dev-house-rules/SKILL.md) | how we work, and what went wrong last time              |
 
 **All four are treated as source.** Prose falsified by a change is rewritten in the same commit, not
 the next one. Structural facts — modules, entry points, the composition — live in `ARCHITECTURE.md`
