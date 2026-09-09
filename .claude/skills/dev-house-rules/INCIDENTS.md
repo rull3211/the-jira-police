@@ -807,3 +807,49 @@ four questions were not in it.
 **The rules** — [say what you owe, in the pull request
 body](FINISHING.md#the-rules-you-owe-are-written-down-or-they-are-not-owed);
 [re-read the phase file, never recall it](FINISHING.md#re-read-the-phase-file-never-recall-it).
+
+### The audit that found eight things and got three of them wrong on the way
+
+Run 2026-09-08 against these rules by spot-check rather than by reading: drive every command, then
+test each falsifiable claim the rules make about the repository. **Eight findings; six held, one was
+wrong, one was overstated in a way that would have destroyed evidence.**
+
+**Calibration first, so the rest is read in proportion.** All five checks were green;
+plan-before-work had been followed with the entry written and then deleted; every symbol
+`BUILDING.md` names was present, including `FAIL_FIRST_CHECK`'s `!== "false"` asymmetry; the
+literal-list rule was derived at the sites it names; six entry points exactly. Of eighteen incidents
+sampled, thirteen trace to a SHA whose diff or message carries the incident's own details, and **no
+claimed defect turned out never to have existed.** The audit was worth running. It is recorded here
+because how it went wrong is more transferable than what it found.
+
+**Three failures of method, each a defect these rules already name, committed while auditing for
+them:**
+
+- **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
+  a shared table row looks like, and it was read as a missing row **because a finding had predicted
+  one**. The row-count also assumed one setting per row. Deriving the answer instead — iterate
+  `SETTINGS`, check each name — gives 46 of 46 present.
+  [→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms)
+- **A number that invited an inference about what it controls.** `git rev-list --count main..HEAD`
+  was 3 and `branch-stack.sh`'s threshold is 3, so the hook was reported as at its limit. It counts
+  unmerged branches into `origin/main`, which was **one**. Two numbers that agree today, read as one
+  number. [→](#the-capacity-number-that-was-read-for-two-days-as-a-blocker)
+- **An adversarial subagent returns what it was primed for.** The prompt offered `SUSPECTED RETROFIT`
+  as a verdict and named an untraceable commit as evidence for it. The report came back alleging
+  invention, and it was relayed at full strength. The evidence supported only "not in `PLAN.md`" —
+  and the agent's framing was the more damning of the two available readings, which it had not
+  checked. Depth was delegated on the two sharpest accusations, which is the half of _delegate
+  breadth, keep depth_ that costs something.
+
+A fourth reached `main` and so outlived this entry: a precise `file:line` citation read without the
+twelve lines of context that set up its state. It is in `PLAN.md` under _What was learned_, waiting
+for a second instance before it sharpens the rule it belongs to.
+
+**Why this is here and not in the plan.** It lived in `PLAN.md` §13 for a day as part of a 106-line
+audit report — half open items, half narrative defending the report. A plan that keeps its own
+history is a plan nobody can read the open items out of, which is `PLAN.md`'s own stated rule, and
+the proof was a reader asking what the entry was for. The open items stayed; the story came here.
+
+**The rules** — [a rule with one instance is a
+hypothesis](FINISHING.md#the-postmortem-in-three-questions);
+[where an amendment goes](FINISHING.md#where-an-amendment-goes).

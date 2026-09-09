@@ -334,26 +334,13 @@ is the more tempting and the more dangerous — it would fire on every ordinary 
 
 ---
 
-### 13. What an audit of the house rules against the tree left open
+### 13. What the house rules claim that nothing checks
 
-Run 2026-09-08 against the rules on this branch, by spot-check rather than by reading: drive every
-command, then test each falsifiable claim the rules make about the repository. **Eight findings;
-six held, one was wrong, one was overstated in a way that would have destroyed evidence.** Both
-failures are recorded below, because the way they were reached is more useful than the findings.
-
-**What the audit confirmed first**, so the defects are read in proportion: all five checks green;
-plan-before-work followed in `af61f41`/`1e64ed4` with the entry written and then deleted; every
-symbol `BUILDING.md` names present, including `FAIL_FIRST_CHECK`'s `!== "false"` asymmetry; the
-literal-list rule derived at the sites it names; six entry points exactly. Of eighteen incidents
-sampled, thirteen trace to a SHA whose diff or message carries the incident's own details, and **no
-claimed defect turned out never to have existed.**
-
-The three defects that were only prose have been corrected on this branch, which is why they are no
-longer listed here: the four sentences claiming a mechanical guarantee, the module map's test-file
-count, and two citations that named the wrong document. What is below is what a document edit could
-not reach.
-
-**Open, and not this branch's job:**
+Found by a spot-check audit of the rules against the tree on 2026-09-08, and narrowed by the guard
+work that followed. The audit's own story — what it confirmed, and the three ways its method failed
+while it ran — is an
+[incident](.claude/skills/dev-house-rules/INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way),
+not a plan item. What is left below is only what is still missing.
 
 - **The count class, not the instance.** A fourth `FACT` now pins the bare-count phrasing, but that
   is one site, not the class. Measured across tracked markdown on 2026-09-08 — a number followed by
@@ -408,35 +395,12 @@ which is **blind to every squash- and rebase-merged branch**. `chore/agent-guard
 identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
 these accumulate, and it is one instance of a possible rule rather than a rule.
 
-**Four method failures, recorded and deliberately not generalised** — each is one instance, and
-each is a defect this repository already has an incident for, committed while auditing for it:
-
-- **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
-  a shared row looks like, and it was read as a missing row because a finding had predicted one.
-  Row-counting also assumed one setting per row. Deriving the answer — iterate `SETTINGS`, check
-  each name — gives 46 of 46 present. `STARTING.md`'s "finding something adjacent and believing it".
-- **A number that invited an inference about what it controls.** `git rev-list --count main..HEAD`
-  is 3 and `branch-stack.sh`'s threshold is 3, so the hook was said to be at its limit. It counts
-  unmerged branches into `origin/main` — currently **one**. The `capacity: 0` incident exactly.
-- **An adversarial subagent returns what it was primed for.** The prompt offered `SUSPECTED
-RETROFIT` as a verdict and named an untraceable commit as evidence of it; the report came back
-  alleging invention, and it was relayed at full strength. The evidence supported "not in
-  `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
-  delegated on the two sharpest accusations.
-- **A line number read without its context**, and the only one of the four that reached `main`. It
-  is therefore the only one that outlives this entry: the record is under
-  [what was learned](#a-citation-can-be-exact-and-still-be-read-wrongly-and-that-one-shipped), so
-  that deleting §13 does not delete a correction to something shipped.
-
-**What would make this the wrong idea.** Two things. The prose corrections that already shipped
-read, at a glance, as weakening the rules — they are not: _never work on `main`_ and _a human
-merges_ stay absolute, and only the claim about what enforces them changed. The honest objection was
-that if wiring the hooks were imminent, those edits would be churn; the counter is that the prose had
-been false for as long as it had existed, and a rule that overstates its own enforcement teaches a
-reader to stop checking the other ones. For what remains: every item above is a check on documents,
-and this repository's own evidence is that checks on documents catch less than driving a command
-does. If the next session has budget for exactly one of these, the guard hardening is worth more than
-the whole `docs:check` list, and the wiring is worth more than the guards.
+**What would make this the wrong idea.** Every item above is a check on documents, and this
+repository's own evidence is that checks on documents catch less than driving a command does. The
+guard work that was worth more than the whole `docs:check` list has now shipped, so what is left
+here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
+which is not ours (§12). If the next session has budget for exactly one, take the class check with
+its test: it is the only item whose absence has already produced two shipped contradictions.
 
 ---
 
