@@ -55,6 +55,13 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { SETTINGS } from "../settings.ts";
 import { CHECKLIST_QUESTIONS, pinnedProseProblems } from "./pinned-prose.ts";
+import {
+  type DocumentShape,
+  maskDisabled,
+  referencesIn,
+  sectionIds,
+  unresolved,
+} from "./section-refs.ts";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 
@@ -124,7 +131,12 @@ function markdownFiles(dir: string, found: string[] = []): string[] {
   return found;
 }
 
-/** Every `.ts` in the tree, for a count that is about code and not about prose. */
+/**
+ * Every `.ts` in the tree. Two callers want it for opposite reasons:
+ * `sectionReferences` counts a population that is about code and not about
+ * prose, and the resolver reads these because a `§N` in a doc comment is a
+ * citation like any other.
+ */
 function typescriptFiles(dir: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     if (SKIP_DIRS.has(entry)) {
@@ -140,6 +152,7 @@ function typescriptFiles(dir: string, found: string[] = []): string[] {
   return found;
 }
 
+/* refs:off */
 /**
  * How many `§N` references the *code* contains.
  *
@@ -150,19 +163,29 @@ function typescriptFiles(dir: string, found: string[] = []): string[] {
  * that they resolve to nothing — drove three consecutive failures of this check
  * in the commit that introduced it. A count whose own write-up perturbs it is
  * noise, and a check that cries wolf gets switched off. Restricted to `.ts`, it
- * measures the population that actually matters and holds still while being
- * described.
+ * measures the population that actually matters.
+ *
+ * **Narrowing the scope was the wrong fix, and this file now contains the
+ * counter-example.** "Holds still while being described" was the claim, and it
+ * held for one commit: `section-refs.test.ts` needs dangling tokens as fixtures,
+ * so building the resolver moved this count by 35 without a single new citation
+ * being made. The general fix is the resolver's own — `refs:off` / `refs:on`,
+ * marking a region as quoting rather than citing — so this count reads through
+ * the same mask instead of through a narrower directory. A test fixture and a
+ * write-up are the same thing to a counter, and one mechanism should exempt
+ * both.
  *
  * This counts the system's *size* and does not check that any reference
- * resolves. `PLAN.md` §13 records that gap; roughly 39 of these point at
- * sections that have never existed in any revision of the document they appear
- * to cite. Sizing it keeps the cited scale of that problem honest until the
- * resolver is built. It is not the resolver.
+ * resolves. It was written to keep the scale of that problem honest until the
+ * resolver existed, and the resolver now runs below it — so what was "roughly
+ * 39" is 39 exactly, measured rather than sampled, across markdown as well as
+ * code.
  */
+/* refs:on */
 function sectionReferences(): number {
   let found = 0;
   for (const file of typescriptFiles(ROOT)) {
-    found += (readFileSync(file, "utf8").match(/§\d/gu) ?? []).length;
+    found += (maskDisabled(readFileSync(file, "utf8")).match(/§\d/gu) ?? []).length;
   }
   return found;
 }
@@ -444,6 +467,64 @@ for (const file of files) {
 
 say(
   `${problems.length === beforeLinks ? "ok  " : "FAIL"} markdown links: ${links} checked across ${files.length} files`,
+);
+
+/**
+ * The four documents that number their sections, and the one section whose
+ * list items are addressable. Declared here rather than discovered, because
+ * every document with a numbered list is not a document with sub-sections —
+ * see `section-refs.ts` for why inferring that loses the check.
+ */
+const NUMBERED_DOCUMENTS: readonly DocumentShape[] = [
+  { path: "ARCHITECTURE.md", numberedListIn: "14" },
+  { path: "PLAN.md" },
+  { path: ".claude/skills/intake-triage/INTAKE_INSTRUCTIONS.md" },
+  { path: ".claude/skills/agent-solve/SOLVE_INSTRUCTIONS.md" },
+];
+
+const defined = new Set<string>();
+for (const document of NUMBERED_DOCUMENTS) {
+  const body = readFileSync(join(ROOT, document.path), "utf8");
+  for (const id of sectionIds(body, document)) {
+    defined.add(id);
+  }
+}
+
+/**
+ * References already known to name nothing, being fixed under `PLAN.md` §14.
+ *
+ * **Exact, not a ceiling, for the same reason `expectSites` is.** Fewer means
+ * somebody fixed one and left this number claiming a debt that is already paid,
+ * which is how a budget stops being read. More means a new one arrived. Both
+ * are worth stopping for, and a `<=` here would catch only half of that.
+ *
+ * This is a debt and not an exemption: it is one number for the whole tree, so
+ * it cannot quietly grow to fit, and it names no file, so nothing is
+ * permanently blessed. It goes to zero.
+ */
+const KNOWN_DANGLING = 39;
+
+const refs = [...files, ...typescriptFiles(ROOT)].flatMap((file) =>
+  referencesIn(relative(ROOT, file), readFileSync(file, "utf8")),
+);
+const dangling = unresolved(refs, defined);
+
+if (dangling.length !== KNOWN_DANGLING) {
+  for (const ref of dangling) {
+    problems.push(
+      `${ref.file}:${ref.line} cites §${ref.id}, which is not a section in any document here.\n` +
+        `  Sections come from ARCHITECTURE.md, PLAN.md and the two instruction skills. If the\n` +
+        `  reference is being quoted rather than made, put it in a refs:off / refs:on region.`,
+    );
+  }
+  problems.push(
+    `section references: ${dangling.length} resolve to nothing, and KNOWN_DANGLING says ${KNOWN_DANGLING}.\n` +
+      `  ${dangling.length > KNOWN_DANGLING ? "A new one arrived — fix it rather than raising the number." : "Some were fixed: lower KNOWN_DANGLING in src/cli/docs-check.ts to match."}`,
+  );
+}
+
+say(
+  `${dangling.length === KNOWN_DANGLING ? "ok  " : "FAIL"} section references: ${refs.length} checked against ${defined.size} sections, ${dangling.length} owed`,
 );
 
 if (problems.length > 0) {

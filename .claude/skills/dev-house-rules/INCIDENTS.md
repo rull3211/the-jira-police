@@ -1001,6 +1001,8 @@ stop testing](PROVING.md#tests-that-stop-testing).
 
 ### Thirty-nine citations to sections that were never written
 
+<!-- refs:off -->
+
 An audit of this repository's own cross-reference system found roughly **39 dangling `§N`
 citations** in shipped source. The first diagnosis was that a renumbering had stranded them —
 `96998cc` did cut `PLAN.md` from 1774 lines to 438 — and that diagnosis is wrong. `§3a`, `§5b`,
@@ -1010,6 +1012,8 @@ They were never written down. A session held a plan in its context, wrote `§7b'
 `src/watch/counter.ts` as though citing a document, and the plan died when the session did.
 `src/watch/decide.ts` does this four times. `ARCHITECTURE.md:619` says "See PLAN.md §5b" — the one
 citation in the tree that names its target document, and it resolves to nothing.
+
+<!-- refs:on -->
 
 **This is the project's own thesis failing in its own source.** Every rule here says that files
 outlive contexts and that a fact worth keeping is written to disk. These comments are the shape of
@@ -1033,8 +1037,8 @@ checking its claim against `git log` rather than from the report.
 [→ read wide in a subagent, decide in the main context](STARTING.md#read-wide-in-a-subagent-decide-in-the-main-context)
 
 **The rule** — [the plan is written before the work](STARTING.md#the-plan-is-written-before-the-work-not-after-it).
-Sized in `PLAN.md`, "The citations that were never written down"; the resolver and the 39 fixes are
-not built.
+Sized in `PLAN.md`, "The citations that were never written down". The resolver is built and holds the
+count at 39; the fixes are not. Status pointer updated 2026-09-09 — the story above is unchanged.
 
 ---
 

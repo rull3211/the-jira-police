@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2379 tests in 65 files, no build step, no
+Status: running end to end against production Jira. 2390 tests in 66 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -655,7 +655,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-71 production modules, 65 test files. Grouped by what they belong to rather than alphabetically,
+72 production modules, 66 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -762,6 +762,7 @@ because the grouping is the architecture.
 | `src/cli/watch-once.ts`    | What the sendback watch would do; `--write` does it                                  |
 | `src/cli/watch-args.ts`    | Its argument and output shapes, kept out of a file that ends in a top-level `await`  |
 | `src/cli/docs-check.ts`    | `pnpm docs:check`. Development tooling, not a service entry point — see below        |
+| `src/cli/section-refs.ts`  | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only  |
 
 **Output**
 
@@ -772,11 +773,15 @@ because the grouping is the architecture.
 `wiring.ts` exists because there are six entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once` and `watch:once` — and a difference in how they wire the same pipeline
 would be a bug
-that only shows up in production. `docs-check.ts` is the seventh file in that directory and is
-deliberately not a seventh entry point: it composes nothing, reads no settings, and touches neither
-Jira nor a repository. It lives here because this is where a file you can run lives, and it is
-called out rather than left to be counted, since "six" above is a claim about the composition and a
-new CLI file is exactly what would quietly falsify it. The two solve commands go further than sharing `wiring.ts`: their
+that only shows up in production. `docs-check.ts` and `section-refs.ts` are the seventh and eighth
+files in that directory and are deliberately not entry points: they compose nothing, read no
+settings, and touch neither Jira nor a repository. They live here because this is where a file you
+can run lives, and they are called out rather than left to be counted, since "six" above is a claim
+about the composition and a new CLI file is exactly what would quietly falsify it — which is what
+the second one did, to the sentence that predicted it, in the commit that added it. `section-refs.ts`
+is the only one of the eight with no `pnpm` command of its own, because it is a library that
+`docs-check.ts` reads; it is here rather than beside the code it inspects so that the pair stays
+together. The two solve commands go further than sharing `wiring.ts`: their
 write rungs are literally the same functions, in `src/cli/solve-run.ts`, so a command file is now
 argument parsing plus a call into the one module that writes to Jira, a worktree or GitHub.
 `triage:once` used to build its options by hand; the copy drifted the moment the real skill grew
