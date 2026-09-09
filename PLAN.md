@@ -395,6 +395,15 @@ not a plan item. What is left below is only what is still missing.
   inbound link from any rule file, and it was the entry added that morning. Caught by a fresh-context
   audit, which is not a mechanism — and the audit was needed again the same day, for entries 34 and 35. The check is cheap — every heading must be linked from at least one of the five rule files —
   and it belongs with `docs-check.test.ts` above.
+- **`docs:check` verifies counts that describe the code, and none that describe the prose.** Every
+  fact it holds is a property of the tree — tests, settings, files. A sentence counting its own
+  document is invisible to it, and `INCIDENTS.md`'s preamble carried two such claims for two
+  commits: that every entry _ends_ with `**Found by**`, and that "the seven that already answer the
+  question are quoted above" when five were. Both were caught by a reader, twice, in the paragraph
+  arguing that this class of claim cannot be taken on trust. Not obviously worth a mechanism —
+  "seven quotes appear above this line" is a check with one site and a bespoke parser — but the
+  gap is real and the alternative is to stop writing such sentences, which is the cheaper fix and
+  is not currently a rule.
 - **Cost figures are facts with many homes.** `$0.94`, `$0.11`, `$3.99` and `$4.50` occupy 17
   file-homes between them, outside the `docs:check` exemption rule 3 grants. The figures themselves
   are history and stay unchecked; the total is derived, so the class spreading further goes red —
