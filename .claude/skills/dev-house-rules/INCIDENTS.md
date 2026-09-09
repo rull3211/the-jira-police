@@ -1117,3 +1117,38 @@ noise.
 **The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code);
 [a guard is not shipped until a test fails when it is unplugged](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged).
 No new rule proposed: one instance is a hypothesis.
+
+### The probe that ruled out the right answer
+
+The entry above was published with a wrong diagnosis, argued from a measurement, and CI refuted it on
+the first run against a branch that did not carry the fix. The failing value was **3,599,999** — one
+millisecond under the bound. That is the injected hour, arriving a millisecond early, because a timer
+may fire before `Date.now()` agrees it is due. There was never a second event.
+
+**The reasoning was not lazy, which is the point.** A probe was written specifically to test whether
+a gap could come in under the interval: a 300ms interval with a 700ms block inside one tick, on this
+machine, giving gaps of 301, 301, 300, 700, 301 and none below the period. The conclusion drawn —
+that the hour's drift could only land at or above 3,600,000, so the failing number had to be a
+different `session.slept` event — followed from it. The probe simply did not measure the case that
+was failing: the **first** gap, timed against a stamp taken before `setInterval` is created, on
+hardware that was not this laptop. A probe that covers the wrong case is more dangerous than no
+probe, because its output is quoted as evidence.
+
+The entry above is left standing with its wrong conclusion, per this file's convention. What it got
+right is that the assertion had one millisecond of margin, and the fix — one tick of tolerance — was
+correct for the wrong reason and needed no change when the reason did.
+
+**This is the second time in one session.** A `perl -i -pe 's/…/ if !$done++'` mutation earlier
+restricted its substitution to line 1, changed nothing, and reported a clean pass. Same shape: a
+check ran, did not cover what it claimed, and was believed because it produced output. Both were
+caught by something outside the reasoning that produced them — a `grep` for the inserted text, and
+CI on different hardware.
+
+**Found by** CI, on a pull request that was red for an unrelated reason and was only being read to
+explain that redness. Not by the suite locally, which was green in 28 consecutive runs including ten
+under deliberate CPU load.
+
+**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
+The candidate amendment — _state which case a probe does not cover, before quoting it as evidence_ —
+now has two instances rather than one, and is worth proposing on the third or on a defect that
+reaches `main`.

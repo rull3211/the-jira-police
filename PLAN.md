@@ -517,8 +517,36 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 `SOLVE_INSTRUCTIONS.md` ones.
 
 **Targets the resolver must know about:** `ARCHITECTURE.md` §1–15 plus its §14 invariants 1–17;
-`PLAN.md` §1–14; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`; `SOLVE_INSTRUCTIONS.md` §0–8 with
+`PLAN.md` §1–15; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`; `SOLVE_INSTRUCTIONS.md` §0–8 with
 `0a`/`2a`/`2b`/`2c`.
+
+### 15. Two branches in flight, and the order they have to land in
+
+**Branch:** this one (`fix/slept-assertion`) for the correction; `fix/section-resolver` for the rest.
+**Delete this entry when both are merged** — it is a hand-off, not a plan, and it exists because the
+session that produced both ends before either lands.
+
+**`fix/slept-assertion` (PR #22) — the fix is right and the published reason was wrong.** It replaces
+a `.find()`-first-event assertion with largest-event-plus-one-tick-tolerance in
+`src/triage/session.test.ts`. The fix needs no change. The **diagnosis** shipped in the commit
+message and PR body claims the failing value was a second `session.slept` event, because a local
+probe showed no gap could come in under the interval. CI then printed `expected 3599999 to be
+greater than or equal to 3600000` — 3,599,999 **is** the injected hour, one millisecond early,
+because a timer may fire before `Date.now()` agrees it is due, and the probe never measured the
+first gap against a stamp taken before `setInterval` exists. Corrected in the test comment and in
+`INCIDENTS.md`; **the commit message and the PR body still carry the wrong story** unless this
+entry is being read after they were amended.
+
+**`fix/section-resolver` (PR #21) — built, green locally, red in CI for a reason that is not its
+own.** It adds `src/cli/section-refs.ts` and its 11 tests, routes `sectionReferences()` through
+`maskDisabled`, and holds `KNOWN_DANGLING` at exactly 39. Its CI is red **only** because the branch
+predates #22 and so still runs the one-millisecond assertion. **Rebase it once #22 merges and it
+goes green** — do not debug it before then.
+
+**One open question, deliberately not answered by either branch.** `sectionReferences()` counts
+`§N` tokens across `src/` and may now be an orphan superseded by the resolver, which resolves the
+same tokens rather than counting them. Leaving it costs a `docs:check` fact that moves whenever
+test fixtures do — it already jumped 106 → 141 on fixtures alone. Propose before deleting.
 
 ---
 
