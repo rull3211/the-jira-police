@@ -522,6 +522,43 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 
 ---
 
+### 14. Nothing resolves a `§N`, and 39 of them point at sections that were never written
+
+**Branch:** `fix/section-resolver`, taken off `main` rather than stacked — three branches are already
+stacked here and the fourth is how an incremental plan becomes a waterfall.
+
+**What is being attempted.** `docs:check` verifies every markdown _link_ and every cited _count_.
+The `§N` cross-reference — the most-used citation form in this tree, and the only one that appears
+in `.ts` comments as well as in prose — is verified by nothing. Build the resolver first, then fix
+what it finds, because "39, roughly" is not a reviewable diff and a batch pass over confident
+references to nothing is how they got here.
+
+**What the tokens are.** Parsing headings out of the four section-numbered documents gives the whole
+legal vocabulary: `ARCHITECTURE.md` 1–15 plus invariants 14.1–14.17, `PLAN.md` 1–14,
+`INTAKE_INSTRUCTIONS.md` 0–12 with `1b`/`6b`, `SOLVE_INSTRUCTIONS.md` 0–8 with `0a`/`2a`/`2b`/`2c`.
+Ten cited tokens are in none of them.
+
+**What it can and cannot catch, stated before it is built, because the gap is the interesting part.**
+Almost no citation names its target document — `§7b` in `src/watch/decide.ts` says nothing about
+where §7b would live — so the strongest available rule is _this token is a heading in **some**
+document_. That catches every one of the 39. It cannot catch a reference that still resolves but now
+means something else, and the tree has those too: six sites say "§1 refuses on-disk state" when that
+rule is `ARCHITECTURE.md` §5, three say "§6's rule is advance, then claim" when it is §2. Those need
+a human read, and the resolver's job is to shrink the set that needs one, not to claim it is empty.
+
+**The self-reference trap, which this check walks straight into.** The last count added here counted
+its own write-up and moved every time a sentence was written about it; the fix was to narrow its
+scope. That will not work twice — the resolver must scan markdown, since four of the 39 are in
+`ARCHITECTURE.md` — so this entry, which quotes ten dangling tokens in order to be useful, would
+fail the check it is arguing for. Hence `<!-- refs:off -->` regions: a marker, not a file-level
+exemption, so exempting a paragraph never quietly exempts the document around it.
+
+**What would make this the wrong idea.** If the answer to a dangling `§7b` turns out to be "delete
+the citation", then 39 comments get shorter and nothing gets more correct, and the resolver was an
+expensive way to find that out. Read three of them before fixing any.
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 ### A citation can be exact and still be read wrongly, and that one shipped
