@@ -1307,3 +1307,61 @@ and the candidate amendment now at seven instances: _state which case your check
 before quoting it as evidence_. It is **proposed, not written**: see `claude-validation-work`, "The
 rule this work owes". Seven is well past the threshold `INCIDENTS.md` set for itself, and the
 proposal outliving its own evidence by this margin is starting to be its own finding.
+
+### The denylist that named thirteen of git's write verbs
+
+**2026-09-09.** `branch-guard.sh` decided whether a `Bash` call would write by matching it against a
+list of git subcommands that mutate. The list had been patched twice, each time after a measurement
+caught it letting something through: `push`, which names no branch when bare and reaches `main`
+through its upstream, and then `pull`, which is `merge` with a fetch in front. The second fix landed
+with an unusually candid note — that the list "was assembled from commands that _sound_ mutating,
+and `pull` sounds like a read", so the defect was in the derivation rather than in the list, and
+patching it was worth little on its own.
+
+**Nobody had asked how much little was.** Every subcommand git knows about — 163, from
+`git --list-cmds=main,others,nohelpers` — fed to the script with `CLAUDE_PROJECT_DIR` pointed at a
+throwaway repository whose HEAD is `main`:
+
+```
+REFUSED (13)   am apply cherry-pick commit merge mv pull push rebase reset restore revert rm
+allowed (150)  everything else
+```
+
+Arguments cannot change that verdict, because the pattern matches on the verb token — so the
+bare-verb sweep is the complete answer rather than a sample. What a protected branch was letting
+through included `checkout`, which is the older spelling of the `restore` the list refused; bare
+`stash`, while `stash pop`, `apply` and `drop` were all refused; `clean`; `branch -f`, which can
+move the protected ref itself; `update-ref` and `symbolic-ref`, which do the same with no porcelain
+involved; `send-pack` and `http-push`, which are `push` under other names; `fetch` in its refspec
+form, which writes a **local** branch; `subtree merge` and `subtree pull`; and `reflog expire`,
+which destroys the trail by which any of the rest could be undone.
+
+**The shape is the finding and the thirty holes are the symptom.** A denylist has to enumerate every
+spelling of "write" in a program with 163 subcommands and several aliases per act, and it is behind
+by construction: the verb git adds next year is allowed on the day it ships, and so is any alias or
+extension a developer configures. Two rounds of patching had moved the count from 11 to 13.
+
+**Fixed by inverting it, for `git` only.** An allowlist of read verbs plus named conditionals;
+anything else is a write. Non-git commands keep the fail-open behaviour, so the inversion is scoped
+to the one program whose surface can be enumerated. The same sweep now refuses 102 of 163. The
+constraint that shaped it was the escape hatch — the denial text tells the agent to run
+`git switch -c`, and a guard that refuses the remedy it names traps the agent on the protected
+branch — so `switch` and `checkout -b` stay allowed and plain `checkout` does not.
+
+**The cost is stated rather than discovered later**, because inverting a denylist buys coverage with
+false positives, and a guard that over-refuses a read earns the contempt that gets it switched off.
+Every conditional verb has its read form asserted beside its write form: 107 → 186 assertions.
+
+**One mutation survived, and it was worth more than the seven that were caught.** Deleting the loop
+that consumes git's global options was expected to let `git -C . worktree add` through. It did not —
+with the options unconsumed, `-C` lands where the verb goes, is not in the allowlist, and is refused
+as an unrecognised write. Under an inversion, mis-parsing can only over-refuse. So no write fixture
+can observe that loop breaking, and the four assertions directly above it read as though they cover
+it. Its only observable job is _not_ refusing a read that carries a global option, which nothing
+checked. Four assertions later the mutation goes red.
+
+**The rule** — this is a candidate for `BUILDING.md` at one instance, and it is **proposed, not
+written**: _a denylist over a vocabulary you do not control is behind by construction; invert it, or
+say in the code why you cannot._ The counter-argument is real and belongs with it: inverting is only
+available when the vocabulary is enumerable and the read set is small enough to maintain, which is
+why the inversion here stops at `git` and does not touch the rest of the shell.

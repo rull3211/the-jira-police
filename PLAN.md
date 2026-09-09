@@ -706,6 +706,14 @@ names must not itself be refused. So `switch` stays allowed in full, `checkout -
 allowed as the spelling half of everyone's fingers already know, and plain `checkout` — the
 destructive one — does not. Each of those three gets an assertion.
 
+**Result.** The same sweep now refuses **102 of 163**. Assertions went 107 → 186, every conditional
+verb's read form asserted beside its write form. Eight mutations, all caught — but only after the
+one that survived was understood: deleting the loop that consumes git's global options did **not**
+let `git -C . worktree add` through, because with the options unconsumed `-C` lands where the verb
+goes and is refused as an unrecognised write. Under an inversion mis-parsing can only over-refuse,
+so no write fixture can see that loop break, and the four assertions above it read as though they
+covered it. Its only observable job is not refusing a read that carries a global option.
+
 **What would make this the wrong change.** Over-refusal on a legitimate read nobody listed. That is
 the real cost and it is accepted rather than dismissed: it will happen, the denial text names the
 remedy, and adding a verb to the read list is a one-line change with an assertion. The direction
