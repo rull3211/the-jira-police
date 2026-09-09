@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2415 tests in 67 files, no build step, no
+Status: running end to end against production Jira. 2465 tests in 69 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -655,7 +655,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-74 production modules, 67 test files. Grouped by what they belong to rather than alphabetically,
+76 production modules, 69 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -1217,7 +1217,7 @@ is the only one that changes what the skill reads:
      a clean pass — the criteria came from the technical side, not from the reporter, so the scope
      decision is proposed rather than confirmed and the description still contradicts it.
    - `agentFitness.solvable` came back **false on a `ready-ish` ticket**, blocked on one criterion
-     whose root cause may not be in this repository. The gate in §2 of the plan is one-directional
+     whose root cause may not be in this repository. The gate in §3 above is one-directional
      by design: DoR passing is necessary for solvability and not sufficient, and this is the first
      live case that distinguishes the two.
 
@@ -1413,10 +1413,10 @@ who remembers them should be able to see that they were retired rather than quie
   | **machine sleep**                | `SESSION_IDLE_TIMEOUT_MS` + the drift watchdog in `session.ts`, which credits back the slept gap |
   | rounds that die before reserving | `MAX_FAILED_STARTS`, after SSX-3835 retried every two minutes for four days unnoticed            |
 
-  **What has _not_ been closed is the one that was named first: cost per ticket per day.** §4 of
-  the plan's Verification asked for it before the loop was switched on, and it is still not
-  measured. A completed solve has never been costed end to end. So the daemon's per-day spend is
-  bounded by arithmetic over `MAX_CONCURRENT_SOLVES`, `MAX_SOLVE_ATTEMPTS_PER_TICKET` and
+  **What has _not_ been closed is the one that was named first: cost per ticket per day.** The
+  plan's own "Cost per ticket per day" entry asked for it before the loop was switched on, and it is
+  still not measured. A completed solve has never been costed end to end. So the daemon's per-day
+  spend is bounded by arithmetic over `MAX_CONCURRENT_SOLVES`, `MAX_SOLVE_ATTEMPTS_PER_TICKET` and
   `MAX_REVIEW_ROUNDS_PER_TICK` rather than by observation, and the difference between those two
   is what an invoice is for. **This is the largest open item in the file.**
 
@@ -2789,9 +2789,10 @@ after a compaction — is the case where they matter most.
 | `session-brief.sh` | `SessionStart`                                          | prints the contract; on `trigger=compact` it also inlines the two rules and `FINISHING.md`'s four questions                                                              |
 | `commit-brief.sh`  | `PreToolUse` on `Bash`                                  | prints `FINISHING.md`'s four questions when the command is a `git commit`; carries no permission decision at all                                                         |
 
-`lib.sh` holds what they share. `test-hooks.sh` is the suite, behind `pnpm test:hooks`;
-`pnpm hooks:brief` and `pnpm hooks:commit-brief` render the two briefs on demand. Registration lives
-in the settings file under `.claude/`, written and reviewed by the operator.
+`lib.sh` holds what they share. `test-hooks.sh` is the suite, behind `pnpm test:hooks`, which you run
+if you change a script; `pnpm hooks:brief` and `pnpm hooks:commit-brief` render the two briefs on
+demand. Registration lives in the settings file under `.claude/`, written and reviewed by the
+operator, and has been in place since 2026-09-09.
 
 **Three of the four guard the tree; `commit-brief.sh` guards nothing.** It is the only script here
 that never refuses and never prompts — it emits `hookSpecificOutput.additionalContext` with exit 0
@@ -2839,13 +2840,15 @@ command-position analysis cannot see inside `sh -c '...'`. The two are a union.
 
 **And the floor had never actually been exercised.** Its verb terminator matched a space or
 end-of-string, so `bash -lc "git push"` — the verb flush against the closing quote — fell through
-both halves and was allowed on `main`. There was an assertion for that exact string, green for four
-days, passing because the suite's `bash_payload` helper interpolated commands into JSON without
-escaping: a fixture containing a double quote produced a payload the hook could not parse, and an
-unreadable command is treated as a write. The guard denied for the one reason the assertion was not
-testing. **A test whose fixture cannot reach the code path is indistinguishable from a passing test**,
-and nothing about this one looked wrong from the inside — it was found sideways, by writing a hook
-whose behaviour on an unparseable payload differs from its behaviour on a command it ignores.
+both halves and was allowed on `main`. There was an assertion for that exact string, and for the
+hundred minutes it existed — `4d5ef49` to `cbb5be0`, one afternoon of 2026-09-09, not the four days
+that commit's own message claims — it passed on a defect in the harness rather than on the guard:
+`bash_payload` interpolated commands into JSON without escaping, so a fixture containing a double
+quote produced a payload the hook could not parse, and an unreadable command is treated as a write.
+The guard denied for the one reason the assertion was not testing. **A test whose fixture cannot
+reach the code path is indistinguishable from a passing test.** The terminator is now
+`[^[:alnum:]_-]`, so a quote or a bracket ends the verb; `PLAN.md` carries how it was found and the
+rule it is being proposed for.
 
 **Anchoring is the difference between guarding the act and censoring the words.** The `gh pr merge`
 check matches only at command position, so prose and commit messages may discuss it freely. The push
@@ -2863,8 +2866,9 @@ with it depends on how it reaches for it:
 | the `Read` tool                         | **allowed**                                                     |
 
 The permission to _change_ it is scoped to the human, not to the file's location; moving it inside the
-repository bought no write access. Three documents here claimed the read was refused too. It is not,
-and the correction matters more than the fact, because a false claim about a capability removes the
+repository bought no write access, and the agent a guard constrains does not get to wire it. Three
+documents here claimed the read was refused too, and said so until 2026-09-09. It is not, and the
+correction matters more than the fact, because a false claim about a capability removes the
 operation that would have refuted it.
 
 The shell rule's shape has a false-positive edge worth knowing: a `git commit -m` whose _message_
@@ -2890,7 +2894,9 @@ their own authority, never on a guard's.
 
 `pnpm test:hooks` proves the **scripts** — that each emits the right decision and, since the exit-code
 assertions were added, that it exits 0 while doing so. It says nothing about whether anything runs
-them. Stated explicitly, because this is the section that owes it:
+them. Stated explicitly, because this is the section that owes it — and the five are not all the
+same kind: the first three have never been measured at all, the fourth is a measured past failure of
+the suite itself, and the fifth has been watched working, on the dates its own log records.
 
 1. **`ask` has never been observed working.** `deny` carried on stdout with exit 0 was watched being
    honoured on 2026-09-09; `branch-stack.sh` is registered on `Bash` and was once watched _not_
@@ -2905,24 +2911,42 @@ them. Stated explicitly, because this is the section that owes it:
    being a fast-forward that brought the settings file into the tree.
 4. **The suite could not run anywhere but one laptop** until `8ad1a31`, because its assertions borrowed
    the developer's git identity. CI caught it the first time it ran them.
-5. **`additionalContext` is honoured — watched once, by hand, and not by the suite.** On 2026-09-09,
-   the commit that added the `PLAN.md` entry for this correction arrived with `commit-brief.sh`'s
-   four questions in front of it, verbatim, on a real `git commit` rather than a hand-fed payload.
-   So `PreToolUse` with exit 0, no `permissionDecision` and text under
-   `hookSpecificOutput.additionalContext` reaches the model. That is a third decision shape
-   confirmed on this transport, after `deny`; `ask` remains the one nobody has seen.
+5. **`additionalContext` is honoured — watched by hand, never by the suite.** `PreToolUse` with
+   exit 0, no `permissionDecision` and text under `hookSpecificOutput.additionalContext` reaches
+   the model. `deny` is the other shape watched honoured on this transport; `ask` remains the one
+   nobody has seen.
+
+   **The log below is the record, and it is the only record.** No sentence here or anywhere else
+   states how many sightings there are, because a figure in prose is the part that rots: three
+   documents once carried three different ones. **Adding a sighting is appending a dated bullet**,
+   never editing a sentence. Each line carries the date, the commit where there is one, and what was
+   distinctive about it — "watched once, by hand" was unfalsifiable a month later.
+
+   - **2026-09-09, commit `12b1220`** — "plan: the commit brief is documented everywhere except
+     the working contract". The `git commit` that produced it arrived with `commit-brief.sh`'s four
+     questions in front of it, verbatim, on a real commit rather than a hand-fed payload.
+   - **2026-09-09, two `git commit` commands aimed at a throwaway clone under `/tmp`.** Both
+     injected. Two things came out of it that the first sighting could not show. **One of the two
+     commands was then refused by a different safety hook, and the context was injected anyway** —
+     injection does not wait on the command being permitted, so the brief arriving is no evidence
+     the commit ran. And **the brief named this repository's branch rather than the one being
+     committed to**, because `commit-brief.sh` reads the branch from `CLAUDE_PROJECT_DIR` while
+     matching on the command text; the two disagree whenever a commit targets a tree outside the
+     project directory.
 
    **It stays on this list because the suite still cannot tell you any of that.** `pnpm test:hooks`
    asserts the script emits the right JSON, and it asserted exactly that on the days the hook was
-   not yet registered. One observation on one machine on one day is what stands behind the sentence
-   "the four questions now fire at the commit" — enough to stop calling the transport unproven, not
-   enough to call it guaranteed. Re-run it, the way `claude-validation-work`'s step 0 re-runs the
-   others, rather than citing this paragraph forever.
+   not yet registered. Every line above is one machine on one day, and "watched" is not
+   "reliable" — the log is enough to stop calling the transport unproven and not enough to call it
+   guaranteed. So when you need to know whether it still works, re-run it the way
+   `claude-validation-work`'s step 0 re-runs the others, and **add a dated line above** rather than
+   citing this paragraph forever.
 
 ### The fourth guardrail guards a habit, not the tree
 
 CI's `Rules owed` step fails a pull request whose body does not answer `FINISHING.md`'s fourth
-question. It is the only check in that workflow with no hand-run equivalent, because what it reads is
+question. It is one of two checks in that workflow with no hand-run equivalent — the other is
+`No budget override`, which is about the environment the run happens in — because what it reads is
 the pull request body rather than the tree, and it is worth being exact about how little it proves:
 **it cannot tell a true `Rules owed: none` from a false one.** It guarantees the question was
 answered. Everything above it guards the repository; this one guards a habit that had failed four

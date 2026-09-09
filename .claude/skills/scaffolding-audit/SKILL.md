@@ -44,15 +44,18 @@ prediction was never recorded — report that as a failed probe, not as a pass.
 ## Point it here first
 
 Start with the class this tree is systematically bad at: **a green check answering a narrower
-question than everyone thinks it is asking.** Three instances are on record, all green for days
-or weeks:
+question than everyone thinks it is asking.** Four are on record, each green until somebody went
+looking:
 
 - a hook-suite fixture whose payload could not parse, so the assertion passed on the wrong
   refusal and hid a live hole in `branch-guard.sh`;
 - a documentation check that verified the number phrasings somebody had thought to write down,
   and silently ignored the rest;
 - a cross-document reference resolver that pools section ids from every document into one set, so
-  a dead reference resolves against a different file's live section.
+  a dead reference resolves against a different file's live section;
+- a docs suite made entirely of consistency checks, read by everyone as keeping the documents
+  honest, with no length or growth ceiling in it anywhere — the corpus tripled while every gate
+  stayed green.
 
 For every mechanical check here, answer two things: **what question does it actually answer, and
 what does everyone believe it answers?** Then unplug it and confirm something goes red. A check
@@ -132,12 +135,18 @@ State in one line whether each still holds, then move past it.
   the file-reading tool. Three documents once got this wrong in the same direction, generalising
   from two blocked routes to a third nobody had tried.
 - `pnpm test:hooks` proves each script _emits_ a decision, never that the runtime acts on one.
-  `deny` and `additionalContext` have each been watched working once, by hand. `ask` has never
-  been observed at all, and a whole class of fail-open guards rests on it — `PLAN.md` §17.
+  Which decision shapes have been watched honoured lives in `ARCHITECTURE.md` §16, not here.
+  `ask` is the one nobody has seen, and a class of fail-open guards rests on it — `PLAN.md` §17.
 - `PLAN.md` §19: the section resolver pools ids across documents, so `KNOWN_DANGLING` and the
   reference cleanup are both measuring a smaller population than anyone thinks. Open, unfixed.
-- The four questions in `FINISHING.md` have no mechanical check. They are carried by a reminder
-  hook that cannot verify anything and a CI step that reads the pull request body.
+- Nothing checks that the four questions in `FINISHING.md` were **asked**. `pinned-prose.ts` (via
+  `docs:check`) does check the `CLAUDE.md` copy against the original and that there are four; the
+  rest is a reminder hook and a CI step that reads the pull request body.
+- The phase split is not a finding. Measured over the non-merge commits since it landed: most
+  touched no phase file at all, the modal case among the rest touched exactly one, and three
+  touched three. "Load the phase you are in" describes what happens. An audit that reports the
+  split as needless decomposition has argued from the rules rather than from the history — which
+  is what this skill tells you not to do.
 
 **This list rots, and a stale one suppresses real findings.** If a probe contradicts an entry
 here, that is a result and the entry is wrong. Novel findings are the deliverable; finishing with

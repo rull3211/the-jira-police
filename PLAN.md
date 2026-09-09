@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2415 tests in 67
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2465 tests in 69
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -46,20 +46,24 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16 and §18, and this line names them rather than citing them.** A
+**The holes are §12, §15, §16, §18, §20 and §21, and this line names them rather than citing them.** A
 catalogue of deleted sections dangles by construction — the targets are gone and can never be
-repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which is a debt
-that goes to zero and cannot go to zero if it is holding entries nobody could ever pay.
+repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
+still and would be holding entries nobody could ever pay. That its docstring once said the debt
+"goes to zero" is no longer part of this argument: the claim is withdrawn in `docs-check.ts`, on
+the evidence that the number has not moved once in forty-one commits.
 
-**Only §18 was ever actually counted, and finding out why is §19.** Adding these four names raised
-the dangling count by two, not by four: the resolver pools section ids from every document into one
-set, so a dead `PLAN.md §12` resolves against `ARCHITECTURE.md`'s live §12, and the same for §15 and
-§16. §18 dangled only because no document here has an eighteenth section. The region is still right
-— a hole list should not be checked — but it is buying much less than it looks like it is buying.
+**Only §18 was ever actually counted, and finding out why is §19.** Adding the first four names
+raised the dangling count by two, not by four: the resolver pools section ids from every document
+into one set, so a dead `PLAN.md §12` resolves against `ARCHITECTURE.md`'s live §12, and the same
+for §15 and §16. §18 dangled only because no document here has an eighteenth section. The region is
+still right — a hole list should not be checked — but it is buying much less than it looks like it
+is buying.
 
-§12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §18 was opened
-and shipped inside a single session — the shortest-lived entry here, and still worth a permanent
-number, because the session was compacted once while it was open.
+§12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §20 was the
+scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
+entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
+worth a permanent number, because the session was compacted once while it was open.
 
 <!-- refs:on -->
 
@@ -332,16 +336,19 @@ not a plan item. What is left below is only what is still missing.
   `CLAUDE.md`'s own routing table was the third gap here and is now closed: its filenames are links,
   so deleting a phase file fails the check by name instead of keeping it green. The size of the
   system is now derived by `docs:check`; whether any of it resolves is still not.
-- **Nothing checks that an incident is reachable from a rule.** `docs:check` verifies that a link
-  _resolves_, never that one _exists_, so the direction `FINISHING.md` makes explicit — the rule
-  links to the incident, never the reverse — is unenforced in the only direction that matters.
-  Measured 2026-09-09 over the 33 `###` entries `INCIDENTS.md` then had: exactly one lacked an
-  inbound link from any rule file, and it was the entry added that morning. Caught by a fresh-context
-  audit, which is not a mechanism — and the audit was needed again the same day, for entries 34 and 35. The check is cheap — every heading must be linked from at least one of the five rule files —
-  and it belongs with `docs-check.test.ts` above.
-- **`docs:check` verifies counts that describe the code, and none that describe the prose.** Every
-  fact it holds is a property of the tree — tests, settings, files. A sentence counting its own
-  document is invisible to it, and `INCIDENTS.md`'s preamble carried two such claims for two
+- **An incident unreachable from a rule now fails `docs:check`; the reverse direction does not.**
+  Closed by `rule-citations.ts`: every `###` entry in `INCIDENTS.md` must be cited from one of the
+  six documents in `CITING_FILES`, or carry a `**No rule yet**` line that parses. 44 entries, 39
+  cited, 5 declared. What is still missing is the direction this bullet used to claim was the one
+  that mattered — **42 of the 71 rule paragraphs cite no incident**, and that number is printed in
+  the summary and failed on by nobody. It is not a debt to pay down blind: 18 of the 42 are file
+  openers, reading pointers and section labels rather than rules, so the honest fix is a citation
+  convention for rule paragraphs, which does not exist yet.
+- **`docs:check` bounds one property of the prose — how long it is — and verifies no count stated
+  _inside_ it.** `length-budget.ts` measures four documents and holds their bands in TypeScript;
+  every other fact the run holds is a property of the tree — tests, settings, files. A sentence
+  counting its own
+  document is still invisible to it, and `INCIDENTS.md`'s preamble carried two such claims for two
   commits: that every entry _ends_ with `**Found by**`, and that "the seven that already answer the
   question are quoted above" when five were. Both were caught by a reader, twice, in the paragraph
   arguing that this class of claim cannot be taken on trust. Not obviously worth a mechanism —
@@ -414,8 +421,8 @@ a `git log --all` check, and it is kept because regenerating it is the expensive
 `fix/section-resolver` shipped the check; the fixes need one of their own, off `main`.
 
 **39 dangling `§N` citations** in shipped source. The first diagnosis — that a renumbering
-stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **none of the 54 historical
-revisions of `PLAN.md`**, in any form. They were never written down. `ARCHITECTURE.md:619` says
+stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **no revision of `PLAN.md` that
+`git log --all` can reach**, in any form. They were never written down. `ARCHITECTURE.md:619` says
 "See PLAN.md §5b", the one citation naming its target, and it resolves to nothing;
 `ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 16.
 
@@ -472,8 +479,9 @@ and nothing gets more correct. Read three of them before fixing any.
 **Provenance, because it decides how far to trust each row.** The list came from a subagent sweep;
 the totals and line numbers are its work and are **unverified in bulk**. Verified by hand: that
 `ARCHITECTURE.md:619` and `:1095` say what they are quoted as saying, that three sampled `src/`
-lines match verbatim, and — against all 54 revisions of `PLAN.md` via `git log --all` — that `§3a`,
-`§5b`, `§7b` and `§6.1c` have never existed there in any form. Re-check a row before editing it.
+lines match verbatim, and — against every revision of `PLAN.md` that `git log --all` reaches — that
+`§3a`, `§5b`, `§7b` and `§6.1c` have never existed there in any form. Re-check a row before editing
+it.
 
 Dangling, grouped by the token they cite. None of these tokens has ever been a heading anywhere:
 
@@ -497,7 +505,6 @@ Dangling, grouped by the token they cite. None of these tokens has ever been a h
   question.
 - "§6's rule is _advance, then claim_" — `index.ts:44`, `review-loop.ts:97`, `review-loop.test.ts:150`.
   Now `ARCHITECTURE.md §2` (L143); `PLAN.md §6` is the second gate.
-- `ARCHITECTURE.md:1215` — "the gate in §2 of the plan"; `PLAN.md §2` is now cost per ticket.
 
 **Clean, and worth knowing so the resolver is not written to re-check them:** all 7 `invariant N`
 references (`README.md:447`, `ARCHITECTURE.md:1511,1635,1726,1735,1750`, `solve/claim.ts:26`) cite
@@ -506,7 +513,7 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 `SOLVE_INSTRUCTIONS.md` ones.
 
 **The legal vocabulary, which the resolver now parses rather than being told:** `ARCHITECTURE.md`
-§1–16 plus its §14 invariants 1–17; `PLAN.md` §1–17 less the numbers it has retired;
+§1–16 plus its §14 invariants 1–17; `PLAN.md` §1–21 less the numbers it has retired;
 `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
 `SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten cited tokens are in none of them.
 
@@ -573,103 +580,97 @@ shipped and was deleted — resolves happily against `ARCHITECTURE.md`'s §12, a
 it lands somewhere unrelated. Three of this file's own dead numbers were passing that way.
 
 **How it was found.** By accident, and only because the accident was the right shape: the entry
-numbered 18 was deleted, two mentions of it were left in prose, and `docs:check` correctly flagged
-both. Wrapping
-the whole hole list in `refs:off` should then have dropped the dangling count by four. It dropped by
-two. The gap between the predicted number and the measured one is the entire finding — a check that
-had gone green a second earlier was hiding it.
+numbered 18 was deleted, two mentions of it were left in prose, `docs:check` correctly flagged both,
+and wrapping the whole hole list in `refs:off` should then have dropped the dangling count by four.
+It dropped by two. The gap between the predicted number and the measured one is the entire finding —
+a check that had gone green a second earlier was hiding it.
 
-**Why it is worse than a rough edge.** `KNOWN_DANGLING` is described in code as "a debt… it goes to
-zero", and §14 is an open entry about repointing dangling citations. Both are measuring a population
-that is smaller than the real one by an unknown amount, and the resolver is one of the few things
-here that checks prose against prose rather than prose against code. The failure is the house
-speciality: not a wrong answer, a right answer to a narrower question than anyone thought was being
-asked.
+**Measured 2026-09-09 by the corpus audit, and this entry's own prediction is refuted.** It said to
+expect `KNOWN_DANGLING` to "rise sharply" under strict per-document resolution. It rises by eleven,
+39 to 50. What is large is the ambiguity, not the error: the four documents define 77 numbered
+headings that collapse to 43 distinct tokens once pooled, and **181 of the 243 resolving citations —
+74.5% — would resolve in more than one document.** So the check is nearly right about the population
+it reports while answering a far weaker question than it looks like it is asking, which is the house
+speciality. Two figures make that concrete: renumbering `INTAKE_INSTRUCTIONS.md` wholesale turns
+only 2 of the 243 red, and 15 citations resolve **only** by pooling — among them the `§12` and `§15`
+in §17's own opening line, this file citing its retired numbers and being told they are fine.
 
 **The shape of the fix.** References already carry the file they were found in — `referencesIn`
 takes a path — so the work is to key `defined` by document and resolve `§N` against the document
 that owns it, with an explicit rule for the cross-document form (`ARCHITECTURE.md §16` names its
-target and should resolve there, a bare `§16` should resolve locally). Expect `KNOWN_DANGLING` to
-rise sharply on the first run, and expect that number to be the real one.
+target and should resolve there, a bare `§16` should resolve locally). The 15 pooling-only citations
+are the whole migration; the eleven are the debt it exposes.
 
-**What would make it the wrong idea.** If the true count turns out to be large enough that the
-budget stops being a budget, raising `KNOWN_DANGLING` to fit is the failure the constant's own
-comment warns about. Then the honest move is to fix the references the same week or to admit the
-resolver is aspirational and say so where it is documented — not to widen the number and leave it.
-
-### 20. The scaffolding audit exists as a prompt somebody typed twice
-
-**Branch:** `docs/scaffolding-audit-skill`, stacked on `fix/unverified-claims`.
-
-**What is being attempted.** Turning the audit that produced §19 and most of
-`fix/unverified-claims` into `.claude/skills/scaffolding-audit/SKILL.md`, so it is invocable
-rather than retyped. The audit is the highest-yield thing anyone has run against this tree — it
-found a live hole in `branch-guard.sh`, a walker that excluded a real source directory, and a
-resolver checking a narrower population than its own budget claims — and none of that is
-repeatable today, because the instruction that produced it exists only in a transcript.
-
-**Why now, and why it is a skill rather than a document.** `claude-validation-work` is the
-precedent and the argument: it is the same shape — a probe protocol plus what each result did and
-did not settle — and being a skill is what makes it addressable by name from a fresh context. A
-document nobody is pointed at is a document nobody reads, and this one is worthless unless it is
-read at the start of a session rather than found halfway through.
-
-**The two design decisions worth arguing with.** First, it carries an _already known_ list, so an
-audit cannot spend its budget rediscovering the cheap findings and report a satisfying list of
-nothing new; the cost is that the list rots, and a stale one actively suppresses a real finding.
-Second, it forbids fixing anything, because the last audit was authorised to fix five findings and
-shipped rather more — separating audit from repair removes the mechanism instead of relying on the
-auditor's restraint.
-
-**What would make it the wrong idea.** If the audit is only ever run by a human typing a fresh
-prompt, a skill is a fourth place for the same instruction to drift, and this tree already fails
-that way more than any other. The honest test is whether it gets invoked by name at least once
-without being asked for; if the next audit here is run from a hand-written prompt anyway, delete
-the skill rather than reconciling it.
-
-### 21. The corpus outgrew the reason it was split, and no check can see length
-
-**Branch:** `docs/corpus-cut`.
-
-**What is being attempted.** Cutting the house-rules corpus back below the size that justified
-splitting it, deleting the rules that carry no incident and the incidents that carry no rule, and
-adding the two checks whose absence let it happen: a length budget, and a bidirectional rule↔incident
-citation check. Target, committed before measuring: mandatory pre-edit reading under **4,907 words**,
-the figure at `1e64ed4` immediately after the split.
-
-**Why now.** The audit measured the drift and it is not marginal. `INCIDENTS.md` is 1,411 lines —
-60% longer than the 884-line `SKILL.md` whose length was the stated reason to split it, and only
-~8.6% of it traces back to that file. It absorbed 73% of all corpus growth while every gate stayed
-green, because **every check in `docs-check.ts` is a consistency check and not one has a ceiling.**
-Meanwhile 12 of the 36 rules added since the split rest on no supporting incident, 6 of 15 new
-incidents have no rule attached, and 6 of the 9 rule-bearing incidents were written in the same
-commit as the rule they justify — median gap 0 minutes. The amendment loop stopped being fed from
-outside: 37 of 52 commits since the split touched scaffolding, exactly one touched `src/` without it,
-and the four skills the service actually ships to its own subagents received zero bytes.
-
-**What is explicitly kept.** Everything with a measured return: `branch-guard.sh` (a strict superset
-of its predecessor — 78 git subcommands closed off on a protected branch, and its predecessor's own
-suite still passing 57/57 against it, so the hardening cost nothing), `test-hooks.sh`, the commit
-and compact briefs, `pinned-prose` (the only check
-that survives mutation), the FACT checker, the link walker, the CI steps, and the inlining that put
-the four questions 0 words from a cold context instead of 9,497.
-
-**What would make it the wrong idea.** If the cut removes the argument rather than the padding, this
-becomes the same defect in the other direction — rules nobody obeys because the story that made them
-stick is gone, which `PLAN.md`'s own "the war stories are the asset" entry warns about directly. The
-discipline is that no deletion ships unless something goes red when the thing it claims is redundant
-is unplugged, and that every surviving rule keeps exactly one incident. A length budget that is
-raised to fit the corpus is the `KNOWN_DANGLING` failure repeated, so the budget lands in the same
-commit as the cut that already clears it, never after.
-
-**Also folded in, because they are the same sweep.** §20 above is an orphan — it shipped in `7237af5`
-and was never deleted. The three "green for four days" claims measure at 21 hours. `CLAUDE.md:98`
-states that the brief's transport has never been watched working and cites the section that says it
-has.
+**What would make it the wrong idea.** Eleven is small enough that raising `KNOWN_DANGLING` to 50 is
+tempting, and that is the failure the constant's own comment warns about. Fix the eleven in the same
+week, or say in the code that the resolver is aspirational — do not widen the number and leave it.
 
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### A rewrite can invent a number, and every gate here stays green
+
+The cut of 2026-09-09 compressed `CLAUDE.md` and, in the process, changed "the brief's transport has
+never been watched working" into "watched working by hand three times". Nobody decided to write
+three. A compression pass needed a short clause where a long one had been, and produced a figure.
+`git show HEAD:CLAUDE.md` is the only reason it was caught, and it was caught by a reviewer, not by
+a run.
+
+**Nothing mechanical could have caught it, and the reason generalises.** `count-phrases` watches 12
+counted nouns; "times" is not one of them, and neither is any noun for an observation. A FACT only
+sees the phrasing somebody thought to write down — so a check that reads as "the numbers in the prose
+are correct" actually reads "the twelve nouns we listed are correct". Three documents ended up
+carrying three different counts for the same fact, and the tree was green throughout.
+
+The fix that holds is not another counted noun. It is **not stating the number**: `ARCHITECTURE.md`
+§16 item 5 is now a dated list of sightings, the list _is_ the count, and every other site cites it
+carrying no figure. A sentence with no number in it cannot drift, which is cheaper than a checker for
+every noun anyone might reach for.
+
+### A budget read off a landing that missed its target ratifies the miss
+
+The same cut committed in advance to a mandatory-reading path under 4,907 words, landed at 4,913, and
+then set the length-budget bands around 4,913. Every band was honestly derived — measurement plus 2%
+— and the result was a check that enforced the outcome instead of the promise, six words adrift and
+green forever. The order is the whole thing: **hit the target, then read the numbers off it.** Doing
+it the other way is the same act as raising a ceiling to fit the corpus, which is the failure the
+budget was built to stop, committed by the commit that built it.
+
+### A check can depend on the runner's configuration, and be green everywhere except there
+
+The length budget's ratchet resolves its baseline with `git merge-base HEAD origin/main`, and an
+unresolvable baseline is a _problem_, so `docs:check` exits 1. `actions/checkout@v4` defaults to
+`fetch-depth: 1`: detached HEAD, no `origin/main`. So the Docs step would have failed on **every**
+pull request, and the first would have been the one adding the ratchet. Nothing local could see it —
+seven gates green, twice, including a mutation probe on the ratchet itself, because every one of
+them ran in a tree that had `origin/main` sitting right there.
+
+Found by asking question one about a file the diff did not edit: `ci.yml`'s `- uses:
+actions/checkout@v4` was three lines above the step being added, and unchanged. Measured before
+shipping by running `docs:check` in a copy of the tree with no reachable baseline: `no baseline to
+compare ceilings against`, `exit=1`. The fix is `fetch-depth: 0` with a comment saying what depends
+on it.
+
+**The rule this owes.** A check that reads anything outside the working tree — a remote ref, an
+environment variable, a clock — has a second environment it must be proven in, and the local one is
+never it. `PROVING.md` says to unplug a check and watch something go red; it does not say to run it
+where CI will. The two are different probes and this branch only did the first, twice.
+
+### A check can demand a property the corpus wants rather than one it has
+
+`rule-citations` was written to assert that every rule cites an incident. Measured: 42 of 71 rule
+paragraphs cite none, and of the 69 citations that do exist, **not one opens a bold paragraph** —
+they sit in table rows, on indented continuations, and in `**The rule**` backlinks pointing the other
+way. The check was looking for a convention nobody here writes to. Worse, roughly 18 of the 42 are
+not rules at all but file openers and list lead-ins, including the sentence
+`**Why every rule here exists is in INCIDENTS.md.**`, flagged for not citing an incident.
+
+Such a check has only three exits, and two are worse than deleting it: fabricate 42 citations, or
+pin the population as a grandfather list — which is `KNOWN_DANGLING` again, still 39, still "it goes
+to zero". So it now **guards the half that is true** (every citation resolves; every entry has a rule
+or a dated declaration) and **reports the other half as a number that fails nothing**. The test of
+whether to guard a property is not whether you want it. It is whether the tree already has it.
 
 ### `git checkout <file>` to undo a mutation deletes the work the mutation was testing
 
@@ -720,11 +721,12 @@ are amended by proposal and not unilaterally.** The incident is
 the argument for promoting it is that it survived the two mechanisms this repository already trusts.
 
 `bash -lc "git push"` was allowed on `main` — rule 1 unguarded, by both halves of the guard at once,
-for the exact shape the floor exists to catch. The assertion for that exact string had been green
-for four days. It passed because `test-hooks.sh`'s `bash_payload` helper built its JSON by
-interpolation, so any fixture containing a double quote produced a payload the hook could not parse,
-and an unreadable command is treated as a write. The guard denied — for the one reason the assertion
-was not testing.
+for the exact shape the floor exists to catch. The assertion for that exact string was green for the
+hundred minutes it existed — `4d5ef49` to `cbb5be0`, one afternoon of 2026-09-09, not the four days
+`cbb5be0`'s own message claims. It passed because `test-hooks.sh`'s `bash_payload` helper built its
+JSON by interpolation, so any fixture containing a double quote produced a payload the hook could
+not parse, and an unreadable command is treated as a write. The guard denied — for the one reason
+the assertion was not testing.
 
 **What makes it worth a rule is which safeguards it walked through.** `PROVING.md`'s central rule —
 a guard is not shipped until a test fails when it is unplugged — was followed in form. The floor was
@@ -795,6 +797,30 @@ quietly become an opinion.
 The layout decision is worth keeping too: the phase files are **flat siblings** of `SKILL.md`, not a
 `references/` subdirectory, because `intake-triage/` and `agent-solve/` are already flat and a
 layout used by one skill in three is a layout somebody has to learn.
+
+### The operational skills are the control group, and they are the strongest thing the corpus audit measured
+
+**2026-09-09.** The four skills this service actually ships to its own subagents — `intake-triage`,
+`agent-solve` and the two triage doubles — received **zero bytes** in the era that carried
+`dev-house-rules/` from 16,613 words at the split to 28,286. Read on its own, that is a story about
+neglect.
+
+**It is the opposite, and one command settles it: `src/solve/` received zero commits over the same
+window.** The instructions did not move because the code they describe did not move. Every
+backticked symbol in `SOLVE_INSTRUCTIONS.md` but one resolves against `src/` — 45 of 46 as the audit
+counted them, and the same single miss under a coarser extraction — and the miss is `AGENTS.md`, a
+conditional instruction about the repository being fixed rather than a claim about this one.
+`agent-solve` sits at 7,530 words and static, and static is what fitness looks like for prose whose
+subject held still.
+
+**Why it is an entry and not a footnote: it is the only control group this corpus has.** Both layers
+are prose, both are read by an agent, both are checked by the same commands, and only one of them
+grew. So the growth cannot be explained by "documentation accretes" or by "agents need more context
+than we thought" — those would have moved both. What separates them is where the amendment comes
+from: the operational skills are amended when something outside them changes, and the meta-layer is
+amended from its own incidents. A loop fed only by itself has no source of stopping. That is the
+argument for a length budget, and it is the only version of that argument resting on a measurement
+rather than on taste.
 
 ### Two redundant guards, each making the other untestable, with the suite reporting green
 

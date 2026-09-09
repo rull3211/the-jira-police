@@ -7,15 +7,20 @@
 # have run something is not evidence it ran, and until now the finishing
 # checklist in FINISHING.md was asserted by the party being checked.
 #
-# So the point is mostly not the commands. Every step below but the last is one
-# a developer runs by hand; the point is that they run on a machine nobody is
-# logged into, against the pushed ref rather than a working tree, whether or not
-# anyone remembered.
+# So the point is mostly not the commands. Most steps below are ones a developer
+# runs by hand; the point is that they run on a machine nobody is logged into,
+# against the pushed ref rather than a working tree, whether or not anyone
+# remembered.
 #
-# The last step is the exception and is the only one here with no hand-run
-# equivalent, because what it reads is the pull request body rather than the
-# tree. It exists because the finishing checklist has one question with no exit
-# code behind it, and a question with no exit code is skipped in silence.
+# Two are exceptions, and both exist because what they check is not a property
+# of the tree that a hand-run command would reach:
+#
+#   - `Rules owed` reads the pull request body. The finishing checklist has one
+#     question with no exit code behind it, and a question with no exit code is
+#     skipped in silence.
+#   - `No budget override` refuses the length budget's local escape hatch. It is
+#     about the environment the run happens in, so running it by hand proves
+#     nothing about the runner.
 #
 # There is no build step (Node strips types at runtime) and no deploy: this is
 # not a deployed service. Adding one here would be a stage that never runs, and
@@ -52,7 +57,20 @@ jobs:
     # Each step is one of the commands in the finishing checklist, named the
     # same way, so a red run points at the rule it broke rather than at a log.
     steps:
+      # `fetch-depth: 0` is load-bearing, not caution. The default is 1, which
+      # gives a detached HEAD and no `origin/main` at all, and the length
+      # budget's ratchet resolves its baseline with `git merge-base HEAD
+      # origin/main` (src/cli/length-budget.ts). With a shallow checkout that
+      # resolves to nothing, and `docs:check` does not shrug: it pushes a
+      # problem and exits 1. Measured — running `docs:check` in a copy of this
+      # tree with no reachable baseline gives `length budget ratchet: no
+      # baseline to compare ceilings against` and `exit=1`. So the shallow
+      # default would have failed the Docs step on every pull request, and the
+      # branch that added the ratchet is the branch that would have discovered
+      # it in CI rather than here.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Pinned rather than floated. `packageManager` in package.json is the
       # single source for the version; `run_install: false` because the cache
@@ -107,12 +125,36 @@ jobs:
       - name: Hook guards
         run: pnpm test:hooks
 
-      # Numbers cited in prose, checked against the tree. Its own step rather
-      # than part of Tests: it collects the suite with `vitest list` instead of
-      # running it, so it costs about a second, and a failure here means a
-      # document is lying rather than that the code is broken.
+      # Prose checked against the tree: numbers cited in it, links, pinned
+      # copies, and — since the length budget landed — how long the documents an
+      # agent must read before starting have got. Its own step rather than part
+      # of Tests: it collects the suite with `vitest list` instead of running
+      # it, so it costs about three seconds rather than a full run, and a
+      # failure here means a document is lying rather than that the code is
+      # broken. It was about one second before the two checks this branch added;
+      # most of the rest is rule-citations' `git log` pickaxe searches.
       - name: Docs
         run: pnpm docs:check
+
+      # The length budget's ceilings can only be lowered, and the one way past
+      # that — `DOCS_CHECK_RAISE_BUDGET`, see src/cli/length-budget.ts — is a
+      # local escape hatch for the single commit that widens a ceiling on
+      # purpose. It must never be how a branch goes green on a machine nobody is
+      # logged into, so a run carrying it is refused: in this job's environment,
+      # or written into any workflow here.
+      #
+      # What it does not cover, stated rather than discovered: a `run:` block
+      # that sets the variable inline on the command. That is deliberate — the
+      # grep is anchored to an assignment at the start of a line, because a
+      # pattern loose enough to catch every form also catches this comment, and
+      # a step that fails on its own explanation gets deleted.
+      - name: No budget override
+        run: |
+          if [ -n "${DOCS_CHECK_RAISE_BUDGET:-}" ] ||
+             grep -REn '^[[:space:]]*DOCS_CHECK_RAISE_BUDGET[[:space:]]*:' .github/workflows/; then
+            echo "::error::A raised length budget is a local escape hatch, never a CI one."
+            exit 1
+          fi
 
       # The one check here that is not a command, and cannot be.
       #

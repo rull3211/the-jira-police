@@ -54,6 +54,24 @@
  * same held for the size of the `§N` cross-reference system, cited at 87 when
  * the tree had nearly three times that. A section that catalogues unchecked
  * facts is the last place an unchecked fact should be, and both are now derived.
+ *
+ * **And this command told the same lie about itself.** It closed a clean run
+ * with "Every cited number agrees with the tree and every link resolves" — on a
+ * run whose own output, four lines above, said `23 found, 10 checked, 13
+ * historical`. Thirteen of those numbers are read rather than derived, thirty-nine
+ * section references resolve to nothing by arrangement, and neither is what
+ * "every cited number agrees with the tree" describes. A green line claiming a
+ * guarantee narrower than the checks behind it is the defect this whole file
+ * exists to catch, and it was sitting in the file that owns the checks. The
+ * closing line is now a per-check tally built from what each check looked at,
+ * with each check saying in its own words what it left alone.
+ *
+ * **Two of the checks are no longer about consistency at all**, and they are the
+ * reason that mattered. Everything above asks whether the tree agrees with
+ * itself, which a corpus that doubles in size answers perfectly;
+ * `length-budget.ts` bounds what an agent must read before it starts, and
+ * `rule-citations.ts` asks whether a rule can name the incident it generalises.
+ * Both live in their own modules because importing this one runs `vitest list`.
  */
 
 import { execFileSync } from "node:child_process";
@@ -69,7 +87,27 @@ import {
   staleHistorical,
   unaccountedPhrases,
 } from "./count-phrases.ts";
+import {
+  AGGREGATE_FLOOR,
+  aggregateCeiling,
+  budgetProblems,
+  BUDGETS,
+  countWords,
+  parseBudgets,
+  raisedCeilings,
+  raiseNotice,
+  ratchetProblems,
+  resolveBaseline,
+  unresolvedBaselineProblem,
+} from "./length-budget.ts";
 import { CHECKLIST_QUESTIONS, pinnedProseProblems } from "./pinned-prose.ts";
+import {
+  CITING_FILES,
+  incidentAddedArgs,
+  incidentEntries,
+  ruleCitationProblems,
+  ruleCitedArgs,
+} from "./rule-citations.ts";
 import {
   type DocumentShape,
   maskDisabled,
@@ -83,6 +121,43 @@ const ROOT = resolve(import.meta.dirname, "..", "..");
 /** `process.stdout.write` is how every other command here prints; `no-console` is on. */
 function say(line: string): void {
   process.stdout.write(`${line}\n`);
+}
+
+/**
+ * One check, and the question it does not answer.
+ *
+ * `unchecked` is the field that earns this type. Every check here prints a
+ * confident `ok`, and the reader's problem has never been whether an individual
+ * line is true — it is what the set of them adds up to. So each check states its
+ * own blind spot once, beside the measurement, and the closing tally is built
+ * out of those rather than out of a sentence somebody wrote when there were four
+ * checks and never revisited.
+ */
+interface CheckLine {
+  readonly ok: boolean;
+  /** What was checked, as the `ok`/`FAIL` line names it. */
+  readonly what: string;
+  /** The measurement that line carries. */
+  readonly measured: string;
+  /** What a green run of *this* check still does not say. */
+  readonly unchecked: string;
+}
+
+const checks: CheckLine[] = [];
+
+/** Print the `ok`/`FAIL` line, and keep it for the closing tally. */
+function record(line: CheckLine): void {
+  checks.push(line);
+  say(`${line.ok ? "ok  " : "FAIL"} ${line.what}: ${line.measured}`);
+}
+
+/**
+ * Keep a check for the tally without printing it, for the one block that prints
+ * a line per `FACT` instead of a line for itself. Eight lines and a ninth
+ * summarising them is noise; a tally entry with no line of its own is not.
+ */
+function carry(line: CheckLine): void {
+  checks.push(line);
 }
 
 /** Skipped wherever they appear, because they nest. */
@@ -439,6 +514,15 @@ for (const fact of FACTS) {
   say(`${mark} ${fact.what}: ${fact.actual}, ${shown}`);
 }
 
+carry({
+  ok: problems.length === 0,
+  what: "numbers derived from the tree",
+  measured: `${FACTS.length} fact(s) across ${checkedSites.length} citation site(s)`,
+  unchecked:
+    "a number nobody declared. A FACT only sees the phrasing it was written for, " +
+    "which is why the check below exists",
+});
+
 /**
  * Numbers in prose that are a measurement of one past run, not a property of
  * the tree — so they are read rather than derived.
@@ -559,10 +643,14 @@ if (stale.length > 0) {
   );
 }
 
-say(
-  `${unaccounted.length === 0 && stale.length === 0 ? "ok  " : "FAIL"} count-noun phrases: ` +
-    `${phrases.length} found, ${checkedSites.length} checked, ${HISTORICAL.length} historical`,
-);
+record({
+  ok: unaccounted.length === 0 && stale.length === 0,
+  what: "count-noun phrases",
+  measured: `${phrases.length} found, ${checkedSites.length} checked, ${HISTORICAL.length} historical`,
+  unchecked:
+    `whether the ${HISTORICAL.length} historical figures were ever right. They are read, not ` +
+    "derived, and the entry only pins the file, value and noun",
+});
 
 /**
  * Prose that is deliberately copied, and is therefore checked in every place it
@@ -579,10 +667,14 @@ problems.push(
     readFileSync(join(ROOT, "CLAUDE.md"), "utf8"),
   ),
 );
-say(
-  `${problems.length === beforePinned ? "ok  " : "FAIL"} CLAUDE.md's copy of the checklist: ` +
-    `${CHECKLIST_QUESTIONS} question(s)`,
-);
+record({
+  ok: problems.length === beforePinned,
+  what: "CLAUDE.md's copy of the checklist",
+  measured: `${CHECKLIST_QUESTIONS} question(s)`,
+  unchecked:
+    "that anyone asked them. There is no mechanical test for having asked yourself a " +
+    "question, which is why commit-brief.sh reminds and cannot refuse",
+});
 
 /**
  * GitHub's heading-to-anchor rule: lowercase, drop everything that is not a
@@ -593,6 +685,14 @@ say(
  * link by hand will guess one. Two headings here were renamed rather than
  * linked to, because a slug nobody can predict is one that gets typed wrong
  * once and then stays wrong.
+ *
+ * **`rule-citations.ts` takes this as an argument rather than owning a copy.**
+ * It has to turn an incident's `### ` heading into the anchor a rule links to,
+ * which is the same rule and would be the same eight lines — and a fact with two
+ * homes has one maintainer, which is the premise of this entire command. It is
+ * injected instead of exported because importing this file runs `vitest list`;
+ * the module's test uses a labelled stand-in, so the substitution is visible in
+ * the assertions rather than assumed.
  */
 function slugOf(heading: string): string {
   return heading
@@ -678,9 +778,14 @@ for (const file of files) {
   }
 }
 
-say(
-  `${problems.length === beforeLinks ? "ok  " : "FAIL"} markdown links: ${links} checked across ${files.length} files`,
-);
+record({
+  ok: problems.length === beforeLinks,
+  what: "markdown links",
+  measured: `${links} checked across ${files.length} files`,
+  unchecked:
+    "whether the heading a link lands on says what the link claims it says, and " +
+    `${NOT_OURS.size} document(s) are exempt as a source of links`,
+});
 
 /**
  * The four documents that number their sections, and the one section whose
@@ -713,7 +818,23 @@ for (const document of NUMBERED_DOCUMENTS) {
  *
  * This is a debt and not an exemption: it is one number for the whole tree, so
  * it cannot quietly grow to fit, and it names no file, so nothing is
- * permanently blessed. It goes to zero.
+ * permanently blessed.
+ *
+ * **It said "it goes to zero", and it has not moved once.** Written at 39 in
+ * `b300eed` and still 39 forty-one commits later, through a corpus cut that
+ * rewrote most of the documents these references live in. That sentence was a
+ * plan, and a plan in a docstring is not a mechanism — nothing has ever required
+ * the number to fall, so it has not. The claim is withdrawn rather than
+ * restated: what this constant does is hold the debt still, and the run says so
+ * in those words. `length-budget.ts` is the same problem solved, and its
+ * docstring cites this constant as the counter-example it was built from — a
+ * two-sided band, so a corpus that shrinks without its budget following fails
+ * too, and a ceiling that can only be lowered because `git show` compares it
+ * against the committed one. Neither of those exists here. Giving this the same
+ * treatment is its own change, and it belongs with the `PLAN.md` item named at
+ * the top of this comment — the one where the 39 are being fixed. Written
+ * without the section token on purpose: this file counts those, and a docstring
+ * about a debt should not move the number it is describing.
  */
 const KNOWN_DANGLING = 39;
 
@@ -736,9 +857,185 @@ if (dangling.length !== KNOWN_DANGLING) {
   );
 }
 
+record({
+  ok: dangling.length === KNOWN_DANGLING,
+  what: "section references",
+  // "held at" rather than "owed": the number has never fallen, and a line that
+  // reads like a shrinking debt every run is how it got to sit still this long.
+  measured: `${refs.length} checked against ${defined.size} sections, ${dangling.length} resolving to nothing and held at KNOWN_DANGLING`,
+  unchecked:
+    `those ${dangling.length}. They are counted, not fixed, and nothing here makes the ` +
+    "number fall — it has been 39 since the day it was written",
+});
+
+/**
+ * How long the mandatory-reading path is, against the band the cut landed in.
+ *
+ * **The one check here that is not a consistency check.** Everything above asks
+ * whether the tree agrees with itself, and a corpus that triples in a day agrees
+ * with itself the whole way — which is what happened, with every gate green. The
+ * reasoning, the counting rule and the two-sided band are in `length-budget.ts`;
+ * this is the part that has to touch the disk.
+ *
+ * A budgeted file that is missing is left out of `sizes` rather than read as
+ * zero, because `budgetProblems` treats "not measured" as a failure and reading
+ * it as zero would report it as spectacularly under budget instead.
+ */
+const beforeBudget = problems.length;
+const sizes = new Map<string, number>();
+for (const budget of BUDGETS) {
+  const path = join(ROOT, budget.path);
+  if (existsSync(path)) {
+    sizes.set(budget.path, countWords(readFileSync(path, "utf8")));
+  }
+}
+problems.push(...budgetProblems(sizes));
+
+/**
+ * The ratchet: a ceiling in the working tree above the one at the fork point.
+ *
+ * **Not `HEAD`.** Comparing against `HEAD` is what the first version did, and an
+ * audit unplugged it and watched it stay quiet: on any ref CI checks out, the
+ * working tree _is_ `HEAD`, so the comparison was the file against itself and
+ * could never fail. The baseline is the merge base with the default branch, so a
+ * ceiling raised at any point in a branch is still visible when CI reads it —
+ * which holds only because the CI checkout sets `fetch-depth: 0`; at the default
+ * depth of 1 there is no `origin/main` to be a merge base with. See
+ * `length-budget.ts`, which measured that case rather than assuming it.
+ *
+ * `git show` throws when the path is absent at the baseline, which is true of
+ * every commit before the one adding `length-budget.ts`. That is "no previous
+ * budgets" and not a failure — a file with no earlier ceiling cannot have raised
+ * one. A baseline that does not resolve at all is different, and is reported
+ * rather than swallowed: both states produce an empty list and they mean
+ * opposite things.
+ */
+const git = (args: readonly string[]): string | null => {
+  try {
+    return execFileSync("git", [...args], {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+};
+
+const baseline = resolveBaseline(git);
+if (baseline === null) {
+  problems.push(unresolvedBaselineProblem());
+}
+const baselineBudgets =
+  baseline === null ? "" : (git(["show", `${baseline.rev}:src/cli/length-budget.ts`]) ?? "");
+const raises = raisedCeilings(parseBudgets(baselineBudgets), BUDGETS);
+problems.push(...ratchetProblems(raises));
+
+const notice = raiseNotice(raises);
+if (notice !== null) {
+  say(notice);
+}
+
+const budgeted = [...sizes.values()].reduce((total, size) => total + size, 0);
+record({
+  ok: problems.length === beforeBudget,
+  what: "length of the mandatory-reading path",
+  measured: `${budgeted} words across ${sizes.size} of ${BUDGETS.length} budgeted file(s), band ${AGGREGATE_FLOOR}-${aggregateCeiling()}`,
+  unchecked:
+    "every other document. INCIDENTS, BUILDING, PROVING, ARCHITECTURE and PLAN have no " +
+    "ceiling at all, because a budget on a file nobody must read is one nobody defends",
+});
+
+/**
+ * Rules against incidents, in both directions.
+ *
+ * The module is pure and reads nothing: it is handed the documents, `slugOf`,
+ * and an existence test. `slugOf` is passed rather than copied because GitHub's
+ * heading-to-anchor rule is a fact with one home, and this whole command is
+ * about what happens to facts with two. It is not exported for the reason
+ * `pinned-prose.ts` and `rule-citations.ts` both give in their headers — this
+ * file is a script, and importing it runs `vitest list`.
+ */
+const beforeCitations = problems.length;
+const incidentsPath = ".claude/skills/dev-house-rules/INCIDENTS.md";
+const incidents = readFileSync(join(ROOT, incidentsPath), "utf8");
+
+/**
+ * Minutes between an incident being written and the first rule citing it.
+ *
+ * Reported and guarded by nobody, which `rule-citations.ts` argues for at
+ * length: an incident found this afternoon may legitimately produce its rule
+ * this afternoon, so there is no threshold that is right at the moment it would
+ * fire. Two pickaxe searches per entry, and the argv for both comes from the
+ * module so the semantics live beside the check that prints them.
+ */
+function firstCommitSeconds(args: readonly string[]): number | null {
+  try {
+    const raw = execFileSync("git", [...args], {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const first = raw.split("\n")[0]?.trim();
+    return first === undefined || first === "" ? null : Number(first);
+  } catch {
+    return null;
+  }
+}
+
+const measuredGaps: Array<{ written: number; minutes: number }> = [];
+for (const entry of incidentEntries(incidents, slugOf)) {
+  const written = firstCommitSeconds(incidentAddedArgs(entry, incidentsPath));
+  const cited = firstCommitSeconds(ruleCitedArgs(entry, CITING_FILES));
+  if (written !== null && cited !== null && cited >= written) {
+    measuredGaps.push({ written, minutes: (cited - written) / 60 });
+  }
+}
+// Sorted by when the incident was written, not by where it sits in the file.
+// `GAP_WINDOW` takes the most recent fifteen, and entries are added to
+// INCIDENTS.md wherever the section they belong to happens to be.
+const authoringGaps = measuredGaps
+  .toSorted((a, b) => b.written - a.written)
+  .map((gap) => gap.minutes);
+
+const citations = ruleCitationProblems({
+  incidentsPath,
+  incidents,
+  citing: CITING_FILES.map((path) => ({ path, body: readFileSync(join(ROOT, path), "utf8") })),
+  slugOf,
+  today: new Date(),
+  authoringGaps,
+});
+problems.push(...citations.problems);
+
+record({
+  ok: problems.length === beforeCitations,
+  what: "rules against incidents",
+  measured: citations.summary,
+  unchecked:
+    "whether the incident a rule cites is the incident it came from — a slug resolving " +
+    "proves the entry exists, not that the story under it earns the rule — and whether a rule " +
+    "cites one at all, which is counted in the line above and failed on by nobody",
+});
+
+/**
+ * The closing line, which used to be a promise nobody had audited: "Every cited
+ * number agrees with the tree and every link resolves", printed on runs whose
+ * own output four lines up said thirteen of the numbers were never derived and
+ * thirty-nine of the references resolve to nothing.
+ *
+ * It is a tally now, and it prints whether or not the run passed — the coverage
+ * of these checks is the same either way, and the run that most needs to be told
+ * what is *not* covered is the one that just went green.
+ */
+const failed = checks.filter((check) => !check.ok);
 say(
-  `${dangling.length === KNOWN_DANGLING ? "ok  " : "FAIL"} section references: ${refs.length} checked against ${defined.size} sections, ${dangling.length} owed`,
+  `\n${checks.length - failed.length} of ${checks.length} check(s) passed. ` +
+    `None of them checks the following, on any run:`,
 );
+for (const check of checks) {
+  say(`  ${check.what} — ${check.unchecked}.`);
+}
 
 if (problems.length > 0) {
   process.stderr.write(`\n${problems.length} problem(s):\n\n`);
@@ -751,5 +1048,3 @@ if (problems.length > 0) {
   );
   process.exit(1);
 }
-
-say(`\nEvery cited number agrees with the tree and every link resolves.`);

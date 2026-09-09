@@ -23,11 +23,15 @@
 #
 #   - Like every other hook here, the suite proves this script *emits* the right
 #     thing. It cannot prove the runtime *acts* on it. `additionalContext` has
-#     now been watched being honoured once, by hand, on a real `git commit` —
-#     the text arrived in the model's context ahead of the command — which is
-#     the same standing `deny` has and better than `ask`, which nobody has seen
-#     (PLAN.md §17). One observation is not the suite: it was green on the days
-#     this hook was not registered at all, and it would be green again tomorrow.
+#     been watched being honoured by hand, on real `git commit` commands — the
+#     text arrived in the model's context ahead of the command — which is the
+#     same standing `deny` has and better than `ask`, which nobody has seen
+#     (PLAN.md §17). ARCHITECTURE.md §16 item 5 is the dated log of those
+#     sightings and the only place they are counted: append a line there, and
+#     **do not restate a number in this comment** — a figure copied into a
+#     second file is one that goes stale silently, which is the defect this
+#     log replaced. Observation is not the suite either: the suite was green on
+#     the days this hook was not registered at all, and would be green tomorrow.
 #   - It has to be registered to fire at all, and the file that registers it is
 #     one this agent is refused write access to, in the editor and in the shell.
 #     So a wiring snippet is proposed to the operator and the operator applies

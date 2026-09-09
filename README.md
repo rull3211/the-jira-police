@@ -477,7 +477,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                  | Jira                        |
 | `pnpm start`                                           | The daemon — grooming, plus solve and watch if their flags are on. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
 | `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                    |
-| `pnpm docs:check`                                      | Numbers cited in prose, checked against the tree. About a second                                          | no                          |
+| `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                  | no                          |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                          |
 | `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                          |
 | `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                             | no                          |

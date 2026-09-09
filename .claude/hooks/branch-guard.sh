@@ -259,14 +259,15 @@ if [ -n "$command_text" ]; then
   # command was allowed on `main`, which is rule 1 unguarded by both halves at
   # once.
   #
-  # It had an assertion, and the assertion passed for four days on a defect in
-  # the test harness rather than on the guard: `bash_payload` interpolated the
-  # command into JSON without escaping, so a fixture containing a double quote
-  # produced a payload the hook could not parse, and an unreadable command is
-  # treated as a write. The guard denied — for the one reason the assertion was
-  # not testing. Found while writing commit-brief.sh, the first hook here whose
-  # behaviour on an unparseable payload differs from its behaviour on a command
-  # it does not care about.
+  # It had an assertion, and for the hundred minutes it existed — 4d5ef49 to
+  # cbb5be0, one afternoon, not the four days cbb5be0's own message claims — it
+  # passed on a defect in the test harness rather than on the guard:
+  # `bash_payload` interpolated the command into JSON without escaping, so a
+  # fixture containing a double quote produced a payload the hook could not
+  # parse, and an unreadable command is treated as a write. The guard denied —
+  # for the one reason the assertion was not testing. Found while writing
+  # commit-brief.sh, the first hook here whose behaviour on an unparseable
+  # payload differs from its behaviour on a command it does not care about.
   #
   # Now terminated by `[^[:alnum:]_-]`, so a quote, a full stop or a bracket
   # ends the verb while `pull-request` and `applypatch-msg` still do not match.
