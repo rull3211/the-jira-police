@@ -135,6 +135,13 @@ hypothetical — it happened during the writing of these rules.
 [→ the precondition with no references and two
 enforcers](INCIDENTS.md#the-precondition-with-no-references-and-two-enforcers)
 
+**Second instance, and it is the sharper one: the search was run by an audit looking for defects.**
+`grep -c` returned the number a predicted finding wanted, and the prediction is what made the number
+look like evidence. A count is the most confirmable thing a search can return, because it arrives
+with no context attached to contradict it.
+[→ the audit that got three of its own methods
+wrong](INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way)
+
 So:
 
 - **Search for the behaviour as well as the identifier.** If a symbol looks unused, search for what

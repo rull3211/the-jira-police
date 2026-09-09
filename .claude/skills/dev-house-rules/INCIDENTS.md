@@ -815,7 +815,8 @@ test each falsifiable claim the rules make about the repository. **Eight finding
 wrong, one was overstated in a way that would have destroyed evidence.**
 
 **Calibration first, so the rest is read in proportion.** All five checks were green;
-plan-before-work had been followed with the entry written and then deleted; every symbol
+plan-before-work had been followed in `af61f41`, with the entry written there and deleted in
+`1e64ed4`; every symbol
 `BUILDING.md` names was present, including `FAIL_FIRST_CHECK`'s `!== "false"` asymmetry; the
 literal-list rule was derived at the sites it names; six entry points exactly. Of eighteen incidents
 sampled, thirteen trace to a SHA whose diff or message carries the incident's own details, and **no

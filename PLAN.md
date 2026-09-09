@@ -364,6 +364,13 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links; `CLAUDE.md`'s
   own routing table is backticks, so deleting a phase file keeps it green; the repository's real
   cross-reference system — **87 `§N`/`invariant N` references** — is unchecked entirely.
+- **Nothing checks that an incident is reachable from a rule.** `docs:check` verifies that a link
+  _resolves_, never that one _exists_, so the direction `FINISHING.md` makes explicit — the rule
+  links to the incident, never the reverse — is unenforced in the only direction that matters.
+  Measured 2026-09-09: of 33 `###` entries in `INCIDENTS.md`, exactly one had no inbound link from
+  any rule file, and it was the entry added that morning. Caught by a fresh-context audit, which is
+  not a mechanism. The check is cheap — every heading must be linked from at least one of the five
+  rule files — and it belongs with `docs-check.test.ts` above.
 - **Cost figures are facts with many homes.** `$0.94` in five files, `$0.11` in five, `$3.99` in
   three, `$4.50` in three, outside the `docs:check` exemption rule 3 grants.
 - **A citation to a document outside the tree cannot be checked, and does not look different.**
@@ -408,9 +415,11 @@ its test: it is the only item whose absence has already produced two shipped con
 
 ### A citation can be exact and still be read wrongly, and that one shipped
 
-Rescued from §13's method failures, which are deleted when that entry closes. This one survives
-because it is the only one of the four that reached `main`, and a correction to something shipped
-must outlive the audit that found it.
+The audit that produced this is an
+[incident](.claude/skills/dev-house-rules/INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way);
+its other three method failures went there with it. This one is here because it is the only one of
+the four that reached `main`, and a correction to something shipped must outlive both the audit that
+found it and the plan entry that happened to carry it.
 
 The claim was that `test-hooks.sh:93` **asserted** the bare-push hole, by listing a push among the
 commands that must stay silent. It does not. Twelve lines above it the fixture switches to
