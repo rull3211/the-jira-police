@@ -1,0 +1,111 @@
+---
+name: claude-validation-work
+description: Entrypoint for validating that this repository's Claude Code hooks are actually enforced, after .claude/settings.json was registered on 2026-09-09. Carries the probe protocol, the two outcomes decided in advance, and the exit-code question the hook suite cannot answer. Use when resuming the chore/register-hooks work, when asked whether the guards fire, or before trusting any statement that a guard is installed.
+---
+
+# Validating the guardrails
+
+**Point a fresh session here by name.** This exists because the work it describes cannot be finished
+inside one session: hook configuration is read at session start, so the change and the proof of the
+change are always on opposite sides of a restart.
+
+**Read `PLAN.md` §12 first.** It is the entry, it names the branch, and it holds the reasoning. This
+file is the runbook; §12 is the argument. If they disagree, §12 is the source and this file is stale.
+
+## Where the work is
+
+**Branch:** `chore/register-hooks`, off `origin/main` at `673f6c6`.
+
+Registered on 2026-09-09 in `.claude/settings.json`: `branch-guard.sh` on
+`Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, `session-brief.sh` on `SessionStart`
+with **no matcher** so that no trigger value can be missed by a typo.
+
+## First, the thing that will waste your time if you do not read it
+
+**You cannot read or write `.claude/settings.json`. Neither could the agent that wrote this.** Both
+are refused by the harness:
+
+```
+Write to protected path blocked by storecode (.claude/settings.json)
+Blocked: accessing Claude Code hook configuration via shell
+  (storecode.sensitive_paths:claude-settings-access)
+```
+
+Do not work around either. Do not re-attempt them in another spelling to see whether the block is
+consistent — it is, and the attempt is the thing the rule prohibits. **If you need to know what is in
+that file, ask the human to paste it.** If you need it changed, write the JSON in a message and let
+them apply it.
+
+This is deliberate and it is the whole design: the agent a guard constrains does not get to wire it.
+A consequence worth stating flatly, because it is the one an eager session gets wrong — **no agent
+can report whether the hooks are installed.** An answer to that question from an agent is either a
+refusal or a fabrication.
+
+## The probe
+
+Run in a **fresh session**, by a **human**, in this order. Nothing before step 1 is worth doing.
+
+| #   | do this                                                | expect                                                                 |
+| --- | ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| 1   | start a session and type nothing                       | the brief: contract pointer, branch, uncommitted count, unmerged count |
+| 2   | `git switch -c test/wiring-probe`                      | a **prompt** — not a refusal — from `branch-stack.sh`                  |
+| 3   | `git switch main`, then ask the agent to edit any file | a **hard refusal** naming `main`, from `branch-guard.sh`               |
+
+**If step 1 is silent, stop.** The configuration is not being read at all and steps 2 and 3 prove
+nothing. Check that the file exists and parses before looking at anything else.
+
+**Step 2 should fire on the first attempt** as long as three or more branches are unmerged into
+`main`; that was true when this was written (`fix/section-resolver`, `fix/slept-assertion`, and this
+one). If they have since merged, the stack is shallow and a silent step 2 means nothing — create two
+throwaway branches first, or skip to step 3.
+
+**Clean up:** `git switch chore/register-hooks && git branch -D test/wiring-probe`.
+
+## Step 3 is the one to bet against, and both outcomes are already decided
+
+Every hook here does `printf` the decision JSON and `exit 0`. The published hook reference documents
+**exit 2** as the blocking status and is unclear on whether a `deny` carried on stdout with exit 0 is
+honoured. Our own suite cannot settle it: all 93 assertions in `test-hooks.sh` pipe stdout through a
+`decision` filter and **not one checks an exit code**. So `pnpm test:hooks` proves the scripts emit
+the right refusal and says nothing about whether the runtime acts on it.
+
+Written down before the probe runs, so the result cannot be rationalised after the fact:
+
+- **Step 3 refuses.** Exit 0 with the JSON is honoured. Add an exit-code assertion to
+  `test-hooks.sh` anyway, so nobody has to rediscover this, and record the observed behaviour in
+  §12.
+- **Step 3 lets the edit through.** `deny()` in `branch-guard.sh` gets `exit 2`, and the suite gets
+  the assertion that would have caught it. **Do not make the same change to `branch-stack.sh`** — its
+  decision is `ask`, and exit 2 would convert a prompt into a hard refusal, which is the failure
+  BUILDING.md warns about, where a guard acquires an enemy among the people who maintain it.
+
+## What is still owed after the probe
+
+1. **`CLAUDE.md` is deliberately untouched and is now wrong in two places** — it says the guards may
+   be unregistered and that the `SessionStart` hook "is not registered here". It was left alone on
+   purpose: rewriting it before the probe passed would have claimed enforcement nobody had seen.
+   Correct it in the commit that records the probe result, not before.
+2. **Keep "behave as though they are unregistered."** That instruction survives registration. It now
+   rests on a better reason than "you cannot check": a guard can be registered and still fail open,
+   which is exactly what the exit-code question is about.
+3. **The residual risk moved and did not disappear.** `.claude/hooks/*.sh` is **not** protected — the
+   agent can edit every script the settings file points at, and `CLAUDE.md` expects it to
+   (`pnpm test:hooks`, "which you run if you change one"). Neutering `branch-guard.sh` is a one-line
+   diff. Review is what stops it; the harness block covers the wiring, not the wire.
+4. **A rule is owed to `PROVING.md`.** See below — this is the only item that is not about hooks.
+
+## The rule this work owes, at three instances
+
+The session that registered these hooks made the same mistake three times, and each time a single
+command refuted it. **Only the third is written up on this branch** — the other two are in `INCIDENTS.md`
+on `fix/slept-assertion` and arrive with PR #22, so do not go looking for them here:
+
+- A probe measured the wrong case and its output was quoted as proof; CI produced the counter-example
+  on its first run.
+- A mutation silently restricted itself to line 1, changed nothing, and reported a clean pass.
+- A report that "developers may add settings" was read as "the constraint is not real", twice in
+  succession — the write ban and then the read ban, each refuted about a minute after being denied.
+
+`INCIDENTS.md` says the candidate rule — **state which case your check does not cover before quoting
+it as evidence** — waits for a third instance. It has one. **Propose it to `PROVING.md` rather than
+adding it silently**, per `FINISHING.md`: say what you want to change and why, before changing it.

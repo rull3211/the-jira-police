@@ -264,7 +264,18 @@ alive only by being carried forward in conversation.
   unavailable, and the automation comments are not ours. A board this service can be blocked by and
   cannot unblock is a fact about the tool surface that the daemon should be known to have.
 
-### 12. The development guardrails are built, and registering them is not this repository's to do
+### 12. The development guardrails are built, and this is the change that registers them
+
+**Branch:** `chore/register-hooks`, in flight. **The runbook is
+[`claude-validation-work`](.claude/skills/claude-validation-work/SKILL.md)** — point a fresh session
+at it by name; it carries the probe, the two outcomes decided in advance, and what is still owed.
+This section is the argument and it is the source; that file is the steps. **Why now:** the operator asked the storecode team and
+confirmed that developers may add settings, which removes the access constraint the rest of this
+section was written under. **What is being attempted:** a checked-in `.claude/settings.json` wiring
+the three hooks below, plus the correction of every sentence in this repository that says they are
+unregistered and unregisterable. **What would make it the wrong idea** is at the bottom of this
+section, under the probe — if the probe does not refuse, this change has made the guards _look_
+installed, which is worse than the honest nothing it replaces.
 
 Requested 2026-09-08, from a question worth restating because it is the one this whole item answers:
 _how do we make sure the agent follows the house rules the moment it steps into this project?_ Until
@@ -289,18 +300,52 @@ it, and also the version most likely to refuse a correct one-line fix — the fa
 has a rule about, where a guard acquires an enemy among the people who maintain it. It waits for a
 second instance.
 
-**Registration is not in this repository, and that is the arrangement rather than a gap.** Hook
-configuration belongs to the operator and is held outside this tree; the environment refuses the
-agent both read and write access to it, which is the correct way round — anything that could
-register the guards that constrain it could also unregister them. So no commit here makes a guard
-fire, and no commit here can report whether one does. **Behave as though they are unregistered**:
-the two rules in `CLAUDE.md` bind on their own authority, never on a guard's. What was once filed
-here as pending work is closed as out of scope, and the prose that described it as pending has been
-corrected.
+**Registration moved into this repository on 2026-09-09 — written by the operator, because the agent
+is refused the file in both directions.** The sentence this section used to carry was right, and it
+took two blocked commands to establish that:
 
-**Which leaves the one thing genuinely open: nothing in this tree can verify enforcement.** Claude
-Code snapshots hook configuration at session start, so the check must be run by a person in a
-_fresh_ session:
+```
+Write to protected path blocked by storecode (.claude/settings.json)
+Blocked: accessing Claude Code hook configuration via shell
+  (storecode.sensitive_paths:claude-settings-access)
+```
+
+The operator confirmed with the storecode team that **developers** may add settings. That is true and
+it was read here as meaning the constraint had never been real — so an intermediate revision of this
+paragraph claimed the write ban was the only half that held, and the read ban was refuted about
+ninety seconds later. **The permission is scoped to the human, not to the tree and not to the file's
+location.** `.claude/settings.json` may live here, be committed, and be reviewed like anything else;
+what the agent may do with it is nothing.
+
+**The operational consequence, which is the part that outlives the story.** No agent in this
+repository can confirm that the settings file exists, parses, names the right paths, or is tracked by
+git. Do not ask one to check, and do not accept an answer — the honest reply is a refusal. **Whether
+the configuration is well-formed is verified by a human reading it, and whether it _works_ is
+verified only by the probe below.** This is the same arrangement as before, with the file moved
+inside the tree for the sake of review; it buys no self-inspection.
+
+**Where the residual risk actually sits, now that it is not the settings file.** `.claude/hooks/*.sh`
+is **not** protected — the agent can edit every script the settings file points at, and `CLAUDE.md`
+positively expects it to ("`pnpm test:hooks`, which you run if you change one"). Neutering
+`branch-guard.sh` is therefore a one-line diff. What stops it is the same thing that stops any bad
+change: it must be made on a branch, it lands in a pull request a human reads, and CI runs the hook
+suite against it. **Review is the protection.** Do not read the block above as more coverage than it
+is; it protects the wiring, not the wire.
+
+**Behave as though they are unregistered anyway.** The two rules in `CLAUDE.md` bind on their own
+authority, never on a guard's. That instruction survives registration unchanged, and now for a
+sharper reason than "you cannot check" — see the exit-code question below.
+
+**Two other branches were in flight when this one was cut, and this branch cannot see their notes.**
+`chore/register-hooks` came off `origin/main` at `673f6c6`, so the `PLAN.md` here predates both.
+**PR #22** (`fix/slept-assertion`) fixes a one-millisecond assertion and carries a §15 hand-off plus
+two `INCIDENTS.md` entries from the same day; it is green and ready. **PR #21**
+(`fix/section-resolver`) builds the `§N` resolver and is red **only** because it predates #22 —
+rebase it once #22 lands rather than debugging it. Expect this section and their §15 to collide on
+whichever merges second; the collision is textual, and §12 is the one to keep.
+
+**Nothing in this tree can verify enforcement, and that is unchanged by registering it.** Claude Code
+reads hook configuration at session start, so the check must be run by a person in a _fresh_ session:
 
 ```
 git switch -c test/wiring-probe   # expect a prompt if the stack is deep (branch-stack)
@@ -314,6 +359,23 @@ enforcement**, and the distinction is the same one BUILDING.md draws about a gua
 installed. Note how narrow the first half was until recently: those assertions borrowed the
 developer's git identity, so they passed on one laptop and could not run anywhere else at all. CI
 caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI step.
+
+**The narrowness has a second half, found while writing the settings file and not yet closed.** Every
+assertion in `test-hooks.sh` pipes the hook's stdout through a `decision` filter; **not one of the 93
+checks an exit code.** So the suite proves each script _emits_ the right refusal and says nothing
+about whether the runtime _acts_ on it. That gap has a specific candidate behind it: our hooks all
+`printf` the deny JSON and `exit 0`, and the published hook reference documents exit 2 as the
+blocking status while being unclear on whether a deny decision carried on stdout with exit 0 is
+honoured. If it is not, `branch-guard.sh` fails open on every path at once — the exact shape its own
+header warns about.
+
+**This is deliberately not fixed by guessing.** Switching `deny()` to exit 2 would block under either
+reading, but it is a change to a guard argued from documentation, and the same move cannot be made in
+`branch-stack.sh`, whose decision is `ask` and which exit 2 would convert into a hard refusal. So:
+run the probe, and let it decide. The probe is cheap and the doc is ambiguous, which is the whole
+argument for measuring. **If the probe refuses, add an exit-code assertion to `test-hooks.sh` so the
+next person does not have to rediscover this. If it does not refuse, `deny()` gets exit 2 and the
+suite gets the assertion that would have caught it.**
 
 One thing deliberately not built, because it was offered and declined: a `Stop` hook gating a turn
 on verification. Recorded so that "we considered it" survives the session that considered it.
