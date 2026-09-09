@@ -13,35 +13,51 @@ any work.
 better; if a later run refutes it, that is a new entry, because a corrected story loses the thing
 that made it worth keeping. Entries are removed only when the subsystem they describe is gone.
 
-**Every entry ends with `**Found by**` — what caught it, not what caused it.** One line, naming the
-mechanism: a real run against a live target, `pnpm docs:check`, a hook test, the type checker, a
-fresh-context audit, review, or a user. This is the only field here that is not about the defect,
+**Every entry carries a `**Found by**` line — what caught it, not what caused it.** It sits second
+from last, immediately above `**The rule**`, so that an entry closes on what to do rather than on
+how it turned up. That position is worth stating: the first reader sent to check this file for the
+field read the last line of each entry, found `**The rule**`, and reported the field missing from
+the two entries that have it — because an earlier draft of this sentence said each entry _ends_
+with it. One line, naming the mechanism: a real run against a live target, `pnpm docs:check`, a hook
+test, the type checker, a fresh-context audit, review, or a user. This is the only field here that
+is not about the defect,
 and it exists because the rules are amended from this file: without it there is no way to tell which
 practice is actually productive, and so no evidence for which guard to build next. `CLAUDE.md`
 asserts that every defect of consequence in this project was found by driving a command against a
 real target rather than by the suite. That is the single most consequential claim in the working
 contract and it decides where effort goes.
 
-**The problem this solves is not absence, it is five phrasings.** When the field was introduced on
-2026-09-09, seven of the 35 entries did name what caught them — "Found by the first `--advance`
-against a real pull request", "The first live run reported, in its own `problems` field", "Counted
-while writing the CI workflow", "The first machine that ever ran it without one was CI", "**How it
-surfaced.** A human asked, twice". Every one of those is an answer; no two are shaped alike, so the
-set cannot be counted, and a claim about the whole file has to be taken on trust. One field name
-turns seven anecdotes into a tally.
+**The problem this solves is not absence, it is that the answers are shaped differently.** When the
+field was introduced on 2026-09-09, plenty of the 35 entries already named what caught them — "Found
+by the first `--advance` against a real pull request", "The first live run reported, in its own
+`problems` field", "Counted while writing the CI workflow", "The first machine that ever ran it
+without one was CI", "**How it surfaced.** A human asked, twice", "Two defects the same work found,
+both by running the guards rather than by testing them", "Shipped in the same diff, found by the
+same audit". Every one of those is an answer, and no two are shaped alike.
 
-That estimate was itself wrong first: it was made by grepping for the string `Found by`, which
-matched three lines, and the figure "exactly one" reached this paragraph before a reader went
-entry by entry. Counting the string instead of the thing is
-[the defect two entries below](#the-compaction-finding-that-counted-the-string-instead-of-the-call),
-committed inside the paragraph introducing the field meant to make it countable.
+**How many is not a determinable number, and that is the whole argument.** A strict reading — the
+entry states a mechanism — gives seven. A generous one, counting any sentence that names the event
+which revealed the defect, gives ten: "The operator deleted ten remote branches … and the count went
+**up**" is a finder if you want it to be, and so is "The first time the review chain found the
+reviewer silent". Nothing distinguishes those from "The first bail to reach a ticket landed as
+roughly four thousand characters", which is a symptom and not a discovery. Two readers will not
+agree, so no claim about the whole file can be checked. One field name is what turns that into a
+tally.
+
+Both numbers in this paragraph were wrong before they were right, in the same way twice. The first
+estimate was "exactly one", reached by grepping for the string `Found by` and finding three lines —
+[the defect further down](#the-compaction-finding-that-counted-the-string-instead-of-the-call),
+committed inside the paragraph introducing the field meant to make it countable. The correction to
+that said "seven" and then asserted it in the sentence arguing the set cannot be counted, which is
+the same mistake wearing the opposite conclusion: a count was quoted because a count reads better
+than an admission. Both were caught by having someone read the entries rather than the file.
 
 **Older entries are left exactly as they are.** Not backfilled, and not retrofitted with the field
 either — append-only is the strongest convention here, and inserting a line into 35 historical
-entries to make a tally tidy is the kind of edit this file exists to argue against. The seven that
-already answer the question are quoted above, which is enough for the baseline to be real; the rest
-are unrecoverable without invention, and an invented provenance would corrupt the one measurement
-the field exists to take. New entries carry it. The count becomes meaningful as the file grows, not
+entries to make a tally tidy is the kind of edit this file exists to argue against. Seven of them
+are quoted above, which is enough for the baseline to be real without pretending it is exact; the
+rest are unrecoverable without invention, and an invented provenance would corrupt the one
+measurement the field exists to take. New entries carry it. The count becomes meaningful as the file grows, not
 by rewriting what it already holds.
 
 Where a new entry genuinely has no answer, the field says `not recorded` — and "a human noticed" and

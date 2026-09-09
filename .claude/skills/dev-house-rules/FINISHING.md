@@ -190,7 +190,8 @@ measurement that can be re-taken.
 3. **What would have caught it, and does that generalise?** A fix for one case belongs in the code. A
    rule belongs here only if it would have caught a _class_.
 
-**Then record what actually caught it**, as the `**Found by**` line the incident entry ends with.
+**Then record what actually caught it**, as the `**Found by**` line an incident entry carries second
+from last, above `**The rule**`.
 Question 3 is a counterfactual and this is not: one is the guard worth building, the other is the
 practice that is already paying. They are usually different, and the gap between them is the only
 honest measure of whether the mechanisms here work. Answer it even when the answer is unflattering —
