@@ -26,7 +26,17 @@ name: ci
 on:
   push:
     branches: [main]
+  # `edited` is not in the default set — that is `opened`, `synchronize`,
+  # `reopened` — and it has to be here because the last step reads
+  # `github.event.pull_request.body`, which comes from the event payload rather
+  # than from the API. Without it, a run that failed for a missing
+  # `Rules owed:` line stays red no matter what you write in the body, and
+  # re-running it replays the *old* payload: the only way to clear it is to push
+  # a commit. Measured on #24, which is the pull request that adds this line.
+  # The remedy that step's own error message names has to be a remedy that
+  # works, or the step teaches people to route around it.
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 # A superseded run tells you about a commit nobody is looking at any more.
 concurrency:

@@ -1243,3 +1243,34 @@ work had registered `session-brief.sh` with no matcher _so that no trigger value
 a typo_, which is the same insight as "a hook can be silent because nothing invoked it". The
 candidate amendment — _state which case your check does not cover before quoting it as evidence_ —
 is **proposed, not written**: see `claude-validation-work`, "The rule this work owes".
+
+### The check whose own remedy could not clear it
+
+Filed on the way out of the pull request above, and it is the sixth instance in a row.
+
+CI's `Rules owed` step failed on #24: the body answered the question under a `## Rules owed`
+heading, and the step matches a literal `Rules owed:` line. Fine — that is the check working. The
+defect is what happened next. Its error message says to answer the question **in the pull request
+body**; the body was edited to do exactly that, and the run stayed red. Re-running it stayed red
+too.
+
+**The step reads `github.event.pull_request.body`** — the event payload, not the API — and
+`pull_request:` with no `types:` subscribes to `opened`, `synchronize`, `reopened` and **not**
+`edited`. So editing the body cannot re-run it, and a re-run replays the payload from before the
+edit. The only way to clear a body-only failure was to push a commit, which is not what the message
+tells you to do.
+
+This is the shape `branch-guard.sh`'s own header already names — _a guard whose remedy its own
+denial text names must not itself block that remedy_ — arriving in a different file, written by a
+session that had read that comment the same afternoon. A check that cannot be satisfied the way it
+says to satisfy it teaches people to route around it, which is how a check earns the contempt that
+gets it deleted.
+
+**Fixed** by adding `types: [opened, synchronize, reopened, edited]`, in the pull request that hit
+it, so the fix and its counter-example are the same run.
+
+**The rule** — the same one, at its sixth instance:
+`pnpm format:check`, `docs:check`, `test:hooks` and `test` were all green locally, and were quoted
+as "the gates pass" without stating the case they exclude. None of the four reads a pull request
+body; the only step that does has no hand-run equivalent, which is written down in `ci.yml`'s own
+header comment.
