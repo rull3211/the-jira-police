@@ -116,11 +116,24 @@ fi
 #   on a protected branch there is no push worth allowing, so it joins the list
 #   rather than getting a special case; off a protected branch it is untouched,
 #   which is the ordinary way work leaves this machine.
+#
+#   `pull` was absent while `merge` was present, so on `main` a bare `git pull`
+#   was allowed and `git merge --ff-only origin/main` was refused — the same act
+#   with a fetch in front, and the one that can leave a merge commit on the
+#   protected branch. The shape is worth more than the hole: this list was
+#   assembled from commands that *sound* mutating, and `pull` sounds like a
+#   read. Anything derived that way is a list of the author's intuitions, so the
+#   assertions in `test-hooks.sh` are the part that stops the next omission.
+#
+# Each entry is terminated by `([[:space:]]|$)` and that is load-bearing, not
+# tidiness: without it `pull` matches `git pull-request`, in the same way a bare
+# substring match on `main` once refused `fix/domain`. Every addition here needs
+# the negative case asserted alongside the positive one.
 mutates=yes
 if [ -n "$command_text" ]; then
   mutates=no
   if printf '%s' "$command_text" | grep -Eq \
-    'git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([[:space:]]|$)'; then
+    'git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|pull|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([[:space:]]|$)'; then
     mutates=yes
   fi
 fi
