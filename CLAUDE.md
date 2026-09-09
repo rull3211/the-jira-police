@@ -15,19 +15,29 @@ rather than routed to.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
 
-**Assume nothing mechanical is holding either of these, because you cannot check.** Both now have
-guards written and tested in `.claude/hooks/` — `branch-guard.sh` refuses writes and pushes on a
-protected branch, and refuses `gh pr merge` from every branch — with their own suite,
-`pnpm test:hooks`, which you run if you change one. Since 2026-09-09 they are also registered, by a
-`.claude/settings.json` the operator writes and reviews here. That moves the file inside this tree
-and buys you no self-inspection: the permission is scoped to the human, not to the file's location,
-so you are refused it in both directions and cannot confirm that it exists, parses, or names the
-right paths. Do not ask another agent to check either — the honest reply is a refusal. And
+**Assume nothing mechanical is holding either of these, because a guard can be registered and still
+fail open.** Both now have guards written and tested in `.claude/hooks/` — `branch-guard.sh` refuses
+writes and pushes on a protected branch, and refuses `gh pr merge` from every branch — with their own
+suite, `pnpm test:hooks`, which you run if you change one. Since 2026-09-09 they are also registered,
+by a `.claude/settings.json` the operator writes and reviews here.
+
+**That file is one rule per direction and the two differ, which three documents here got wrong until
+2026-09-09.** _Writing_ it is refused, through the editor and through the shell; that ban is real,
+it is not to be worked around, and the agent a guard constrains does not get to wire it. _Reading_ it
+with the file-reading tool is **not** refused. What was written down instead — that you are refused
+it in both directions, so no agent can report whether the hooks are installed and any such answer is
+a refusal or a fabrication — generalised from two blocked routes to a third nobody had tried. Shell
+access is still blocked, including a shell command that only names the path in prose.
+
+**So you can read the wiring, and you can watch it act, and neither excuses you from the rules.**
 `pnpm test:hooks` proves only that each script _emits_ the right refusal, never that the runtime
-_acts_ on it; the agent a guard constrains is the last one who should be certifying it. Both rules
-bind exactly as hard as if they were enforced; the only difference is that breaking one may not be
-caught. `PLAN.md` §12 records what is built, what it does not cover, and the probe a human runs to
-prove enforcement.
+_acts_ on it. Two probes that settle that in one turn, and cost nothing if the answer is no, are step
+0 of
+[`claude-validation-work`](.claude/skills/claude-validation-work/SKILL.md#the-probe).
+Both rules bind exactly as hard either way; the only difference is that breaking one may not be
+caught. [`ARCHITECTURE.md` §16](ARCHITECTURE.md) is where all of that is argued out — what each
+guard is, what the suite does not cover, and why the residual risk is `.claude/hooks/*.sh` rather
+than the settings file.
 
 **Do not stack branches deeply** — three stacked here once turned an incremental plan into a
 waterfall. The rule and the story are in
@@ -77,10 +87,17 @@ commit; the full text and the reasoning are in
 **If you cannot remember reading `FINISHING.md` in this session, you have not read it.** Run
 `pnpm hooks:brief` before committing: it prints these four in full, the two rules above, and the
 current branch and stack depth. Trigger it off the commit rather than off a compaction — a commit is
-a moment you can observe, a compaction is not. The `SessionStart` hook does now print unasked, but
-at startup it prints only a pointer to the contract; it inlines these four on `trigger=compact`, and
-a commit is not a `SessionStart` trigger at all. So the moment they are for is still the one nothing
-fires on: this stays a habit and not a guard, and nothing checks that you ran it.
+a moment you can observe, a compaction is not.
+
+**Something does now fire on that moment, and it is still not a guard.** `commit-brief.sh` is a
+`PreToolUse` hook that prints these four when the command is a `git commit`; `pnpm hooks:commit-brief`
+is the same text on demand. It carries no permission decision, because there is no mechanical test
+for having asked yourself a question — a refusal here could only block every commit or be dismissed
+by rote. So it can remind and it cannot check, and two things still have to be true on your own
+authority: it only fires if the operator has registered it, which you cannot verify by its silence,
+and its transport has never been watched working ([`ARCHITECTURE.md` §16](ARCHITECTURE.md)). Read
+these four here, in this file, and treat anything that prints them again as a second chance rather
+than as the mechanism.
 
 ## Where the truth lives
 

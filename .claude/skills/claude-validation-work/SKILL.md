@@ -1,6 +1,6 @@
 ---
 name: claude-validation-work
-description: Entrypoint for validating that this repository's Claude Code hooks are actually enforced. Registration landed in PR #23 and the probe was run on 2026-09-09 — a hard refusal was observed on main, so exit 0 carrying the decision on stdout is honoured for deny. Step 3's ask was NOT observed, and whether ask is honoured at all is the open question. Carries the probe protocol, the precondition that defeated its first run, and what the result did and did not settle. Use when asked whether the guards fire, or before trusting any statement that a guard is installed.
+description: Entrypoint for validating that this repository's Claude Code hooks are actually enforced. Registration landed in PR #23; deny is honoured, watched refusing on main on 2026-09-09 with exit 0 carrying the decision on stdout. Step 0 is two zero-risk probes an agent runs itself in one turn — this file previously said no agent could check anything here, which was wrong: the settings file is writable by nobody but readable with the file-reading tool. branch-stack.sh is confirmed wired on Bash, so the one open question is narrowed to whether an ask decision is honoured at all. Carries the probe protocol, the precondition that defeated its first run, and what each result did and did not settle. Use when asked whether the guards fire, or before trusting any statement that a guard is installed.
 ---
 
 # Validating the guardrails
@@ -19,19 +19,33 @@ Say what that does not cover, because this file is where the habit is owed: nobo
 whether an _edited_ hook definition is re-read within a session. The agent cannot write that file,
 so the case stays open.
 
-**Read `PLAN.md` §12 first.** It is the entry, it names the branch, and it holds the reasoning. This
-file is the runbook; §12 is the argument. If they disagree, §12 is the source and this file is stale.
+**Read [`ARCHITECTURE.md` §16](../../../ARCHITECTURE.md) first.** It holds the reasoning: what each
+guard is, what the suite proves, where the residual risk sits, and the four things nobody has
+measured. This file is the runbook; §16 is the argument. If they disagree, §16 is the source and
+this file is stale. The two open questions live in `PLAN.md` §17.
+
+That entry used to be `PLAN.md` §12, which shipped and was deleted. If you find a document still
+sending you to `PLAN.md` §12 or §15, it is stale and the number now resolves against the wrong
+document — repoint it.
 
 ## Where the work is
 
 Registration landed in **PR #23** and is on `main`. `.claude/settings.json` wires `branch-guard.sh`
-on `Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, and `session-brief.sh` on
-`SessionStart` with **no matcher** so that no trigger value can be missed by a typo.
+on `Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, `commit-brief.sh` on `Bash`, and
+`session-brief.sh` on `SessionStart` with **no matcher** so that no trigger value can be missed by a
+typo.
+
+**This list is an enumeration and nothing checks it.** The `PreToolUse` count further down is
+checked against the settings file; this sentence names four scripts across two events and pairs a
+digit with neither, so it can fall behind the wiring exactly the way it did when `commit-brief.sh`
+was registered and only `ARCHITECTURE.md` noticed. Read it as the older of the two claims and
+believe the checked one if they disagree.
 
 ## First, the thing that will waste your time if you do not read it
 
-**You cannot read or write `.claude/settings.json`. Neither could the agent that wrote this.** Both
-are refused by the harness:
+**You cannot _write_ `.claude/settings.json`, and you cannot reach it _through the shell_. You can
+read it with the file-reading tool.** Those are three different rules and this file asserted the
+wrong union of them until 2026-09-09. Two of the three are refused by the harness:
 
 ```
 Write to protected path blocked by storecode (.claude/settings.json)
@@ -40,18 +54,68 @@ Blocked: accessing Claude Code hook configuration via shell
 ```
 
 Do not work around either. Do not re-attempt them in another spelling to see whether the block is
-consistent — it is, and the attempt is the thing the rule prohibits. **If you need to know what is in
-that file, ask the human to paste it.** If you need it changed, write the JSON in a message and let
-them apply it.
+consistent — it is, and the attempt is the thing the rule prohibits. If you need it **changed**, write
+the JSON in a message and let the operator apply it. The write ban is the whole design and it stands:
+the agent a guard constrains does not get to wire it.
 
-This is deliberate and it is the whole design: the agent a guard constrains does not get to wire it.
-A consequence worth stating flatly, because it is the one an eager session gets wrong — **no agent
-can report whether the hooks are installed.** An answer to that question from an agent is either a
-refusal or a fabrication.
+**The read is the correction, and it was worth three documents being wrong.** This file, `CLAUDE.md`
+and the guardrail entry then in `PLAN.md` all said the file was refused in both directions, and
+derived a rule from it —
+_no agent can report whether the hooks are installed; any such answer is a refusal or a
+fabrication._ That was never tested. The evidence behind it is the two blocks quoted above: a
+**write**, and a **shell** read. Nobody tried the file-reading tool, which returns the file on the
+first attempt. So the rule inverted: an agent that has read the wiring can say what is registered,
+and the sentence telling it not to bother was the expensive part — it retires the cheapest check
+available and instructs the next session to disbelieve a true result.
+
+**What it still does not buy.** Reading the file tells you what is _wired_. It says nothing about
+whether the runtime _honours_ what is wired — that is step 0 and step 4 below, and the two are
+independent. A registration that parses and a guard that fires are different claims, and this file
+has already been wrong by conflating a narrower thing with a wider one once.
+
+**The shell ban has a false-positive shape worth knowing before it costs you a turn.** The rule
+matches the path as a string in the command text, so a `git commit` whose _message_ discusses the
+file is refused even though nothing touches it. That is the guard censoring the word rather than the
+act — the failure `branch-guard.sh` anchors its own `gh pr merge` check to avoid. Do not re-spell the
+command to slip past it. Say what happened, and either have the operator run it or get explicit
+agreement to word the message differently; performing a different operation that the block caught by
+accident is legitimate, and saying so out loud is what keeps it legitimate.
+[→](../dev-house-rules/INCIDENTS.md#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent)
 
 ## The probe
 
-Run by a **human**, in this order. Nothing before step 1 is worth doing.
+**Step 0 is run by the agent, in one turn, every session it matters. Steps 1–4 need a human** —
+they turn on session starts and on watching a prompt appear, neither of which an agent can observe
+about itself.
+
+### Step 0 — is `branch-guard.sh` actually firing, right now?
+
+**Two commands the guard classifies as writes and that do nothing if they run.** That is the whole
+trick, and it is why this is safe to make routine: if the hook is live you get its refusal, and if it
+is not you get a no-op and a clean tree. Run them from a protected branch, which is the only place
+the guard has an opinion.
+
+```
+git rm                       # no pathspec: prints usage, changes nothing
+```
+
+and a `Write` aimed at a directory that already exists — `src` — which no filesystem will let you
+overwrite with a file. Expect `branch-guard.sh`'s refusal naming the branch, twice. Confirm with
+`git status --porcelain` that the tree is unchanged either way.
+
+**Between them they cover both matchers**, which is the point of running two: the `Bash` entry and
+the `Edit|Write|NotebookEdit` entry are separate registrations and either can be absent alone. A
+`deny` from both is strong evidence that `PreToolUse` is wired and that exit 0 carrying the decision
+on stdout is honoured.
+
+**Say what it does not cover, because that is this file's own habit.** It proves `deny`. It says
+nothing about `ask` — see step 3, which is still open — and nothing about `gh pr merge`, which shares
+`branch-guard.sh` with the cases above and is therefore covered by inference rather than by
+observation. Do not run a real merge to close that gap.
+
+### Steps 1–4 — the human's half
+
+In this order. Nothing before step 1 is worth doing.
 
 **Check this before anything else: does the branch you are testing carry the registration?**
 `.claude/settings.json` is a tracked file, so on any branch whose history predates PR #23 it is
@@ -101,19 +165,52 @@ rather than the reverse.
 produced no prompt. Run by hand with the identical payload, `branch-stack.sh` emits the correct
 `ask` — naming all three branches — and exits 0. So the script is not the problem.
 
-**Two causes remain and this tree cannot separate them.** What is excluded: `session-brief.sh`
-printed at session start with the live branch and counts, so the settings file is read and parses;
-and `branch-guard.sh`'s `deny` on `Bash` was watched refusing in step 4, so `Bash` `PreToolUse`
-hooks do run and a decision on stdout with exit 0 is honoured **for `deny`**. What is left is that
-`branch-stack.sh` may not be wired on `Bash` at all, or that `ask` is not honoured the way `deny`
-is. Telling them apart means reading `.claude/settings.json`, which no agent here can do — so this
-is the human's half, and it is the last open question in this file.
+**Two causes were named, and one is now eliminated — by reading the settings file, which this file
+had said no agent could do.** What was already excluded: `session-brief.sh` printed at session start
+with the live branch and counts, so the file is read and parses; and `branch-guard.sh`'s `deny` on
+`Bash` was watched refusing in step 4, so `Bash` `PreToolUse` hooks do run and a decision on stdout
+with exit 0 is honoured **for `deny`**. The two candidates left were that `branch-stack.sh` is not
+wired on `Bash` at all, or that `ask` is not honoured the way `deny` is.
 
-**If it is wired, the finding is that `ask` is decorative**, and that is larger than anything else
-recorded here: every guard written in the fail-open, make-the-human-decide style rests on `ask`
-being honoured, and `branch-stack.sh` was deliberately written as `ask` rather than `deny` so that
-stacking stays possible when it is right. A guard that cannot prompt is not a soft guard, it is an
-absent one.
+**It is wired,** by 3 PreToolUse registrations: `branch-guard.sh` on
+`Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, and `commit-brief.sh` on `Bash`. Read on
+2026-09-09, on `main`. **This sentence is now checked** — `docs:check` counts the `PreToolUse` array
+in `.claude/settings.json` and fails when the number here disagrees, which is the least this
+paragraph could have, given what the rest of it is about.
+
+**And "Where the work is" said so already, eighty lines above this paragraph.** That is the part
+worth keeping. The wiring was written down correctly at the top of this file — from the operator, who
+can read it — while this section went on calling the same fact unreachable and assigned it to the
+human. Two statements about one thing in one document, disagreeing, with nothing to make them
+disagree loudly. The agent's supposed blindness was doing the work: a claim about what _cannot_ be
+known is not checked against the document making it, because there is nothing to check it against.
+[→ cite, don't copy, and the map you did not check](../dev-house-rules/STARTING.md#architecturemd-is-the-map-and-this-section-is-only-how-to-read-one)
+
+**Do not read that as settling the question, which is the trap this file has fallen into twice.**
+One hypothesis surviving is not the same as one hypothesis confirmed. A third cause nobody listed is
+exactly what happened last time a probe here was pre-registered with two branches — and the
+conditions of the step-3 run are a live candidate: `unmergedBranches` excludes HEAD, the threshold is
+`>= 3`, and the count was measured **before** the command rather than at the instant the hook saw it.
+
+**So the open question is now single and directly testable**, which it was not before:
+
+> Does a `PreToolUse` hook emitting `permissionDecision: "ask"` on stdout with exit 0 actually
+> prompt, the way `deny` was shown to refuse?
+
+The test is step 3 run deliberately rather than incidentally: create three throwaway branches
+**carrying a commit each** — `git branch --no-merged` ignores branches sitting on the base, which is
+why merely creating them is not enough — confirm with the `countLines` command above that the hook
+will see 3, then `git switch -c test/wiring-probe` and watch for a prompt. If it is silent with the
+count confirmed at the moment of the call, `ask` is decorative, and that is the largest finding
+available here: every fail-open guard in this repository rests on it.
+
+**That sentence used to open "if it is wired", and the conditional is spent** — it is wired, read
+directly, eight paragraphs up. What the conditional was protecting is still worth stating plainly:
+`branch-stack.sh` was deliberately written as `ask` rather than `deny` so that stacking stays
+possible when it is right, and a guard that cannot prompt is not a soft guard but an absent one.
+
+**This question is carried as an open item in `PLAN.md` §17**, with the churn that has deferred it
+written down beside it, so that deferring it a sixth time is a visible choice rather than a silence.
 
 **Note what this does not settle**, since this file is where the habit is owed: a stack of exactly 3
 was tested, from `main`, on one machine, with one command shape. Nobody has tried `git worktree add`
@@ -153,7 +250,8 @@ result; it does not stop you misreading which case you are in.
 1. **Done.** `CLAUDE.md` was corrected ahead of the probe; `PLAN.md` §13 and
    [`dev-house-rules/SKILL.md`](../dev-house-rules/SKILL.md) were corrected in the probe-result
    commit. Each was amended rather than deleted, because each is load-bearing about what you still
-   cannot check: the agent can now watch a guard refuse without ever confirming what is wired.
+   cannot check — which is not "what is wired", since that reads fine, but whether the runtime acts
+   on it.
 2. **Keep "behave as though they are unregistered."** That instruction survives registration. It now
    rests on a better reason than "you cannot check": a guard can be registered and still fail open,
    which is exactly what the exit-code question is about.
@@ -163,16 +261,14 @@ result; it does not stop you misreading which case you are in.
    diff. Review is what stops it; the harness block covers the wiring, not the wire.
 4. **A rule is owed to `PROVING.md`.** See below — this is the only item that is not about hooks.
 5. **The mutate list was a denylist naming 13 of git's write verbs, and is now an allowlist of
-   reads.** `git pull` was missing from it, which shipped in PR #25; that fix's own note said the
-   defect was in the derivation rather than the list, because it "was assembled from commands that
-   _sound_ mutating, and `pull` sounds like a read". The audit that note asked for measured how much
-   that was worth: all 163 subcommands fed to the script with HEAD on a protected branch, **13
-   refused and 150 allowed** — including `checkout` (the older spelling of the `restore` it
-   refused), bare `stash`, `clean`, `branch -f`, `update-ref`, `send-pack`, `fetch` in its refspec
-   form and `subtree pull`. Inverted for `git` only, the same sweep refuses 102. `switch` and
-   `checkout -b` stay allowed because the denial text names them as the remedy. **Done**, on
-   `fix/write-verb-audit`; the incident is
-   [in `INCIDENTS.md`](../dev-house-rules/INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs).
+   reads.** **Done**, on `fix/write-verb-audit`. The sweep, the verbs it let through and the reason
+   the shape rather than the list was the defect are in `branch-guard.sh`'s header comment, argued
+   at [`ARCHITECTURE.md` §16](../../../ARCHITECTURE.md) and storied
+   [in `INCIDENTS.md`](../dev-house-rules/INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs);
+   they are not restated here, because a runbook that carries its own copy of a measurement is the
+   thing that goes stale first. What the runbook owes is the consequence: an unlisted **read** is now
+   a refusal a human fixes in a minute, and if step 0 or a real command ever refuses something
+   ordinary, that is the expected direction and not a bug report.
 
 ## The rule this work bought, at seven instances
 

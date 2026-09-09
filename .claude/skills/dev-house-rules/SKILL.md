@@ -46,9 +46,12 @@ green.
 ## The two that are not advisory
 
 Everything else is recoverable if you get it wrong. These are not — and you should assume your own
-compliance is the whole of the enforcement. The guards are registered here now, and one has been
-watched refusing; but the settings file that wires them still cannot be read from inside this tree,
-so you can never confirm which of them is live on the branch you are standing on (`PLAN.md` §12):
+compliance is the whole of the enforcement. The guards are registered here now, one has been watched
+refusing, and the settings file that wires them **can** be read from inside this tree, which this
+line denied until 2026-09-09. What you still cannot assume is that a registration you have read is a
+guard that fires; run step 0 of
+[`claude-validation-work`](../claude-validation-work/SKILL.md#step-0--is-branch-guardsh-actually-firing-right-now)
+if the answer matters (`ARCHITECTURE.md` §16):
 
 1. **Never work on `main` or any protected branch.** Branch first. One implementation branch per
    reviewable unit of privilege. Do not look for a way around this — ask.
