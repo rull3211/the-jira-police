@@ -745,6 +745,70 @@ negative, or the change does not ship.
 
 ---
 
+### 16. Four claims this tree makes that turned out to be wrong, unchecked, or already shipped
+
+**Branch:** `fix/unverified-claims`, off `main`. **Delete this entry when it ships.**
+
+**Why now.** A spot-check audit on 2026-09-09, asked for as a confidence assessment rather than as a
+defect hunt, ran the guards instead of reading about them. Four things came back, and the first is
+the one that matters:
+
+1. **`.claude/settings.json` is readable by the agent.** `CLAUDE.md`, this file's §12 and
+   `claude-validation-work/SKILL.md` all state the file is refused **in both directions**, and build
+   a rule on it: _"no agent can report whether the hooks are installed. An answer to that question
+   from an agent is either a refusal or a fabrication."_ The `Read` tool returned the file, first
+   attempt, no block. Look at the evidence those three documents actually quote: a **Write** block,
+   and a shell-read block naming `claude-settings-access`. The read **tool** was never tried. The
+   generalisation skipped the one case that is open.
+2. **Enforcement is agent-verifiable, cheaply and without risk.** §12 says _"nothing in this tree can
+   verify enforcement"_ and hands the probe to a human. But a command that the guard classifies as a
+   write and that is a **no-op if it executes** separates "registered" from "merely written" with
+   nothing at stake: `git rm` with no pathspec, and a `Write` to a directory path. Both were refused
+   on `main` on 2026-09-09, naming the branch. The working tree was clean before and after.
+3. **§12 and §15 shipped and were never deleted.** §12 merged as PR #24, §15 as PR #28 — and §15
+   says _"Delete this entry when it ships"_ in its own second line. §15 is the harmful one: it
+   describes `branch-guard.sh` as a denylist catching 13 of ~40 write verbs and tables the holes,
+   and the guard has been an inverted allowlist since #28. Anyone grepping this file for the guard's
+   shape gets a materially wrong model of it.
+4. **The hook-assertion count rotted a third time.** §13 predicted this in as many words — _"§12's
+   hook-assertion count is current and uncited — and duly went stale within a day of being named
+   here, twice"_ — and §12:303 now says 107 where the suite reports 186. `INCIDENTS.md:1357` has it
+   right. Third instance is this repository's own threshold for generalising, so this takes the
+   class fix §13 asks for rather than a fifth `FACT`.
+
+**What is being attempted.** All four, on one branch at the operator's direction, in four commits
+that each carry their own argument:
+
+- correct the readability claim wherever it is made, and add the two zero-risk probes to the runbook
+  as a step an agent runs every session rather than a ritual reserved for a human;
+- retire §12 and §15, migrating what is still true — the residual-risk analysis, and the fact that
+  `.claude/hooks/*.sh` is unprotected and review is the protection — into a new `ARCHITECTURE.md`
+  §16, because ten documents cite "`PLAN.md` §12" as the argument's home and it needs a real one;
+- the count-phrase class check, extracted into its own module so it can be tested, with the
+  `docs-check.test.ts` §13 says must arrive with it;
+- a `PreToolUse` hook that prints the four questions when a commit is about to happen.
+
+**What would make it the wrong idea, one per item.** (1) is a correction and the risk is
+over-correcting: the **write** ban is real and was verified by two people, and nothing here should
+read as licence to edit that file. (2) is only as good as its blast radius — it proves `deny` is
+honoured for `Bash` and `Write`, and says nothing about `ask`, which `claude-validation-work` still
+lists as open; if it gets written up as "the guards are verified" it has become the overstatement
+`PROVING.md` counts seven of. (3) is the largest diff and the least interesting; the risk is that
+migrating §12 loses the argument rather than moving it, which is the failure that section exists to
+name. (4) is the one most likely to be wrong in the build: a class check over prose has a large
+false-positive surface, the population was measured at **539** shape-matching phrases before being
+scoped by noun to about **34**, and a check that cries wolf gets switched off — `docs-check.ts`'s own
+header says so. If the accounted-for list cannot be kept under roughly fifty entries, the scoping is
+wrong and the check should be narrowed again rather than the list grown.
+
+**What the measurement already refuted.** The prediction going in was that scoping by noun would
+surface several more stale current counts. It did not: of the ambiguous phrases, every one is either
+a war story or **another repository's** suite (`4562 tests` is `insurance-commerce-rest-api`, twice).
+Only §12:303 was stale. It also surfaced a false-positive class the design has to handle — `#2661`
+is a pull request number, and a naive count matcher reads it as a count.
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 ### A citation can be exact and still be read wrongly, and that one shipped
