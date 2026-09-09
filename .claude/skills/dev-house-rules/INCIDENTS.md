@@ -1186,9 +1186,32 @@ quietly. That distinction is the whole of the line: re-spelling a blocked operat
 performing a different operation that the block caught by accident is not, and the way to stay honest
 about which one you are doing is to say so out loud.
 
-**Found by** the harness refusing the operation. Not by review, and not by any check that could have
-existed: there is no way for an agent here to confirm a claim about its own permissions except to
-attempt the thing and read the refusal.
+**And then it happened a fourth time, in the paragraph written to close it — 2026-09-09.** Everything
+above is about generalising from a route that was tested to a route that was not, and the correction
+it produced did the same thing once more. Two routes had been attempted: the **write**, refused, and
+the **shell** read, refused. From those two the conclusion drawn was _both directions_, and from
+_both directions_ came a rule — no agent can report whether the hooks are installed; any such answer
+is a refusal or a fabrication. It was copied into `CLAUDE.md`, into `PLAN.md` §12 and into the
+validation runbook.
+
+Nobody tried the file-reading tool. It returns the file on the first attempt. The union of two
+refusals was written down as a property of the agent, when it was a property of two mechanisms — one
+guarding writes, one guarding the shell — and a third mechanism was assumed into existence because
+it would have been consistent.
+
+**The compounding is the finding, not the wrong sentence.** A false claim about a _capability_ is not
+symmetrical with other false claims: it removes the operation that would have refuted it. The rule
+said the check was pointless and dishonest to attempt, so the check went unattempted, and the claim
+was safe for as long as it was believed. It also cost more than it looks — reading the wiring
+immediately eliminated one of the two candidate causes of the only open question in the runbook, and
+that answer had been sitting in the runbook's own opening section the whole time, contradicting the
+paragraph that called it unknowable.
+
+**Found by** the harness refusing the operation, three times. The fourth was found by a spot-check
+audit that ran the probe instead of reading about it — and found it only because the audit had been
+asked how confident it was, not asked to confirm the documents. Not by review, and not by any check
+that could exist: the only way for an agent here to test a claim about its own permissions is to
+attempt the thing and read what comes back.
 
 **The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
 extended from assumptions about your own code to assumptions about your own privileges. This is the
