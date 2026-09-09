@@ -41,9 +41,9 @@ Default posture is **manual**: nothing is solved until a human adds a label.
 **The numbers are identifiers, not an ordering, so they are never reused and the sequence has
 holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion would silently
 repoint every one of them — the failure §14 exists about. A missing number means that entry shipped
-and was deleted. §12 and §15 are the current holes: the guardrail argument they carried now lives in
-`ARCHITECTURE.md` §16, and every file that cited "`PLAN.md` §12" has been repointed there. What is
-still open from those two entries is §17.
+and was deleted. §12, §15 and §16 are the current holes. The guardrail argument §12 and §15 carried
+now lives in `ARCHITECTURE.md` §16, and every file that cited "`PLAN.md` §12" has been repointed
+there; what is still open from those two is §17. §16 was the audit branch and shipped whole.
 
 ### 1. Which model runs which task, and nothing chooses today
 
@@ -494,73 +494,6 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 
 <!-- refs:on -->
 
-### 16. Four claims this tree makes that turned out to be wrong, unchecked, or already shipped
-
-**Branch:** `fix/unverified-claims`, off `main`. **Delete this entry when it ships.**
-
-**Why now.** A spot-check audit on 2026-09-09, asked for as a confidence assessment rather than as a
-defect hunt, ran the guards instead of reading about them. Four things came back, and the first is
-the one that matters:
-
-1. **`.claude/settings.json` is readable by the agent.** `CLAUDE.md`, this file's §12 and
-   `claude-validation-work/SKILL.md` all state the file is refused **in both directions**, and build
-   a rule on it: _"no agent can report whether the hooks are installed. An answer to that question
-   from an agent is either a refusal or a fabrication."_ The `Read` tool returned the file, first
-   attempt, no block. Look at the evidence those three documents actually quote: a **Write** block,
-   and a shell-read block naming `claude-settings-access`. The read **tool** was never tried. The
-   generalisation skipped the one case that is open.
-2. **Enforcement is agent-verifiable, cheaply and without risk.** §12 says _"nothing in this tree can
-   verify enforcement"_ and hands the probe to a human. But a command that the guard classifies as a
-   write and that is a **no-op if it executes** separates "registered" from "merely written" with
-   nothing at stake: `git rm` with no pathspec, and a `Write` to a directory path. Both were refused
-   on `main` on 2026-09-09, naming the branch. The working tree was clean before and after.
-3. **§12 and §15 shipped and were never deleted.** §12 merged as PR #24, §15 as PR #28 — and §15
-   says _"Delete this entry when it ships"_ in its own second line. §15 is the harmful one: it
-   describes `branch-guard.sh` as a denylist catching 13 of ~40 write verbs and tables the holes,
-   and the guard has been an inverted allowlist since #28. Anyone grepping this file for the guard's
-   shape gets a materially wrong model of it.
-4. **The hook-assertion count rotted a third time.** §13 predicted this in as many words — _"§12's
-   hook-assertion count is current and uncited — and duly went stale within a day of being named
-   here, twice"_ — and §12:303 now says 107 where the suite reports 186. `INCIDENTS.md:1357` has it
-   right. Third instance is this repository's own threshold for generalising, so this takes the
-   class fix §13 asks for rather than a fifth `FACT`.
-
-**What is being attempted.** All four, on one branch at the operator's direction, in four commits
-that each carry their own argument:
-
-- correct the readability claim wherever it is made, and add the two zero-risk probes to the runbook
-  as a step an agent runs every session rather than a ritual reserved for a human;
-- retire §12 and §15, migrating what is still true — the residual-risk analysis, and the fact that
-  `.claude/hooks/*.sh` is unprotected and review is the protection — into a new `ARCHITECTURE.md`
-  §16, because five files cite "`PLAN.md` §12" as the argument's home and it needs a real one.
-  **Done.** This line said "ten documents" until the repointing measured it —
-  `git grep -l 'PLAN.md §12' HEAD -- '*.md'` returns five. An estimate written as a count, in the
-  entry whose fourth item exists to catch exactly that, and it survived being read four times;
-- the count-phrase class check, extracted into its own module so it can be tested, with the
-  `docs-check.test.ts` §13 says must arrive with it;
-- a `PreToolUse` hook that prints the four questions when a commit is about to happen.
-
-**What would make it the wrong idea, one per item.** (1) is a correction and the risk is
-over-correcting: the **write** ban is real and was verified by two people, and nothing here should
-read as licence to edit that file. (2) is only as good as its blast radius — it proves `deny` is
-honoured for `Bash` and `Write`, and says nothing about `ask`, which `claude-validation-work` still
-lists as open; if it gets written up as "the guards are verified" it has become the overstatement
-`PROVING.md` counts seven of. (3) is the largest diff and the least interesting; the risk is that
-migrating §12 loses the argument rather than moving it, which is the failure that section exists to
-name. (4) is the one most likely to be wrong in the build: a class check over prose has a large
-false-positive surface, the population was measured at **539** shape-matching phrases before being
-scoped by noun to about **34**, and a check that cries wolf gets switched off — `docs-check.ts`'s own
-header says so. If the accounted-for list cannot be kept under roughly fifty entries, the scoping is
-wrong and the check should be narrowed again rather than the list grown.
-
-**What the measurement already refuted.** The prediction going in was that scoping by noun would
-surface several more stale current counts. It did not: of the ambiguous phrases, every one is either
-a war story or **another repository's** suite (`4562 tests` is `insurance-commerce-rest-api`, twice).
-Only §12:303 was stale. It also surfaced a false-positive class the design has to handle — `#2661`
-is a pull request number, and a naive count matcher reads it as a count.
-
----
-
 ### 17. Two guardrail questions that outlived the entries they were written in
 
 **Branch:** none yet. These came out of §12 and §15, which shipped and were deleted; the settled
@@ -614,6 +547,44 @@ onto; the substring floor is what covers it today and the fix must not remove th
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### A fixture that cannot reach the code path is a green test, and it looks like every other one
+
+**This is a proposed rule for `PROVING.md`, written here rather than there because the house rules
+are amended by proposal and not unilaterally.** The incident is
+`.claude/hooks/branch-guard.sh`'s floor pass and the assertion that was supposed to cover it, and
+the argument for promoting it is that it survived the two mechanisms this repository already trusts.
+
+`bash -lc "git push"` was allowed on `main` — rule 1 unguarded, by both halves of the guard at once,
+for the exact shape the floor exists to catch. The assertion for that exact string had been green
+for four days. It passed because `test-hooks.sh`'s `bash_payload` helper built its JSON by
+interpolation, so any fixture containing a double quote produced a payload the hook could not parse,
+and an unreadable command is treated as a write. The guard denied — for the one reason the assertion
+was not testing.
+
+**What makes it worth a rule is which safeguards it walked through.** `PROVING.md`'s central rule —
+a guard is not shipped until a test fails when it is unplugged — was followed in form. The floor was
+removed, the assertion went red, and the comment recording that is still in the file. It went red
+for the wrong reason: with the payload unparseable, removing the floor changed nothing, and what
+actually failed was some other fixture in the same loop. Unplugging proves a test can fail; it does
+not prove the test can fail _for its own reason_. And the sibling fixture one line away,
+`sh -c 'git commit -m x'`, passed honestly — its verb is followed by a space either way — so the
+loop as a whole looked exercised.
+
+**The proposed rule, in two halves.** (1) A test fixture that is a serialised format — JSON, YAML, a
+URL, a shell command line — is built with an encoder, never by interpolating a value into a template;
+hand-built input is a test of your escaping before it is a test of anything else, and this is the
+third appearance of that defect here after `lib.sh`'s `jsonEscape` and the branch-name quoting bug.
+(2) When an unplugging goes red, check _which_ assertion went red and that the input reached the
+line you removed. The second half is the expensive one and probably the one worth writing down.
+
+**What would make it the wrong rule.** Half (2) is a per-mutation cost on a practice whose value is
+that it is cheap, and a rule that makes unplugging laborious will stop it happening. It may be
+better stated as a rule about fixtures alone, with the reasoning attached, than as a step.
+
+**How it was found**, which is the part that does not generalise: sideways, by writing
+`commit-brief.sh` — the first hook here whose behaviour on an unparseable payload differs from its
+behaviour on a command it ignores. Nothing was looking for this.
 
 ### A citation can be exact and still be read wrongly, and that one shipped
 
