@@ -627,6 +627,46 @@ that way more than any other. The honest test is whether it gets invoked by name
 without being asked for; if the next audit here is run from a hand-written prompt anyway, delete
 the skill rather than reconciling it.
 
+### 21. The corpus outgrew the reason it was split, and no check can see length
+
+**Branch:** `docs/corpus-cut`.
+
+**What is being attempted.** Cutting the house-rules corpus back below the size that justified
+splitting it, deleting the rules that carry no incident and the incidents that carry no rule, and
+adding the two checks whose absence let it happen: a length budget, and a bidirectional rule↔incident
+citation check. Target, committed before measuring: mandatory pre-edit reading under **4,907 words**,
+the figure at `1e64ed4` immediately after the split.
+
+**Why now.** The audit measured the drift and it is not marginal. `INCIDENTS.md` is 1,411 lines —
+60% longer than the 884-line `SKILL.md` whose length was the stated reason to split it, and only
+~8.6% of it traces back to that file. It absorbed 73% of all corpus growth while every gate stayed
+green, because **every check in `docs-check.ts` is a consistency check and not one has a ceiling.**
+Meanwhile 12 of the 36 rules added since the split rest on no supporting incident, 6 of 15 new
+incidents have no rule attached, and 6 of the 9 rule-bearing incidents were written in the same
+commit as the rule they justify — median gap 0 minutes. The amendment loop stopped being fed from
+outside: 37 of 52 commits since the split touched scaffolding, exactly one touched `src/` without it,
+and the four skills the service actually ships to its own subagents received zero bytes.
+
+**What is explicitly kept.** Everything with a measured return: `branch-guard.sh` (a strict superset
+of its predecessor — 78 git subcommands closed off on a protected branch, and its predecessor's own
+suite still passing 57/57 against it, so the hardening cost nothing), `test-hooks.sh`, the commit
+and compact briefs, `pinned-prose` (the only check
+that survives mutation), the FACT checker, the link walker, the CI steps, and the inlining that put
+the four questions 0 words from a cold context instead of 9,497.
+
+**What would make it the wrong idea.** If the cut removes the argument rather than the padding, this
+becomes the same defect in the other direction — rules nobody obeys because the story that made them
+stick is gone, which `PLAN.md`'s own "the war stories are the asset" entry warns about directly. The
+discipline is that no deletion ships unless something goes red when the thing it claims is redundant
+is unplugged, and that every surviving rule keeps exactly one incident. A length budget that is
+raised to fit the corpus is the `KNOWN_DANGLING` failure repeated, so the budget lands in the same
+commit as the cut that already clears it, never after.
+
+**Also folded in, because they are the same sweep.** §20 above is an orphan — it shipped in `7237af5`
+and was never deleted. The three "green for four days" claims measure at 21 hours. `CLAUDE.md:98`
+states that the brief's transport has never been watched working and cites the section that says it
+has.
+
 ---
 
 ## What was learned, and is recorded nowhere else
