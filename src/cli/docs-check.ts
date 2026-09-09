@@ -221,6 +221,44 @@ function productionModules(): number {
 }
 
 /**
+ * Hook registrations under `PreToolUse` in `.claude/settings.json`.
+ *
+ * **This is the only fact here measured from a file the agent may not write.**
+ * Reading it is allowed and writing it is refused — one rule per direction,
+ * which three documents got wrong for a while — and that asymmetry is exactly
+ * what makes the number worth checking rather than merely stating. The operator
+ * changes the wiring; prose written by an agent claims what the wiring is; and
+ * until now nothing connected the two, so `claude-validation-work/SKILL.md` was
+ * free to say `PreToolUse` carried two registrations on a day it carried three.
+ * That document's own retrospective is about a wiring claim that disagreed with
+ * another wiring claim eighty lines away, with nothing to make them disagree
+ * loudly. This is the thing that makes one of them disagree loudly.
+ *
+ * **The noun is qualified for a reason.** `registrations` alone denotes two
+ * populations in this tree — every hook across both events in one sentence, the
+ * `PreToolUse` array alone in another — so the bare word is deliberately not in
+ * `COUNTED_NOUNS`. A noun that names two populations cannot be checked against
+ * one number, and the enumeration in that file's "Where the work is" section is
+ * left uncheckable rather than checked wrongly.
+ *
+ * **A missing or unparseable file throws rather than returning 0.** Zero is a
+ * plausible count — an operator who has unregistered everything — so returning
+ * it on a read failure would report "no hooks are wired" for a file that could
+ * not be opened, which is the fail-quiet shape this whole area keeps producing.
+ * The throw takes down `docs:check`, which is the correct blast radius: the
+ * check cannot do its job and should not pretend the tree agrees with itself.
+ */
+function preToolUseRegistrations(): number {
+  const raw = readFileSync(join(ROOT, ".claude", "settings.json"), "utf8");
+  const parsed = JSON.parse(raw) as { hooks?: { PreToolUse?: readonly unknown[] } };
+  const entries = parsed.hooks?.PreToolUse;
+  if (!Array.isArray(entries)) {
+    throw new TypeError(".claude/settings.json has no PreToolUse array to count");
+  }
+  return entries.length;
+}
+
+/**
  * The per-ticket cost figures quoted in prose, and how many files repeat each.
  *
  * The sum is what gets cited, rather than four separate counts, because the
@@ -348,6 +386,13 @@ const FACTS: readonly Fact[] = [
     actual: sectionReferences(),
     phrase: "<N> section references",
     cited: citation(CAPTURED, "section", "references"),
+    expectSites: 1,
+  },
+  {
+    what: "PreToolUse registrations in .claude/settings.json",
+    actual: preToolUseRegistrations(),
+    phrase: "<N> PreToolUse registrations",
+    cited: citation(CAPTURED, "PreToolUse", "registrations"),
     expectSites: 1,
   },
   {

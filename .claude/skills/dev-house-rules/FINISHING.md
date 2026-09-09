@@ -34,6 +34,15 @@ own entry. The `SessionStart` hook now inlines the four questions below when it 
 `trigger=compact`, on the reasoning that a pointer is exactly what such a context discounts.
 **Treat that injection as a prompt to open this file, not as a substitute for it** — it carries four
 of the checks and none of the reasoning.
+
+**A second hook now does the same thing at the better moment.** `commit-brief.sh` fires on
+`PreToolUse` when the command about to run is a `git commit`, and prints these four — extracted from
+the section below, never copied — into the session that is about to commit. It was watched arriving
+on a real commit on 2026-09-09, so the transport is not decorative. **It refuses nothing**, because
+there is no mechanical test for having asked yourself a question, and a check that cannot tell a
+satisfied condition from an unsatisfied one can only block everything or be dismissed by rote. The
+same sentence applies to it as to the compaction one: it is a prompt to open this file. `pnpm
+hooks:commit-brief` prints it without committing.
 [→](INCIDENTS.md#the-compaction-finding-that-counted-the-string-instead-of-the-call)
 
 ---
@@ -141,9 +150,9 @@ judged important, which is reliably the narrative and not the file paths.
 So take the decision instead of receiving it. **A commit has just made the context disposable**: the
 work is on disk, `PLAN.md` holds the intent, the branch holds the position. That is the cheapest
 moment in the whole cycle to lose everything else, and it is the one moment you can see coming —
-which is the same argument `CLAUDE.md` makes for running `pnpm hooks:brief` off the commit rather
-than off a compaction. If a unit has just landed and the next one is large, compact **there**, on
-purpose.
+which is the same argument `CLAUDE.md` makes for firing the brief off the commit rather than off a
+compaction, and `commit-brief.sh` is that argument built. If a unit has just landed and the next one
+is large, compact **there**, on purpose.
 
 **Say what to preserve, because the default keeps the wrong half.** Name the things that are
 expensive to recover and cheap to state: the branch and what it is stacked on, the `PLAN.md` entry

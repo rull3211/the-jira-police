@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2413 tests in 67
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2415 tests in 67
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -41,9 +41,27 @@ Default posture is **manual**: nothing is solved until a human adds a label.
 **The numbers are identifiers, not an ordering, so they are never reused and the sequence has
 holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion would silently
 repoint every one of them — the failure §14 exists about. A missing number means that entry shipped
-and was deleted. §12, §15 and §16 are the current holes. The guardrail argument §12 and §15 carried
-now lives in `ARCHITECTURE.md` §16, and every file that cited "`PLAN.md` §12" has been repointed
-there; what is still open from those two is §17. §16 was the audit branch and shipped whole.
+and was deleted. The settled half of the two guardrail entries now lives in `ARCHITECTURE.md` §16,
+every file that cited them has been repointed there, and what is still open from them is §17.
+
+<!-- refs:off -->
+
+**The holes are §12, §15, §16 and §18, and this line names them rather than citing them.** A
+catalogue of deleted sections dangles by construction — the targets are gone and can never be
+repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which is a debt
+that goes to zero and cannot go to zero if it is holding entries nobody could ever pay.
+
+**Only §18 was ever actually counted, and finding out why is §19.** Adding these four names raised
+the dangling count by two, not by four: the resolver pools section ids from every document into one
+set, so a dead `PLAN.md §12` resolves against `ARCHITECTURE.md`'s live §12, and the same for §15 and
+§16. §18 dangled only because no document here has an eighteenth section. The region is still right
+— a hole list should not be checked — but it is buying much less than it looks like it is buying.
+
+§12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §18 was opened
+and shipped inside a single session — the shortest-lived entry here, and still worth a permanent
+number, because the session was compacted once while it was open.
+
+<!-- refs:on -->
 
 ### 1. Which model runs which task, and nothing chooses today
 
@@ -544,43 +562,85 @@ for both directions — a real push refused, a commit message naming it allowed.
 where narrowing is the expensive direction. `git push` inside `sh -c '...'` is the case to hold
 onto; the substring floor is what covers it today and the fix must not remove that.
 
-### 18. The commit brief is documented everywhere except the working contract
+### 19. `§N` resolves against every document at once, so cross-document references are barely checked
 
-**Branch:** `fix/unverified-claims`.
+**Branch:** none yet.
 
-**What is being attempted.** `commit-brief.sh` shipped in `cbb5be0` and was written into
-`ARCHITECTURE.md` §16, `CLAUDE.md`, `README.md` and `package.json`. It was written into
-`.claude/skills/` nowhere at all — zero mentions across `dev-house-rules` and
-`claude-validation-work` — which leaves four passages stale:
+**What is wrong.** `docs-check.ts` builds one `defined` set by unioning the section ids of
+`ARCHITECTURE.md`, `PLAN.md` and the two instruction skills, then asks whether each `§N` reference
+appears in it. The document a reference belongs to is discarded. So `PLAN.md §12` — an entry that
+shipped and was deleted — resolves happily against `ARCHITECTURE.md`'s §12, and a reader following
+it lands somewhere unrelated. Three of this file's own dead numbers were passing that way.
 
-- `FINISHING.md`, the file the four questions actually live in, still says only the `SessionStart`
-  hook inlines them. A second hook now quotes this file at the better moment and the file does not
-  know.
-- `FINISHING.md` again, further down, cites the commit-versus-compaction argument as an argument,
-  and names `pnpm hooks:brief` — the compaction one. The commit one is `pnpm hooks:commit-brief`,
-  and it is built.
-- `claude-validation-work/SKILL.md` "Where the work is" enumerates three registrations. Four.
-- The same file's "It is wired" paragraph says `PreToolUse` carries two. Three.
+**How it was found.** By accident, and only because the accident was the right shape: the entry
+numbered 18 was deleted, two mentions of it were left in prose, and `docs:check` correctly flagged
+both. Wrapping
+the whole hole list in `refs:off` should then have dropped the dangling count by four. It dropped by
+two. The gap between the predicted number and the measured one is the entire finding — a check that
+had gone green a second earlier was hiding it.
 
-**Why now.** The last two are the shape that document's own retrospective is about — "two statements
-about one thing in one document, disagreeing, with nothing to make them disagree loudly" — and this
-would leave exactly that, both understating by one, eighty lines apart.
+**Why it is worse than a rough edge.** `KNOWN_DANGLING` is described in code as "a debt… it goes to
+zero", and §14 is an open entry about repointing dangling citations. Both are measuring a population
+that is smaller than the real one by an unknown amount, and the resolver is one of the few things
+here that checks prose against prose rather than prose against code. The failure is the house
+speciality: not a wrong answer, a right answer to a narrower question than anyone thought was being
+asked.
 
-**And `docs:check` cannot see any of it.** `COUNTED_NOUNS` has ten entries and `registrations` is
-not one, so "two registrations" and "three registrations" both pass. The class check added in
-`6abb3e8` is working as designed and the design is one noun short. Adding the noun is what turns
-this from a correction into a check.
+**The shape of the fix.** References already carry the file they were found in — `referencesIn`
+takes a path — so the work is to key `defined` by document and resolve `§N` against the document
+that owns it, with an explicit rule for the cross-document form (`ARCHITECTURE.md §16` names its
+target and should resolve there, a bare `§16` should resolve locally). Expect `KNOWN_DANGLING` to
+rise sharply on the first run, and expect that number to be the real one.
 
-**What would make it the wrong idea.** Adding nouns to `COUNTED_NOUNS` is not free: each one is a
-claim that every digit before that word in every document is a measurable property of the tree, and
-a noun that appears in war stories more often than in live claims buys blessings rather than checks.
-`registrations` earns it only if the historical uses are few — if `HISTORICAL` needs more than a
-couple of new entries to absorb it, the noun is the wrong instrument and the four passages should
-just be fixed by hand.
+**What would make it the wrong idea.** If the true count turns out to be large enough that the
+budget stops being a budget, raising `KNOWN_DANGLING` to fit is the failure the constant's own
+comment warns about. Then the honest move is to fix the references the same week or to admit the
+resolver is aspirational and say so where it is documented — not to widen the number and leave it.
 
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### `git checkout <file>` to undo a mutation deletes the work the mutation was testing
+
+**2026-09-09.** Mutation-proving two changes in one turn. The first backed the file up with `cp`
+before mutating and restored from the backup. The second skipped that and reverted with
+`git checkout src/cli/docs-check.ts` — which restores from `HEAD`, and the file held forty
+uncommitted lines that were the entire point of the exercise. They went. Both mutations had already
+produced their verdicts, so nothing was learned twice, but the change had to be retyped from
+context that happened still to hold it.
+
+**Why the safe habit did not generalise from the file next to it.** `cp` and `git checkout` look
+like the same operation and are not: one restores what was there a second ago, the other restores
+what was committed. They agree exactly when the file is clean, which is the case every mutation
+tutorial shows and never the case in the middle of a change. The tell was available and unread —
+`git checkout` is the command that prints nothing on success whether it restored one line or forty.
+
+**The rule this suggests, and the reason it is a suggestion.** Mutation-test through a copy, never
+through source control, unless the file is committed. It is one line in `PROVING.md` next to the
+unplugging rule, and it is not written yet because a rule earns its place by generalising more than
+one incident and this is one. The disposal condition: if the next unplugging in this repository is
+done on a dirty file and survives, the habit is adequate and this entry can go.
+
+### A count-noun check needs the noun to name one population, which is not obvious until it does not
+
+**2026-09-09.** `registrations` was going into `COUNTED_NOUNS` to catch two stale wiring claims. The
+disposal condition written into the plan entry beforehand was about volume — the noun earns its
+place if few existing uses have to be blessed as history — and that condition passed cleanly: the
+tree had zero historical uses and one live claim.
+
+**It passed and the noun was still wrong, for a reason the condition could not see.** The two stale
+sentences do not count the same thing. One says `PreToolUse` carries N registrations; the other
+enumerates every hook across both events. A single FACT cannot be right about both, and the check
+would have been _confidently_ wrong on whichever sentence it was not written for — worse than the
+silence it replaced. The noun shipped as `PreToolUse registrations`, and the enumeration is now
+labelled in place as uncheckable rather than left looking checked.
+
+**What this says about the disposal conditions themselves.** They are written before the work, which
+is the point of them, and that is also the limit: this one tested the cost of the noun and not
+whether the noun referred to anything. A condition that only measures the price of being right
+cannot notice that the question is ambiguous. Worth asking of the next one — before "is this worth
+it", ask "does this name one thing".
 
 ### A fixture that cannot reach the code path is a green test, and it looks like every other one
 

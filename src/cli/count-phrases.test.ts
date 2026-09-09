@@ -102,6 +102,27 @@ describe("nouns that contain other nouns", () => {
     expect(scan("2390 tests in 66 files")).toHaveLength(2);
   });
 
+  it("reads 'three PreToolUse registrations' as the qualified noun, not a bare one", () => {
+    // Unplugged: put `registrations` in the list instead of the qualified form.
+    // The bare noun matches here too, and the phrase it reports is the same
+    // length — so the failure is invisible in a count and only shows in `noun`.
+    // Which noun matched is the whole question: the bare word names every hook
+    // in the settings file in one sentence and the `PreToolUse` array alone in
+    // another, and only the second is what the FACT measures.
+    const found = scan("wired by 3 PreToolUse registrations today\n");
+
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ value: 3, noun: "PreToolUse registrations" });
+  });
+
+  it("does not read a bare 'registrations' count as the PreToolUse one", () => {
+    // The other half of the same decision, and the reason the bare noun stayed
+    // out of the list rather than going in alongside. A sentence counting all
+    // four hooks across both events is not a claim about `PreToolUse`, and a
+    // checker that treated it as one would demand it equal 3 and be wrong.
+    expect(scan("the settings file holds 4 registrations\n")).toEqual([]);
+  });
+
   it("has no noun that is a whole-word prefix of another", () => {
     // The one shape that would produce two phrases at one offset. Nothing in
     // the list has it today; this fails on the day somebody adds one, which is

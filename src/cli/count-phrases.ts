@@ -82,6 +82,13 @@ export const COUNTED_NOUNS: readonly string[] = [
   "cases",
   "file-homes",
   "files",
+  // Alphabetised case-insensitively, which is why a capital sits mid-list. The
+  // event name is load-bearing rather than decorative: the bare word
+  // `registrations` denotes two different populations in the two sentences that
+  // use it here — one counts every hook in `.claude/settings.json`, the other
+  // counts the `PreToolUse` array alone — and a noun that names two populations
+  // cannot be checked against one number. Qualify the noun or leave it out.
+  "PreToolUse registrations",
   "production modules",
   "section references",
   "settings",

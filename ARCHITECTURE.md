@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2413 tests in 67 files, no build step, no
+Status: running end to end against production Jira. 2415 tests in 67 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -2905,12 +2905,19 @@ them. Stated explicitly, because this is the section that owes it:
    being a fast-forward that brought the settings file into the tree.
 4. **The suite could not run anywhere but one laptop** until `8ad1a31`, because its assertions borrowed
    the developer's git identity. CI caught it the first time it ran them.
-5. **`additionalContext` has never been observed working either.** `commit-brief.sh`'s whole transport
-   is unwatched, for the same reason as (1) and with the same remedy — run it and look. The difference
-   is the stake: if `ask` is decorative, a class of future guards is decorative, whereas if
-   `additionalContext` is decorative the loss is a reminder and the status quo returns. It is listed
-   here so that "the four questions now have a hook" is never read as "the four questions now have a
-   guarantee".
+5. **`additionalContext` is honoured — watched once, by hand, and not by the suite.** On 2026-09-09,
+   the commit that added the `PLAN.md` entry for this correction arrived with `commit-brief.sh`'s
+   four questions in front of it, verbatim, on a real `git commit` rather than a hand-fed payload.
+   So `PreToolUse` with exit 0, no `permissionDecision` and text under
+   `hookSpecificOutput.additionalContext` reaches the model. That is a third decision shape
+   confirmed on this transport, after `deny`; `ask` remains the one nobody has seen.
+
+   **It stays on this list because the suite still cannot tell you any of that.** `pnpm test:hooks`
+   asserts the script emits the right JSON, and it asserted exactly that on the days the hook was
+   not yet registered. One observation on one machine on one day is what stands behind the sentence
+   "the four questions now fire at the commit" — enough to stop calling the transport unproven, not
+   enough to call it guaranteed. Re-run it, the way `claude-validation-work`'s step 0 re-runs the
+   others, rather than citing this paragraph forever.
 
 ### The fourth guardrail guards a habit, not the tree
 

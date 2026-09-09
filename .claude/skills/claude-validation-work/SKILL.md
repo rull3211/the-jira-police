@@ -31,8 +31,15 @@ document — repoint it.
 ## Where the work is
 
 Registration landed in **PR #23** and is on `main`. `.claude/settings.json` wires `branch-guard.sh`
-on `Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, and `session-brief.sh` on
-`SessionStart` with **no matcher** so that no trigger value can be missed by a typo.
+on `Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, `commit-brief.sh` on `Bash`, and
+`session-brief.sh` on `SessionStart` with **no matcher** so that no trigger value can be missed by a
+typo.
+
+**This list is an enumeration and nothing checks it.** The `PreToolUse` count further down is
+checked against the settings file; this sentence names four scripts across two events and pairs a
+digit with neither, so it can fall behind the wiring exactly the way it did when `commit-brief.sh`
+was registered and only `ARCHITECTURE.md` noticed. Read it as the older of the two claims and
+believe the checked one if they disagree.
 
 ## First, the thing that will waste your time if you do not read it
 
@@ -165,8 +172,11 @@ with the live branch and counts, so the file is read and parses; and `branch-gua
 with exit 0 is honoured **for `deny`**. The two candidates left were that `branch-stack.sh` is not
 wired on `Bash` at all, or that `ask` is not honoured the way `deny` is.
 
-**It is wired.** `PreToolUse` carries two registrations: `branch-guard.sh` on
-`Bash|Edit|Write|NotebookEdit`, and `branch-stack.sh` on `Bash`. Read on 2026-09-09, on `main`.
+**It is wired,** by 3 PreToolUse registrations: `branch-guard.sh` on
+`Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, and `commit-brief.sh` on `Bash`. Read on
+2026-09-09, on `main`. **This sentence is now checked** — `docs:check` counts the `PreToolUse` array
+in `.claude/settings.json` and fails when the number here disagrees, which is the least this
+paragraph could have, given what the rest of it is about.
 
 **And "Where the work is" said so already, eighty lines above this paragraph.** That is the part
 worth keeping. The wiring was written down correctly at the top of this file — from the operator, who
