@@ -120,7 +120,7 @@ was tested, from `main`, on one machine, with one command shape. Nobody has trie
 or `git branch <name>`, which the same hook matches.
 
 **This paragraph replaces one that got it wrong**, and the error is worth keeping because it is the
-fourth instance of the rule this work owes to `PROVING.md`. The old text claimed the stack was deep
+fourth instance of the rule this work drove into `PROVING.md`. The old text claimed the stack was deep
 enough and listed `fix/section-resolver`, `fix/slept-assertion` "and this one" — counting HEAD, which
 `lib.sh` drops. A branch count was quoted as evidence without stating which case it excludes, by the
 same session that wrote the exclusion.
@@ -174,11 +174,11 @@ result; it does not stop you misreading which case you are in.
    `fix/write-verb-audit`; the incident is
    [in `INCIDENTS.md`](../dev-house-rules/INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs).
 
-## The rule this work owes, at seven instances
+## The rule this work bought, at seven instances
 
 The work that registered these hooks made the same mistake seven times, and each time a single
-command refuted it. All seven are in `INCIDENTS.md` **on this branch** — they reach `main` when this
-pull request does, and not before:
+command refuted it. All seven are in `INCIDENTS.md` on `main`, and so is the rule they paid for —
+#27 merged on 2026-09-09:
 
 - A probe measured the wrong case and its output was quoted as proof; CI produced the counter-example
   on its first run.
@@ -212,7 +212,10 @@ of a silent hook. The seventh ignored a command this file supplies, three lines 
 purpose of not guessing that number. Knowing the mechanism is not the same as checking the case, and
 neither is owning the check.
 
-`INCIDENTS.md` said the candidate rule — **state which case your check does not cover before quoting
-it as evidence** — waits for a third instance. It has seven. **Propose it to `PROVING.md` rather
-than adding it silently**, per `FINISHING.md`: say what you want to change and why, before changing
-it.
+**This is now a rule and no longer a candidate.** `INCIDENTS.md` held it awaiting a third instance;
+it reached seven, was proposed in #24's body, and is written into
+[`PROVING.md`](../dev-house-rules/PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code)
+— _state which case your check does not cover, before you quote it as evidence._
+
+Keep this list anyway. It is the evidence behind the rule, and this file is where the next instance
+will be made: every claim below about what the guards do is a claim about the case that was run.

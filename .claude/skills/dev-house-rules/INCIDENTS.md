@@ -1150,8 +1150,9 @@ under deliberate CPU load.
 
 **The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
 The candidate amendment — _state which case a probe does not cover, before quoting it as evidence_ —
-now has two instances rather than one, and is worth proposing on the third or on a defect that
-reaches `main`.
+had two instances at the time of writing, and this entry set the bar at "the third, or a defect that
+reaches `main`". It reached seven before anyone spent one on the amendment. It is now a rule:
+[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
 
 ### A permission granted to a human, read as a permission granted to the agent
 
@@ -1194,8 +1195,8 @@ extended from assumptions about your own code to assumptions about your own priv
 **third instance in one session** of a check that did not cover what it claimed; the other two are
 the two entries directly above, which reached this branch when #22 merged into it. The candidate
 amendment — _state which case your check does not cover before quoting it as evidence_ — reached its
-threshold here and is **proposed, not written**: see `claude-validation-work`, "The rule this work
-owes".
+threshold here, and then took four more instances to get written. It is now a rule:
+[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
 
 ### The silent guard that was diagnosed before anyone checked whether it had run
 
@@ -1246,7 +1247,8 @@ and the second written by a session that already held the fact that would have c
 work had registered `session-brief.sh` with no matcher _so that no trigger value could be missed by
 a typo_, which is the same insight as "a hook can be silent because nothing invoked it". The
 candidate amendment — _state which case your check does not cover before quoting it as evidence_ —
-is **proposed, not written**: see `claude-validation-work`, "The rule this work owes".
+is now a rule:
+[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
 
 ### The check whose own remedy could not clear it
 
@@ -1303,10 +1305,12 @@ happens.
 narrative after it was first written down.
 
 **The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
-and the candidate amendment now at seven instances: _state which case your check does not cover
-before quoting it as evidence_. It is **proposed, not written**: see `claude-validation-work`, "The
-rule this work owes". Seven is well past the threshold `INCIDENTS.md` set for itself, and the
-proposal outliving its own evidence by this margin is starting to be its own finding.
+and the amendment this instance finally bought:
+[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
+written into `PROVING.md` at seven instances against a threshold of three. **That gap is the
+finding.** Each new instance was spent writing evidence rather than spent on the amendment, which is
+the collecting-instead-of-amending failure the rule's own entry now warns about. If a candidate is
+past its threshold, the next incident is not more evidence — it is overdue work.
 
 ### The denylist that named thirteen of git's write verbs
 
@@ -1360,8 +1364,20 @@ can observe that loop breaking, and the four assertions directly above it read a
 it. Its only observable job is _not_ refusing a read that carries a global option, which nothing
 checked. Four assertions later the mutation goes red.
 
+That paragraph is
+[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code)
+being used one entry after it was written, and **it is not an eighth instance** — the count of seven
+in `PROVING.md` is for times the rule was broken, and this is a time it worked. Worth recording for
+what it bought that review would not have: the four assertions were not wrong, and the loop was not
+untested through oversight. Writing down what they measure — that a global option in front of a
+write verb is still refused — is what made visible that nothing measured the other direction.
+
 **The rule** — this is a candidate for `BUILDING.md` at one instance, and it is **proposed, not
 written**: _a denylist over a vocabulary you do not control is behind by construction; invert it, or
-say in the code why you cannot._ The counter-argument is real and belongs with it: inverting is only
-available when the vocabulary is enumerable and the read set is small enough to maintain, which is
-why the inversion here stops at `git` and does not touch the rest of the shell.
+say in the code why you cannot._ One instance is below the threshold of three, so it waits. The
+entry directly above is about a candidate that waited until seven, so the wait comes with an
+instruction attached: at instance two, write it. Do not spend the third on more evidence.
+
+The counter-argument is real and belongs with it: inverting is only available when the vocabulary is
+enumerable and the read set is small enough to maintain, which is why the inversion here stops at
+`git` and does not touch the rest of the shell.
