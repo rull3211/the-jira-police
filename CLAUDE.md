@@ -51,6 +51,27 @@ know which phase you are in.
 read each as a hypothesis that has survived so far. If one is wrong, say so and propose the change
 before making it.
 
+## The four questions, copied here on purpose
+
+**This is copied prose, and the exemption is that `pnpm docs:check` fails the run once the copy
+drifts from the original.** It is duplicated here because this file is re-injected into a compacted
+context and `FINISHING.md` is not, and because these four are the part of the contract with no
+command behind them — nothing else will ever notice them being skipped. Ask them before every
+commit; the full text and the reasoning are in
+[`FINISHING.md`](.claude/skills/dev-house-rules/FINISHING.md#the-checklist).
+
+- [ ] **Any comment _near_ the change that is now true of something else?**
+- [ ] **If this fails at 3am, what does it leave behind?**
+- [ ] **What did the run refute?**
+- [ ] **Did something get through that these rules do not cover?**
+
+**If you cannot remember reading `FINISHING.md` in this session, you have not read it.** Run
+`pnpm hooks:brief` before committing: it prints these four in full, the two rules above, and the
+current branch and stack depth. Trigger it off the commit rather than off a compaction — a commit is
+a moment you can observe, a compaction is not. This is a habit and not a guard: the `SessionStart`
+hook that would print it unasked is not registered here, whether it ever is belongs to the operator
+(`PLAN.md` §12), and nothing checks that you ran it.
+
 ## Where the truth lives
 
 | file                              | answers                                                 |

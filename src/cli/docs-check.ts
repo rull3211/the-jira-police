@@ -46,6 +46,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { SETTINGS } from "../settings.ts";
+import { CHECKLIST_QUESTIONS, pinnedProseProblems } from "./pinned-prose.ts";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 
@@ -198,6 +199,10 @@ const FACTS: readonly Fact[] = [
    * one level up — every count-noun phrase must be a declared site or a listed
    * historical figure — and it is too large to hand-watch, so it arrives with
    * this file's first test rather than before it. Recorded in `PLAN.md` §13.
+   *
+   * `pinned-prose.test.ts` is not that test and does not discharge this. It
+   * covers a sibling module extracted so that it *could* be tested; nothing
+   * below this line — no count, no `expectSites`, no link — is under a test yet.
    */
   {
     what: "test files, written as a bare count",
@@ -239,6 +244,26 @@ for (const fact of FACTS) {
   const shown = sites.length === 0 ? "no sites" : `${sites.length} site(s)`;
   say(`${mark} ${fact.what}: ${fact.actual}, ${shown}`);
 }
+
+/**
+ * Prose that is deliberately copied, and is therefore checked in every place it
+ * appears — which is the whole of the exemption this file's header describes.
+ * `CLAUDE.md` carries `FINISHING.md`'s four checklist questions because it is
+ * the only document a compacted context is guaranteed to still have; the
+ * reasoning, and the reason a wrapped copy still passes, are in
+ * `pinned-prose.ts`.
+ */
+const beforePinned = problems.length;
+problems.push(
+  ...pinnedProseProblems(
+    readFileSync(join(ROOT, ".claude", "skills", "dev-house-rules", "FINISHING.md"), "utf8"),
+    readFileSync(join(ROOT, "CLAUDE.md"), "utf8"),
+  ),
+);
+say(
+  `${problems.length === beforePinned ? "ok  " : "FAIL"} CLAUDE.md's copy of the checklist: ` +
+    `${CHECKLIST_QUESTIONS} question(s)`,
+);
 
 /**
  * GitHub's heading-to-anchor rule: lowercase, drop everything that is not a
