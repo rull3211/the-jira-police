@@ -1192,3 +1192,54 @@ the two entries directly above, which reached this branch when #22 merged into i
 amendment — _state which case your check does not cover before quoting it as evidence_ — reached its
 threshold here and is **proposed, not written**: see `claude-validation-work`, "The rule this work
 owes".
+
+### The silent guard that was diagnosed before anyone checked whether it had run
+
+The probe that proves these hooks are enforced was written with both outcomes decided in advance, so
+that the result could not be rationalised after the fact. Step 4 — edit a file from `main`, expect a
+refusal — was pre-committed to a diagnosis: if the edit goes through, `deny()` in `branch-guard.sh`
+gets `exit 2`, because the published reference documents exit 2 as the blocking status and is
+unclear on whether a deny carried on stdout with exit 0 is honoured.
+
+The edit went through. So did a mutating git command on `main`. Step 3 was silent too. Every
+pre-registered condition for "the runtime ignores exit 0" was satisfied.
+
+**It was the wrong diagnosis, and the pre-decided outcome is what made it persuasive.** A silent
+hook has two causes and the plan had named one. The hooks were never running: the settings file is
+tracked, registration was still an open pull request, and `main` therefore did not carry it in the
+working tree. The guards were live on every branch _except_ the one they exist to protect, and the
+probe sent the reader to exactly that branch.
+
+**One line settled it** — appending to a log under `/tmp` at the top of `branch-guard.sh`, then
+making any tool call. The tracer fired, so the hook was running; a scratch branch matching the
+guard's `release/*` pattern then produced a real refusal, so exit 0 had been honoured all along. Two
+commands, after an afternoon of reasoning from a decision table.
+
+**What the near-miss would have cost.** Applying the pre-decided fix would have passed all 93
+existing assertions, because not one of them read an exit code; it would have read like hardening in
+review; and it would have left `main` unprotected behind a commit that looked like a repair. The
+guard's own header warns about exactly this shape — a guard that fails open is worse than no guard,
+because it looks installed.
+
+**Deciding both outcomes in advance is still right.** It stops you rewriting the criterion once you
+see the result, which is a different failure and a more common one. What it does not do, and was
+quietly assumed to do, is establish that the case in front of you is one of the cases on the list.
+
+**Found by** instrumenting the hook — after the configuration was pasted in by the human and read as
+confirming correct wiring, which it was. Correct configuration and an executing hook are different
+claims, and the first was allowed to stand in for the second.
+
+**A false positive fired on the write-up, for the second time and in the same shape.** Appending
+this entry by shell was blocked, because the command carried the configuration's path inside quoted
+prose and the rule matches the string rather than the target. As
+[the first time](#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent), it
+went in through the file editor instead — the right tool for a markdown edit regardless — and the
+substitution is disclosed rather than made quietly.
+
+**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
+This is the **fifth instance** of a check quoted as evidence without stating the case it excludes,
+and the second written by a session that already held the fact that would have caught it: the same
+work had registered `session-brief.sh` with no matcher _so that no trigger value could be missed by
+a typo_, which is the same insight as "a hook can be silent because nothing invoked it". The
+candidate amendment — _state which case your check does not cover before quoting it as evidence_ —
+is **proposed, not written**: see `claude-validation-work`, "The rule this work owes".

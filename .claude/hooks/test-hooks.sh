@@ -467,6 +467,56 @@ expect "...and it still prints the brief" yes \
   "$(contains "$(cat "$brief_repo/silent.out" 2>/dev/null || true)" 'dev-house-rules/SKILL.md')"
 
 echo
+echo "exit codes, and the branch list they print"
+
+# Every assertion above this line reads stdout and none of them read an exit
+# code, which left the suite unable to answer the one question that decides
+# whether a guard works at all: is a decision carried on stdout with exit 0
+# honoured by the runtime, or does it need the documented exit 2?
+#
+# Answered on 2026-09-09 by running it rather than by reading the reference. A
+# Write on `main` came back refused in branch-guard.sh's own words, and every
+# path exited 0. So exit 0 is right here, and these assertions exist to stop it
+# being "fixed".
+#
+# That is not a hypothetical edit. The plan for this work had pre-committed to
+# giving deny() an exit 2 if the probe let the write through, and for most of an
+# afternoon it looked like it had — the guards were silent on `main` because the
+# settings file registering them was still an unmerged pull request, so it was
+# absent from that branch's working tree. Switching to exit 2 then would have
+# passed every stdout assertion above, looked like hardening, and fixed nothing.
+# In branch-stack.sh the same edit is worse than nothing: its decision is `ask`,
+# and exit 2 turns a prompt a human can approve into a refusal they cannot.
+
+codes="$(scratch)"
+
+CLAUDE_PROJECT_DIR="$codes" "$HOOKS/branch-guard.sh" </dev/null >/dev/null 2>&1
+expect "branch-guard: deny exits 0, not 2" 0 "$?"
+
+bash_payload "gh pr merge 15" |
+  CLAUDE_PROJECT_DIR="$codes" "$HOOKS/branch-guard.sh" >/dev/null 2>&1
+expect "branch-guard: merge deny exits 0" 0 "$?"
+
+git -C "$codes" switch -q -c feat/ordinary
+CLAUDE_PROJECT_DIR="$codes" "$HOOKS/branch-guard.sh" </dev/null >/dev/null 2>&1
+expect "branch-guard: staying silent exits 0" 0 "$?"
+
+BRANCH_STACK_MAX=1 CLAUDE_PROJECT_DIR="$stack" "$HOOKS/branch-stack.sh" </dev/null >/dev/null 2>&1
+expect "branch-stack: ask exits 0, never 2" 0 "$?"
+
+CLAUDE_PROJECT_DIR="$(scratch)" "$HOOKS/branch-stack.sh" </dev/null >/dev/null 2>&1
+expect "branch-stack: staying silent exits 0" 0 "$?"
+
+# `paste -sd ', '` reads -d as a cycling list of delimiters rather than as one
+# two-character separator, so three branches came out as "a,b c". Nothing caught
+# it because every assertion here checked the decision and none read the prose
+# the human is actually asked to act on.
+git -C "$stack" switch -q main
+expect "the branch list is comma-and-space separated" yes \
+  "$(contains "$(BRANCH_STACK_MAX=1 CLAUDE_PROJECT_DIR="$stack" \
+    "$HOOKS/branch-stack.sh" </dev/null)" 'feat/three, feat/two')"
+
+echo
 if [ "$fail" -gt 0 ]; then
   echo "$fail failed, $pass passed"
   exit 1

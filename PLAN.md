@@ -264,18 +264,21 @@ alive only by being carried forward in conversation.
   unavailable, and the automation comments are not ours. A board this service can be blocked by and
   cannot unblock is a fact about the tool surface that the daemon should be known to have.
 
-### 12. The development guardrails are built, and this is the change that registers them
+### 12. The development guardrails are built, registered, and now observed refusing
 
-**Branch:** `chore/register-hooks`, in flight. **The runbook is
-[`claude-validation-work`](.claude/skills/claude-validation-work/SKILL.md)** — point a fresh session
-at it by name; it carries the probe, the two outcomes decided in advance, and what is still owed.
-This section is the argument and it is the source; that file is the steps. **Why now:** the operator asked the storecode team and
-confirmed that developers may add settings, which removes the access constraint the rest of this
-section was written under. **What is being attempted:** a checked-in `.claude/settings.json` wiring
-the three hooks below, plus the correction of every sentence in this repository that says they are
-unregistered and unregisterable. **What would make it the wrong idea** is at the bottom of this
-section, under the probe — if the probe does not refuse, this change has made the guards _look_
-installed, which is worse than the honest nothing it replaces.
+**Branch:** `chore/probe-result`, in flight — registration itself landed as PR #23. **The runbook is
+[`claude-validation-work`](.claude/skills/claude-validation-work/SKILL.md)**; it carries the probe
+and what is still owed. This section is the argument and it is the source; that file is the steps.
+**What is being attempted now:** recording what the probe actually did, correcting the three
+sentences it falsified, and adding the exit-code assertion the result earns. **What would make it
+the wrong idea:** nothing about the probe's outcome is inferable from a diff, so if this entry ever
+gets ahead of what was observed it becomes the thing §12 exists to prevent — a claim that the guards
+work, resting on prose rather than on a refusal somebody watched.
+
+**The probe ran on 2026-09-09 and step 4 refuses.** From `main`, with registration merged, a `Write`
+and a `git restore --staged` were both refused by `branch-guard.sh` naming the branch. Registration
+is therefore no longer the open question; the two that remain are in the last paragraphs of this
+section.
 
 Requested 2026-09-08, from a question worth restating because it is the one this whole item answers:
 _how do we make sure the agent follows the house rules the moment it steps into this project?_ Until
@@ -289,10 +292,12 @@ two non-negotiable rules and the pointer to the working contract; `.claude/hooks
 `branch-stack.sh` (ask a human when the stack is deep), `session-brief.sh` (state the contract and
 the repository's shape at session start, and after a compaction inline the two non-advisory rules
 and the finishing checklist's four judgement questions, extracted from their source files at run
-time), `lib.sh`, and `test-hooks.sh` — 93 assertions behind `pnpm test:hooks`; eleven mutations
+time), `lib.sh`, and `test-hooks.sh` — 99 assertions behind `pnpm test:hooks`; eleven mutations
 watched to fail when it was first written, five more when rule 2 was guarded, three more for the
 compaction brief — a stale pasted copy of each of its two extractions, and a regression to the
-unbounded stdin read that hung the suite.
+unbounded stdin read that hung the suite. Two more on 2026-09-09, with the exit-code assertions:
+`deny()` switched to `exit 2`, which the original 93 did not notice at all, and the restored
+`paste -sd ', '` delimiter bug.
 
 One thing deliberately not built here as well: a `PreToolUse` guard refusing `git commit` when the
 branch has no `PLAN.md` entry. It is the only version of the compaction fix with an exit code behind
@@ -344,8 +349,8 @@ two `INCIDENTS.md` entries from the same day; it is green and ready. **PR #21**
 rebase it once #22 lands rather than debugging it. Expect this section and their §15 to collide on
 whichever merges second; the collision is textual, and §12 is the one to keep.
 
-**Nothing in this tree can verify enforcement, and that is unchanged by registering it.** Claude Code
-reads hook configuration at session start, so the check must be run by a person in a _fresh_ session:
+**Nothing in this tree can verify enforcement, and that is unchanged by registering it.** The probe
+below is still the only thing that proves anything, and it is still run by a person:
 
 ```
 # start the session and type nothing  → expect the brief (session-brief)
@@ -367,26 +372,51 @@ If the **brief** is silent in a fresh session, the configuration is not being re
 else is worth testing. Do not draw that conclusion from a silent branch-stack prompt; it has an
 innocent explanation and the brief does not. **`pnpm test:hooks` proves the scripts; only that probe
 proves the enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
-installed. Note how narrow the first half was until recently: those assertions borrowed the
-developer's git identity, so they passed on one laptop and could not run anywhere else at all. CI
-caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI step.
+installed.
 
-**The narrowness has a second half, found while writing the settings file and not yet closed.** Every
-assertion in `test-hooks.sh` pipes the hook's stdout through a `decision` filter; **not one of the 93
-checks an exit code.** So the suite proves each script _emits_ the right refusal and says nothing
+**A precondition the first run of this probe did not state, and was defeated by.** Steps 3 and 4
+test a branch, and the settings file that registers the hooks is itself a tracked file — so on any
+branch whose history predates registration, `.claude/settings.json` is simply not in the working
+tree and **no hook is wired at all**. The probe as first written sent the reader to `main` while
+registration was still an open pull request, which is the one branch where it could not pass. Both
+steps came back silent, and the silence was nearly read as the exit-code failure below. Before
+running steps 3 or 4, confirm the branch under test actually carries the registration.
+
+**And the session-start claim this block used to make is wrong.** It said hook configuration is read
+at session start, so the change and its proof are always on opposite sides of a restart. On
+2026-09-09 the same `git restore --staged` was **allowed** on a stale `main` and **refused** on the
+same `main` minutes later in the same session, the only difference being that a fast-forward had
+brought the settings file into the tree. Registration appearing or disappearing takes effect
+immediately. Stating what that does _not_ cover, since this section is where that discipline is
+owed: nobody has tested whether an _edited_ hook definition is re-read, because the agent cannot
+write the file to find out.
+
+**`pnpm test:hooks` was narrow in two halves, and both are now closed.** The first: those assertions
+borrowed the developer's git identity, so they passed on one laptop and could not run anywhere else
+at all. CI caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI
+step.
+
+**The second half was found while writing the settings file and closed on 2026-09-09.**
+Every assertion in `test-hooks.sh` piped the hook's stdout through a `decision` filter; **not one of
+the original 93 checked an exit code.** So the suite proves each script _emits_ the right refusal and says nothing
 about whether the runtime _acts_ on it. That gap has a specific candidate behind it: our hooks all
 `printf` the deny JSON and `exit 0`, and the published hook reference documents exit 2 as the
 blocking status while being unclear on whether a deny decision carried on stdout with exit 0 is
 honoured. If it is not, `branch-guard.sh` fails open on every path at once — the exact shape its own
 header warns about.
 
-**This is deliberately not fixed by guessing.** Switching `deny()` to exit 2 would block under either
-reading, but it is a change to a guard argued from documentation, and the same move cannot be made in
-`branch-stack.sh`, whose decision is `ask` and which exit 2 would convert into a hard refusal. So:
-run the probe, and let it decide. The probe is cheap and the doc is ambiguous, which is the whole
-argument for measuring. **If the probe refuses, add an exit-code assertion to `test-hooks.sh` so the
-next person does not have to rediscover this. If it does not refuse, `deny()` gets exit 2 and the
-suite gets the assertion that would have caught it.**
+**This was deliberately not fixed by guessing, and the measurement came back on 2026-09-09: exit 0
+carrying the decision on stdout is honoured.** A `Write` on `main` was refused with
+`branch-guard.sh`'s own text, as was a `git restore --staged`. `deny()` keeps `exit 0` and
+`branch-stack.sh` was left alone, which matters more than it sounds — the pre-registered plan said
+that a probe letting the edit through would earn `deny()` an `exit 2`, and for most of an afternoon
+it looked like that had happened. Applying it then would have rewritten a working guard to fix a
+fault that was somewhere else entirely, gone green, and left `main` unprotected behind a commit that
+read like a repair.
+
+**The assertion that gap earned is now in the suite** — the decision-carrying paths are checked to
+exit 0 rather than only to emit the right JSON, so a future edit that "helpfully" switches `deny()`
+to exit 2 fails a test instead of silently converting `branch-stack.sh`'s prompt into a refusal.
 
 One thing deliberately not built, because it was offered and declined: a `Stop` hook gating a turn
 on verification. Recorded so that "we considered it" survives the session that considered it.
@@ -501,9 +531,12 @@ not a plan item. What is left below is only what is still missing.
   established without running `gh pr merge`, so it is unknown and will stay unknown. Separately,
   ruleset 22571207 requires **0 approvals and no status checks**, so nothing on the GitHub side would
   refuse the merge if the command ever ran.
-- **Nothing here can be watched working.** Registration is the operator's and outside this tree
-  (§12), so every guard in it is built inert; the whole of the evidence is `pnpm test:hooks` and
-  hand-fed payloads, never an observed refusal.
+- **This one is closed, and is kept because it was wrong in a specific way.** It said registration
+  was the operator's and outside this tree, so every guard was built inert and the whole of the
+  evidence was `pnpm test:hooks` and hand-fed payloads, never an observed refusal. Registration moved
+  into the tree as PR #23 and a refusal **was** observed on 2026-09-09 (§12). What survives is the
+  narrower claim the original overshot: the agent still cannot read the settings file, so it can
+  watch a guard refuse without ever confirming what is wired.
 
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,

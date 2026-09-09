@@ -66,7 +66,12 @@ branches="$(unmergedBranches "$repo" "$base")"
 count="$(countLines "$branches")"
 
 if [ "${count:-0}" -ge "$threshold" ]; then
-  list="$(printf '%s\n' "$branches" | grep -ve '^$' | paste -sd ', ' - 2>/dev/null || true)"
+  # `paste -sd ', '` reads its -d argument as a *cycling list* of delimiters, not as one
+  # two-character separator, so it joined three branches as "a,b c" — comma, then space, then comma.
+  # awk is used rather than a `sed 's/,/, /g'` repair because a git ref may legally contain a comma,
+  # and that repair would rewrite the branch name it was printing.
+  list="$(printf '%s\n' "$branches" | grep -ve '^$' |
+    awk 'NR > 1 { printf ", " } { printf "%s", $0 } END { if (NR) print "" }' 2>/dev/null || true)"
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s branches are already unmerged into %s (%s). Each unmerged base gates everything stacked above it, and the review of the bottom one gates the lot. Merge or close some before adding another, or approve to proceed deliberately."}}\n' \
     "$count" "$(jsonEscape "$base")" "$(jsonEscape "$list")"
 fi
