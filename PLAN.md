@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2379 tests in 65
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2390 tests in 66
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -455,9 +455,11 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **106 section references** from `src/` alone, mostly
-  into the two instruction skills — is unresolved entirely, and **roughly 39 of them point at
-  sections that have never existed** (below, "The citations that were never written down").
+  repository's real cross-reference system — **107 section references** from `src/` alone, mostly
+  into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
+  headings that define them, and **exactly 39 point at sections that have never existed** (below,
+  "The citations that were never written down"). What is still unresolved is which _document_ a
+  citation meant, since almost none of them says.
   `CLAUDE.md`'s own routing table was the third gap here and is now closed: its filenames are links,
   so deleting a phase file fails the check by name instead of keeping it green. The size of the
   system is now derived by `docs:check`; whether any of it resolves is still not.
@@ -520,11 +522,23 @@ its test: it is the only item whose absence has already produced two shipped con
 
 ### 14. The citations that were never written down
 
-**Not started.** Sized only, and the sizing is the asset — the list below cost a full-tree audit plus
-a `git log --all` check, and regenerating it is the expensive part. **Branch:** none yet; take one
-off `main`, since this touches `src/` and `ARCHITECTURE.md` and is independent of anything stacked.
+<!-- refs:off -->
 
-Roughly **39 dangling `§N` citations** in shipped source. The first diagnosis — that a renumbering
+**Every `§N` in this section is quoted, not cited**, which is why the whole section sits in a
+`refs:off` region rather than just its table. The resolver reads this document; a section that names
+ten tokens in order to say they resolve to nothing would otherwise report itself as forty-odd
+defects. That is the write-up perturbing the count it reports — a failure this file has now paid for
+twice, and the reason the exemption is a marked region rather than a file-level opt-out.
+
+**The resolver is built. The 39 fixes are not, and they were always the expensive half.** `docs:check`
+now parses the headings of the four section-numbered documents and resolves every `§N` in markdown
+_and_ in `.ts` against them, so "roughly 39" is **exactly 39**, held by `KNOWN_DANGLING` and compared
+with `!==` — fixing some fails the check as loudly as adding one, because a ceiling would let the
+debt be paid down silently and then quietly regrow. The list below still cost a full-tree audit plus
+a `git log --all` check, and it is kept because regenerating it is the expensive part. **Branch:**
+`fix/section-resolver` shipped the check; the fixes need one of their own, off `main`.
+
+**39 dangling `§N` citations** in shipped source. The first diagnosis — that a renumbering
 stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **none of the 54 historical
 revisions of `PLAN.md`**, in any form. They were never written down. `ARCHITECTURE.md:619` says
 "See PLAN.md §5b", the one citation naming its target, and it resolves to nothing;
@@ -535,21 +549,30 @@ revisions of `PLAN.md`**, in any form. They were never written down. `ARCHITECTU
 when checked; a repointed one reads correctly forever.
 
 **The root cause is structural.** `PLAN.md` numbers its sections and rule 2 deletes entries when
-they ship, so every `§N` there names a slot guaranteed to be reused. Three fixes, and the third
-matters most:
+they ship, so every `§N` there names a slot guaranteed to be reused. Three fixes were named; the
+first is done and the third matters most:
 
-1. A resolver in `docs:check`: every `§N` names its target document, and that section exists. **It
-   needs an exemption for references that are quoted rather than made** — the incident recording
-   this names `§3a` and `§7b` in order to say they resolve to nothing, and a resolver without that
-   distinction reports the write-up as four defects. A guard that fires on its own documentation
-   gets switched off.
+1. ~~A resolver in `docs:check`.~~ Shipped. It needed the predicted exemption for references that
+   are _quoted_ rather than made — this very entry names ten dangling tokens in order to be useful —
+   and that arrived as `refs:off` / `refs:on` markers rather than a file-level opt-out, so exempting
+   a paragraph never quietly exempts the document around it. A guard that fires on its own
+   documentation gets switched off.
 2. Fix the 39. Most need a human: the intended target is often unrecoverable, and deleting a comment
    that cites nothing sometimes destroys the only record of a decision.
 3. **Stop citing `PLAN.md` by number from code.** Cite `ARCHITECTURE.md`, whose sections are stable,
    or quote the reasoning where it is used.
 
+**What the resolver cannot catch, which is why item 2 is still a human's.** Almost no citation names
+its target document — `§7b` in `src/watch/decide.ts` says nothing about where `§7b` would live — so
+the strongest available rule is _this token is a heading in **some** document_. That catches all 39.
+It cannot catch a reference that still resolves and now means something else, and the tree has those
+too; they are listed below. The check shrinks the set that needs a human read. It does not claim the
+set is empty.
+
 **What would make this the wrong idea.** Item 2 is a large mechanical diff across `src/` with real
-judgement in it, and a batch pass by an agent is how 39 confident references to nothing got here.
+judgement in it, and a batch pass by an agent is how 39 confident references to nothing got here. If
+the answer to a dangling `§7b` turns out to be "delete the citation", then 39 comments get shorter
+and nothing gets more correct. Read three of them before fixing any.
 
 #### The sites, so nobody pays for the audit twice
 
@@ -589,17 +612,23 @@ invariants 5, 11 and 13 and are correct; every `§14.N` sub-reference resolves; 
 citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as are the
 `SOLVE_INSTRUCTIONS.md` ones.
 
-**Targets the resolver must know about:** `ARCHITECTURE.md` §1–15 plus its §14 invariants 1–17;
-`PLAN.md` §1–15; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`; `SOLVE_INSTRUCTIONS.md` §0–8 with
-`0a`/`2a`/`2b`/`2c`.
+**The legal vocabulary, which the resolver now parses rather than being told:** `ARCHITECTURE.md`
+§1–15 plus its §14 invariants 1–17; `PLAN.md` §1–15; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
+`SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten cited tokens are in none of them.
 
-### 15. Two branches in flight, and the order they have to land in
+<!-- refs:on -->
 
-**Branch:** this one (`fix/slept-assertion`) for the correction; `fix/section-resolver` for the rest.
-**Delete this entry when both are merged** — it is a hand-off, not a plan, and it exists because the
-session that produced both ends before either lands.
+### 15. One branch still in flight, and the order they had to land in
 
-**`fix/slept-assertion` (PR #22) — the fix is right and the published reason was wrong.** It replaces
+**Branch:** `fix/section-resolver`, which is now the only one left. **Delete this entry when it
+merges** — it is a hand-off, not a plan, and it exists because the session that produced both ends
+before either lands.
+
+**`fix/slept-assertion` (PR #22) — merged.** Its half of the ordering is done, and the paragraph
+below is kept rather than deleted because the correction it records outlived the branch: the fix was
+right and the published reason was wrong, and that is the part worth carrying.
+
+**The fix is right and the published reason was wrong.** It replaces
 a `.find()`-first-event assertion with largest-event-plus-one-tick-tolerance in
 `src/triage/session.test.ts`. The fix needs no change. The **diagnosis** shipped in the commit
 message and PR body claims the failing value was a second `session.slept` event, because a local
@@ -610,11 +639,11 @@ first gap against a stamp taken before `setInterval` exists. Corrected in the te
 `INCIDENTS.md`; **the commit message and the PR body still carry the wrong story** unless this
 entry is being read after they were amended.
 
-**`fix/section-resolver` (PR #21) — built, green locally, red in CI for a reason that is not its
-own.** It adds `src/cli/section-refs.ts` and its 11 tests, routes `sectionReferences()` through
-`maskDisabled`, and holds `KNOWN_DANGLING` at exactly 39. Its CI is red **only** because the branch
-predates #22 and so still runs the one-millisecond assertion. **Rebase it once #22 merges and it
-goes green** — do not debug it before then.
+**`fix/section-resolver` (PR #21) — built, and now green.** It adds `src/cli/section-refs.ts` and its
+11 tests, routes `sectionReferences()` through `maskDisabled`, and holds `KNOWN_DANGLING` at exactly 39. Its CI was red **only** because the branch predated #22 and so still ran the one-millisecond
+assertion. That prediction held: `origin/main` was merged in once #22 landed, and the suite went to
+2390 passing without the branch's own code being touched. The prediction is left here on purpose —
+it is the cheapest kind of evidence, a stated expectation that a later run either confirms or kills.
 
 **One open question, deliberately not answered by either branch.** `sectionReferences()` counts
 `§N` tokens across `src/` and may now be an orphan superseded by the resolver, which resolves the
