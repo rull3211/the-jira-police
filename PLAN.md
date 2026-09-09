@@ -544,6 +544,40 @@ for both directions — a real push refused, a commit message naming it allowed.
 where narrowing is the expensive direction. `git push` inside `sh -c '...'` is the case to hold
 onto; the substring floor is what covers it today and the fix must not remove that.
 
+### 18. The commit brief is documented everywhere except the working contract
+
+**Branch:** `fix/unverified-claims`.
+
+**What is being attempted.** `commit-brief.sh` shipped in `cbb5be0` and was written into
+`ARCHITECTURE.md` §16, `CLAUDE.md`, `README.md` and `package.json`. It was written into
+`.claude/skills/` nowhere at all — zero mentions across `dev-house-rules` and
+`claude-validation-work` — which leaves four passages stale:
+
+- `FINISHING.md`, the file the four questions actually live in, still says only the `SessionStart`
+  hook inlines them. A second hook now quotes this file at the better moment and the file does not
+  know.
+- `FINISHING.md` again, further down, cites the commit-versus-compaction argument as an argument,
+  and names `pnpm hooks:brief` — the compaction one. The commit one is `pnpm hooks:commit-brief`,
+  and it is built.
+- `claude-validation-work/SKILL.md` "Where the work is" enumerates three registrations. Four.
+- The same file's "It is wired" paragraph says `PreToolUse` carries two. Three.
+
+**Why now.** The last two are the shape that document's own retrospective is about — "two statements
+about one thing in one document, disagreeing, with nothing to make them disagree loudly" — and this
+would leave exactly that, both understating by one, eighty lines apart.
+
+**And `docs:check` cannot see any of it.** `COUNTED_NOUNS` has ten entries and `registrations` is
+not one, so "two registrations" and "three registrations" both pass. The class check added in
+`6abb3e8` is working as designed and the design is one noun short. Adding the noun is what turns
+this from a correction into a check.
+
+**What would make it the wrong idea.** Adding nouns to `COUNTED_NOUNS` is not free: each one is a
+claim that every digit before that word in every document is a measurable property of the tree, and
+a noun that appears in war stories more often than in live claims buys blessings rather than checks.
+`registrations` earns it only if the historical uses are few — if `HISTORICAL` needs more than a
+couple of new entries to absorb it, the noun is the wrong instrument and the four passages should
+just be fixed by hand.
+
 ---
 
 ## What was learned, and is recorded nowhere else
