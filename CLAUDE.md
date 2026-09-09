@@ -87,6 +87,10 @@ hook that would print it unasked is not registered here, whether it ever is belo
 | [PLAN.md](PLAN.md)                                         | what is **not** built yet, and what was learned         |
 | [dev-house-rules](.claude/skills/dev-house-rules/SKILL.md) | how we work, and what went wrong last time              |
 
+`ARCHITECTURE.md` is three times the size of the next largest document here — grep it for the symbol
+you need and read that section. Nothing asks you to read it whole, and a context that has just been
+compacted has the least room to find that out the expensive way.
+
 **All four are treated as source.** Prose falsified by a change is rewritten in the same commit, not
 the next one. Structural facts — modules, entry points, the composition — live in `ARCHITECTURE.md`
 and are cited from elsewhere, never copied. `pnpm docs:check` enforces the part of that which is
