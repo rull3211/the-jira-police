@@ -1274,3 +1274,32 @@ it, so the fix and its counter-example are the same run.
 as "the gates pass" without stating the case they exclude. None of the four reads a pull request
 body; the only step that does has no hand-run equivalent, which is written down in `ci.yml`'s own
 header comment.
+
+### The dead step that was alive, from a merge list read instead of a count
+
+Seventh instance, and the cheapest of the seven to have avoided.
+
+`claude-validation-work` recorded that "as of the #21 and #23 merges the count from `main` is 1, so
+step 3 is dead" — that step being the only check on `branch-stack.sh`, the one hook here that has
+still never been watched firing. The number came from a mental list of merged pull requests. **#21
+had not merged.** With #21, #24 and #25 open the count is 3 and the step was live the whole time.
+
+**What makes this the cheapest.** The command that measures it —
+`countLines "$(unmergedBranches "$PWD" "$(stackBase "$PWD")")"` — is printed in that same file,
+three lines above the claim, and was put there by an earlier instance of this identical mistake. The
+file supplies the remedy and the next writer walked past it.
+
+**The direction is the new part, and it is the more dangerous one.** The six before this all
+overstated a guard's coverage. This one _under_stated it: a working, testable guard was written down
+as untestable, and the note said its silence "means nothing at all" — an instruction to stop looking.
+A false negative about your own enforcement retires a check quietly, and nothing goes red when it
+happens.
+
+**Found by** running the command while answering a question about merge order, three weeks of
+narrative after it was first written down.
+
+**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
+and the candidate amendment now at seven instances: _state which case your check does not cover
+before quoting it as evidence_. It is **proposed, not written**: see `claude-validation-work`, "The
+rule this work owes". Seven is well past the threshold `INCIDENTS.md` set for itself, and the
+proposal outliving its own evidence by this margin is starting to be its own finding.

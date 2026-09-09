@@ -87,9 +87,18 @@ see before believing anything about the result:
 ```
 
 Three or more and step 3 should fire. Fewer, and the stack is genuinely shallow: create throwaway
-branches until that command prints 3, or skip to step 4. **As of the #21 and #23 merges the count
-from `main` is 1, so step 3 is dead** until something is stacked up again — its silence now means
-nothing at all.
+branches until that command prints 3, or skip to step 4.
+
+**Run that command; do not read a number out of this file.** A previous revision of this paragraph
+said the count was 1 and that step 3 was therefore dead, on the strength of #21 and #23 having
+merged. #21 had not merged. With #21, #24 and #25 open the count from `main` is 3 or more and step 3
+is live — which is the seventh time in this work that a number was written down instead of measured,
+and the first where the stale number would have caused a working guard to be recorded as untestable
+rather than the reverse.
+
+**`branch-stack.sh` has still never been watched firing**, which makes step 3 the only unproven
+piece left. It is testable exactly while the stack is deep, so it is worth running _before_ the open
+pull requests merge rather than after.
 
 **This paragraph replaces one that got it wrong**, and the error is worth keeping because it is the
 fourth instance of the rule this work owes to `PROVING.md`. The old text claimed the stack was deep
@@ -143,10 +152,11 @@ result; it does not stop you misreading which case you are in.
    allowed. Note the shape rather than just the hole: the list was assembled from commands that
    sound mutating, and `pull` sounds like a read.
 
-## The rule this work owes, at five instances
+## The rule this work owes, at seven instances
 
-The work that registered these hooks made the same mistake five times, and each time a single
-command refuted it. All five are now in `INCIDENTS.md` on `main`:
+The work that registered these hooks made the same mistake seven times, and each time a single
+command refuted it. All seven are in `INCIDENTS.md` **on this branch** — they reach `main` when this
+pull request does, and not before:
 
 - A probe measured the wrong case and its output was quoted as proof; CI produced the counter-example
   on its first run.
@@ -164,13 +174,23 @@ command refuted it. All five are now in `INCIDENTS.md` on `main`:
   hook has two causes, and "never ran" is one of them. The probe's first run hit exactly that case.
   Refuted by instrumenting the hook to log when it fired, which took one line.
 
-The last two are the sharpest, and are the reason to keep the list. The fourth failed to account for
+- **CI's `Rules owed` step**, which reads `github.event.pull_request.body` from the event payload.
+  Four local gates were quoted as "green" without stating that none of them reads a pull request
+  body — which `ci.yml`'s own header comment says in as many words. Refuted by the first push.
+
+- **This file's own step-3 paragraph**, above: "the count from `main` is 1, so step 3 is dead" was
+  written from a list of merged pull requests rather than from the command sitting two paragraphs
+  above it. #21 had not merged. Refuted by running that command, which printed `3`.
+
+The pattern in the last four is worth more than any of them alone. The fourth failed to account for
 an exclusion **documented at length in `lib.sh` by the same session that then quoted the count**. The
 fifth was written by the session that had deliberately registered `session-brief.sh` with no matcher
 _so that no trigger could be missed_ — the exact knowledge that would have surfaced the other cause
-of a silent hook. Knowing the mechanism is not the same as checking the case, which is precisely what
-the rule is for.
+of a silent hook. The seventh ignored a command this file supplies, three lines away, for the sole
+purpose of not guessing that number. Knowing the mechanism is not the same as checking the case, and
+neither is owning the check.
 
 `INCIDENTS.md` said the candidate rule — **state which case your check does not cover before quoting
-it as evidence** — waits for a third instance. It has five. **Propose it to `PROVING.md` rather than
-adding it silently**, per `FINISHING.md`: say what you want to change and why, before changing it.
+it as evidence** — waits for a third instance. It has seven. **Propose it to `PROVING.md` rather
+than adding it silently**, per `FINISHING.md`: say what you want to change and why, before changing
+it.
