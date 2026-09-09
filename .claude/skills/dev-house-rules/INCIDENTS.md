@@ -651,9 +651,14 @@ Counted while writing the CI workflow: nine merged pull requests, **no review on
 Nothing had ever checked a change except the agent that wrote it, and the finishing checklist was
 being asserted by the party being checked.
 
-The commands CI runs are the same four a developer runs by hand, and that is the point — it is not a
-new standard, it is the existing one moved somewhere it cannot be skipped. What changes is that they
-run against the pushed ref, on a machine nobody is logged into, whether or not anyone remembered.
+The commands CI ran when this was written were the same four a developer runs by hand, and that was
+the point — not a new standard, the existing one moved somewhere it cannot be skipped. What changes
+is that they run against the pushed ref, on a machine nobody is logged into, whether or not anyone
+remembered. (The job has grown since: the hook suite and `docs:check` were added, and then one step
+that is deliberately _not_ a command anybody runs by hand — see
+[the four filed lessons](#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them).
+The tense is corrected here rather than the count updated, because this entry is a record of a day,
+not a description of the workflow.)
 
 **It found something before it merged.** `pnpm format:check` was failing on `main`, and had been for
 as long as nobody ran it. Left red rather than softened, which is the fail-closed rule, and it is a
@@ -727,3 +732,78 @@ only people who maintain it, until one of them removes it while genuinely believ
 
 **The rule** — [fail closed, except
 guards](BUILDING.md#fail-closed-except-guards-which-fail-open).
+
+### The suite that was a statement about one laptop
+
+`pnpm test:hooks` reported **57 passed** for as long as it existed. The fixtures are real
+repositories, so `git commit` needs an identity, and the suite silently borrowed the developer's.
+
+The first machine that ever ran it without one was CI. Every fixture died on `fatal: empty ident
+name` before reaching its initial commit, so no fixture had a `main` ref, and **22 of 57 assertions
+failed describing that** rather than describing the guards.
+
+**Why it took until then.** `origin/main` had no `test:hooks` step. The step was added by `1e64ed4`,
+on the branch that also fixed this — so the suite's first clean-machine run and its first failure
+are the same event. Green on a laptop for its entire life is not evidence a suite runs; it is the
+absence of anyone having tried.
+
+**It was never wrong about the hooks.** The scripts were fine. The suite was a true statement about
+one machine's configuration, worn as a statement about the code — which is why the fix is that it
+now supplies its own identity and reads no ambient configuration at all. Comment the identity lines
+out, run in a clean environment, and the CI failure returns exactly: 22 failed, 35 passed.
+
+This is the second instance of a rule that had one. [The timezone
+test](#the-two-regression-tests-that-guarded-nothing) ended: _a probe that inherits the operator's
+environment cannot answer a question about CI's._ That was about a timezone. This is the same
+sentence about a git identity, and generalising from two beats generalising from one.
+
+**The rule** — [tests that stop testing](PROVING.md#tests-that-stop-testing).
+
+### Four lessons written down carefully and filed where nothing loads them
+
+None of these was missed. Each was noticed, understood and written up at length — and each went
+somewhere no rule and no reader ever opens.
+
+- **A bare SHA where the neighbours cite anchors.** `SKILL.md` recorded the incident above as
+  `` `8ad1a31` ``. Every other rule in that file links to `INCIDENTS.md#…`; this one was resolvable
+  only by `git show`. It is the unverifiable-citation class named in this file's own header —
+  committed **one day after** that header was written, in the file that documents it.
+- **A correction scheduled for deletion.** A claim that `test-hooks.sh:93` asserted something it
+  does not had shipped to `main`; the correction was filed as the fourth of `PLAN.md` §13's method
+  failures, inside an entry that rule 2 deletes when the audit closes.
+- **A design rule in a commit message.** The anchoring rule above lived in a commit message and a
+  code comment until it was asked for.
+- **An entry deleted while half the work was outstanding.** §14 was removed when the guard shipped,
+  but the rule the guard produced had not been written. _Delete the entry when it ships_ assumes the
+  prose half ships with the code half.
+
+**And then the same number failed the other way, in the branch fixing all of the above.** A new §14
+was written for this work, the work shipped, and the entry was left standing — so `PLAN.md`
+advertised as _not built_ three layers sitting in the diff below it. Deleted too early on one day,
+kept too late on the next, by the same reader holding the same rule. What survived the deletion went
+to §12, which already holds the declined `Stop` hook and the declined drift reporter.
+
+**Which says something about the rule and not only about the reader.** _Delete it when it ships_
+sounds like one action at one moment, and it is two: a plan entry and the work it describes finish
+at different times, and neither ending announces itself. The reliable question is not _did this
+ship_ but **is any sentence in `PLAN.md` now describing something that exists** — asked while
+looking at the file, which is why it is on the checklist and not left to memory. This one was caught
+by a person asking where the additions belonged.
+
+**The common cause is not forgetting; it is that writing something down feels like filing it.** The
+subjective signal — _I thought about this carefully and put it in words_ — is identical whether the
+words land on a reading path or in a commit message nobody will open again.
+
+**How it surfaced.** A human asked, twice: _did you have anything that was supposed to go into new
+rules?_ Nothing mechanical was involved, and the checklist item that should have caught it —
+_"did something get through that these rules do not cover?"_ — had been skipped in silence, because
+it is the one item in `FINISHING.md` with no exit code behind it. The six commands were run and were
+green; the four questions were not asked.
+
+**Contributing cause, and the cheapest thing on this list to fix:** the checklist was run from
+**memory**, after a compaction, rather than read. The remembered version was the six commands. The
+four questions were not in it.
+
+**The rules** — [say what you owe, in the pull request
+body](FINISHING.md#the-rules-you-owe-are-written-down-or-they-are-not-owed);
+[re-read the phase file, never recall it](FINISHING.md#re-read-the-phase-file-never-recall-it).

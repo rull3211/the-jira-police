@@ -57,7 +57,8 @@ outside this tree and cannot be read from inside it (`PLAN.md` §12):
 If you change a hook, run `pnpm test:hooks`. It caught a branch name containing a `"` breaking the
 denial JSON, which made the guard fail _open_ while still looking installed. Note what that suite
 can and cannot say: it proves the scripts, not that anything runs them. It could not even say that
-much until `8ad1a31` — the assertions borrowed the developer's git identity, so they passed on one
+much until `8ad1a31` — [the assertions borrowed the developer's git
+identity](INCIDENTS.md#the-suite-that-was-a-statement-about-one-laptop), so they passed on one
 machine and collapsed on the first clean one.
 
 ---

@@ -311,6 +311,27 @@ was declined was a reporter that judges whether prose is _true_, which is a mode
 document; what was built checks the handful of prose facts that are _countable_, which is a regex
 and an exit code. The rest is still declined.
 
+**A fourth guardrail shipped on 2026-09-09, and it does not guard the code.** CI's `Rules owed` step
+fails a pull request whose body does not answer `FINISHING.md`'s fourth question. It is the only
+check in that workflow with no hand-run equivalent, because what it reads is the pull request body
+rather than the tree, and it is worth being exact about how little it proves: **it cannot tell a
+true `Rules owed: none` from a false one.** It guarantees the question was answered. Everything
+above it in this section guards the repository; this one guards a habit, and a habit that had failed
+four times in two sessions before anyone noticed.
+
+**Its disposal condition, written while it is still new.** If the fresh-context audit that produces
+that line ever returns `none` on a diff that plainly owes something, the step is worse than nothing —
+it will have made an unexamined omission _look_ examined — and it should be deleted rather than
+tuned. A rule with a stated way to die is one somebody can actually retire.
+
+Three more declined on the same day, recorded so they are not re-argued. **A rule making a blocked
+command an incident to write up**: rejected because "record what it taught you before you re-attempt
+or reword" reads as blessing the reword, and a rule that can be read as permission will be. **A
+`docs:check` rule failing a bare SHA cited without an incident anchor**, and **a CI check requiring
+"What was learned" to grow whenever a numbered entry is deleted**: both would have caught a real
+defect from this session, and both are mechanism ahead of evidence at one instance each. The second
+is the more tempting and the more dangerous — it would fire on every ordinary deletion.
+
 ---
 
 ### 13. What an audit of the house rules against the tree left open
@@ -402,13 +423,10 @@ RETROFIT` as a verdict and named an untraceable commit as evidence of it; the re
   alleging invention, and it was relayed at full strength. The evidence supported "not in
   `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
   delegated on the two sharpest accusations.
-- **A line number read without its context.** This entry claimed `test-hooks.sh:93` _asserted_ the
-  bare-push hole by listing `git push` among the commands that must stay silent. It does not: twelve
-  lines above it the fixture switches to `feat/ordinary`, where allowing a bare push is correct. The
-  hole was only ever that no case exercised a protected branch. Shipped to `main` in `e9483c1`,
-  caught the next day by running the guard instead of re-reading it — which is the same _cite
-  `file:line`, never a recollection_ rule failing in its other direction: the citation was exact and
-  the reading of it was not.
+- **A line number read without its context**, and the only one of the four that reached `main`. It
+  is therefore the only one that outlives this entry: the record is under
+  [what was learned](#a-citation-can-be-exact-and-still-be-read-wrongly-and-that-one-shipped), so
+  that deleting §13 does not delete a correction to something shipped.
 
 **What would make this the wrong idea.** Two things. The prose corrections that already shipped
 read, at a glance, as weakening the rules — they are not: _never work on `main`_ and _a human
@@ -423,6 +441,30 @@ the whole `docs:check` list, and the wiring is worth more than the guards.
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### A citation can be exact and still be read wrongly, and that one shipped
+
+Rescued from §13's method failures, which are deleted when that entry closes. This one survives
+because it is the only one of the four that reached `main`, and a correction to something shipped
+must outlive the audit that found it.
+
+The claim was that `test-hooks.sh:93` **asserted** the bare-push hole, by listing a push among the
+commands that must stay silent. It does not. Twelve lines above it the fixture switches to
+`feat/ordinary`, where allowing a push is correct and the assertion says so. The hole was never
+asserted or denied — it was simply that no case exercised a protected branch.
+
+Shipped to `main` in `e9483c1`, corrected the next day in `a94c005`, and found by **running the
+guard rather than re-reading the file**.
+
+**What it sharpens.** `STARTING.md` says _cite `file:line`, never a recollection_, and the failure
+here is that rule's other direction: the citation was exact, and the reading of it was wrong. A
+precise line number is evidence about **one line** and carries no information about the twelve above
+it that set up the state it runs in — while looking, in a report, exactly like a verified claim. The
+rule as written defends against vagueness; it says nothing about a precise reference read without
+its context, which is the more convincing of the two failures.
+
+One instance, so it stays here rather than becoming a rule. The second instance would earn an
+amendment to that bullet in `STARTING.md`.
 
 ### The war stories are the asset, and length pressure comes for them first
 
