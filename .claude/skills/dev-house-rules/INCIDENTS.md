@@ -13,6 +13,41 @@ any work.
 better; if a later run refutes it, that is a new entry, because a corrected story loses the thing
 that made it worth keeping. Entries are removed only when the subsystem they describe is gone.
 
+**Every entry ends with `**Found by**` — what caught it, not what caused it.** One line, naming the
+mechanism: a real run against a live target, `pnpm docs:check`, a hook test, the type checker, a
+fresh-context audit, review, or a user. This is the only field here that is not about the defect,
+and it exists because the rules are amended from this file: without it there is no way to tell which
+practice is actually productive, and so no evidence for which guard to build next. `CLAUDE.md`
+asserts that every defect of consequence in this project was found by driving a command against a
+real target rather than by the suite. That is the single most consequential claim in the working
+contract and it decides where effort goes.
+
+**The problem this solves is not absence, it is five phrasings.** When the field was introduced on
+2026-09-09, seven of the 35 entries did name what caught them — "Found by the first `--advance`
+against a real pull request", "The first live run reported, in its own `problems` field", "Counted
+while writing the CI workflow", "The first machine that ever ran it without one was CI", "**How it
+surfaced.** A human asked, twice". Every one of those is an answer; no two are shaped alike, so the
+set cannot be counted, and a claim about the whole file has to be taken on trust. One field name
+turns seven anecdotes into a tally.
+
+That estimate was itself wrong first: it was made by grepping for the string `Found by`, which
+matched three lines, and the figure "exactly one" reached this paragraph before a reader went
+entry by entry. Counting the string instead of the thing is
+[the defect two entries below](#the-compaction-finding-that-counted-the-string-instead-of-the-call),
+committed inside the paragraph introducing the field meant to make it countable.
+
+**Older entries are left exactly as they are.** Not backfilled, and not retrofitted with the field
+either — append-only is the strongest convention here, and inserting a line into 35 historical
+entries to make a tally tidy is the kind of edit this file exists to argue against. The seven that
+already answer the question are quoted above, which is enough for the baseline to be real; the rest
+are unrecoverable without invention, and an invented provenance would corrupt the one measurement
+the field exists to take. New entries carry it. The count becomes meaningful as the file grows, not
+by rewriting what it already holds.
+
+Where a new entry genuinely has no answer, the field says `not recorded` — and "a human noticed" and
+"nothing; it turned up while reading for something else" are the most valuable answers it can carry,
+because they are the ones that say the mechanisms did not fire.
+
 **Some sources sit outside this tree, and must say so.** Several entries quote the plan-mode
 planning documents written before a phase. Those are not `PLAN.md`, they are not in the repository,
 and `pnpm docs:check` structurally cannot open them — so it cannot tell such a citation from one
@@ -945,3 +980,81 @@ asserted at one of its sites is an anecdote with a test attached.
 **The rules** — [a guard is not shipped until a test fails when it is
 unplugged](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged); [tests that
 stop testing](PROVING.md#tests-that-stop-testing).
+
+---
+
+### Thirty-nine citations to sections that were never written
+
+An audit of this repository's own cross-reference system found roughly **39 dangling `§N`
+citations** in shipped source. The first diagnosis was that a renumbering had stranded them —
+`96998cc` did cut `PLAN.md` from 1774 lines to 438 — and that diagnosis is wrong. `§3a`, `§5b`,
+`§7b` and `§6.1c` appear in **none of the 54 historical revisions of `PLAN.md`**, in any form.
+
+They were never written down. A session held a plan in its context, wrote `§7b's infinite loop` into
+`src/watch/counter.ts` as though citing a document, and the plan died when the session did.
+`src/watch/decide.ts` does this four times. `ARCHITECTURE.md:619` says "See PLAN.md §5b" — the one
+citation in the tree that names its target document, and it resolves to nothing.
+
+**This is the project's own thesis failing in its own source.** Every rule here says that files
+outlive contexts and that a fact worth keeping is written to disk. These comments are the shape of
+that rule being followed and the substance of it being skipped: the citation format asserts an
+external, durable source, and there was never anything at the other end. A reader cannot tell the
+difference without going to look, which is why 39 of them survived review.
+
+**The quieter half is worse.** Some references are in range and silently repointed. Six files say
+"§1 refuses on-disk state"; `PLAN.md §1` is now "Which model runs which task", and that rule moved
+to `ARCHITECTURE.md §5`. A dangling number fails the moment anyone checks it. A repointed one reads
+correctly forever and misleads every time.
+
+**The mechanism is structural, not careless.** `PLAN.md` numbers its sections and rule 2 deletes
+entries when they ship, so every `§N` in that document names a slot guaranteed to be reused by
+unrelated work. Citing it by number from code was never going to hold. Cite `ARCHITECTURE.md`, whose
+sections are stable, or quote the reasoning where it is used.
+
+**Found by** a subagent audit asked to resolve every `§N` against its target document — and the
+audit's counts were right while its causal story was wrong, so the diagnosis above came from
+checking its claim against `git log` rather than from the report.
+[→ read wide in a subagent, decide in the main context](STARTING.md#read-wide-in-a-subagent-decide-in-the-main-context)
+
+**The rule** — [the plan is written before the work](STARTING.md#the-plan-is-written-before-the-work-not-after-it).
+Sized in `PLAN.md`, "The citations that were never written down"; the resolver and the 39 fixes are
+not built.
+
+---
+
+### The mutation test that reverted the file it was testing
+
+Two derived counts had just been added to `docs:check` — `§N` references in `src/`, and files
+repeating a quoted cost figure. Neither ships until it fails when unplugged, so each was mutated by
+appending to a file: a cost figure into `README.md`, a section reference into `settings.ts`, and a
+line of prose into `PLAN.md` to prove the code-only count does **not** move. All three fired
+correctly. Each was then undone with a per-file worktree restore.
+
+`PLAN.md` held about an hour of uncommitted work — two new sections and three rewritten bullets,
+including the very prose those two counts existed to pin. The restore reverted the file, not the
+appended line, and the mutation test destroyed exactly the work it had been run to verify.
+
+**The mechanism is that a mutation has two scopes and the restore has one.** The edit is a line; the
+undo is a file. Identical in a clean tree, silently different in a dirty one — and unplugging a
+guard happens at the end of a change, which is when the tree is dirtiest. Nothing warned: reverting
+a modified file does not look destructive and reports the same one-path summary whether it discarded
+one line or four hundred.
+
+**The near-miss is the part worth keeping.** It was caught only because the same command printed
+`git status` for an unrelated reason and `PLAN.md` was missing from the list. Had the next step been
+a commit of the named files, the work would have been gone and the commit would have looked
+complete: the other five files were correct, and `docs:check` would then have failed on an
+uncited number — which reads like a small prose fix, not like a restore.
+
+**A second guard fired on the write-up, not the act.** Recording this entry was refused by an outer
+guard, because the prose quoted the destructive command it warns about. That is the third instance
+of a text-matching guard reading a description as the deed
+([the first](#the-commit-message-that-was-refused-as-the-act-it-described)), and the entry is
+phrased around the command rather than quoting it — the guard is correct to be blunt, and the cost
+of that bluntness is paid in wording.
+
+**Found by** `git status` output printed incidentally by the mutation script — by no check. The
+suite, the type checker and the hook tests were all green throughout, and `docs:check` would have
+caught it one step later as the wrong problem.
+
+**The rule** — [commit before you mutate](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged).

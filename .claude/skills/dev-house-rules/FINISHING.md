@@ -121,12 +121,41 @@ concludes that no rule was skipped. Hand a fresh context the diff and the rules 
 rules the change touches and which are unsatisfied — and **prime it with nothing else**. Offering it
 a verdict to reach is how an adversarial subagent was once talked into alleging invention; the
 finding was relayed at full strength and was wrong.
-[→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms)
+[→ priming, and what to check before relaying](STARTING.md#read-wide-in-a-subagent-decide-in-the-main-context)
+· [→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms)
 
 **What none of this catches**, stated because the gap is the point: a rule silently reinterpreted,
 where `Rules owed: none` is written in good faith. The class this rule comes from surfaced because a
 human asked twice. Nothing here replaces that reader; it lowers how often they must think to ask.
 [→](INCIDENTS.md#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them)
+
+---
+
+## The commit is where you choose to compact
+
+**A compaction you did not choose happens at the worst available moment.** It fires when the context
+is exhausted, and the context is most exhausted in the middle of the largest change — halfway
+through an edit, with the intent held nowhere but here. What survives is then whatever a summariser
+judged important, which is reliably the narrative and not the file paths.
+
+So take the decision instead of receiving it. **A commit has just made the context disposable**: the
+work is on disk, `PLAN.md` holds the intent, the branch holds the position. That is the cheapest
+moment in the whole cycle to lose everything else, and it is the one moment you can see coming —
+which is the same argument `CLAUDE.md` makes for running `pnpm hooks:brief` off the commit rather
+than off a compaction. If a unit has just landed and the next one is large, compact **there**, on
+purpose.
+
+**Say what to preserve, because the default keeps the wrong half.** Name the things that are
+expensive to recover and cheap to state: the branch and what it is stacked on, the `PLAN.md` entry
+in force, the paths under edit, and what has already been ruled out. A summariser left to itself
+will keep an account of the session — which reads as though the work is understood, and is exactly
+[the inheritance that makes a resuming context misjudge its own position](STARTING.md#the-plan-is-written-before-the-work-not-after-it).
+
+**None of this is a substitute for the files.** If compacting at a chosen point would lose something,
+that thing belonged in `PLAN.md` or in a doc comment before the commit, and the fix is to write it
+down rather than to compact more carefully. The test is worth applying deliberately: **if this
+context vanished now, what would the next one not be able to reconstruct?** Anything on that list is
+a gap in the tree, not a gap in the summary.
 
 ---
 
@@ -160,6 +189,13 @@ measurement that can be re-taken.
    [→](INCIDENTS.md#the-favicon-reconstructed-from-an-adjective)
 3. **What would have caught it, and does that generalise?** A fix for one case belongs in the code. A
    rule belongs here only if it would have caught a _class_.
+
+**Then record what actually caught it**, as the `**Found by**` line the incident entry ends with.
+Question 3 is a counterfactual and this is not: one is the guard worth building, the other is the
+practice that is already paying. They are usually different, and the gap between them is the only
+honest measure of whether the mechanisms here work. Answer it even when the answer is unflattering —
+"a user noticed" and "nothing; it was found while reading for something else" are the two most
+useful values this field can take, because they are the ones that say the mechanisms did not fire.
 
 **A rule with one instance is a hypothesis.** Write the case down, in `PLAN.md` or in the module's
 own header, and wait. This repository named the literal-list rule on its **third** instance and

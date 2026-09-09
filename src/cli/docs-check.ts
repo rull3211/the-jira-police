@@ -35,10 +35,18 @@
  * being nowhere to put it.
  *
  * **What it deliberately does not cover.** Assertion counts ("21 assertions
- * redirected", "57 assertions behind pnpm test:hooks"), costs, and anything
- * else that is a measurement of one past run rather than a property of the
- * tree. Those are history, not state, and a check that re-derived them would be
- * asserting that the past has not changed. They stay a matter of reading.
+ * redirected", "57 assertions behind pnpm test:hooks"), what a run cost, and
+ * anything else that is a measurement of one past run rather than a property of
+ * the tree. Those are history, not state, and a check that re-derived them would
+ * be asserting that the past has not changed. They stay a matter of reading.
+ *
+ * **The line is what the number measures, not what it is about.** `$4.50` is
+ * history and is not checked. *How many documents repeat `$4.50`* is a property
+ * of the tree today, and `PLAN.md` §13 cites it while making the argument that
+ * facts with many homes drift — so it was itself wrong, by one, within days. The
+ * same held for the size of the `§N` cross-reference system, cited at 87 when
+ * the tree had nearly three times that. A section that catalogues unchecked
+ * facts is the last place an unchecked fact should be, and both are now derived.
  */
 
 import { execFileSync } from "node:child_process";
@@ -116,6 +124,66 @@ function markdownFiles(dir: string, found: string[] = []): string[] {
   return found;
 }
 
+/** Every `.ts` in the tree, for a count that is about code and not about prose. */
+function typescriptFiles(dir: string, found: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (SKIP_DIRS.has(entry)) {
+      continue;
+    }
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) {
+      typescriptFiles(path, found);
+    } else if (entry.endsWith(".ts")) {
+      found.push(path);
+    }
+  }
+  return found;
+}
+
+/**
+ * How many `§N` references the *code* contains.
+ *
+ * **Markdown is deliberately excluded, and that is not a simplification.** The
+ * first version counted both, and then every sentence written about the problem
+ * moved the number it was reporting: documenting the dangling citations in
+ * `PLAN.md` and `INCIDENTS.md` — which must name `§7b` and `§3a` in order to say
+ * that they resolve to nothing — drove three consecutive failures of this check
+ * in the commit that introduced it. A count whose own write-up perturbs it is
+ * noise, and a check that cries wolf gets switched off. Restricted to `.ts`, it
+ * measures the population that actually matters and holds still while being
+ * described.
+ *
+ * This counts the system's *size* and does not check that any reference
+ * resolves. `PLAN.md` §13 records that gap; roughly 39 of these point at
+ * sections that have never existed in any revision of the document they appear
+ * to cite. Sizing it keeps the cited scale of that problem honest until the
+ * resolver is built. It is not the resolver.
+ */
+function sectionReferences(): number {
+  let found = 0;
+  for (const file of typescriptFiles(ROOT)) {
+    found += (readFileSync(file, "utf8").match(/§\d/gu) ?? []).length;
+  }
+  return found;
+}
+
+/**
+ * The per-ticket cost figures quoted in prose, and how many files repeat each.
+ *
+ * The sum is what gets cited, rather than four separate counts, because the
+ * claim in `PLAN.md` §13 is about the class: these are facts with many homes and
+ * no maintainer. One total goes red whichever figure spreads.
+ */
+const COST_FIGURES = ["$0.94", "$0.11", "$3.99", "$4.50"] as const;
+
+function costHomes(files: readonly string[]): number {
+  const contents = files.map((file) => readFileSync(file, "utf8"));
+  return COST_FIGURES.reduce(
+    (total, figure) => total + contents.filter((text) => text.includes(figure)).length,
+    0,
+  );
+}
+
 function citationsOf(fact: Fact, files: readonly string[]): Citation[] {
   const found: Citation[] = [];
   for (const file of files) {
@@ -162,6 +230,8 @@ const suite = suiteShape();
 
 const COUNT = String.raw`\d[\d,]*`;
 const CAPTURED = String.raw`(\d[\d,]*)`;
+
+const files = markdownFiles(ROOT);
 
 const FACTS: readonly Fact[] = [
   {
@@ -211,9 +281,22 @@ const FACTS: readonly Fact[] = [
     cited: citation(CAPTURED, "test", "files"),
     expectSites: 1,
   },
+  {
+    what: "section references in the tree",
+    actual: sectionReferences(),
+    phrase: "<N> section references",
+    cited: citation(CAPTURED, "section", "references"),
+    expectSites: 1,
+  },
+  {
+    what: "file-homes shared by the quoted cost figures",
+    actual: costHomes(files),
+    phrase: "<N> file-homes",
+    cited: citation(CAPTURED, "file-homes"),
+    expectSites: 1,
+  },
 ];
 
-const files = markdownFiles(ROOT);
 const problems: string[] = [];
 
 for (const fact of FACTS) {

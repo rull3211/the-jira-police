@@ -382,9 +382,12 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **87 `§N`/`invariant N` references** — is unchecked
-  entirely. `CLAUDE.md`'s own routing table was the third gap here and is now closed: its filenames
-  are links, so deleting a phase file fails the check by name instead of keeping it green.
+  repository's real cross-reference system — **106 section references** from `src/` alone, mostly
+  into the two instruction skills — is unresolved entirely, and **roughly 39 of them point at
+  sections that have never existed** (below, "The citations that were never written down").
+  `CLAUDE.md`'s own routing table was the third gap here and is now closed: its filenames are links,
+  so deleting a phase file fails the check by name instead of keeping it green. The size of the
+  system is now derived by `docs:check`; whether any of it resolves is still not.
 - **Nothing checks that an incident is reachable from a rule.** `docs:check` verifies that a link
   _resolves_, never that one _exists_, so the direction `FINISHING.md` makes explicit — the rule
   links to the incident, never the reverse — is unenforced in the only direction that matters.
@@ -392,8 +395,11 @@ not a plan item. What is left below is only what is still missing.
   inbound link from any rule file, and it was the entry added that morning. Caught by a fresh-context
   audit, which is not a mechanism — and the audit was needed again the same day, for entries 34 and 35. The check is cheap — every heading must be linked from at least one of the five rule files —
   and it belongs with `docs-check.test.ts` above.
-- **Cost figures are facts with many homes.** `$0.94` in five files, `$0.11` in five, `$3.99` in
-  three, `$4.50` in three, outside the `docs:check` exemption rule 3 grants.
+- **Cost figures are facts with many homes.** `$0.94`, `$0.11`, `$3.99` and `$4.50` occupy 17
+  file-homes between them, outside the `docs:check` exemption rule 3 grants. The figures themselves
+  are history and stay unchecked; the total is derived, so the class spreading further goes red —
+  this bullet said "three" of `$4.50` while it was already in four, which is the drift it describes,
+  happening to it.
 - **A citation to a document outside the tree cannot be checked, and does not look different.**
   `docs:check` can only resolve what it can open, so an out-of-tree quotation is exempt by nature
   while reading exactly like a verifiable one — which is how two of them were misattributed to
@@ -429,6 +435,66 @@ guard work that was worth more than the whole `docs:check` list has now shipped,
 here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
 which is not ours (§12). If the next session has budget for exactly one, take the class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
+
+### 14. Context is the scarce resource, and nothing in the rules says how to spend it
+
+**Branch:** `feat/checklist-in-claude-md`
+
+**What is being attempted.** Four amendments to the house rules, and two new derived counts, all
+from one finding: this repository's whole thesis is that files outlive contexts, and it had never
+written down how to work that way.
+
+- **`Found by` on every incident.** 35 entries record what broke; seven name what caught it, in five
+  different phrasings, so the set cannot be counted and `CLAUDE.md`'s claim that defects here are
+  found by real runs rather than by the suite cannot be checked. One field name turns seven
+  anecdotes into a tally. Older entries are left alone — append-only is the stronger convention.
+- **Subagents, as a way to spend context rather than only a hazard.** The rules mentioned them three
+  times, all cautionary. Nothing said to read wide in a subagent and decide in the main context,
+  which is the technique that makes a long session survivable. It ships with its counterweight:
+  claims are verified before they are relayed, and the diagnosis is verified separately from the
+  findings, because both failed that way in this session.
+- **Electing the compaction boundary.** `/compact` appeared nowhere in the tree. The commit is the
+  moment the context is disposable and the only boundary you can see coming.
+- **`PLAN.md` entries keyed by branch**, so `CLAUDE.md`'s resuming row can be followed at all.
+
+**Why now.** An audit found roughly 39 `§N` citations pointing at sections that were never written.
+See the entry below; the fix is its own branch, and this entry covers only the rules and the counts.
+
+**What would make this the wrong idea.** Three of the four amendments are prose about how to think,
+and this repository's evidence is that prose catches less than a command does. `Found by` is the
+only one that produces data, and it produces it slowly. If they read as advice rather than as rules
+with incidents attached, they will be skipped like any other advice.
+
+### 15. The citations that were never written down
+
+**Not started.** Sized only; the fix is its own branch.
+
+Roughly **39 dangling `§N` citations** in shipped source. The first diagnosis — that a renumbering
+stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **none of the 54 historical
+revisions of `PLAN.md`**, in any form. They were never written down. `ARCHITECTURE.md:619` says
+"See PLAN.md §5b", the one citation naming its target, and it resolves to nothing;
+`ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 15.
+
+**The quieter half is worse.** Some references are in range and silently repointed: six files say
+"§1 refuses on-disk state", but that rule moved to `ARCHITECTURE.md §5`. A dangling number fails
+when checked; a repointed one reads correctly forever.
+
+**The root cause is structural.** `PLAN.md` numbers its sections and rule 2 deletes entries when
+they ship, so every `§N` there names a slot guaranteed to be reused. Three fixes, and the third
+matters most:
+
+1. A resolver in `docs:check`: every `§N` names its target document, and that section exists. **It
+   needs an exemption for references that are quoted rather than made** — the incident recording
+   this names `§3a` and `§7b` in order to say they resolve to nothing, and a resolver without that
+   distinction reports the write-up as four defects. A guard that fires on its own documentation
+   gets switched off.
+2. Fix the 39. Most need a human: the intended target is often unrecoverable, and deleting a comment
+   that cites nothing sometimes destroys the only record of a decision.
+3. **Stop citing `PLAN.md` by number from code.** Cite `ARCHITECTURE.md`, whose sections are stable,
+   or quote the reasoning where it is used.
+
+**What would make this the wrong idea.** Item 2 is a large mechanical diff across `src/` with real
+judgement in it, and a batch pass by an agent is how 39 confident references to nothing got here.
 
 ---
 

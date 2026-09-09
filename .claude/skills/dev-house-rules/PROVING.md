@@ -44,6 +44,15 @@ observed from inside a test runner that is itself holding the loop open. Run a c
 assert on its exit code.
 [→](INCIDENTS.md#the-unref-that-killed-the-only-loop-whose-job-is-waiting)
 
+**Commit before you mutate, or mutate something you have not written.** Unplugging a guard means
+deliberately damaging the tree and then restoring it, and the restore is a blunt instrument:
+`git checkout <file>` reverts the whole file, not the line you added. Run that against a file
+holding uncommitted work and the mutation test destroys the work it was verifying. It happened here
+on 2026-09-09 — two new `docs:check` facts were mutation-tested by appending to `README.md`,
+`settings.ts` and `PLAN.md`, and the third `git checkout` deleted an hour of unrelated `PLAN.md`
+edits that were still in the working tree.
+[→](INCIDENTS.md#the-mutation-test-that-reverted-the-file-it-was-testing)
+
 **None of this is the safety net.** This section stops you re-breaking what you already understand.
 It has never once caught a defect of the kind that actually escaped here, and read on its own it
 will leave you trusting a green suite.

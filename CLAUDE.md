@@ -36,14 +36,14 @@ waterfall. The rule and the story are in
 optional reading and it is not a style guide; every rule in it is the generalisation of a defect
 that already got through here. It is split the way a change is — **load the phase you are in**:
 
-| when you are                                 | load                                                                                                                                      |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| resuming work you did not start              | `git status`, `git log --oneline -5`, this branch's [`PLAN.md`](PLAN.md) entry — then the row below that matches what you are about to do |
-| starting anything that is not a one-line fix | [STARTING.md](.claude/skills/dev-house-rules/STARTING.md)                                                                                 |
-| writing or deleting code                     | [BUILDING.md](.claude/skills/dev-house-rules/BUILDING.md)                                                                                 |
-| adding a guard, a test, or running the thing | [PROVING.md](.claude/skills/dev-house-rules/PROVING.md)                                                                                   |
-| committing, or amending the rules themselves | [FINISHING.md](.claude/skills/dev-house-rules/FINISHING.md)                                                                               |
-| asking _why_ a rule exists                   | [INCIDENTS.md](.claude/skills/dev-house-rules/INCIDENTS.md) — cited from each rule                                                        |
+| when you are                                 | load                                                                                                                                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| resuming work you did not start              | `git status`, `git log --oneline -5`, then the [`PLAN.md`](PLAN.md) entry naming your branch — in-flight entries open with one — then the row below that matches what you are about to do |
+| starting anything that is not a one-line fix | [STARTING.md](.claude/skills/dev-house-rules/STARTING.md)                                                                                                                                 |
+| writing or deleting code                     | [BUILDING.md](.claude/skills/dev-house-rules/BUILDING.md)                                                                                                                                 |
+| adding a guard, a test, or running the thing | [PROVING.md](.claude/skills/dev-house-rules/PROVING.md)                                                                                                                                   |
+| committing, or amending the rules themselves | [FINISHING.md](.claude/skills/dev-house-rules/FINISHING.md)                                                                                                                               |
+| asking _why_ a rule exists                   | [INCIDENTS.md](.claude/skills/dev-house-rules/INCIDENTS.md) — cited from each rule                                                                                                        |
 
 **The first row is the one that gets skipped, because nothing announces that it applies.** A
 compacted context, or a session picking up a branch somebody else left, inherits an account of the
@@ -99,7 +99,8 @@ mechanical — the counts cited in prose, and every cross-document link.
 ## Before you start
 
 **Write it into `PLAN.md` first** — what is being attempted, why now, and what would make it the
-wrong idea. Then do the work; the entry is deleted when it ships. This is not bookkeeping. Work here
+wrong idea, opening with a bold `Branch:` label naming the branch so the entry can be found from it.
+Then do the work; the entry is deleted when it ships. This is not bookkeeping. Work here
 is done in sessions that end and compact, and a session that holds the intent only in its own
 context leaves the next one a diff and a branch name. A diff never says what was being attempted or
 what was already ruled out.
