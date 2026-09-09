@@ -21,6 +21,7 @@
     "test:watch": "vitest",
     "test:hooks": ".claude/hooks/test-hooks.sh",
     "hooks:brief": "printf '{\"trigger\":\"compact\"}' | CLAUDE_PROJECT_DIR=\"$PWD\" .claude/hooks/session-brief.sh",
+    "hooks:commit-brief": "CLAUDE_PROJECT_DIR=\"$PWD\" .claude/hooks/commit-brief.sh </dev/null | node -e 'let s=\"\";process.stdin.on(\"data\",(d)=>(s+=d)).on(\"end\",()=>process.stdout.write(JSON.parse(s).hookSpecificOutput.additionalContext+\"\\n\"))'",
     "docs:check": "node src/cli/docs-check.ts"
   },
   "devDependencies": {

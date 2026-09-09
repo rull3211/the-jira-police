@@ -84,8 +84,25 @@ scratch() {
   printf '%s' "$dir"
 }
 
+# The command is JSON-encoded rather than interpolated, and that is a repair.
+# For as long as this helper existed it wrote the command straight into the
+# string, so any case whose command contained a double quote produced a payload
+# no hook could parse. Those assertions were not testing what they said: the
+# hook was falling through its "cannot read the command" path and the expected
+# outcome happened to be the same one. Exposed by commit-brief.sh, which is the
+# first hook here that behaves differently on an unparseable payload than on a
+# command it does not care about — three of its assertions inverted, and the
+# harness turned out to be the thing that was wrong.
+#
+# This is lib.sh's jsonEscape incident for a third time, in the test suite this
+# time: hand-built JSON containing user text is the same defect wherever it is
+# written.
 bash_payload() {
-  printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$1"
+  node -e '
+    process.stdout.write(
+      JSON.stringify({ tool_name: "Bash", tool_input: { command: process.argv[1] } }),
+    );
+  ' "$1"
 }
 
 echo "branch-guard.sh"
@@ -237,10 +254,28 @@ done
 # The floor exists for exactly this: command-position analysis cannot see inside
 # a quoted `-c` argument, so dropping the substring pass in favour of the
 # inversion would have opened a hole while closing thirty. Measured — with the
-# floor removed, both of these are allowed on a protected branch.
-for w in "sh -c 'git commit -m x'" "bash -lc \"git push\""; do
+# floor removed, all of these are allowed on a protected branch.
+#
+# The second and third are the shape the floor was missing until this suite
+# stopped feeding it malformed JSON: the write verb sits flush against the
+# closing quote, and the old `([[:space:]]|$)` terminator did not match a quote.
+# `bash -lc "git push"` was in this list and passing on the harness defect
+# rather than on the guard. The single-quoted fixture never covered it, because
+# its verb is followed by a space either way — which is why one bad terminator
+# hid behind a neighbouring assertion for four days.
+for w in "sh -c 'git commit -m x'" "bash -lc \"git push\"" "sh -c 'git pull'" \
+  "bash -c \"cd /tmp && git commit\""; do
   expect "on main refuses: $w" DENY \
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The over-refusal side of widening that terminator. A read inside the same
+# quoting must still come back silent, or the floor has stopped being a floor
+# and become a ban on the word "git" in an argument.
+for r in "bash -lc \"git status\"" "sh -c 'git log --oneline -5'" \
+  "bash -c \"git rev-parse HEAD\""; do
+  expect "on main allows: $r" SILENT \
+    "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
 # Each simple command is examined on its own, so a write in the second half of a
@@ -587,6 +622,177 @@ expect "...and it still prints the brief" yes \
   "$(contains "$(cat "$brief_repo/silent.out" 2>/dev/null || true)" 'dev-house-rules/SKILL.md')"
 
 echo
+echo "commit-brief.sh"
+
+# The only hook here that is not a guard. It prints the four questions when a
+# commit is about to happen and never refuses, so the assertions split three
+# ways: it fires on the right commands, it stays out of the way on everything
+# else, and — the one that matters most — it carries no permission decision at
+# all. A reminder that accidentally learned to deny would stop every commit in
+# the repository, and every stdout assertion below would still pass.
+
+commit_repo="$(scratch)"
+mkdir -p "$commit_repo/.claude/skills/dev-house-rules"
+cp "$ROOT/.claude/skills/dev-house-rules/FINISHING.md" \
+  "$commit_repo/.claude/skills/dev-house-rules/FINISHING.md"
+
+commit_out() {
+  bash_payload "$1" | CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh"
+}
+
+# The advisory text, or empty. Distinct from `decision()` above, which reports
+# BADJSON for output this hook produces on purpose — there is no
+# permissionDecision to read.
+context() {
+  node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      if (!s.trim()) return;
+      try {
+        process.stdout.write(String(JSON.parse(s).hookSpecificOutput.additionalContext || ""));
+      } catch {
+        process.stdout.write("BADJSON");
+      }
+    });
+  '
+}
+
+# yes when the output carries any permissionDecision field, which this hook must
+# never do.
+carries_decision() {
+  node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      if (!s.trim()) return console.log("no");
+      try {
+        const o = JSON.parse(s).hookSpecificOutput || {};
+        console.log("permissionDecision" in o ? "yes" : "no");
+      } catch {
+        console.log("BADJSON");
+      }
+    });
+  '
+}
+
+fires() {
+  local out
+  out="$(commit_out "$1")"
+  if [ -n "$out" ]; then printf 'yes'; else printf 'no'; fi
+}
+
+# The same question asked of a whole payload rather than a command, for the
+# shapes `bash_payload` cannot build.
+fires_payload() {
+  local out
+  out="$(printf '%s' "$1" | CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh")"
+  if [ -n "$out" ]; then printf 'yes'; else printf 'no'; fi
+}
+
+expect "fires on a plain git commit" yes "$(fires 'git commit')"
+expect "fires on git commit -m" yes "$(fires 'git commit -m ok')"
+expect "fires on git commit --amend" yes "$(fires 'git commit --amend')"
+expect "fires after && in a chain" yes "$(fires 'pnpm test && git commit -m ok')"
+expect "fires after ; in a chain" yes "$(fires 'pnpm test; git commit -m ok')"
+
+# The solver works in isolated worktrees, so this is the form it would use. It
+# is also the case the first pattern got wrong: allowing only dash-prefixed
+# tokens between `git` and `commit` skipped the *argument* of `-C`.
+expect "fires on git -C <path> commit" yes "$(fires 'git -C /tmp/x commit --amend')"
+expect "fires on git -c k=v commit" yes "$(fires 'git -c user.name=x commit')"
+
+# branch-guard.sh's rule, and the reason it matters more here: this hook fires
+# on commits, and a commit message is the one place in this repository where the
+# words "git commit" appear in prose constantly. Anchoring is the difference
+# between guarding the act and censoring the words.
+expect "silent on an unrelated git command" no "$(fires 'git status')"
+expect "silent on a word that merely starts with commit" no "$(fires 'git commitment')"
+expect "silent when the words appear in a quoted argument" no \
+  "$(fires 'echo "remember to git commit later"')"
+expect "silent when searching for the words" no "$(fires 'git log --grep "git commit"')"
+expect "silent when searching for them unquoted" no "$(fires 'git log --grep git commit')"
+expect "silent on a PR body mentioning them" no \
+  "$(fires 'gh pr create --body "then git commit"')"
+
+# The assertion the rest of this block exists to protect. A printer that starts
+# denying blocks every commit; a printer that starts asking prompts on every
+# one, which trains the human to approve without reading.
+expect "carries no permission decision" no "$(commit_out 'git commit' | carries_decision)"
+expect "the payload is valid JSON with context" yes \
+  "$(contains "$(commit_out 'git commit' | context)" 'no command behind them')"
+expect "names the branch it is about to commit on" yes \
+  "$(contains "$(commit_out 'git commit' | context)" "on 'main'")"
+
+# DERIVED, not pasted — the same split as the compact brief above. A copy of the
+# checklist living in a shell script would pass the "contains" assertion and
+# fail both mutations, and nothing else in this tree would ever check it.
+expect "carries the 3am question" yes \
+  "$(contains "$(commit_out 'git commit' | context)" 'If this fails at 3am')"
+expect "keeps the wrapped continuation of an item" yes \
+  "$(contains "$(commit_out 'git commit' | context)" 'the ones you did not.')"
+expect "carries the Rules owed line" yes \
+  "$(contains "$(commit_out 'git commit' | context)" 'Rules owed:')"
+
+# Mutation 1: rename the heading. Unlike session-brief.sh, going quiet is NOT
+# the accepted degradation here — this fires at the one moment the questions
+# help, so it has to say out loud that it has stopped working.
+sed -i.bak 's/^## The checklist/## The list/' \
+  "$commit_repo/.claude/skills/dev-house-rules/FINISHING.md"
+renamed="$(commit_out 'git commit' | context)"
+expect "renaming the heading drops the questions" no \
+  "$(contains "$renamed" 'If this fails at 3am')"
+expect "...and it says so instead of going silent" yes \
+  "$(contains "$renamed" 'has stopped reminding')"
+expect "...and still carries no decision" no "$(commit_out 'git commit' | carries_decision)"
+mv "$commit_repo/.claude/skills/dev-house-rules/FINISHING.md.bak" \
+  "$commit_repo/.claude/skills/dev-house-rules/FINISHING.md"
+
+# Mutation 2: edit the text. The brief must follow FINISHING.md rather than a
+# snapshot taken when this hook was written.
+sed -i.bak 's/If this fails at 3am/If this fails at dawn/' \
+  "$commit_repo/.claude/skills/dev-house-rules/FINISHING.md"
+expect "edited question text follows through" yes \
+  "$(contains "$(commit_out 'git commit' | context)" 'If this fails at dawn')"
+mv "$commit_repo/.claude/skills/dev-house-rules/FINISHING.md.bak" \
+  "$commit_repo/.claude/skills/dev-house-rules/FINISHING.md"
+
+# Quoting. The four questions contain double quotes, em dashes and a bracketed
+# markdown link, so the JSON is built by node rather than hand-escaped. This is
+# lib.sh's jsonEscape incident in a different costume: unescaped output is
+# dropped by the runtime, and a hook that emits nothing looks exactly like a
+# hook that had nothing to say.
+expect "the embedded double quotes survive encoding" yes \
+  "$(contains "$(commit_out 'git commit' | context)" '"The exception propagates"')"
+expect "the markdown link survives encoding" yes \
+  "$(contains "$(commit_out 'git commit' | context)" \
+    '(#the-rules-you-owe-are-written-down-or-they-are-not-owed)')"
+
+# Inspectability. Run by hand it prints, so a person can read what the model is
+# being told rather than inferring it from the source.
+expect "no payload at all still prints" yes \
+  "$(contains "$(CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh" </dev/null | context)" \
+    'If this fails at 3am')"
+
+# A payload that does not parse and a payload with no command in it are
+# different failures and get different answers. The first version treated both
+# as "not a commit" and went quiet, which is how a hook stops working and looks
+# exactly like a hook with nothing to say — the failure mode this whole branch
+# was opened about. Found by this assertion, which was written expecting the
+# opposite result.
+unparsed="$(printf '%s' '{not json' |
+  CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh" | context)"
+expect "an unparseable payload still prints" yes "$(contains "$unparsed" 'If this fails at 3am')"
+expect "...and says the payload is the reason" yes "$(contains "$unparsed" 'could not parse')"
+expect "...and still carries no decision" no \
+  "$(printf '%s' '{not json' |
+    CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh" | carries_decision)"
+
+# Parsed, but no command: an ordinary PreToolUse payload for any tool that is
+# not Bash. Silence is correct here, and asserting it is what stops the fix
+# above from being widened into "print on everything".
+expect "a parsed payload with no command stays silent" no \
+  "$(fires_payload '{"tool_name":"Write","tool_input":{"file_path":"/tmp/x"}}')"
+
+echo
 echo "exit codes, and the branch list they print"
 
 # Every assertion above this line reads stdout and none of them read an exit
@@ -626,6 +832,17 @@ expect "branch-stack: ask exits 0, never 2" 0 "$?"
 
 CLAUDE_PROJECT_DIR="$(scratch)" "$HOOKS/branch-stack.sh" </dev/null >/dev/null 2>&1
 expect "branch-stack: staying silent exits 0" 0 "$?"
+
+# Both paths, because this hook has no decision to carry: a non-zero exit is the
+# only way it could ever block anything, and exit 2 in particular is documented
+# as blocking with stderr fed back. A reminder must not be able to stop a commit.
+bash_payload "git commit -m x" |
+  CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh" >/dev/null 2>&1
+expect "commit-brief: printing exits 0, never 2" 0 "$?"
+
+bash_payload "git status" |
+  CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh" >/dev/null 2>&1
+expect "commit-brief: staying silent exits 0" 0 "$?"
 
 # `paste -sd ', '` reads -d as a cycling list of delimiters rather than as one
 # two-character separator, so three branches came out as "a,b c". Nothing caught

@@ -248,12 +248,36 @@ if [ -n "$command_text" ]; then
   mutates=no
 
   # The floor: the original substring list, which sees into `sh -c '...'` and
-  # into quoting that command-position analysis cannot parse. Each entry is
-  # terminated by `([[:space:]]|$)`, which is load-bearing rather than tidiness:
-  # without it `pull` matches `git pull-request`, the same way a bare substring
-  # match on `main` once refused `fix/domain`.
+  # into quoting that command-position analysis cannot parse.
+  #
+  # The terminator is load-bearing and was wrong. It read `([[:space:]]|$)`,
+  # which stops `pull` swallowing `git pull-request` — the same class as the
+  # bare `main` match that once refused `fix/domain` — but a quote is neither a
+  # space nor end-of-string, so `bash -lc "git push"` did not match. The verb
+  # sat flush against the closing quote, and that is the *only* shape the floor
+  # exists to catch: command-position analysis sees `bash` and stops. The
+  # command was allowed on `main`, which is rule 1 unguarded by both halves at
+  # once.
+  #
+  # It had an assertion, and the assertion passed for four days on a defect in
+  # the test harness rather than on the guard: `bash_payload` interpolated the
+  # command into JSON without escaping, so a fixture containing a double quote
+  # produced a payload the hook could not parse, and an unreadable command is
+  # treated as a write. The guard denied — for the one reason the assertion was
+  # not testing. Found while writing commit-brief.sh, the first hook here whose
+  # behaviour on an unparseable payload differs from its behaviour on a command
+  # it does not care about.
+  #
+  # Now terminated by `[^[:alnum:]_-]`, so a quote, a full stop or a bracket
+  # ends the verb while `pull-request` and `applypatch-msg` still do not match.
+  # What that widens: the floor is a substring pass over the whole command text,
+  # so prose ending "...then git push." now reads as a write. That is bounded —
+  # the result is only ever consulted to refuse work on a protected branch,
+  # where nearly everything is refused anyway, and the escape hatch verbs are
+  # not on this list — and it is the fail-closed direction for the rule CLAUDE.md
+  # says is not advisory.
   if printf '%s' "$command_text" | grep -Eq \
-    'git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|pull|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([[:space:]]|$)'; then
+    'git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|pull|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([^[:alnum:]_-]|$)'; then
     mutates=yes
   fi
 

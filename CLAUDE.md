@@ -87,10 +87,17 @@ commit; the full text and the reasoning are in
 **If you cannot remember reading `FINISHING.md` in this session, you have not read it.** Run
 `pnpm hooks:brief` before committing: it prints these four in full, the two rules above, and the
 current branch and stack depth. Trigger it off the commit rather than off a compaction — a commit is
-a moment you can observe, a compaction is not. The `SessionStart` hook does now print unasked, but
-at startup it prints only a pointer to the contract; it inlines these four on `trigger=compact`, and
-a commit is not a `SessionStart` trigger at all. So the moment they are for is still the one nothing
-fires on: this stays a habit and not a guard, and nothing checks that you ran it.
+a moment you can observe, a compaction is not.
+
+**Something does now fire on that moment, and it is still not a guard.** `commit-brief.sh` is a
+`PreToolUse` hook that prints these four when the command is a `git commit`; `pnpm hooks:commit-brief`
+is the same text on demand. It carries no permission decision, because there is no mechanical test
+for having asked yourself a question — a refusal here could only block every commit or be dismissed
+by rote. So it can remind and it cannot check, and two things still have to be true on your own
+authority: it only fires if the operator has registered it, which you cannot verify by its silence,
+and its transport has never been watched working ([`ARCHITECTURE.md` §16](ARCHITECTURE.md)). Read
+these four here, in this file, and treat anything that prints them again as a second chance rather
+than as the mechanism.
 
 ## Where the truth lives
 

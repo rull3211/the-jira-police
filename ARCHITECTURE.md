@@ -2787,14 +2787,27 @@ after a compaction — is the case where they matter most.
 | `branch-guard.sh`  | `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit` | refuses a write on a protected branch (`main`, `master`, `develop`, `release/*`), refuses a push naming one from any branch, and refuses `gh pr merge` from every branch |
 | `branch-stack.sh`  | `PreToolUse` on `Bash`                                  | returns `ask` when a new branch would take the stack past `BRANCH_STACK_MAX` (default 3)                                                                                 |
 | `session-brief.sh` | `SessionStart`                                          | prints the contract; on `trigger=compact` it also inlines the two rules and `FINISHING.md`'s four questions                                                              |
+| `commit-brief.sh`  | `PreToolUse` on `Bash`                                  | prints `FINISHING.md`'s four questions when the command is a `git commit`; carries no permission decision at all                                                         |
 
 `lib.sh` holds what they share. `test-hooks.sh` is the suite, behind `pnpm test:hooks`;
-`pnpm hooks:brief` renders the compaction brief on demand. Registration lives in the settings file
-under `.claude/`, written and reviewed by the operator.
+`pnpm hooks:brief` and `pnpm hooks:commit-brief` render the two briefs on demand. Registration lives
+in the settings file under `.claude/`, written and reviewed by the operator.
 
-**`session-brief.sh` extracts rather than copies.** Both inlined blocks are pulled out of `CLAUDE.md`
-and `FINISHING.md` at run time with `awk`, so the brief cannot drift from the documents it quotes.
-Two of the suite's mutations are stale pasted copies of exactly those two extractions.
+**Three of the four guard the tree; `commit-brief.sh` guards nothing.** It is the only script here
+that never refuses and never prompts — it emits `hookSpecificOutput.additionalContext` with exit 0
+and no `permissionDecision`, which hands text to the model and leaves the permission flow untouched.
+That is deliberate and not timidity: there is no mechanical test for "did you ask yourself these
+four", so a refusal could not tell a satisfied condition from an unsatisfied one and would either
+block every commit or be dismissed by rote. It exists because the four questions are the part of the
+contract with no command behind them, and because `session-brief.sh` was firing at the wrong moment
+— a compaction is not a commit, and a commit is the moment the questions are for.
+
+**Both briefs extract rather than copy.** Every inlined block is pulled out of `CLAUDE.md` and
+`FINISHING.md` at run time with `awk`, so neither can drift from the documents it quotes. Six of the
+suite's mutations are stale pasted copies of exactly those extractions. Where they differ is the
+degraded case: `session-brief.sh` goes quiet when a heading is renamed and relies on the suite
+noticing, while `commit-brief.sh` says out loud that it has stopped working, because it fires at the
+one moment where silence reads as approval.
 
 ### `git` is an allowlist; everything else fails open
 
@@ -2823,6 +2836,16 @@ Two properties of that inversion are worth naming because they are not obvious f
 
 The substring pass that predates the inversion is kept as a floor rather than replaced, because
 command-position analysis cannot see inside `sh -c '...'`. The two are a union.
+
+**And the floor had never actually been exercised.** Its verb terminator matched a space or
+end-of-string, so `bash -lc "git push"` — the verb flush against the closing quote — fell through
+both halves and was allowed on `main`. There was an assertion for that exact string, green for four
+days, passing because the suite's `bash_payload` helper interpolated commands into JSON without
+escaping: a fixture containing a double quote produced a payload the hook could not parse, and an
+unreadable command is treated as a write. The guard denied for the one reason the assertion was not
+testing. **A test whose fixture cannot reach the code path is indistinguishable from a passing test**,
+and nothing about this one looked wrong from the inside — it was found sideways, by writing a hook
+whose behaviour on an unparseable payload differs from its behaviour on a command it ignores.
 
 **Anchoring is the difference between guarding the act and censoring the words.** The `gh pr merge`
 check matches only at command position, so prose and commit messages may discuss it freely. The push
@@ -2863,7 +2886,7 @@ wiring, not the wire.
 So the standing instruction is to behave as though none of this is registered. The two rules bind on
 their own authority, never on a guard's.
 
-### What the suite proves, and four things it does not
+### What the suite proves, and five things it does not
 
 `pnpm test:hooks` proves the **scripts** — that each emits the right decision and, since the exit-code
 assertions were added, that it exits 0 while doing so. It says nothing about whether anything runs
@@ -2882,6 +2905,12 @@ them. Stated explicitly, because this is the section that owes it:
    being a fast-forward that brought the settings file into the tree.
 4. **The suite could not run anywhere but one laptop** until `8ad1a31`, because its assertions borrowed
    the developer's git identity. CI caught it the first time it ran them.
+5. **`additionalContext` has never been observed working either.** `commit-brief.sh`'s whole transport
+   is unwatched, for the same reason as (1) and with the same remedy — run it and look. The difference
+   is the stake: if `ask` is decorative, a class of future guards is decorative, whereas if
+   `additionalContext` is decorative the loss is a reminder and the status quo returns. It is listed
+   here so that "the four questions now have a hook" is never read as "the four questions now have a
+   guarantee".
 
 ### The fourth guardrail guards a habit, not the tree
 
