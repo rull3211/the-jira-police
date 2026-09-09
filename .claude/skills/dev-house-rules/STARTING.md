@@ -52,6 +52,13 @@ being attempted, why now, what it would let the service do that it cannot do tod
 make it the wrong idea. Then do the work. The entry is deleted when it ships, exactly as rule 2 says
 — the two halves are the same rule seen from both ends.
 
+**Open the entry with the branch it is being done on** — a bold `Branch:` label and the branch name,
+on its own line under the heading. `CLAUDE.md` sends a resuming context to the entry belonging to
+its current branch, and until 2026-09-09 no entry named one, so with anything stacked the single
+instruction written for the context least able to orient itself could not be followed. An entry
+naming no branch is also the signature of work abandoned rather than shipped, which is worth being
+able to see.
+
 **The reason is specific to how this project is built, and it is not tidiness.** Work here is done by
 agents in sessions that end, compact, and are replaced. A session that holds the intent only in its
 own context is one compaction away from losing it, and the next context inherits a diff and a branch
@@ -127,6 +134,45 @@ true of something other than what it appears to describe.
 statement of what it is for and which edge cases were judged real, and a commit message naming the
 mutations it caught tells you which guards are load-bearing. Where a document and a test disagree,
 the test is the one that has been executed recently.
+
+### Read wide in a subagent; decide in the main context
+
+**A wide read is the most expensive thing you can do to a context, and the least of it is worth
+keeping.** Sweeping thirty files to find the three that matter spends the budget on twenty-seven you
+will never refer to again — and it is spent permanently, because the answer and the noise compact
+together. The session that then runs out of room is the one holding the decision.
+
+So split them. **Anything whose output is much larger than its conclusion goes to a subagent**: the
+"which files mention X", the "does this pattern appear anywhere else", the audit across a directory.
+What comes back is the conclusion, and the twenty-seven files were never in this context at all.
+Anything whose output _is_ the conclusion — the one file you already know you need, the symbol you
+can name — you read yourself, because delegating it costs a round trip to save nothing.
+
+**What a subagent returns is a claim, not a result, and it is checked before it is used.** This is
+not general caution about model output; it is the specific failure this repository has already
+shipped. An adversarial audit here was primed with the verdict it was invited to reach and duly
+reached it, the finding was relayed at full strength, and it was wrong.
+[→](INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way)
+
+The check is cheap and it is not optional:
+
+- **Spot-check the load-bearing claims against the tree yourself** — the ones the decision turns on,
+  not all of them. A file:line that does not say what the report says it says invalidates the report
+  and not just the row.
+- **Verify the diagnosis separately from the findings.** They fail independently, and the diagnosis
+  is the half that gets believed without checking, because it arrives as an explanation rather than
+  as evidence. An audit of this repository's `§N` references got all its counts right and its
+  causal story wrong: it attributed the dangling citations to a renumbering, when the sections had
+  never existed in any of the 54 revisions of the file.
+- **Prime for evidence, not for a verdict.** Ask what the tree contains, and say plainly which
+  answer is expected and acceptable — "most of these will be 'not recorded'" — because a prompt that
+  only rewards findings is a prompt that will be given findings.
+- **Relay at the strength you verified, and say which half that was.** "Confirmed at these three
+  lines; the rest is the subagent's count, unchecked" is a usable statement. Passing the whole
+  report through as fact is how the wrong finding shipped.
+
+**The main context's job is the part that cannot be delegated** — deciding, and being accountable
+for what it repeats.
 
 ### The failure mode to design against: a search that confirms
 

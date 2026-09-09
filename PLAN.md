@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2367 tests in 64
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2379 tests in 65
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -371,12 +371,23 @@ not a plan item. What is left below is only what is still missing.
   down instead of made silently. §12's hook-assertion count is current and uncited — and duly went
   stale within a day of being named here, twice; `ARCHITECTURE.md:1863`'s "1245 passing tests" is
   history.
-- **`docs-check.ts` has no test.** 331 lines enforcing prose discipline, and `PROVING.md`'s central
-  rule is not satisfied for it. The class check above is not hand-watchable, so these two are one
-  unit: whoever writes the class check writes `docs-check.test.ts` with it.
-- **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links; `CLAUDE.md`'s
-  own routing table is backticks, so deleting a phase file keeps it green; the repository's real
-  cross-reference system — **87 `§N`/`invariant N` references** — is unchecked entirely.
+- **`docs-check.ts` still has no test of its own.** The pinned-prose check that ships with the
+  `CLAUDE.md` copy was put in `pinned-prose.ts` precisely so it could have one — importing
+  `docs-check.ts` from a test runs `vitest list`, which spawns vitest inside vitest — and its 12
+  cases are mutation-tested against four wrong implementations. That is the first test this command
+  has ever had and it covers none of the original 374 lines: the counts, the `expectSites` logic and
+  the link walker are all still only `PROVING.md`'s central rule unsatisfied. The extraction is the
+  pattern for closing the rest, and the class check above is still not hand-watchable, so these
+  remain one unit: whoever writes the class check writes `docs-check.test.ts` with it.
+- **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
+  to a directory rather than a file is still invisible to it — which is why the "where the truth
+  lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
+  repository's real cross-reference system — **106 section references** from `src/` alone, mostly
+  into the two instruction skills — is unresolved entirely, and **roughly 39 of them point at
+  sections that have never existed** (below, "The citations that were never written down").
+  `CLAUDE.md`'s own routing table was the third gap here and is now closed: its filenames are links,
+  so deleting a phase file fails the check by name instead of keeping it green. The size of the
+  system is now derived by `docs:check`; whether any of it resolves is still not.
 - **Nothing checks that an incident is reachable from a rule.** `docs:check` verifies that a link
   _resolves_, never that one _exists_, so the direction `FINISHING.md` makes explicit — the rule
   links to the incident, never the reverse — is unenforced in the only direction that matters.
@@ -384,8 +395,20 @@ not a plan item. What is left below is only what is still missing.
   inbound link from any rule file, and it was the entry added that morning. Caught by a fresh-context
   audit, which is not a mechanism — and the audit was needed again the same day, for entries 34 and 35. The check is cheap — every heading must be linked from at least one of the five rule files —
   and it belongs with `docs-check.test.ts` above.
-- **Cost figures are facts with many homes.** `$0.94` in five files, `$0.11` in five, `$3.99` in
-  three, `$4.50` in three, outside the `docs:check` exemption rule 3 grants.
+- **`docs:check` verifies counts that describe the code, and none that describe the prose.** Every
+  fact it holds is a property of the tree — tests, settings, files. A sentence counting its own
+  document is invisible to it, and `INCIDENTS.md`'s preamble carried two such claims for two
+  commits: that every entry _ends_ with `**Found by**`, and that "the seven that already answer the
+  question are quoted above" when five were. Both were caught by a reader, twice, in the paragraph
+  arguing that this class of claim cannot be taken on trust. Not obviously worth a mechanism —
+  "seven quotes appear above this line" is a check with one site and a bespoke parser — but the
+  gap is real and the alternative is to stop writing such sentences, which is the cheaper fix and
+  is not currently a rule.
+- **Cost figures are facts with many homes.** `$0.94`, `$0.11`, `$3.99` and `$4.50` occupy 17
+  file-homes between them, outside the `docs:check` exemption rule 3 grants. The figures themselves
+  are history and stay unchecked; the total is derived, so the class spreading further goes red —
+  this bullet said "three" of `$4.50` while it was already in four, which is the drift it describes,
+  happening to it.
 - **A citation to a document outside the tree cannot be checked, and does not look different.**
   `docs:check` can only resolve what it can open, so an out-of-tree quotation is exempt by nature
   while reading exactly like a verifiable one — which is how two of them were misattributed to
@@ -421,6 +444,81 @@ guard work that was worth more than the whole `docs:check` list has now shipped,
 here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
 which is not ours (§12). If the next session has budget for exactly one, take the class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
+
+### 14. The citations that were never written down
+
+**Not started.** Sized only, and the sizing is the asset — the list below cost a full-tree audit plus
+a `git log --all` check, and regenerating it is the expensive part. **Branch:** none yet; take one
+off `main`, since this touches `src/` and `ARCHITECTURE.md` and is independent of anything stacked.
+
+Roughly **39 dangling `§N` citations** in shipped source. The first diagnosis — that a renumbering
+stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **none of the 54 historical
+revisions of `PLAN.md`**, in any form. They were never written down. `ARCHITECTURE.md:619` says
+"See PLAN.md §5b", the one citation naming its target, and it resolves to nothing;
+`ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 15.
+
+**The quieter half is worse.** Some references are in range and silently repointed: six files say
+"§1 refuses on-disk state", but that rule moved to `ARCHITECTURE.md §5`. A dangling number fails
+when checked; a repointed one reads correctly forever.
+
+**The root cause is structural.** `PLAN.md` numbers its sections and rule 2 deletes entries when
+they ship, so every `§N` there names a slot guaranteed to be reused. Three fixes, and the third
+matters most:
+
+1. A resolver in `docs:check`: every `§N` names its target document, and that section exists. **It
+   needs an exemption for references that are quoted rather than made** — the incident recording
+   this names `§3a` and `§7b` in order to say they resolve to nothing, and a resolver without that
+   distinction reports the write-up as four defects. A guard that fires on its own documentation
+   gets switched off.
+2. Fix the 39. Most need a human: the intended target is often unrecoverable, and deleting a comment
+   that cites nothing sometimes destroys the only record of a decision.
+3. **Stop citing `PLAN.md` by number from code.** Cite `ARCHITECTURE.md`, whose sections are stable,
+   or quote the reasoning where it is used.
+
+**What would make this the wrong idea.** Item 2 is a large mechanical diff across `src/` with real
+judgement in it, and a batch pass by an agent is how 39 confident references to nothing got here.
+
+#### The sites, so nobody pays for the audit twice
+
+**Provenance, because it decides how far to trust each row.** The list came from a subagent sweep;
+the totals and line numbers are its work and are **unverified in bulk**. Verified by hand: that
+`ARCHITECTURE.md:619` and `:1095` say what they are quoted as saying, that three sampled `src/`
+lines match verbatim, and — against all 54 revisions of `PLAN.md` via `git log --all` — that `§3a`,
+`§5b`, `§7b` and `§6.1c` have never existed there in any form. Re-check a row before editing it.
+
+Dangling, grouped by the token they cite. None of these tokens has ever been a heading anywhere:
+
+| token   | sites                                                                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `§7b`   | `watch-loop.ts:71`, `cli/watch-once.ts:25`, `watch/counter.ts:5`, `watch/decide.ts:232,314,329`, `watch/decide.test.ts:219`, `watch/memo.ts:13`, `watch/relevance.ts:35` |
+| `§6.1c` | `solve/pr.ts:438,1706`, `solve/commenter.ts:10`, `solve/delivery.ts:302,317`, `cli/solve-outcome.ts:324,485`, `cli/solve-outcome.test.ts:598`                            |
+| `§6.1`  | `ARCHITECTURE.md:426`, `cli/solve-outcome.ts:314`, `cli/solve-run.ts:569,1013`, `jira/jql.ts:208`                                                                        |
+| `§3a`   | `ARCHITECTURE.md:880`, `solve/attempts.ts:38`, `solve/commenter.ts:29`, `solve/commenter.test.ts:63`                                                                     |
+| `§6.3`  | `solve/delivery.ts:1417`, `watch/counter.ts:14`, `watch/retriage.ts:23`, `watch/retriage.test.ts:141`                                                                    |
+| `§7c`   | `jira/jql.ts:266`, `watch/retriage.ts:32`, `triage/gate.test.ts:532`                                                                                                     |
+| `§3c`   | `cli/solve-outcome.ts:522,533`, `jira/jql.ts:221`                                                                                                                        |
+| `§6.2`  | `solve/delivery.ts:1045`                                                                                                                                                 |
+| `§5b`   | `ARCHITECTURE.md:619` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                              |
+| `§24`   | `ARCHITECTURE.md:1095` — self-reference in a file whose sections stop at 15; intended target is almost certainly §15, "The solve pipeline"                               |
+
+**In range and silently repointed — the harder half, because nothing will ever flag these:**
+
+- "§1 refuses on-disk state" — `solve/attempts.ts:31`, `watch/relevance.ts:40`, `watch/memo.ts:21,26`,
+  `solve/review-cycle.ts:24,26`. That rule is now `ARCHITECTURE.md §5`; `PLAN.md §1` is the model
+  question.
+- "§6's rule is _advance, then claim_" — `index.ts:44`, `review-loop.ts:97`, `review-loop.test.ts:150`.
+  Now `ARCHITECTURE.md §2` (L143); `PLAN.md §6` is the second gate.
+- `ARCHITECTURE.md:1215` — "the gate in §2 of the plan"; `PLAN.md §2` is now cost per ticket.
+
+**Clean, and worth knowing so the resolver is not written to re-check them:** all 7 `invariant N`
+references (`README.md:447`, `ARCHITECTURE.md:1511,1635,1726,1735,1750`, `solve/claim.ts:26`) cite
+invariants 5, 11 and 13 and are correct; every `§14.N` sub-reference resolves; the ~57 `§11`
+citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as are the
+`SOLVE_INSTRUCTIONS.md` ones.
+
+**Targets the resolver must know about:** `ARCHITECTURE.md` §1–15 plus its §14 invariants 1–17;
+`PLAN.md` §1–14; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`; `SOLVE_INSTRUCTIONS.md` §0–8 with
+`0a`/`2a`/`2b`/`2c`.
 
 ---
 

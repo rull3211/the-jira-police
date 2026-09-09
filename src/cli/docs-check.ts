@@ -35,10 +35,18 @@
  * being nowhere to put it.
  *
  * **What it deliberately does not cover.** Assertion counts ("21 assertions
- * redirected", "57 assertions behind pnpm test:hooks"), costs, and anything
- * else that is a measurement of one past run rather than a property of the
- * tree. Those are history, not state, and a check that re-derived them would be
- * asserting that the past has not changed. They stay a matter of reading.
+ * redirected", "57 assertions behind pnpm test:hooks"), what a run cost, and
+ * anything else that is a measurement of one past run rather than a property of
+ * the tree. Those are history, not state, and a check that re-derived them would
+ * be asserting that the past has not changed. They stay a matter of reading.
+ *
+ * **The line is what the number measures, not what it is about.** `$4.50` is
+ * history and is not checked. *How many documents repeat `$4.50`* is a property
+ * of the tree today, and `PLAN.md` §13 cites it while making the argument that
+ * facts with many homes drift — so it was itself wrong, by one, within days. The
+ * same held for the size of the `§N` cross-reference system, cited at 87 when
+ * the tree had nearly three times that. A section that catalogues unchecked
+ * facts is the last place an unchecked fact should be, and both are now derived.
  */
 
 import { execFileSync } from "node:child_process";
@@ -46,6 +54,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { SETTINGS } from "../settings.ts";
+import { CHECKLIST_QUESTIONS, pinnedProseProblems } from "./pinned-prose.ts";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 
@@ -115,6 +124,66 @@ function markdownFiles(dir: string, found: string[] = []): string[] {
   return found;
 }
 
+/** Every `.ts` in the tree, for a count that is about code and not about prose. */
+function typescriptFiles(dir: string, found: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    if (SKIP_DIRS.has(entry)) {
+      continue;
+    }
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) {
+      typescriptFiles(path, found);
+    } else if (entry.endsWith(".ts")) {
+      found.push(path);
+    }
+  }
+  return found;
+}
+
+/**
+ * How many `§N` references the *code* contains.
+ *
+ * **Markdown is deliberately excluded, and that is not a simplification.** The
+ * first version counted both, and then every sentence written about the problem
+ * moved the number it was reporting: documenting the dangling citations in
+ * `PLAN.md` and `INCIDENTS.md` — which must name `§7b` and `§3a` in order to say
+ * that they resolve to nothing — drove three consecutive failures of this check
+ * in the commit that introduced it. A count whose own write-up perturbs it is
+ * noise, and a check that cries wolf gets switched off. Restricted to `.ts`, it
+ * measures the population that actually matters and holds still while being
+ * described.
+ *
+ * This counts the system's *size* and does not check that any reference
+ * resolves. `PLAN.md` §13 records that gap; roughly 39 of these point at
+ * sections that have never existed in any revision of the document they appear
+ * to cite. Sizing it keeps the cited scale of that problem honest until the
+ * resolver is built. It is not the resolver.
+ */
+function sectionReferences(): number {
+  let found = 0;
+  for (const file of typescriptFiles(ROOT)) {
+    found += (readFileSync(file, "utf8").match(/§\d/gu) ?? []).length;
+  }
+  return found;
+}
+
+/**
+ * The per-ticket cost figures quoted in prose, and how many files repeat each.
+ *
+ * The sum is what gets cited, rather than four separate counts, because the
+ * claim in `PLAN.md` §13 is about the class: these are facts with many homes and
+ * no maintainer. One total goes red whichever figure spreads.
+ */
+const COST_FIGURES = ["$0.94", "$0.11", "$3.99", "$4.50"] as const;
+
+function costHomes(files: readonly string[]): number {
+  const contents = files.map((file) => readFileSync(file, "utf8"));
+  return COST_FIGURES.reduce(
+    (total, figure) => total + contents.filter((text) => text.includes(figure)).length,
+    0,
+  );
+}
+
 function citationsOf(fact: Fact, files: readonly string[]): Citation[] {
   const found: Citation[] = [];
   for (const file of files) {
@@ -162,6 +231,8 @@ const suite = suiteShape();
 const COUNT = String.raw`\d[\d,]*`;
 const CAPTURED = String.raw`(\d[\d,]*)`;
 
+const files = markdownFiles(ROOT);
+
 const FACTS: readonly Fact[] = [
   {
     what: "tests in the suite",
@@ -198,6 +269,10 @@ const FACTS: readonly Fact[] = [
    * one level up — every count-noun phrase must be a declared site or a listed
    * historical figure — and it is too large to hand-watch, so it arrives with
    * this file's first test rather than before it. Recorded in `PLAN.md` §13.
+   *
+   * `pinned-prose.test.ts` is not that test and does not discharge this. It
+   * covers a sibling module extracted so that it *could* be tested; nothing
+   * below this line — no count, no `expectSites`, no link — is under a test yet.
    */
   {
     what: "test files, written as a bare count",
@@ -206,9 +281,22 @@ const FACTS: readonly Fact[] = [
     cited: citation(CAPTURED, "test", "files"),
     expectSites: 1,
   },
+  {
+    what: "section references in the tree",
+    actual: sectionReferences(),
+    phrase: "<N> section references",
+    cited: citation(CAPTURED, "section", "references"),
+    expectSites: 1,
+  },
+  {
+    what: "file-homes shared by the quoted cost figures",
+    actual: costHomes(files),
+    phrase: "<N> file-homes",
+    cited: citation(CAPTURED, "file-homes"),
+    expectSites: 1,
+  },
 ];
 
-const files = markdownFiles(ROOT);
 const problems: string[] = [];
 
 for (const fact of FACTS) {
@@ -239,6 +327,26 @@ for (const fact of FACTS) {
   const shown = sites.length === 0 ? "no sites" : `${sites.length} site(s)`;
   say(`${mark} ${fact.what}: ${fact.actual}, ${shown}`);
 }
+
+/**
+ * Prose that is deliberately copied, and is therefore checked in every place it
+ * appears — which is the whole of the exemption this file's header describes.
+ * `CLAUDE.md` carries `FINISHING.md`'s four checklist questions because it is
+ * the only document a compacted context is guaranteed to still have; the
+ * reasoning, and the reason a wrapped copy still passes, are in
+ * `pinned-prose.ts`.
+ */
+const beforePinned = problems.length;
+problems.push(
+  ...pinnedProseProblems(
+    readFileSync(join(ROOT, ".claude", "skills", "dev-house-rules", "FINISHING.md"), "utf8"),
+    readFileSync(join(ROOT, "CLAUDE.md"), "utf8"),
+  ),
+);
+say(
+  `${problems.length === beforePinned ? "ok  " : "FAIL"} CLAUDE.md's copy of the checklist: ` +
+    `${CHECKLIST_QUESTIONS} question(s)`,
+);
 
 /**
  * GitHub's heading-to-anchor rule: lowercase, drop everything that is not a
