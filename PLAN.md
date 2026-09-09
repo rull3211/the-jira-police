@@ -422,6 +422,39 @@ here is genuinely the cheaper half — and the thing still worth more than any o
 which is not ours (§12). If the next session has budget for exactly one, take the class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
 
+### 14. The checklist copied into CLAUDE.md, and pinned so the copy cannot rot
+
+**What.** Copy the four headline questions from
+[`FINISHING.md`'s checklist](.claude/skills/dev-house-rules/FINISHING.md#the-checklist) into
+`CLAUDE.md`, add a pre-commit instruction to run `pnpm hooks:brief`, and extend `pnpm docs:check` so
+the copy fails the run once it drifts from the original.
+
+**Why now.** A spot-check from a fresh context established two things nobody had written down.
+`~/.claude/settings.json` registers six operator guards and **neither of this repository's hooks** —
+there is no `SessionStart` entry at all, so the compact brief added in `22d5093` has never executed
+and will not until §12 is done by someone who is not us. And measured against that brief, only 5 of
+its 33 lines are already in `CLAUDE.md`; the other 28 — the four questions, and the live branch and
+stack state — are exactly what a compacted context loses. `CLAUDE.md` is re-injected whether or not
+anything is registered, so today it is the only carrier that works, and four one-line questions are
+small enough to fit in it.
+
+**Why this is not cite-don't-copy being broken.** `src/cli/docs-check.ts` already states the
+exemption in its header: something this check verifies in every place it appears no longer has one
+maintainer, so copying a _checked_ thing is fine and copying an unchecked one is not. The copy ships
+with the check in the same commit or it does not ship.
+
+**What it does not cover, and that is the point.** The instruction half is a pointer, and
+`session-brief.sh` says in its own header that a pointer is precisely what a compacted context
+discounts — it reads "go and read the rules" as already satisfied. So the instruction is a habit,
+not a guard, and it hangs off the next commit rather than off the compaction: a commit is a moment
+the model can observe, a compaction is not. The copy is the half that needs no compliance.
+
+**What would make this the wrong idea.** If §12 lands, the hook prints all of this unasked and the
+copy becomes a second home for a fact that had a working single source — delete it then, and the
+`docs:check` entry with it. It also adds about twelve lines to the one file everyone reads, and past
+some length that file stops being read, which is the failure this is trying to fix. The four
+headlines were chosen over the full text for that reason, and the full text stays one link away.
+
 ---
 
 ## What was learned, and is recorded nowhere else
