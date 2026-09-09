@@ -91,6 +91,37 @@ Every significant correction in this project came from running something, not fr
 **Probe with a control.** A negative result means nothing unless you have shown the setup was one
 clause away from a positive.
 
+**State which case your check does not cover, before you quote it as evidence.** A green check is a
+statement about the case it ran, and the gap between that and the claim made from it is the single
+largest source of defects in `INCIDENTS.md` — **seven**, more than any other cause recorded here.
+The discipline is one sentence written next to the evidence: _this measures X; it does not measure
+Y._ If you cannot write that sentence, you do not yet know what your check proved.
+
+Three things make it hard to remember, and each is an instance:
+
+- **Knowing the mechanism is not the same as checking the case.** `session-brief.sh` was registered
+  with no matcher, deliberately, _so that no trigger value could be missed_ — and the same session
+  then read a silent hook as proof that its exit code was wrong, never considering that nothing had
+  invoked it [→](INCIDENTS.md#the-silent-guard-that-was-diagnosed-before-anyone-checked-whether-it-had-run).
+- **Owning the check is not the same as running it.** A branch count was quoted from a list of
+  merged pull requests while the command that measures it sat three lines above, put there by an
+  earlier instance of the same mistake
+  [→](INCIDENTS.md#the-dead-step-that-was-alive-from-a-merge-list-read-instead-of-a-count).
+- **Deciding the outcome in advance does not tell you which case you are in.** Pre-registering both
+  branches of a probe stops you rationalising the result. It does nothing about a third cause you
+  never listed, and the probe that introduced this rule hit exactly that.
+
+**The direction cuts both ways, and the rarer direction is worse.** Six of the seven overstated a
+guard's coverage, which review can catch. The seventh _under_stated it — a working, testable guard
+was written down as untestable, with a note saying its silence "means nothing at all". That retires
+a check quietly, and nothing goes red when it happens
+[→](INCIDENTS.md#the-dead-step-that-was-alive-from-a-merge-list-read-instead-of-a-count).
+
+**This rule is also its own worked example of the amendment process failing.** `INCIDENTS.md` held
+it as a candidate "awaiting a third instance" and it reached seven, because each new instance was
+written up as evidence rather than spent on the amendment. Collecting is not amending. When the
+threshold is met, change the rule.
+
 **An unreferenced declaration is evidence about a name, not about a guarantee.** Trace the guarantee
 to the code that would break without it. Two more of the same shape: a "dead" function with 21
 assertions turned out to be a thin wrapper over something with three live call sites, and "no read
