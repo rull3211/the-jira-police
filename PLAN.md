@@ -648,10 +648,92 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 `SOLVE_INSTRUCTIONS.md` ones.
 
 **The legal vocabulary, which the resolver now parses rather than being told:** `ARCHITECTURE.md`
-§1–15 plus its §14 invariants 1–17; `PLAN.md` §1–14; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
+§1–15 plus its §14 invariants 1–17; `PLAN.md` §1–15; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
 `SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten cited tokens are in none of them.
 
 <!-- refs:on -->
+
+### 15. The mutate list is a denylist, and it catches 13 of git's write verbs out of about 40
+
+**Branch:** `fix/write-verb-audit`, off `main`. **Delete this entry when it ships.**
+
+**Why now.** `pull` was added to `branch-guard.sh`'s mutate list in PR #25, and the entry recording
+that said the fix was worth little on its own because the list "was assembled from commands that
+_sound_ mutating, and `pull` sounds like a read" — a defect in the derivation, not a typo. This is
+the audit that entry asked for. It is deliberately a separate branch: #25 closed a hole, this
+changes the shape of the guard.
+
+**The measurement, and it is the whole argument.** Every subcommand git itself knows about
+(`git --list-cmds=main,others,nohelpers`, 163 of them) was fed to `branch-guard.sh` as
+`git <verb>`, with `CLAUDE_PROJECT_DIR` pointed at a throwaway repository whose HEAD is `main`:
+
+```
+REFUSED (13)  am apply cherry-pick commit merge mv pull push rebase reset restore revert rm
+allowed (150) everything else
+```
+
+Arguments cannot change that verdict — the pattern matches on the verb token — so the bare-verb
+sweep is the complete answer rather than a sample. Among the 150 that a protected branch lets
+through:
+
+| allowed on `main`                                                             | and it                                                          |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `checkout`                                                                    | is the older spelling of `restore`, which **is** refused        |
+| `stash` (bare), `stash push`                                                  | takes the worktree away; `stash pop`/`apply`/`drop` are refused |
+| `clean`                                                                       | deletes untracked files                                         |
+| `branch -f`, `branch -D`                                                      | moves or deletes a ref, the protected one included              |
+| `update-ref`, `symbolic-ref`                                                  | move any ref, and HEAD, with no porcelain involved              |
+| `send-pack`, `http-push`                                                      | are `push` under other names                                    |
+| `fetch <remote> <src>:<dst>`                                                  | writes a **local** branch, not a remote-tracking one            |
+| `subtree merge`, `subtree pull`                                               | are a merge and a pull the list does not recognise              |
+| `reflog expire`                                                               | destroys the undo trail for every row above it                  |
+| `filter-branch`, `fast-import`                                                | rewrite history wholesale                                       |
+| `bisect`, `worktree`, `add`                                                   | move HEAD, add trees, stage on a protected branch               |
+| `read-tree`, `update-index`, `checkout-index`, `sparse-checkout`, `submodule` | write the index or the worktree                                 |
+
+**So the shape is the defect and `pull` was a symptom.** A denylist has to enumerate every spelling
+of "write" in a tool with 163 subcommands and several aliases per act, and it is behind by
+construction: a verb git adds next year is allowed on the day it ships.
+
+**What is changing.** Invert the default **for `git` only**. An allowlist of read verbs plus a
+named set of conditional ones; any other `git` subcommand is a mutation. Commands that are not
+`git` keep today's fail-open behaviour untouched, so `pnpm`, `ls` and `grep` are unaffected — the
+inversion is scoped to the one program whose write surface we can enumerate.
+
+**The escape hatch is the constraint that shapes it.** The existing comment is right that a guard
+refusing every command on a protected branch traps the agent there, and that the remedy a denial
+names must not itself be refused. So `switch` stays allowed in full, `checkout -b`/`-B` stays
+allowed as the spelling half of everyone's fingers already know, and plain `checkout` — the
+destructive one — does not. Each of those three gets an assertion.
+
+**What would make this the wrong change.** Over-refusal on a legitimate read nobody listed. That is
+the real cost and it is accepted rather than dismissed: it will happen, the denial text names the
+remedy, and adding a verb to the read list is a one-line change with an assertion. The direction
+matters more than the count — an unlisted read is a refusal a human fixes in a minute, an unlisted
+write is a commit on `main` nobody sees. The second risk is a conditional verb whose read form gets
+caught: `git branch` with no write flag, `git stash list`, `git config --get`, `git worktree list`
+and `git fetch` without a `:` refspec are all ordinary here and all get an assertion, positive and
+negative, or the change does not ship.
+
+**Two things the audit turned up that are not this change**, recorded so they are not lost:
+
+- **`branch-stack.sh` was observed not firing**, which is probe step 3 and the first result that
+  step has ever produced. `git switch -c fix/write-verb-audit` from `main` with three unmerged
+  branches produced no prompt; run by hand with the identical payload the script emits the correct
+  `ask` and exits 0. `session-brief.sh` printed at session start, so the settings file is read and
+  parsed, and `branch-guard.sh`'s `deny` on `Bash` was watched refusing on 2026-09-09, so `Bash`
+  `PreToolUse` hooks do run and stdout-with-exit-0 is honoured **for `deny`**. That leaves two
+  causes this tree cannot separate: `branch-stack.sh` may not be wired on `Bash`, or `ask` may not
+  be honoured the way `deny` is. Only a human can read `.claude/settings.json` and tell them apart.
+  **If it is wired, the finding is that `ask` is decorative**, and that is larger than any hole in
+  the mutate list, because every guard written in the fail-open "make the human decide" style
+  depends on it.
+- **The push check greps the whole command text where the `gh pr merge` check is anchored to
+  command position.** The `gh` check has a comment explaining that anchoring is "the difference
+  between guarding the act and censoring the words". The push check has no such anchor, so a commit
+  message that merely contains the word `main` is refused as though it were a push to it. Measured
+  twice this week, once on this repository's own commits. It is a false positive in a guard, which
+  BUILDING.md says is how a guard earns the contempt that gets it turned off.
 
 ---
 
