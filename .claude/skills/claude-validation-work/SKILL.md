@@ -19,8 +19,14 @@ Say what that does not cover, because this file is where the habit is owed: nobo
 whether an _edited_ hook definition is re-read within a session. The agent cannot write that file,
 so the case stays open.
 
-**Read `PLAN.md` §12 first.** It is the entry, it names the branch, and it holds the reasoning. This
-file is the runbook; §12 is the argument. If they disagree, §12 is the source and this file is stale.
+**Read [`ARCHITECTURE.md` §16](../../../ARCHITECTURE.md) first.** It holds the reasoning: what each
+guard is, what the suite proves, where the residual risk sits, and the four things nobody has
+measured. This file is the runbook; §16 is the argument. If they disagree, §16 is the source and
+this file is stale. The two open questions live in `PLAN.md` §17.
+
+That entry used to be `PLAN.md` §12, which shipped and was deleted. If you find a document still
+sending you to `PLAN.md` §12 or §15, it is stale and the number now resolves against the wrong
+document — repoint it.
 
 ## Where the work is
 
@@ -46,7 +52,8 @@ the JSON in a message and let the operator apply it. The write ban is the whole 
 the agent a guard constrains does not get to wire it.
 
 **The read is the correction, and it was worth three documents being wrong.** This file, `CLAUDE.md`
-and `PLAN.md` §12 all said the file was refused in both directions, and derived a rule from it —
+and the guardrail entry then in `PLAN.md` all said the file was refused in both directions, and
+derived a rule from it —
 _no agent can report whether the hooks are installed; any such answer is a refusal or a
 fabrication._ That was never tested. The evidence behind it is the two blocks quoted above: a
 **write**, and a **shell** read. Nobody tried the file-reading tool, which returns the file on the
@@ -187,11 +194,13 @@ will see 3, then `git switch -c test/wiring-probe` and watch for a prompt. If it
 count confirmed at the moment of the call, `ask` is decorative, and that is the largest finding
 available here: every fail-open guard in this repository rests on it.
 
-**If it is wired, the finding is that `ask` is decorative**, and that is larger than anything else
-recorded here: every guard written in the fail-open, make-the-human-decide style rests on `ask`
-being honoured, and `branch-stack.sh` was deliberately written as `ask` rather than `deny` so that
-stacking stays possible when it is right. A guard that cannot prompt is not a soft guard, it is an
-absent one.
+**That sentence used to open "if it is wired", and the conditional is spent** — it is wired, read
+directly, eight paragraphs up. What the conditional was protecting is still worth stating plainly:
+`branch-stack.sh` was deliberately written as `ask` rather than `deny` so that stacking stays
+possible when it is right, and a guard that cannot prompt is not a soft guard but an absent one.
+
+**This question is carried as an open item in `PLAN.md` §17**, with the churn that has deferred it
+written down beside it, so that deferring it a sixth time is a visible choice rather than a silence.
 
 **Note what this does not settle**, since this file is where the habit is owed: a stack of exactly 3
 was tested, from `main`, on one machine, with one command shape. Nobody has tried `git worktree add`
@@ -231,7 +240,8 @@ result; it does not stop you misreading which case you are in.
 1. **Done.** `CLAUDE.md` was corrected ahead of the probe; `PLAN.md` §13 and
    [`dev-house-rules/SKILL.md`](../dev-house-rules/SKILL.md) were corrected in the probe-result
    commit. Each was amended rather than deleted, because each is load-bearing about what you still
-   cannot check: the agent can now watch a guard refuse without ever confirming what is wired.
+   cannot check — which is not "what is wired", since that reads fine, but whether the runtime acts
+   on it.
 2. **Keep "behave as though they are unregistered."** That instruction survives registration. It now
    rests on a better reason than "you cannot check": a guard can be registered and still fail open,
    which is exactly what the exit-code question is about.
@@ -241,16 +251,14 @@ result; it does not stop you misreading which case you are in.
    diff. Review is what stops it; the harness block covers the wiring, not the wire.
 4. **A rule is owed to `PROVING.md`.** See below — this is the only item that is not about hooks.
 5. **The mutate list was a denylist naming 13 of git's write verbs, and is now an allowlist of
-   reads.** `git pull` was missing from it, which shipped in PR #25; that fix's own note said the
-   defect was in the derivation rather than the list, because it "was assembled from commands that
-   _sound_ mutating, and `pull` sounds like a read". The audit that note asked for measured how much
-   that was worth: all 163 subcommands fed to the script with HEAD on a protected branch, **13
-   refused and 150 allowed** — including `checkout` (the older spelling of the `restore` it
-   refused), bare `stash`, `clean`, `branch -f`, `update-ref`, `send-pack`, `fetch` in its refspec
-   form and `subtree pull`. Inverted for `git` only, the same sweep refuses 102. `switch` and
-   `checkout -b` stay allowed because the denial text names them as the remedy. **Done**, on
-   `fix/write-verb-audit`; the incident is
-   [in `INCIDENTS.md`](../dev-house-rules/INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs).
+   reads.** **Done**, on `fix/write-verb-audit`. The sweep, the verbs it let through and the reason
+   the shape rather than the list was the defect are in `branch-guard.sh`'s header comment, argued
+   at [`ARCHITECTURE.md` §16](../../../ARCHITECTURE.md) and storied
+   [in `INCIDENTS.md`](../dev-house-rules/INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs);
+   they are not restated here, because a runbook that carries its own copy of a measurement is the
+   thing that goes stale first. What the runbook owes is the consequence: an unlisted **read** is now
+   a refusal a human fixes in a minute, and if step 0 or a real command ever refuses something
+   ordinary, that is the expected direction and not a bug report.
 
 ## The rule this work bought, at seven instances
 

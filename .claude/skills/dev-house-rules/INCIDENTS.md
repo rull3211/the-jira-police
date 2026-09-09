@@ -832,7 +832,10 @@ somewhere no rule and no reader ever opens.
 was written for this work, the work shipped, and the entry was left standing — so `PLAN.md`
 advertised as _not built_ three layers sitting in the diff below it. Deleted too early on one day,
 kept too late on the next, by the same reader holding the same rule. What survived the deletion went
-to §12, which already holds the declined `Stop` hook and the declined drift reporter.
+to `PLAN.md` §12, alongside the declined `Stop` hook and the declined drift reporter. §12 has since
+shipped and been deleted in its turn, and all three now live in `ARCHITECTURE.md` §16 — which is the
+same rule applied one level up: what survives a deletion moves to the document that describes the
+built thing.
 
 **Which says something about the rule and not only about the reader.** _Delete it when it ships_
 sounds like one action at one moment, and it is two: a plan entry and the work it describes finish
@@ -1156,7 +1159,9 @@ reaches `main`". It reached seven before anyone spent one on the amendment. It i
 
 ### A permission granted to a human, read as a permission granted to the agent
 
-`PLAN.md` §12 had said for a day that hook configuration "belongs to the operator, lives outside this
+`PLAN.md` §12 — the guardrail entry, since shipped and retired into `ARCHITECTURE.md` §16, which is
+where every `§12` below now resolves — had said for a day that hook configuration "belongs to the
+operator, lives outside this
 tree, and is deliberately neither readable nor writable from here." The operator then checked with
 the storecode team and reported back: **developers can add settings.** That is true, and it was taken
 to mean the constraint had never been real — that §12 described a convention nobody had tested rather
@@ -1191,7 +1196,7 @@ above is about generalising from a route that was tested to a route that was not
 it produced did the same thing once more. Two routes had been attempted: the **write**, refused, and
 the **shell** read, refused. From those two the conclusion drawn was _both directions_, and from
 _both directions_ came a rule — no agent can report whether the hooks are installed; any such answer
-is a refusal or a fabrication. It was copied into `CLAUDE.md`, into `PLAN.md` §12 and into the
+is a refusal or a fabrication. It was copied into `CLAUDE.md`, into the guardrail entry and into the
 validation runbook.
 
 Nobody tried the file-reading tool. It returns the file on the first attempt. The union of two

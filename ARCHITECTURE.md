@@ -2765,3 +2765,154 @@ against a named ticket, and granted in a commit a reviewer can see.** The one it
 clear that bar before the loop was switched on is cost per ticket per day, which §13 now carries as
 the file's largest open item — and the reason it is worth naming there rather than here is that it
 is the only gate the plan set for the daemon that the daemon did not wait for.
+
+---
+
+## 16. The development guardrails
+
+These guard the people and agents working **on** this repository. They are not part of the service
+and never reach a model it runs: `prepareSkillRoot` (§7) copies only `agent-solve` into a skill root
+that must contain nothing else, so a solve pass cannot see them.
+
+They exist because the two rules in `CLAUDE.md` that are not advisory — never work on a protected
+branch, and a human merges — had nothing behind them but the agent's own compliance. The rules lived
+in a **model-invoked** skill, so whether they were read depended on whether the model chose to read
+them, and the case where that is least likely — a narrow prompt late in a long session, or one just
+after a compaction — is the case where they matter most.
+
+### What is built
+
+| script             | fires on                                                | what it does                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `branch-guard.sh`  | `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit` | refuses a write on a protected branch (`main`, `master`, `develop`, `release/*`), refuses a push naming one from any branch, and refuses `gh pr merge` from every branch |
+| `branch-stack.sh`  | `PreToolUse` on `Bash`                                  | returns `ask` when a new branch would take the stack past `BRANCH_STACK_MAX` (default 3)                                                                                 |
+| `session-brief.sh` | `SessionStart`                                          | prints the contract; on `trigger=compact` it also inlines the two rules and `FINISHING.md`'s four questions                                                              |
+
+`lib.sh` holds what they share. `test-hooks.sh` is the suite, behind `pnpm test:hooks`;
+`pnpm hooks:brief` renders the compaction brief on demand. Registration lives in the settings file
+under `.claude/`, written and reviewed by the operator.
+
+**`session-brief.sh` extracts rather than copies.** Both inlined blocks are pulled out of `CLAUDE.md`
+and `FINISHING.md` at run time with `awk`, so the brief cannot drift from the documents it quotes.
+Two of the suite's mutations are stale pasted copies of exactly those two extractions.
+
+### `git` is an allowlist; everything else fails open
+
+`branch-guard.sh` classifies a `Bash` call by asking whether it would change the repository, and for
+`git` the default is **write**: a named set of read verbs plus a named set of conditional ones, and
+any other subcommand is a mutation. Commands that are not `git` keep fail-open behaviour, so `pnpm`,
+`ls` and `grep` are untouched — the inversion is scoped to the one program whose write surface can be
+enumerated.
+
+It replaced a denylist of thirteen verbs that let 150 of git's 163 subcommands through on a protected
+branch, `checkout` and `clean` and `update-ref` among them. **The audit and the reasoning are in the
+script's own header comment** and are deliberately not repeated here; what belongs at this level is
+the shape. A denylist over a program with several spellings per act is behind by construction — a verb
+git adds next year is allowed on the day it ships — while under an inversion the failure mode is a
+human adding one line to the read list.
+
+Two properties of that inversion are worth naming because they are not obvious from the diff:
+
+- **A guard's denial must not block the remedy it names.** Refusing every command on a protected
+  branch traps the agent there, so `switch` stays allowed in full and `checkout -b`/`-B` stays allowed
+  as the spelling most fingers already know, while plain `checkout` — the destructive one — does not.
+- **Mis-parsing can only over-refuse**, which is why the loop consuming git's global options has no
+  write fixture that can see it break: with the options unconsumed, `-C` lands where the verb goes and
+  is refused as an unrecognised write. Its only observable job is _not_ refusing a read that carries a
+  global option, and that is what its assertions test.
+
+The substring pass that predates the inversion is kept as a floor rather than replaced, because
+command-position analysis cannot see inside `sh -c '...'`. The two are a union.
+
+**Anchoring is the difference between guarding the act and censoring the words.** The `gh pr merge`
+check matches only at command position, so prose and commit messages may discuss it freely. The push
+check does not, and that is a known defect rather than a design choice — `PLAN.md` carries it.
+
+### The hook configuration: three routes, and they do not agree
+
+The settings file that registers these hooks is a tracked file in this tree, and what an agent may do
+with it depends on how it reaches for it:
+
+| route                                   | result                                                          |
+| --------------------------------------- | --------------------------------------------------------------- |
+| `Write` / `Edit`                        | **refused** by the harness as a protected path                  |
+| any shell command whose _text_ names it | **refused** — the rule matches the command text, not the target |
+| the `Read` tool                         | **allowed**                                                     |
+
+The permission to _change_ it is scoped to the human, not to the file's location; moving it inside the
+repository bought no write access. Three documents here claimed the read was refused too. It is not,
+and the correction matters more than the fact, because a false claim about a capability removes the
+operation that would have refuted it.
+
+The shell rule's shape has a false-positive edge worth knowing: a `git commit -m` whose _message_
+names the path is refused, and so is any other command that merely mentions it. The honest response is
+to reword the message and say so out loud — never to re-spell the command.
+
+The runbook for checking any of this is
+[`claude-validation-work`](.claude/skills/claude-validation-work/SKILL.md); its step 0 is two
+zero-risk probes an agent can run on itself.
+
+### Where the residual risk sits
+
+**`.claude/hooks/*.sh` is not protected.** The agent can edit every script the settings file points
+at, and `CLAUDE.md` positively expects it to. Neutering `branch-guard.sh` is a one-line diff. What
+stops it is what stops any bad change: it must be made on a branch, it lands in a pull request a human
+reads, and CI runs the hook suite against it. **Review is the protection.** The write ban protects the
+wiring, not the wire.
+
+So the standing instruction is to behave as though none of this is registered. The two rules bind on
+their own authority, never on a guard's.
+
+### What the suite proves, and four things it does not
+
+`pnpm test:hooks` proves the **scripts** — that each emits the right decision and, since the exit-code
+assertions were added, that it exits 0 while doing so. It says nothing about whether anything runs
+them. Stated explicitly, because this is the section that owes it:
+
+1. **`ask` has never been observed working.** `deny` carried on stdout with exit 0 was watched being
+   honoured on 2026-09-09; `branch-stack.sh` is registered on `Bash` and was once watched _not_
+   prompting when it should have. Whether `ask` is honoured at all is open, and `PLAN.md` carries it.
+   It is not a small question: every guard written in the fail-open "make the human decide" style
+   rests on it.
+2. **The `gh pr merge` refusal is proven by inference only** — same code path, same `deny`, never run
+   for real, and it must stay that way.
+3. **A re-read of an _edited_ hook definition is untested**, because the agent cannot write the file to
+   find out. Registration _appearing_ takes effect immediately rather than at the next session start:
+   the same command was allowed and then refused minutes apart in one session, the only difference
+   being a fast-forward that brought the settings file into the tree.
+4. **The suite could not run anywhere but one laptop** until `8ad1a31`, because its assertions borrowed
+   the developer's git identity. CI caught it the first time it ran them.
+
+### The fourth guardrail guards a habit, not the tree
+
+CI's `Rules owed` step fails a pull request whose body does not answer `FINISHING.md`'s fourth
+question. It is the only check in that workflow with no hand-run equivalent, because what it reads is
+the pull request body rather than the tree, and it is worth being exact about how little it proves:
+**it cannot tell a true `Rules owed: none` from a false one.** It guarantees the question was
+answered. Everything above it guards the repository; this one guards a habit that had failed four
+times in two sessions before anyone noticed.
+
+**Its disposal condition, written while it is still new.** If the fresh-context audit that produces
+that line ever returns `none` on a diff that plainly owes something, the step is worse than nothing —
+it will have made an unexamined omission _look_ examined — and it should be deleted rather than tuned.
+A rule with a stated way to die is one somebody can actually retire.
+
+### Deliberately not built
+
+Recorded so that "we considered it" survives the session that considered it.
+
+- **A `Stop` hook gating a turn on verification.** Offered and declined.
+- **A `PreToolUse` guard refusing `git commit` when the branch has no `PLAN.md` entry.** It is the only
+  version of the compaction fix with an exit code behind it, and also the version most likely to refuse
+  a correct one-line fix — the failure where a guard acquires an enemy among the people who maintain
+  it. It waits for a second instance.
+- **A drift reporter judging whether prose is _true_.** Declined: that is a model call on every
+  document. The narrow half shipped anyway, on 2026-09-08, as `pnpm docs:check` — which checks the
+  prose facts that are _countable_, a regex and an exit code. The rest is still declined.
+- **A rule making a blocked command an incident to write up.** Rejected because "record what it taught
+  you before you re-attempt" reads as blessing the re-attempt, and a rule that can be read as
+  permission will be.
+- **A `docs:check` rule failing a bare SHA cited without an incident anchor**, and **a CI check
+  requiring "What was learned" to grow whenever a numbered entry is deleted.** Both would have caught a
+  real defect, and both are mechanism ahead of evidence at one instance each. The second is the more
+  tempting and the more dangerous — it would fire on every ordinary deletion.

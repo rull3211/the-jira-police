@@ -35,7 +35,9 @@ _acts_ on it. Two probes that settle that in one turn, and cost nothing if the a
 0 of
 [`claude-validation-work`](.claude/skills/claude-validation-work/SKILL.md#the-probe).
 Both rules bind exactly as hard either way; the only difference is that breaking one may not be
-caught.
+caught. [`ARCHITECTURE.md` §16](ARCHITECTURE.md) is where all of that is argued out — what each
+guard is, what the suite does not cover, and why the residual risk is `.claude/hooks/*.sh` rather
+than the settings file.
 
 **Do not stack branches deeply** — three stacked here once turned an incremental plan into a
 waterfall. The rule and the story are in

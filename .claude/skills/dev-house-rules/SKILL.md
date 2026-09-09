@@ -51,7 +51,7 @@ refusing, and the settings file that wires them **can** be read from inside this
 line denied until 2026-09-09. What you still cannot assume is that a registration you have read is a
 guard that fires; run step 0 of
 [`claude-validation-work`](../claude-validation-work/SKILL.md#step-0--is-branch-guardsh-actually-firing-right-now)
-if the answer matters (`PLAN.md` §12):
+if the answer matters (`ARCHITECTURE.md` §16):
 
 1. **Never work on `main` or any protected branch.** Branch first. One implementation branch per
    reviewable unit of privilege. Do not look for a way around this — ask.

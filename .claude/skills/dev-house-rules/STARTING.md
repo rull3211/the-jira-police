@@ -241,7 +241,8 @@ which is what makes the ordering enforceable rather than aspirational.
 **One branch per privilege, never `main`.** A human always merges; this service has no merge path
 and neither do you. Both rules have guards, written and tested — `.claude/hooks/`, suite
 `pnpm test:hooks`, run it if you change one — and both are registered, by a file this tree can read
-even though it may not write it (`PLAN.md` §12). Reading the registration is not watching it work:
+even though it may not write it (`ARCHITECTURE.md` §16). Reading the registration is not watching it
+work:
 `pnpm test:hooks` proves the scripts emit refusals, never that the runtime acts on one. Assume
 neither is watched unless you have just seen it refuse. Neither is any less binding either way; the
 only difference is that breaking one may not be caught.

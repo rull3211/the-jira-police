@@ -38,6 +38,13 @@ Default posture is **manual**: nothing is solved until a human adds a label.
 
 ## What is not built
 
+**The numbers are identifiers, not an ordering, so they are never reused and the sequence has
+holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion would silently
+repoint every one of them — the failure §14 exists about. A missing number means that entry shipped
+and was deleted. §12 and §15 are the current holes: the guardrail argument they carried now lives in
+`ARCHITECTURE.md` §16, and every file that cited "`PLAN.md` §12" has been repointed there. What is
+still open from those two entries is §17.
+
 ### 1. Which model runs which task, and nothing chooses today
 
 Requested 2026-09-06, and **the first fact is that there is no setting to change.** `--model`
@@ -228,7 +235,8 @@ environment cannot answer a question about CI's.**
 - **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
   suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
   after a compaction — so neither the field name it branches on nor the fact of registration is
-  confirmed from inside this tree (§12). It accepts both `trigger` and `source` for that reason.
+  confirmed from a session's own vantage point (`ARCHITECTURE.md` §16). It accepts both `trigger`
+  and `source` for that reason.
 
 ### 11. Loose ends recorded in no other file
 
@@ -272,186 +280,6 @@ alive only by being carried forward in conversation.
   to a caller rather than trusting the name (`PROVING.md`, "an unreferenced declaration is evidence
   about a name").
 
-### 12. The development guardrails are built, registered, and now observed refusing
-
-**Branch:** `chore/probe-result`, in flight — registration itself landed as PR #23. **The runbook is
-[`claude-validation-work`](.claude/skills/claude-validation-work/SKILL.md)**; it carries the probe
-and what is still owed. This section is the argument and it is the source; that file is the steps.
-**What is being attempted now:** recording what the probe actually did, correcting the three
-sentences it falsified, and adding the exit-code assertion the result earns. **What would make it
-the wrong idea:** nothing about the probe's outcome is inferable from a diff, so if this entry ever
-gets ahead of what was observed it becomes the thing §12 exists to prevent — a claim that the guards
-work, resting on prose rather than on a refusal somebody watched.
-
-**The probe ran on 2026-09-09 and step 4 refuses.** From `main`, with registration merged, a `Write`
-and a `git restore --staged` were both refused by `branch-guard.sh` naming the branch. Registration
-is therefore no longer the open question; the two that remain are in the last paragraphs of this
-section.
-
-Requested 2026-09-08, from a question worth restating because it is the one this whole item answers:
-_how do we make sure the agent follows the house rules the moment it steps into this project?_ Until
-now the answer was that nothing did. The rules existed in a skill that is **model-invoked**, so
-whether they were read depended on whether the model chose to read them, and the case where that is
-least likely — a narrow prompt late in a long session — is the case where they matter most.
-
-**Built, on `chore/agent-guardrails`:** `CLAUDE.md`, which auto-loads every session and carries the
-two non-negotiable rules and the pointer to the working contract; `.claude/hooks/branch-guard.sh`
-(deny writes and pushes on a protected branch, and deny `gh pr merge` from any branch),
-`branch-stack.sh` (ask a human when the stack is deep), `session-brief.sh` (state the contract and
-the repository's shape at session start, and after a compaction inline the two non-advisory rules
-and the finishing checklist's four judgement questions, extracted from their source files at run
-time), `lib.sh`, and `test-hooks.sh` — 107 assertions behind `pnpm test:hooks`; eleven mutations
-watched to fail when it was first written, five more when rule 2 was guarded, three more for the
-compaction brief — a stale pasted copy of each of its two extractions, and a regression to the
-unbounded stdin read that hung the suite. Two more on 2026-09-09, with the exit-code assertions:
-`deny()` switched to `exit 2`, which the original 93 did not notice at all, and the restored
-`paste -sd ', '` delimiter bug. Two more when `pull` joined the write list: dropping it back out
-fails four assertions, and dropping the `([[:space:]]|$)` that terminates the alternation fails the
-one that keeps `git pull-request` allowed.
-
-One thing deliberately not built here as well: a `PreToolUse` guard refusing `git commit` when the
-branch has no `PLAN.md` entry. It is the only version of the compaction fix with an exit code behind
-it, and also the version most likely to refuse a correct one-line fix — the failure `BUILDING.md`
-has a rule about, where a guard acquires an enemy among the people who maintain it. It waits for a
-second instance.
-
-**Registration moved into this repository on 2026-09-09 — written by the operator, because the agent
-is refused the file in both directions.** The sentence this section used to carry was right, and it
-took two blocked commands to establish that:
-
-```
-Write to protected path blocked by storecode (.claude/settings.json)
-Blocked: accessing Claude Code hook configuration via shell
-  (storecode.sensitive_paths:claude-settings-access)
-```
-
-The operator confirmed with the storecode team that **developers** may add settings. That is true and
-it was read here as meaning the constraint had never been real — so an intermediate revision of this
-paragraph claimed the write ban was the only half that held, and the read ban was refuted about
-ninety seconds later. **The permission is scoped to the human, not to the tree and not to the file's
-location.** `.claude/settings.json` may live here, be committed, and be reviewed like anything else;
-what the agent may do with it is nothing.
-
-**The operational consequence, which is the part that outlives the story.** No agent in this
-repository can confirm that the settings file exists, parses, names the right paths, or is tracked by
-git. Do not ask one to check, and do not accept an answer — the honest reply is a refusal. **Whether
-the configuration is well-formed is verified by a human reading it, and whether it _works_ is
-verified only by the probe below.** This is the same arrangement as before, with the file moved
-inside the tree for the sake of review; it buys no self-inspection.
-
-**Where the residual risk actually sits, now that it is not the settings file.** `.claude/hooks/*.sh`
-is **not** protected — the agent can edit every script the settings file points at, and `CLAUDE.md`
-positively expects it to ("`pnpm test:hooks`, which you run if you change one"). Neutering
-`branch-guard.sh` is therefore a one-line diff. What stops it is the same thing that stops any bad
-change: it must be made on a branch, it lands in a pull request a human reads, and CI runs the hook
-suite against it. **Review is the protection.** Do not read the block above as more coverage than it
-is; it protects the wiring, not the wire.
-
-**Behave as though they are unregistered anyway.** The two rules in `CLAUDE.md` bind on their own
-authority, never on a guard's. That instruction survives registration unchanged, and now for a
-sharper reason than "you cannot check" — see the exit-code question below.
-
-**Nothing in this tree can verify enforcement, and that is unchanged by registering it.** The probe
-below is still the only thing that proves anything, and it is still run by a person:
-
-```
-# start the session and type nothing  → expect the brief (session-brief)
-git switch main                       # setup, not a check
-git switch -c test/wiring-probe       # expect a prompt (branch-stack)
-git switch main                       # then ask the agent to edit any file
-                                      # expect a refusal naming 'main' (branch-guard)
-```
-
-**The `git switch main` before the branch creation is load-bearing, and an earlier revision of this
-block left it out.** `unmergedBranches` in `lib.sh` excludes HEAD from the count deliberately, so a
-feature branch is absent from its own stack: with three pull requests open, the count is 3 from
-`main` and 2 from any of them, and 2 does not meet the threshold. Created from `chore/register-hooks`
-the prompt is **correctly** silent, which the old ordering would have read as a dead hook. Confirm
-the number the hook will see rather than inferring it from open pull requests —
-`. .claude/hooks/lib.sh && countLines "$(unmergedBranches "$PWD" "$(stackBase "$PWD")")"`.
-
-If the **brief** is silent in a fresh session, the configuration is not being read at all and nothing
-else is worth testing. Do not draw that conclusion from a silent branch-stack prompt; it has an
-innocent explanation and the brief does not. **`pnpm test:hooks` proves the scripts; only that probe
-proves the enforcement**, and the distinction is the same one BUILDING.md draws about a guard that looks
-installed.
-
-**A precondition the first run of this probe did not state, and was defeated by.** Steps 3 and 4
-test a branch, and the settings file that registers the hooks is itself a tracked file — so on any
-branch whose history predates registration, `.claude/settings.json` is simply not in the working
-tree and **no hook is wired at all**. The probe as first written sent the reader to `main` while
-registration was still an open pull request, which is the one branch where it could not pass. Both
-steps came back silent, and the silence was nearly read as the exit-code failure below. Before
-running steps 3 or 4, confirm the branch under test actually carries the registration.
-
-**And the session-start claim this block used to make is wrong.** It said hook configuration is read
-at session start, so the change and its proof are always on opposite sides of a restart. On
-2026-09-09 the same `git restore --staged` was **allowed** on a stale `main` and **refused** on the
-same `main` minutes later in the same session, the only difference being that a fast-forward had
-brought the settings file into the tree. Registration appearing or disappearing takes effect
-immediately. Stating what that does _not_ cover, since this section is where that discipline is
-owed: nobody has tested whether an _edited_ hook definition is re-read, because the agent cannot
-write the file to find out.
-
-**`pnpm test:hooks` was narrow in two halves, and both are now closed.** The first: those assertions
-borrowed the developer's git identity, so they passed on one laptop and could not run anywhere else
-at all. CI caught it the first time it ran them, which was `1e64ed4` — the commit that added the CI
-step.
-
-**The second half was found while writing the settings file and closed on 2026-09-09.**
-Every assertion in `test-hooks.sh` piped the hook's stdout through a `decision` filter; **not one of
-the original 93 checked an exit code.** So the suite proves each script _emits_ the right refusal and says nothing
-about whether the runtime _acts_ on it. That gap has a specific candidate behind it: our hooks all
-`printf` the deny JSON and `exit 0`, and the published hook reference documents exit 2 as the
-blocking status while being unclear on whether a deny decision carried on stdout with exit 0 is
-honoured. If it is not, `branch-guard.sh` fails open on every path at once — the exact shape its own
-header warns about.
-
-**This was deliberately not fixed by guessing, and the measurement came back on 2026-09-09: exit 0
-carrying the decision on stdout is honoured.** A `Write` on `main` was refused with
-`branch-guard.sh`'s own text, as was a `git restore --staged`. `deny()` keeps `exit 0` and
-`branch-stack.sh` was left alone, which matters more than it sounds — the pre-registered plan said
-that a probe letting the edit through would earn `deny()` an `exit 2`, and for most of an afternoon
-it looked like that had happened. Applying it then would have rewritten a working guard to fix a
-fault that was somewhere else entirely, gone green, and left `main` unprotected behind a commit that
-read like a repair.
-
-**The assertion that gap earned is now in the suite** — the decision-carrying paths are checked to
-exit 0 rather than only to emit the right JSON, so a future edit that "helpfully" switches `deny()`
-to exit 2 fails a test instead of silently converting `branch-stack.sh`'s prompt into a refusal.
-
-One thing deliberately not built, because it was offered and declined: a `Stop` hook gating a turn
-on verification. Recorded so that "we considered it" survives the session that considered it.
-
-A general drift reporter comparing prose against code was declined here too, and **the narrow half
-of it shipped anyway** on 2026-09-08 as `pnpm docs:check`. The distinction is worth keeping: what
-was declined was a reporter that judges whether prose is _true_, which is a model call on every
-document; what was built checks the handful of prose facts that are _countable_, which is a regex
-and an exit code. The rest is still declined.
-
-**A fourth guardrail shipped on 2026-09-09, and it does not guard the code.** CI's `Rules owed` step
-fails a pull request whose body does not answer `FINISHING.md`'s fourth question. It is the only
-check in that workflow with no hand-run equivalent, because what it reads is the pull request body
-rather than the tree, and it is worth being exact about how little it proves: **it cannot tell a
-true `Rules owed: none` from a false one.** It guarantees the question was answered. Everything
-above it in this section guards the repository; this one guards a habit, and a habit that had failed
-four times in two sessions before anyone noticed.
-
-**Its disposal condition, written while it is still new.** If the fresh-context audit that produces
-that line ever returns `none` on a diff that plainly owes something, the step is worse than nothing —
-it will have made an unexamined omission _look_ examined — and it should be deleted rather than
-tuned. A rule with a stated way to die is one somebody can actually retire.
-
-Three more declined on the same day, recorded so they are not re-argued. **A rule making a blocked
-command an incident to write up**: rejected because "record what it taught you before you re-attempt
-or reword" reads as blessing the reword, and a rule that can be read as permission will be. **A
-`docs:check` rule failing a bare SHA cited without an incident anchor**, and **a CI check requiring
-"What was learned" to grow whenever a numbered entry is deleted**: both would have caught a real
-defect from this session, and both are mechanism ahead of evidence at one instance each. The second
-is the more tempting and the more dangerous — it would fire on every ordinary deletion.
-
----
-
 ### 13. What the house rules claim that nothing checks
 
 Found by a spot-check audit of the rules against the tree on 2026-09-08, and narrowed by the guard
@@ -473,9 +301,10 @@ not a plan item. What is left below is only what is still missing.
   indistinguishable to a regex, and here the call was made by rewording. The class fix is
   `expectSites` one level up: every count-noun phrase must be either a declared site or an
   explicitly listed historical figure, which forces that current-versus-war-story call to be written
-  down instead of made silently. §12's hook-assertion count is current and uncited — and duly went
-  stale within a day of being named here, twice; `ARCHITECTURE.md:1863`'s "1245 passing tests" is
-  history.
+  down instead of made silently. The hook-assertion count that the retired §12 carried was current
+  and uncited — and duly went stale within a day of being named here, twice, the third time being
+  what retired the section; `ARCHITECTURE.md:1863`'s "1245 passing tests" is history. Deleting that
+  instance removed neither the class nor the next one.
 - **`docs-check.ts` still has no test of its own.** The pinned-prose check that ships with the
   `CLAUDE.md` copy was put in `pinned-prose.ts` precisely so it could have one — importing
   `docs-check.ts` from a test runs `vitest list`, which spawns vitest inside vitest — and its 12
@@ -538,9 +367,11 @@ not a plan item. What is left below is only what is still missing.
 - **This one is closed, and is kept because it was wrong in a specific way.** It said registration
   was the operator's and outside this tree, so every guard was built inert and the whole of the
   evidence was `pnpm test:hooks` and hand-fed payloads, never an observed refusal. Registration moved
-  into the tree as PR #23 and a refusal **was** observed on 2026-09-09 (§12). What survives is the
-  narrower claim the original overshot: the agent still cannot read the settings file, so it can
-  watch a guard refuse without ever confirming what is wired.
+  into the tree as PR #23 and a refusal **was** observed on 2026-09-09 (`ARCHITECTURE.md` §16). The
+  narrower claim it was replaced with — "the agent still cannot read the settings file, so it can
+  watch a guard refuse without ever confirming what is wired" — was wrong in turn, and that is the
+  second correction this item has taken. The read is allowed; what stays true is only that reading a
+  registration is not watching it work.
 
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
@@ -552,7 +383,8 @@ these accumulate, and it is one instance of a possible rule rather than a rule.
 repository's own evidence is that checks on documents catch less than driving a command does. The
 guard work that was worth more than the whole `docs:check` list has now shipped, so what is left
 here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
-which is not ours (§12). If the next session has budget for exactly one, take the class check with
+which is not ours (`ARCHITECTURE.md` §16). If the next session has budget for exactly one, take the
+class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
 
 ### 14. The citations that were never written down
@@ -577,15 +409,30 @@ a `git log --all` check, and it is kept because regenerating it is the expensive
 stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **none of the 54 historical
 revisions of `PLAN.md`**, in any form. They were never written down. `ARCHITECTURE.md:619` says
 "See PLAN.md §5b", the one citation naming its target, and it resolves to nothing;
-`ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 15.
+`ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 16.
 
 **The quieter half is worse.** Some references are in range and silently repointed: six files say
 "§1 refuses on-disk state", but that rule moved to `ARCHITECTURE.md §5`. A dangling number fails
 when checked; a repointed one reads correctly forever.
 
 **The root cause is structural.** `PLAN.md` numbers its sections and rule 2 deletes entries when
-they ship, so every `§N` there names a slot guaranteed to be reused. Three fixes were named; the
-first is done and the third matters most:
+they ship, so every `§N` there named a slot guaranteed to be reused. **Half of that is now fixed by
+convention rather than by mechanism:** numbers here are retired instead of reused, stated at the top
+of "What is not built", so a deleted entry leaves a hole rather than handing its number to the next
+one. That closes the reuse case and not the deletion case, which is worse and is the one this entry
+had not named.
+
+**The deletion case, found while retiring §12 and §15 on `fix/unverified-claims`.** Five files cited
+"`PLAN.md` §12". Deleting §12 does not dangle any of them, because `§12` is still a heading in
+`ARCHITECTURE.md` — so `docs:check` stayed green while every one of those citations came to point at
+"Local divergence from upstream" instead of the guardrail argument. The resolver's rule is _this
+token is a heading in **some** document_, and that rule is blind by construction to a citation
+becoming wrong by deletion elsewhere. They were repointed by hand, at `ARCHITECTURE.md` §16, and
+nothing would have failed if they had not been. **A check that cannot see the failure mode its own
+document describes is the sharpest version of item 3's argument**, which is why item 3 is now
+partly instanced rather than only recommended.
+
+Three fixes were named; the first is done, the third matters most and has its first real instance:
 
 1. ~~A resolver in `docs:check`.~~ Shipped. It needed the predicted exemption for references that
    are _quoted_ rather than made — this very entry names ten dangling tokens in order to be useful —
@@ -595,7 +442,10 @@ first is done and the third matters most:
 2. Fix the 39. Most need a human: the intended target is often unrecoverable, and deleting a comment
    that cites nothing sometimes destroys the only record of a decision.
 3. **Stop citing `PLAN.md` by number from code.** Cite `ARCHITECTURE.md`, whose sections are stable,
-   or quote the reasoning where it is used.
+   or quote the reasoning where it is used. **First instance done:** the guardrail argument moved out
+   of `PLAN.md` §12 into `ARCHITECTURE.md` §16 precisely because five files were citing a plan entry
+   as though it were a permanent home. The general form of the rule is that an argument other
+   documents cite does not belong in the document whose entries are deleted on purpose.
 
 **What the resolver cannot catch, which is why item 2 is still a human's.** Almost no citation names
 its target document — `§7b` in `src/watch/decide.ts` says nothing about where `§7b` would live — so
@@ -630,7 +480,7 @@ Dangling, grouped by the token they cite. None of these tokens has ever been a h
 | `§3c`   | `cli/solve-outcome.ts:522,533`, `jira/jql.ts:221`                                                                                                                        |
 | `§6.2`  | `solve/delivery.ts:1045`                                                                                                                                                 |
 | `§5b`   | `ARCHITECTURE.md:619` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                              |
-| `§24`   | `ARCHITECTURE.md:1095` — self-reference in a file whose sections stop at 15; intended target is almost certainly §15, "The solve pipeline"                               |
+| `§24`   | `ARCHITECTURE.md:1095` — self-reference in a file whose sections stop at 16; intended target is almost certainly §15, "The solve pipeline"                               |
 
 **In range and silently repointed — the harder half, because nothing will ever flag these:**
 
@@ -648,102 +498,11 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 `SOLVE_INSTRUCTIONS.md` ones.
 
 **The legal vocabulary, which the resolver now parses rather than being told:** `ARCHITECTURE.md`
-§1–15 plus its §14 invariants 1–17; `PLAN.md` §1–15; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
+§1–16 plus its §14 invariants 1–17; `PLAN.md` §1–17 less the numbers it has retired;
+`INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
 `SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten cited tokens are in none of them.
 
 <!-- refs:on -->
-
-### 15. The mutate list is a denylist, and it catches 13 of git's write verbs out of about 40
-
-**Branch:** `fix/write-verb-audit`, off `main`. **Delete this entry when it ships.**
-
-**Why now.** `pull` was added to `branch-guard.sh`'s mutate list in PR #25, and the entry recording
-that said the fix was worth little on its own because the list "was assembled from commands that
-_sound_ mutating, and `pull` sounds like a read" — a defect in the derivation, not a typo. This is
-the audit that entry asked for. It is deliberately a separate branch: #25 closed a hole, this
-changes the shape of the guard.
-
-**The measurement, and it is the whole argument.** Every subcommand git itself knows about
-(`git --list-cmds=main,others,nohelpers`, 163 of them) was fed to `branch-guard.sh` as
-`git <verb>`, with `CLAUDE_PROJECT_DIR` pointed at a throwaway repository whose HEAD is `main`:
-
-```
-REFUSED (13)  am apply cherry-pick commit merge mv pull push rebase reset restore revert rm
-allowed (150) everything else
-```
-
-Arguments cannot change that verdict — the pattern matches on the verb token — so the bare-verb
-sweep is the complete answer rather than a sample. Among the 150 that a protected branch lets
-through:
-
-| allowed on `main`                                                             | and it                                                          |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `checkout`                                                                    | is the older spelling of `restore`, which **is** refused        |
-| `stash` (bare), `stash push`                                                  | takes the worktree away; `stash pop`/`apply`/`drop` are refused |
-| `clean`                                                                       | deletes untracked files                                         |
-| `branch -f`, `branch -D`                                                      | moves or deletes a ref, the protected one included              |
-| `update-ref`, `symbolic-ref`                                                  | move any ref, and HEAD, with no porcelain involved              |
-| `send-pack`, `http-push`                                                      | are `push` under other names                                    |
-| `fetch <remote> <src>:<dst>`                                                  | writes a **local** branch, not a remote-tracking one            |
-| `subtree merge`, `subtree pull`                                               | are a merge and a pull the list does not recognise              |
-| `reflog expire`                                                               | destroys the undo trail for every row above it                  |
-| `filter-branch`, `fast-import`                                                | rewrite history wholesale                                       |
-| `bisect`, `worktree`, `add`                                                   | move HEAD, add trees, stage on a protected branch               |
-| `read-tree`, `update-index`, `checkout-index`, `sparse-checkout`, `submodule` | write the index or the worktree                                 |
-
-**So the shape is the defect and `pull` was a symptom.** A denylist has to enumerate every spelling
-of "write" in a tool with 163 subcommands and several aliases per act, and it is behind by
-construction: a verb git adds next year is allowed on the day it ships.
-
-**What is changing.** Invert the default **for `git` only**. An allowlist of read verbs plus a
-named set of conditional ones; any other `git` subcommand is a mutation. Commands that are not
-`git` keep today's fail-open behaviour untouched, so `pnpm`, `ls` and `grep` are unaffected — the
-inversion is scoped to the one program whose write surface we can enumerate.
-
-**The escape hatch is the constraint that shapes it.** The existing comment is right that a guard
-refusing every command on a protected branch traps the agent there, and that the remedy a denial
-names must not itself be refused. So `switch` stays allowed in full, `checkout -b`/`-B` stays
-allowed as the spelling half of everyone's fingers already know, and plain `checkout` — the
-destructive one — does not. Each of those three gets an assertion.
-
-**Result.** The same sweep now refuses **102 of 163**. Assertions went 107 → 186, every conditional
-verb's read form asserted beside its write form. Eight mutations, all caught — but only after the
-one that survived was understood: deleting the loop that consumes git's global options did **not**
-let `git -C . worktree add` through, because with the options unconsumed `-C` lands where the verb
-goes and is refused as an unrecognised write. Under an inversion mis-parsing can only over-refuse,
-so no write fixture can see that loop break, and the four assertions above it read as though they
-covered it. Its only observable job is not refusing a read that carries a global option.
-
-**What would make this the wrong change.** Over-refusal on a legitimate read nobody listed. That is
-the real cost and it is accepted rather than dismissed: it will happen, the denial text names the
-remedy, and adding a verb to the read list is a one-line change with an assertion. The direction
-matters more than the count — an unlisted read is a refusal a human fixes in a minute, an unlisted
-write is a commit on `main` nobody sees. The second risk is a conditional verb whose read form gets
-caught: `git branch` with no write flag, `git stash list`, `git config --get`, `git worktree list`
-and `git fetch` without a `:` refspec are all ordinary here and all get an assertion, positive and
-negative, or the change does not ship.
-
-**Two things the audit turned up that are not this change**, recorded so they are not lost:
-
-- **`branch-stack.sh` was observed not firing**, which is probe step 3 and the first result that
-  step has ever produced. `git switch -c fix/write-verb-audit` from `main` with three unmerged
-  branches produced no prompt; run by hand with the identical payload the script emits the correct
-  `ask` and exits 0. `session-brief.sh` printed at session start, so the settings file is read and
-  parsed, and `branch-guard.sh`'s `deny` on `Bash` was watched refusing on 2026-09-09, so `Bash`
-  `PreToolUse` hooks do run and stdout-with-exit-0 is honoured **for `deny`**. That leaves two
-  causes this tree cannot separate: `branch-stack.sh` may not be wired on `Bash`, or `ask` may not
-  be honoured the way `deny` is. Only a human can read `.claude/settings.json` and tell them apart.
-  **If it is wired, the finding is that `ask` is decorative**, and that is larger than any hole in
-  the mutate list, because every guard written in the fail-open "make the human decide" style
-  depends on it.
-- **The push check greps the whole command text where the `gh pr merge` check is anchored to
-  command position.** The `gh` check has a comment explaining that anchoring is "the difference
-  between guarding the act and censoring the words". The push check has no such anchor, so a commit
-  message that merely contains the word `main` is refused as though it were a push to it. Measured
-  twice this week, once on this repository's own commits. It is a false positive in a guard, which
-  BUILDING.md says is how a guard earns the contempt that gets it turned off.
-
----
 
 ### 16. Four claims this tree makes that turned out to be wrong, unchecked, or already shipped
 
@@ -783,7 +542,10 @@ that each carry their own argument:
   as a step an agent runs every session rather than a ritual reserved for a human;
 - retire §12 and §15, migrating what is still true — the residual-risk analysis, and the fact that
   `.claude/hooks/*.sh` is unprotected and review is the protection — into a new `ARCHITECTURE.md`
-  §16, because ten documents cite "`PLAN.md` §12" as the argument's home and it needs a real one;
+  §16, because five files cite "`PLAN.md` §12" as the argument's home and it needs a real one.
+  **Done.** This line said "ten documents" until the repointing measured it —
+  `git grep -l 'PLAN.md §12' HEAD -- '*.md'` returns five. An estimate written as a count, in the
+  entry whose fourth item exists to catch exactly that, and it survived being read four times;
 - the count-phrase class check, extracted into its own module so it can be tested, with the
   `docs-check.test.ts` §13 says must arrive with it;
 - a `PreToolUse` hook that prints the four questions when a commit is about to happen.
@@ -806,6 +568,58 @@ surface several more stale current counts. It did not: of the ambiguous phrases,
 a war story or **another repository's** suite (`4562 tests` is `insurance-commerce-rest-api`, twice).
 Only §12:303 was stale. It also surfaced a false-positive class the design has to handle — `#2661`
 is a pull request number, and a naive count matcher reads it as a count.
+
+---
+
+### 17. Two guardrail questions that outlived the entries they were written in
+
+**Branch:** none yet. These came out of §12 and §15, which shipped and were deleted; the settled
+half of both is now `ARCHITECTURE.md` §16 and this is the half that is still open. They are here
+rather than there because §16 describes what the guardrails **are**, and a document describing a
+built thing is the wrong place to keep a defect nobody has fixed.
+
+**1. Nobody has ever seen `ask` honoured.** `branch-stack.sh` returns
+`permissionDecision: "ask"` on stdout with exit 0, and it is registered on `Bash` — that much can be
+read. What has never been observed is the runtime acting on it. It was watched _not_ prompting once,
+on `git switch -c fix/write-verb-audit` from `main` with three unmerged branches, while the same
+payload fed to the script by hand emitted the correct `ask` and exited 0. `deny` on the same
+transport was watched being honoured the day before, so the transport works for at least one
+decision.
+
+**Why it is worth more than it looks.** If `ask` is decorative, then every guard written in the
+fail-open "make the human decide" style is decorative, and that is the style this repository reaches
+for whenever a refusal would be too blunt. It is one measurement standing behind a whole class of
+future guards.
+
+**How to settle it, and why it has not been.** The probe needs three throwaway branches _carrying
+commits_ — `git branch --no-merged origin/main` ignores a branch with nothing on it, and
+`unmergedBranches` excludes HEAD besides — then a `git switch -c` from `main` with `BRANCH_STACK_MAX`
+at its default. Confirm the count the hook will actually see first,
+`. .claude/hooks/lib.sh && countLines "$(unmergedBranches "$PWD" "$(stackBase "$PWD")")"`, rather
+than inferring it from open pull requests; an earlier revision of the old probe got exactly that
+wrong and read a correct silence as a dead hook. What has stopped it is that it is real churn —
+three branches and three commits created only to be deleted — against a single bit of information.
+That is a defensible trade for one session and not for five, so the count of times this has been
+deferred matters more than the argument.
+
+**What would make measuring it the wrong idea:** nothing, except the cost. There is no
+lower-churn version — a hook that only prompts under a condition needs the condition.
+
+**2. The push check greps the whole command text.** `branch-guard.sh` anchors its `gh pr merge`
+check to command position, with a comment explaining that this is "the difference between guarding
+the act and censoring the words". The push check three lines below has no such anchor: it matches
+`git push` anywhere in the text and then a protected branch name anywhere in the text, so a commit
+message that merely _discusses_ pushing to `main` is refused as though it were one. Measured twice
+in one week, once on this repository's own commits.
+
+**Why it is a defect and not a rough edge.** `BUILDING.md` has the rule: a false positive is how a
+guard earns the contempt that gets it turned off, and this one fires precisely when somebody is
+writing about the guard. The fix is the anchor that already exists eleven lines up, plus assertions
+for both directions — a real push refused, a commit message naming it allowed.
+
+**What would make it the wrong change:** anchoring narrows the guard, and rule 2 is the one rule
+where narrowing is the expensive direction. `git push` inside `sh -c '...'` is the case to hold
+onto; the substring floor is what covers it today and the fix must not remove that.
 
 ---
 
