@@ -81,10 +81,18 @@ Written down before the probe runs, so the result cannot be rationalised after t
 
 ## What is still owed after the probe
 
-1. **`CLAUDE.md` is deliberately untouched and is now wrong in two places** — it says the guards may
-   be unregistered and that the `SessionStart` hook "is not registered here". It was left alone on
-   purpose: rewriting it before the probe passed would have claimed enforcement nobody had seen.
-   Correct it in the commit that records the probe result, not before.
+1. **`CLAUDE.md` was corrected on 2026-09-09, ahead of the probe, and two sibling sites were not.**
+   This item used to say the file was deliberately untouched and to correct it only in the commit
+   recording the probe result. What overtook that: a `SessionStart` hook was observed firing, with
+   this repository's live branch and counts in it, so **registration is now first-hand rather than
+   assumed** — which was the whole of the reason to wait. The rewrite claims registration and
+   explicitly denies enforcement, so it still asserts nothing unseen. **Two sites were left, and are
+   owed to the probe commit:** `PLAN.md` §13 ("Registration is the operator's and outside this tree
+   ... every guard in it is built inert" — wrong twice over) and
+   [`dev-house-rules/SKILL.md`](../dev-house-rules/SKILL.md) under "The two that are not advisory"
+   ("decided outside this tree and cannot be read from inside it" — _decided_ outside is now false,
+   _cannot be read_ is still true). Fix both with the observed result, and prefer amending the
+   sentence over deleting it: each one is load-bearing about what you still cannot check.
 2. **Keep "behave as though they are unregistered."** That instruction survives registration. It now
    rests on a better reason than "you cannot check": a guard can be registered and still fail open,
    which is exactly what the exit-code question is about.
