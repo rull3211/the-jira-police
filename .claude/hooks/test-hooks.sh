@@ -260,6 +260,26 @@ for w in "git -C . worktree add /tmp/x ref" "/usr/bin/git clean -fd" \
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
+# These are the assertions that make the option-consuming loop above testable at
+# all, and they exist because a mutation survived without them.
+#
+# Deleting that loop was expected to let `git -C . worktree add` through. It did
+# not, and the reason is a property of the inversion worth naming: with the
+# options unconsumed, `-C` itself lands where the verb goes, the allowlist does
+# not name it, and it is refused as an unrecognised write. Mis-parsing can only
+# ever over-refuse here, never under-refuse -- which is the direction the whole
+# change was chosen for, and also why the write fixtures above cannot see the
+# loop break.
+#
+# So the loop's only observable job is not refusing a read that carries a global
+# option, and that is what these check. Without them the loop is untested code
+# that looks covered by the four assertions directly above it.
+for r in "git -C . status" "git --no-pager log --oneline" \
+  "git -c core.pager=cat diff" "git --git-dir=.git rev-parse HEAD"; do
+  expect "on main allows: $r" SILENT \
+    "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
 git -C "$main_repo" switch -q feat/ordinary
 expect "off main: a commit is fine" SILENT \
   "$(bash_payload "git commit -m x" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
