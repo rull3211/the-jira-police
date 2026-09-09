@@ -1,24 +1,32 @@
 ---
 name: claude-validation-work
-description: Entrypoint for validating that this repository's Claude Code hooks are actually enforced, after .claude/settings.json was registered on 2026-09-09. Carries the probe protocol, the two outcomes decided in advance, and the exit-code question the hook suite cannot answer. Use when resuming the chore/register-hooks work, when asked whether the guards fire, or before trusting any statement that a guard is installed.
+description: Entrypoint for validating that this repository's Claude Code hooks are actually enforced. Registration landed in PR #23 and the probe was run on 2026-09-09 — a refusal was observed on main, and exit 0 carrying the decision on stdout is honoured. Carries the probe protocol, the precondition that defeated its first run, and what the result did and did not settle. Use when asked whether the guards fire, or before trusting any statement that a guard is installed.
 ---
 
 # Validating the guardrails
 
-**Point a fresh session here by name.** This exists because the work it describes cannot be finished
-inside one session: hook configuration is read at session start, so the change and the proof of the
-change are always on opposite sides of a restart.
+**Point a session here by name when you need to know whether the guards fire.**
+
+**This file used to open by saying the work could not be finished inside one session** — that hook
+configuration is read at session start, so a change and its proof are always on opposite sides of a
+restart. That is wrong, and it was refuted while running the probe below. On 2026-09-09 the same
+`git restore --staged` was **allowed** on a stale `main` and **refused** on that same `main` minutes
+later in one session, the only change being a fast-forward that brought `.claude/settings.json` into
+the working tree. Registration appearing or disappearing takes effect immediately, and no restart is
+needed to see it.
+
+Say what that does not cover, because this file is where the habit is owed: nobody has tested
+whether an _edited_ hook definition is re-read within a session. The agent cannot write that file,
+so the case stays open.
 
 **Read `PLAN.md` §12 first.** It is the entry, it names the branch, and it holds the reasoning. This
 file is the runbook; §12 is the argument. If they disagree, §12 is the source and this file is stale.
 
 ## Where the work is
 
-**Branch:** `chore/register-hooks`, off `origin/main` at `673f6c6`.
-
-Registered on 2026-09-09 in `.claude/settings.json`: `branch-guard.sh` on
-`Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, `session-brief.sh` on `SessionStart`
-with **no matcher** so that no trigger value can be missed by a typo.
+Registration landed in **PR #23** and is on `main`. `.claude/settings.json` wires `branch-guard.sh`
+on `Bash|Edit|Write|NotebookEdit`, `branch-stack.sh` on `Bash`, and `session-brief.sh` on
+`SessionStart` with **no matcher** so that no trigger value can be missed by a typo.
 
 ## First, the thing that will waste your time if you do not read it
 
@@ -43,7 +51,16 @@ refusal or a fabrication.
 
 ## The probe
 
-Run in a **fresh session**, by a **human**, in this order. Nothing before step 1 is worth doing.
+Run by a **human**, in this order. Nothing before step 1 is worth doing.
+
+**Check this before anything else: does the branch you are testing carry the registration?**
+`.claude/settings.json` is a tracked file, so on any branch whose history predates PR #23 it is
+simply absent and **nothing is wired at all**. This is not a footnote — it is what defeated the
+first run of this probe. The steps below sent the reader to `main` while registration was still an
+open pull request, which made `main` the one branch where the probe could not pass. Steps 3 and 4
+both came back silent, and that silence was nearly written up as the exit-code failure. If
+`git merge-base --is-ancestor <registration-commit> HEAD` fails, stop; you are testing a branch with
+no hooks on it.
 
 | #   | do this                                                | expect                                                                 |
 | --- | ------------------------------------------------------ | ---------------------------------------------------------------------- |
@@ -72,46 +89,52 @@ see before believing anything about the result:
 Three or more and step 3 should fire. Fewer, and the stack is genuinely shallow: create throwaway
 branches until that command prints 3, or skip to step 4.
 
+**Run that command; do not read a number out of this file.** A previous revision of this paragraph
+said the count was 1 and that step 3 was therefore dead, on the strength of #21 and #23 having
+merged. #21 had not merged. With #21, #24 and #25 open the count from `main` is 3 or more and step 3
+is live — which is the seventh time in this work that a number was written down instead of measured,
+and the first where the stale number would have caused a working guard to be recorded as untestable
+rather than the reverse.
+
+**`branch-stack.sh` has still never been watched firing**, which makes step 3 the only unproven
+piece left. It is testable exactly while the stack is deep, so it is worth running _before_ the open
+pull requests merge rather than after.
+
 **This paragraph replaces one that got it wrong**, and the error is worth keeping because it is the
 fourth instance of the rule this work owes to `PROVING.md`. The old text claimed the stack was deep
 enough and listed `fix/section-resolver`, `fix/slept-assertion` "and this one" — counting HEAD, which
 `lib.sh` drops. A branch count was quoted as evidence without stating which case it excludes, by the
 same session that wrote the exclusion.
 
-**Clean up:** `git switch chore/register-hooks && git branch -D test/wiring-probe`.
+**Clean up:** `git switch <your branch> && git branch -d test/wiring-probe`. The lowercase `-d` is
+deliberate — the probe branch carries no commits, and `-D` is refused by an outer guard anyway.
 
-## Step 4 is the one to bet against, and both outcomes are already decided
+## Step 4 was the one to bet against, and it refused
 
-Every hook here does `printf` the decision JSON and `exit 0`. The published hook reference documents
-**exit 2** as the blocking status and is unclear on whether a `deny` carried on stdout with exit 0 is
-honoured. Our own suite cannot settle it: all 93 assertions in `test-hooks.sh` pipe stdout through a
-`decision` filter and **not one checks an exit code**. So `pnpm test:hooks` proves the scripts emit
-the right refusal and says nothing about whether the runtime acts on it.
+**Result, 2026-09-09: exit 0 carrying the decision on stdout is honoured.** From `main`, with
+registration merged, a `Write` and a `git restore --staged` were both refused in
+`branch-guard.sh`'s own words. `deny()` keeps `exit 0`; `branch-stack.sh` was not touched.
 
-Written down before the probe runs, so the result cannot be rationalised after the fact:
+The question this settled: every hook here does `printf` the decision JSON and `exit 0`, the
+published reference documents **exit 2** as the blocking status and is unclear on whether a `deny`
+on stdout with exit 0 is honoured, and the suite could not settle it because all 93 assertions piped
+stdout through a `decision` filter and **not one checked an exit code**. That gap is now closed —
+six assertions cover the exit codes and the branch list, and both were mutation-tested: switching
+`deny()` to `exit 2` fails two of them, and **none of the original 93 noticed it**.
 
-- **Step 4 refuses.** Exit 0 with the JSON is honoured. Add an exit-code assertion to
-  `test-hooks.sh` anyway, so nobody has to rediscover this, and record the observed behaviour in
-  §12.
-- **Step 4 lets the edit through.** `deny()` in `branch-guard.sh` gets `exit 2`, and the suite gets
-  the assertion that would have caught it. **Do not make the same change to `branch-stack.sh`** — its
-  decision is `ask`, and exit 2 would convert a prompt into a hard refusal, which is the failure
-  BUILDING.md warns about, where a guard acquires an enemy among the people who maintain it.
+**The part worth carrying is how nearly the pre-registered plan went wrong.** It said that if step 4
+let the edit through, `deny()` earns `exit 2`. Step 4 did let the edit through on the first run — and
+the cause was the missing registration described above, not the exit code. Applying the pre-decided
+fix then would have rewritten a working guard, passed every existing assertion, read like hardening
+in review, and left `main` unprotected. A decision recorded in advance stops you rationalising the
+result; it does not stop you misreading which case you are in.
 
 ## What is still owed after the probe
 
-1. **`CLAUDE.md` was corrected on 2026-09-09, ahead of the probe, and two sibling sites were not.**
-   This item used to say the file was deliberately untouched and to correct it only in the commit
-   recording the probe result. What overtook that: a `SessionStart` hook was observed firing, with
-   this repository's live branch and counts in it, so **registration is now first-hand rather than
-   assumed** — which was the whole of the reason to wait. The rewrite claims registration and
-   explicitly denies enforcement, so it still asserts nothing unseen. **Two sites were left, and are
-   owed to the probe commit:** `PLAN.md` §13 ("Registration is the operator's and outside this tree
-   ... every guard in it is built inert" — wrong twice over) and
-   [`dev-house-rules/SKILL.md`](../dev-house-rules/SKILL.md) under "The two that are not advisory"
-   ("decided outside this tree and cannot be read from inside it" — _decided_ outside is now false,
-   _cannot be read_ is still true). Fix both with the observed result, and prefer amending the
-   sentence over deleting it: each one is load-bearing about what you still cannot check.
+1. **Done.** `CLAUDE.md` was corrected ahead of the probe; `PLAN.md` §13 and
+   [`dev-house-rules/SKILL.md`](../dev-house-rules/SKILL.md) were corrected in the probe-result
+   commit. Each was amended rather than deleted, because each is load-bearing about what you still
+   cannot check: the agent can now watch a guard refuse without ever confirming what is wired.
 2. **Keep "behave as though they are unregistered."** That instruction survives registration. It now
    rests on a better reason than "you cannot check": a guard can be registered and still fail open,
    which is exactly what the exit-code question is about.
@@ -120,12 +143,20 @@ Written down before the probe runs, so the result cannot be rationalised after t
    (`pnpm test:hooks`, "which you run if you change one"). Neutering `branch-guard.sh` is a one-line
    diff. Review is what stops it; the harness block covers the wiring, not the wire.
 4. **A rule is owed to `PROVING.md`.** See below — this is the only item that is not about hooks.
+5. **`git pull` is not in `branch-guard.sh`'s mutate list, and it should be.** Measured on
+   `main` after registration merged: `git merge --ff-only origin/main` is refused there and
+   `git pull --ff-only origin main` is not, though a bare `git pull` on a protected branch can
+   create a merge commit on it. The list already carries `merge`; `pull` is the same act with a
+   fetch in front. It is deliberately **not** fixed in the probe-result commit — it changes what the
+   guard refuses, so it is its own reviewable unit, and `git pull` on a feature branch must stay
+   allowed. Note the shape rather than just the hole: the list was assembled from commands that
+   sound mutating, and `pull` sounds like a read.
 
-## The rule this work owes, at four instances
+## The rule this work owes, at seven instances
 
-The work that registered these hooks made the same mistake four times, and each time a single
-command refuted it. **The third and fourth are written up on this branch** — the first two are in
-`INCIDENTS.md` on `fix/slept-assertion` and arrive with PR #22, so do not go looking for them here:
+The work that registered these hooks made the same mistake seven times, and each time a single
+command refuted it. All seven are in `INCIDENTS.md` **on this branch** — they reach `main` when this
+pull request does, and not before:
 
 - A probe measured the wrong case and its output was quoted as proof; CI produced the counter-example
   on its first run.
@@ -138,11 +169,28 @@ command refuted it. **The third and fourth are written up on this branch** — t
   hook. Refuted by one command — `countLines "$(unmergedBranches ...)"` — printing `2`. The same
   claim had already been copied into PR #23's body before anyone ran it.
 
-The fourth is the sharpest of the four, and the reason to keep it: the exclusion it failed to account
-for is **documented at length in `lib.sh` by the same session that then quoted the count**. Knowing
-the mechanism is not the same as checking the case, which is precisely what the rule is for.
+- **This file's own pre-decided outcome**, above: step 4's result was written up in advance as
+  evidence about exit-code semantics, without stating the case it does not cover — that a silent
+  hook has two causes, and "never ran" is one of them. The probe's first run hit exactly that case.
+  Refuted by instrumenting the hook to log when it fired, which took one line.
 
-`INCIDENTS.md` says the candidate rule — **state which case your check does not cover before quoting
-it as evidence** — waits for a third instance. It now has two more. **Propose it to `PROVING.md`
-rather than adding it silently**, per `FINISHING.md`: say what you want to change and why, before
-changing it.
+- **CI's `Rules owed` step**, which reads `github.event.pull_request.body` from the event payload.
+  Four local gates were quoted as "green" without stating that none of them reads a pull request
+  body — which `ci.yml`'s own header comment says in as many words. Refuted by the first push.
+
+- **This file's own step-3 paragraph**, above: "the count from `main` is 1, so step 3 is dead" was
+  written from a list of merged pull requests rather than from the command sitting two paragraphs
+  above it. #21 had not merged. Refuted by running that command, which printed `3`.
+
+The pattern in the last four is worth more than any of them alone. The fourth failed to account for
+an exclusion **documented at length in `lib.sh` by the same session that then quoted the count**. The
+fifth was written by the session that had deliberately registered `session-brief.sh` with no matcher
+_so that no trigger could be missed_ — the exact knowledge that would have surfaced the other cause
+of a silent hook. The seventh ignored a command this file supplies, three lines away, for the sole
+purpose of not guessing that number. Knowing the mechanism is not the same as checking the case, and
+neither is owning the check.
+
+`INCIDENTS.md` said the candidate rule — **state which case your check does not cover before quoting
+it as evidence** — waits for a third instance. It has seven. **Propose it to `PROVING.md` rather
+than adding it silently**, per `FINISHING.md`: say what you want to change and why, before changing
+it.

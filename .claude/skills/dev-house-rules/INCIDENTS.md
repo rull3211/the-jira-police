@@ -1196,3 +1196,114 @@ the two entries directly above, which reached this branch when #22 merged into i
 amendment — _state which case your check does not cover before quoting it as evidence_ — reached its
 threshold here and is **proposed, not written**: see `claude-validation-work`, "The rule this work
 owes".
+
+### The silent guard that was diagnosed before anyone checked whether it had run
+
+The probe that proves these hooks are enforced was written with both outcomes decided in advance, so
+that the result could not be rationalised after the fact. Step 4 — edit a file from `main`, expect a
+refusal — was pre-committed to a diagnosis: if the edit goes through, `deny()` in `branch-guard.sh`
+gets `exit 2`, because the published reference documents exit 2 as the blocking status and is
+unclear on whether a deny carried on stdout with exit 0 is honoured.
+
+The edit went through. So did a mutating git command on `main`. Step 3 was silent too. Every
+pre-registered condition for "the runtime ignores exit 0" was satisfied.
+
+**It was the wrong diagnosis, and the pre-decided outcome is what made it persuasive.** A silent
+hook has two causes and the plan had named one. The hooks were never running: the settings file is
+tracked, registration was still an open pull request, and `main` therefore did not carry it in the
+working tree. The guards were live on every branch _except_ the one they exist to protect, and the
+probe sent the reader to exactly that branch.
+
+**One line settled it** — appending to a log under `/tmp` at the top of `branch-guard.sh`, then
+making any tool call. The tracer fired, so the hook was running; a scratch branch matching the
+guard's `release/*` pattern then produced a real refusal, so exit 0 had been honoured all along. Two
+commands, after an afternoon of reasoning from a decision table.
+
+**What the near-miss would have cost.** Applying the pre-decided fix would have passed all 93
+existing assertions, because not one of them read an exit code; it would have read like hardening in
+review; and it would have left `main` unprotected behind a commit that looked like a repair. The
+guard's own header warns about exactly this shape — a guard that fails open is worse than no guard,
+because it looks installed.
+
+**Deciding both outcomes in advance is still right.** It stops you rewriting the criterion once you
+see the result, which is a different failure and a more common one. What it does not do, and was
+quietly assumed to do, is establish that the case in front of you is one of the cases on the list.
+
+**Found by** instrumenting the hook — after the configuration was pasted in by the human and read as
+confirming correct wiring, which it was. Correct configuration and an executing hook are different
+claims, and the first was allowed to stand in for the second.
+
+**A false positive fired on the write-up, for the second time and in the same shape.** Appending
+this entry by shell was blocked, because the command carried the configuration's path inside quoted
+prose and the rule matches the string rather than the target. As
+[the first time](#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent), it
+went in through the file editor instead — the right tool for a markdown edit regardless — and the
+substitution is disclosed rather than made quietly.
+
+**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
+This is the **fifth instance** of a check quoted as evidence without stating the case it excludes,
+and the second written by a session that already held the fact that would have caught it: the same
+work had registered `session-brief.sh` with no matcher _so that no trigger value could be missed by
+a typo_, which is the same insight as "a hook can be silent because nothing invoked it". The
+candidate amendment — _state which case your check does not cover before quoting it as evidence_ —
+is **proposed, not written**: see `claude-validation-work`, "The rule this work owes".
+
+### The check whose own remedy could not clear it
+
+Filed on the way out of the pull request above, and it is the sixth instance in a row.
+
+CI's `Rules owed` step failed on #24: the body answered the question under a `## Rules owed`
+heading, and the step matches a literal `Rules owed:` line. Fine — that is the check working. The
+defect is what happened next. Its error message says to answer the question **in the pull request
+body**; the body was edited to do exactly that, and the run stayed red. Re-running it stayed red
+too.
+
+**The step reads `github.event.pull_request.body`** — the event payload, not the API — and
+`pull_request:` with no `types:` subscribes to `opened`, `synchronize`, `reopened` and **not**
+`edited`. So editing the body cannot re-run it, and a re-run replays the payload from before the
+edit. The only way to clear a body-only failure was to push a commit, which is not what the message
+tells you to do.
+
+This is the shape `branch-guard.sh`'s own header already names — _a guard whose remedy its own
+denial text names must not itself block that remedy_ — arriving in a different file, written by a
+session that had read that comment the same afternoon. A check that cannot be satisfied the way it
+says to satisfy it teaches people to route around it, which is how a check earns the contempt that
+gets it deleted.
+
+**Fixed** by adding `types: [opened, synchronize, reopened, edited]`, in the pull request that hit
+it, so the fix and its counter-example are the same run.
+
+**The rule** — the same one, at its sixth instance:
+`pnpm format:check`, `docs:check`, `test:hooks` and `test` were all green locally, and were quoted
+as "the gates pass" without stating the case they exclude. None of the four reads a pull request
+body; the only step that does has no hand-run equivalent, which is written down in `ci.yml`'s own
+header comment.
+
+### The dead step that was alive, from a merge list read instead of a count
+
+Seventh instance, and the cheapest of the seven to have avoided.
+
+`claude-validation-work` recorded that "as of the #21 and #23 merges the count from `main` is 1, so
+step 3 is dead" — that step being the only check on `branch-stack.sh`, the one hook here that has
+still never been watched firing. The number came from a mental list of merged pull requests. **#21
+had not merged.** With #21, #24 and #25 open the count is 3 and the step was live the whole time.
+
+**What makes this the cheapest.** The command that measures it —
+`countLines "$(unmergedBranches "$PWD" "$(stackBase "$PWD")")"` — is printed in that same file,
+three lines above the claim, and was put there by an earlier instance of this identical mistake. The
+file supplies the remedy and the next writer walked past it.
+
+**The direction is the new part, and it is the more dangerous one.** The six before this all
+overstated a guard's coverage. This one _under_stated it: a working, testable guard was written down
+as untestable, and the note said its silence "means nothing at all" — an instruction to stop looking.
+A false negative about your own enforcement retires a check quietly, and nothing goes red when it
+happens.
+
+**Found by** running the command while answering a question about merge order, three weeks of
+narrative after it was first written down.
+
+**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
+and the candidate amendment now at seven instances: _state which case your check does not cover
+before quoting it as evidence_. It is **proposed, not written**: see `claude-validation-work`, "The
+rule this work owes". Seven is well past the threshold `INCIDENTS.md` set for itself, and the
+proposal outliving its own evidence by this margin is starting to be its own finding.

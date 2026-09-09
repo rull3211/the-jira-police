@@ -46,8 +46,9 @@ green.
 ## The two that are not advisory
 
 Everything else is recoverable if you get it wrong. These are not — and you should assume your own
-compliance is the whole of the enforcement, because whether the guards are registered is decided
-outside this tree and cannot be read from inside it (`PLAN.md` §12):
+compliance is the whole of the enforcement. The guards are registered here now, and one has been
+watched refusing; but the settings file that wires them still cannot be read from inside this tree,
+so you can never confirm which of them is live on the branch you are standing on (`PLAN.md` §12):
 
 1. **Never work on `main` or any protected branch.** Branch first. One implementation branch per
    reviewable unit of privilege. Do not look for a way around this — ask.
