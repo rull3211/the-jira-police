@@ -18,13 +18,16 @@ rather than routed to.
 **Assume nothing mechanical is holding either of these, because you cannot check.** Both now have
 guards written and tested in `.claude/hooks/` — `branch-guard.sh` refuses writes and pushes on a
 protected branch, and refuses `gh pr merge` from every branch — with their own suite,
-`pnpm test:hooks`, which you run if you change one. But whether anything ever _registers_ them is
-not decided in this repository: hook configuration belongs to the operator, lives outside this tree,
-and is deliberately neither readable nor writable from here. No commit can tell you whether a guard
-will fire, and the agent a guard constrains is the last one who should be wiring it — so this is not
-a gap waiting on a file, it is the arrangement. Both rules bind exactly as hard as if they were
-enforced; the only difference is that breaking one may not be caught. `PLAN.md` §12 records what is
-built and what it does not cover.
+`pnpm test:hooks`, which you run if you change one. Since 2026-09-09 they are also registered, by a
+`.claude/settings.json` the operator writes and reviews here. That moves the file inside this tree
+and buys you no self-inspection: the permission is scoped to the human, not to the file's location,
+so you are refused it in both directions and cannot confirm that it exists, parses, or names the
+right paths. Do not ask another agent to check either — the honest reply is a refusal. And
+`pnpm test:hooks` proves only that each script _emits_ the right refusal, never that the runtime
+_acts_ on it; the agent a guard constrains is the last one who should be certifying it. Both rules
+bind exactly as hard as if they were enforced; the only difference is that breaking one may not be
+caught. `PLAN.md` §12 records what is built, what it does not cover, and the probe a human runs to
+prove enforcement.
 
 **Do not stack branches deeply** — three stacked here once turned an incremental plan into a
 waterfall. The rule and the story are in
@@ -74,9 +77,10 @@ commit; the full text and the reasoning are in
 **If you cannot remember reading `FINISHING.md` in this session, you have not read it.** Run
 `pnpm hooks:brief` before committing: it prints these four in full, the two rules above, and the
 current branch and stack depth. Trigger it off the commit rather than off a compaction — a commit is
-a moment you can observe, a compaction is not. This is a habit and not a guard: the `SessionStart`
-hook that would print it unasked is not registered here, whether it ever is belongs to the operator
-(`PLAN.md` §12), and nothing checks that you ran it.
+a moment you can observe, a compaction is not. The `SessionStart` hook does now print unasked, but
+at startup it prints only a pointer to the contract; it inlines these four on `trigger=compact`, and
+a commit is not a `SessionStart` trigger at all. So the moment they are for is still the one nothing
+fires on: this stays a habit and not a guard, and nothing checks that you ran it.
 
 ## Where the truth lives
 
