@@ -22,10 +22,12 @@
 # model while leaving the permission flow untouched. Two honest caveats:
 #
 #   - Like every other hook here, the suite proves this script *emits* the right
-#     thing. It cannot prove the runtime *acts* on it. `deny` on this transport
-#     has been watched being honoured; `ask` has never been (PLAN.md §17), and
-#     `additionalContext` has not either. The difference is that nothing is at
-#     stake if this one is decorative: the failure mode is the status quo.
+#     thing. It cannot prove the runtime *acts* on it. `additionalContext` has
+#     now been watched being honoured once, by hand, on a real `git commit` —
+#     the text arrived in the model's context ahead of the command — which is
+#     the same standing `deny` has and better than `ask`, which nobody has seen
+#     (PLAN.md §17). One observation is not the suite: it was green on the days
+#     this hook was not registered at all, and it would be green again tomorrow.
 #   - It has to be registered to fire at all, and the file that registers it is
 #     one this agent is refused write access to, in the editor and in the shell.
 #     So a wiring snippet is proposed to the operator and the operator applies
