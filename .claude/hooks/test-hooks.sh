@@ -175,11 +175,107 @@ for w in "git pull" "git pull --rebase" "git pull --ff-only origin main" "git -C
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
-# `git pull-request` is the negative case that keeps the terminator honest: drop
-# the `([[:space:]]|$)` after the alternation and `pull` swallows this, which is
-# the same defect as a bare substring match on `main` refusing `fix/domain`.
 for r in "git switch -c feat/x" "git checkout -b feat/x" "git status" "git log" \
-  "git diff" "git fetch origin" "git pull-request" "pnpm test" "ls"; do
+  "git diff" "git fetch origin" "pnpm test" "ls"; do
+  expect "on main allows: $r" SILENT \
+    "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# `git pull-request` was in that list as an *allowed* case, proving the floor
+# regex's `([[:space:]]|$)` terminator stopped `pull` swallowing it. It is
+# refused now and that is the intended change, not a break: it is not a git
+# subcommand, the read allowlist does not name it, and an unrecognised verb is a
+# write. Refusing the verb nobody thought of is the property the inversion was
+# chosen for, so the fixture stays and only its verdict moves.
+#
+# What that costs, stated rather than discovered later: the terminator is no
+# longer observable through this guard's decision, because both halves refuse
+# this input now and an assertion here cannot tell a working terminator from a
+# broken one. It has become defence in depth behind a `case` that matches verbs
+# exactly, where a prefix bug of that shape cannot arise. If the terminator
+# regressed, nothing in this suite would go red.
+expect "on main refuses: git pull-request, an unknown verb" DENY \
+  "$(bash_payload "git pull-request" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+
+# The audit. Every subcommand git knows about was fed to the guard with HEAD on
+# a protected branch; the denylist refused 13 of 163 and the inversion refuses
+# 102. These are the ones that measured *allowed* before it, each one a write
+# the old list had no name for.
+for w in "git checkout somefile.ts" "git clean -fd" "git stash" "git stash push -u" \
+  "git update-ref refs/heads/x HEAD" "git symbolic-ref HEAD refs/heads/x" \
+  "git send-pack origin HEAD" "git http-push https://example.invalid/r HEAD" \
+  "git subtree merge --prefix=p ref" "git subtree pull --prefix=p origin ref" \
+  "git reflog expire --all" "git bisect start" "git worktree add /tmp/x ref" \
+  "git add ." "git read-tree HEAD" "git update-index --refresh" \
+  "git checkout-index -a" "git sparse-checkout set src" "git submodule update --init" \
+  "git tag v1.2.3" "git notes add -m hi" "git replace a b" "git config user.email x@y" \
+  "git gc --prune=now" "git mergetool" "git fast-import" "git filter-branch --all" \
+  "git branch -d gone" "git branch --force target ref" "git branch -m old new" \
+  "git fetch origin topic:topic"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The other half of the same claim, and the half that decides whether this guard
+# survives contact with a working day. Inverting a denylist buys coverage with
+# false positives, so every conditional verb gets its read form asserted next to
+# its write form above. An over-refusal here is what earns a guard the contempt
+# that gets it switched off.
+for r in "git branch" "git branch --list" "git branch -a" "git branch --show-current" \
+  "git branch newthing" "git stash list" "git stash show" "git reflog" "git reflog show" \
+  "git tag" "git tag -l" "git tag --list" "git worktree list" "git remote" "git remote -v" \
+  "git remote show origin" "git remote get-url origin" "git config --get user.email" \
+  "git config --list" "git fetch" "git fetch --all --prune" "git submodule status" \
+  "git bisect log" "git notes list" "git sparse-checkout list" "git checkout -B feat/x" \
+  "git switch main" "git merge-base --is-ancestor a b" "git merge-tree --write-tree a b" \
+  "git cherry -v main topic" "git ls-remote --heads origin" "git rev-parse HEAD" \
+  "git show HEAD" "git grep -n TODO" "git describe --tags" "git shortlog -sn"; do
+  expect "on main allows: $r" SILENT \
+    "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The floor exists for exactly this: command-position analysis cannot see inside
+# a quoted `-c` argument, so dropping the substring pass in favour of the
+# inversion would have opened a hole while closing thirty. Measured — with the
+# floor removed, both of these are allowed on a protected branch.
+for w in "sh -c 'git commit -m x'" "bash -lc \"git push\""; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# Each simple command is examined on its own, so a write in the second half of a
+# chain is caught. The first fixture's leading command is a read that the
+# allowlist names, which is what makes it a test of the split rather than of the
+# floor.
+for w in "git status && git worktree add /tmp/x ref" "git log | head -5; git clean -fd"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# Global options and an absolute path in front of the verb, which is the bypass
+# this guard has already been caught by once.
+for w in "git -C . worktree add /tmp/x ref" "/usr/bin/git clean -fd" \
+  "GIT_AUTHOR_NAME=x git stash" "git -c user.name=x tag v1"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# These are the assertions that make the option-consuming loop above testable at
+# all, and they exist because a mutation survived without them.
+#
+# Deleting that loop was expected to let `git -C . worktree add` through. It did
+# not, and the reason is a property of the inversion worth naming: with the
+# options unconsumed, `-C` itself lands where the verb goes, the allowlist does
+# not name it, and it is refused as an unrecognised write. Mis-parsing can only
+# ever over-refuse here, never under-refuse -- which is the direction the whole
+# change was chosen for, and also why the write fixtures above cannot see the
+# loop break.
+#
+# So the loop's only observable job is not refusing a read that carries a global
+# option, and that is what these check. Without them the loop is untested code
+# that looks covered by the four assertions directly above it.
+for r in "git -C . status" "git --no-pager log --oneline" \
+  "git -c core.pager=cat diff" "git --git-dir=.git rev-parse HEAD"; do
   expect "on main allows: $r" SILENT \
     "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done

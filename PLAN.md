@@ -232,7 +232,7 @@ environment cannot answer a question about CI's.**
 
 ### 11. Loose ends recorded in no other file
 
-Four things that exist in neither `ARCHITECTURE.md`, `README.md` nor the source, and were being kept
+Five things that exist in neither `ARCHITECTURE.md`, `README.md` nor the source, and were being kept
 alive only by being carried forward in conversation.
 
 - **A post-merge vacuous-test sweep.** Two shipped tests guard nothing: #1413's timezone test and
@@ -263,6 +263,14 @@ alive only by being carried forward in conversation.
   takes a `commentId` and updates in place, so _our own_ comment can be rewritten — but deletion is
   unavailable, and the automation comments are not ours. A board this service can be blocked by and
   cannot unblock is a fact about the tool surface that the daemon should be known to have.
+- **`sectionReferences()` may be an orphan, and this is rehomed from an entry that shipped.** It
+  counts `§N` tokens across `src/`, and the section resolver that landed in PR #21 resolves the same
+  tokens rather than counting them. Leaving it costs a `docs:check` fact that moves whenever test
+  fixtures do — it already jumped 106 → 141 on fixtures alone, which is a number in prose that
+  churns for reasons unrelated to the thing it claims to measure. **Propose before deleting**: an
+  unreferenced-looking function here has twice turned out to be load-bearing, so trace the guarantee
+  to a caller rather than trusting the name (`PROVING.md`, "an unreferenced declaration is evidence
+  about a name").
 
 ### 12. The development guardrails are built, registered, and now observed refusing
 
@@ -342,14 +350,6 @@ is; it protects the wiring, not the wire.
 **Behave as though they are unregistered anyway.** The two rules in `CLAUDE.md` bind on their own
 authority, never on a guard's. That instruction survives registration unchanged, and now for a
 sharper reason than "you cannot check" — see the exit-code question below.
-
-**Two other branches were in flight when this one was cut, and this branch cannot see their notes.**
-`chore/register-hooks` came off `origin/main` at `673f6c6`, so the `PLAN.md` here predates both.
-**PR #22** (`fix/slept-assertion`) fixes a one-millisecond assertion and carries a §15 hand-off plus
-two `INCIDENTS.md` entries from the same day; it is green and ready. **PR #21**
-(`fix/section-resolver`) builds the `§N` resolver and is red **only** because it predates #22 —
-rebase it once #22 lands rather than debugging it. Expect this section and their §15 to collide on
-whichever merges second; the collision is textual, and §12 is the one to keep.
 
 **Nothing in this tree can verify enforcement, and that is unchanged by registering it.** The probe
 below is still the only thing that proves anything, and it is still run by a person:
@@ -653,72 +653,95 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 
 <!-- refs:on -->
 
-### 15. One branch still in flight, and the order they had to land in
+### 15. The mutate list is a denylist, and it catches 13 of git's write verbs out of about 40
 
-**Branch:** `fix/section-resolver`, which is now the only one left. **Delete this entry when it
-merges** — it is a hand-off, not a plan, and it exists because the session that produced both ends
-before either lands.
+**Branch:** `fix/write-verb-audit`, off `main`. **Delete this entry when it ships.**
 
-**`fix/slept-assertion` (PR #22) — merged.** Its half of the ordering is done, and the paragraph
-below is kept rather than deleted because the correction it records outlived the branch: the fix was
-right and the published reason was wrong, and that is the part worth carrying.
+**Why now.** `pull` was added to `branch-guard.sh`'s mutate list in PR #25, and the entry recording
+that said the fix was worth little on its own because the list "was assembled from commands that
+_sound_ mutating, and `pull` sounds like a read" — a defect in the derivation, not a typo. This is
+the audit that entry asked for. It is deliberately a separate branch: #25 closed a hole, this
+changes the shape of the guard.
 
-**The fix is right and the published reason was wrong.** It replaces
-a `.find()`-first-event assertion with largest-event-plus-one-tick-tolerance in
-`src/triage/session.test.ts`. The fix needs no change. The **diagnosis** shipped in the commit
-message and PR body claims the failing value was a second `session.slept` event, because a local
-probe showed no gap could come in under the interval. CI then printed `expected 3599999 to be
-greater than or equal to 3600000` — 3,599,999 **is** the injected hour, one millisecond early,
-because a timer may fire before `Date.now()` agrees it is due, and the probe never measured the
-first gap against a stamp taken before `setInterval` exists. Corrected in the test comment and in
-`INCIDENTS.md`; **the commit message and the PR body still carry the wrong story** unless this
-entry is being read after they were amended.
-
-**`fix/section-resolver` (PR #21) — built, and now green.** It adds `src/cli/section-refs.ts` and its
-11 tests, routes `sectionReferences()` through `maskDisabled`, and holds `KNOWN_DANGLING` at exactly 39. Its CI was red **only** because the branch predated #22 and so still ran the one-millisecond
-assertion. That prediction held: `origin/main` was merged in once #22 landed, and the suite went to
-2390 passing without the branch's own code being touched. The prediction is left here on purpose —
-it is the cheapest kind of evidence, a stated expectation that a later run either confirms or kills.
-
-**One open question, deliberately not answered by either branch.** `sectionReferences()` counts
-`§N` tokens across `src/` and may now be an orphan superseded by the resolver, which resolves the
-same tokens rather than counting them. Leaving it costs a `docs:check` fact that moves whenever
-test fixtures do — it already jumped 106 → 141 on fixtures alone. Propose before deleting.
-
-### 16. `git pull` reaches a protected branch and `git merge` does not
-
-**Branch:** `fix/pull-on-protected-branch`, stacked one deep on `chore/probe-result` (PR #24).
-**Delete this entry when it ships.**
-
-**Stacked deliberately, and this is the exception the depth rule contemplates rather than a
-violation of it.** Both branches edit `test-hooks.sh`; off `main` the conflict is certain rather
-than likely, and resolving a conflict in the file that asserts the guard is the worst place to be
-resolving one. One level, one reviewable unit of privilege, and it lands after #24.
-
-**What is wrong.** `branch-guard.sh`'s mutate list carries `merge` and not `pull`. Measured against
-the script itself, with `CLAUDE_PROJECT_DIR` pointed at a throwaway repository whose HEAD is `main`:
+**The measurement, and it is the whole argument.** Every subcommand git itself knows about
+(`git --list-cmds=main,others,nohelpers`, 163 of them) was fed to `branch-guard.sh` as
+`git <verb>`, with `CLAUDE_PROJECT_DIR` pointed at a throwaway repository whose HEAD is `main`:
 
 ```
-git pull                          allowed
-git pull --ff-only origin main    allowed
-git pull --rebase                 allowed
-git merge --ff-only origin/main   REFUSED
+REFUSED (13)  am apply cherry-pick commit merge mv pull push rebase reset restore revert rm
+allowed (150) everything else
 ```
 
-A bare `git pull` on a protected branch can create a merge commit on it, which is rule 1 by a
-spelling the list does not recognise. `pull` is `merge` with a fetch in front.
+Arguments cannot change that verdict — the pattern matches on the verb token — so the bare-verb
+sweep is the complete answer rather than a sample. Among the 150 that a protected branch lets
+through:
 
-**Why it was missed, which matters more than the hole.** The list was assembled from commands that
-_sound_ mutating, and `pull` sounds like a read. That is a defect in how the list was derived, not a
-typo in it, so the fix is worth nothing without the assertions: the same reasoning would omit the
-same command again.
+| allowed on `main`                                                             | and it                                                          |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `checkout`                                                                    | is the older spelling of `restore`, which **is** refused        |
+| `stash` (bare), `stash push`                                                  | takes the worktree away; `stash pop`/`apply`/`drop` are refused |
+| `clean`                                                                       | deletes untracked files                                         |
+| `branch -f`, `branch -D`                                                      | moves or deletes a ref, the protected one included              |
+| `update-ref`, `symbolic-ref`                                                  | move any ref, and HEAD, with no porcelain involved              |
+| `send-pack`, `http-push`                                                      | are `push` under other names                                    |
+| `fetch <remote> <src>:<dst>`                                                  | writes a **local** branch, not a remote-tracking one            |
+| `subtree merge`, `subtree pull`                                               | are a merge and a pull the list does not recognise              |
+| `reflog expire`                                                               | destroys the undo trail for every row above it                  |
+| `filter-branch`, `fast-import`                                                | rewrite history wholesale                                       |
+| `bisect`, `worktree`, `add`                                                   | move HEAD, add trees, stage on a protected branch               |
+| `read-tree`, `update-index`, `checkout-index`, `sparse-checkout`, `submodule` | write the index or the worktree                                 |
 
-**What would make this the wrong change.** `git pull` on a feature branch is the ordinary way work
-gets updated here and must stay allowed — the guard keys on HEAD, so it already is, and there is an
-assertion for it rather than an argument. The second risk is over-matching: `git pull-request`
-(measured: currently allowed) must stay allowed, which the existing `([[:space:]]|$)` terminator
-gives for free, and which is the same class as the bare-substring bug that once refused `fix/domain`
-for containing `main`. Both cases get an assertion or the change does not ship.
+**So the shape is the defect and `pull` was a symptom.** A denylist has to enumerate every spelling
+of "write" in a tool with 163 subcommands and several aliases per act, and it is behind by
+construction: a verb git adds next year is allowed on the day it ships.
+
+**What is changing.** Invert the default **for `git` only**. An allowlist of read verbs plus a
+named set of conditional ones; any other `git` subcommand is a mutation. Commands that are not
+`git` keep today's fail-open behaviour untouched, so `pnpm`, `ls` and `grep` are unaffected — the
+inversion is scoped to the one program whose write surface we can enumerate.
+
+**The escape hatch is the constraint that shapes it.** The existing comment is right that a guard
+refusing every command on a protected branch traps the agent there, and that the remedy a denial
+names must not itself be refused. So `switch` stays allowed in full, `checkout -b`/`-B` stays
+allowed as the spelling half of everyone's fingers already know, and plain `checkout` — the
+destructive one — does not. Each of those three gets an assertion.
+
+**Result.** The same sweep now refuses **102 of 163**. Assertions went 107 → 186, every conditional
+verb's read form asserted beside its write form. Eight mutations, all caught — but only after the
+one that survived was understood: deleting the loop that consumes git's global options did **not**
+let `git -C . worktree add` through, because with the options unconsumed `-C` lands where the verb
+goes and is refused as an unrecognised write. Under an inversion mis-parsing can only over-refuse,
+so no write fixture can see that loop break, and the four assertions above it read as though they
+covered it. Its only observable job is not refusing a read that carries a global option.
+
+**What would make this the wrong change.** Over-refusal on a legitimate read nobody listed. That is
+the real cost and it is accepted rather than dismissed: it will happen, the denial text names the
+remedy, and adding a verb to the read list is a one-line change with an assertion. The direction
+matters more than the count — an unlisted read is a refusal a human fixes in a minute, an unlisted
+write is a commit on `main` nobody sees. The second risk is a conditional verb whose read form gets
+caught: `git branch` with no write flag, `git stash list`, `git config --get`, `git worktree list`
+and `git fetch` without a `:` refspec are all ordinary here and all get an assertion, positive and
+negative, or the change does not ship.
+
+**Two things the audit turned up that are not this change**, recorded so they are not lost:
+
+- **`branch-stack.sh` was observed not firing**, which is probe step 3 and the first result that
+  step has ever produced. `git switch -c fix/write-verb-audit` from `main` with three unmerged
+  branches produced no prompt; run by hand with the identical payload the script emits the correct
+  `ask` and exits 0. `session-brief.sh` printed at session start, so the settings file is read and
+  parsed, and `branch-guard.sh`'s `deny` on `Bash` was watched refusing on 2026-09-09, so `Bash`
+  `PreToolUse` hooks do run and stdout-with-exit-0 is honoured **for `deny`**. That leaves two
+  causes this tree cannot separate: `branch-stack.sh` may not be wired on `Bash`, or `ask` may not
+  be honoured the way `deny` is. Only a human can read `.claude/settings.json` and tell them apart.
+  **If it is wired, the finding is that `ask` is decorative**, and that is larger than any hole in
+  the mutate list, because every guard written in the fail-open "make the human decide" style
+  depends on it.
+- **The push check greps the whole command text where the `gh pr merge` check is anchored to
+  command position.** The `gh` check has a comment explaining that anchoring is "the difference
+  between guarding the act and censoring the words". The push check has no such anchor, so a commit
+  message that merely contains the word `main` is refused as though it were a push to it. Measured
+  twice this week, once on this repository's own commits. It is a false positive in a guard, which
+  BUILDING.md says is how a guard earns the contempt that gets it turned off.
 
 ---
 

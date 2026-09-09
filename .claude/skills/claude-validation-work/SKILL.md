@@ -1,6 +1,6 @@
 ---
 name: claude-validation-work
-description: Entrypoint for validating that this repository's Claude Code hooks are actually enforced. Registration landed in PR #23 and the probe was run on 2026-09-09 — a refusal was observed on main, and exit 0 carrying the decision on stdout is honoured. Carries the probe protocol, the precondition that defeated its first run, and what the result did and did not settle. Use when asked whether the guards fire, or before trusting any statement that a guard is installed.
+description: Entrypoint for validating that this repository's Claude Code hooks are actually enforced. Registration landed in PR #23 and the probe was run on 2026-09-09 — a hard refusal was observed on main, so exit 0 carrying the decision on stdout is honoured for deny. Step 3's ask was NOT observed, and whether ask is honoured at all is the open question. Carries the probe protocol, the precondition that defeated its first run, and what the result did and did not settle. Use when asked whether the guards fire, or before trusting any statement that a guard is installed.
 ---
 
 # Validating the guardrails
@@ -96,12 +96,31 @@ is live — which is the seventh time in this work that a number was written dow
 and the first where the stale number would have caused a working guard to be recorded as untestable
 rather than the reverse.
 
-**`branch-stack.sh` has still never been watched firing**, which makes step 3 the only unproven
-piece left. It is testable exactly while the stack is deep, so it is worth running _before_ the open
-pull requests merge rather than after.
+**Step 3 has now produced a result, and the result is that it did not fire.** On 2026-09-09, from
+`main`, with the count measured at 3 by the command above, `git switch -c fix/write-verb-audit`
+produced no prompt. Run by hand with the identical payload, `branch-stack.sh` emits the correct
+`ask` — naming all three branches — and exits 0. So the script is not the problem.
+
+**Two causes remain and this tree cannot separate them.** What is excluded: `session-brief.sh`
+printed at session start with the live branch and counts, so the settings file is read and parses;
+and `branch-guard.sh`'s `deny` on `Bash` was watched refusing in step 4, so `Bash` `PreToolUse`
+hooks do run and a decision on stdout with exit 0 is honoured **for `deny`**. What is left is that
+`branch-stack.sh` may not be wired on `Bash` at all, or that `ask` is not honoured the way `deny`
+is. Telling them apart means reading `.claude/settings.json`, which no agent here can do — so this
+is the human's half, and it is the last open question in this file.
+
+**If it is wired, the finding is that `ask` is decorative**, and that is larger than anything else
+recorded here: every guard written in the fail-open, make-the-human-decide style rests on `ask`
+being honoured, and `branch-stack.sh` was deliberately written as `ask` rather than `deny` so that
+stacking stays possible when it is right. A guard that cannot prompt is not a soft guard, it is an
+absent one.
+
+**Note what this does not settle**, since this file is where the habit is owed: a stack of exactly 3
+was tested, from `main`, on one machine, with one command shape. Nobody has tried `git worktree add`
+or `git branch <name>`, which the same hook matches.
 
 **This paragraph replaces one that got it wrong**, and the error is worth keeping because it is the
-fourth instance of the rule this work owes to `PROVING.md`. The old text claimed the stack was deep
+fourth instance of the rule this work drove into `PROVING.md`. The old text claimed the stack was deep
 enough and listed `fix/section-resolver`, `fix/slept-assertion` "and this one" — counting HEAD, which
 `lib.sh` drops. A branch count was quoted as evidence without stating which case it excludes, by the
 same session that wrote the exclusion.
@@ -143,21 +162,23 @@ result; it does not stop you misreading which case you are in.
    (`pnpm test:hooks`, "which you run if you change one"). Neutering `branch-guard.sh` is a one-line
    diff. Review is what stops it; the harness block covers the wiring, not the wire.
 4. **A rule is owed to `PROVING.md`.** See below — this is the only item that is not about hooks.
-5. **`git pull` was not in `branch-guard.sh`'s mutate list, and now is** — on
-   `fix/pull-on-protected-branch`, kept out of the probe-result commit because it changes what the
-   guard refuses. Measured on `main` after registration merged: `git merge --ff-only origin/main`
-   was refused there and `git pull --ff-only origin main` was not, though a bare `git pull` on a
-   protected branch can create a merge commit on it. `pull` is `merge` with a fetch in front.
-   Note the shape rather than just the hole: the list was assembled from commands that _sound_
-   mutating, and `pull` sounds like a read — so the fix is worth little without the assertions,
-   because the same reasoning would omit the same command again. `git pull` on a feature branch
-   stays allowed, and there is an assertion for that rather than an argument.
+5. **The mutate list was a denylist naming 13 of git's write verbs, and is now an allowlist of
+   reads.** `git pull` was missing from it, which shipped in PR #25; that fix's own note said the
+   defect was in the derivation rather than the list, because it "was assembled from commands that
+   _sound_ mutating, and `pull` sounds like a read". The audit that note asked for measured how much
+   that was worth: all 163 subcommands fed to the script with HEAD on a protected branch, **13
+   refused and 150 allowed** — including `checkout` (the older spelling of the `restore` it
+   refused), bare `stash`, `clean`, `branch -f`, `update-ref`, `send-pack`, `fetch` in its refspec
+   form and `subtree pull`. Inverted for `git` only, the same sweep refuses 102. `switch` and
+   `checkout -b` stay allowed because the denial text names them as the remedy. **Done**, on
+   `fix/write-verb-audit`; the incident is
+   [in `INCIDENTS.md`](../dev-house-rules/INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs).
 
-## The rule this work owes, at seven instances
+## The rule this work bought, at seven instances
 
 The work that registered these hooks made the same mistake seven times, and each time a single
-command refuted it. All seven are in `INCIDENTS.md` **on this branch** — they reach `main` when this
-pull request does, and not before:
+command refuted it. All seven are in `INCIDENTS.md` on `main`, and so is the rule they paid for —
+#27 merged on 2026-09-09:
 
 - A probe measured the wrong case and its output was quoted as proof; CI produced the counter-example
   on its first run.
