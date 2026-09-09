@@ -225,6 +225,10 @@ environment cannot answer a question about CI's.**
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
+- **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
+  suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
+  after a compaction — so neither the field name it branches on nor the fact of registration is
+  confirmed from inside this tree (§12). It accepts both `trigger` and `source` for that reason.
 
 ### 11. Loose ends recorded in no other file
 
@@ -272,9 +276,18 @@ least likely — a narrow prompt late in a long session — is the case where th
 two non-negotiable rules and the pointer to the working contract; `.claude/hooks/branch-guard.sh`
 (deny writes and pushes on a protected branch, and deny `gh pr merge` from any branch),
 `branch-stack.sh` (ask a human when the stack is deep), `session-brief.sh` (state the contract and
-the repository's shape at session start, including after a compaction), `lib.sh`, and
-`test-hooks.sh` — 74 assertions behind `pnpm test:hooks`; eleven mutations watched to fail when it
-was first written, five more when rule 2 was guarded.
+the repository's shape at session start, and after a compaction inline the two non-advisory rules
+and the finishing checklist's four judgement questions, extracted from their source files at run
+time), `lib.sh`, and `test-hooks.sh` — 93 assertions behind `pnpm test:hooks`; eleven mutations
+watched to fail when it was first written, five more when rule 2 was guarded, three more for the
+compaction brief — a stale pasted copy of each of its two extractions, and a regression to the
+unbounded stdin read that hung the suite.
+
+One thing deliberately not built here as well: a `PreToolUse` guard refusing `git commit` when the
+branch has no `PLAN.md` entry. It is the only version of the compaction fix with an exit code behind
+it, and also the version most likely to refuse a correct one-line fix — the failure `BUILDING.md`
+has a rule about, where a guard acquires an enemy among the people who maintain it. It waits for a
+second instance.
 
 **Registration is not in this repository, and that is the arrangement rather than a gap.** Hook
 configuration belongs to the operator and is held outside this tree; the environment refuses the
@@ -334,26 +347,13 @@ is the more tempting and the more dangerous — it would fire on every ordinary 
 
 ---
 
-### 13. What an audit of the house rules against the tree left open
+### 13. What the house rules claim that nothing checks
 
-Run 2026-09-08 against the rules on this branch, by spot-check rather than by reading: drive every
-command, then test each falsifiable claim the rules make about the repository. **Eight findings;
-six held, one was wrong, one was overstated in a way that would have destroyed evidence.** Both
-failures are recorded below, because the way they were reached is more useful than the findings.
-
-**What the audit confirmed first**, so the defects are read in proportion: all five checks green;
-plan-before-work followed in `af61f41`/`1e64ed4` with the entry written and then deleted; every
-symbol `BUILDING.md` names present, including `FAIL_FIRST_CHECK`'s `!== "false"` asymmetry; the
-literal-list rule derived at the sites it names; six entry points exactly. Of eighteen incidents
-sampled, thirteen trace to a SHA whose diff or message carries the incident's own details, and **no
-claimed defect turned out never to have existed.**
-
-The three defects that were only prose have been corrected on this branch, which is why they are no
-longer listed here: the four sentences claiming a mechanical guarantee, the module map's test-file
-count, and two citations that named the wrong document. What is below is what a document edit could
-not reach.
-
-**Open, and not this branch's job:**
+Found by a spot-check audit of the rules against the tree on 2026-09-08, and narrowed by the guard
+work that followed. The audit's own story — what it confirmed, and the three ways its method failed
+while it ran — is an
+[incident](.claude/skills/dev-house-rules/INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way),
+not a plan item. What is left below is only what is still missing.
 
 - **The count class, not the instance.** A fourth `FACT` now pins the bare-count phrasing, but that
   is one site, not the class. Measured across tracked markdown on 2026-09-08 — a number followed by
@@ -377,6 +377,13 @@ not reach.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links; `CLAUDE.md`'s
   own routing table is backticks, so deleting a phase file keeps it green; the repository's real
   cross-reference system — **87 `§N`/`invariant N` references** — is unchecked entirely.
+- **Nothing checks that an incident is reachable from a rule.** `docs:check` verifies that a link
+  _resolves_, never that one _exists_, so the direction `FINISHING.md` makes explicit — the rule
+  links to the incident, never the reverse — is unenforced in the only direction that matters.
+  Measured 2026-09-09 over the 33 `###` entries `INCIDENTS.md` then had: exactly one lacked an
+  inbound link from any rule file, and it was the entry added that morning. Caught by a fresh-context
+  audit, which is not a mechanism — and the audit was needed again the same day, for entries 34 and 35. The check is cheap — every heading must be linked from at least one of the five rule files —
+  and it belongs with `docs-check.test.ts` above.
 - **Cost figures are facts with many homes.** `$0.94` in five files, `$0.11` in five, `$3.99` in
   three, `$4.50` in three, outside the `docs:check` exemption rule 3 grants.
 - **A citation to a document outside the tree cannot be checked, and does not look different.**
@@ -408,35 +415,12 @@ which is **blind to every squash- and rebase-merged branch**. `chore/agent-guard
 identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
 these accumulate, and it is one instance of a possible rule rather than a rule.
 
-**Four method failures, recorded and deliberately not generalised** — each is one instance, and
-each is a defect this repository already has an incident for, committed while auditing for it:
-
-- **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
-  a shared row looks like, and it was read as a missing row because a finding had predicted one.
-  Row-counting also assumed one setting per row. Deriving the answer — iterate `SETTINGS`, check
-  each name — gives 46 of 46 present. `STARTING.md`'s "finding something adjacent and believing it".
-- **A number that invited an inference about what it controls.** `git rev-list --count main..HEAD`
-  is 3 and `branch-stack.sh`'s threshold is 3, so the hook was said to be at its limit. It counts
-  unmerged branches into `origin/main` — currently **one**. The `capacity: 0` incident exactly.
-- **An adversarial subagent returns what it was primed for.** The prompt offered `SUSPECTED
-RETROFIT` as a verdict and named an untraceable commit as evidence of it; the report came back
-  alleging invention, and it was relayed at full strength. The evidence supported "not in
-  `PLAN.md`". `STARTING.md` already covers this — _delegate breadth, keep depth_ — and depth was
-  delegated on the two sharpest accusations.
-- **A line number read without its context**, and the only one of the four that reached `main`. It
-  is therefore the only one that outlives this entry: the record is under
-  [what was learned](#a-citation-can-be-exact-and-still-be-read-wrongly-and-that-one-shipped), so
-  that deleting §13 does not delete a correction to something shipped.
-
-**What would make this the wrong idea.** Two things. The prose corrections that already shipped
-read, at a glance, as weakening the rules — they are not: _never work on `main`_ and _a human
-merges_ stay absolute, and only the claim about what enforces them changed. The honest objection was
-that if wiring the hooks were imminent, those edits would be churn; the counter is that the prose had
-been false for as long as it had existed, and a rule that overstates its own enforcement teaches a
-reader to stop checking the other ones. For what remains: every item above is a check on documents,
-and this repository's own evidence is that checks on documents catch less than driving a command
-does. If the next session has budget for exactly one of these, the guard hardening is worth more than
-the whole `docs:check` list, and the wiring is worth more than the guards.
+**What would make this the wrong idea.** Every item above is a check on documents, and this
+repository's own evidence is that checks on documents catch less than driving a command does. The
+guard work that was worth more than the whole `docs:check` list has now shipped, so what is left
+here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
+which is not ours (§12). If the next session has budget for exactly one, take the class check with
+its test: it is the only item whose absence has already produced two shipped contradictions.
 
 ---
 
@@ -444,9 +428,11 @@ the whole `docs:check` list, and the wiring is worth more than the guards.
 
 ### A citation can be exact and still be read wrongly, and that one shipped
 
-Rescued from §13's method failures, which are deleted when that entry closes. This one survives
-because it is the only one of the four that reached `main`, and a correction to something shipped
-must outlive the audit that found it.
+The audit that produced this is an
+[incident](.claude/skills/dev-house-rules/INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way);
+its other three method failures went there with it. This one is here because it is the only one of
+the four that reached `main`, and a correction to something shipped must outlive both the audit that
+found it and the plan entry that happened to carry it.
 
 The claim was that `test-hooks.sh:93` **asserted** the bare-push hole, by listing a push among the
 commands that must stay silent. It does not. Twelve lines above it the fixture switches to

@@ -29,6 +29,16 @@ _almost-correct change_, and only it catches anything.
 **A mutation that no test can kill but the type checker does is fine** — say so where it would
 otherwise look like a gap.
 
+**Count what your claim quantifies over, and mutate every one of them.** A comment saying _both of
+these are derived, not pasted_ is a claim about two sites; three assertions covering one of them
+leave the other free to rot, and the comment reads as if it were covered. Measured here: pasting a
+stale copy over the unwatched half left all 87 assertions green. The same diff had an assertion
+named for a case it did not exercise — _empty stdin does not hang_, run against stdin **closed**,
+while the state that actually hung was stdin open and silent. Both are one habit: coverage written
+for the example in front of you rather than for the set the sentence names.
+[→ the half of the extraction that nothing
+watched](INCIDENTS.md#the-half-of-the-extraction-that-nothing-watched)
+
 **Some properties belong to a program, not a function.** _The event loop stays alive_ cannot be
 observed from inside a test runner that is itself holding the loop open. Run a child process and
 assert on its exit code.

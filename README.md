@@ -479,6 +479,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                    |
 | `pnpm docs:check`                                      | Numbers cited in prose, checked against the tree. About a second                                          | no                          |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                          |
+| `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                          |
 | `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                                                            | no                          |
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or

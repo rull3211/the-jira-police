@@ -25,6 +25,17 @@ inherited a summary of the work rather than the work. That context has a confide
 rules and has never read them.
 [→](INCIDENTS.md#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them)
 
+**The mechanism is worth naming, and the rate is not known.** Compaction fires when context is
+exhausted; context is most exhausted at the end of a unit of work; the end of a unit of work is when
+this page is supposed to run. So the most rule-dense moment in the workflow tends to be reached by
+the most degraded context available. That is an argument, plus one measured instance — an attempt to
+turn it into a rate produced four-for-four out of a transcript that says one-for-four, which is its
+own entry. The `SessionStart` hook now inlines the four questions below when it fires with
+`trigger=compact`, on the reasoning that a pointer is exactly what such a context discounts.
+**Treat that injection as a prompt to open this file, not as a substitute for it** — it carries four
+of the checks and none of the reasoning.
+[→](INCIDENTS.md#the-compaction-finding-that-counted-the-string-instead-of-the-call)
+
 ---
 
 ## Run these
