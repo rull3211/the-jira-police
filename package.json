@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:hooks": ".claude/hooks/test-hooks.sh",
+    "hooks:brief": "printf '{\"trigger\":\"compact\"}' | CLAUDE_PROJECT_DIR=\"$PWD\" .claude/hooks/session-brief.sh",
     "docs:check": "node src/cli/docs-check.ts"
   },
   "devDependencies": {

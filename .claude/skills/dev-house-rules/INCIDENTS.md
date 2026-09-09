@@ -854,3 +854,94 @@ the proof was a reader asking what the entry was for. The open items stayed; the
 **The rules** — [a rule with one instance is a
 hypothesis](FINISHING.md#the-postmortem-in-three-questions);
 [where an amendment goes](FINISHING.md#where-an-amendment-goes).
+
+### The compaction finding that counted the string instead of the call
+
+An hour after the entry above was written about an audit whose searches confirmed what it predicted,
+the same failure produced a shipped claim about compaction — and this one was on its way into a
+hook, which would have injected it into every future session as a current fact.
+
+**The claim.** _Three compaction boundaries in this session, and all three were immediately followed
+by a `git commit` — lines 611→612, 1353→1354, 2002→2003 — with no read of any rule file in between.
+Rule-file reads against `git commit` calls, by stretch: 8:13, then 1:23, then 5:10, then 0:6._ It
+was written into `PLAN.md`, into `FINISHING.md`, and into the text `session-brief.sh` injects.
+
+**What a real count says.** Parsing the transcript for `tool_use` blocks rather than grepping it for
+a string:
+
+| the claim                             | measured                                                 |
+| ------------------------------------- | -------------------------------------------------------- |
+| three boundaries                      | **four** — 611, 1353, 2002, 2621                         |
+| each _immediately_ followed by commit | first commit is **+146, +32, +66, +57** transcript lines |
+| no rule-file read in between          | **2, 0, 2, 3** reads between boundary and that commit    |
+| reads are scarce next to commits      | per stretch, reads:commits ran **8:8, 18:5, 11:7, 8:3**  |
+
+One boundary of four fits the story. The ratios do not merely fail to support it, they point the
+other way: rule files were read _more_ often than commits were made in every stretch but one.
+
+**Three separate errors, and each is one this file already names.**
+
+- **`grep -c 'git commit'` counts mentions, not calls.** 83 lines of the transcript contain the
+  string; 27 are actual `Bash` calls. The rest are plans, summaries, tool results and commit-message
+  heredocs — and a heredoc quoting a commit message is the residue of a commit that has _already_
+  been made carefully. The denominators were inflated by the very evidence of care they were being
+  used to deny. [→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms)
+- **`611→612` was read as "boundary, then commit".** It is the boundary line and its summary line,
+  which is what a compaction always looks like. The arrow implied a sequence that the citation never
+  claimed, and it was exact, which is what made it persuasive. This is the second instance in two
+  days of a precise citation being read wrongly _because_ it was precise; the first is under _What
+  was learned_ in `PLAN.md`, and the pair is the second instance that entry was waiting for.
+- **The fourth boundary was missing because counting stopped when the pattern was complete.** Three
+  boundaries made three-for-three; the search was not run again after the session continued.
+
+**Why it survived long enough to be committed to prose.** The conclusion was independently plausible
+— `FINISHING.md` had already argued from an earlier incident that a compacted context holds a
+summary of the rules and has never read them — so the numbers were checked for _support_ rather than
+for _truth_. A finding that agrees with a rule you already believe gets the shortest review of any
+finding you will ever produce.
+
+**What survived, and it is not nothing.** The mechanism is still sound and one boundary is still an
+instance: compaction fires when context is exhausted, context is most exhausted at the end of a unit
+of work, and that is when the finishing checklist runs. The change built on it — `session-brief.sh`
+inlining the two non-advisory rules and the four judgement questions when it fires with
+`trigger=compact` — is justified by mechanism plus one case, which is a hypothesis, so the hook now
+says so in a comment and injects **no numbers at all**. The false ratios came back out of
+`PLAN.md`, `FINISHING.md` and the injected text.
+
+**Found by** a fresh-context subagent audit of the uncommitted diff, run before the commit rather
+than after it. That is the second time this session that the audit-before-commit caught something
+the author could not see, and the first time it caught the author's own audit.
+
+**The rules** — [a search that confirms](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms);
+[measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code);
+[a rule with one instance is a hypothesis](FINISHING.md#the-postmortem-in-three-questions).
+
+### The half of the extraction that nothing watched
+
+Shipped in the same diff, found by the same audit. `session-brief.sh` extracts two things from two
+files at run time — the non-advisory rules from `CLAUDE.md`, the four judgement questions from
+`FINISHING.md` — and a comment above both said they were extracted rather than pasted precisely so
+that they could not go stale. Three assertions were written to hold that. **All three were about the
+checklist. Nothing at all watched the rules.**
+
+Measured: replacing the `CLAUDE.md` extraction with a verbatim paste of today's text left **all 87
+assertions green**. Replacing the `FINISHING.md` one turned two red. The comment described a
+property of the file; the tests covered one function call in it.
+
+There was also a second, quieter version of the same shape one screen below. An assertion named
+`empty stdin does not hang` ran the hook with `</dev/null` — stdin _closed_, which returns instantly
+whatever the implementation does. The case in its name, stdin **open and never written**, was the
+one the implementation actually got wrong, and the guard `[ ! -t 0 ]` cannot tell the two apart. The
+suite invoked the hook the same way, so it hung with it: green on a terminal, and stalled forever
+anywhere stdin is an idle pipe, which is a plausible CI. Both were fixed by writing the assertion
+the name promised — a fifo held open by a spare file descriptor, watchdogged, because a suite that
+hangs to report a hang has reported nothing.
+
+**The generalisation, and it is not "write more tests".** Both holes are the same act: a claim was
+made about a file, and coverage was written for the example in front of the author. Count the things
+a claim quantifies over — two extractions, two stdin states — and mutate each one. A property
+asserted at one of its sites is an anecdote with a test attached.
+
+**The rules** — [a guard is not shipped until a test fails when it is
+unplugged](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged); [tests that
+stop testing](PROVING.md#tests-that-stop-testing).

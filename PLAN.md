@@ -225,6 +225,10 @@ environment cannot answer a question about CI's.**
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
+- **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
+  suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
+  after a compaction — so neither the field name it branches on nor the fact of registration is
+  confirmed from inside this tree (§12). It accepts both `trigger` and `source` for that reason.
 
 ### 11. Loose ends recorded in no other file
 
@@ -272,9 +276,18 @@ least likely — a narrow prompt late in a long session — is the case where th
 two non-negotiable rules and the pointer to the working contract; `.claude/hooks/branch-guard.sh`
 (deny writes and pushes on a protected branch, and deny `gh pr merge` from any branch),
 `branch-stack.sh` (ask a human when the stack is deep), `session-brief.sh` (state the contract and
-the repository's shape at session start, including after a compaction), `lib.sh`, and
-`test-hooks.sh` — 74 assertions behind `pnpm test:hooks`; eleven mutations watched to fail when it
-was first written, five more when rule 2 was guarded.
+the repository's shape at session start, and after a compaction inline the two non-advisory rules
+and the finishing checklist's four judgement questions, extracted from their source files at run
+time), `lib.sh`, and `test-hooks.sh` — 93 assertions behind `pnpm test:hooks`; eleven mutations
+watched to fail when it was first written, five more when rule 2 was guarded, three more for the
+compaction brief — a stale pasted copy of each of its two extractions, and a regression to the
+unbounded stdin read that hung the suite.
+
+One thing deliberately not built here as well: a `PreToolUse` guard refusing `git commit` when the
+branch has no `PLAN.md` entry. It is the only version of the compaction fix with an exit code behind
+it, and also the version most likely to refuse a correct one-line fix — the failure `BUILDING.md`
+has a rule about, where a guard acquires an enemy among the people who maintain it. It waits for a
+second instance.
 
 **Registration is not in this repository, and that is the arrangement rather than a gap.** Hook
 configuration belongs to the operator and is held outside this tree; the environment refuses the
@@ -367,10 +380,10 @@ not a plan item. What is left below is only what is still missing.
 - **Nothing checks that an incident is reachable from a rule.** `docs:check` verifies that a link
   _resolves_, never that one _exists_, so the direction `FINISHING.md` makes explicit — the rule
   links to the incident, never the reverse — is unenforced in the only direction that matters.
-  Measured 2026-09-09: of 33 `###` entries in `INCIDENTS.md`, exactly one had no inbound link from
-  any rule file, and it was the entry added that morning. Caught by a fresh-context audit, which is
-  not a mechanism. The check is cheap — every heading must be linked from at least one of the five
-  rule files — and it belongs with `docs-check.test.ts` above.
+  Measured 2026-09-09 over the 33 `###` entries `INCIDENTS.md` then had: exactly one lacked an
+  inbound link from any rule file, and it was the entry added that morning. Caught by a fresh-context
+  audit, which is not a mechanism — and the audit was needed again the same day, for entries 34 and 35. The check is cheap — every heading must be linked from at least one of the five rule files —
+  and it belongs with `docs-check.test.ts` above.
 - **Cost figures are facts with many homes.** `$0.94` in five files, `$0.11` in five, `$3.99` in
   three, `$4.50` in three, outside the `docs:check` exemption rule 3 grants.
 - **A citation to a document outside the tree cannot be checked, and does not look different.**
@@ -408,49 +421,6 @@ guard work that was worth more than the whole `docs:check` list has now shipped,
 here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
 which is not ours (§12). If the next session has budget for exactly one, take the class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
-
----
-
-### 14. The session brief does not survive the moment it was written for
-
-**What is being attempted.** Make `session-brief.sh` behave differently when it fires with
-`trigger=compact`: inline the content a compacted context has provably lost — the two non-advisory
-rules and the finishing checklist's four judgement questions — instead of pointing at the file that
-holds them.
-
-**Why now, and it is measured rather than argued.** This session's transcript has three compaction
-boundaries, and **all three are immediately followed by a `git commit`** — lines 611→612,
-1353→1354, 2002→2003 — with no read of any rule file in between. That is not coincidence and it is
-worth stating as a mechanism: compaction fires when context is exhausted, context is most exhausted
-at the end of a unit of work, and the end of a unit of work is when the finishing checklist runs.
-**The most rule-dense moment in the workflow is systematically executed by the most degraded context
-available.** Rule-file reads against `git commit` calls, by stretch: 8:13 before the first
-compaction, then 1:23, then 5:10, then 0:6. The stretch with no reads at all produced four rule
-violations in one commit, found by a fresh-context audit and fixed in `6a10be6`.
-
-**What the current hook gets wrong**, beyond not being registered so far as anyone can tell:
-
-- Its header says it fires with `source=compact`. The field is **`trigger`**, and the values are
-  `startup|resume|clear|compact|fork`. The comment describes a payload that does not exist.
-- It injects a **pointer** — _"Read it before changing code or prose."_ A pointer is exactly what a
-  compacted context discounts, because it has a confident summary and reads the line as satisfied.
-- Committing is neither changing code nor changing prose, so the sentence does not name the one
-  action that empirically follows a compaction three times out of three.
-
-**What would make this the wrong idea.** Three things. First, the whole finding is downstream of an
-unknown: if the hook was never registered, then what was measured is the absence of a hook rather
-than the weakness of its wording, and only the operator can say which (§12). The fix is worth making
-either way, which is why it is not blocked on the answer — but the confidence attached to it should
-be. Second, injecting content rather than a pointer costs tokens on every compaction forever, and a
-brief that grows will eventually be skimmed exactly like the pointer it replaced; if it passes about
-sixty lines, it has become the thing it was fixing. Third, `n` is three boundaries in one session,
-all with the same operator on the same kind of work, and one of the four stretches behaved fine —
-so this is a hypothesis with an unusually clean mechanism, not a law.
-
-**Deliberately not built:** a `PreToolUse` guard refusing `git commit` when the branch has no
-`PLAN.md` entry. It is the only version with an exit code, and it is also the version most likely to
-refuse a correct one-line fix — the failure `BUILDING.md` now has a rule about, where a guard
-acquires an enemy among the people who maintain it. It waits for a second instance.
 
 ---
 

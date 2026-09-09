@@ -142,12 +142,23 @@ with no context attached to contradict it.
 [→ the audit that got three of its own methods
 wrong](INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way)
 
+**Third instance, an hour after the second, in prose written about the second.** `grep -c` on a
+string that names an action counted every _mention_ of it — plans, summaries, tool results, the
+commit message quoted back in a heredoc — at three times the rate of the action itself, and the
+ratio it produced was published in three files and nearly compiled into a hook. **The count agreed
+with a rule that was already believed, which is the condition under which a number is checked least.**
+[→ the compaction finding that counted the
+string](INCIDENTS.md#the-compaction-finding-that-counted-the-string-instead-of-the-call)
+
 So:
 
 - **Search for the behaviour as well as the identifier.** If a symbol looks unused, search for what
   it would _do_ — the error it raises, the label it writes, the phrase a document would use.
 - **An unreferenced declaration is evidence about a name, not about a guarantee.** Trace to the code
   that would break, and if nothing would break, say that instead.
+- **Count the event, never the string that describes it.** A log, a plan, a summary and a commit
+  message all contain the name of the thing; only one of them is the thing. If the corpus is
+  structured — JSON, a git log, a test report — parse it and count the records.
 - **Cite `file:line`, never a recollection.** A memory of a codebase is a claim you have already
   stopped checking, and it degrades silently as the project grows.
 - **Verify with a tool rather than a reading where one exists** — `pnpm check-types`, a dry run, a

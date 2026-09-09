@@ -304,7 +304,7 @@ done
 echo
 echo "session-brief.sh"
 
-brief="$(CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/session-brief.sh")"
+brief="$(CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/session-brief.sh" </dev/null)"
 case "$brief" in
 *dev-house-rules/SKILL.md*)
   expect "names the working contract" yes yes
@@ -314,7 +314,7 @@ case "$brief" in
   ;;
 esac
 
-on_main="$(cd "$main_repo" && git switch -q main && CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/session-brief.sh")"
+on_main="$(cd "$main_repo" && git switch -q main && CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/session-brief.sh" </dev/null)"
 case "$on_main" in
 *"protected branch"*)
   expect "warns when HEAD is main" yes yes
@@ -323,6 +323,148 @@ case "$on_main" in
   expect "warns when HEAD is main" yes no
   ;;
 esac
+
+# --- the compact case -------------------------------------------------------
+#
+# A fixture repository carrying real copies of the two documents the brief
+# extracts from, so the extraction can be mutated without touching the tree.
+# The point of these assertions is not that the text appears; it is that the
+# text is DERIVED. A brief that had the checklist pasted into it would pass
+# every "contains" assertion here and fail the four mutations below, which is
+# exactly the split PROVING.md's literal-list rule is about.
+ROOT="$(cd "$HOOKS/../.." && pwd)"
+
+brief_repo="$(scratch)"
+mkdir -p "$brief_repo/.claude/skills/dev-house-rules"
+cp "$ROOT/CLAUDE.md" "$brief_repo/CLAUDE.md"
+cp "$ROOT/.claude/skills/dev-house-rules/FINISHING.md" \
+  "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md"
+
+brief_out() {
+  printf '%s' "$1" | CLAUDE_PROJECT_DIR="$brief_repo" "$HOOKS/session-brief.sh"
+}
+
+contains() {
+  case "$1" in
+  *"$2"*) printf 'yes' ;;
+  *) printf 'no' ;;
+  esac
+}
+
+compact="$(brief_out '{"trigger":"compact"}')"
+expect "compact carries rule 1 verbatim" yes \
+  "$(contains "$compact" 'Never work on `main`')"
+expect "compact carries rule 2 verbatim" yes \
+  "$(contains "$compact" 'A human merges. Always.')"
+expect "compact carries the 3am question" yes \
+  "$(contains "$compact" 'If this fails at 3am')"
+expect "compact names committing" yes \
+  "$(contains "$compact" 'Before your next commit')"
+
+# The wrapped half of each item. Matching only the line that opens a list item
+# shipped four sentences cut in half, and it looked correct in the source file.
+expect "compact keeps wrapped continuations" yes \
+  "$(contains "$compact" 'the ones you did not.')"
+
+# A brief that is always long is a brief that is always skimmed, so the
+# expensive half is spent only where it was measured to be needed.
+startup="$(brief_out '{"trigger":"startup"}')"
+expect "startup omits the checklist" no \
+  "$(contains "$startup" 'If this fails at 3am')"
+expect "startup still names the contract" yes \
+  "$(contains "$startup" 'dev-house-rules/SKILL.md')"
+
+# Mutation 1: rename the heading the extractor keys on. A pasted copy survives
+# this; a derived one goes silent, and silence is what this asserts.
+sed -i.bak 's/^## The checklist/## The list/' \
+  "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md"
+mutated="$(brief_out '{"trigger":"compact"}')"
+expect "renaming the heading drops the checklist" no \
+  "$(contains "$mutated" 'If this fails at 3am')"
+expect "...and the rules are unaffected" yes \
+  "$(contains "$mutated" 'A human merges. Always.')"
+mv "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md.bak" \
+  "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md"
+
+# Mutation 2: change the text itself. The brief must follow the source file
+# rather than a snapshot of it taken when this hook was written.
+sed -i.bak 's/If this fails at 3am/If this fails at dawn/' \
+  "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md"
+followed="$(brief_out '{"trigger":"compact"}')"
+expect "edited checklist text follows through" yes \
+  "$(contains "$followed" 'If this fails at dawn')"
+mv "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md.bak" \
+  "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md"
+
+# Mutations 3 and 4: the same pair again, against the OTHER extraction.
+#
+# They exist because the first version of this block guarded the checklist half
+# and left the rules half unwatched, while one comment described both as
+# "extracted" — so a pasted copy of the two rules passed everything above. An
+# asymmetry between what a comment claims and what an assertion covers is
+# invisible from the inside; this was found by mutating the half nobody had
+# mutated. The lesson is per-extraction, not per-file.
+sed -i.bak 's/^## Two rules that are not advisory/## Two important rules/' "$brief_repo/CLAUDE.md"
+no_rules="$(brief_out '{"trigger":"compact"}')"
+expect "renaming the rules heading drops the rules" no \
+  "$(contains "$no_rules" 'A human merges. Always.')"
+expect "...and the checklist is unaffected" yes \
+  "$(contains "$no_rules" 'If this fails at 3am')"
+mv "$brief_repo/CLAUDE.md.bak" "$brief_repo/CLAUDE.md"
+
+sed -i.bak 's/A human merges. Always./A human merges. Invariably./' "$brief_repo/CLAUDE.md"
+expect "edited rule text follows through" yes \
+  "$(contains "$(brief_out '{"trigger":"compact"}')" 'A human merges. Invariably.')"
+mv "$brief_repo/CLAUDE.md.bak" "$brief_repo/CLAUDE.md"
+
+# `trigger` comes from documentation a subagent read, not from a payload anyone
+# has seen, and PreCompact spells the same idea `source`. Both are accepted on
+# purpose: guessing wrong makes the whole compact branch dead code that no test
+# would notice. This asserts the tolerance rather than the guess.
+expect "a source= payload is treated as compact too" yes \
+  "$(contains "$(brief_out '{"source":"compact"}')" 'If this fails at 3am')"
+expect "an unrelated trigger gets no checklist" no \
+  "$(contains "$(brief_out '{"trigger":"resume"}')" 'If this fails at 3am')"
+
+# Malformed input and no input both fall through to the short brief. A hook
+# that crashes or hangs at SessionStart takes the session with it, so the safe
+# direction is text nobody needed.
+expect "malformed JSON degrades to the brief" yes \
+  "$(contains "$(brief_out '{not json')" 'dev-house-rules/SKILL.md')"
+expect "closed stdin degrades to the brief" yes \
+  "$(contains "$(CLAUDE_PROJECT_DIR="$brief_repo" "$HOOKS/session-brief.sh" </dev/null)" \
+    'dev-house-rules/SKILL.md')"
+
+# The case the assertion above was named for and did not cover. `</dev/null` is
+# stdin CLOSED; the hook's guard was `[ ! -t 0 ]`, which cannot tell a pipe with
+# data coming from a pipe that will never be written, and `cat` waited on the
+# second one forever. The suite inherited the hang, so it was green on a
+# terminal and would have sat there until killed anywhere stdin is an idle pipe.
+#
+# Held open by fd 9 and never written. Watchdogged rather than trusted, because
+# the failure this guards against is a hang, and a suite that hangs to report a
+# hang has not reported anything.
+fifo="$brief_repo/silent-stdin"
+mkfifo "$fifo"
+exec 9<>"$fifo"
+CLAUDE_PROJECT_DIR="$brief_repo" "$HOOKS/session-brief.sh" <"$fifo" >"$brief_repo/silent.out" 2>&1 &
+hookpid=$!
+waited=0
+while kill -0 "$hookpid" 2>/dev/null && [ "$waited" -lt 5 ]; do
+  sleep 1
+  waited=$((waited + 1))
+done
+if kill -0 "$hookpid" 2>/dev/null; then
+  kill -9 "$hookpid" 2>/dev/null || true
+  hung=yes
+else
+  hung=no
+fi
+wait "$hookpid" 2>/dev/null || true
+exec 9>&-
+expect "an open but silent stdin does not hang" no "$hung"
+expect "...and it still prints the brief" yes \
+  "$(contains "$(cat "$brief_repo/silent.out" 2>/dev/null || true)" 'dev-house-rules/SKILL.md')"
 
 echo
 if [ "$fail" -gt 0 ]; then
