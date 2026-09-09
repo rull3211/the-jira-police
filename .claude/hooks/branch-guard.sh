@@ -93,48 +93,181 @@ fi
 # be working around it or asking a human to type it. A guard whose remedy its
 # own denial text names must not itself block that remedy.
 #
-# The list is of commands that write, and it is deliberately not the complement
-# of a read list: an unrecognised command is treated as a read and allowed. That
-# is the fail-open direction, chosen here because Edit/Write/NotebookEdit is the
-# path that actually matters and it is covered unconditionally, while the cost
-# of the closed direction is the trap above.
+# For `git`, this is an allowlist of reads and everything else is a write. For
+# every other program it is still fail-open: an unrecognised command is treated
+# as a read and allowed, because Edit/Write/NotebookEdit is the path that
+# actually matters and is covered unconditionally, while the cost of closing the
+# whole surface is the trap above.
 #
-# Two things the first version of this list got wrong, both measured by feeding
-# payloads to this script rather than by reading it:
+# The inversion is scoped to git deliberately, and it replaced a denylist. That
+# denylist named thirteen verbs. Every subcommand git knows about — 163 of them,
+# from `git --list-cmds=main,others,nohelpers` — was fed to this script with
+# HEAD on a protected branch, and 150 came back allowed, among them:
+#
+#   checkout      the older spelling of `restore`, which the list refused
+#   stash         bare, while `stash pop`/`apply`/`drop` were refused
+#   clean         deletes untracked files
+#   branch -f     moves a ref, the protected one included
+#   update-ref    the same, with no porcelain involved
+#   send-pack     `push` under another name; so is http-push
+#   fetch a b:c   the refspec form writes a *local* branch
+#   subtree pull  a pull the list did not recognise; likewise subtree merge
+#
+# So `pull` going missing was a symptom. A denylist over a program with 163
+# subcommands and several spellings per act is behind by construction, and a
+# verb git adds next year would be allowed on the day it ships. Inverted, an
+# unrecognised verb is refused and the failure is a human adding one line.
+#
+# Two earlier fixes are kept because the inversion does not subsume them:
 #
 #   `git -C . commit`, `git --no-pager commit` and `git -c user.name=x commit`
-#   were all allowed on `main`. The subcommand was required to sit immediately
-#   after `git`, so any global option in front of it walked straight past. The
-#   run of options is now consumed first. The cost is a false positive on
-#   `git -C /some/other/repo commit`, which is a real command and is now refused
-#   while HEAD here is protected; that is the fail-closed direction and the
-#   remedy the denial names — branch — is cheap.
+#   were all allowed, because the subcommand had to sit immediately after `git`.
+#   The run of global options is consumed first, and the four that take a
+#   separate value consume it. The cost is a false positive on
+#   `git -C /some/other/repo commit`, refused while HEAD here is protected; that
+#   is the fail-closed direction and the remedy — branch — is cheap.
 #
-#   `push` was absent, so a bare `git push` from `main` was allowed. The check
-#   above only fires when the command *names* a protected branch, and a bare
-#   push names nothing while going straight to `main` via its upstream. Standing
-#   on a protected branch there is no push worth allowing, so it joins the list
-#   rather than getting a special case; off a protected branch it is untouched,
-#   which is the ordinary way work leaves this machine.
+#   `push` names nothing when bare and still goes to `main` via its upstream, so
+#   it cannot be caught by the protected-name check above. It is simply not a
+#   read, so the inversion covers it; off a protected branch it is untouched.
 #
-#   `pull` was absent while `merge` was present, so on `main` a bare `git pull`
-#   was allowed and `git merge --ff-only origin/main` was refused — the same act
-#   with a fetch in front, and the one that can leave a merge commit on the
-#   protected branch. The shape is worth more than the hole: this list was
-#   assembled from commands that *sound* mutating, and `pull` sounds like a
-#   read. Anything derived that way is a list of the author's intuitions, so the
-#   assertions in `test-hooks.sh` are the part that stops the next omission.
-#
-# Each entry is terminated by `([[:space:]]|$)` and that is load-bearing, not
-# tidiness: without it `pull` matches `git pull-request`, in the same way a bare
-# substring match on `main` once refused `fix/domain`. Every addition here needs
-# the negative case asserted alongside the positive one.
+# The substring pass is kept as a floor rather than replaced, and that is the
+# one non-obvious decision here. Command-position analysis cannot see inside
+# `sh -c '...'`, so dropping it would have opened a hole while closing thirty.
+# The two are a union: either one is enough to call the command a write.
+gitSegmentWrites() {
+  local verb rest
+
+  # Word-split the segment. Globbing is off around it so that a `*` in a
+  # pathspec is not expanded against the working directory mid-guard.
+  set -f
+  # shellcheck disable=SC2086
+  set -- $1
+  set +f
+
+  # Leading VAR=value assignments, then an `env` or `command` wrapper.
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      [A-Za-z_]*=* | env | command) shift ;;
+      *) break ;;
+    esac
+  done
+  [ $# -gt 0 ] || return 1
+
+  # An absolute path to git counts; anything else is not our business.
+  case "${1##*/}" in
+    git) shift ;;
+    *) return 1 ;;
+  esac
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -C | -c | --git-dir | --work-tree | --namespace | --exec-path)
+        shift
+        [ $# -gt 0 ] && shift
+        ;;
+      -*) shift ;;
+      *) break ;;
+    esac
+  done
+
+  # A bare `git`, or git with only options, prints usage and writes nothing.
+  [ $# -gt 0 ] || return 1
+  verb="$1"
+  shift
+  rest="$*"
+
+  case "$verb" in
+    # Reads, unconditionally. Anything not here is a write by default, which is
+    # the whole point of the inversion.
+    status | log | diff | show | grep | blame | annotate | describe | shortlog | whatchanged | \
+      rev-parse | rev-list | merge-base | merge-tree | patch-id | name-rev | cherry | \
+      for-each-ref | for-each-repo | show-ref | show-branch | show-index | \
+      ls-files | ls-tree | ls-remote | cat-file | \
+      diff-tree | diff-index | diff-files | diff-pairs | \
+      format-patch | range-diff | request-pull | difftool | \
+      check-ignore | check-attr | check-ref-format | check-mailmap | \
+      count-objects | fsck | fsck-objects | verify-commit | verify-tag | verify-pack | \
+      var | version | help | bugreport | diagnose | archive | bundle | get-tar-commit-id | \
+      interpret-trailers | stripspace | column)
+      return 1
+      ;;
+
+    # The escape hatch, and it is why this guard can be inverted at all. The
+    # denial text tells the agent to run `git switch -c`, and a guard that
+    # refuses the remedy it names traps the agent on the protected branch with
+    # no way off it but working around the guard or asking a human to type.
+    switch) return 1 ;;
+
+    # `checkout` is two commands wearing one name: `-b` is the escape hatch in
+    # the spelling most fingers already know, and everything else is the
+    # destructive worktree write that `restore` was split out of.
+    checkout)
+      case " $rest " in
+        *" -b "* | *" -B "*) return 1 ;;
+      esac
+      ;;
+
+    # Listing branches is the common read; `-d`, `-f` and `-m` are not, and one
+    # of them can move the protected ref. Creating a branch stays allowed: it is
+    # the escape hatch again, by its third spelling.
+    branch)
+      printf '%s' "$rest" | grep -Eq \
+        '(^|[[:space:]])(-[dDfmMcCu]|--delete|--force|--move|--copy|--set-upstream-to|--unset-upstream|--edit-description)([[:space:]]|=|$)' ||
+        return 1
+      ;;
+
+    stash) case "$rest" in list* | show*) return 1 ;; esac ;;
+    reflog) case "$rest" in "" | show*) return 1 ;; esac ;;
+    tag) case "$rest" in "" | -l* | --list* | -n*) return 1 ;; esac ;;
+    worktree) case "$rest" in list*) return 1 ;; esac ;;
+    notes) case "$rest" in list* | show*) return 1 ;; esac ;;
+    submodule) case "$rest" in status* | summary* | foreach*) return 1 ;; esac ;;
+    bisect) case "$rest" in log* | view* | visualize*) return 1 ;; esac ;;
+    sparse-checkout) case "$rest" in list*) return 1 ;; esac ;;
+    remote) case "$rest" in "" | -v* | --verbose* | show* | get-url*) return 1 ;; esac ;;
+
+    config)
+      printf '%s' "$rest" | grep -Eq \
+        '(^|[[:space:]])(-l|--list|--get|--get-all|--get-regexp|--get-urlmatch|get|list)([[:space:]]|=|$)' &&
+        return 1
+      ;;
+
+    # Fetching updates remote-tracking refs, which is not rule 1. A refspec with
+    # a colon updates a *local* branch, which is. The known over-refusal is a
+    # URL carrying a port, which is rare enough to accept and cheap to work
+    # around by branching.
+    fetch) case "$rest" in *:*) ;; *) return 1 ;; esac ;;
+  esac
+
+  return 0
+}
+
 mutates=yes
 if [ -n "$command_text" ]; then
   mutates=no
+
+  # The floor: the original substring list, which sees into `sh -c '...'` and
+  # into quoting that command-position analysis cannot parse. Each entry is
+  # terminated by `([[:space:]]|$)`, which is load-bearing rather than tidiness:
+  # without it `pull` matches `git pull-request`, the same way a bare substring
+  # match on `main` once refused `fix/domain`.
   if printf '%s' "$command_text" | grep -Eq \
     'git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|pull|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([[:space:]]|$)'; then
     mutates=yes
+  fi
+
+  # The inversion, over each simple command separately, so that the second half
+  # of `pnpm test && git commit` is examined on its own terms.
+  if [ "$mutates" = no ]; then
+    while IFS= read -r segment; do
+      if gitSegmentWrites "$segment"; then
+        mutates=yes
+        break
+      fi
+    done <<EOF
+$(printf '%s' "$command_text" | tr ';&|()' '\n\n\n\n\n')
+EOF
   fi
 fi
 
