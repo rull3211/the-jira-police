@@ -66,15 +66,8 @@ is buying.
 scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
 entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
 worth a permanent number, because the session was compacted once while it was open; §25 was the
-fitness block owning the region it writes, shipped in PR #37.
-
-**§24 is a hole that was never an entry, and it has to stay one.** The §25 above was written as §24
-first, and that alone made `ARCHITECTURE.md`'s broken self-reference to §24 resolve — the count fell
-to 38 and the run invited whoever saw it to lower `KNOWN_DANGLING`. Doing so would have recorded a
-still-broken citation as paid and planted a failure on the commit that later deleted the entry.
-Renumbering was the fix, so the next entry after §25 is §26: taking §24 repairs nothing and hides
-one thing. This is the same pooling defect as the paragraph above, running in the direction nobody
-was watching — a reference repaired by an edit in a file it does not name.
+fitness block owning the region it writes, shipped in PR #37. **§24 is absent from that list and is
+not a hole** — it was skipped rather than spent, for the reason §19 gives, so the next entry is §26.
 
 <!-- refs:on -->
 
@@ -618,10 +611,10 @@ week, or say in the code that the resolver is aspirational — do not widen the 
 
 <!-- refs:off -->
 
-**The other direction, found 2026-09-10 while opening the entry below.** Everything above is about a
-_dead_ reference resolving against a live section elsewhere. The reverse is worse and had not been
-noticed: numbering a new `PLAN.md` entry §24 — the next free number, chosen without a thought —
-**repaired** `ARCHITECTURE.md:1103`'s dangling `§24`, and `docs:check` reported the count falling to
+**The other direction, found 2026-09-10 while opening what became §25, since shipped.** Everything
+above is about a _dead_ reference resolving against a live section elsewhere. The reverse is worse
+and had not been noticed: numbering a new `PLAN.md` entry §24 — the next free number, chosen without
+a thought — **repaired** `ARCHITECTURE.md:1104`'s dangling `§24`, and `docs:check` reported the count falling to
 38 and asked for `KNOWN_DANGLING` to be lowered to match. Nothing about that citation had improved.
 It is still a self-reference in a file whose sections stop at 16, still pointing at nothing, and
 §14's table still names §15 as its intended target. Two things follow. **The count is sensitive to
