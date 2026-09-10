@@ -652,6 +652,30 @@ production race exactly where it is, untested in both directions.
 
 ## What was learned, and is recorded nowhere else
 
+### A green suite is not evidence about a race, because the window is a property of the machine
+
+The skill-root collision (§22) arrived as one red test in CI on a commit that had gone green an hour
+earlier, differing only in a pull request body. Everything available locally said there was nothing
+there: the file alone passed 12 times, the two colliding files together passed 15 times. Every one
+of those runs was on the broken code, and none of them was evidence of anything — a fast local disk
+narrows the interleaving window, a contended shared runner widens it, and the suite measures the
+disk it is on.
+
+What settled it was leaving the suite behind and driving the mechanism directly: two concurrent
+calls against one root, 40 rounds, **40 prepared and 40 refused**, exactly one loser per pair, every
+time. A defect that reproduces 0 times in 27 test runs and 40 times out of 40 when addressed head-on
+is the same defect; only the instrument changed.
+
+**The generalisation is about what a re-run means.** A flaky test is a measurement, and re-running it
+until it is green discards the measurement rather than reading it. The cheap move here — press
+re-run on the CI job, watch #33 go green, move on — was available and would have worked, and the
+race would still be in `prepareSkillRoot` waiting for a slower morning.
+
+**The narrower lesson underneath it:** a path derived entirely from its inputs is shared mutable
+state wearing a local variable's clothes. `<parentDirectory>/<issueKey>-skill` looked private to a
+run because both arguments were about that run. Two runs with the same arguments is not an exotic
+case; it is the ordinary one, and the tests were simply the first two callers to hit it.
+
 ### A gate is calibrated on the population it passes, not the one it fails
 
 The complaint was that DoR rows 8 and 9 were failing too many tickets. Measured over the 29 reports
