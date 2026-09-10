@@ -16,13 +16,32 @@
  * that gap and cost a gate rule to police it. Deriving the sentence from the
  * field makes disagreement impossible by construction instead of by check.
  *
+ * **Rendering `rationale` is that rule, not an exception to it.** The field is
+ * required by the schema and asks for the deciding factor in one sentence, so
+ * printing it is the renderer reading structured input — the same thing
+ * `sink.ts` already does with it. What the rule forbids is a *second*,
+ * free-text account of the call, which can drift from `solvable` and
+ * `confidence` while looking equally official. The residual risk is narrower
+ * and worth naming: `rationale` is prose, so a model could pair `solvable: true`
+ * with a sentence arguing the opposite. That is a coherence question and the
+ * gate is where coherence is checked; it is not a reason to discard the field.
+ *
+ * **The block owns its region, which is why `withFitnessNote` strips first.**
+ * On a re-run the model rebuilds the comment from its own previous one and
+ * carries this block along as ordinary body text, so splicing without
+ * removing produces two. Measured across six runs on the real board: four
+ * re-runs, four duplicates, both verdicts; two first runs, both correct. The
+ * dossier block — model-written, no renderer — stayed at one through the same
+ * re-runs, which is what identifies the cause as the splice rather than the
+ * model's copying.
+ *
  * The cost of that choice is language: comments are sometimes Norwegian
  * (SSX-3827 was) and this block is always English. That is a real wart, and the
  * trade was made deliberately — a bilingual seam is easier to live with than a
  * class of silent contradiction.
  */
 
-import { FOOTER_SENTINEL } from "./gate.ts";
+import { FITNESS_MARKER, FOOTER_SENTINEL } from "./gate.ts";
 import type { AgentFitness, TriagePayload } from "./runner.ts";
 
 /**
@@ -106,12 +125,18 @@ export function buildFitnessNote(
   ];
 
   if (fitness.solvable) {
-    // Deliberately not a promise. Nothing downstream consumes this label yet,
-    // and manual mode means a human opts the ticket in even once something
-    // does. Claiming a bot "will" pick it up would be false today and still
-    // misleading later.
+    // The reason first, then the caveat. Emitting only the caveat is what this
+    // branch used to do, and it threw away the one ticket-specific thing the
+    // payload carries — so the block said less than the data behind it, and
+    // the model kept restoring the difference by hand.
     lines.push(
-      "Assessed as safe for an autonomous fix. Nothing picks this up on its own — a human still has to opt the ticket in.",
+      fitness.rationale === "" ? "Assessed as safe for an autonomous fix." : fitness.rationale,
+      "",
+      // Deliberately not a promise. Nothing downstream consumes this label yet,
+      // and manual mode means a human opts the ticket in even once something
+      // does. Claiming a bot "will" pick it up would be false today and still
+      // misleading later.
+      "Nothing picks this up on its own — a human still has to opt the ticket in.",
     );
     return lines.join("\n");
   }
@@ -131,13 +156,79 @@ export function buildFitnessNote(
   return lines.join("\n");
 }
 
+const isSeparator = (line: string): boolean => line.trim() === "---";
+
 /**
- * Returns the payload with the note spliced into the comment, above the footer.
+ * Removes every agent-fitness block already in the body, so the splice below
+ * can be the only writer of one.
+ *
+ * ## What a block is, and where it stops
+ *
+ * It opens on a line *starting* with `FITNESS_MARKER` — column zero, not
+ * anywhere in the line. The renderer writes it there, so a match at column zero
+ * is the region this module owns, while a mention of the phrase inside a
+ * sentence, a table cell or an evidence blockquote is the report talking about
+ * fitness and is none of our business. Anchoring is the difference between the
+ * two and there is no other signal that separates them.
+ *
+ * It closes at the next `---` or at the footer, whichever comes first, and both
+ * are kept. Keeping the closing rule matters when two blocks are adjacent: it
+ * becomes the *opening* rule of the second one, which the backward scan then
+ * removes.
+ *
+ * ## The backward scan, which is the part that is easy to leave out
+ *
+ * The renderer emits `---`, a blank line, then the marker — so deleting from
+ * the marker forward leaves a horizontal rule hanging under the report with
+ * nothing beneath it. Walking back over blanks and separators first is what
+ * makes the strip invisible rather than merely correct.
+ */
+function stripFitnessBlocks(body: string): string {
+  const lines = body.split("\n");
+  const kept: string[] = [];
+  let inBlock = false;
+
+  for (const line of lines) {
+    if (line.startsWith(FITNESS_MARKER)) {
+      inBlock = true;
+      while (kept.length > 0) {
+        const last = kept[kept.length - 1] ?? "";
+        if (last.trim() !== "" && !isSeparator(last)) {
+          break;
+        }
+        kept.pop();
+      }
+      continue;
+    }
+
+    if (!inBlock) {
+      kept.push(line);
+      continue;
+    }
+
+    if (isSeparator(line) || line.startsWith(FOOTER_SENTINEL)) {
+      inBlock = false;
+      kept.push(line);
+    }
+  }
+
+  return kept.join("\n");
+}
+
+/**
+ * Returns the payload with exactly one note in the comment, above the footer.
  *
  * Above rather than below because the footer sentinel is load-bearing: the
  * poster finds its own previous comment by matching that exact trailing line,
  * so anything appended after it would break update-in-place and start posting
  * duplicates on every re-run.
+ *
+ * **Strip then splice, and the strip runs even when there is no note to add.**
+ * A ticket that was `plausible: true` last run and is not this one renders
+ * `null` here, and returning early on that — which is what this function used
+ * to do — leaves the previous run's watch note on the ticket for good: a list
+ * of blockers addressed to a reporter nobody is waiting on any more. Removing
+ * it is the same ownership claim as replacing it.
  *
  * A body with no sentinel is returned untouched. That is not this function's
  * failure to report — `assertPostable` already refuses such a body with a
@@ -145,17 +236,21 @@ export function buildFitnessNote(
  */
 export function withFitnessNote(payload: TriagePayload): TriagePayload {
   const note = buildFitnessNote(payload.verdict, payload.agentFitness);
-  if (note === null) {
+  const body = payload.mutation.commentBody;
+  const stripped = stripFitnessBlocks(body);
+
+  if (note === null && stripped === body) {
     return payload;
   }
 
-  const body = payload.mutation.commentBody;
-  const at = body.lastIndexOf(FOOTER_SENTINEL);
+  const at = stripped.lastIndexOf(FOOTER_SENTINEL);
   if (at === -1) {
     return payload;
   }
 
-  const commentBody = `${body.slice(0, at).trimEnd()}\n\n${note}\n\n${body.slice(at)}`;
+  const head = stripped.slice(0, at).trimEnd();
+  const tail = stripped.slice(at);
+  const commentBody = note === null ? `${head}\n\n${tail}` : `${head}\n\n${note}\n\n${tail}`;
 
   return { ...payload, mutation: { ...payload.mutation, commentBody } };
 }

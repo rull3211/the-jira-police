@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2471 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2484 tests in 69
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -48,8 +48,8 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21 and §23, and this line names them rather than citing
-them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
+**The holes are §12, §15, §16, §18, §20, §21, §23 and §25, and this line names them rather than
+citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
 "goes to zero" is no longer part of this argument: the claim is withdrawn in `docs-check.ts`, on
@@ -65,7 +65,9 @@ is buying.
 §12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §20 was the
 scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
 entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
-worth a permanent number, because the session was compacted once while it was open.
+worth a permanent number, because the session was compacted once while it was open; §25 was the
+fitness block owning the region it writes, shipped in PR #37. **§24 is absent from that list and is
+not a hole** — it was skipped rather than spent, for the reason §19 gives, so the next entry is §26.
 
 <!-- refs:on -->
 
@@ -606,6 +608,26 @@ are the whole migration; the eleven are the debt it exposes.
 **What would make it the wrong idea.** Eleven is small enough that raising `KNOWN_DANGLING` to 50 is
 tempting, and that is the failure the constant's own comment warns about. Fix the eleven in the same
 week, or say in the code that the resolver is aspirational — do not widen the number and leave it.
+
+<!-- refs:off -->
+
+**The other direction, found 2026-09-10 while opening what became §25, since shipped.** Everything
+above is about a _dead_ reference resolving against a live section elsewhere. The reverse is worse
+and had not been noticed: numbering a new `PLAN.md` entry §24 — the next free number, chosen without
+a thought — **repaired** `ARCHITECTURE.md:1104`'s dangling `§24`, and `docs:check` reported the count falling to
+38 and asked for `KNOWN_DANGLING` to be lowered to match. Nothing about that citation had improved.
+It is still a self-reference in a file whose sections stop at 16, still pointing at nothing, and
+§14's table still names §15 as its intended target. Two things follow. **The count is sensitive to
+edits in files that have nothing to do with it**, so a routine plan entry can turn a check green
+about a defect it did not touch — and had the invitation been accepted, deleting the entry on ship
+would have failed `docs:check` on a later, unrelated commit, with a message pointing at neither
+cause. The entry was renumbered to §25 instead and §24 left unused, which is the smallest thing that
+does not launder a broken citation. **A number skipped on purpose is not a hole**: the list above
+holds sections that shipped and were deleted, and this one never existed. Every `§N` in this
+paragraph is a number being discussed rather than a reference being made, which is why the region is
+`refs:off` — the same reason §14's table is.
+
+<!-- refs:on -->
 
 ---
 

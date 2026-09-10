@@ -181,9 +181,12 @@ describe("createGroom with WRITE_BACK on", () => {
     // posted. If these two could differ, the gate would be checking a draft.
     //
     // This fixture is `needs-info`, which is below the threshold for the
-    // fitness note, so the mutation genuinely passes through untouched. The
-    // ready-ish case — where the note IS spliced in — is covered below, and
-    // the same property holds there because the splice happens before the gate.
+    // fitness note, and its body carries no block from an earlier run — both
+    // halves matter now that `withFitnessNote` strips before it splices, since
+    // a `needs-info` re-run over a body that DID carry one is edited, not
+    // passed through. The ready-ish case — where the note IS spliced in — is
+    // covered below, and the same property holds there because the splice
+    // happens before the gate.
     const result = payload();
     runTriage.mockResolvedValue(result);
     await createGroom(on())(TICKET);

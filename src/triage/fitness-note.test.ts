@@ -1,8 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { buildFitnessNote, withFitnessNote } from "./fitness-note.ts";
-import { FOOTER_SENTINEL } from "./gate.ts";
+import { FITNESS_MARKER, FOOTER_SENTINEL } from "./gate.ts";
 import type { AgentFitness, Mutation, TriagePayload } from "./runner.ts";
+
+/** Blocks, counted by the line that opens one — never by mentions of the phrase. */
+function blocks(body: string): number {
+  return body.split("\n").filter((line) => line.startsWith(FITNESS_MARKER)).length;
+}
+
+/** What a re-run is handed: the body this module wrote on the previous pass. */
+function rerunOf(previous: TriagePayload, overrides: Partial<TriagePayload> = {}): TriagePayload {
+  return payload({
+    ...overrides,
+    mutation: mutation({ commentBody: previous.mutation.commentBody }),
+  });
+}
 
 function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
   return {
@@ -84,6 +97,34 @@ describe("buildFitnessNote", () => {
     expect(note).not.toContain("will");
   });
 
+  it("carries the deciding factor on a yes, not only the caveat", () => {
+    // The branch used to emit a fixed sentence and drop `rationale` — the one
+    // ticket-specific thing the payload holds, required by the schema and
+    // already printed to the local report by `sink.ts`. The block said less
+    // than the data behind it, and on four re-runs the model restored the
+    // difference by hand, which is where the duplicate came from.
+    const note =
+      buildFitnessNote(
+        "ready-ish",
+        fitness({
+          solvable: true,
+          blockers: [],
+          rationale: "One repo, and AC-4 reads directly as the regression test.",
+        }),
+      ) ?? "";
+
+    expect(note).toContain("One repo, and AC-4 reads directly as the regression test.");
+    expect(note).toContain("a human still has to opt the ticket in");
+  });
+
+  it("still says something when a yes gave no reason at all", () => {
+    const note =
+      buildFitnessNote("ready-ish", fitness({ solvable: true, blockers: [], rationale: "" })) ?? "";
+
+    expect(note).toContain("Assessed as safe for an autonomous fix.");
+    expect(note).toContain("a human still has to opt the ticket in");
+  });
+
   it("falls back to the rationale when a no lists no blockers", () => {
     // Reachable: the gate enforces solvable ⇒ no blockers, not the reverse.
     const note = buildFitnessNote("ready-ish", fitness({ blockers: [] }));
@@ -143,6 +184,144 @@ describe("withFitnessNote", () => {
     const body = withFitnessNote(payload()).mutation.commentBody;
 
     expect(body.split(FOOTER_SENTINEL)).toHaveLength(2);
+  });
+});
+
+describe("the block owns its region, because a re-run hands its own output back", () => {
+  // Measured on the real board before any of this was written: four re-runs,
+  // four duplicates, across both verdicts; two first runs, both correct. The
+  // model rebuilds the comment from its own previous one and carries this
+  // block along as body text, so a splice that does not remove first posts a
+  // second copy of a block whose whole purpose is to be the single account of
+  // the call. The fixture is built by running the real thing twice rather than
+  // by hand, so it cannot stop modelling what the renderer actually emits.
+
+  it("posts one block on a re-run, not one per run", () => {
+    const first = withFitnessNote(payload());
+    const second = withFitnessNote(rerunOf(first));
+
+    expect(blocks(first.mutation.commentBody)).toBe(1);
+    expect(blocks(second.mutation.commentBody)).toBe(1);
+  });
+
+  it("does not ratchet: the fourth run still posts one", () => {
+    // The observed ceiling on the board was two, which reads as harmless. It
+    // is not a property anything guaranteed — it was the model collapsing
+    // whatever it found. Nothing here relies on it.
+    let run = withFitnessNote(payload());
+    for (let index = 0; index < 3; index += 1) {
+      run = withFitnessNote(rerunOf(run));
+    }
+
+    expect(blocks(run.mutation.commentBody)).toBe(1);
+  });
+
+  it("removes a block whose wording no longer matches what the renderer writes", () => {
+    // The plausible wrong fix is deleting the exact string this run would
+    // render. It fails on every re-run where anything moved — and something
+    // usually has, which is why the ticket was re-triaged. Here the previous
+    // pass called it `not yet`; this one calls it `looks automatable`.
+    const previous = withFitnessNote(payload({ agentFitness: fitness({ solvable: false }) }));
+    const now = withFitnessNote(
+      rerunOf(previous, { agentFitness: fitness({ solvable: true, blockers: [] }) }),
+    );
+    const body = now.mutation.commentBody;
+
+    expect(blocks(body)).toBe(1);
+    expect(body).toContain("looks automatable");
+    expect(body).not.toContain("To make this agent-solvable, resolve:");
+  });
+
+  it("removes a block the model re-typed in its own words", () => {
+    // Observed on SSX-3024, where the model wrote `🤖 **Agent fitness:
+    // solvable**` against the renderer's `🤖 **Agent fitness:** looks
+    // automatable`. Keying the strip on the whole rendered line would have
+    // walked straight past it.
+    const paraphrased = [
+      "# ACCEPT · SSX-3822",
+      "",
+      "The report.",
+      "",
+      "---",
+      "",
+      "🤖 **Agent fitness: solvable** · `buy-insurance-advisor-web` · confidence med",
+      "",
+      "The watch set on 2026-09-06 is lifted.",
+      "",
+      FOOTER_SENTINEL,
+    ].join("\n");
+    const body = withFitnessNote(payload({ mutation: mutation({ commentBody: paraphrased }) }))
+      .mutation.commentBody;
+
+    expect(blocks(body)).toBe(1);
+    expect(body).not.toContain("The watch set on 2026-09-06 is lifted.");
+  });
+
+  it("collapses a body that already carries two", () => {
+    // The state four tickets were actually in. Stripping only the first
+    // occurrence leaves the ticket exactly as broken as it was.
+    const once = withFitnessNote(payload()).mutation.commentBody;
+    const doubled = once.replace(
+      FOOTER_SENTINEL,
+      `---\n\n🤖 **Agent fitness:** not yet · confidence low\n\nA second account.\n\n${FOOTER_SENTINEL}`,
+    );
+
+    const body = withFitnessNote(payload({ mutation: mutation({ commentBody: doubled }) })).mutation
+      .commentBody;
+
+    expect(blocks(body)).toBe(1);
+    expect(body).not.toContain("A second account.");
+  });
+
+  it("leaves no horizontal rule hanging where the old block was", () => {
+    // Deleting forward from the marker is correct and looks broken: the
+    // renderer opens with `---`, so the report ends under a rule with nothing
+    // beneath it. Exactly one separator should survive — the one introducing
+    // the block this run wrote.
+    const body = withFitnessNote(rerunOf(withFitnessNote(payload()))).mutation.commentBody;
+
+    expect(body.split("\n").filter((line) => line.trim() === "---")).toHaveLength(1);
+    expect(body).toContain("The report.");
+  });
+
+  it("keeps a mention of the phrase that is not a block", () => {
+    // Anchoring at column zero is the only thing separating the region this
+    // module owns from the report talking about fitness. Match anywhere in the
+    // line and the evidence blockquote goes with it.
+    const quoting = [
+      "# ACCEPT · SSX-3822",
+      "",
+      "> Evidence: the previous 🤖 **Agent fitness** call was withdrawn.",
+      "",
+      FOOTER_SENTINEL,
+    ].join("\n");
+    const body = withFitnessNote(payload({ mutation: mutation({ commentBody: quoting }) })).mutation
+      .commentBody;
+
+    expect(body).toContain("> Evidence: the previous 🤖 **Agent fitness** call was withdrawn.");
+    expect(blocks(body)).toBe(1);
+  });
+
+  it("clears a watch note the ticket has stopped qualifying for", () => {
+    // `plausible` went false, so nothing is rendered this run. Returning early
+    // on that — the shape this function had — strands the previous run's
+    // blockers on the ticket permanently: a to-do list addressed to a reporter
+    // nobody is waiting on any more.
+    const watched = withFitnessNote(
+      payload({ verdict: "needs-info", agentFitness: fitness({ plausible: true }) }),
+    );
+    const body = withFitnessNote(
+      payload({
+        verdict: "needs-info",
+        agentFitness: fitness({ plausible: false }),
+        mutation: mutation({ commentBody: watched.mutation.commentBody }),
+      }),
+    ).mutation.commentBody;
+
+    expect(blocks(body)).toBe(0);
+    expect(body).not.toContain("needs a real .ico asset");
+    expect(body).toContain("The report.");
+    expect(body.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
   });
 });
 
