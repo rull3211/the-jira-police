@@ -225,11 +225,50 @@ export interface AgentFitness {
   readonly blockers: readonly string[];
 }
 
+/**
+ * An unfilled fill-in placeholder, and the DoR row it stands in for.
+ *
+ * `row` is what decides whether the placeholder is evidence of a contradiction
+ * or merely of a nudge, now that rows 8 and 9 cannot fail an item. See
+ * `BLOCKING_DOR_ROWS` for which rows are which, and why an unattributed
+ * placeholder is treated as blocking rather than waved through.
+ */
+export interface DorPlaceholder {
+  /** The placeholder verbatim, as it appears in the ticket. */
+  readonly text: string;
+  /** The DoR checklist row it stands in for, or `UNATTRIBUTED_DOR_ROW`. */
+  readonly row: number;
+}
+
+/**
+ * The DoR rows a leftover placeholder can still fail an item on.
+ *
+ * Rows 1-3 are the ones that describe whether the ticket is *understood* —
+ * problem and segment, value and why-now, testable acceptance criteria. Rows 4-7
+ * are auto-filled from research rather than from the ticket body, so a
+ * placeholder never stands in for one. Rows 8 and 9 are advisory and block
+ * nothing; row 10 is the human Trio gate.
+ */
+const BLOCKING_DOR_ROWS: ReadonlySet<number> = new Set([1, 2, 3]);
+
+/**
+ * The row of a placeholder the model did not attribute, or attributed to a row
+ * that does not exist.
+ *
+ * Treated as **blocking**, which is the one place this change deliberately fails
+ * closed. "There is an unfilled placeholder here and I cannot say which row it
+ * belongs to" is the exact shape of SSX-3822 — the evidence present, the step
+ * from evidence to label missing — and that is the payload this guard exists to
+ * refuse. The escape is free and requires only honesty: a model that believes
+ * the placeholder is the row 9 baseline says `row: 9` and the item passes.
+ */
+export const UNATTRIBUTED_DOR_ROW = 0;
+
 export interface TriagePayload {
   readonly verdict: Verdict;
   readonly labels: readonly string[];
-  /** Unfilled fill-in placeholders the skill found in the ticket, verbatim. */
-  readonly dorPlaceholders: readonly string[];
+  /** Unfilled fill-in placeholders the skill found in the ticket, with their rows. */
+  readonly dorPlaceholders: readonly DorPlaceholder[];
   readonly recommendedNextStep: string;
   readonly report: string;
   /** What a write WOULD send. Nothing in this module sends it. */
@@ -251,6 +290,16 @@ export class TriageError extends Error {}
  * the step from evidence to label is what broke, and the label is the only part
  * downstream reads.
  *
+ * Re-aimed when DoR rows 8 and 9 became advisory. Both incidents were row 9,
+ * and row 9 can no longer fail an item — so the original rule ("any placeholder
+ * contradicts a pass") now condemns payloads that are simply correct. What
+ * survives the demotion is the rule underneath it: a payload may not assert a
+ * pass while its own evidence names a *blocking* row as unmet. So the check now
+ * reads the row each placeholder is attributed to, and fires on `BLOCKING_DOR_ROWS`
+ * only. The literal SSX-3822 payload — a `[N]` standing in for the baseline
+ * metric — is legal today, deliberately: under the advisory rule it is no longer
+ * a contradiction.
+ *
  * IMPORTANT — this is detection, not prevention. The skill posts its comment
  * mid-run via `addCommentToJiraIssue`; `structured_output` only arrives with
  * the final result event. By the time this throws, a write-enabled run has
@@ -263,13 +312,22 @@ export class TriageError extends Error {}
  */
 export class TriageContradictionError extends TriageError {
   readonly issueKey: string;
-  readonly placeholders: readonly string[];
+  readonly placeholders: readonly DorPlaceholder[];
 
-  constructor(issueKey: string, placeholders: readonly string[], claims: readonly string[]) {
+  constructor(
+    issueKey: string,
+    placeholders: readonly DorPlaceholder[],
+    claims: readonly string[],
+  ) {
+    const named = placeholders
+      .map(
+        (p) => `"${p.text}" (${p.row === UNATTRIBUTED_DOR_ROW ? "no row given" : `row ${p.row}`})`,
+      )
+      .join(", ");
     super(
-      `${issueKey}: the ticket still contains ${placeholders.map((p) => `"${p}"`).join(", ")}, ` +
-        `so DoR row 9 (baseline metric) does not hold — but the run returned ${claims.join(" and ")}. ` +
-        `DOR_CHECKLIST.md: "Output dor:pass only if 1-9 hold." Refusing the verdict; ` +
+      `${issueKey}: the ticket still contains ${named}, ` +
+        `so a blocking DoR row does not hold — but the run returned ${claims.join(" and ")}. ` +
+        `DOR_CHECKLIST.md: "Output dor:pass only if 1-7 hold." Refusing the verdict; ` +
         `if the run was write-enabled, a comment making the same claim is already on the issue.`,
     );
     this.name = "TriageContradictionError";
@@ -408,8 +466,18 @@ function isVerdict(value: unknown): value is Verdict {
  *
  * Exported for testing: the point is not that it exists but that it fires.
  */
+export function blockingPlaceholders(
+  placeholders: readonly DorPlaceholder[],
+): readonly DorPlaceholder[] {
+  return placeholders.filter(
+    (placeholder) =>
+      placeholder.row === UNATTRIBUTED_DOR_ROW || BLOCKING_DOR_ROWS.has(placeholder.row),
+  );
+}
+
 export function assertDorCoherent(payload: TriagePayload, issueKey: string): void {
-  if (payload.dorPlaceholders.length === 0) {
+  const blocking = blockingPlaceholders(payload.dorPlaceholders);
+  if (blocking.length === 0) {
     return;
   }
 
@@ -422,7 +490,7 @@ export function assertDorCoherent(payload: TriagePayload, issueKey: string): voi
     return;
   }
 
-  throw new TriageContradictionError(issueKey, payload.dorPlaceholders, claims);
+  throw new TriageContradictionError(issueKey, blocking, claims);
 }
 
 /**
@@ -445,7 +513,7 @@ export function parsePayload(value: unknown, issueKey: string): TriagePayload {
   const payload: TriagePayload = {
     verdict,
     labels: strings(candidate["labels"]),
-    dorPlaceholders: strings(candidate["dorPlaceholders"]),
+    dorPlaceholders: dorPlaceholders(candidate["dorPlaceholders"]),
     recommendedNextStep: String(candidate["recommendedNextStep"] ?? ""),
     report: String(candidate["report"] ?? ""),
     mutation: parseMutation(candidate["mutation"]),
@@ -551,6 +619,42 @@ function strings(value: unknown): readonly string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
     : [];
+}
+
+/**
+ * Reads the placeholder list, tolerating a model that answers in the old shape.
+ *
+ * A bare string was the whole field until rows 8 and 9 went advisory, and the
+ * skill is prose the model interprets rather than code that is deployed with
+ * this file — so a run mid-rollout can still return `["[N]"]`. That parses to an
+ * `UNATTRIBUTED_DOR_ROW`, which `blockingPlaceholders` treats as blocking. The
+ * old shape therefore keeps the old behaviour exactly, which is the property
+ * worth having: the failure mode of a stale skill is the guard being too strict,
+ * never it silently switching off.
+ */
+function dorPlaceholders(value: unknown): readonly DorPlaceholder[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const parsed: DorPlaceholder[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string") {
+      parsed.push({ text: entry, row: UNATTRIBUTED_DOR_ROW });
+      continue;
+    }
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const candidate = entry as Record<string, unknown>;
+    const text = candidate["text"];
+    if (typeof text !== "string" || text === "") {
+      continue;
+    }
+    const row = candidate["row"];
+    const valid = typeof row === "number" && Number.isInteger(row) && row >= 1 && row <= 10;
+    parsed.push({ text, row: valid ? row : UNATTRIBUTED_DOR_ROW });
+  }
+  return parsed;
 }
 
 export async function runTriage(options: TriageRunOptions): Promise<TriagePayload> {

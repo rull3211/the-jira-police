@@ -84,7 +84,11 @@ describe("assertPostable", () => {
     // because of SSX-3822.
     expect(() =>
       assertPostable(
-        payload({ verdict: "ready-ish", labels: ["dor:pass"], dorPlaceholders: ["[N]"] }),
+        payload({
+          verdict: "ready-ish",
+          labels: ["dor:pass"],
+          dorPlaceholders: [{ text: "[N]", row: 3 }],
+        }),
         "SSX-3822",
       ),
     ).toThrow(TriageContradictionError);
@@ -139,12 +143,17 @@ describe("the comment body", () => {
     // run had wrongly stamped. Repudiating a label requires naming it, so the
     // check fired hardest on the runs that were fixing things. The rule now
     // reads the delta instead, where applying and reversing are distinct.
+    //
+    // The placeholder is on row 3 rather than the row 9 of the original
+    // incident, because row 9 no longer justifies a send-back at all — a
+    // fixture reversing `dor:pass` over an advisory row would be teaching the
+    // opposite of the current rule while testing something unrelated to it.
     const body = [
       "# ↩ SEND BACK → needs info · SSX-1234",
       "",
       "**This reverses the previous intake comment** (it stamped `dor:pass`",
-      "while noting the same unfilled `[N]` — an unfilled placeholder is not a",
-      "baseline, so row 9 fails).",
+      "while noting the same unfilled `[N]` — AC-2 is still a placeholder, so",
+      "row 3 fails).",
       "",
       "LABEL DELTA — remove: dor:pass · add: dor:gaps",
       "",
@@ -156,7 +165,7 @@ describe("the comment body", () => {
         payload({
           verdict: "needs-info",
           labels: ["dor:gaps", "next:to-reporter"],
-          dorPlaceholders: ["[N]"],
+          dorPlaceholders: [{ text: "[N]", row: 3 }],
           mutation: mutation({
             commentBody: body,
             labelsAdd: ["dor:gaps", "next:to-reporter"],
@@ -174,7 +183,7 @@ describe("the comment body", () => {
     const input = payload({
       verdict: "needs-info",
       labels: ["dor:gaps"],
-      dorPlaceholders: ["[N]"],
+      dorPlaceholders: [{ text: "[N]", row: 3 }],
       mutation: mutation({ labelsAdd: ["dor:pass"] }),
     });
 
@@ -187,7 +196,12 @@ describe("the comment body", () => {
     const body = `## SSX-1234\n\nDoR: gaps — baseline is still "[N]".\n\n${FOOTER_SENTINEL}`;
 
     expect(
-      violations(payload({ dorPlaceholders: ["[N]"], mutation: mutation({ commentBody: body }) })),
+      violations(
+        payload({
+          dorPlaceholders: [{ text: "[N]", row: 9 }],
+          mutation: mutation({ commentBody: body }),
+        }),
+      ),
     ).toEqual([]);
   });
 });
@@ -211,7 +225,7 @@ describe("labels", () => {
       violations(
         payload({
           labels: ["dor:gaps", "next:to-reporter"],
-          dorPlaceholders: ["[N]"],
+          dorPlaceholders: [{ text: "[N]", row: 9 }],
           mutation: mutation({
             labelsAdd: ["dor:gaps", "next:to-reporter"],
             labelsRemove: ["dor:pass", "next:to-trio"],

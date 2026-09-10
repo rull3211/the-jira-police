@@ -253,12 +253,12 @@ describe("createGroom with WRITE_BACK on", () => {
       payload({
         verdict: "ready-ish",
         labels: ["dor:pass", "route:ours"],
-        dorPlaceholders: ["[N]"],
+        dorPlaceholders: [{ text: "[N]", row: 3 }],
         mutation: mutation({ labelsAdd: ["dor:pass"] }),
       }),
     );
 
-    await expect(createGroom(on())(TICKET)).rejects.toThrow(/dor:pass only if 1-9 hold/);
+    await expect(createGroom(on())(TICKET)).rejects.toThrow(/dor:pass only if 1-7 hold/);
     expect(runPost).not.toHaveBeenCalled();
   });
 
@@ -307,7 +307,10 @@ describe("createGroom with WRITE_BACK on", () => {
     // file an operator can open ends up on disk.
     const directory = await mkdtemp(join(tmpdir(), "groom-reject-"));
     runTriage.mockResolvedValue(
-      payload({ dorPlaceholders: ["[N]"], mutation: mutation({ component: "Nonsense" }) }),
+      payload({
+        dorPlaceholders: [{ text: "[N]", row: 9 }],
+        mutation: mutation({ component: "Nonsense" }),
+      }),
     );
 
     await expect(
@@ -316,7 +319,11 @@ describe("createGroom with WRITE_BACK on", () => {
 
     const written = await readFile(join(directory, "SSX-1234.rejected.md"), "utf8");
     expect(written).toContain("Nonsense");
-    expect(written).toContain("[N]");
+    // The row, not just the text. Which row a placeholder was attributed to is
+    // now what decides whether it blocks, so a refusal artifact that omits it
+    // cannot be judged — an operator would not be able to tell a correct pass
+    // on an advisory row from a guard that failed to fire on a blocking one.
+    expect(written).toContain("[N] (row 9)");
     // The body itself, which is the evidence the whole file exists to preserve.
     expect(written).toContain("Gaps remain.");
   });

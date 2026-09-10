@@ -35,7 +35,7 @@ a Jira comment (no HTML, no ANSI, no collapsible, no colour).
 9. Exactly one Evidence line and one Caveat line, both blockquotes; the Caveat is always present, always last.
 10. **CONF = match strength, not candidate count.** Emit **Ours?/route at HIGH only with a corroborating signal** — surface, domain, or description agreement beyond a single fuzzy keyword. A lone fuzzy keyword hit → **MED** or **route:unknown**. The owner read is deterministic ONCE the service is correctly identified; the _service_ match is a keyword heuristic — verify it before handing off.
 11. **Dev lens on ACCEPT (default).** An `✅ ACCEPT` reason / `→ Next` always carries a one-line feasibility read for developers — owning repo · blast LOW/MED/HIGH · the single biggest technical question — so they engage DURING prioritization, no `--deep` needed. Draw it from the vault only.
-12. **Data gate rolls into DoR.** A missing baseline metric / expected movement is a `dor:gaps` item shown in the DoR cell and the send-back note — NOT a new scorecard row (the six gates are fixed).
+12. **Data and size are advisory.** A missing baseline metric / expected movement (row 9) or an unsized item (row 8) is shown in the DoR cell and carried in `→ Next` as a follow-up — never a `dor:gaps` item, never a send-back question, and NOT a new scorecard row (the six gates are fixed). Note the gap in one clause; do not argue for why passing anyway is defensible.
 
 ## Verdict banner set (line 1)
 

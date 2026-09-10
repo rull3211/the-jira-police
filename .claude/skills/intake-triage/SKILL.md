@@ -14,7 +14,7 @@ Pre-screen ONE new backlog idea or Jira ticket **before the Trio (Techlead + PM 
 
 The default run always emits the complete PM report. `--deep` reuses the same research and **appends** a techlead technical appendix — it is additive, never a prerequisite, so the PM is never blocked on the techlead.
 
-The board's issue types — **Oppgave** (Task), **Feil** (Bug), **Epic** — steer the path (see `INTAKE_INSTRUCTIONS.md` §1b); a planned `bugFastPath` switch (**OFF now**) will later send a **Feil** straight to _Prioritized_. Every **ACCEPT** carries a default **dev lens** (feasibility + the top technical question) so developers weigh in during prioritization, not after — and DoR now includes a **data/evidence** gate. The team solves measured problems, not unmeasured orders. Every run also writes a self-contained, shareable **HTML roll-up dashboard** for the Trio (local file, never a Jira write).
+The board's issue types — **Oppgave** (Task), **Feil** (Bug), **Epic** — steer the path (see `INTAKE_INSTRUCTIONS.md` §1b); a planned `bugFastPath` switch (**OFF now**) will later send a **Feil** straight to _Prioritized_. Every **ACCEPT** carries a default **dev lens** (feasibility + the top technical question) so developers weigh in during prioritization, not after — and DoR carries an **advisory data/evidence** row: an unmeasured item is reported and passed, never sent back on that alone. Every run also writes a self-contained, shareable **HTML roll-up dashboard** for the Trio (local file, never a Jira write).
 
 ## Usage
 

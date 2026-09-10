@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2465 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2471 tests in 69
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -328,7 +328,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **108 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **109 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 39 point at sections that have never existed** (below,
   "The citations that were never written down"). What is still unresolved is which _document_ a
@@ -607,7 +607,101 @@ week, or say in the code that the resolver is aspirational — do not widen the 
 
 ---
 
+### 22. `prepareSkillRoot` stages a path two concurrent runs can share, and one of them loses
+
+**Branch:** `fix/skill-root-collision`, stacked on `refactor/dor-advisory-rows`.
+
+**What is being attempted.** Make the staged skill root private to the run that made it, so two
+concurrent `prepareSkillRoot` calls with the same `parentDirectory` and `issueKey` both get a tree
+and neither refuses.
+
+**Why now.** CI went red on pull request #33 in a run whose only difference from a green run on the
+_same commit_ was the pull request body — `src/solve/orchestrator.test.ts > resolveReview > passes
+the reviewer's comments in and withholds the brief`, expecting the review pass's options and getting
+`undefined`. The harness records passes in a per-test array, so an empty one means the pass never
+ran, and the only early return above it is `prepareSkillRoot` refusing.
+
+The root is ``join(parentDirectory, `${issueKey}-skill`)`` — derived entirely from two inputs, with
+nothing making it unique. `orchestrator.test.ts` and `delivery.test.ts` both drive `resolveReview`
+with `issueKey: "SSX-3822"` and `parentDirectory: "/tmp/solve"`, so both stage the identical real
+directory `/tmp/solve/SSX-3822-review-skill`, from separate vitest workers, with `rm -rf` then
+`cp -r` then `chmod a-w`.
+
+**Measured, not reasoned.** Two `prepareSkillRoot` calls raced against one root, 40 rounds: **40
+prepared, 40 refused** — exactly one loser per pair, every time, `EEXIST: file already exists,
+mkdir`. The suite does not reproduce it on this machine (12 runs of the file alone, 15 of the two
+colliding files together, all green), which is the shape of the defect: a fast local filesystem
+narrows the window, a contended CI runner widens it.
+
+This is not only a test artifact. Nothing outside the tests stops two runs sharing a root; the
+tests are just the first two callers that actually did.
+
+**What would make it the wrong idea.** The deterministic name is load-bearing in one direction: it
+is how a leftover from a hard-killed run gets cleared, because the next run for the same issue
+reuses the name and removes it first. A unique name per run gives that up, and orphans then
+accumulate rather than being overwritten one-per-issue. That is survivable because the default
+`parentDirectory` is under `tmpdir()` (`wiring.ts`), but it is only survivable _by default_ — an
+operator who configures it elsewhere gets unbounded growth. If the answer is an age-based sweep,
+that is a second, testable piece of work and not this one; say so here rather than smuggling a
+time-dependent behaviour into a collision fix.
+
+The other wrong turn is fixing the two test fixtures instead. It would go green and leave the
+production race exactly where it is, untested in both directions.
+
+---
+
 ## What was learned, and is recorded nowhere else
+
+### A green suite is not evidence about a race, because the window is a property of the machine
+
+The skill-root collision (§22) arrived as one red test in CI on a commit that had gone green an hour
+earlier, differing only in a pull request body. Everything available locally said there was nothing
+there: the file alone passed 12 times, the two colliding files together passed 15 times. Every one
+of those runs was on the broken code, and none of them was evidence of anything — a fast local disk
+narrows the interleaving window, a contended shared runner widens it, and the suite measures the
+disk it is on.
+
+What settled it was leaving the suite behind and driving the mechanism directly: two concurrent
+calls against one root, 40 rounds, **40 prepared and 40 refused**, exactly one loser per pair, every
+time. A defect that reproduces 0 times in 27 test runs and 40 times out of 40 when addressed head-on
+is the same defect; only the instrument changed.
+
+**The generalisation is about what a re-run means.** A flaky test is a measurement, and re-running it
+until it is green discards the measurement rather than reading it. The cheap move here — press
+re-run on the CI job, watch #33 go green, move on — was available and would have worked, and the
+race would still be in `prepareSkillRoot` waiting for a slower morning.
+
+**The narrower lesson underneath it:** a path derived entirely from its inputs is shared mutable
+state wearing a local variable's clothes. `<parentDirectory>/<issueKey>-skill` looked private to a
+run because both arguments were about that run. Two runs with the same arguments is not an exotic
+case; it is the ordinary one, and the tests were simply the first two callers to hit it.
+
+### A gate is calibrated on the population it passes, not the one it fails
+
+The complaint was that DoR rows 8 and 9 were failing too many tickets. Measured over the 29 reports
+in `groomed/`, that is **refuted**: only 2 of 12 `dor:gaps` items would have flipped if both rows
+were deleted, and both needed an interpretive call to count at all. Had the question stopped there,
+the answer would have been "the rows are fine, the complaint is wrong" — and the complaint was
+right.
+
+**The signal was in the passes.** 11 of the 16 `dor:pass` items carried a written argument for why a
+thin or absent row 9 should not block, and three independently invented the same unwritten exemption
+to get there — _row 9 exists to stop unmeasured features, so a reproducible defect is exempt_. That
+sentence was in no checklist. A gate two thirds of its passing population has to argue past is not
+measuring what it believes it is; it has become a discretionary override with no field recording
+that it was exercised.
+
+**The general form, and it is not about DoR.** A gate's failures are the population everybody counts,
+because a failure is an event with a name and a label. Its passes are unexamined by construction —
+the ticket moved on, so nothing asks at what cost. But a miscalibrated gate does not usually
+manifest as too many refusals; it manifests as **compliance theatre in the accepts**, which is
+invisible to any count keyed on the refusal. So when asking whether a check is set too tight, read
+what the passing cases had to say to get through, not just how many were stopped.
+
+The tell is cheap to look for and was sitting in plain text: the same unwritten exemption appearing
+in three independent runs. **Any rule the corpus keeps inventing is a rule the corpus needs and the
+document does not have** — and until somebody writes it down, every instance of it is an
+unauditable judgement call wearing the costume of a passing check.
 
 ### A rewrite can invent a number, and every gate here stays green
 

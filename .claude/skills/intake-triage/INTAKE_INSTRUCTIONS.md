@@ -221,18 +221,26 @@ separate from the routing verdict, which is the owning repo's team only.
     handover, Temauker, `Steg N`/Cleanup). Do the **child roll-up**: all children Done → `verify-if-done`;
     some open + scope clear → `keep`; zero children + empty + stale → `archive-candidate`; zero children +
     empty + recent → `send-back`. An **empty epic body is NOT `dor:gaps`** — this is the SSX-2629 class of error.
-  - **Leaf** (Story/Task/Bug): full 1–9 bar (incl. the data/evidence gate), but **inherit** value/why-now and scope from the parent
+  - **Leaf** (Story/Task/Bug): blocking rows 1–7, but **inherit** value/why-now and scope from the parent
     epic when the leaf omits it and the parent states it (cite the parent as the source).
   - **Sub-task**: lightest bar — atomic action + acceptance inherited from parent; judge against the
     parent, never standalone (empty sub-tasks under a clear parent are not `dor:gaps`).
   - Auto-fill the duplicate/affected-system/dependency items from steps 4–7; list what is still
     missing as concrete questions to send the requester.
-  - **Data / evidence gate (additive — tech-lead: data-driven).** Score DoR row 9: is there a
-    baseline metric + source and an expected movement (from what, to what, measured where)? The
-    requester supplies the numbers; the skill POINTS to the source — GA4 / analytics for buy-flow
-    funnels, Datadog for reliability, `commerce-explorer-web` for commerce data. No data and no way
-    to get it → a `dor:gaps` item + a send-back prompt. This row is a skill-local addition pending
-    the Confluence DoR update (see `DOR_CHECKLIST.md`).
+  - **Rows 8 (size) and 9 (data / evidence) are ADVISORY and cannot fail an item.** Score them and
+    report them; never let them produce `dor:gaps`, a send-back question, or anything other than
+    `ready-ish`. An item whose only unmet rows are 8 and 9 is `dor:pass`.
+    - **Row 9.** Is there a baseline metric + source and an expected movement (from what, to what,
+      measured where)? The requester supplies the numbers; the skill POINTS to the source — GA4 /
+      analytics for buy-flow funnels, Datadog for reliability, `commerce-explorer-web` for commerce
+      data. When it is thin or absent, say so in the DoR cell and carry it in `→ Next` as something
+      to go and get before estimation.
+    - **Row 8.** Same treatment: an unsized item is worth flagging, never worth sending back.
+    - **Do not argue the row away.** The old hard gate produced a written justification on two thirds
+      of passing items — most often the invented rule that row 9 "only stops unmeasured features", so
+      a reproducible defect is exempt. That exemption is not in the checklist and never was. Now that
+      the row is advisory the argument is unnecessary: report the gap plainly and pass the item. A
+      sentence explaining why an unmet advisory row is acceptable is a sentence to delete.
 - **Dev lens by default (tech-lead: involve developers early).** For an **ACCEPT** heading to
   prioritization, always emit a one-line feasibility read from the vault (owning repo · blast
   LOW/MED/HIGH · the single biggest technical question) so developers weigh in DURING prioritization,
