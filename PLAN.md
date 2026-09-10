@@ -607,6 +607,49 @@ week, or say in the code that the resolver is aspirational — do not widen the 
 
 ---
 
+### 22. `prepareSkillRoot` stages a path two concurrent runs can share, and one of them loses
+
+**Branch:** `fix/skill-root-collision`, stacked on `refactor/dor-advisory-rows`.
+
+**What is being attempted.** Make the staged skill root private to the run that made it, so two
+concurrent `prepareSkillRoot` calls with the same `parentDirectory` and `issueKey` both get a tree
+and neither refuses.
+
+**Why now.** CI went red on pull request #33 in a run whose only difference from a green run on the
+*same commit* was the pull request body — `src/solve/orchestrator.test.ts > resolveReview > passes
+the reviewer's comments in and withholds the brief`, expecting the review pass's options and getting
+`undefined`. The harness records passes in a per-test array, so an empty one means the pass never
+ran, and the only early return above it is `prepareSkillRoot` refusing.
+
+The root is `join(parentDirectory, `${issueKey}-skill`)` — derived entirely from two inputs, with
+nothing making it unique. `orchestrator.test.ts` and `delivery.test.ts` both drive `resolveReview`
+with `issueKey: "SSX-3822"` and `parentDirectory: "/tmp/solve"`, so both stage the identical real
+directory `/tmp/solve/SSX-3822-review-skill`, from separate vitest workers, with `rm -rf` then
+`cp -r` then `chmod a-w`.
+
+**Measured, not reasoned.** Two `prepareSkillRoot` calls raced against one root, 40 rounds: **40
+prepared, 40 refused** — exactly one loser per pair, every time, `EEXIST: file already exists,
+mkdir`. The suite does not reproduce it on this machine (12 runs of the file alone, 15 of the two
+colliding files together, all green), which is the shape of the defect: a fast local filesystem
+narrows the window, a contended CI runner widens it.
+
+This is not only a test artifact. Nothing outside the tests stops two runs sharing a root; the
+tests are just the first two callers that actually did.
+
+**What would make it the wrong idea.** The deterministic name is load-bearing in one direction: it
+is how a leftover from a hard-killed run gets cleared, because the next run for the same issue
+reuses the name and removes it first. A unique name per run gives that up, and orphans then
+accumulate rather than being overwritten one-per-issue. That is survivable because the default
+`parentDirectory` is under `tmpdir()` (`wiring.ts`), but it is only survivable *by default* — an
+operator who configures it elsewhere gets unbounded growth. If the answer is an age-based sweep,
+that is a second, testable piece of work and not this one; say so here rather than smuggling a
+time-dependent behaviour into a collision fix.
+
+The other wrong turn is fixing the two test fixtures instead. It would go green and leave the
+production race exactly where it is, untested in both directions.
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 ### A gate is calibrated on the population it passes, not the one it fails
