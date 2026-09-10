@@ -33,8 +33,13 @@ afterEach(async () => {
   // Read-only directories cannot be removed until they are unlocked, which is
   // what `removeSkillRoot` is for. Using it here means the cleanup path is
   // exercised by every test in this file, not only the two that assert on it.
-  for (const key of ["SSX-1", "SSX-2"]) {
-    await removeSkillRoot(join(parent, `${key}-skill`));
+  //
+  // Listed rather than named: roots are uniquely suffixed now, so there is no
+  // name to reconstruct. `rm(parent, { force: true })` is not the shortcut it
+  // looks like — `force` suppresses "it was not there", not EACCES, and a
+  // locked-down root is precisely what `rm` cannot descend into.
+  for (const entry of await readdir(parent)) {
+    await removeSkillRoot(join(parent, entry));
   }
   await rm(parent, { recursive: true, force: true });
 });

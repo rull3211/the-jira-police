@@ -59,7 +59,7 @@
  * ships with the code because it is part of the code.
  */
 
-import { chmod, cp, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { logger } from "../logger.ts";
@@ -127,6 +127,36 @@ async function unlock(path: string): Promise<void> {
  * Refuses rather than throws, matching `createWorktree`. A missing skill
  * directory is a broken installation and the run should stop with a sentence
  * saying so, not a stack trace three layers up.
+ *
+ * ## The root is unique per call, and that is load-bearing
+ *
+ * It used to be `<parentDirectory>/<issueKey>-skill` — derived entirely from the
+ * two arguments, so two runs sharing them shared a directory, and this function
+ * `rm -rf`s it, `cp -r`s into it and then `chmod`s it read-only. Two of those
+ * interleaved is one run deleting another's tree, or copying into one that has
+ * already been locked. The loser does not crash: it returns `refused`, the
+ * caller reads that as a broken installation, and the pass silently never runs.
+ *
+ * Measured 2026-09-10, two concurrent calls against one root, 40 rounds: 40
+ * prepared, 40 refused, `EEXIST` every time — exactly one loser per pair. It
+ * reached us as a flaky test (`orchestrator.test.ts` and `delivery.test.ts` both
+ * drive `resolveReview` for `SSX-3822` under `/tmp/solve`) which had passed on
+ * the same commit an hour earlier, but nothing about it was specific to tests.
+ *
+ * `mkdtemp` is the fix because it is the only one that is atomic: checking
+ * whether the path is free and then creating it is the same race with a smaller
+ * window. Callers must treat the returned path as opaque.
+ *
+ * **The residual risk, which is not closed.** The old name was self-cleaning —
+ * a leftover from a hard-killed run was removed by the next run for the same
+ * issue, because it landed on the same path. Unique names give that up, so a
+ * `SIGKILL` between staging and the caller's `finally` now leaks one directory
+ * per kill instead of overwriting one per issue. That is survivable only by
+ * default, where `parentDirectory` is under `tmpdir()` (`wiring.ts`); an
+ * operator who configures it elsewhere gets unbounded growth. An age-based
+ * sweep is the obvious answer and is deliberately not here — it is a
+ * time-dependent behaviour that needs its own tests, and smuggling it into a
+ * collision fix would leave both half-proven. `PLAN.md` §22 holds it.
  */
 export async function prepareSkillRoot(
   parentDirectory: string,
@@ -146,17 +176,30 @@ export async function prepareSkillRoot(
     };
   }
 
-  const root = join(parentDirectory, `${issueKey}-skill`);
+  let root: string;
+  try {
+    // `mkdtemp` will not create the parent, and on the first solve of a run
+    // nothing else has.
+    await mkdir(parentDirectory, { recursive: true });
+    root = await mkdtemp(join(parentDirectory, `${issueKey}-skill-`));
+  } catch (error) {
+    return {
+      outcome: "refused",
+      reason: `could not stage the skill under ${parentDirectory}: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
   const destination = join(root, ".claude", "skills", SKILL_NAME);
 
   try {
-    // A leftover from an interrupted run is read-only, so clear it the same way
-    // `removeSkillRoot` would rather than letting `cp` fail on EACCES.
-    await removeSkillRoot(root);
     await mkdir(dirname(destination), { recursive: true });
     await cp(source, destination, { recursive: true });
     await lockDown(root);
   } catch (error) {
+    // The directory exists by now, and a `refused` result carries no path, so
+    // the caller's `finally` has nothing to clean up with. Fail without
+    // leaving a locked-down husk behind.
+    await removeSkillRoot(root).catch(() => undefined);
     return {
       outcome: "refused",
       reason: `could not stage the skill at ${root}: ${error instanceof Error ? error.message : String(error)}`,

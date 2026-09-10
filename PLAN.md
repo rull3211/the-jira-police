@@ -328,7 +328,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **108 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **109 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 39 point at sections that have never existed** (below,
   "The citations that were never written down"). What is still unresolved is which _document_ a
@@ -616,12 +616,12 @@ concurrent `prepareSkillRoot` calls with the same `parentDirectory` and `issueKe
 and neither refuses.
 
 **Why now.** CI went red on pull request #33 in a run whose only difference from a green run on the
-*same commit* was the pull request body — `src/solve/orchestrator.test.ts > resolveReview > passes
+_same commit_ was the pull request body — `src/solve/orchestrator.test.ts > resolveReview > passes
 the reviewer's comments in and withholds the brief`, expecting the review pass's options and getting
 `undefined`. The harness records passes in a per-test array, so an empty one means the pass never
 ran, and the only early return above it is `prepareSkillRoot` refusing.
 
-The root is `join(parentDirectory, `${issueKey}-skill`)` — derived entirely from two inputs, with
+The root is ``join(parentDirectory, `${issueKey}-skill`)`` — derived entirely from two inputs, with
 nothing making it unique. `orchestrator.test.ts` and `delivery.test.ts` both drive `resolveReview`
 with `issueKey: "SSX-3822"` and `parentDirectory: "/tmp/solve"`, so both stage the identical real
 directory `/tmp/solve/SSX-3822-review-skill`, from separate vitest workers, with `rm -rf` then
@@ -640,7 +640,7 @@ tests are just the first two callers that actually did.
 is how a leftover from a hard-killed run gets cleared, because the next run for the same issue
 reuses the name and removes it first. A unique name per run gives that up, and orphans then
 accumulate rather than being overwritten one-per-issue. That is survivable because the default
-`parentDirectory` is under `tmpdir()` (`wiring.ts`), but it is only survivable *by default* — an
+`parentDirectory` is under `tmpdir()` (`wiring.ts`), but it is only survivable _by default_ — an
 operator who configures it elsewhere gets unbounded growth. If the answer is an age-based sweep,
 that is a second, testable piece of work and not this one; say so here rather than smuggling a
 time-dependent behaviour into a collision fix.
