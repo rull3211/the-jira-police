@@ -48,7 +48,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23 and §25, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25 and §26, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -66,9 +66,11 @@ is buying.
 scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
 entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
 worth a permanent number, because the session was compacted once while it was open; §25 was the
-fitness block owning the region it writes, shipped in PR #37. **§24 is absent from that list and is
-not a hole** — it was skipped rather than spent, for the reason §19 gives. §26, §27 and §28 are the
-open triage-selection entries, so the next entry is §29.
+fitness block owning the region it writes, shipped in PR #37; §26 was the closed-ticket clause, and
+it is a hole one commit after it was written — opened and deleted inside the branch that built it,
+which is what the rule now asks for. **§24 is absent from that list and is not a hole** — it was
+skipped rather than spent, for the reason §19 gives. §27 and §28 are the open triage-selection
+entries, so the next entry is §29.
 
 <!-- refs:on -->
 
@@ -653,35 +655,10 @@ both half-proven.
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
 
-### 26. The new-issue query has no status clause, so closed tickets are triaged
-
-**Branch:** `fix/triage-skips-closed-issues`.
-
-**What is not built.** `AND statusCategory != Done` in `buildNewIssuesJql`.
-
-**Why now.** It stopped being hypothetical: `triage.start` fired on `SSX-3859`, a closed ticket, on
-2026-09-10. `ARCHITECTURE.md` §13 has carried this as an open item — "closed tickets currently get
-triaged … a question of intent, so it is open" — and the intent is now settled. A closed ticket is
-skipped outright: not fetched, not triaged, nothing written to Jira. That entry is deleted in the
-same commit, because a gap that has been closed is no longer a gap.
-
-**Why the clause and not a local filter.** `buildSolveQueueJql` already carries exactly this clause
-for exactly this reason, so the JQL is where a reader of this codebase will look for it. A local
-predicate would also mark the ticket seen, which spends the one mechanism that could pick it up if
-it reopened inside the window.
-
-**On `statusCategory` rather than a status name.** `src/watch/signals.ts` already settles this: names
-are per-board, renameable and Norwegian on this board, so `status != "Done"` is a filter that
-matches nothing here. The category key is the only stable spelling of "closed".
-
-**What would make it the wrong idea.** A ticket closed and reopened outside the created-window is
-now permanently invisible to the poller — it was already, via `seenKeys`, but this widens the set
-that never enters. Acceptable because reopening is a human act and the human can re-trigger; wrong
-if reopening turns out to be routine.
-
 ### 27. Triage cannot be restricted to one status
 
-**Branch:** none yet. Follows §26; wants the status field §26 does not need.
+**Branch:** none yet. Follows the closed-ticket clause, which shipped; wants the status field on
+`TicketRef` that the clause did not need, because it filtered in JQL rather than in the poller.
 
 **What is not built.** `TRIAGE_ONLY_STATUS` — when set, only issues in that status are triaged.
 Empty means no restriction, the shape `JIRA_COMPONENTS` already uses.
