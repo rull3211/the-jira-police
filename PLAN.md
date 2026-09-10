@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2486 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2496 tests in 69
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -48,7 +48,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25 and §26, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26 and §27, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -66,11 +66,11 @@ is buying.
 scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
 entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
 worth a permanent number, because the session was compacted once while it was open; §25 was the
-fitness block owning the region it writes, shipped in PR #37; §26 was the closed-ticket clause, and
-it is a hole one commit after it was written — opened and deleted inside the branch that built it,
-which is what the rule now asks for. **§24 is absent from that list and is not a hole** — it was
-skipped rather than spent, for the reason §19 gives. §27 and §28 are the open triage-selection
-entries, so the next entry is §29.
+fitness block owning the region it writes, shipped in PR #37; §26 and §27 were the closed-ticket
+clause and the status allowlist that narrowed it, and each is a hole one commit after it was written
+— opened and deleted inside the branch that built it, which is what the rule now asks for. **§24 is
+absent from that list and is not a hole** — it was skipped rather than spent, for the reason §19
+gives. §28 and §29 are what is left of the triage-selection entries, so the next entry is §30.
 
 <!-- refs:on -->
 
@@ -655,34 +655,38 @@ both half-proven.
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
 
-### 27. Triage cannot be restricted to one status
+### 29. A watched ticket keeps being re-triaged after a human takes it over
 
-**Branch:** none yet. Follows the closed-ticket clause, which shipped; wants the status field on
-`TicketRef` that the clause did not need, because it filtered in JQL rather than in the poller.
+**Branch:** none yet. Follows the discovery half, which shipped `TRIAGE_ONLY_STATUS` in `SETTINGS`
+and settled its rendering; this entry is only about the second population.
 
-**What is not built.** `TRIAGE_ONLY_STATUS` — when set, only issues in that status are triaged.
-Empty means no restriction, the shape `JIRA_COMPONENTS` already uses.
+**What is not built.** A ticket under `agent:watching` that moves into a status outside
+`TRIAGE_ONLY_STATUS` should be **unsubscribed** — `agent:watching` removed — under a new
+`UnsubscribeReason` of `handed-off`.
 
-**Why it is owed.** The operator wants to point the service at one column while it is being
-calibrated, rather than at everything the component filter admits. Today the only selection dials
-are project, component, issue type and a time window.
+**Why it is owed.** The watch loop pays for a re-triage on any qualifying activity regardless of
+status, so a ticket a person picked up keeps drawing agent comments. That is the same noise
+`TRIAGE_ONLY_STATUS` removes from discovery, arriving through the other door.
 
-**Both populations, and the watch queue is the awkward half.** It applies to newly discovered issues
-in `buildNewIssuesJql`, and to tickets already under `agent:watching` — those are explicitly _not_
-exempt. But `buildSendbackWatchJql` must keep returning every watched ticket regardless of status,
-because a ticket the query cannot see is a ticket nothing can unsubscribe, and the label would
-outlive every loop that honours it. So the filter lands on the **decision**, not the query:
-`decideWatch` returns `quiet` for a watched ticket outside the status. `quiet` and not
-`unsubscribe` — an out-of-status ticket has not ended, it is merely not being paid for this tick.
+**Why unsubscribe and not `quiet`.** `quiet` was the design until the operator was asked, and they
+chose unsubscribe knowing it is one-way: the created-window means a ticket that later moves back to
+`Mottatt` is far too old for discovery to see, so nothing re-adopts it. Recorded because it is the
+decision most likely to be questioned later, and it was made deliberately rather than by default.
 
-**What would make it the wrong idea.** A status name is a per-board string with no validation
-available at startup, so a typo is a filter that silently matches nothing and a service that appears
-to be running and triages zero tickets. Needs a startup log of the rendered query at minimum, and
-possibly a louder signal for "restriction set, zero candidates, every cycle".
+**The query must not change.** `buildSendbackWatchJql` keeps returning every watched ticket
+regardless of status, for the reason its own header gives at length: a ticket the query cannot see
+is a ticket nothing can unsubscribe, so filtering here would strand the label rather than remove it.
+The decision is the only correct place for this.
+
+**What would make it the wrong idea.** If tickets routinely bounce out of and back into the
+allowlist, this converts a recoverable pause into permanent abandonment, and `quiet` was right all
+along. Nobody has measured how often a ticket moves backwards on this board — that measurement is
+the first task of the branch, not an afterthought.
 
 ### 28. Triage order ignores the board, so the leftmost column waits behind the oldest ticket
 
-**Branch:** none yet. Follows §27.
+**Branch:** none yet. Wants the cursor work first, and the status list `TRIAGE_ONLY_STATUS` already
+ships.
 
 **What is not built.** `TRIAGE_STATUS_PRIORITY` — an ordered status list, leftmost column first,
 with unlisted statuses sorting last. Triage works down it rather than strictly oldest-first.

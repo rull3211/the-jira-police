@@ -8,8 +8,8 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 39 of the 44
-entries below are cited that way, and the other five each say in their own text that no rule has been
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 40 of the 46
+entries below are cited that way, and the other six each say in their own text that no rule has been
 written yet. 28 entries also link the other way, from `**The rule**` at the end of the entry, so that
 [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against what it
 rested on. Nothing needs to read this file top to bottom, and it is not on the path of doing any
@@ -1291,3 +1291,50 @@ the tree was already saying these things, and that a run leaving no residue is t
 **The rules** — [`PLAN.md` records what is not built, and never a
 lesson](STARTING.md#the-document-contract-which-is-the-one-that-is-always-in-force); [step 5 routes
 what was learned to the rule it changes](PROVING.md#step-5-is-where-it-compounds).
+
+### The status filter that was verified against the board and still missed the largest column
+
+`TRIAGE_ONLY_STATUS` shipped on 2026-09-10 with the default
+`Mottatt,Backlog,On Hold,In Progress Concept` — the four columns the operator named, spelled the way
+the board spells them. The branch was driven against production Jira before the pull request, which
+is the rule, and the query came back with **14 eligible tickets against 106 unrestricted**. That
+looked exactly like a filter doing its job, and the number went into the pull request body as the
+evidence that it worked.
+
+**It was the fingerprint of the bug.** `status = "Mottatt"` matches zero issues on this instance;
+`status = 10165`, the same column, matches all 51. The other three names resolve normally. So the
+allowlist was silently missing the single largest and most important column — the one the operator
+had called "the first by default" — and 14 was 65 minus the 51 that had been dropped.
+
+**Nothing available would have caught it.** `jqlValue` was satisfied: the value is well-formed and
+correctly spelled. The startup character check was satisfied for the same reason. `poll.status_filter`
+logged the list, and the list was right — a reader comparing that log line against the board would
+have confirmed it. The credential cannot read status metadata, so no startup validation was possible.
+Every mitigation the feature shipped with was working as designed and none of them can see this.
+
+**The fault was the shape of the measurement, not its absence.** One aggregate count was taken and
+read as confirmation. An aggregate that moves is consistent with the intended filter and with a
+filter broken in any one of its terms, and it is the only reading that cannot distinguish them —
+four counts, one per status, would have shown `Mottatt → 0` immediately and cost one more query. The
+rule that says drive it against a real target was **followed**; what it does not say is that a
+filter's verification has to be per-term, because a filter is a conjunction of claims and the
+aggregate only tests their sum.
+
+**Found by** the operator, on the first ticket after the pull request was opened — "trage didnt pick
+up the ones in with mottatt status why is that? SSX-3884" — against an agent that had reported the
+feature verified against production.
+
+**Fixed** by pinning the default to ids, `10165,10025,10194,10179`, with a test asserting the
+rendered clause carries no quote character: quoting an id turns it back into a name lookup, so the
+regression has a shape as well as a value. Names remain supported and are now documented as a claim
+nobody has checked, which is what the new `named` field on `poll.status_filter` reports.
+
+**The rule it wants** — _when a change filters a set, verify each term separately; an aggregate
+count cannot tell a working filter from one broken in a single term._ It generalises past JQL to any
+allowlist, any `IN`, any composed predicate, and what argues for writing it early is that the
+aggregate here was not merely uninformative but actively persuasive: 106 → 14 was quoted as proof in
+a pull request body, and it was the defect. What argues against is that this is one instance, and
+[FINISHING.md](FINISHING.md#the-postmortem-in-three-questions) refuses rules built from one.
+
+**No rule yet** — writing it needs a second instance showing the shape is not specific to JQL name
+resolution, and `filter-terms` at 2.

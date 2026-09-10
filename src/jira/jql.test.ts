@@ -18,6 +18,7 @@ const NOW = new Date("2026-09-02T12:00:00Z");
 const BASE = {
   project: "SSX",
   components: [] as readonly string[],
+  statuses: [] as readonly string[],
   excludedTypeIds: ["10009"],
   cursor: null,
   now: NOW,
@@ -87,6 +88,50 @@ describe("buildNewIssuesJql", () => {
     // Status names are per-board and Norwegian on this one, so `status = "Done"`
     // is a clause that matches nothing. Same rule as `src/watch/signals.ts`.
     expect(buildNewIssuesJql(BASE)).not.toMatch(/status\s*!?=\s*"?Done"?/);
+  });
+
+  it("restricts discovery to the configured statuses", () => {
+    // The operator watched triage fire on tickets in code review and in test.
+    const jql = buildNewIssuesJql({
+      ...BASE,
+      statuses: ["Mottatt", "Backlog", "On Hold", "In Progress Concept"],
+    });
+    expect(jql).toContain('status IN ("Mottatt", "Backlog", "On Hold", "In Progress Concept")');
+  });
+
+  it("drops the closed-category clause when an allowlist is set", () => {
+    // Not a saving. Both clauses together would silently defeat an allowlist
+    // naming a closed status — two clauses that agree until someone configures
+    // the setting they exist to configure.
+    const jql = buildNewIssuesJql({ ...BASE, statuses: ["Ferdig"] });
+    expect(jql).not.toContain("statusCategory");
+  });
+
+  it("keeps filtering closed tickets when no allowlist is set", () => {
+    // Blank is "anything not closed", so removing the else branch has to fail.
+    expect(buildNewIssuesJql({ ...BASE, statuses: [] })).toContain("statusCategory != Done");
+  });
+
+  it("cannot be expressed as a status category, which is why it names statuses", () => {
+    // Measured against SSX on 2026-09-10: `In Progress Concept` is
+    // `indeterminate` and is wanted; `Prioritized` is `new` and is not. The
+    // eligible set straddles the taxonomy, so `statusCategory = new` — the
+    // one-clause version this nearly shipped as — is wrong in both directions.
+    const jql = buildNewIssuesJql({ ...BASE, statuses: ["Mottatt", "In Progress Concept"] });
+    expect(jql).toContain('"In Progress Concept"');
+    expect(jql).not.toContain("statusCategory = new");
+  });
+
+  it("quotes status names but resolves a bare number as an id", () => {
+    // Same rule as components: ids survive a rename, names are legible in a
+    // config file, and the quoting is what decides which Jira looks up.
+    const jql = buildNewIssuesJql({ ...BASE, statuses: ["On Hold", "10213"] });
+    expect(jql).toContain('status IN ("On Hold", 10213)');
+  });
+
+  it("rejects a status that would break out of its JQL literal", () => {
+    // JQL has no parameter binding, so this is rejected rather than escaped.
+    expect(() => buildNewIssuesJql({ ...BASE, statuses: ['Mottatt") OR ("x'] })).toThrow(JqlError);
   });
 
   it("uses a relative offset, never an absolute date", () => {

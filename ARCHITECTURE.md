@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2486 tests in 69 files, no build step, no
+Status: running end to end against production Jira. 2496 tests in 69 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -347,12 +347,44 @@ drops anything created in the same minute as the last issue seen. `CURSOR_OVERLA
 min) re-scans, `lookbackMinutes` rounds **up**, and key-level dedupe is what makes the overlap
 free. The dedupe is mandatory, not an optimisation.
 
-**`statusCategory != Done`, and this query is the one place the clause is unarguable.** A closed
-ticket cannot be groomed into anything, and unlike the review and sendback queries the poller holds
-no label on it that would need taking off afterwards — so there is nothing to be gained by seeing
-it and a paid model run to be lost. It went in after `triage.start` fired on a closed `SSX-3859` on
-2026-09-10. On the **category**, never the status name: names are per-board and this board's are
-Norwegian, the same reason `src/watch/signals.ts` compares against `statusCategory.key`.
+**A status filter, and this query is the one place it is unarguable.** A ticket nobody can act on
+cannot be groomed into anything, and unlike the review and sendback queries the poller holds no
+label on it that would need taking off afterwards — so there is nothing to be gained by seeing it
+and a paid model run to be lost. It is **one of two clauses, never both**, and the exclusivity is
+load-bearing rather than a saving:
+
+- **`TRIAGE_ONLY_STATUS` set** → `status IN (…)`. The default is this board's untouched columns, by
+  **id**: `10165` Mottatt, `10025` Backlog, `10194` On Hold, `10179` In Progress Concept.
+- **Blank** → `statusCategory != Done`, on the **category**, never the status name: names are
+  per-board and this board's are Norwegian, the same reason `src/watch/signals.ts` compares against
+  `statusCategory.key`.
+
+Keeping both would let a `statusCategory != Done` silently defeat an allowlist naming a closed
+status — two clauses agreeing until somebody configures the setting they exist to configure.
+
+The closed filter went in after `triage.start` fired on a closed `SSX-3859` on 2026-09-10; the
+allowlist followed the same day, because filtering only closed tickets still admits every ticket
+somebody is actively working. **It cannot be a status category.** Measured against SSX that day,
+`In Progress Concept` is `indeterminate` and is wanted, while `Prioritized` is `new` and is not — so
+the eligible set straddles the taxonomy and the columns have to be named one by one. In the component
+scope this narrows 106 eligible tickets to 65.
+
+**Ids rather than names, and the board decided that within a day of the feature shipping.**
+`jqlValue` supports both — a bare number is an id lookup, anything quoted is a name lookup — and the
+first default chose names for legibility. `status = "Mottatt"` matches **zero** issues on this
+instance; `status = 10165` matches all 51. Same column, no error, no warning: a name that fails to
+resolve is a silent hole in the allowlist, and it took out the largest column in the list while the
+other three worked. So the default is pinned by id, and a name in this setting is a claim nobody has
+checked. The `named` field on `poll.status_filter` exists to say which entries those are.
+
+**Nothing validates any of it at startup**, which is the standing cost: the credential cannot read
+project status metadata (`/project/SSX/statuses` is a 404 for it), so a status that resolves to
+nothing is a filter matching nothing and a service that looks healthy while triaging zero tickets
+forever. `poll.status_filter` prints the active list once at wiring, at `info`, unlike the per-cycle
+`poll.query` at `debug` — **and note what that bought on the day it was needed, which was nothing.**
+The log line would have printed `Mottatt` and a reader comparing it against the board would have
+agreed with it. Only counting the query's results per status finds this, and only against the real
+board.
 
 **JQL has no parameter binding**, so every interpolated value is validated rather than escaped.
 `jqlValue()` also encodes a real Jira subtlety: a bare number is resolved as an **id**, anything
@@ -940,6 +972,7 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `JIRA_AUTH`                     | —                                      | **required**, sensitive. Discovery **and `agent:` label writes** — `updateLabels` only, namespace-bound by `assertOwnedLabel`; see §12. Not "discovery only", which is what this row said until 2026-09-08                                                                                                                                                                                                                                                                                                                                                          |
 | `JIRA_PROJECT`                  | `SSX`                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `JIRA_COMPONENTS`               | `SSX Advisor`                          | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `TRIAGE_ONLY_STATUS`            | `10165,10025,10194,10179`              | Statuses discovery may triage, **by id**. Blank means anything not closed. See §4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `JIRA_EXCLUDED_TYPES`           | `10009`                                | Deloppgave / sub-task — arrives attached to a parent already triaged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `POLL_INTERVAL_MS`              | `300000`                               |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `CURSOR_OVERLAP_MS`             | `120000`                               | See §4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -1372,7 +1405,7 @@ being widened or dropped:
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 46 settings are read**, and there are no orphan files.
+  the same sweep: **all 47 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

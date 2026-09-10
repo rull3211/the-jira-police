@@ -17,6 +17,7 @@ import {
   buildPublishRequest,
   buildSolveRequest,
   buildTriageOptions,
+  createDiscover,
   createReviewCycleDeps,
   createSolveDeps,
   createSolveRunDeps,
@@ -275,6 +276,61 @@ function fakeClient(
   } as unknown as JiraClient;
   return { client, queries };
 }
+
+/**
+ * Composition of discovery.
+ *
+ * `TRIAGE_ONLY_STATUS` is the only setting in this query typed as a per-board
+ * string, and `buildNewIssuesJql` is called per cycle rather than at wiring —
+ * so these prove the two things that split apart: the characters are rejected
+ * once, at startup, and the values reach the query the poller actually runs.
+ *
+ * What none of them can prove is that a value resolves against the board.
+ * `status = "Mottatt"` is well-formed, correctly spelled, matches this file's
+ * every expectation, and matched zero issues in production. Only the board
+ * settles that, which is why the default is pinned by id and why the test
+ * below is about the quoting rather than the names.
+ */
+describe("createDiscover", () => {
+  async function queryFor(overrides: Partial<Record<string, string>> = {}): Promise<string> {
+    const { client, queries } = fakeClient();
+    await createDiscover(settingsWith({ JIRA_PROJECT: "SSX", ...overrides }), client)(null);
+    return queries[0] ?? "";
+  }
+
+  it("restricts the query to the configured statuses", async () => {
+    expect(await queryFor({ TRIAGE_ONLY_STATUS: "Mottatt,On Hold" })).toContain(
+      'status IN ("Mottatt", "On Hold")',
+    );
+  });
+
+  it("ships restricted by default, because the unrestricted query was the defect", async () => {
+    // The fallback is the board's untouched columns. If this ever reads as
+    // unrestricted, discovery silently goes back to triaging other people's
+    // in-flight work — the failure this setting was added for, and one that
+    // shows up as spend rather than as an error.
+    expect(await queryFor()).toContain("status IN (10165, 10025, 10194, 10179)");
+  });
+
+  it("pins the default statuses by id, unquoted, because the readable spelling missed 51 tickets", async () => {
+    // The regression, and it is about the quoting rather than the values. The
+    // first default spelled these as names, and `status = "Mottatt"` matches
+    // zero issues on this instance while `status = 10165` matches all 51 —
+    // same column, and no error either way. Quoting an id turns it back into a
+    // name lookup (`jqlValue`), so a default that renders quoted is the same
+    // defect wearing the new values.
+    expect(await queryFor()).not.toMatch(/status IN \([^)]*"/);
+  });
+
+  it("refuses a status that would break out of its JQL literal, at wiring", async () => {
+    // At construction, not on the first cycle. The query is built inside the
+    // returned closure, so without the check in `createDiscover` this same
+    // input is an error every poll for the life of the process.
+    expect(() =>
+      createDiscover(settingsWith({ TRIAGE_ONLY_STATUS: 'Mottatt") OR ("x' }), fakeClient().client),
+    ).toThrow(JqlError);
+  });
+});
 
 /**
  * Composition of the solve queue.

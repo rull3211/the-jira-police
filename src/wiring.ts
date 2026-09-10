@@ -54,6 +54,7 @@ import {
   buildNewIssuesJql,
   buildReviewQueueJql,
   buildSolveQueueJql,
+  jqlValue,
 } from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
@@ -107,11 +108,49 @@ export function createDiscover(
   settings: Settings,
   client: JiraClient,
 ): (cursor: string | null) => Promise<readonly TicketRef[]> {
+  const statuses = list(settings, "TRIAGE_ONLY_STATUS");
+
+  // Rendered here and thrown away, so an unquotable status is a startup crash
+  // rather than a `JqlError` raised inside every poll cycle from now on. The
+  // query is only built inside the closure below, which means without this the
+  // first sign of a bad character in the setting would be an error at 3am, on
+  // the tick, forever — nothing written, nothing damaged, and nothing that says
+  // the cause is one line of configuration. Only the characters are checkable;
+  // whether the status exists is not, see below.
+  for (const status of statuses) {
+    jqlValue(status, "status");
+  }
+
+  // Once, at wiring, at `info` — unlike `poll.query` below, which is per-cycle
+  // plumbing at `debug`. The failure it is here for is silent: a status that
+  // resolves to nothing is a filter matching nothing, and the service goes on
+  // looking healthy while triaging zero tickets forever. The credential cannot
+  // check the names against the board — `/project/SSX/statuses` is a 404 for
+  // it, verified 2026-09-10 — so printing the list is what is left.
+  //
+  // **And printing it does not catch the case it was written for.** The
+  // shipped default read `Mottatt,Backlog,On Hold,In Progress Concept`, which
+  // is what the board calls those columns and what this line would have
+  // printed, and `Mottatt` matched zero issues because the name does not
+  // resolve on this instance while the id does. A reader checking the log
+  // against the board would have agreed with it. That is the argument for
+  // `named`: it makes the un-checkable half of each entry visible as such,
+  // so a list of ids reads as pinned and a list of names reads as a claim
+  // nobody has verified.
+  logger.info("poll.status_filter", {
+    statuses,
+    restricted: statuses.length > 0,
+    named: statuses.filter((entry) => !/^[0-9]+$/.test(entry.trim())),
+  });
+
   return async (cursor: string | null): Promise<readonly TicketRef[]> => {
     const jql = buildNewIssuesJql({
       project: settings.JIRA_PROJECT,
       components: list(settings, "JIRA_COMPONENTS"),
       excludedTypeIds: list(settings, "JIRA_EXCLUDED_TYPES"),
+      // The list logged above, not a second read of it: a log line describing a
+      // filter the query does not use is worse than no log line.
+      statuses,
       cursor,
       now: new Date(),
       overlapMs: numeric(settings, "CURSOR_OVERLAP_MS"),
