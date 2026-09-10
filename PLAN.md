@@ -630,6 +630,35 @@ number nobody has measured yet.
 
 ---
 
+### 23. The 15 lessons left in this file, awaiting disposition
+
+**Branch:** `docs/plan-is-not-a-lesson-store`.
+
+**What is not built.** The audit of the section below. Closing the sink stops the deposits; it does
+not empty it, and an empty rule against a full section is the least convincing thing this file could
+carry.
+
+**What is being attempted.** One verdict per entry, no fourth option:
+
+1. **Graduate** — the lesson generalises, so it becomes a rule paragraph in the phase file it changes,
+   with its war story in `INCIDENTS.md` if the story is the evidence for the rule.
+2. **Relocate** — it is a fact about the system rather than about how we work, so it goes to
+   `ARCHITECTURE.md` or to the call site it constrains.
+3. **Delete** — it is a run log, a duplicate of a rule that already exists, or a one-instance
+   observation nobody would look up.
+
+**Why now.** Measured 2026-09-10: 15 entries, ~365 lines. Nothing cites them; a grep for `PLAN.md#`
+returns no link into this section from anywhere in the tree.
+
+**What would make it the wrong idea.** Deleting a lesson because it is long rather than because it is
+covered, which is exactly the pressure
+[the war-stories entry](#the-war-stories-are-the-asset-and-length-pressure-comes-for-them-first)
+warns about — the reasoning is the differentiated part of this corpus. So the bar for **delete** is
+_covered elsewhere, or a log of a run that is over_, never _too long_. Length is why the entries
+move; it is not why any of them goes.
+
+---
+
 ## What was learned, and is recorded nowhere else
 
 > **Closed. Nothing is added here again.** This section is what
