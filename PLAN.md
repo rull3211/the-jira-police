@@ -655,34 +655,6 @@ both half-proven.
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
 
-### 29. A watched ticket keeps being re-triaged after a human takes it over
-
-**Branch:** none yet. Follows the discovery half, which shipped `TRIAGE_ONLY_STATUS` in `SETTINGS`
-and settled its rendering; this entry is only about the second population.
-
-**What is not built.** A ticket under `agent:watching` that moves into a status outside
-`TRIAGE_ONLY_STATUS` should be **unsubscribed** — `agent:watching` removed — under a new
-`UnsubscribeReason` of `handed-off`.
-
-**Why it is owed.** The watch loop pays for a re-triage on any qualifying activity regardless of
-status, so a ticket a person picked up keeps drawing agent comments. That is the same noise
-`TRIAGE_ONLY_STATUS` removes from discovery, arriving through the other door.
-
-**Why unsubscribe and not `quiet`.** `quiet` was the design until the operator was asked, and they
-chose unsubscribe knowing it is one-way: the created-window means a ticket that later moves back to
-`Mottatt` is far too old for discovery to see, so nothing re-adopts it. Recorded because it is the
-decision most likely to be questioned later, and it was made deliberately rather than by default.
-
-**The query must not change.** `buildSendbackWatchJql` keeps returning every watched ticket
-regardless of status, for the reason its own header gives at length: a ticket the query cannot see
-is a ticket nothing can unsubscribe, so filtering here would strand the label rather than remove it.
-The decision is the only correct place for this.
-
-**What would make it the wrong idea.** If tickets routinely bounce out of and back into the
-allowlist, this converts a recoverable pause into permanent abandonment, and `quiet` was right all
-along. Nobody has measured how often a ticket moves backwards on this board — that measurement is
-the first task of the branch, not an afterthought.
-
 ### 28. Triage order ignores the board, so the leftmost column waits behind the oldest ticket
 
 **Branch:** none yet. Wants the cursor work first, and the status list `TRIAGE_ONLY_STATUS` already
