@@ -48,8 +48,8 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21 and §23, and this line names them rather than citing
-them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
+**The holes are §12, §15, §16, §18, §20, §21, §23 and §25, and this line names them rather than
+citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
 "goes to zero" is no longer part of this argument: the claim is withdrawn in `docs-check.ts`, on
@@ -65,7 +65,16 @@ is buying.
 §12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §20 was the
 scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
 entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
-worth a permanent number, because the session was compacted once while it was open.
+worth a permanent number, because the session was compacted once while it was open; §25 was the
+fitness block owning the region it writes, shipped in PR #37.
+
+**§24 is a hole that was never an entry, and it has to stay one.** The §25 above was written as §24
+first, and that alone made `ARCHITECTURE.md`'s broken self-reference to §24 resolve — the count fell
+to 38 and the run invited whoever saw it to lower `KNOWN_DANGLING`. Doing so would have recorded a
+still-broken citation as paid and planted a failure on the commit that later deleted the entry.
+Renumbering was the fix, so the next entry after §25 is §26: taking §24 repairs nothing and hides
+one thing. This is the same pooling defect as the paragraph above, running in the direction nobody
+was watching — a reference repaired by an edit in a file it does not name.
 
 <!-- refs:on -->
 
@@ -649,61 +658,6 @@ both half-proven.
 **What would make it the wrong idea.** A sweep that deletes by age can delete a root belonging to a
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
-
----
-
-### 25. The fitness block is spliced blind, so a re-run posts two of them
-
-**Branch:** `fix/fitness-block-owns-its-region`.
-
-**Numbered 25 rather than 24, deliberately** — see §19, which this entry walked into on the way in.
-
-**What is not built.** `withFitnessNote` owning the region it writes. It appends
-(`fitness-note.ts:158`) without checking whether the body it was handed already contains a fitness
-block, and on a re-run it always does — the model rebuilds the comment from its own previous one,
-carrying that block along as ordinary body text.
-
-**What was measured, before anything was changed.** Four re-runs, four duplicates; two first runs,
-both correct; both verdicts affected, so the verdict is not the variable.
-
-| ticket   | run                                            | verdict                        | blocks |
-| -------- | ---------------------------------------------- | ------------------------------ | ------ |
-| SSX-3285 | first                                          | ACCEPT · solvable              | 1 ✅   |
-| SSX-3852 | first                                          | SEND BACK · `plausible: false` | 0 ✅   |
-| SSX-3283 | re-run                                         | SEND BACK · `plausible: true`  | 2 ❌   |
-| SSX-3834 | re-run (`retriage-1`)                          | ACCEPT · solvable              | 2 ❌   |
-| SSX-3024 | re-run (`retriage-2`)                          | ACCEPT · solvable              | 2 ❌   |
-| SSX-3285 | re-run, run deliberately to test the diagnosis | ACCEPT · solvable              | 2 ❌   |
-
-**The prediction that made the last row worth running.** The dossier block is model-written and has
-no renderer, so if the cause were "the model reproduces the old body sloppily" it would have
-duplicated too. It stayed at one while the fitness block went to two. What duplicates is exactly the
-region that has both a machine owner and a model author.
-
-**Why it matters, given it is nearly invisible.** On SSX-3285 the two copies read alike and the
-defect passes for a spacing glitch. On SSX-3283 they did not agree — prose and the structured field
-saying different things is the defect class this file's own header says the service was bitten by
-twice (SSX-3814, SSX-3822) and that rendering in TypeScript was chosen to make impossible by
-construction. A splice with no ownership check reopens it, one re-run at a time.
-
-**The cause underneath the symptom, which is worth more than the de-duplication.** The `solvable`
-branch (`fitness-note.ts:108-117`) discards `fitness.rationale` and emits a fixed sentence carrying
-nothing about the ticket. The schema requires that field and asks for "the deciding factor"; the
-`solvable: false` branch already prints it at `:124`. So on every ACCEPT the renderer throws away the
-one informative thing it was handed — and the model's duplicate is measurably better than the block
-it duplicates. Removing the duplication without removing the reason for it leaves the model with the
-same incentive and the guard as the only thing in its way.
-
-**Also in scope, same line of code.** `withFitnessNote` returns early when the note is `null`, so a
-ticket that was `plausible: true` last run and is not this run keeps its stale watch note — a list of
-blockers nobody is waiting on any more — for good.
-
-**What would make it the wrong idea.** Stripping is a regex-shaped judgement over text a model
-wrote, and the marker is not stable: SSX-3024 shows it paraphrased as `🤖 **Agent fitness:
-solvable**`. Matching loosely enough to catch the paraphrases risks eating a region the model meant
-to keep; matching tightly leaves the defect in place for the next paraphrase. If a line-based scan
-cannot be made to state its own boundaries clearly, the honest fix is the gate refusing a second
-marker rather than this function silently deciding which copy wins.
 
 ---
 
