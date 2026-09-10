@@ -137,6 +137,13 @@ export interface NewIssuesJqlOptions extends WindowOptions {
    * A closed ticket is not the only one a paid triage has nothing to say
    * about: so is one a person has already picked up. The comment lands as
    * noise on somebody else's work, and it is the same spend either way.
+   *
+   * **Prefer ids, and the default does.** `jqlValue` above explains the
+   * quoting rule; what the board added on 2026-09-10 is that the name half of
+   * it cannot be relied on for statuses. `status = "Mottatt"` matches zero
+   * issues on this instance, `status = 10165` matches all 51, and the two
+   * spellings name the same column — so a name that resolves to nothing is a
+   * silent hole in the allowlist rather than an error.
    */
   readonly statuses: readonly string[];
 }

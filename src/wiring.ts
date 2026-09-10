@@ -122,18 +122,25 @@ export function createDiscover(
   }
 
   // Once, at wiring, at `info` — unlike `poll.query` below, which is per-cycle
-  // plumbing at `debug`. The failure this is here for is silent: a status name
-  // is a per-board string nothing validates, so one typo or one renamed column
-  // is a filter matching nothing, and the service goes on looking healthy while
-  // triaging zero tickets forever. There is no cheaper check available — this
-  // service's Jira credential cannot read project status metadata (verified
-  // 2026-09-10: `/project/SSX/statuses` is a 404 for it), so the names cannot
-  // be validated at startup. Printing them is what is left, and it at least
-  // means the wrong list is visible in the log rather than inferable from an
-  // absence of work.
+  // plumbing at `debug`. The failure it is here for is silent: a status that
+  // resolves to nothing is a filter matching nothing, and the service goes on
+  // looking healthy while triaging zero tickets forever. The credential cannot
+  // check the names against the board — `/project/SSX/statuses` is a 404 for
+  // it, verified 2026-09-10 — so printing the list is what is left.
+  //
+  // **And printing it does not catch the case it was written for.** The
+  // shipped default read `Mottatt,Backlog,On Hold,In Progress Concept`, which
+  // is what the board calls those columns and what this line would have
+  // printed, and `Mottatt` matched zero issues because the name does not
+  // resolve on this instance while the id does. A reader checking the log
+  // against the board would have agreed with it. That is the argument for
+  // `named`: it makes the un-checkable half of each entry visible as such,
+  // so a list of ids reads as pinned and a list of names reads as a claim
+  // nobody has verified.
   logger.info("poll.status_filter", {
     statuses,
     restricted: statuses.length > 0,
+    named: statuses.filter((entry) => !/^[0-9]+$/.test(entry.trim())),
   });
 
   return async (cursor: string | null): Promise<readonly TicketRef[]> => {

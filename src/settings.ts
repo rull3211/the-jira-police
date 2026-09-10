@@ -64,8 +64,8 @@ export const SETTINGS = [
   {
     name: "TRIAGE_ONLY_STATUS",
     description:
-      'Comma-separated statuses discovery is allowed to triage, by name or id. Blank triages anything not closed. The default is this board\'s untouched columns, measured 2026-09-10: a ticket somebody has already moved into "In Code Review" or "Test" does not want a paid triage comment on it. Cannot be expressed as a status category — "In Progress Concept" is `indeterminate` and belongs here, while "Prioritized" is `new` and does not — which is why it names per-board strings. Blanking it does not disable the restriction, because a blank is indistinguishable from unset; to widen, list the statuses you want.',
-    fallback: "Mottatt,Backlog,On Hold,In Progress Concept",
+      'Comma-separated statuses discovery is allowed to triage, by id or by name. Blank triages anything not closed. The default is this board\'s untouched columns, measured 2026-09-10: 10165 Mottatt, 10025 Backlog, 10194 On Hold, 10179 In Progress Concept. A ticket somebody has already moved into "In Code Review" or "Test" does not want a paid triage comment on it. Cannot be expressed as a status category — "In Progress Concept" is `indeterminate` and belongs here, while "Prioritized" is `new` and does not. **Ids, not names, and that is not a preference**: `status = "Mottatt"` matches zero issues on this instance while `status = 10165` matches all 51, so the readable spelling of the default silently dropped the largest column. Names still work for statuses that resolve; check one before relying on it. Blanking this does not disable the restriction, because a blank is indistinguishable from unset; to widen, list the statuses you want.',
+    fallback: "10165,10025,10194,10179",
   },
   {
     name: "POLL_INTERVAL_MS",

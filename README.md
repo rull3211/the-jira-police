@@ -586,7 +586,7 @@ Full table in `ARCHITECTURE.md` §10. The ones that matter for a demo:
 | `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket    |
 | `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post           |
 | `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`     |
-| `TRIAGE_ONLY_STATUS`            | 4 statuses    | Which columns get triaged. **Blank widens rather than closes** — see below |
+| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank widens rather than closes** — see below |
 | `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                         |
 | `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                     |
 | `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in  |
@@ -615,10 +615,15 @@ solver phase depends on is a person reading that worktree.
 board's four untouched columns, because a triage comment on a ticket somebody has already moved into
 code review is noise on their work at full model price. Blanking it does not turn the restriction
 off — a blank is indistinguishable from unset, so the default comes back — and clearing the
-restriction means listing the statuses you want instead. The statuses are per-board strings nothing
-validates, so a typo is a filter that matches nothing and a service that looks healthy while
-triaging zero tickets: the active list is printed once at startup as `poll.status_filter`, and that
-log line is the only check there is.
+restriction means listing the statuses you want instead.
+
+**Use status ids, as the default does** — `10165,10025,10194,10179` here. The setting takes names
+too, and the first version of this default used them, until `Mottatt` turned out to match zero
+issues by name and all 51 by id. Nothing validates either form at startup, so a status that does not
+resolve is a filter matching nothing and a service that looks healthy while triaging nothing. The
+active list prints once at startup as `poll.status_filter`, with a `named` field listing the entries
+given as names — those are the ones nobody has checked. **Check a name against the board before you
+rely on it**, because the log line will happily print a name that matches nothing.
 
 **`SOLVE_REPO_ROOT` is the one that stops a solve before it starts, and it has no fallback on
 purpose.** A ticket's repository is resolved as `SOLVE_REPO_ROOT/<name>`, where the name comes from

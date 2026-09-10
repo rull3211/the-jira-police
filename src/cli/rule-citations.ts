@@ -140,12 +140,19 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
  * debt that is already paid, which is how a budget stops being read. More means
  * a new entry took the exemption. Both are worth stopping for.
  *
- * There is deliberately no grandfather list. 39 of the 44 entries cite a rule
- * today, and a clause forgiving the other five by path would be longer than the
+ * There is deliberately no grandfather list. 40 of the 46 entries cite a rule
+ * today, and a clause forgiving the other six by path would be longer than the
  * debt it excuses — and would still be here after the debt was paid. A
  * declaration expires; a path exemption does not.
+ *
+ * **6 since 2026-09-10**, and the sixth is worth naming because raising this is
+ * the move the check exists to make somebody argue for. The status-filter
+ * incident is one instance of "an aggregate count cannot tell a working filter
+ * from one broken in a single term", and `FINISHING.md` refuses rules built
+ * from one instance — so the honest options were a declaration or a premature
+ * rule, and the declaration comes due at instance two.
  */
-export const UNRESOLVED_ON_PURPOSE = 5;
+export const UNRESOLVED_ON_PURPOSE = 6;
 
 /** How stale a dated `**No rule yet**` is allowed to get. */
 export const UNRESOLVED_DAYS = 30;
