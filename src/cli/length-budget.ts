@@ -10,18 +10,6 @@
  * how much of a cold context it eats before any work starts — was the only
  * property nobody measured.
  *
- * **The only control group this argument has.** The four skills this service ships to its own
- * subagents — `intake-triage`, `agent-solve` and the two triage doubles — received **zero bytes**
- * over the era that carried `dev-house-rules/` from 16,613 words to 28,286, and `src/solve/`
- * received **zero commits** over the same window. The instructions did not move because the code
- * they describe did not move; every backticked symbol in `SOLVE_INSTRUCTIONS.md` but one resolves
- * against `src/`. Both layers are prose, both are read by an agent, both are checked by the same
- * commands, and only one grew — so the growth is not "documentation accretes", which would have
- * moved both. What separates them is where the amendment comes from: the operational skills are
- * amended when something outside them changes, and the meta-layer is amended from its own
- * incidents. **A loop fed only by itself has no source of stopping.** That is this file's reason to
- * exist, and the only version of it resting on a measurement rather than on taste.
- *
  * **What is budgeted, and nothing else.** `CLAUDE.md`, and the three phase
  * files a change actually has to load: the index, `STARTING.md`, `FINISHING.md`.
  * Plus their sum, so cutting one file and spending the words in another is
@@ -119,9 +107,7 @@ export interface Budget extends Band {
  * This branch committed in `PLAN.md`, before any measuring, to a mandatory-reading
  * path under 4,907 words. The cut landed at 4,913, and the bands were then drawn
  * around the 4,913 — which quietly converts a promise into whatever happened,
- * and is the same move as raising a ceiling to fit the corpus. The general form
- * is a rule — `PROVING.md`, *hit the target, then read the numbers off it*.
- * The fix was to
+ * and is the same move as raising a ceiling to fit the corpus. The fix was to
  * hit the target first (`CLAUDE.md` to its 800-word brief, landing the path at
  * 4,811) and only then re-read the numbers. `aggregateCeiling` is now 4,905, so
  * the figure this branch promised in advance is the figure that fails the build.

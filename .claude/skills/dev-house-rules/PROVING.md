@@ -53,28 +53,6 @@ on 2026-09-09 — two new `docs:check` facts were mutation-tested by appending t
 edits that were still in the working tree.
 [→](INCIDENTS.md#the-mutation-test-that-reverted-the-file-it-was-testing)
 
-**Unplug redundant guards _together_, because each one masks the other.** Two guards covering the
-same case both survive being removed singly, and the suite is green for both mutations — the rule as
-usually stated assumes guards are unplugged one at a time. Found here on the watch loop: the
-self-trigger skip and the strict `at > spokeAt` beside it each made the other untestable. The fix
-was not to delete one but to make the pair **asymmetric** — a tie now counts as somebody else in
-both loops — which left the skip as the only thing holding the self-trigger, and improved the
-answer.
-
-**When an unplugging goes red, check _which_ assertion went red and that the input reached the line
-you removed.** Red is not the same as red for its own reason. `branch-guard.sh`'s floor was
-unplugged, a test went red, and the comment recording that is still in the file — but the payload
-was unparseable, so removing the floor changed nothing and some other fixture in the same loop
-failed. `bash -lc "git push"` was allowed on `main`, unguarded, for a hundred minutes.
-
-**A check that reads anything outside the working tree has a second environment, and the local one
-is never it.** A remote ref, an environment variable, a clock. The length budget resolves its
-baseline with `git merge-base HEAD origin/main`; `actions/checkout@v4` defaults to `fetch-depth: 1`,
-so it would have failed the Docs step on **every** pull request, starting with the one that added
-it. Seven gates green locally, twice, including a mutation probe on the check itself — every one of
-them in a tree that had `origin/main` sitting right there. Unplugging and running-where-CI-will are
-two different probes.
-
 **None of this is the safety net.** This section stops you re-breaking what you already understand.
 It has never once caught a defect of the kind that actually escaped here, and read on its own it
 will leave you trusting a green suite.
@@ -96,11 +74,6 @@ will leave you trusting a green suite.
 - **A test can be a real guard by a route nobody wrote down**, which is the same defect wearing the
   other face: a suite that catches the bug through an incidental fixture in an unrelated block will
   stop catching it silently, while the test named for it stays green.
-- **A fixture in a serialised format — JSON, YAML, a URL, a shell command line — is built with an
-  encoder, never by interpolating into a template.** Hand-built input is a test of your escaping
-  before it is a test of anything else, and **a fixture that cannot reach the code path is
-  indistinguishable from a passing test**. Third instance here, after `lib.sh`'s `jsonEscape` and the
-  branch-name quoting bug.
 
 ---
 
@@ -161,50 +134,6 @@ assertions turned out to be a thin wrapper over something with three live call s
 tools" was true of the MCP allowlist and false of the session, written by someone who checked the
 allowlist and read it as describing the whole surface.
 [→](INCIDENTS.md#the-read-tools-the-header-said-were-denied)
-
-**An exact citation can still be read wrongly, and that failure is the convincing one.**
-`STARTING.md` says to cite `file:line` rather than a recollection; the other direction is that a
-precise line number is evidence about **one line** and carries nothing about the twelve above that
-set up the state it runs in — while reading, in a report, exactly like a verified claim. One such
-claim about `test-hooks.sh:93` shipped to `main`: the fixture had switched branch twelve lines
-earlier, so the assertion said the opposite of what it was quoted for. Found by running the guard
-instead of re-reading the file.
-
-**Guard the property the tree already has, not the one you wish it had.** `rule-citations` was
-written to assert that every rule cites an incident; measured, 42 of 71 rule paragraphs cite none,
-and of the citations that do exist not one opened a bold paragraph. A check like that has three
-exits and two are worse than deleting it — fabricate the missing 42, or pin them as a grandfather
-list, which is `KNOWN_DANGLING` again, still 39, still "it goes to zero". It now guards the half that
-is true and **reports the other half as a number that fails nothing**. The test is not whether you
-want the property. It is whether the tree has it.
-
-**Hit the target, then read the numbers off it.** Calibrating a check on the landing rather than on
-the promise converts a commitment into whatever happened. The length budget was committed in advance
-to a mandatory-reading path under 4,907 words, landed at 4,913, and the bands were drawn around
-4,913 — every one honestly derived, and the result enforced the outcome instead of the promise, six
-words adrift and green forever. That is the same act as raising a ceiling to fit the corpus, which
-is the failure the budget was built to stop.
-
-**Before asking whether a check is worth it, ask whether its subject names one thing.** A disposal
-condition written in advance is the right habit and has a blind spot: it prices being right and
-cannot notice that the question is ambiguous. `registrations` passed its condition cleanly — zero
-historical uses, one live claim — and was still wrong, because the two sentences it would have
-checked count different populations, and a check confidently wrong on one of them is worse than the
-silence it replaced. It shipped as `PreToolUse registrations`.
-
-**A green suite is not evidence about a race, because the window is a property of the machine.** A
-fast local disk narrows the interleaving; a contended runner widens it. **A flaky test is a
-measurement — re-running it until it is green discards the measurement rather than reading it.**
-Leave the suite behind and drive the mechanism directly: 27 green local runs said nothing about a
-collision that reproduced 40 times out of 40 under two concurrent calls.
-[→](INCIDENTS.md#the-race-twenty-seven-green-runs-did-not-see)
-
-**A gate is calibrated on the population it passes, not the one it fails.** Failures are counted
-because a failure is an event with a name; passes are unexamined by construction. So a
-miscalibrated check shows up as **compliance theatre in the accepts**, which no count keyed on
-refusals can see. Read what the passing cases had to argue to get through — and **any exemption the
-corpus keeps inventing is a rule it needs and the document does not have.**
-[→](INCIDENTS.md#the-gate-whose-passing-cases-all-argued-their-way-through)
 
 **When you are corrected, check before agreeing.** The value is in verifying and finding _why_,
 which usually changes the fix. Folding is not agreement, it is the loss of one data point.

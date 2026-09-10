@@ -35,28 +35,6 @@ are **advisory** — scored and reported, never able to fail an item.
 - **Rows 8 and 9 never change the label or the verdict.** Score them, and when they are thin or absent say so — in the DoR cell and as a follow-up in `→ Next`, phrased as something to go and get rather than as a question blocking the ticket. An item failing only 8 and/or 9 is `dor:pass`.
 - Criterion 10 (Trio sign-off) is never auto-satisfied — it is the human gate the whole intake protects.
 
-## Two things to ask of a defect's acceptance criteria
-
-Both came out of SSX-3834, the first ticket to travel the whole system unattended, and both are
-about the criteria rather than about the solver — the solver implemented what it was given, exactly.
-
-- **An enumerated acceptance criterion that replaces a catch-all guard is only as complete as the
-  enumeration.** `if (!value)` absorbed `null`, `undefined`, `''`, `0` **and `NaN`**. The acceptance
-  table listed the first three, so the fix rendered `NaN` as the string `"NaN"` — a specification
-  drifting from the code it supersedes, which is the same prose-versus-behaviour divergence this
-  service exists to catch, arriving one step earlier than usual. When a criterion replaces a
-  truthiness check, enumerate what the old check actually swallowed.
-- **Naming the plausible wrong fix in the ticket is cheaper than any mechanism that could detect
-  it.** Because the criteria said in writing which wrong fix was tempting, the solver's own
-  regression test was verified against it — _"fails against the naive 'just delete the falsy guard'
-  fix"_ — which is what `SOLVE_INSTRUCTIONS.md` §2 asks for and had never been observed doing.
-
-The send-back is worth the round for the same reason: SSX-3834's triage asked for a blocker nobody
-had thought of — _may the guard change, given it flips other call sites?_ — and three steps later
-that written scope let a review comment with a true observation and an inflated conclusion be
-answered correctly. **The send-back produced a better question than the person who wrote the ticket
-had.**
-
 ## Advisory rows — why 8 and 9 do not block
 
 **Measured over the 29 reports in `groomed/`, these two were not failing items; they were being
