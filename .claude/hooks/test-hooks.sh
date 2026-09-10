@@ -262,7 +262,8 @@ done
 # `bash -lc "git push"` was in this list and passing on the harness defect
 # rather than on the guard. The single-quoted fixture never covered it, because
 # its verb is followed by a space either way — which is why one bad terminator
-# hid behind a neighbouring assertion for four days.
+# hid behind a neighbouring assertion from 4d5ef49 until cbb5be0 closed it, a
+# hundred minutes later the same afternoon.
 for w in "sh -c 'git commit -m x'" "bash -lc \"git push\"" "sh -c 'git pull'" \
   "bash -c \"cd /tmp && git commit\""; do
   expect "on main refuses: $w" DENY \

@@ -2,7 +2,8 @@
 
 **The `dev` step of the loop.** What to write, what shape to write it in, and what to delete on the
 way past. None of this is the safety net — [PROVING.md](PROVING.md) is. This is the craft that stops
-known problems recurring, and every rule here is the generalisation of one that did.
+known problems recurring; the rules here generalise problems that did, and the ones with an incident
+on record cite it.
 
 Previous: [STARTING.md](STARTING.md) · Next: [PROVING.md](PROVING.md) · Evidence:
 [INCIDENTS.md](INCIDENTS.md)
@@ -115,10 +116,10 @@ Ticket text, comment bodies, reviewer output and anything a model wrote are **da
 instruction**. Treat structure you did not create as forgeable: collapse whitespace, cap lengths,
 cut on word boundaries and mark the cut.
 
-- **Prefer the structured channel to parsing prose.** Read review threads over scraping a summary.
-  When a model must return several things, give it _several fields_ and let the renderer build the
-  layout — one field asked for two things is why a bail arrived as four thousand characters with no
-  line break in it. [→](INCIDENTS.md#the-bail-that-arrived-as-four-thousand-characters)
+- **Prefer the structured channel to parsing prose.** Read review threads over scraping a summary,
+  and when a model must return several things give it _several fields_ and let the renderer build
+  the layout. One field asked for two things is
+  [how a bail arrived as four thousand characters](INCIDENTS.md#the-bail-that-arrived-as-four-thousand-characters).
 - **A comment reporting a state transition is evidence of an event, not of the current state**, and
   the field it describes is on the same ticket. Prose written at one instant and never revisited
   will contradict a live field, and the contradiction resolves toward the prose unless something
@@ -138,12 +139,10 @@ cut on word boundaries and mark the cut.
 money, takes minutes to tens of minutes, and is not reproducible — the model, the reviewer and the
 board have all moved on by the time you look. So the first failure is usually the only sample you
 get, and a failure that produced no diagnostic has to be **bought twice**: once to fail silently,
-once to fail again after you have added the instrumentation that should have been there the first
-time.
-
-That sequence — fail, learn nothing, go build logging and visibility and ticket write-back, then
-re-run the expensive thing to find out what happened — has been the single largest recurring cost in
-this project. Not wrong answers. **Failures that charged full price and returned nothing.**
+once to fail again after you have added the instrumentation that should have been there. Fail, learn
+nothing, go build the logging and the ticket write-back, re-run the expensive thing to find out what
+happened — that sequence has been the single largest recurring cost in this project. Not wrong
+answers. **Failures that charged full price and returned nothing.**
 
 | the failure                                                                                               | what it left behind                                                       | what the retry cost                            |
 | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------- |
@@ -169,10 +168,10 @@ only one you will ever be debugging, and it is reliably the one written last and
   them writes a terminal label a human must clear because a laptop went to sleep.
 - **Preserve the evidence, not the summary.** Keep the worktree, write the refused payload, record
   the inputs the decision was made from. A heuristic you cannot audit is one you end up disabling.
-- **Report that the run happened even when there is no outcome to report.** _Did this run spend a
-  claim_ is a different question from _is this ticket's fate decided_, and fusing the two is exactly
-  what made the hook denial invisible. **A gap in the record is indistinguishable from the tool
-  being switched off.**
+- **Report that the run happened even when there is no outcome to report.** Spending a claim and
+  deciding a ticket's fate are
+  [two questions](#two-questions-that-agree-today-are-still-two-questions). **A gap in the record is
+  indistinguishable from the tool being switched off.**
 - **Report the decision, not only the inputs to it.** A cycle report printing `capacity: 0` was read
   for two days as the reason a hand-driven run was blocked, by a path that never consults it. **A
   number on a page invites an inference about what it controls.**
@@ -291,9 +290,10 @@ the remote and leaves every local ref exactly where it was.
 
 It matters more here than in a repository with one author, for two reasons that compound:
 
-- **The stack is a real cost and it is measured mechanically.** `.claude/hooks/branch-stack.sh` puts
-  a deep stack in front of a human before another branch is created, and the threshold is three from
-  evidence. A backlog of long-merged branches makes that prompt fire on a stack that does not exist.
+- **Nothing mechanical will do it for you.** `.claude/hooks/branch-stack.sh` puts a stack of three or
+  more in front of a human before another branch is created — but it counts
+  `git branch --no-merged origin/main`, so merged branches drop out by construction and a pile of
+  them never reaches the threshold. It is registered, and it has never been watched firing.
 - **A stale branch is a plausible-looking wrong answer to "what is in flight".** That is the defect
   class applied to the repository itself, and the branch name is the part that makes it convincing.
 

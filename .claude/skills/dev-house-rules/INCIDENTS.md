@@ -1,82 +1,50 @@
 # Incidents
 
-**The evidence base for the house rules.** Nothing in those rules was designed; each one is the
-generalisation of something that got through, and this is where the something lives.
+**The evidence base for the house rules.** Nothing in those rules was designed against a theory;
+every entry here is something that got through, and the rules that cite one are the generalisation
+of it. Not every rule cites one — 42 of the 71 bold paragraphs in the four phase files name no
+incident, and a good share of those are section prose rather than rules — so the honest claim is the
+narrow one: where a rule names its evidence, the evidence is here, and `pnpm docs:check` fails if the
+link stops resolving.
 
-**Read direction: rules cite incidents.** `STARTING.md`, `BUILDING.md`, `PROVING.md` and
-`FINISHING.md` link here from the rule an incident produced. This file links back so that
+**Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 39 of the 44
+entries below are cited that way, and the other five each say in their own text that no rule has been
+written yet. 28 entries also link the other way, from `**The rule**` at the end of the entry, so that
 [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against what it
-rested on — but nothing needs to read this file top to bottom, and it is not on the path of doing
-any work.
+rested on. Nothing needs to read this file top to bottom, and it is not on the path of doing any
+work.
 
-**Append-only, and dated.** New incidents go at the bottom. An entry is never edited to make it look
-better; if a later run refutes it, that is a new entry, because a corrected story loses the thing
-that made it worth keeping. Entries are removed only when the subsystem they describe is gone.
+**Append-only, and dated.** New incidents go at the bottom. An entry is never edited to make its
+conclusion look better; if a later run refutes it, that is a new entry, because a corrected story
+loses the thing that made it worth keeping. Entries are removed only when the subsystem they
+describe is gone.
 
-**Every entry carries a `**Found by**` line — what caught it, not what caused it.** It sits second
-from last, immediately above `**The rule**`, so that an entry closes on what to do rather than on
-how it turned up. That position is worth stating: the first reader sent to check this file for the
-field read the last line of each entry, found `**The rule**`, and reported the field missing from
-the two entries that have it — because an earlier draft of this sentence said each entry _ends_
-with it. One line, naming the mechanism: a real run against a live target, `pnpm docs:check`, a hook
-test, the type checker, a fresh-context audit, review, or a user. This is the only field here that
-is not about the defect,
-and it exists because the rules are amended from this file: without it there is no way to tell which
-practice is actually productive, and so no evidence for which guard to build next. `CLAUDE.md`
-asserts that every defect of consequence in this project was found by driving a command against a
-real target rather than by the suite. That is the single most consequential claim in the working
-contract and it decides where effort goes.
+**New entries carry a `**Found by**` line — what caught it, not what caused it.** One line naming
+the mechanism, sitting immediately above `**The rule**` so the entry closes on what to do rather
+than on how it turned up. It is the only field here that is not about the defect, and it exists
+because the rules are amended from this file: without it there is no evidence for which practice is
+productive, and so none for which guard to build next. `not recorded` is a legitimate answer, and so
+are "a human noticed" and "it turned up while reading for something else" — those are the most
+valuable ones it can carry, because they say the mechanisms did not fire.
 
-**The problem this solves is not absence, it is that the answers are shaped differently.** When the
-field was introduced on 2026-09-09, plenty of the 35 entries already named what caught them — "Found
-by the first `--advance` against a real pull request", "The first live run reported, in its own
-`problems` field", "Counted while writing the CI workflow", "The first machine that ever ran it
-without one was CI", "**How it surfaced.** A human asked, twice", "Two defects the same work found,
-both by running the guards rather than by testing them", "Shipped in the same diff, found by the
-same audit". Every one of those is an answer, and no two are shaped alike.
+**Most entries below do not have it, and that is deliberate.** The field landed on 2026-09-09 with
+most of this file already written, and none of it was backfilled: the older stories are
+unrecoverable without invention, and an invented provenance would corrupt the one measurement the
+field exists to take. Plenty of them name what caught them anyway, in a sentence shaped some other
+way — "The first machine that ever ran it without one was CI", "A human asked, twice". So the field
+makes the answer countable rather than making it exist, and the tally is not worth reading until the
+file has turned over.
 
-**How many is not a determinable number, and that is the whole argument.** A strict reading — the
-entry states a mechanism — gives seven. A generous one, counting any sentence that names the event
-which revealed the defect, gives ten: "The operator deleted ten remote branches … and the count went
-**up**" is a finder if you want it to be, and so is "The first time the review chain found the
-reviewer silent". Nothing distinguishes those from "The first bail to reach a ticket landed as
-roughly four thousand characters", which is a symptom and not a discovery. Two readers will not
-agree, so no claim about the whole file can be checked. One field name is what turns that into a
-tally.
-
-Both numbers in this paragraph were wrong before they were right, in the same way twice. The first
-estimate was "exactly one", reached by grepping for the string `Found by` and finding three lines —
-[the defect further down](#the-compaction-finding-that-counted-the-string-instead-of-the-call),
-committed inside the paragraph introducing the field meant to make it countable. The correction to
-that said "seven" and then asserted it in the sentence arguing the set cannot be counted, which is
-the same mistake wearing the opposite conclusion: a count was quoted because a count reads better
-than an admission. Both were caught by having someone read the entries rather than the file.
-
-**Older entries are left exactly as they are.** Not backfilled, and not retrofitted with the field
-either — append-only is the strongest convention here, and inserting a line into 35 historical
-entries to make a tally tidy is the kind of edit this file exists to argue against. Seven of them
-are quoted above, which is enough for the baseline to be real without pretending it is exact; the
-rest are unrecoverable without invention, and an invented provenance would corrupt the one
-measurement the field exists to take. New entries carry it. The count becomes meaningful as the file grows, not
-by rewriting what it already holds.
-
-Where a new entry genuinely has no answer, the field says `not recorded` — and "a human noticed" and
-"nothing; it turned up while reading for something else" are the most valuable answers it can carry,
-because they are the ones that say the mechanisms did not fire.
-
-**Some sources sit outside this tree, and must say so.** Several entries quote the plan-mode
-planning documents written before a phase. Those are not `PLAN.md`, they are not in the repository,
-and `pnpm docs:check` structurally cannot open them — so it cannot tell such a citation from one
-that resolves. An unverifiable citation that announces itself is a known gap; one that reads like
-every other citation is a silent one, which is this file's own subject applied to itself. Two
-entries — [`capacity: 0`](#the-capacity-number-that-was-read-for-two-days-as-a-blocker) and
-[D4a](#the-three-phases-stacked-on-one-branch) — said "the plan" and were read as meaning `PLAN.md`,
-where neither string has ever appeared. Corrected 2026-09-08 by naming the source. That is a
-pointer being fixed, not a story being softened; the quotations are verbatim and unchanged.
-
-**Why the stories are kept at all.** A rule stripped of its incident is an opinion, and the next
-person under time pressure will correctly identify it as one. When a rule looks expensive, the story
-is the argument for paying.
+**Some sources sit outside this tree, and must say so.** Several entries quote plan-mode planning
+documents written before a phase: not `PLAN.md`, not in the repository, and `pnpm docs:check`
+structurally cannot tell such a citation from one that resolves. An unverifiable citation that
+announces itself is a known gap; one that reads like every other citation is a silent one, which is
+this file's own subject applied to itself.
+[`capacity: 0`](#the-capacity-number-that-was-read-for-two-days-as-a-blocker) and
+[D4a](#the-three-phases-stacked-on-one-branch) said "the plan" and were read as meaning `PLAN.md`,
+where neither string has ever appeared; corrected 2026-09-08 by naming the source, which is a
+pointer being fixed rather than a story being softened.
 
 ---
 
@@ -759,54 +727,45 @@ except guards](BUILDING.md#fail-closed-except-guards-which-fail-open).
 
 The commit hardening `branch-guard.sh` described the hole it closed in literal command form — a bare
 push, naming no branch, following its upstream to a protected one. An outer guard matched the push
-verb and the branch name in that text and refused the commit as a direct push to `main`.
+verb and the branch name in that text and refused the commit as a direct push to `main`. There was
+no push in it; only the wording changed.
 
-There was no push in it. The operation was a local commit on a feature branch, before the refusal
-and after it; only the wording changed.
+**The same defect was one assertion away in the diff being committed.** The new rule-2 check was
+mutated five ways, and the fifth was the plausible wrong fix — match `gh` anywhere in the text
+rather than at command position. It fails exactly one case, a commit message that merely _mentions_
+merging. Without it this guard would have shipped the property just used against it.
 
-**The same defect was already in the diff being committed, one assertion away.** The new rule-2
-check was mutated five ways before shipping, and the fifth was the plausible wrong fix: match `gh`
-anywhere in the text rather than at command position. It fails exactly one assertion — a commit
-message that merely _mentions_ merging. Without that single case, this guard would have shipped with
-the property that had just been used against it.
-
-**This is not a complaint about the outer guard.** At that layer a coarse matcher that fails closed
-on ambiguous text is defensible: the cost of a miss is an unreviewed commit on `main`, and the cost
-of a false positive is a reworded sentence. The lesson is for guards written _here_, where the same
-trade was available and nearly taken for a much weaker reason — the unanchored pattern was simply
-shorter.
-
-**What makes this failure direction distinct** from the two above it is who pays. A guard that fails
-open is invisible; a guard that fails closed onto its own remedy traps you loudly and gets fixed. A
-guard that taxes _writing about itself_ is neither — it works perfectly, and it steadily annoys the
-only people who maintain it, until one of them removes it while genuinely believing it is noise.
+At the outer layer a coarse matcher that fails closed is defensible; a miss costs an unreviewed
+commit on `main` and a false positive costs a reworded sentence. **The lesson is for guards written
+_here_**, where the same trade was available and nearly taken for a much weaker reason: the
+unanchored pattern was simply shorter. What makes this direction distinct is who pays. A guard that
+fails open is invisible; one that fails closed onto its own remedy traps you loudly and gets fixed;
+one that taxes _writing about itself_ works perfectly and steadily annoys the only people who
+maintain it, until one removes it believing it is noise.
 
 **The rule** — [fail closed, except
 guards](BUILDING.md#fail-closed-except-guards-which-fail-open).
 
 ### The suite that was a statement about one laptop
 
-`pnpm test:hooks` reported **57 passed** for as long as it existed. The fixtures are real
+`pnpm test:hooks` reported **57 passed** for as long as it existed. Its fixtures are real
 repositories, so `git commit` needs an identity, and the suite silently borrowed the developer's.
+The first machine that ever ran it without one was CI: every fixture died on `fatal: empty ident
+name` before its initial commit, so no fixture had a `main` ref, and **22 of 57 assertions failed
+describing that** rather than describing the guards.
 
-The first machine that ever ran it without one was CI. Every fixture died on `fatal: empty ident
-name` before reaching its initial commit, so no fixture had a `main` ref, and **22 of 57 assertions
-failed describing that** rather than describing the guards.
+`origin/main` had no `test:hooks` step until `1e64ed4`, the branch that also fixed this — so the
+suite's first clean-machine run and its first failure are the same event. Green on a laptop for its
+whole life is not evidence a suite runs; it is the absence of anyone having tried.
 
-**Why it took until then.** `origin/main` had no `test:hooks` step. The step was added by `1e64ed4`,
-on the branch that also fixed this — so the suite's first clean-machine run and its first failure
-are the same event. Green on a laptop for its entire life is not evidence a suite runs; it is the
-absence of anyone having tried.
+The scripts were fine: this was a true statement about one machine's configuration worn as a
+statement about the code, so the suite now supplies its own identity and reads no ambient
+configuration at all. Comment the identity lines out, run in a clean environment, and the CI failure
+returns exactly: 22 failed, 35 passed.
 
-**It was never wrong about the hooks.** The scripts were fine. The suite was a true statement about
-one machine's configuration, worn as a statement about the code — which is why the fix is that it
-now supplies its own identity and reads no ambient configuration at all. Comment the identity lines
-out, run in a clean environment, and the CI failure returns exactly: 22 failed, 35 passed.
-
-This is the second instance of a rule that had one. [The timezone
+Second instance of a rule that had one. [The timezone
 test](#the-two-regression-tests-that-guarded-nothing) ended: _a probe that inherits the operator's
-environment cannot answer a question about CI's._ That was about a timezone. This is the same
-sentence about a git identity, and generalising from two beats generalising from one.
+environment cannot answer a question about CI's._ That was a timezone; this is a git identity.
 
 **The rule** — [tests that stop testing](PROVING.md#tests-that-stop-testing).
 
@@ -816,47 +775,27 @@ None of these was missed. Each was noticed, understood and written up at length 
 somewhere no rule and no reader ever opens.
 
 - **A bare SHA where the neighbours cite anchors.** `SKILL.md` recorded the incident above as
-  `` `8ad1a31` ``. Every other rule in that file links to `INCIDENTS.md#…`; this one was resolvable
-  only by `git show`. It is the unverifiable-citation class named in this file's own header —
-  committed **one day after** that header was written, in the file that documents it.
-- **A correction scheduled for deletion.** A claim that `test-hooks.sh:93` asserted something it
-  does not had shipped to `main`; the correction was filed as the fourth of `PLAN.md` §13's method
-  failures, inside an entry that rule 2 deletes when the audit closes.
-- **A design rule in a commit message.** The anchoring rule above lived in a commit message and a
-  code comment until it was asked for.
+  `` `8ad1a31` ``, resolvable only by `git show`, one day after this file's header named that class.
+- **A correction scheduled for deletion**, filed inside a `PLAN.md` entry that rule 2 deletes when
+  the audit closes.
+- **A design rule in a commit message**, where it stayed until someone asked for it.
 - **An entry deleted while half the work was outstanding.** §14 was removed when the guard shipped,
-  but the rule the guard produced had not been written. _Delete the entry when it ships_ assumes the
-  prose half ships with the code half.
+  but the rule that guard produced had not been written.
 
-**And then the same number failed the other way, in the branch fixing all of the above.** A new §14
-was written for this work, the work shipped, and the entry was left standing — so `PLAN.md`
-advertised as _not built_ three layers sitting in the diff below it. Deleted too early on one day,
-kept too late on the next, by the same reader holding the same rule. What survived the deletion went
-to `PLAN.md` §12, alongside the declined `Stop` hook and the declined drift reporter. §12 has since
-shipped and been deleted in its turn, and all three now live in `ARCHITECTURE.md` §16 — which is the
-same rule applied one level up: what survives a deletion moves to the document that describes the
-built thing.
-
-**Which says something about the rule and not only about the reader.** _Delete it when it ships_
-sounds like one action at one moment, and it is two: a plan entry and the work it describes finish
-at different times, and neither ending announces itself. The reliable question is not _did this
-ship_ but **is any sentence in `PLAN.md` now describing something that exists** — asked while
-looking at the file, which is why it is on the checklist and not left to memory. This one was caught
-by a person asking where the additions belonged.
+**And then the same number failed the other way, in the branch fixing all of the above:** a new §14
+was written, the work shipped, the entry was left standing, and `PLAN.md` advertised as _not built_
+three layers sitting in the diff below it. Deleted too early on one day, kept too late on the next,
+by the same reader holding the same rule. _Delete it when it ships_ sounds like one action and is
+two, finishing at different times. The reliable question is **is any sentence in `PLAN.md` now
+describing something that exists** — asked while looking at the file.
 
 **The common cause is not forgetting; it is that writing something down feels like filing it.** The
 subjective signal — _I thought about this carefully and put it in words_ — is identical whether the
 words land on a reading path or in a commit message nobody will open again.
 
-**How it surfaced.** A human asked, twice: _did you have anything that was supposed to go into new
-rules?_ Nothing mechanical was involved, and the checklist item that should have caught it —
-_"did something get through that these rules do not cover?"_ — had been skipped in silence, because
-it is the one item in `FINISHING.md` with no exit code behind it. The six commands were run and were
-green; the four questions were not asked.
-
-**Contributing cause, and the cheapest thing on this list to fix:** the checklist was run from
-**memory**, after a compaction, rather than read. The remembered version was the six commands. The
-four questions were not in it.
+**How it surfaced.** A human asked, twice. The checklist item that should have caught it — _did
+something get through that these rules do not cover?_ — was skipped in silence: the checklist was
+run from memory after a compaction, and the remembered version was the six commands.
 
 **The rules** — [say what you owe, in the pull request
 body](FINISHING.md#the-rules-you-owe-are-written-down-or-they-are-not-owed);
@@ -864,46 +803,33 @@ body](FINISHING.md#the-rules-you-owe-are-written-down-or-they-are-not-owed);
 
 ### The audit that found eight things and got three of them wrong on the way
 
-Run 2026-09-08 against these rules by spot-check rather than by reading: drive every command, then
-test each falsifiable claim the rules make about the repository. **Eight findings; six held, one was
-wrong, one was overstated in a way that would have destroyed evidence.**
-
-**Calibration first, so the rest is read in proportion.** All five checks were green;
-plan-before-work had been followed in `af61f41`, with the entry written there and deleted in
-`1e64ed4`; every symbol
-`BUILDING.md` names was present, including `FAIL_FIRST_CHECK`'s `!== "false"` asymmetry; the
-literal-list rule was derived at the sites it names; six entry points exactly. Of eighteen incidents
-sampled, thirteen trace to a SHA whose diff or message carries the incident's own details, and **no
-claimed defect turned out never to have existed.** The audit was worth running. It is recorded here
-because how it went wrong is more transferable than what it found.
+Run 2026-09-08 against these rules by spot-check rather than by reading. **Eight findings; six held,
+one was wrong, one was overstated in a way that would have destroyed evidence.** Calibration first:
+all five checks were green, plan-before-work had been followed, every symbol `BUILDING.md` names was
+present, and of eighteen incidents sampled thirteen trace to a SHA whose diff carries the incident's
+own details — **no claimed defect turned out never to have existed.** It is recorded here because
+how it went wrong is more transferable than what it found.
 
 **Three failures of method, each a defect these rules already name, committed while auditing for
 them:**
 
 - **A search that confirms.** `grep -c STATE_PATH` returned 1, which is what a setting documented in
   a shared table row looks like, and it was read as a missing row **because a finding had predicted
-  one**. The row-count also assumed one setting per row. Deriving the answer instead — iterate
-  `SETTINGS`, check each name — gives 46 of 46 present.
+  one**. Deriving the answer instead — iterate `SETTINGS` — gives 46 of 46 present.
   [→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms)
 - **A number that invited an inference about what it controls.** `git rev-list --count main..HEAD`
   was 3 and `branch-stack.sh`'s threshold is 3, so the hook was reported as at its limit. It counts
-  unmerged branches into `origin/main`, which was **one**. Two numbers that agree today, read as one
-  number. [→](#the-capacity-number-that-was-read-for-two-days-as-a-blocker)
+  unmerged branches into `origin/main`, which was **one**.
+  [→](#the-capacity-number-that-was-read-for-two-days-as-a-blocker)
 - **An adversarial subagent returns what it was primed for.** The prompt offered `SUSPECTED RETROFIT`
-  as a verdict and named an untraceable commit as evidence for it. The report came back alleging
-  invention, and it was relayed at full strength. The evidence supported only "not in `PLAN.md`" —
-  and the agent's framing was the more damning of the two available readings, which it had not
-  checked. Depth was delegated on the two sharpest accusations, which is the half of _delegate
-  breadth, keep depth_ that costs something.
+  as a verdict and named an untraceable commit as evidence; the report alleged invention and was
+  relayed at full strength. The evidence supported only "not in `PLAN.md`". Depth was delegated on
+  the two sharpest accusations, which is the half of _delegate breadth, keep depth_ that costs
+  something.
 
-A fourth reached `main` and so outlived this entry: a precise `file:line` citation read without the
-twelve lines of context that set up its state. It is in `PLAN.md` under _What was learned_, waiting
-for a second instance before it sharpens the rule it belongs to.
-
-**Why this is here and not in the plan.** It lived in `PLAN.md` §13 for a day as part of a 106-line
-audit report — half open items, half narrative defending the report. A plan that keeps its own
-history is a plan nobody can read the open items out of, which is `PLAN.md`'s own stated rule, and
-the proof was a reader asking what the entry was for. The open items stayed; the story came here.
+**Where the amendment went.** The story lived in `PLAN.md` §13 for a day inside a 106-line audit
+report, half open items and half narrative defending itself — which is a plan nobody can read the
+open items out of. The open items stayed there; the story came here.
 
 **The rules** — [a rule with one instance is a
 hypothesis](FINISHING.md#the-postmortem-in-three-questions);
@@ -911,60 +837,36 @@ hypothesis](FINISHING.md#the-postmortem-in-three-questions);
 
 ### The compaction finding that counted the string instead of the call
 
-An hour after the entry above was written about an audit whose searches confirmed what it predicted,
-the same failure produced a shipped claim about compaction — and this one was on its way into a
-hook, which would have injected it into every future session as a current fact.
+An hour after the entry above, the same failure produced a claim about compaction that was on its
+way into a hook — which would have injected it into every future session as a current fact.
 
-**The claim.** _Three compaction boundaries in this session, and all three were immediately followed
-by a `git commit` — lines 611→612, 1353→1354, 2002→2003 — with no read of any rule file in between.
-Rule-file reads against `git commit` calls, by stretch: 8:13, then 1:23, then 5:10, then 0:6._ It
-was written into `PLAN.md`, into `FINISHING.md`, and into the text `session-brief.sh` injects.
+**The claim.** _Three compaction boundaries in this session — lines 611→612, 1353→1354, 2002→2003 —
+all three immediately followed by a `git commit`, with no read of any rule file in between._ It went
+into `PLAN.md`, `FINISHING.md` and the text `session-brief.sh` injects.
 
-**What a real count says.** Parsing the transcript for `tool_use` blocks rather than grepping it for
-a string:
+**What a real count says**, parsing the transcript for `tool_use` blocks rather than grepping it for
+a string: **four** boundaries; the first commit after each is +146, +32, +66 and +57 transcript
+lines away; **2, 0, 2, 3** rule-file reads sit in between; per stretch reads:commits ran **8:8,
+18:5, 11:7, 8:3**. One boundary of four fits the story, and the ratios point the other way.
 
-| the claim                             | measured                                                 |
-| ------------------------------------- | -------------------------------------------------------- |
-| three boundaries                      | **four** — 611, 1353, 2002, 2621                         |
-| each _immediately_ followed by commit | first commit is **+146, +32, +66, +57** transcript lines |
-| no rule-file read in between          | **2, 0, 2, 3** reads between boundary and that commit    |
-| reads are scarce next to commits      | per stretch, reads:commits ran **8:8, 18:5, 11:7, 8:3**  |
+**Three errors, each one this file already names.** Counting the string counts mentions, not calls —
+83 lines contain it, 27 are `Bash` calls, and the rest include commit-message heredocs, residue of
+commits already made carefully, so the denominator was inflated by the very evidence of care it was
+used to deny [→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms). `611→612`
+is a boundary line and its own summary line, not a sequence; the arrow implied one, and it was
+exact, which is what made it persuasive. And the fourth boundary was missed because counting stopped
+when the pattern was complete.
 
-One boundary of four fits the story. The ratios do not merely fail to support it, they point the
-other way: rule files were read _more_ often than commits were made in every stretch but one.
+**Why it survived to be committed.** The conclusion was independently plausible, so the numbers were
+checked for _support_ rather than for _truth_. A finding that agrees with a rule you already believe
+gets the shortest review of any finding you will ever produce.
 
-**Three separate errors, and each is one this file already names.**
+**What survived** is mechanism plus one case — compaction fires when context is exhausted, and
+context is most exhausted at the end of a unit of work, which is when the finishing checklist runs.
+So `session-brief.sh` says that in a comment and injects **no numbers at all**, and the false ratios
+came back out of `PLAN.md`, `FINISHING.md` and the injected text.
 
-- **`grep -c 'git commit'` counts mentions, not calls.** 83 lines of the transcript contain the
-  string; 27 are actual `Bash` calls. The rest are plans, summaries, tool results and commit-message
-  heredocs — and a heredoc quoting a commit message is the residue of a commit that has _already_
-  been made carefully. The denominators were inflated by the very evidence of care they were being
-  used to deny. [→](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms)
-- **`611→612` was read as "boundary, then commit".** It is the boundary line and its summary line,
-  which is what a compaction always looks like. The arrow implied a sequence that the citation never
-  claimed, and it was exact, which is what made it persuasive. This is the second instance in two
-  days of a precise citation being read wrongly _because_ it was precise; the first is under _What
-  was learned_ in `PLAN.md`, and the pair is the second instance that entry was waiting for.
-- **The fourth boundary was missing because counting stopped when the pattern was complete.** Three
-  boundaries made three-for-three; the search was not run again after the session continued.
-
-**Why it survived long enough to be committed to prose.** The conclusion was independently plausible
-— `FINISHING.md` had already argued from an earlier incident that a compacted context holds a
-summary of the rules and has never read them — so the numbers were checked for _support_ rather than
-for _truth_. A finding that agrees with a rule you already believe gets the shortest review of any
-finding you will ever produce.
-
-**What survived, and it is not nothing.** The mechanism is still sound and one boundary is still an
-instance: compaction fires when context is exhausted, context is most exhausted at the end of a unit
-of work, and that is when the finishing checklist runs. The change built on it — `session-brief.sh`
-inlining the two non-advisory rules and the four judgement questions when it fires with
-`trigger=compact` — is justified by mechanism plus one case, which is a hypothesis, so the hook now
-says so in a comment and injects **no numbers at all**. The false ratios came back out of
-`PLAN.md`, `FINISHING.md` and the injected text.
-
-**Found by** a fresh-context subagent audit of the uncommitted diff, run before the commit rather
-than after it. That is the second time this session that the audit-before-commit caught something
-the author could not see, and the first time it caught the author's own audit.
+**Found by** a fresh-context subagent audit of the uncommitted diff, run before the commit.
 
 **The rules** — [a search that confirms](STARTING.md#the-failure-mode-to-design-against-a-search-that-confirms);
 [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code);
@@ -972,29 +874,24 @@ the author could not see, and the first time it caught the author's own audit.
 
 ### The half of the extraction that nothing watched
 
-Shipped in the same diff, found by the same audit. `session-brief.sh` extracts two things from two
-files at run time — the non-advisory rules from `CLAUDE.md`, the four judgement questions from
-`FINISHING.md` — and a comment above both said they were extracted rather than pasted precisely so
-that they could not go stale. Three assertions were written to hold that. **All three were about the
-checklist. Nothing at all watched the rules.**
+Shipped in the same diff, found by the same audit. `session-brief.sh` extracts two things at run
+time — the non-advisory rules from `CLAUDE.md`, the four judgement questions from `FINISHING.md` —
+and a comment above both said they were extracted rather than pasted precisely so they could not go
+stale. Three assertions were written to hold that. **All three were about the checklist. Nothing at
+all watched the rules.** Measured: replacing the `CLAUDE.md` extraction with a verbatim paste of
+today's text left **all 87 assertions green**; replacing the `FINISHING.md` one turned two red.
 
-Measured: replacing the `CLAUDE.md` extraction with a verbatim paste of today's text left **all 87
-assertions green**. Replacing the `FINISHING.md` one turned two red. The comment described a
-property of the file; the tests covered one function call in it.
+The same shape sat one screen below. An assertion named `empty stdin does not hang` ran the hook
+with stdin _closed_, which returns instantly whatever the implementation does; the case in its name,
+stdin **open and never written**, was the one the implementation got wrong, and the guard
+`[ ! -t 0 ]` cannot tell the two apart. Green on a terminal, stalled forever anywhere stdin is an
+idle pipe. Fixed by writing the assertion the name promised — a fifo held open by a spare
+descriptor, watchdogged, because a suite that hangs to report a hang has reported nothing.
 
-There was also a second, quieter version of the same shape one screen below. An assertion named
-`empty stdin does not hang` ran the hook with `</dev/null` — stdin _closed_, which returns instantly
-whatever the implementation does. The case in its name, stdin **open and never written**, was the
-one the implementation actually got wrong, and the guard `[ ! -t 0 ]` cannot tell the two apart. The
-suite invoked the hook the same way, so it hung with it: green on a terminal, and stalled forever
-anywhere stdin is an idle pipe, which is a plausible CI. Both were fixed by writing the assertion
-the name promised — a fifo held open by a spare file descriptor, watchdogged, because a suite that
-hangs to report a hang has reported nothing.
-
-**The generalisation, and it is not "write more tests".** Both holes are the same act: a claim was
-made about a file, and coverage was written for the example in front of the author. Count the things
-a claim quantifies over — two extractions, two stdin states — and mutate each one. A property
-asserted at one of its sites is an anecdote with a test attached.
+**The generalisation is not "write more tests".** A claim was made about a file, and coverage was
+written for the example in front of the author. Count what a claim quantifies over — two
+extractions, two stdin states — and mutate each one. A property asserted at one of its sites is an
+anecdote with a test attached.
 
 **The rules** — [a guard is not shipped until a test fails when it is
 unplugged](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged); [tests that
@@ -1006,42 +903,22 @@ stop testing](PROVING.md#tests-that-stop-testing).
 
 <!-- refs:off -->
 
-An audit of this repository's own cross-reference system found roughly **39 dangling `§N`
-citations** in shipped source. The first diagnosis was that a renumbering had stranded them —
-`96998cc` did cut `PLAN.md` from 1774 lines to 438 — and that diagnosis is wrong. `§3a`, `§5b`,
-`§7b` and `§6.1c` appear in **none of the 54 historical revisions of `PLAN.md`**, in any form.
-
-They were never written down. A session held a plan in its context, wrote `§7b's infinite loop` into
-`src/watch/counter.ts` as though citing a document, and the plan died when the session did.
-`src/watch/decide.ts` does this four times. `ARCHITECTURE.md:619` says "See PLAN.md §5b" — the one
-citation in the tree that names its target document, and it resolves to nothing.
+An audit of this repository's own cross-reference system found **39 dangling `§N` citations** in
+shipped source. Its first diagnosis was that a renumbering had stranded them; that was wrong. `§3a`,
+`§5b`, `§7b` and `§6.1c` appear in no revision of `PLAN.md`, in any form — a session held a plan in
+its own context, cited it from code as though citing a document, and the plan died when the session
+did. The quieter half is worse: a reference that is in range and silently repointed reads correctly
+forever, where a dangling one fails the moment anyone checks it.
 
 <!-- refs:on -->
 
-**This is the project's own thesis failing in its own source.** Every rule here says that files
-outlive contexts and that a fact worth keeping is written to disk. These comments are the shape of
-that rule being followed and the substance of it being skipped: the citation format asserts an
-external, durable source, and there was never anything at the other end. A reader cannot tell the
-difference without going to look, which is why 39 of them survived review.
-
-**The quieter half is worse.** Some references are in range and silently repointed. Six files say
-"§1 refuses on-disk state"; `PLAN.md §1` is now "Which model runs which task", and that rule moved
-to `ARCHITECTURE.md §5`. A dangling number fails the moment anyone checks it. A repointed one reads
-correctly forever and misleads every time.
-
-**The mechanism is structural, not careless.** `PLAN.md` numbers its sections and rule 2 deletes
-entries when they ship, so every `§N` in that document names a slot guaranteed to be reused by
-unrelated work. Citing it by number from code was never going to hold. Cite `ARCHITECTURE.md`, whose
-sections are stable, or quote the reasoning where it is used.
-
 **Found by** a subagent audit asked to resolve every `§N` against its target document — and the
-audit's counts were right while its causal story was wrong, so the diagnosis above came from
-checking its claim against `git log` rather than from the report.
+audit's counts were right while its causal story was wrong, so the correction came from checking its
+claim against `git log` rather than from the report.
 [→ read wide in a subagent, decide in the main context](STARTING.md#read-wide-in-a-subagent-decide-in-the-main-context)
 
 **The rule** — [the plan is written before the work](STARTING.md#the-plan-is-written-before-the-work-not-after-it).
-Sized in `PLAN.md`, "The citations that were never written down". The resolver is built and holds the
-count at 39; the fixes are not. Status pointer updated 2026-09-09 — the story above is unchanged.
+The open items and the full account are in `PLAN.md`, "The citations that were never written down".
 
 ---
 
@@ -1049,36 +926,33 @@ count at 39; the fixes are not. Status pointer updated 2026-09-09 — the story 
 
 Two derived counts had just been added to `docs:check` — `§N` references in `src/`, and files
 repeating a quoted cost figure. Neither ships until it fails when unplugged, so each was mutated by
-appending to a file: a cost figure into `README.md`, a section reference into `settings.ts`, and a
-line of prose into `PLAN.md` to prove the code-only count does **not** move. All three fired
-correctly. Each was then undone with a per-file worktree restore.
+appending to a file: a cost figure into `README.md`, a section reference into `settings.ts`, and —
+as the control — a line of prose into `PLAN.md`, to prove the code-only count does **not** move. All
+three fired correctly. Each was then undone one file at a time through the version-control tool.
 
-`PLAN.md` held about an hour of uncommitted work — two new sections and three rewritten bullets,
-including the very prose those two counts existed to pin. The restore reverted the file, not the
-appended line, and the mutation test destroyed exactly the work it had been run to verify.
+`PLAN.md` held about an hour of uncommitted work, including the very prose those counts existed to
+pin. The undo reverted the whole file, not the appended line, and the mutation test destroyed
+exactly the work it had been run to verify.
 
-**The mechanism is that a mutation has two scopes and the restore has one.** The edit is a line; the
-undo is a file. Identical in a clean tree, silently different in a dirty one — and unplugging a
-guard happens at the end of a change, which is when the tree is dirtiest. Nothing warned: reverting
-a modified file does not look destructive and reports the same one-path summary whether it discarded
-one line or four hundred.
+**A mutation has two scopes and the undo has one.** The edit is a line; the undo is a file.
+Identical in a clean tree, silently different in a dirty one — and unplugging a guard happens at the
+end of a change, which is when the tree is dirtiest. It reports the same one-path summary whether it
+discarded one line or four hundred.
 
-**The near-miss is the part worth keeping.** It was caught only because the same command printed
+**The near-miss is the part worth keeping.** Caught only because the same command printed
 `git status` for an unrelated reason and `PLAN.md` was missing from the list. Had the next step been
 a commit of the named files, the work would have been gone and the commit would have looked
-complete: the other five files were correct, and `docs:check` would then have failed on an
-uncited number — which reads like a small prose fix, not like a restore.
+complete: the other five files were correct, and `docs:check` would then have failed on an uncited
+number — which reads like a small prose fix, not like a restore.
 
 **A second guard fired on the write-up, not the act.** Recording this entry was refused by an outer
-guard, because the prose quoted the destructive command it warns about. That is the third instance
-of a text-matching guard reading a description as the deed
-([the first](#the-commit-message-that-was-refused-as-the-act-it-described)), and the entry is
-phrased around the command rather than quoting it — the guard is correct to be blunt, and the cost
-of that bluntness is paid in wording.
+guard because the prose named the destructive command it warns about — the third instance of a
+text-matching guard reading a description as the deed
+([the first](#the-commit-message-that-was-refused-as-the-act-it-described)).
 
-**Found by** `git status` output printed incidentally by the mutation script — by no check. The
-suite, the type checker and the hook tests were all green throughout, and `docs:check` would have
-caught it one step later as the wrong problem.
+**Found by** `git status` printed incidentally by the mutation script — by no check. The suite, the
+type checker and the hook tests were all green throughout, and `docs:check` would have caught it one
+step later as the wrong problem.
 
 **The rule** — [commit before you mutate](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged).
 
@@ -1119,7 +993,10 @@ noise.
 
 **The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code);
 [a guard is not shipped until a test fails when it is unplugged](PROVING.md#a-guard-is-not-shipped-until-a-test-fails-when-it-is-unplugged).
-No new rule proposed: one instance is a hypothesis.
+
+**No rule yet** — one instance of an assertion that fails one run in thirty is a hypothesis and the
+two rules above already carry the repair, so what is missing is a second one with a diagnosed cause,
+and `intermittent` at 2.
 
 ### The probe that ruled out the right answer
 
@@ -1130,16 +1007,15 @@ may fire before `Date.now()` agrees it is due. There was never a second event.
 
 **The reasoning was not lazy, which is the point.** A probe was written specifically to test whether
 a gap could come in under the interval: a 300ms interval with a 700ms block inside one tick, on this
-machine, giving gaps of 301, 301, 300, 700, 301 and none below the period. The conclusion drawn —
-that the hour's drift could only land at or above 3,600,000, so the failing number had to be a
-different `session.slept` event — followed from it. The probe simply did not measure the case that
-was failing: the **first** gap, timed against a stamp taken before `setInterval` is created, on
-hardware that was not this laptop. A probe that covers the wrong case is more dangerous than no
-probe, because its output is quoted as evidence.
+machine, giving gaps of 301, 301, 300, 700, 301 and none below the period. The published conclusion
+followed from it. The probe simply did not measure the case that was failing: the **first** gap,
+timed against a stamp taken before `setInterval` is created, on hardware that was not this laptop. A
+probe that covers the wrong case is more dangerous than no probe, because its output is quoted as
+evidence.
 
 The entry above is left standing with its wrong conclusion, per this file's convention. What it got
-right is that the assertion had one millisecond of margin, and the fix — one tick of tolerance — was
-correct for the wrong reason and needed no change when the reason did.
+right is the one millisecond of margin, and the fix — one tick of tolerance — was correct for the
+wrong reason and needed no change when the reason did.
 
 **This is the second time in one session.** A `perl -i -pe 's/…/ if !$done++'` mutation earlier
 restricted its substitution to line 1, changed nothing, and reported a clean pass. Same shape: a
@@ -1151,80 +1027,61 @@ CI on different hardware.
 explain that redness. Not by the suite locally, which was green in 28 consecutive runs including ten
 under deliberate CPU load.
 
-**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
-The candidate amendment — _state which case a probe does not cover, before quoting it as evidence_ —
-had two instances at the time of writing, and this entry set the bar at "the third, or a defect that
-reaches `main`". It reached seven before anyone spent one on the amendment. It is now a rule:
-[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
+**The rule** — [state which case your check does not
+cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code), which
+this entry proposed as a candidate and which took seven instances to get written.
+
+**No rule yet** — the rule this entry proposed was written against the seventh instance and cites
+that one rather than this one; a rule of its own, about a probe that measures a case other than the
+failing one, needs a second probe to have done it, and `wrong-case-probe` at 2.
 
 ### A permission granted to a human, read as a permission granted to the agent
 
-`PLAN.md` §12 — the guardrail entry, since shipped and retired into `ARCHITECTURE.md` §16, which is
-where every `§12` below now resolves — had said for a day that hook configuration "belongs to the
-operator, lives outside this
-tree, and is deliberately neither readable nor writable from here." The operator then checked with
-the storecode team and reported back: **developers can add settings.** That is true, and it was taken
-to mean the constraint had never been real — that §12 described a convention nobody had tested rather
-than a mechanism. §12 was rewritten on that basis, in confident prose, saying the access "was never a
-property of the environment".
+`PLAN.md` §12 — the guardrail entry, since retired into `ARCHITECTURE.md` §16, which is where every
+`§12` below now resolves — had said that hook configuration "belongs to the operator, lives outside
+this tree, and is deliberately neither readable nor writable from here." The operator checked with
+the storecode team and reported back: **developers can add settings.** True, and taken to mean the
+constraint had never been real. §12 was rewritten on that basis, in confident prose.
 
-The rewrite was wrong twice, and each half was refuted about a minute after it was written, by the
-only thing that could refute it — attempting the operation. The first attempt to author the settings
-file was refused by the harness as a protected path. §12 was then corrected to say the **write** was
-refused and the **read** was not, which was a guess dressed as a finding: nothing had tested the
-read. The read was refused about ninety seconds later, by a second rule covering shell access to the
-same configuration. **The permission was scoped to the human all along**, and the agent's own
-inability to check was the fact being reasoned about.
+The rewrite was wrong twice, and each half was refuted about a minute later by the only thing that
+could refute it — attempting the operation. The first attempt to author the settings file was
+refused as a protected path. §12 was then corrected to say the **write** was refused and the **read**
+was not, a guess dressed as a finding; the read was refused ninety seconds later by a second rule
+covering shell access. **The permission was scoped to the human all along.** Confidence tracked how
+recently the claim had been formed rather than what supported it, and the second version was _more_
+assertive than the first while resting on strictly less evidence.
 
-**What makes this an entry rather than an apology.** The prose was falsified while it was being
-written, in the file that exists to stop exactly this, by a session that had already appended an
-incident about the same failure that day. Confidence tracked how recently the claim had been formed
-rather than what supported it, and the second version was _more_ assertive than the first while
-resting on strictly less evidence.
+**And then it happened a fourth time, in the paragraph written to close it.** Two routes had been
+attempted — the write, refused, and the shell read, refused. From those two came _both directions_,
+and from that a rule: no agent can report whether the hooks are installed, so any such answer is a
+refusal or a fabrication. It was copied into `CLAUDE.md`, into the guardrail entry and into the
+validation runbook. **Nobody tried the file-reading tool. It returns the file on the first attempt.**
+The union of two refusals was written down as a property of the agent when it was a property of two
+mechanisms, and a third was assumed into existence because it would have been consistent.
 
-Both refusals are the correct arrangement and neither was worked around. A third refusal in the same
-hour was a **false positive** and is recorded because the shape will recur: appending this very entry
-was blocked, because the shell command carried the settings path inside quoted prose and the rule
-matches the string rather than the target. The write went through the file editor instead — the
-right tool for a markdown edit in any case — and the substitution was disclosed rather than made
-quietly. That distinction is the whole of the line: re-spelling a blocked operation is prohibited,
-performing a different operation that the block caught by accident is not, and the way to stay honest
-about which one you are doing is to say so out loud.
-
-**And then it happened a fourth time, in the paragraph written to close it — 2026-09-09.** Everything
-above is about generalising from a route that was tested to a route that was not, and the correction
-it produced did the same thing once more. Two routes had been attempted: the **write**, refused, and
-the **shell** read, refused. From those two the conclusion drawn was _both directions_, and from
-_both directions_ came a rule — no agent can report whether the hooks are installed; any such answer
-is a refusal or a fabrication. It was copied into `CLAUDE.md`, into the guardrail entry and into the
-validation runbook.
-
-Nobody tried the file-reading tool. It returns the file on the first attempt. The union of two
-refusals was written down as a property of the agent, when it was a property of two mechanisms — one
-guarding writes, one guarding the shell — and a third mechanism was assumed into existence because
-it would have been consistent.
-
-**The compounding is the finding, not the wrong sentence.** A false claim about a _capability_ is not
-symmetrical with other false claims: it removes the operation that would have refuted it. The rule
-said the check was pointless and dishonest to attempt, so the check went unattempted, and the claim
-was safe for as long as it was believed. It also cost more than it looks — reading the wiring
+**The compounding is the finding.** A false claim about a _capability_ removes the operation that
+would have refuted it: the rule said the check was pointless to attempt, so it went unattempted, and
+the claim was safe for as long as it was believed. It cost more than it looks — reading the wiring
 immediately eliminated one of the two candidate causes of the only open question in the runbook, and
 that answer had been sitting in the runbook's own opening section the whole time, contradicting the
 paragraph that called it unknowable.
 
-**Found by** the harness refusing the operation, three times. The fourth was found by a spot-check
-audit that ran the probe instead of reading about it — and found it only because the audit had been
-asked how confident it was, not asked to confirm the documents. Not by review, and not by any check
-that could exist: the only way for an agent here to test a claim about its own permissions is to
-attempt the thing and read what comes back.
+A third refusal in the same hour was a **false positive**: appending this entry by shell was blocked
+because the command carried the settings path inside quoted prose, and the rule matches the string
+rather than the target. It went in through the file editor instead, disclosed rather than done
+quietly — re-spelling a blocked operation is prohibited, performing a different operation the block
+caught by accident is not.
 
-**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
-extended from assumptions about your own code to assumptions about your own privileges. This is the
-**third instance in one session** of a check that did not cover what it claimed; the other two are
-the two entries directly above, which reached this branch when #22 merged into it. The candidate
-amendment — _state which case your check does not cover before quoting it as evidence_ — reached its
-threshold here, and then took four more instances to get written. It is now a rule:
-[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
+**Found by** the harness refusing the operation, three times; the fourth by a spot-check audit that
+ran the probe instead of reading about it — and found it only because the audit had been asked how
+confident it was, not asked to confirm the documents.
+
+**The rule** — [measure, do not
+assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
+extended from assumptions about your own code to assumptions about your own privileges.
+
+**No rule yet** — that extension is stated here and nowhere in `PROVING.md`, so a reader who never
+opens this file gets the rule without the half that would have caught this, and 2026-09-09.
 
 ### The silent guard that was diagnosed before anyone checked whether it had run
 
@@ -1280,65 +1137,45 @@ is now a rule:
 
 ### The check whose own remedy could not clear it
 
-Filed on the way out of the pull request above, and it is the sixth instance in a row.
+**Sixth instance, filed on the way out of the pull request above.** CI's `Rules owed` step failed
+on #24, and its error message says to answer the question **in the pull request body** — but the
+step reads `github.event.pull_request.body`, and `pull_request:` with no `types:` excludes `edited`,
+so editing the body could not clear it and a re-run replayed the payload from before the edit. A
+check that cannot be satisfied the way it says to satisfy it teaches people to route around it.
+Fixed by adding `types: [opened, synchronize, reopened, edited]` in the pull request that hit it,
+with the mechanism written at the site that matters, in `ci.yml`'s own header comment.
 
-CI's `Rules owed` step failed on #24: the body answered the question under a `## Rules owed`
-heading, and the step matches a literal `Rules owed:` line. Fine — that is the check working. The
-defect is what happened next. Its error message says to answer the question **in the pull request
-body**; the body was edited to do exactly that, and the run stayed red. Re-running it stayed red
-too.
+**The rule** — the same one, at its sixth instance. The four gates were green locally and were
+quoted as "the gates pass" without stating the case they exclude: not one of them reads a pull
+request body.
 
-**The step reads `github.event.pull_request.body`** — the event payload, not the API — and
-`pull_request:` with no `types:` subscribes to `opened`, `synchronize`, `reopened` and **not**
-`edited`. So editing the body cannot re-run it, and a re-run replays the payload from before the
-edit. The only way to clear a body-only failure was to push a commit, which is not what the message
-tells you to do.
-
-This is the shape `branch-guard.sh`'s own header already names — _a guard whose remedy its own
-denial text names must not itself block that remedy_ — arriving in a different file, written by a
-session that had read that comment the same afternoon. A check that cannot be satisfied the way it
-says to satisfy it teaches people to route around it, which is how a check earns the contempt that
-gets it deleted.
-
-**Fixed** by adding `types: [opened, synchronize, reopened, edited]`, in the pull request that hit
-it, so the fix and its counter-example are the same run.
-
-**The rule** — the same one, at its sixth instance:
-`pnpm format:check`, `docs:check`, `test:hooks` and `test` were all green locally, and were quoted
-as "the gates pass" without stating the case they exclude. None of the four reads a pull request
-body; the only step that does has no hand-run equivalent, which is written down in `ci.yml`'s own
-header comment.
+**No rule yet** — the half with no rule is the other one, that a check must be satisfiable the way
+its own message says to satisfy it; one CI step is a single instance and the fix went in at the
+site, and `unsatisfiable-remedy` at 2.
 
 ### The dead step that was alive, from a merge list read instead of a count
 
 Seventh instance, and the cheapest of the seven to have avoided.
-
 `claude-validation-work` recorded that "as of the #21 and #23 merges the count from `main` is 1, so
 step 3 is dead" — that step being the only check on `branch-stack.sh`, the one hook here that has
 still never been watched firing. The number came from a mental list of merged pull requests. **#21
 had not merged.** With #21, #24 and #25 open the count is 3 and the step was live the whole time.
 
-**What makes this the cheapest.** The command that measures it —
-`countLines "$(unmergedBranches "$PWD" "$(stackBase "$PWD")")"` — is printed in that same file,
-three lines above the claim, and was put there by an earlier instance of this identical mistake. The
-file supplies the remedy and the next writer walked past it.
+**What makes it the cheapest.** The command that measures it is printed in that same file three
+lines above the claim, put there by an earlier instance of this identical mistake. The file supplied
+the remedy and the next writer walked past it.
 
-**The direction is the new part, and it is the more dangerous one.** The six before this all
-overstated a guard's coverage. This one _under_stated it: a working, testable guard was written down
-as untestable, and the note said its silence "means nothing at all" — an instruction to stop looking.
-A false negative about your own enforcement retires a check quietly, and nothing goes red when it
-happens.
+**The direction is the new part, and it is the more dangerous one.** The six before this overstated
+a guard's coverage. This one _under_stated it: a working, testable guard was written down as
+untestable, with a note saying its silence "means nothing at all" — an instruction to stop looking.
+A false negative about your own enforcement retires a check quietly, and nothing goes red.
 
 **Found by** running the command while answering a question about merge order, three weeks of
 narrative after it was first written down.
 
-**The rule** — [measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
-and the amendment this instance finally bought:
-[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
-written into `PROVING.md` at seven instances against a threshold of three. **That gap is the
-finding.** Each new instance was spent writing evidence rather than spent on the amendment, which is
-the collecting-instead-of-amending failure the rule's own entry now warns about. If a candidate is
-past its threshold, the next incident is not more evidence — it is overdue work.
+**The rule** — [state which case your check does not
+cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code), finally
+written into `PROVING.md` here at seven instances against a threshold of three.
 
 ### The denylist that named thirteen of git's write verbs
 
@@ -1346,66 +1183,53 @@ past its threshold, the next incident is not more evidence — it is overdue wor
 list of git subcommands that mutate. The list had been patched twice, each time after a measurement
 caught it letting something through: `push`, which names no branch when bare and reaches `main`
 through its upstream, and then `pull`, which is `merge` with a fetch in front. The second fix landed
-with an unusually candid note — that the list "was assembled from commands that _sound_ mutating,
-and `pull` sounds like a read", so the defect was in the derivation rather than in the list, and
-patching it was worth little on its own.
+with a candid note — the list "was assembled from commands that _sound_ mutating, and `pull` sounds
+like a read" — so the defect was in the derivation, and patching it was worth little on its own.
 
 **Nobody had asked how much little was.** Every subcommand git knows about — 163, from
-`git --list-cmds=main,others,nohelpers` — fed to the script with `CLAUDE_PROJECT_DIR` pointed at a
-throwaway repository whose HEAD is `main`:
+`git --list-cmds=main,others,nohelpers` — fed to the script against a throwaway repository whose
+HEAD is `main`:
 
 ```
 REFUSED (13)   am apply cherry-pick commit merge mv pull push rebase reset restore revert rm
 allowed (150)  everything else
 ```
 
-Arguments cannot change that verdict, because the pattern matches on the verb token — so the
-bare-verb sweep is the complete answer rather than a sample. What a protected branch was letting
-through included `checkout`, which is the older spelling of the `restore` the list refused; bare
-`stash`, while `stash pop`, `apply` and `drop` were all refused; `clean`; `branch -f`, which can
-move the protected ref itself; `update-ref` and `symbolic-ref`, which do the same with no porcelain
-involved; `send-pack` and `http-push`, which are `push` under other names; `fetch` in its refspec
-form, which writes a **local** branch; `subtree merge` and `subtree pull`; and `reflog expire`,
-which destroys the trail by which any of the rest could be undone.
+The pattern matches on the verb token, so a bare-verb sweep is the complete answer rather than a
+sample. What a protected branch was letting through included `checkout`, the older spelling of the
+`restore` the list refused; bare `stash`; `clean`; `branch -f`, which can move the protected ref
+itself; `update-ref` and `symbolic-ref`; `send-pack` and `http-push`; `fetch` in its refspec form,
+which writes a **local** branch; and `reflog expire`, which destroys the trail by which any of the
+rest could be undone.
 
-**The shape is the finding and the thirty holes are the symptom.** A denylist has to enumerate every
+**The shape is the finding and the thirty holes are the symptom.** A denylist must enumerate every
 spelling of "write" in a program with 163 subcommands and several aliases per act, and it is behind
-by construction: the verb git adds next year is allowed on the day it ships, and so is any alias or
-extension a developer configures. Two rounds of patching had moved the count from 11 to 13.
+by construction: the verb git adds next year is allowed on the day it ships. Two rounds of patching
+had moved the count from 11 to 13, which is the measure of what patching buys.
 
-**Fixed by inverting it, for `git` only.** An allowlist of read verbs plus named conditionals;
-anything else is a write. Non-git commands keep the fail-open behaviour, so the inversion is scoped
-to the one program whose surface can be enumerated. The same sweep now refuses 102 of 163. The
-constraint that shaped it was the escape hatch — the denial text tells the agent to run
+**Fixed by inverting it, for `git` only** — an allowlist of read verbs plus named conditionals,
+anything else a write. Non-git commands keep the fail-open behaviour, so the inversion is scoped to
+the one program whose surface can be enumerated. The same sweep now refuses 102 of 163. The
+constraint that shaped it was the escape hatch: the denial text tells the agent to run
 `git switch -c`, and a guard that refuses the remedy it names traps the agent on the protected
-branch — so `switch` and `checkout -b` stay allowed and plain `checkout` does not.
-
-**The cost is stated rather than discovered later**, because inverting a denylist buys coverage with
-false positives, and a guard that over-refuses a read earns the contempt that gets it switched off.
-Every conditional verb has its read form asserted beside its write form: 107 → 186 assertions.
+branch. Inverting buys coverage with false positives, so every conditional verb has its read form
+asserted beside its write form: 107 → 186 assertions.
 
 **One mutation survived, and it was worth more than the seven that were caught.** Deleting the loop
-that consumes git's global options was expected to let `git -C . worktree add` through. It did not —
-with the options unconsumed, `-C` lands where the verb goes, is not in the allowlist, and is refused
-as an unrecognised write. Under an inversion, mis-parsing can only over-refuse. So no write fixture
-can observe that loop breaking, and the four assertions directly above it read as though they cover
-it. Its only observable job is _not_ refusing a read that carries a global option, which nothing
-checked. Four assertions later the mutation goes red.
+that consumes git's global options should have let `git -C . worktree add` through. It did not: with
+the options unconsumed, `-C` lands where the verb goes and is refused as an unrecognised write.
+Under an inversion, mis-parsing can only over-refuse, so no write fixture can observe that loop
+breaking — its only observable job is _not_ refusing a read that carries a global option, which
+nothing checked. Four assertions later the mutation goes red.
 
-That paragraph is
-[state which case your check does not cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code)
-being used one entry after it was written, and **it is not an eighth instance** — the count of seven
-in `PROVING.md` is for times the rule was broken, and this is a time it worked. Worth recording for
-what it bought that review would not have: the four assertions were not wrong, and the loop was not
-untested through oversight. Writing down what they measure — that a global option in front of a
-write verb is still refused — is what made visible that nothing measured the other direction.
+**Found by** the sweep itself — every verb git has, put through the script by hand. Not by the
+suite, which was green before it and green after both of the patches that preceded it.
 
-**The rule** — this is a candidate for `BUILDING.md` at one instance, and it is **proposed, not
-written**: _a denylist over a vocabulary you do not control is behind by construction; invert it, or
-say in the code why you cannot._ One instance is below the threshold of three, so it waits. The
-entry directly above is about a candidate that waited until seven, so the wait comes with an
-instruction attached: at instance two, write it. Do not spend the third on more evidence.
+**The rule** — a candidate for `BUILDING.md` at one instance, **proposed, not written**: _a denylist
+over a vocabulary you do not control is behind by construction; invert it, or say in the code why
+you cannot._ Inverting is only available when the vocabulary is enumerable and the read set is small
+enough to maintain, which is why it stops at `git`. The entry above waited until seven instances, so
+this one comes with an instruction attached: at instance two, write it.
 
-The counter-argument is real and belongs with it: inverting is only available when the vocabulary is
-enumerable and the read set is small enough to maintain, which is why the inversion here stops at
-`git` and does not touch the rest of the shell.
+**No rule yet** — inverting a denylist over a vocabulary you do not control is a candidate at one
+instance and the paragraph above says what writing it would take, and `denylist` at 2.

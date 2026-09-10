@@ -5,20 +5,10 @@ description: Development discipline for the-jira-police — writing the plan bef
 
 # House rules
 
-This skill is **not** staged into any solve pass. `prepareSkillRoot` copies only `agent-solve` into
-a root that must contain nothing else, so nothing here reaches a model the service runs. It is for
-whoever is developing the service.
-
-**These rules were not designed.** Each one is the generalisation of a defect that got through, and
-the incident is kept — in [INCIDENTS.md](INCIDENTS.md), linked from the rule it produced — because
-the story is what makes the rule stick. When a rule seems expensive, the story is the argument.
-
-**So none of this is finished, and no instruction here is final.** Every section is the current best
-generalisation of a finite set of incidents, and the next one may sharpen it, narrow it or retire
-it. When something escapes, the incident is worked back into these rules rather than just fixed;
+**Why these rules exist, and why no instruction here is final:** [INCIDENTS.md](INCIDENTS.md) opens
+with it, and the evidence is underneath. Read each rule as a hypothesis that has survived so far,
+and when one of them is wrong,
 [propose the amendment and say why before editing](FINISHING.md#always-propose-before-editing).
-Read each rule as a hypothesis that has survived so far, not as a settled fact — that is the same
-posture the rules themselves demand of the code.
 
 ---
 
@@ -28,49 +18,39 @@ The document is split the way a change is: what you do before the first edit, wh
 proving, and on the way out. **Load the phase you are in.** They are short and disjoint, and each
 links to the next.
 
-| phase                           | load it for                                                                                                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1** [STARTING](STARTING.md)   | the four-document contract · writing the plan before the work · finding your way around · phasing a privilege · picking a branch                                                 |
-| **2** [BUILDING](BUILDING.md)   | the defect class · two questions that agree today · fail closed · state in the remote system · untrusted input · failures that explain themselves · bailing honestly · dead code |
-| **3** [PROVING](PROVING.md)     | mutation-testing a guard · tests that stop testing · measure don't assume · **state the case your check does not cover** · **the loop** · every capability gets a command        |
-| **4** [FINISHING](FINISHING.md) | the commands to run · the checklist · the postmortem · how to amend these rules                                                                                                  |
-| [INCIDENTS](INCIDENTS.md)       | the evidence. Cited from the rules; **not on the reading path** for doing work                                                                                                   |
+| phase                           | load it for                                                                                                                        |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **1** [STARTING](STARTING.md)   | the four-document contract · the plan before the work · phasing a privilege · branching                                            |
+| **2** [BUILDING](BUILDING.md)   | the defect class · fail closed · state in the remote system · untrusted input · failures that explain themselves · dead code       |
+| **3** [PROVING](PROVING.md)     | mutation-testing a guard · measure don't assume · **the case your check does not cover** · **the loop** · a command per capability |
+| **4** [FINISHING](FINISHING.md) | the commands · the checklist · the postmortem · amending these rules                                                               |
+| [INCIDENTS](INCIDENTS.md)       | the evidence; **not on the reading path** for doing work                                                                           |
 
-**If you read one section, read [the loop](PROVING.md#the-loop-dev-test-run-human-reevaluate).**
-Everything else is craft that stops known problems recurring. The loop is what found them in the
-first place, and it is the only one whose absence is invisible — skip it and everything still looks
-green.
+**If you read one section, read [the loop](PROVING.md#the-loop-dev-test-run-human-reevaluate).** It
+is the only rule here whose absence is invisible — skip it and everything still looks green.
 
 ---
 
 ## The two that are not advisory
 
-Everything else is recoverable if you get it wrong. These are not — and you should assume your own
-compliance is the whole of the enforcement. The guards are registered here now, one has been watched
-refusing, and the settings file that wires them **can** be read from inside this tree, which this
-line denied until 2026-09-09. What you still cannot assume is that a registration you have read is a
-guard that fires; run step 0 of
+Everything else is recoverable if you get it wrong. These are not: assume your own compliance is the
+whole of the enforcement, whatever the guards are doing (`ARCHITECTURE.md` §16, and step 0 of
 [`claude-validation-work`](../claude-validation-work/SKILL.md#step-0--is-branch-guardsh-actually-firing-right-now)
-if the answer matters (`ARCHITECTURE.md` §16):
+if you need the answer today):
 
 1. **Never work on `main` or any protected branch.** Branch first. One implementation branch per
    reviewable unit of privilege. Do not look for a way around this — ask.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
 
-If you change a hook, run `pnpm test:hooks`. It caught a branch name containing a `"` breaking the
-denial JSON, which made the guard fail _open_ while still looking installed. Note what that suite
-can and cannot say: it proves the scripts, not that anything runs them. It could not even say that
-much until `8ad1a31` — [the assertions borrowed the developer's git
-identity](INCIDENTS.md#the-suite-that-was-a-statement-about-one-laptop), so they passed on one
-machine and collapsed on the first clean one.
+If you change a hook, run `pnpm test:hooks` — it caught a branch name containing a `"` that broke
+the denial JSON and made the guard fail _open_ while still looking installed. It proves the scripts
+emit, never that anything runs them, and until `8ad1a31` it proved that only on [one
+laptop](INCIDENTS.md#the-suite-that-was-a-statement-about-one-laptop).
 
-**And if the question is how much of any of this to believe, that is its own skill.**
-[`scaffolding-audit`](../scaffolding-audit/SKILL.md) audits the rules, the guards and the checks
-themselves rather than the product code — by running probes rather than by reading, because reading
-these documents and reporting that they are clear is the null result. It is also where the failure
-class this tree keeps producing is written down: a green check answering a narrower question than
-everyone thinks it is asking.
+**How much of this to believe is its own skill.**
+[`scaffolding-audit`](../scaffolding-audit/SKILL.md) audits the rules, guards and checks by running
+probes rather than by reading — reading them and reporting that they are clear is the null result.
 
 ---
 

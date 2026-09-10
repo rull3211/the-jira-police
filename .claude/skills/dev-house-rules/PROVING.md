@@ -92,10 +92,13 @@ Every significant correction in this project came from running something, not fr
 clause away from a positive.
 
 **State which case your check does not cover, before you quote it as evidence.** A green check is a
-statement about the case it ran, and the gap between that and the claim made from it is the single
-largest source of defects in `INCIDENTS.md` — **seven**, more than any other cause recorded here.
-The discipline is one sentence written next to the evidence: _this measures X; it does not measure
-Y._ If you cannot write that sentence, you do not yet know what your check proved.
+statement about the case it ran, and the gap between that and the claim made from it is the
+most-recorded cause in `INCIDENTS.md` — **seven** occurrences, not seven entries; count headings
+there and you get a different number. Read it with its own gap stated, because it is an instance of
+the rule: all seven happened on 2026-09-09, and the entries predating the convention were never
+re-read for this shape. The discipline is one sentence written next to the evidence: _this measures
+X; it does not measure Y._ If you cannot write that sentence, you do not yet know what your check
+proved.
 
 Three things make it hard to remember, and each is an instance:
 
@@ -117,10 +120,13 @@ was written down as untestable, with a note saying its silence "means nothing at
 a check quietly, and nothing goes red when it happens
 [→](INCIDENTS.md#the-dead-step-that-was-alive-from-a-merge-list-read-instead-of-a-count).
 
-**This rule is also its own worked example of the amendment process failing.** `INCIDENTS.md` held
-it as a candidate "awaiting a third instance" and it reached seven, because each new instance was
-written up as evidence rather than spent on the amendment. Collecting is not amending. When the
-threshold is met, change the rule.
+**This rule's own history is the caution, not the vindication.** `INCIDENTS.md` held it as a
+candidate "awaiting a third instance" and shipped it at seven — but the candidate was proposed at
+13:19 on 2026-09-09, met three by 13:51, and became a rule at 16:04. Two hours is not a failed
+amendment process. What did fail is the counting: one day's work on the checks kept turning up the
+same shape, each sighting was filed as fresh evidence, and nothing asked whether the seven were
+independent. Collecting is not amending, and **seven sightings from one sitting are not seven
+instances.** When the threshold is met, change the rule.
 
 **An unreferenced declaration is evidence about a name, not about a guarantee.** Trace the guarantee
 to the code that would break without it. Two more of the same shape: a "dead" function with 21
@@ -151,7 +157,6 @@ Not an opinion — the record is one-sided:
 | [the tool allowlist restricts nothing](INCIDENTS.md#the-allowlist-that-restricted-nothing)                                                | green for the project's life            | a four-probe experiment with a control             |
 | [a local hook vetoing `Write`, silently](INCIDENTS.md#the-hook-that-vetoed-write-silently)                                                | green                                   | a $4.50 run that produced nothing                  |
 | [an icon reconstructed from an adjective](INCIDENTS.md#the-favicon-reconstructed-from-an-adjective)                                       | green, **plus two reviews and a human** | comparing the artifact to the ticket, days later   |
-| [a ticket costs $0.11](INCIDENTS.md#the-ticket-that-cost-fourteen-times-its-estimate)                                                     | n/a                                     | one real invoice, wrong by 14×                     |
 
 Every one of those shipped with tests passing and mutations caught. A green suite means **no test
 disagrees with the code**, which is a statement about the tests. It is not evidence about reality,
@@ -206,17 +211,15 @@ see. Anything with a user-visible surface has a way of being _used_, and that is
 ### Ask for it — and nudge, never refuse
 
 **An agent cannot perform step 4.** No browser, no eyes on the board, no judgement about whether the
-icon looks right. So the obligation is to _ask_, and to ask well:
-
-- **Name the exact command**, copy-pasteable, with the real ticket or target filled in.
-- **Say what to look at** and what would falsify it — "the tab icon should be the attached SVG, not a
-  red block T" beats "please check the favicon works".
-- **Say what has not been observed yet**, plainly.
+icon looks right. So the obligation is to _ask_, and to ask well: **hand over the command itself**,
+in [the form below](#finish-every-feature-by-handing-over-the-command) — the exact line with the
+real target filled in, what would falsify it, and what it has never done.
 
 **Ask when any of these is true**, without waiting to be prompted:
 
 - a feature just became drivable for the first time
-- several turns have gone by with no real run — code has accumulated on the strength of green tests
+- several turns have gone by with no real run — or **no product code has changed at all**, which is
+  the case that looks like progress and reads as green
 - a privilege is about to widen, or a loop is about to run unattended
 - something is about to be committed that has only ever been exercised by its own tests
 
@@ -256,21 +259,12 @@ estimate](INCIDENTS.md#the-round-that-refuted-its-own-cost-estimate)
 and 4.** So this is not ergonomics — it is the precondition for the only thing that has ever caught
 a real defect here. Build the command with the feature, in the same commit, never "later".
 
-The service's whole surface is hand-drivable and that is deliberate:
-
-```
-pnpm poll:once                       pnpm solve:once                  # whole queue, dry
-pnpm triage:once <KEY> [--write]     pnpm solve:once <KEY>            # one ticket, dry
-pnpm watch:once <KEY> [--write]      pnpm solve:once <KEY> --claim|--solve|--pr|--review
-                                     pnpm solve:once <KEY> --advance  # a separate mode
-                                     pnpm bot:once <KEY> --review
-```
+The service's whole surface is hand-drivable and that is deliberate. The rungs themselves are owned
+by [`README.md`](../../../README.md#commands) and by each parser's own `USAGE` string, which is what
+a new one must update — not repeated here, where a copy would rot out of sight.
 
 There is no `--plan` flag and there should not be: the bare form _is_ the first rung, which is the
 dry-by-default rule showing up in the argument parser rather than in a doc comment.
-
-That block is an illustration of the _shape_, not the reference — the commands are owned by
-`README.md` and by each parser's own `USAGE` string, which is what a new rung must update.
 
 ### The command outlives the phase that needed it
 
@@ -283,13 +277,10 @@ by hand against one chosen ticket. It has since been used repeatedly, as itself:
 one ticket, now, because I want its verdict.** The daemon can only offer "wait for the poller to
 notice"; the flag offers a chosen ticket on demand, which is a different and more useful thing.
 
-That reframes the cost argument. A command is not overhead recovered later through cheaper
-debugging — it is frequently **the most-used thing the phase produces**, and the queue that
-motivated it is the part nobody interacts with. So when the command feels like a detour from the
-"real" feature, that instinct has been wrong every time it has been tested here.
-
-It follows that the command deserves the care given to a feature: a usable name, honest `USAGE`
-text, a report worth reading, and an exit code. Not a debug entry point left where it fell.
+That reframes the cost argument: a command is not overhead recovered later through cheaper
+debugging, it is frequently **the most-used thing the phase produces**. So give it the care given to
+a feature — a usable name, honest `USAGE` text, a report worth reading, an exit code — not a debug
+entry point left where it fell.
 
 ### The rules that make a command worth having
 
