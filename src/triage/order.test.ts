@@ -148,7 +148,11 @@ describe("byCreatedAscending", () => {
  *
  * Unplug it by returning the newest success rather than the end of the
  * contiguous prefix, the repair anyone would reach for to "advance further",
- * and the second and fourth cases below fail.
+ * and the second, third and fourth cases below fail — counted by running it,
+ * because the first draft of this comment guessed two and was wrong. Only the
+ * all-succeeded and empty cases survive, which is the point: they are the two
+ * where "newest success" and "end of the prefix" are the same answer, so a
+ * mutant that kept only them would look healthy on the happy path alone.
  */
 describe("settledCursor", () => {
   const oldest = ticket("SSX-1", "2026-09-02T10:00:00Z");

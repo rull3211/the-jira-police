@@ -382,10 +382,12 @@ configured one. **The two settings taking a blank in opposite directions is the 
 a blank widens what `TRIAGE_ONLY_STATUS` admits, and makes `TRIAGE_STATUS_PRIORITY` do nothing at
 all.
 
-**Measured against the real backlog, 2026-09-10, and the result argues for leaving it unset.** In
-the component scope the 35 eligible tickets are 26 `Mottatt`, 7 `On Hold`, 2 `Backlog` and 0
-`In Progress Concept` — so `Mottatt` is 74% of the queue and prioritising it moves the oldest ticket
-on the board (SSX-3499, Backlog, May 11) from first to twenty-seventh. That is the starvation the
+**Measured against the real backlog, 2026-09-10, and the result argues for leaving it unset.** A
+139-day discovery window over the component scope returns 35 tickets — **not the 65 above, which is
+the allowlist's eligible set with no created bound at all**; the two numbers count different things
+four lines apart and neither is derived by `docs:check`. Those 35 are 26 `Mottatt`, 7 `On Hold`, 2
+`Backlog` and 0 `In Progress Concept` — so `Mottatt` is 74% of that queue and prioritising it moves
+its oldest ticket (SSX-3499, Backlog, May 11) from first to twenty-seventh. That is the starvation the
 plan predicted, and the mitigating fact is the window rather than the order: at ~5 new issues a day
 against a 90-minute lookback, a steady-state cycle holds one ticket or none, where every order is
 the same order. **This setting only bites on a backlog** — a first run, a long outage, a widened

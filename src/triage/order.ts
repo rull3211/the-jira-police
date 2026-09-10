@@ -33,7 +33,7 @@ import type { TicketRef } from "../jira/types.ts";
  * the poll cycle is built to never lose an issue quietly, so a nonsensical
  * timestamp should stop the cycle instead.
  */
-export function instant(ticket: TicketRef): number {
+function instant(ticket: TicketRef): number {
   const parsed = Date.parse(ticket.created);
   if (Number.isNaN(parsed)) {
     throw new Error(`${ticket.key} has an unparseable created timestamp: ${ticket.created}`);

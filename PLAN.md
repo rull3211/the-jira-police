@@ -268,6 +268,15 @@ environment cannot answer a question about CI's.**
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
+- **`poll.order` has never been emitted.** It is the instrument `TRIAGE_STATUS_PRIORITY` ships with
+  — the argument for the setting being safe is that an operator can see the queue it produced — and
+  it fires only inside a cycle with at least one fresh ticket, which costs a model run per ticket.
+  What has been driven is the free half: `poll:once --dry-run` printed the real 35-ticket backlog in
+  priority order, and an empty real cycle was run to watch `poll.status_priority` fire at wiring
+  with the parsed list. So the ordering is observed and the wiring line is observed; the per-cycle
+  log line in between is not, and no test asserts it either. The first daemon run with a priority
+  configured settles it — which is also the first run that could show the log is too long, since the
+  head is truncated at ten by a constant nobody has watched truncate.
 - **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
   suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
   after a compaction — so neither the field name it branches on nor the fact of registration is
