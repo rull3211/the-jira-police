@@ -27,7 +27,14 @@
  */
 
 import { AGENT_LABELS } from "../solve/labels.ts";
-import { type Mutation, TriageError, type TriagePayload, assertDorCoherent } from "./runner.ts";
+import {
+  type Mutation,
+  TriageError,
+  type TriagePayload,
+  UNATTRIBUTED_DOR_ROW,
+  assertDorCoherent,
+  blockingPlaceholders,
+} from "./runner.ts";
 
 /**
  * The §11 idempotency sentinel, verbatim.
@@ -292,13 +299,22 @@ function checkLabels(payload: TriagePayload): readonly string[] {
   // the thing to read. `assertDorCoherent` covers the same contradiction via
   // `labels` and the verdict; this catches the case where those two are honest
   // and only the delta claims the pass.
-  if (payload.dorPlaceholders.length > 0 && payload.mutation.labelsAdd.includes("dor:pass")) {
+  // Reads only the blocking rows, for the same reason `assertDorCoherent` does:
+  // rows 8 and 9 are advisory, so a placeholder standing in for one is a nudge
+  // the report carries, not a claim the delta contradicts.
+  const blocking = blockingPlaceholders(payload.dorPlaceholders);
+  if (blocking.length > 0 && payload.mutation.labelsAdd.includes("dor:pass")) {
     violations.push(
-      `labelsAdd applies dor:pass while the ticket still contains ${payload.dorPlaceholders
-        .map((placeholder) => `"${placeholder}"`)
+      `labelsAdd applies dor:pass while the ticket still contains ${blocking
+        .map(
+          (placeholder) =>
+            `"${placeholder.text}" (${
+              placeholder.row === UNATTRIBUTED_DOR_ROW ? "no row given" : `row ${placeholder.row}`
+            })`,
+        )
         .join(
           ", ",
-        )} — DOR_CHECKLIST.md allows dor:pass "only if 1-9 hold", and row 9 is the baseline metric`,
+        )} — DOR_CHECKLIST.md allows dor:pass "only if 1-7 hold", and those rows are blocking`,
     );
   }
 
@@ -316,10 +332,12 @@ function checkLabels(payload: TriagePayload): readonly string[] {
  * The verdict coupling is the load-bearing rule, and it is not an extra
  * restriction invented here. It falls out of three existing ones meeting:
  *
- *   - `assertDorCoherent` already forbids `ready-ish` while placeholders remain,
- *     so `ready-ish` implies the Definition of Ready held.
- *   - DoR holding implies acceptance criteria concrete enough to test against,
- *     which is precisely what an unattended fixer needs and cannot invent.
+ *   - `assertDorCoherent` already forbids `ready-ish` while a placeholder on a
+ *     blocking row remains, so `ready-ish` implies the blocking half of the
+ *     Definition of Ready held.
+ *   - Those blocking rows include acceptance criteria concrete enough to test
+ *     against, which is precisely what an unattended fixer needs and cannot
+ *     invent.
  *   - The skill's dev lens — repo, blast radius, the file, the technique, the
  *     rejected alternative — is only emitted on ACCEPT, and it is most of the
  *     evidence a fitness call rests on.
@@ -328,6 +346,21 @@ function checkLabels(payload: TriagePayload): readonly string[] {
  * and is closer to the opposite: it is the same fact stated three ways, and the
  * gate only has to check the cheapest of them. Note that the placeholder case
  * needs no rule of its own — `assertDorCoherent` throws before this runs.
+ *
+ * ## What the advisory rows moved, and it is a privilege boundary
+ *
+ * Rows 8 (size) and 9 (evidence) no longer fail an item, so tickets that used to
+ * be `dor:gaps` on an unfilled baseline are now `ready-ish` — and `ready-ish` is
+ * the only DoR input this fitness rule has. The set of tickets a bot may be
+ * judged fit to fix therefore **widened**, without a single line here changing.
+ * That is intended: an unmeasured ticket was never unfixable, only unmeasured,
+ * and `SSX-3801` was refused before the claim for exactly that reason.
+ *
+ * It is still a privilege boundary that moved as a side effect of a documentation
+ * change, which is the shape of thing this repository phases deliberately. The
+ * two conditions that actually protect the claim are unchanged and both are
+ * human: `agent:solvable` is not `agent:start`, and nothing picks a ticket up
+ * without a person typing the latter.
  *
  * The label rule reads `labels`, never `labelsAdd`, and that distinction was
  * bought the hard way. `labelsAdd` is a delta holding only labels not already on

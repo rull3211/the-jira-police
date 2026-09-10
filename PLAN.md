@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2465 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2471 tests in 69
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -605,80 +605,36 @@ are the whole migration; the eleven are the debt it exposes.
 tempting, and that is the failure the constant's own comment warns about. Fix the eleven in the same
 week, or say in the code that the resolver is aspirational — do not widen the number and leave it.
 
-### 20. DoR rows 8 and 9 gate the verdict, and the analyst routes around them instead
-
-**Branch:** `refactor/dor-advisory-rows`.
-
-**What is wrong.** The leaf bar is "rows 1–9 hold", and two of those nine are not the same kind of
-claim as the other seven. Row 8 (rough size) and row 9 (evidence / baseline metric) are judgements
-about how well a ticket is _instrumented_, not about whether it is _understood_ — and a ticket can be
-perfectly workable while failing both.
-
-**The measurement, taken over the 29 reports in `groomed/` before the change.** The obvious
-hypothesis — that 8 and 9 fail a lot of tickets — is **refuted**. Only 2 of the 12 `dor:gaps` reports
-would flip to `dor:pass` if both rows were deleted (SSX-3283, SSX-3837), and both need an
-interpretive call to count at all. Row 9 is named in all 12, but always beside a genuinely missing
-acceptance criterion or value statement, which would fail the ticket anyway.
-
-**The cost is on the passes, which is where nobody was looking.** 11 of the 16 `dor:pass` reports
-carry a written argument for why a thin or absent row 9 should not block. `SSX-3838.md:40` is the
-clearest: _"Lest bokstavelig stryker den"_ — read literally it fails — passed anyway because
-_"requiring a baseline before a one-hour verification that produces the baseline is circular"_.
-`SSX-3801.md` flags its own pass as _"the weakest form a PASS can rest on"_. `SSX-3831.md` and
-`SSX-3836.md` both invent the same unwritten rule to get past it: _"rad 9 finnes for å stoppe umålte
-funksjoner"_ — row 9 exists to stop unmeasured **features**, so a reproducible defect is exempt.
-
-That rule is not in the checklist. Three separate runs derived it independently, which is the tell: a
-gate that two thirds of the passing population has to argue past is not measuring the thing it
-believes it is measuring, and the override is discretionary prose rather than a field anything can
-audit.
-
-**The drift that makes this cheap.** The file is a mirror — its own header says the canonical
-Confluence page (SDRM/1563820058) wins on divergence — and the mirror has drifted. Canonical DoR has
-**six** criteria; the local file has **ten**. Row 9 is not on the canonical page at all and the file
-admits it (a skill-local tech-lead policy, 2026-08-28, added the day after the page was last
-edited). Row 8 _is_ canonical, but its canonical wording is _"Rough size is known (or flagged as
-'needs sizing')"_ — an escape hatch the local table copies into its text and then ignores in the
-bar. So softening these two moves the mirror **toward** its source, not away from it.
-
-**What changes.** Rows 8 and 9 become advisory: still scored, still surfaced in the DoR cell and the
-comment as a nudge, never able to produce `dor:gaps` or block `ready-ish`. The leaf bar becomes rows
-1–7. Row 8 goes fully advisory rather than merely regaining its escape hatch — a deliberate deviation
-from the canonical page, recorded as such in the file rather than left to look like more drift.
-
-**And therefore the fitness call moves, which is the part to watch.** No fitness rule mentions DoR
-rows; the coupling is `gate.ts:345`, `solvable ⇒ verdict === "ready-ish"`. So an unmeasured ticket is
-agent-ineligible today purely by inheritance, and widening `ready-ish` widens what a bot may attempt
-unattended. That is a privilege boundary moving as a side effect, and it is the one thing here that
-is not just prose.
-
-**The guard is re-aimed, not retired.** `assertDorCoherent` and the `dor:pass` delta rule both cite
-row 9 by name, and both came from real incidents (SSX-3814, SSX-3822). Their value is catching a
-payload that contradicts its own evidence, and that survives the row-9 demotion — but only if the
-payload says _which_ row a leftover `[N]` stands in for. So `dorPlaceholders` gains a row number, and
-the guard fires on rows 1–3 (problem, value, acceptance criteria) instead of on row 9.
-
-**What would make it the wrong idea.** Three things.
-
-1. **The two incidents were both row 9.** SSX-3822 wrote "baseline [N] left unfilled" into its own
-   scorecard and shipped `dor:pass`. Re-aiming the guard at rows 1–3 means that exact payload is now
-   _legal_. It is legal on purpose — the pass is no longer a contradiction — but if the real lesson
-   of SSX-3822 was "the model will mark a row green while its own prose says otherwise", that lesson
-   is about the model, not about row 9, and demoting the row does not address it.
-2. **Row 9 is defended in the corpus, not only strained against.** `SSX-3517.md` — _"Dette er raden
-   tech-lead la til nettopp for produktgodkjente bestillinger som kommer uten måling. Dataene finnes
-   og er tilgjengelige."_ Exactly the case the row was added for, and it would now be a nudge.
-3. **It is a tech-lead policy and this change is not the tech lead's.** Row 9's provenance is a dated
-   decision by a named person. Demoting it locally without reconciling the Confluence page leaves a
-   third state — not canonical, not the policy as written — which is how the drift started.
-
-**How it gets proved.** `pnpm test` green (2465 before), then re-run triage against the two tickets
-the corpus says are the real test: SSX-3838, which passed row 9 only by argument, should pass it
-without one; and SSX-3283, whose row 9 is a genuine `🔴`, should stay a send-back on AC-3 alone.
-
 ---
 
 ## What was learned, and is recorded nowhere else
+
+### A gate is calibrated on the population it passes, not the one it fails
+
+The complaint was that DoR rows 8 and 9 were failing too many tickets. Measured over the 29 reports
+in `groomed/`, that is **refuted**: only 2 of 12 `dor:gaps` items would have flipped if both rows
+were deleted, and both needed an interpretive call to count at all. Had the question stopped there,
+the answer would have been "the rows are fine, the complaint is wrong" — and the complaint was
+right.
+
+**The signal was in the passes.** 11 of the 16 `dor:pass` items carried a written argument for why a
+thin or absent row 9 should not block, and three independently invented the same unwritten exemption
+to get there — _row 9 exists to stop unmeasured features, so a reproducible defect is exempt_. That
+sentence was in no checklist. A gate two thirds of its passing population has to argue past is not
+measuring what it believes it is; it has become a discretionary override with no field recording
+that it was exercised.
+
+**The general form, and it is not about DoR.** A gate's failures are the population everybody counts,
+because a failure is an event with a name and a label. Its passes are unexamined by construction —
+the ticket moved on, so nothing asks at what cost. But a miscalibrated gate does not usually
+manifest as too many refusals; it manifests as **compliance theatre in the accepts**, which is
+invisible to any count keyed on the refusal. So when asking whether a check is set too tight, read
+what the passing cases had to say to get through, not just how many were stopped.
+
+The tell is cheap to look for and was sitting in plain text: the same unwritten exemption appearing
+in three independent runs. **Any rule the corpus keeps inventing is a rule the corpus needs and the
+document does not have** — and until somebody writes it down, every instance of it is an
+unauditable judgement call wearing the costume of a passing check.
 
 ### A rewrite can invent a number, and every gate here stays green
 

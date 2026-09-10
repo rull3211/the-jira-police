@@ -37,16 +37,40 @@ export const TRIAGE_SCHEMA = {
     },
     dorPlaceholders: {
       type: "array",
-      items: { type: "string" },
       // Doubles as an instruction. The model reads this description, so stating
-      // the rule here is the cheapest place to state it — and it is a rule the
-      // skill already has: DOR_CHECKLIST.md line 28 says `dor:pass` is emitted
-      // "only if 1–9 hold", and row 9 is the baseline metric. A run once
-      // reported "baseline [N] left unfilled" in its own scorecard and marked
-      // the row green anyway, which is what this field exists to make
-      // impossible to do silently.
+      // the rule here is the cheapest place to state it. A run once reported
+      // "baseline [N] left unfilled" in its own scorecard and marked the row
+      // green anyway, which is what this field exists to make impossible to do
+      // silently.
+      //
+      // The row number is what makes that possible now that rows 8 and 9 are
+      // advisory. Before, any placeholder blocked, because every placeholder
+      // was read as the row 9 baseline; with row 9 unable to fail an item, an
+      // unattributed placeholder cannot say whether it is evidence of a
+      // contradiction or of a nudge. Asking which row it belongs to is the
+      // cheapest way to keep the check — and it is a question the model is
+      // already answering implicitly by scoring the row.
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["text", "row"],
+        properties: {
+          text: {
+            type: "string",
+            description:
+              'The placeholder verbatim, exactly as it appears in the ticket — e.g. "[N]", "[TBD]", "<beløp>".',
+          },
+          row: {
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+            description:
+              "Which DoR checklist row this placeholder stands in for: the row that would hold if somebody filled it in. Judge from what the placeholder is standing in for and the section it sits in — a placeholder inside an acceptance criterion is row 3, an unfilled baseline metric is row 9, an unnamed segment is row 1. Answer honestly and specifically; do not default to a blocking row to be safe, and do not default to 9 to avoid one.",
+          },
+        },
+      },
       description:
-        'Literal unfilled fill-in placeholders still present in the ticket body, verbatim — e.g. "[N]", "[TBD]", "<beløp>". Empty array if there are none. A placeholder standing in for the DoR row 9 baseline metric means row 9 does not hold; since `dor:pass` may be emitted ONLY if rows 1–9 all hold, a non-empty array here requires `dor:gaps` rather than `dor:pass`, and rules out the "ready-ish" verdict.',
+        'Literal unfilled fill-in placeholders still present in the ticket body, each with the DoR row it stands in for. Empty array if there are none. Rows 1-3 (problem/segment, value and why-now, acceptance criteria) are BLOCKING: a placeholder attributed to one of them means that row does not hold, which requires `dor:gaps` rather than `dor:pass` and rules out the "ready-ish" verdict. Rows 8 and 9 (size, evidence/data) are ADVISORY and block nothing — report the placeholder, and still emit `dor:pass` if rows 1-7 hold.',
     },
     recommendedNextStep: {
       type: "string",
@@ -158,7 +182,7 @@ export const TRIAGE_SCHEMA = {
           // gate, because a model told the rule up front produces a coherent
           // payload, whereas one told it only by rejection produces a retry.
           description:
-            'True ONLY if ALL of: the verdict is "ready-ish"; the fault is localised to one repo you can name; the acceptance criteria are concrete enough that a passing test could demonstrate the fix; and the change does not need a product decision, a design, a schema/API migration, or credentials. If the verdict is anything other than "ready-ish", this MUST be false — a ticket that does not meet Definition of Ready has nothing an agent could verify itself against. When true, you MUST also include the label "agent:solvable" in the top-level `labels` array. NEVER emit any other `agent:*` label: "agent:start" in particular is a human authorisation and is not yours to grant.',
+            'True ONLY if ALL of: the verdict is "ready-ish"; the fault is localised to one repo you can name; the acceptance criteria are concrete enough that a passing test could demonstrate the fix; and the change does not need a product decision, a design, a schema/API migration, or credentials. A missing size estimate (DoR row 8) or a missing baseline metric (row 9) is NOT a reason to say false — those rows are advisory and describe measurement, not fixability. If the verdict is anything other than "ready-ish", this MUST be false — a ticket that does not meet Definition of Ready has nothing an agent could verify itself against. When true, you MUST also include the label "agent:solvable" in the top-level `labels` array. NEVER emit any other `agent:*` label: "agent:start" in particular is a human authorisation and is not yours to grant.',
         },
         plausible: {
           type: "boolean",
@@ -190,7 +214,7 @@ export const TRIAGE_SCHEMA = {
           type: "array",
           items: { type: "string" },
           description:
-            'What stands in the way, one short phrase each — e.g. "needs a product decision on copy", "touches the payment schema", "no reproduction steps". MUST be empty when `solvable` is true, and should name at least one item when it is false. When `plausible` is true this list is not an explanation but a to-do list addressed to the reporter — it is the exact condition that would end the watch, so write each entry as something a person can go and do.',
+            'What stands in the way, one short phrase each — e.g. "needs a product decision on copy", "touches the payment schema", "no reproduction steps". MUST be empty when `solvable` is true, and should name at least one item when it is false. When `plausible` is true this list is not an explanation but a to-do list addressed to the reporter — it is the exact condition that would end the watch, so write each entry as something a person can go and do. NEVER list an unmet DoR row 8 (size) or row 9 (baseline metric / evidence) here. Those rows are advisory: they say how well the ticket is measured, not whether an agent could fix it, and an unsized or unmeasured ticket with testable acceptance criteria is still solvable. Listing one would refuse the ticket for a reason the checklist has already declined to block on.',
         },
       },
     },

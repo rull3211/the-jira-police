@@ -20,7 +20,7 @@ import { join } from "node:path";
 // Mutually referential with `runner.ts`, which imports `Verdict` from here.
 // Both directions are `import type`, so the cycle exists only for the type
 // checker: Node's type-stripping erases these lines before anything is loaded.
-import type { AgentFitness } from "../triage/runner.ts";
+import { type AgentFitness, type DorPlaceholder, UNATTRIBUTED_DOR_ROW } from "../triage/runner.ts";
 
 /** Verdict emitted by the intake-triage skill. */
 export type Verdict = "duplicate" | "not-our-team" | "out-of-scope" | "needs-info" | "ready-ish";
@@ -71,7 +71,7 @@ export interface Rejection {
   readonly violations: readonly string[];
   readonly verdict: string;
   readonly labels: readonly string[];
-  readonly dorPlaceholders: readonly string[];
+  readonly dorPlaceholders: readonly DorPlaceholder[];
   /** The payload that was refused, rendered as-is. */
   readonly mutation: Readonly<Record<string, unknown>>;
 }
@@ -97,7 +97,16 @@ export async function writeRejection(directory: string, rejection: Rejection): P
     "",
     `- **Verdict:** ${rejection.verdict}`,
     `- **Labels:** ${rejection.labels.join(", ") || "—"}`,
-    `- **DoR placeholders:** ${rejection.dorPlaceholders.join(", ") || "—"}`,
+    `- **DoR placeholders:** ${
+      rejection.dorPlaceholders
+        .map(
+          (placeholder) =>
+            `${placeholder.text} (${
+              placeholder.row === UNATTRIBUTED_DOR_ROW ? "no row given" : `row ${placeholder.row}`
+            })`,
+        )
+        .join(", ") || "—"
+    }`,
     "",
     "## Why it was refused",
     "",

@@ -8,6 +8,7 @@ import {
   type Mutation,
   TriageContradictionError,
   TriageError,
+  UNATTRIBUTED_DOR_ROW,
   assertDorCoherent,
   assertMcpReady,
   parseAgentFitness,
@@ -289,30 +290,103 @@ describe("assertDorCoherent", () => {
   it("passes when placeholders are reported alongside dor:gaps", () => {
     // This is the correct handling, and it must not be punished — the whole
     // point is to make honest reporting free and contradiction expensive.
-    expect(() => assertDorCoherent({ ...clean, dorPlaceholders: ["[N]"] }, "SSX-1")).not.toThrow();
+    expect(() =>
+      assertDorCoherent({ ...clean, dorPlaceholders: [{ text: "[N]", row: 3 }] }, "SSX-1"),
+    ).not.toThrow();
   });
 
-  it("rejects the exact SSX-3822 payload that reached the board", () => {
-    // Reconstructed from the posted comment and the labels now on the issue.
-    // DOR_CHECKLIST.md line 28: "Output dor:pass only if 1-9 hold." Row 9 is
-    // the baseline metric, and the run's own scorecard said it was "[N]".
+  it("allows the exact SSX-3822 payload, because row 9 is now advisory", () => {
+    // Reconstructed from the posted comment and the labels now on the issue,
+    // and it is the payload this guard was BUILT to refuse — the run wrote
+    // "baseline [N] left unfilled" into its own scorecard and shipped dor:pass
+    // anyway.
+    //
+    // It passes now, and that is the change rather than a regression. Row 9
+    // cannot fail an item, so a pass alongside an unfilled baseline is no
+    // longer a contradiction; it is the advisory rule working. What the guard
+    // still refuses is the same claim about a blocking row — the case below.
+    // If this ever needs reverting, the lever is BLOCKING_DOR_ROWS, not this
+    // test.
     expect(() =>
       assertDorCoherent(
         {
           ...clean,
           verdict: "ready-ish",
           labels: ["triaged", "dor:pass", "route:ours", "next:to-trio"],
-          dorPlaceholders: ["[N]"],
+          dorPlaceholders: [{ text: "[N]", row: 9 }],
+        },
+        "SSX-3822",
+      ),
+    ).not.toThrow();
+  });
+
+  it("still rejects the SSX-3822 shape when the placeholder is on a blocking row", () => {
+    // Same payload, one field different: the [N] stands in for an acceptance
+    // criterion rather than a baseline metric. This is the half of the old
+    // guard that survives, and it is the half worth keeping.
+    expect(() =>
+      assertDorCoherent(
+        {
+          ...clean,
+          verdict: "ready-ish",
+          labels: ["triaged", "dor:pass", "route:ours", "next:to-trio"],
+          dorPlaceholders: [{ text: "[N]", row: 3 }],
         },
         "SSX-3822",
       ),
     ).toThrow(TriageContradictionError);
   });
 
+  it("treats an unattributed placeholder as blocking", () => {
+    // Fails closed on purpose. "There is a placeholder and I cannot say which
+    // row" is the SSX-3822 shape with the attribution missing, and the escape
+    // costs the model one honest integer.
+    expect(() =>
+      assertDorCoherent(
+        {
+          ...clean,
+          verdict: "ready-ish",
+          labels: ["dor:pass"],
+          dorPlaceholders: [{ text: "[N]", row: UNATTRIBUTED_DOR_ROW }],
+        },
+        "SSX-1",
+      ),
+    ).toThrow(TriageContradictionError);
+  });
+
+  it("ignores an advisory placeholder sitting beside a blocking one", () => {
+    // The message must name the row that actually blocks, or an operator reads
+    // the refusal and goes looking for the wrong gap.
+    try {
+      assertDorCoherent(
+        {
+          ...clean,
+          verdict: "ready-ish",
+          labels: ["dor:pass"],
+          dorPlaceholders: [
+            { text: "[N]", row: 9 },
+            { text: "[TBD]", row: 2 },
+          ],
+        },
+        "SSX-1",
+      );
+      expect.unreachable("should have thrown");
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('"[TBD]" (row 2)');
+      expect(message).not.toContain("[N]");
+    }
+  });
+
   it("catches a bad label even when the verdict is defensible", () => {
     expect(() =>
       assertDorCoherent(
-        { ...clean, verdict: "needs-info", labels: ["dor:pass"], dorPlaceholders: ["[TBD]"] },
+        {
+          ...clean,
+          verdict: "needs-info",
+          labels: ["dor:pass"],
+          dorPlaceholders: [{ text: "[TBD]", row: 1 }],
+        },
         "SSX-1",
       ),
     ).toThrow(TriageContradictionError);
@@ -324,7 +398,12 @@ describe("assertDorCoherent", () => {
     // one that matters unguarded.
     expect(() =>
       assertDorCoherent(
-        { ...clean, verdict: "ready-ish", labels: ["dor:gaps"], dorPlaceholders: ["[N]"] },
+        {
+          ...clean,
+          verdict: "ready-ish",
+          labels: ["dor:gaps"],
+          dorPlaceholders: [{ text: "[N]", row: 3 }],
+        },
         "SSX-1",
       ),
     ).toThrow(TriageContradictionError);
@@ -333,15 +412,20 @@ describe("assertDorCoherent", () => {
   it("names the placeholder and the rule, so the log explains itself", () => {
     try {
       assertDorCoherent(
-        { ...clean, verdict: "ready-ish", labels: ["dor:pass"], dorPlaceholders: ["[N]"] },
+        {
+          ...clean,
+          verdict: "ready-ish",
+          labels: ["dor:pass"],
+          dorPlaceholders: [{ text: "[N]", row: 3 }],
+        },
         "SSX-3822",
       );
       expect.unreachable("should have thrown");
     } catch (error) {
       const message = (error as Error).message;
       expect(message).toContain("SSX-3822");
-      expect(message).toContain('"[N]"');
-      expect(message).toContain("dor:pass only if 1-9 hold");
+      expect(message).toContain('"[N]" (row 3)');
+      expect(message).toContain("dor:pass only if 1-7 hold");
       // The operator needs to know Jira may already have been written.
       expect(message).toContain("already on the issue");
     }
@@ -356,7 +440,7 @@ describe("assertDorCoherent", () => {
         {
           verdict: "ready-ish",
           labels: ["dor:pass"],
-          dorPlaceholders: ["[N]"],
+          dorPlaceholders: [{ text: "[N]", row: 3 }],
           recommendedNextStep: "Queue it.",
           report: "## report",
         },
@@ -371,13 +455,58 @@ describe("assertDorCoherent", () => {
         {
           verdict: "needs-info",
           labels: ["dor:gaps"],
-          dorPlaceholders: ["[N]"],
+          dorPlaceholders: [{ text: "[N]", row: 9 }],
           recommendedNextStep: "Ask for the baseline.",
           report: "## report",
         },
         "SSX-3822",
       ),
-    ).toMatchObject({ verdict: "needs-info", dorPlaceholders: ["[N]"] });
+    ).toMatchObject({ verdict: "needs-info", dorPlaceholders: [{ text: "[N]", row: 9 }] });
+  });
+
+  it("reads a legacy bare string as unattributed, so a stale skill fails closed", () => {
+    // The skill is prose the model interprets, not code deployed with this
+    // file, so a run mid-rollout can still answer in the old shape. It must
+    // keep the old behaviour rather than silently switching the guard off.
+    expect(() =>
+      parsePayload(
+        {
+          verdict: "ready-ish",
+          labels: ["dor:pass"],
+          dorPlaceholders: ["[N]"],
+          report: "## report",
+        },
+        "SSX-3822",
+      ),
+    ).toThrow(TriageContradictionError);
+  });
+
+  it("reads a row outside 1-10 as unattributed rather than trusting it", () => {
+    expect(
+      parsePayload(
+        {
+          verdict: "needs-info",
+          labels: ["dor:gaps"],
+          dorPlaceholders: [{ text: "[N]", row: 42 }],
+          report: "## report",
+        },
+        "SSX-1",
+      ).dorPlaceholders,
+    ).toEqual([{ text: "[N]", row: UNATTRIBUTED_DOR_ROW }]);
+  });
+
+  it("drops a placeholder with no text, since there is nothing to point at", () => {
+    expect(
+      parsePayload(
+        {
+          verdict: "needs-info",
+          labels: ["dor:gaps"],
+          dorPlaceholders: [{ row: 3 }, { text: "", row: 3 }, null],
+          report: "## report",
+        },
+        "SSX-1",
+      ).dorPlaceholders,
+    ).toEqual([]);
   });
 
   it("treats a missing dorPlaceholders field as empty rather than crashing", () => {
@@ -391,7 +520,11 @@ describe("assertDorCoherent", () => {
   it("is a TriageError, so the poller's existing handling applies", () => {
     // Which means the key is not recorded as seen and the next cycle retries —
     // and the skill's comment is idempotent, so a better run overwrites it.
-    const error = new TriageContradictionError("SSX-1", ["[N]"], ["the label dor:pass"]);
+    const error = new TriageContradictionError(
+      "SSX-1",
+      [{ text: "[N]", row: 3 }],
+      ["the label dor:pass"],
+    );
     expect(error).toBeInstanceOf(TriageError);
   });
 });
