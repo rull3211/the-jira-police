@@ -107,9 +107,7 @@ export interface Budget extends Band {
  * This branch committed in `PLAN.md`, before any measuring, to a mandatory-reading
  * path under 4,907 words. The cut landed at 4,913, and the bands were then drawn
  * around the 4,913 — which quietly converts a promise into whatever happened,
- * and is the same move as raising a ceiling to fit the corpus; `PLAN.md` keeps it
- * under "A budget read off a landing that missed its target ratifies the miss".
- * The fix was to
+ * and is the same move as raising a ceiling to fit the corpus. The fix was to
  * hit the target first (`CLAUDE.md` to its 800-word brief, landing the path at
  * 4,811) and only then re-read the numbers. `aggregateCeiling` is now 4,905, so
  * the figure this branch promised in advance is the figure that fails the build.

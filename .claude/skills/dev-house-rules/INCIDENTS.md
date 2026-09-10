@@ -1233,3 +1233,45 @@ this one comes with an instruction attached: at instance two, write it.
 
 **No rule yet** — inverting a denylist over a vocabulary you do not control is a candidate at one
 instance and the paragraph above says what writing it would take, and `denylist` at 2.
+
+### The lesson store that was the incident it was written to fix
+
+The entry above — [four lessons filed where nothing loads
+them](#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them) — diagnosed the cause
+correctly: **writing something down feels like filing it.** Its remedy was an escape hatch on
+`STARTING.md` rule 2, letting a shipped `PLAN.md` entry survive its own deletion _"if it is a lesson
+that lives nowhere else"_, into a "learned" section that `PROVING.md` step 5 then made a deliverable
+of every run. `PLAN.md` is off the mandatory-reading path and exempt from the length budget. So the
+fix moved lessons out of commit messages, which nothing loads, and into a section of a file nothing
+loads, which unlike a commit message **grows without bound**.
+
+**Measured 2026-09-10, when a human asked why the plan kept getting longer:** 17 entries, **409
+lines**, across `PLAN.md`'s 1,094, and not one ever removed — 805 → 1,094 over 24 commits,
+sawtoothing as plan entries were correctly deleted and ratcheting because the learned section only
+ever took deposits. Every `docs:check` check was green throughout; a growing markdown section is not
+a property any of them measures. It surfaced the way its predecessor did: a human read the file.
+
+**Three properties made it invisible.** The author decides whether the exception applies — "a lesson
+that lives nowhere else" is self-assessed, at the moment of most wanting it to be true. It fires on
+success, so the sink fills fastest when things are going well, which is when nobody is auditing. And
+it had a deposit rule and no withdrawal rule, so it could only integrate.
+
+**The generalisation is not about `PLAN.md`.** An exception clause attached to a deletion rule, where
+the author judges whether it applies, is a leak with a legal path. Deletion rules need the exception
+to name a _destination that is itself maintained_, not a holding area — and if the destination is
+"somewhere I will decide later", the honest options are the rule it changes, or nothing.
+
+**The disposition, and the second mistake inside it.** The first pass emptied the section by
+_promoting_ it: ten rule paragraphs into `PROVING.md`, two entries into this file, one into a skill
+checklist. A human read that diff and said the cut was the point. Re-checked one at a time, **seven
+of the ten were already written at the call site that produced them** — the race at
+`skill-root.ts:140`, the escaping rule at `test-hooks.sh:97`, two at `length-budget.ts`, the
+grandfather-list argument at `rule-citations.ts:18` — and the remaining three had one instance each,
+which [FINISHING.md](FINISHING.md#the-postmortem-in-three-questions) already refuses. All ten were deleted. **Moving a lesson is not disposing of it**, and a relocation
+that has to be argued for is the sink reopening one file along; what closed it was accepting that
+the tree was already saying these things, and that a run leaving no residue is the normal case.
+`PLAN.md` 1,094 → 667 lines.
+
+**The rules** — [`PLAN.md` records what is not built, and never a
+lesson](STARTING.md#the-document-contract-which-is-the-one-that-is-always-in-force); [step 5 routes
+what was learned to the rule it changes](PROVING.md#step-5-is-where-it-compounds).

@@ -2857,8 +2857,8 @@ that commit's own message claims — it passed on a defect in the harness rather
 quote produced a payload the hook could not parse, and an unreadable command is treated as a write.
 The guard denied for the one reason the assertion was not testing. **A test whose fixture cannot
 reach the code path is indistinguishable from a passing test.** The terminator is now
-`[^[:alnum:]_-]`, so a quote or a bracket ends the verb; `PLAN.md` carries how it was found and the
-rule it is being proposed for.
+`[^[:alnum:]_-]`, so a quote or a bracket ends the verb; `test-hooks.sh:97` carries how it was
+found, as the third instance of `lib.sh`'s `jsonEscape` defect.
 
 **Anchoring is the difference between guarding the act and censoring the words.** The `gh pr merge`
 check matches only at command position, so prose and commit messages may discuss it freely. The push
@@ -2983,6 +2983,8 @@ Recorded so that "we considered it" survives the session that considered it.
   you before you re-attempt" reads as blessing the re-attempt, and a rule that can be read as
   permission will be.
 - **A `docs:check` rule failing a bare SHA cited without an incident anchor**, and **a CI check
-  requiring "What was learned" to grow whenever a numbered entry is deleted.** Both would have caught a
-  real defect, and both are mechanism ahead of evidence at one instance each. The second is the more
-  tempting and the more dangerous — it would fire on every ordinary deletion.
+  requiring the old "What was learned" section to grow whenever a numbered entry is deleted.** Both
+  would have caught a real defect, and both are mechanism ahead of evidence at one instance each. The
+  second is the more tempting and the more dangerous — it would fire on every ordinary deletion, and
+  on 2026-09-10 that section was deleted as an unbounded sink, so the check would now enforce the
+  defect.

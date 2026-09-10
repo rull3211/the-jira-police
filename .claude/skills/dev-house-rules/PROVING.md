@@ -242,7 +242,10 @@ legitimate decision. Skipping it because nobody mentioned it is not.
 A run that is not written up is a run paid for twice. The output of step 5 is concrete:
 
 - the prose the run falsified, fixed **now**
-- what was learned, into the plan's learned section if it lives nowhere else
+- what was learned, into **the rule it changes** in this skill — or into [INCIDENTS.md](INCIDENTS.md)
+  if it changes no rule, or nowhere at all. Never into `PLAN.md`, which tracks unbuilt work and is
+  read by nobody looking for a lesson.
+  [→](INCIDENTS.md#the-lesson-store-that-was-the-incident-it-was-written-to-fix)
 - **the prediction you got wrong**, and why — this is the highest-value artifact of the whole loop
   and the only one that improves the _next_ prediction
 
