@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2496 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2519 tests in 70
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -42,13 +42,15 @@ Default posture is **manual**: nothing is solved until a human adds a label.
 
 **The numbers are identifiers, not an ordering, so they are never reused and the sequence has
 holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion would silently
-repoint every one of them — the failure §14 exists about. A missing number means that entry shipped
-and was deleted. The settled half of the two guardrail entries now lives in `ARCHITECTURE.md` §16,
+repoint every one of them — the failure §14 exists about. A missing number almost always means that
+entry shipped and was deleted. **One of them did not ship**, and it is named with the holes below
+rather than here, because the qualifier is worth nothing without the case: a hole list that flattens
+"built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `ARCHITECTURE.md` §16,
 every file that cited them has been repointed there, and what is still open from them is §17.
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26 and §27, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28 and §29, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -70,7 +72,12 @@ fitness block owning the region it writes, shipped in PR #37; §26 and §27 were
 clause and the status allowlist that narrowed it, and each is a hole one commit after it was written
 — opened and deleted inside the branch that built it, which is what the rule now asks for. **§24 is
 absent from that list and is not a hole** — it was skipped rather than spent, for the reason §19
-gives. §28 and §29 are what is left of the triage-selection entries, so the next entry is §30.
+gives. §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
+inside the branch that built it. **§29 is the exception the paragraph above flags** — the handed-off
+unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
+(unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
+parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
+written down here. The triage-selection entries are now all closed, so the next entry is §30.
 
 <!-- refs:on -->
 
@@ -654,35 +661,6 @@ both half-proven.
 **What would make it the wrong idea.** A sweep that deletes by age can delete a root belonging to a
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
-
-### 28. Triage order ignores the board, so the leftmost column waits behind the oldest ticket
-
-**Branch:** none yet. Wants the cursor work first, and the status list `TRIAGE_ONLY_STATUS` already
-ships.
-
-**What is not built.** `TRIAGE_STATUS_PRIORITY` — an ordered status list, leftmost column first,
-with unlisted statuses sorting last. Triage works down it rather than strictly oldest-first.
-
-**Why it is owed.** Ordering today is `created ASC` end to end, which is fair and says nothing about
-what is worth triaging first. A ticket in the leftmost column is the one a person is about to pick
-up.
-
-**Why a configured list rather than the board.** The real column-to-status mapping lives behind
-Jira's Agile API, which would need a board id, a new client method and a new read grant. The list is
-a setting the operator already knows the answer to, it matches how components and auto issue types
-are configured, and it is testable without a board.
-
-**The cursor is the whole difficulty.** `runPollCycle` advances the cursor across an unbroken run of
-successes _from the oldest issue forward_, so today the processing order **is** the correctness
-mechanism. Re-sorting the loop naively strands older tickets permanently — the exact failure the
-poller's header rule 2 exists to prevent. The two get decoupled: triage in priority order, advance
-the cursor over the contiguous created-ascending prefix of the issues that succeeded. That is a
-guard, so it does not ship until a test fails when it is unplugged.
-
-**What would make it the wrong idea.** If the leftmost column is where tickets are dumped and left,
-priority ordering starves the ones that were actually moving, and the decoupling has bought
-complexity for a worse order. Worth measuring against one real backlog before it goes in the daemon
-rather than only in `poll:once`.
 
 ---
 

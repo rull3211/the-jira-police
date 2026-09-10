@@ -587,6 +587,7 @@ Full table in `ARCHITECTURE.md` §10. The ones that matter for a demo:
 | `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post           |
 | `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`     |
 | `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank widens rather than closes** — see below |
+| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below    |
 | `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                         |
 | `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                     |
 | `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in  |
@@ -624,6 +625,23 @@ resolve is a filter matching nothing and a service that looks healthy while tria
 active list prints once at startup as `poll.status_filter`, with a `named` field listing the entries
 given as names — those are the ones nobody has checked. **Check a name against the board before you
 rely on it**, because the log line will happily print a name that matches nothing.
+
+**`TRIAGE_STATUS_PRIORITY` sits next to it, does the opposite job, and reads a blank the opposite
+way.** It does not decide _whether_ a ticket is triaged, only _when_: statuses in the order you want
+them worked, leftmost column first, anything unlisted after everything listed. Blank means the order
+the service has always used — strictly oldest first — so leaving it alone changes nothing. The two
+settings being adjacent and reading silence in opposite directions is the trap worth naming: blank
+`TRIAGE_ONLY_STATUS` widens what gets triaged, blank `TRIAGE_STATUS_PRIORITY` declines to reorder it.
+
+**Set it after looking, not before.** The reason it ships unset is that nobody has measured whether
+the leftmost column on this board is where work starts or where it is dumped — and if it is the
+latter, working it first starves the tickets that were actually moving. Configure it and run
+`pnpm poll:once --dry-run`: that is free, spends no model budget, and lists your real backlog in
+exactly the order a real run would work it, each line carrying the ticket's column. Once it is
+running for real, the daemon logs the same queue every cycle as `poll.order` — the first ten
+tickets and their columns, and only when a priority is configured. Ids and
+names both work here — unlike `TRIAGE_ONLY_STATUS`, this list is matched against what the API
+returned rather than rendered into JQL, so the name that fails to resolve there is safe here.
 
 **`SOLVE_REPO_ROOT` is the one that stops a solve before it starts, and it has no fallback on
 purpose.** A ticket's repository is resolved as `SOLVE_REPO_ROOT/<name>`, where the name comes from
