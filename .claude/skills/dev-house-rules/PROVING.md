@@ -135,6 +135,20 @@ tools" was true of the MCP allowlist and false of the session, written by someon
 allowlist and read it as describing the whole surface.
 [→](INCIDENTS.md#the-read-tools-the-header-said-were-denied)
 
+**A green suite is not evidence about a race, because the window is a property of the machine.** A
+fast local disk narrows the interleaving; a contended runner widens it. **A flaky test is a
+measurement — re-running it until it is green discards the measurement rather than reading it.**
+Leave the suite behind and drive the mechanism directly: 27 green local runs said nothing about a
+collision that reproduced 40 times out of 40 under two concurrent calls.
+[→](INCIDENTS.md#the-race-twenty-seven-green-runs-did-not-see)
+
+**A gate is calibrated on the population it passes, not the one it fails.** Failures are counted
+because a failure is an event with a name; passes are unexamined by construction. So a
+miscalibrated check shows up as **compliance theatre in the accepts**, which no count keyed on
+refusals can see. Read what the passing cases had to argue to get through — and **any exemption the
+corpus keeps inventing is a rule it needs and the document does not have.**
+[→](INCIDENTS.md#the-gate-whose-passing-cases-all-argued-their-way-through)
+
 **When you are corrected, check before agreeing.** The value is in verifying and finding _why_,
 which usually changes the fix. Folding is not agreement, it is the loss of one data point.
 
@@ -242,7 +256,10 @@ legitimate decision. Skipping it because nobody mentioned it is not.
 A run that is not written up is a run paid for twice. The output of step 5 is concrete:
 
 - the prose the run falsified, fixed **now**
-- what was learned, into the plan's learned section if it lives nowhere else
+- what was learned, into **the rule it changes** in this skill — or into [INCIDENTS.md](INCIDENTS.md)
+  if it changes no rule, or nowhere at all. Never into `PLAN.md`, which tracks unbuilt work and is
+  read by nobody looking for a lesson.
+  [→](INCIDENTS.md#the-lesson-store-that-was-the-incident-it-was-written-to-fix)
 - **the prediction you got wrong**, and why — this is the highest-value artifact of the whole loop
   and the only one that improves the _next_ prediction
 

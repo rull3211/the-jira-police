@@ -2985,4 +2985,6 @@ Recorded so that "we considered it" survives the session that considered it.
 - **A `docs:check` rule failing a bare SHA cited without an incident anchor**, and **a CI check
   requiring "What was learned" to grow whenever a numbered entry is deleted.** Both would have caught a
   real defect, and both are mechanism ahead of evidence at one instance each. The second is the more
-  tempting and the more dangerous — it would fire on every ordinary deletion.
+  tempting and the more dangerous — it would fire on every ordinary deletion, and it aged badly in the
+  other direction too: on 2026-09-10 that section was closed as an unbounded sink, so a check
+  _requiring_ it to grow would now enforce the defect. Declined twice, for opposite reasons.

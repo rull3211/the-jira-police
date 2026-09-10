@@ -68,7 +68,7 @@ never by the suite ([§16](ARCHITECTURE.md)). Both remind; neither can check. Re
 
 - [README.md](README.md) — how to run it
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how it works, the map
-- [PLAN.md](PLAN.md) — what is **not** built, lessons
+- [PLAN.md](PLAN.md) — what is **not** built; never lessons
 - [dev-house-rules](.claude/skills/dev-house-rules/SKILL.md) — how we work
 
 **All four are treated as source.** Prose falsified by a change is rewritten in the same commit, not

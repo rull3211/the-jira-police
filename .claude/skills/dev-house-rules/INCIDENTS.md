@@ -1233,3 +1233,104 @@ this one comes with an instruction attached: at instance two, write it.
 
 **No rule yet** — inverting a denylist over a vocabulary you do not control is a candidate at one
 instance and the paragraph above says what writing it would take, and `denylist` at 2.
+
+### The lesson store that was the incident it was written to fix
+
+The entry above — [four lessons filed where nothing loads
+them](#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them) — diagnosed the cause
+correctly: **writing something down feels like filing it.** Its remedy was an escape hatch on
+`STARTING.md` rule 2, letting a shipped `PLAN.md` entry survive its own deletion _"if it is a lesson
+that lives nowhere else"_, moving to a "learned" section. `PROVING.md` step 5 then made that a
+deliverable of every run.
+
+`PLAN.md` is not on the mandatory-reading path. It is exempt from the length budget by an argument
+recorded in `docs-check.ts` — _a budget on a file nobody must read is one nobody defends_. So the fix
+moved lessons out of commit messages, which nothing loads, and into a section of a file nothing
+loads, which unlike a commit message **grows without bound**.
+
+**Measured 2026-09-10, when a human asked why the plan kept getting longer:** 17 entries, **409
+lines**, across `PLAN.md`'s 1,094. Not one had ever been removed. Over the previous 24 commits
+touching the file it went 805 → 1,094, sawtoothing as plan entries were correctly deleted and
+ratcheting because the learned section only ever took deposits. Two implementations that day added a
+net +27 and +67 lines each while their own entries were being deleted as the rule requires.
+
+**Three properties made it invisible**, and they are the transferable part:
+
+- **The author decides whether the exception applies.** "A lesson that lives nowhere else" is
+  self-assessed, at the moment of most wanting it to be true.
+- **It fires on success.** Every finished piece of work is entitled to one, so the sink fills fastest
+  when things are going well — which is when nobody is auditing.
+- **It has no counter-pressure.** Rule 2 says when an entry is created and when it is deleted. The
+  learned section had a deposit rule and no withdrawal rule, so it could only integrate.
+
+**Nothing caught it and nothing could have.** All five checks were green throughout; a growing
+markdown section is not a property any of them measures, and `PLAN.md` was deliberately given no
+ceiling. It surfaced the way its predecessor did: a human read the file and asked.
+
+**The generalisation is not about `PLAN.md`.** An exception clause attached to a deletion rule, where
+the author judges whether it applies, is a leak with a legal path. Deletion rules need the exception
+to name a _destination that is itself maintained_, not a holding area — and if the destination is
+"somewhere I will decide later", the honest options are the rule it changes, or nothing.
+
+**The rules** — [`PLAN.md` records what is not built, and never a
+lesson](STARTING.md#the-document-contract-which-is-the-one-that-is-always-in-force); [step 5 routes
+what was learned to the rule it changes](PROVING.md#step-5-is-where-it-compounds).
+
+### The race twenty-seven green runs did not see
+
+`prepareSkillRoot` named its staging directory `<parentDirectory>/<issueKey>-skill` — derived
+entirely from its two arguments, so two concurrent runs sharing them shared a directory, which the
+function `rm -rf`s, copies into, and then `chmod`s read-only. Interleave two of those and one run
+deletes another's tree. The loser does not crash; it returns `refused`, the caller reads that as a
+broken installation, and the pass silently never runs.
+
+It arrived as one red test in CI on 2026-09-10, on a commit that had gone green an hour earlier and
+differed only in a pull request body. Everything available locally said there was nothing there: the
+file alone passed 12 times, the two colliding files together 15 times. **All 27 runs were on the
+broken code, and none was evidence of anything** — a fast local disk narrows the interleaving window,
+a contended shared runner widens it, and the suite measures the disk it is on.
+
+What settled it was leaving the suite behind and driving the mechanism directly: two concurrent calls
+against one root, 40 rounds, **40 prepared and 40 refused**, exactly one loser per pair, every time.
+A defect that reproduces 0 times in 27 test runs and 40 out of 40 when addressed head-on is the same
+defect; only the instrument changed.
+
+**The generalisation is about what a re-run means.** A flaky test is a measurement, and re-running it
+until it is green discards the measurement rather than reading it. The cheap move — press re-run,
+watch the pull request go green, move on — was available and would have worked, and the race would
+still be in `prepareSkillRoot` waiting for a slower morning.
+
+**The narrower lesson underneath it:** a path derived entirely from its inputs is shared mutable
+state wearing a local variable's clothes. Two runs with the same arguments is not an exotic case; it
+is the ordinary one, and the tests were only the first two callers to hit it.
+
+**The rules** — [a green suite is not evidence about a
+race](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
+
+### The gate whose passing cases all argued their way through
+
+The complaint was that Definition-of-Ready rows 8 and 9 failed too many tickets. Measured over the 29
+reports in `groomed/`, that is **refuted**: only 2 of 12 `dor:gaps` items would have flipped had both
+rows been deleted, and both needed an interpretive call to count at all. Stopping there gives the
+answer "the rows are fine, the complaint is wrong" — and the complaint was right.
+
+**The signal was in the passes.** 11 of the 16 `dor:pass` items carried a written argument for why a
+thin or absent row 9 should not block, and three independently invented the same unwritten
+exemption — _row 9 exists to stop unmeasured features, so a reproducible defect is exempt_. That
+sentence was in no checklist. A gate two thirds of its passing population has to argue past is no
+longer measuring what it believes; it has become a discretionary override with no field recording
+that it was exercised.
+
+**The general form, and it is not about DoR.** A gate's failures are the population everybody counts,
+because a failure is an event with a name and a label. Its passes are unexamined by construction —
+the ticket moved on, so nothing asks at what cost. A miscalibrated gate rarely manifests as too many
+refusals; it manifests as **compliance theatre in the accepts**, invisible to any count keyed on the
+refusal.
+
+The tell was cheap and sitting in plain text: the same unwritten exemption in three independent runs.
+**Any rule the corpus keeps inventing is a rule the corpus needs and the document does not have** —
+until somebody writes it down, every instance is an unauditable judgement call in the costume of a
+passing check.
+
+**The rules** — [read what the passing cases had to
+say](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code).
