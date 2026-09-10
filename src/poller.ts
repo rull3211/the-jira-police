@@ -15,6 +15,13 @@
  *    to #4 would strand #3 outside the next query window. Stopping at the gap
  *    costs a little rework and loses nothing.
  *
+ *    **This is a fact about `created` order, not about loop order**, and it
+ *    used to be both. The cursor was a flag carried down a loop that happened
+ *    to run oldest-first, so the two were indistinguishable until something
+ *    wanted to work in a different order. `settledCursor` in `triage/order.ts`
+ *    now derives it from created-ascending order and the set of successes, so
+ *    the loop below is free to spend in whatever order is worth spending in.
+ *
  * 3. State is persisted after every issue rather than once at the end. Each
  *    triage is a paid model run, so losing the record of one to an ill-timed
  *    kill means paying for it twice. Per-cycle saving made the cost of a crash
@@ -25,6 +32,7 @@ import { logger } from "./logger.ts";
 import type { OutputSink, TriageResult } from "./output/sink.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { type PollState, isUnseen, recordSeen, saveState } from "./state/store.ts";
+import { byCreatedAscending, settledCursor } from "./triage/order.ts";
 import type { TriagePayload } from "./triage/runner.ts";
 
 export interface PollDeps {
@@ -33,6 +41,17 @@ export interface PollDeps {
   readonly triage: (ticket: TicketRef) => Promise<TriagePayload>;
   readonly sink: OutputSink;
   readonly statePath: string;
+  /**
+   * The order to triage in, when it should not be oldest-first.
+   *
+   * Injected as a comparator rather than as the status list itself, so this
+   * module never learns what a status is and the ordering can be tested
+   * without one. Omitted means created-ascending — which is what
+   * `byStatusPriority` also returns for an unset `TRIAGE_STATUS_PRIORITY`, so
+   * the default is the same behaviour arrived at by two routes rather than a
+   * second policy.
+   */
+  readonly order?: (a: TicketRef, b: TicketRef) => number;
   /**
    * Aborted to request a graceful stop.
    *
@@ -56,6 +75,9 @@ export interface PollOutcome {
   readonly state: PollState;
 }
 
+/** How many of the queue's tickets `poll.order` names before truncating. */
+const ORDER_LOG_LIMIT = 10;
+
 export function toTriageResult(ticket: TicketRef, payload: TriagePayload): TriageResult {
   return {
     issueKey: ticket.key,
@@ -69,43 +91,18 @@ export function toTriageResult(ticket: TicketRef, payload: TriagePayload): Triag
   };
 }
 
-/**
- * Oldest first, so the cursor can advance monotonically as work succeeds.
- *
- * Compares instants, not strings. Jira returns `created` with a numeric offset
- * rather than `Z` — `2026-09-02T09:55:34.178+0200` — and the offset changes at
- * the DST boundary. A lexicographic compare then orders `02:00+0100` (01:00Z)
- * before `02:30+0200` (00:30Z), which is backwards, and the cursor would
- * advance past the earlier ticket and drop it permanently.
- *
- * Ties break on key so the order is total: equal timestamps are common, and an
- * unstable order there would make the cursor's resume point non-deterministic.
- */
-function byCreatedAscending(a: TicketRef, b: TicketRef): number {
-  const delta = instant(a) - instant(b);
-  return delta === 0 ? a.key.localeCompare(b.key) : delta;
-}
-
-/**
- * Fails loudly on a timestamp we cannot read.
- *
- * `Date.parse` returns NaN rather than throwing, and NaN from a comparator
- * leaves the order arbitrary — which would silently drop tickets. Everything
- * else in this module is built to never lose an issue quietly, so a
- * nonsensical timestamp should stop the cycle instead.
- */
-function instant(ticket: TicketRef): number {
-  const parsed = Date.parse(ticket.created);
-  if (Number.isNaN(parsed)) {
-    throw new Error(`${ticket.key} has an unparseable created timestamp: ${ticket.created}`);
-  }
-  return parsed;
-}
-
 export async function runPollCycle(state: PollState, deps: PollDeps): Promise<PollOutcome> {
   const candidates = (await deps.fetchCandidates(state.cursor)).toSorted(byCreatedAscending);
 
+  // Two orderings of the same issues, and the cycle needs both at once.
+  // `fresh` stays created-ascending because that is the only order the cursor
+  // may be reasoned about in; `queue` is the order model runs are spent in.
+  // Sorting `candidates` above rather than sorting `fresh` keeps the
+  // unparseable-timestamp check on every issue found, including ones already
+  // seen — a corrupt timestamp should stop the cycle whether or not it happens
+  // to land on work we were going to do.
   const fresh = candidates.filter((ticket) => isUnseen(state, ticket.key));
+  const queue = deps.order === undefined ? fresh : fresh.toSorted(deps.order);
   const skipped = candidates.length - fresh.length;
 
   if (fresh.length === 0) {
@@ -115,12 +112,31 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
 
   logger.info("poll.candidates", { found: candidates.length, skipped, fresh: fresh.length });
 
+  if (deps.order !== undefined) {
+    // The instrument for the question `TRIAGE_STATUS_PRIORITY` cannot answer on
+    // its own: whether working by column starves the tickets that were moving.
+    // Nobody can judge that from the setting, only from the order it actually
+    // produced against a real backlog — so the order is printed, at `info`,
+    // and only when an operator has opted in by configuring one.
+    //
+    // Truncated because this is a log line and a backlog has no upper bound.
+    // The count is reported separately so a truncated list still says how much
+    // it is hiding, rather than looking like the whole queue.
+    logger.info("poll.order", {
+      total: queue.length,
+      head: queue.slice(0, ORDER_LOG_LIMIT).map((ticket) => ({
+        key: ticket.key,
+        status: ticket.statusName === "" ? ticket.statusId : ticket.statusName,
+      })),
+    });
+  }
+
   let current = state;
-  let stillContiguous = true;
+  const succeeded = new Set<string>();
   let triaged = 0;
   let failed = 0;
 
-  for (const ticket of fresh) {
+  for (const ticket of queue) {
     if (deps.signal?.aborted === true) {
       break;
     }
@@ -128,17 +144,24 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
     try {
       const payload = await deps.triage(ticket);
       await deps.sink.write(toTriageResult(ticket, payload));
+      succeeded.add(ticket.key);
 
       // Saved here, not after the loop. The report is already on disk and the
       // model run is already paid for; leaving the key unrecorded until the
       // cycle ends means a kill in between buys the same verdict twice.
-      current = recordSeen(current, [ticket.key], stillContiguous ? ticket.created : null);
+      //
+      // The cursor is recomputed from `fresh` rather than tracked along this
+      // loop, because this loop is no longer in created order. Recomputing is
+      // O(n) over a set that is a handful of tickets, and the alternative —
+      // remembering how far the created-ascending prefix had got — is the
+      // coupling this change removes, reintroduced as an optimisation.
+      current = recordSeen(current, [ticket.key], settledCursor(fresh, succeeded));
       await saveState(deps.statePath, current);
       triaged += 1;
     } catch (error) {
       failed += 1;
-      // Leave the cursor behind this issue so the next cycle sees it again.
-      stillContiguous = false;
+      // Nothing to do to the cursor: `settledCursor` stops at any issue not in
+      // `succeeded`, so this one already blocks it without being told to.
       logger.error("poll.issue_failed", { issueKey: ticket.key, error });
     }
   }

@@ -189,7 +189,19 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
     clauses.push(`issuetype NOT IN (${ids})`);
   }
 
-  // Ascending so the poller can advance its cursor monotonically.
+  // Ascending because truncation has to fall on the newest issues.
+  //
+  // This used to say the poller needs it to advance its cursor monotonically,
+  // and that has not been the reason for a while: the poller re-sorts what it
+  // gets with its own comparator, and since `TRIAGE_STATUS_PRIORITY` the cursor
+  // comes from `settledCursor` over that sort rather than from arrival order.
+  // Handing this query back in any order at all would leave the cursor correct.
+  //
+  // What the direction still decides is which issues a truncated search loses.
+  // `client.ts` stops paginating at `MAX_PAGES` and warns; ascending means the
+  // page it never fetched holds the *newest* issues, which sit beyond the
+  // cursor and come back next cycle. Descending would truncate the oldest — the
+  // ones the cursor is about to advance past — and those never come back.
   return `${clauses.join(" AND ")} ORDER BY created ASC`;
 }
 

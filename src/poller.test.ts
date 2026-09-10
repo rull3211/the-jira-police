@@ -62,6 +62,9 @@ class RecordingSink implements OutputSink {
   }
 }
 
+/** Newest first: the order that breaks a cursor tracked along the loop. */
+const reversed = (a: TicketRef, b: TicketRef) => b.created.localeCompare(a.created);
+
 describe("runPollCycle", () => {
   let dir: string;
   let statePath: string;
@@ -414,5 +417,92 @@ describe("runPollCycle", () => {
     await expect(
       runPollCycle(EMPTY_STATE, deps({ fetchCandidates: async () => candidates })),
     ).rejects.toThrow(/SSX-2 has an unparseable created timestamp/);
+  });
+
+  /**
+   * Triaging out of created order is only safe because the cursor stopped being
+   * a fact about the loop. These are the same guarantees the tests above assert
+   * for oldest-first, re-asserted with the loop deliberately running backwards
+   * — because every one of them used to hold *by construction* and now holds by
+   * `settledCursor`, which is a different claim.
+   *
+   * `order` here reverses created order outright rather than sorting by status.
+   * The comparator is `byStatusPriority`'s business and is tested there; what
+   * the poller has to survive is *any* order, and the reverse is the one that
+   * breaks a cursor tracked along the loop.
+   */
+  describe("triaging out of created order", () => {
+    const OLD = ticket("SSX-1", "2026-09-02T10:00:00Z");
+    const MID = ticket("SSX-2", "2026-09-02T10:05:00Z");
+    const NEW = ticket("SSX-3", "2026-09-02T10:10:00Z");
+
+    it("spends in the order it was given", async () => {
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [OLD, MID, NEW], order: reversed }),
+      );
+
+      expect(sink.written.map((r) => r.issueKey)).toEqual(["SSX-3", "SSX-2", "SSX-1"]);
+    });
+
+    it("still ends with the cursor at the newest, once all of them succeeded", async () => {
+      const outcome = await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [OLD, MID, NEW], order: reversed }),
+      );
+
+      expect(outcome.state.cursor).toBe("2026-09-02T10:10:00Z");
+    });
+
+    /**
+     * The failure this whole change exists to avoid. The newest ticket is
+     * triaged first and succeeds; the oldest then fails. A cursor that tracked
+     * the loop would sit at the newest and SSX-1 would never be seen again.
+     */
+    it("does not strand the oldest issue when a later one succeeded first", async () => {
+      const outcome = await runPollCycle(
+        EMPTY_STATE,
+        deps({
+          fetchCandidates: async () => [OLD, MID, NEW],
+          order: reversed,
+          triage: async (t) => {
+            if (t.key === "SSX-1") {
+              throw new Error("triage blew up");
+            }
+            return PAYLOAD;
+          },
+        }),
+      );
+
+      expect(outcome.state.cursor).toBeNull();
+      expect(outcome.state.seenKeys).toEqual(["SSX-3", "SSX-2"]);
+    });
+
+    /**
+     * The same guarantee against a shutdown rather than a failure. Stopping
+     * after the newest leaves two older tickets never attempted, and the cursor
+     * has to stay behind all of them — on disk, not merely in the return value,
+     * because a shutdown is exactly when the return value is not read.
+     */
+    it("leaves the cursor behind the issues a shutdown never reached", async () => {
+      const controller = new AbortController();
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({
+          fetchCandidates: async () => [OLD, MID, NEW],
+          order: reversed,
+          signal: controller.signal,
+          triage: async () => {
+            controller.abort();
+            return PAYLOAD;
+          },
+        }),
+      );
+
+      const state = await loadState(statePath);
+      expect(state.seenKeys).toEqual(["SSX-3"]);
+      expect(state.cursor).toBeNull();
+    });
   });
 });
