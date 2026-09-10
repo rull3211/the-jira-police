@@ -18,6 +18,7 @@ import {
   buildSolveRequest,
   buildTriageOptions,
   createDiscover,
+  createPollDeps,
   createReviewCycleDeps,
   createSolveDeps,
   createSolveRunDeps,
@@ -331,6 +332,37 @@ describe("createDiscover", () => {
     expect(() =>
       createDiscover(settingsWith({ TRIAGE_ONLY_STATUS: 'Mottatt") OR ("x' }), fakeClient().client),
     ).toThrow(JqlError);
+  });
+});
+
+/**
+ * Composition of the grooming cycle, which for ordering is the whole of the
+ * behaviour: `byStatusPriority` is tested against a list in `order.test.ts` and
+ * the poller is tested against an injected comparator in `poller.test.ts`, so
+ * the only thing neither can see is whether the setting reaches either of them.
+ * An ordering that is correct and never wired up is the failure mode here, and
+ * it is invisible from both sides.
+ */
+describe("createPollDeps", () => {
+  const client = fakeClient().client;
+
+  it("wires no comparator at all when no priority is configured", () => {
+    // Not "wires a created-ascending comparator". The poller already defaults
+    // to that, and passing one anyway would make `poll.order` fire for an
+    // operator who never asked for an ordering.
+    expect(createPollDeps(settingsWith({ TRIAGE_STATUS_PRIORITY: "" }), client).order).toBe(
+      undefined,
+    );
+  });
+
+  it("wires the configured order through to the cycle", () => {
+    const deps = createPollDeps(settingsWith({ TRIAGE_STATUS_PRIORITY: "10025,10165" }), client);
+
+    const mottatt = ticket({ key: "SSX-1", statusId: "10165", statusName: "Mottatt" });
+    const backlog = ticket({ key: "SSX-2", statusId: "10025", statusName: "Backlog" });
+
+    expect(deps.order).toBeDefined();
+    expect([mottatt, backlog].toSorted(deps.order).map((t) => t.key)).toEqual(["SSX-2", "SSX-1"]);
   });
 });
 

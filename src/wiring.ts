@@ -82,6 +82,7 @@ import type { SolveCandidate, SolveDeps } from "./solve/poller.ts";
 import type { ReviewCycleDeps, WatchedTicket } from "./solve/review-cycle.ts";
 import { type RenderedTicket, renderTicket } from "./solve/ticket.ts";
 import { withFitnessNote } from "./triage/fitness-note.ts";
+import { byStatusPriority } from "./triage/order.ts";
 import { UnpostableError, assertPostable } from "./triage/gate.ts";
 import { createTicketCommenter } from "./solve/commenter.ts";
 import type { TicketCommenter } from "./solve/feedback.ts";
@@ -360,11 +361,25 @@ export function createPollDeps(
   client: JiraClient,
   signal?: AbortSignal,
 ): PollDeps {
+  const priority = list(settings, "TRIAGE_STATUS_PRIORITY");
+
+  // Logged once at wiring, like `poll.status_filter`, and for a related reason:
+  // an ordering nobody can see is one nobody can judge. Unlike that one the
+  // failure here is not silent — a status that matches nothing simply orders
+  // nothing, and `poll.order` shows the result every cycle — so this line says
+  // what was asked for and leaves the evidence to that one.
+  logger.info("poll.status_priority", { priority, ordered: priority.length > 0 });
+
   return {
     fetchCandidates: createDiscover(settings, client),
     triage: createGroom(settings),
     sink: new FileSink(settings.OUTPUT_DIR),
     statePath: settings.STATE_PATH,
+    // Omitted entirely when unset rather than passed as a created-ascending
+    // comparator, so the poller's own default is what runs. Two routes to the
+    // same order is one more than needs proving, and `poll.order` stays quiet
+    // for an operator who never asked for this.
+    ...(priority.length === 0 ? {} : { order: byStatusPriority(priority) }),
     ...(signal === undefined ? {} : { signal }),
   };
 }
