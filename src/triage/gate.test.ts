@@ -124,6 +124,42 @@ describe("the comment body", () => {
     expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
   });
 
+  it("refuses a body carrying two agent-fitness blocks", () => {
+    // `withFitnessNote` strips before it splices, so this is unreachable
+    // unless the strip missed a paraphrase of the marker it keys on — which
+    // is how the defect looked on four real tickets. It has to fail loudly:
+    // two blocks are two accounts of one call, both looking equally official,
+    // and the whole reason the block is rendered rather than written is that
+    // prose and the structured field must not be able to disagree.
+    const body = [
+      "## Triage of SSX-1234",
+      "",
+      "🤖 **Agent fitness:** looks automatable · confidence med",
+      "",
+      "🤖 **Agent fitness:** not yet · confidence low",
+      "",
+      FOOTER_SENTINEL,
+    ].join("\n");
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
+      "2 agent-fitness blocks",
+    );
+  });
+
+  it("accepts the one block a normal run posts", () => {
+    const body = `## SSX-1234\n\n🤖 **Agent fitness:** looks automatable\n\n${FOOTER_SENTINEL}`;
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
+  });
+
+  it("does not count the phrase where the report merely mentions it", () => {
+    // Anchoring at column zero is what separates the region the renderer owns
+    // from the report discussing fitness in an evidence blockquote.
+    const body = `## SSX-1234\n\n> the 🤖 **Agent fitness** call was withdrawn\n\n${FOOTER_SENTINEL}`;
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
+  });
+
   it("refuses a body that mentions a different issue", () => {
     // The poster is handed text it did not write. This is the only place the
     // pairing of body to key is ever checked.

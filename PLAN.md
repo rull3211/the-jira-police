@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2471 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2484 tests in 69
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -607,6 +607,26 @@ are the whole migration; the eleven are the debt it exposes.
 tempting, and that is the failure the constant's own comment warns about. Fix the eleven in the same
 week, or say in the code that the resolver is aspirational — do not widen the number and leave it.
 
+<!-- refs:off -->
+
+**The other direction, found 2026-09-10 while opening the entry below.** Everything above is about a
+_dead_ reference resolving against a live section elsewhere. The reverse is worse and had not been
+noticed: numbering a new `PLAN.md` entry §24 — the next free number, chosen without a thought —
+**repaired** `ARCHITECTURE.md:1103`'s dangling `§24`, and `docs:check` reported the count falling to
+38 and asked for `KNOWN_DANGLING` to be lowered to match. Nothing about that citation had improved.
+It is still a self-reference in a file whose sections stop at 16, still pointing at nothing, and
+§14's table still names §15 as its intended target. Two things follow. **The count is sensitive to
+edits in files that have nothing to do with it**, so a routine plan entry can turn a check green
+about a defect it did not touch — and had the invitation been accepted, deleting the entry on ship
+would have failed `docs:check` on a later, unrelated commit, with a message pointing at neither
+cause. The entry was renumbered to §25 instead and §24 left unused, which is the smallest thing that
+does not launder a broken citation. **A number skipped on purpose is not a hole**: the list above
+holds sections that shipped and were deleted, and this one never existed. Every `§N` in this
+paragraph is a number being discussed rather than a reference being made, which is why the region is
+`refs:off` — the same reason §14's table is.
+
+<!-- refs:on -->
+
 ---
 
 ### 22. A staged skill root is never swept, so a hard kill leaks one per kill
@@ -629,6 +649,61 @@ both half-proven.
 **What would make it the wrong idea.** A sweep that deletes by age can delete a root belonging to a
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
+
+---
+
+### 25. The fitness block is spliced blind, so a re-run posts two of them
+
+**Branch:** `fix/fitness-block-owns-its-region`.
+
+**Numbered 25 rather than 24, deliberately** — see §19, which this entry walked into on the way in.
+
+**What is not built.** `withFitnessNote` owning the region it writes. It appends
+(`fitness-note.ts:158`) without checking whether the body it was handed already contains a fitness
+block, and on a re-run it always does — the model rebuilds the comment from its own previous one,
+carrying that block along as ordinary body text.
+
+**What was measured, before anything was changed.** Four re-runs, four duplicates; two first runs,
+both correct; both verdicts affected, so the verdict is not the variable.
+
+| ticket   | run                                            | verdict                        | blocks |
+| -------- | ---------------------------------------------- | ------------------------------ | ------ |
+| SSX-3285 | first                                          | ACCEPT · solvable              | 1 ✅   |
+| SSX-3852 | first                                          | SEND BACK · `plausible: false` | 0 ✅   |
+| SSX-3283 | re-run                                         | SEND BACK · `plausible: true`  | 2 ❌   |
+| SSX-3834 | re-run (`retriage-1`)                          | ACCEPT · solvable              | 2 ❌   |
+| SSX-3024 | re-run (`retriage-2`)                          | ACCEPT · solvable              | 2 ❌   |
+| SSX-3285 | re-run, run deliberately to test the diagnosis | ACCEPT · solvable              | 2 ❌   |
+
+**The prediction that made the last row worth running.** The dossier block is model-written and has
+no renderer, so if the cause were "the model reproduces the old body sloppily" it would have
+duplicated too. It stayed at one while the fitness block went to two. What duplicates is exactly the
+region that has both a machine owner and a model author.
+
+**Why it matters, given it is nearly invisible.** On SSX-3285 the two copies read alike and the
+defect passes for a spacing glitch. On SSX-3283 they did not agree — prose and the structured field
+saying different things is the defect class this file's own header says the service was bitten by
+twice (SSX-3814, SSX-3822) and that rendering in TypeScript was chosen to make impossible by
+construction. A splice with no ownership check reopens it, one re-run at a time.
+
+**The cause underneath the symptom, which is worth more than the de-duplication.** The `solvable`
+branch (`fitness-note.ts:108-117`) discards `fitness.rationale` and emits a fixed sentence carrying
+nothing about the ticket. The schema requires that field and asks for "the deciding factor"; the
+`solvable: false` branch already prints it at `:124`. So on every ACCEPT the renderer throws away the
+one informative thing it was handed — and the model's duplicate is measurably better than the block
+it duplicates. Removing the duplication without removing the reason for it leaves the model with the
+same incentive and the guard as the only thing in its way.
+
+**Also in scope, same line of code.** `withFitnessNote` returns early when the note is `null`, so a
+ticket that was `plausible: true` last run and is not this run keeps its stale watch note — a list of
+blockers nobody is waiting on any more — for good.
+
+**What would make it the wrong idea.** Stripping is a regex-shaped judgement over text a model
+wrote, and the marker is not stable: SSX-3024 shows it paraphrased as `🤖 **Agent fitness:
+solvable**`. Matching loosely enough to catch the paraphrases risks eating a region the model meant
+to keep; matching tightly leaves the defect in place for the next paraphrase. If a line-based scan
+cannot be made to state its own boundaries clearly, the honest fix is the gate refusing a second
+marker rather than this function silently deciding which copy wins.
 
 ---
 
