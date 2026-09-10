@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { logger } from "./logger.ts";
 import { type PollDeps, runPollCycle } from "./poller.ts";
 import type { OutputSink, TriageResult } from "./output/sink.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { EMPTY_STATE, loadState } from "./state/store.ts";
+import { byCreatedAscending } from "./triage/order.ts";
 import type { TriagePayload } from "./triage/runner.ts";
 
 function ticket(key: string, created: string, status = ""): TicketRef {
@@ -503,6 +505,106 @@ describe("runPollCycle", () => {
       const state = await loadState(statePath);
       expect(state.seenKeys).toEqual(["SSX-3"]);
       expect(state.cursor).toBeNull();
+    });
+  });
+
+  /**
+   * `poll.order` is the whole argument for shipping `TRIAGE_STATUS_PRIORITY`:
+   * the order cannot be judged from the setting, only from the queue it
+   * produced, so an operator has to be able to read that queue back. An
+   * instrument nobody watches is worth nothing, and this one went out with
+   * nothing asserting it at all.
+   *
+   * A real daemon run on 2026-09-10 emitted it correctly — seven tickets,
+   * `Mottatt` ahead of `On Hold`, statuses by name. These cover what that run
+   * could not: it carried seven tickets against a limit of ten, and every
+   * ticket had a name, so neither the truncation nor the id fallback was
+   * exercised by it.
+   */
+  describe("poll.order", () => {
+    const OLD = ticket("SSX-1", "2026-09-02T10:00:00Z");
+    const NEW = ticket("SSX-3", "2026-09-02T10:10:00Z");
+
+    it("reports the queue when an order is configured", async () => {
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [OLD, NEW], order: reversed }),
+      );
+
+      expect(info).toHaveBeenCalledWith("poll.order", {
+        total: 2,
+        head: [
+          { key: "SSX-3", status: "" },
+          { key: "SSX-1", status: "" },
+        ],
+      });
+
+      info.mockRestore();
+    });
+
+    /**
+     * The default has to stay silent, not merely correct. An operator who never
+     * asked for a priority should not have to read a line about ordering on
+     * every cycle to discover it says nothing.
+     */
+    it("says nothing at all when no order is configured", async () => {
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(EMPTY_STATE, deps({ fetchCandidates: async () => [OLD, NEW] }));
+
+      expect(info).not.toHaveBeenCalledWith("poll.order", expect.anything());
+
+      info.mockRestore();
+    });
+
+    /**
+     * A backlog has no upper bound and this is a log line. The count is
+     * reported separately from the head precisely so a truncated list still
+     * says how much it is hiding — assert both, because a truncation that also
+     * truncated the total would read as a complete queue of ten.
+     */
+    it("truncates the head at ten while still reporting the true total", async () => {
+      const many = Array.from({ length: 12 }, (_, index) =>
+        ticket(`SSX-${index + 10}`, `2026-09-02T10:${String(index).padStart(2, "0")}:00Z`),
+      );
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => many, order: byCreatedAscending }),
+      );
+
+      const call = info.mock.calls.find(([event]) => event === "poll.order");
+      const payload = call?.[1] as { total: number; head: readonly unknown[] };
+      expect(payload.total).toBe(12);
+      expect(payload.head).toHaveLength(10);
+
+      info.mockRestore();
+    });
+
+    /**
+     * Jira can omit the status, which normalises to `""` rather than to a
+     * guess. The id is the only identifying thing left, and printing an empty
+     * string there would make the line unreadable exactly when something is
+     * already wrong.
+     */
+    it("falls back to the status id when the name is empty", async () => {
+      const nameless: TicketRef = { ...OLD, statusId: "10165", statusName: "" };
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [nameless], order: byCreatedAscending }),
+      );
+
+      expect(info).toHaveBeenCalledWith("poll.order", {
+        total: 1,
+        head: [{ key: "SSX-1", status: "10165" }],
+      });
+
+      info.mockRestore();
     });
   });
 });

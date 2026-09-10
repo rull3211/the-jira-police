@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2519 tests in 70
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2523 tests in 70
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -268,22 +268,13 @@ environment cannot answer a question about CI's.**
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
-- **`poll.order` has never been emitted.** It is the instrument `TRIAGE_STATUS_PRIORITY` ships with
-  — the argument for the setting being safe is that an operator can see the queue it produced — and
-  it fires only inside a cycle with at least one fresh ticket. **That is not merely a model run per
-  ticket.** `WRITE_BACK` falls back to `false`, but `pnpm start` and `pnpm poll:once` both load
-  `.env`, so the fallback is not what decides it on any machine that has one — and on the machine
-  this was measured on, `.env` is demonstrably setting values, because the empty cycle below logged
-  `skill: intake-triage` rather than the `mock-triage` fallback. So the first run that emits
-  `poll.order` against the 35-ticket backlog may also comment and label 35 shared tickets. Observing
-  this instrument is a deliberate act with a blast radius, not a free look, and anyone reaching for
-  it should check `WRITE_BACK` first rather than trust the documented default.
-  What has been driven is the free half: `poll:once --dry-run` printed the real 35-ticket backlog in
-  priority order, and an empty real cycle was run to watch `poll.status_priority` fire at wiring
-  with the parsed list. So the ordering is observed and the wiring line is observed; the per-cycle
-  log line in between is not, and no test asserts it either. The first daemon run with a priority
-  configured settles it — which is also the first run that could show the log is too long, since the
-  head is truncated at ten by a constant nobody has watched truncate.
+- **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
+  daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket
+  queue with the three `Mottatt` ahead of the four older `On Hold` ones, and reported each status by
+  name rather than falling back to its id — which also confirms `statusName` survives normalisation
+  against the live API. What that run could not exercise is the cap: seven against a limit of ten.
+  Both the truncation and the id fallback are covered by tests now, so this is a live-run gap rather
+  than a coverage one, and a first run or a post-outage backlog is what would close it.
 - **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
   suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
   after a compaction — so neither the field name it branches on nor the fact of registration is
