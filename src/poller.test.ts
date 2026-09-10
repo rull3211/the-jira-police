@@ -9,7 +9,7 @@ import type { TicketRef } from "./jira/types.ts";
 import { EMPTY_STATE, loadState } from "./state/store.ts";
 import type { TriagePayload } from "./triage/runner.ts";
 
-function ticket(key: string, created: string): TicketRef {
+function ticket(key: string, created: string, status = ""): TicketRef {
   return {
     key,
     summary: `Summary for ${key}`,
@@ -17,6 +17,8 @@ function ticket(key: string, created: string): TicketRef {
     issueTypeName: "Oppgave",
     created,
     updated: created,
+    statusId: status,
+    statusName: status === "" ? "" : `Column ${status}`,
     labels: [],
     url: `https://example.invalid/browse/${key}`,
   };

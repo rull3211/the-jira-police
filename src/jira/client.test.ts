@@ -23,6 +23,7 @@ function issue(key: string, created: string, fields: Record<string, unknown> = {
       issuetype: { id: "10007", name: "Oppgave", subtask: false },
       created,
       updated: created,
+      status: { id: "10165", name: "Mottatt" },
       labels: [],
       ...fields,
     },
@@ -73,6 +74,8 @@ describe("JiraClient.search", () => {
         issueTypeName: "Oppgave",
         created: "2026-09-02T10:00:00Z",
         updated: "2026-09-02T10:00:00Z",
+        statusId: "10165",
+        statusName: "Mottatt",
         labels: [],
         url: "https://example.invalid/browse/SSX-1",
       },
@@ -81,6 +84,31 @@ describe("JiraClient.search", () => {
     const { url, init } = callArgs(fetchMock, 0);
     expect(url).toBe("https://example.invalid/rest/api/3/search/jql");
     expect(JSON.parse(init.body as string)).toMatchObject({ jql: "project = SSX" });
+  });
+
+  /**
+   * An absent status normalises to empty, not to a plausible column.
+   *
+   * `TicketRef.statusId`'s own comment makes the promise and this is what holds
+   * it. The risk is not the empty string itself but the repair somebody makes
+   * later: a status field Jira did not return is far more tempting to fill with
+   * a default than `updated` ever was, because the ordering code downstream
+   * reads like it wants one. It does not — `statusRank` sorts an unknown status
+   * last, which is the same place an unlisted one goes.
+   */
+  it("leaves the status empty when Jira did not return one", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        issues: [issue("SSX-2", "2026-09-02T10:00:00Z", { status: undefined })],
+        isLast: true,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [ticket] = await client().search("project = SSX");
+
+    expect(ticket?.statusId).toBe("");
+    expect(ticket?.statusName).toBe("");
   });
 
   /**

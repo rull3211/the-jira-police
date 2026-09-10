@@ -247,6 +247,8 @@ function ticket(overrides: Partial<TicketRef> = {}): TicketRef {
     issueTypeName: "Feil",
     created: "2026-03-01T09:00:00.000+0100",
     updated: "2026-09-02T09:55:34.178+0200",
+    statusId: "10165",
+    statusName: "Mottatt",
     labels: ["agent:solvable", "agent:start", "svc:buy-insurance-advisor-web"],
     url: "https://example.invalid/browse/SSX-3822",
     ...overrides,
