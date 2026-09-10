@@ -580,35 +580,45 @@ there is no build step here.
 
 Full table in `ARCHITECTURE.md` §10. The ones that matter for a demo:
 
-| Setting                         | Default       | Notes                                                                     |
-| ------------------------------- | ------------- | ------------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket       |
-| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket   |
-| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post          |
-| `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`    |
-| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                        |
-| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                    |
-| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in |
-| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed      |
-| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write       |
-| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it   |
-| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory            |
-| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built       |
-| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days    |
-| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend    |
-| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot       |
-| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design    |
-| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above    |
-| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see        |
-| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                           |
-| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back   |
-| `FAIL_FIRST_CHECK`              | `true`        | **The only setting that defaults on** — it withdraws a guard, not grants  |
+| Setting                         | Default       | Notes                                                                      |
+| ------------------------------- | ------------- | -------------------------------------------------------------------------- |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket        |
+| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket    |
+| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post           |
+| `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`     |
+| `TRIAGE_ONLY_STATUS`            | 4 statuses    | Which columns get triaged. **Blank widens rather than closes** — see below |
+| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                         |
+| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                     |
+| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in  |
+| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed       |
+| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write        |
+| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it    |
+| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory             |
+| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built        |
+| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days     |
+| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend     |
+| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot        |
+| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design     |
+| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above     |
+| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see         |
+| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                            |
+| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back    |
+| `FAIL_FIRST_CHECK`              | `true`        | **The only setting that defaults on** — it withdraws a guard, not grants   |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
 request. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
 open in a file browser, because macOS puts the default under `/private/var` and the diff review the
 solver phase depends on is a person reading that worktree.
+
+**`TRIAGE_ONLY_STATUS` is the other exception, and it reads silence as _yes_.** It defaults to this
+board's four untouched columns, because a triage comment on a ticket somebody has already moved into
+code review is noise on their work at full model price. Blanking it does not turn the restriction
+off — a blank is indistinguishable from unset, so the default comes back — and clearing the
+restriction means listing the statuses you want instead. The statuses are per-board strings nothing
+validates, so a typo is a filter that matches nothing and a service that looks healthy while
+triaging zero tickets: the active list is printed once at startup as `poll.status_filter`, and that
+log line is the only check there is.
 
 **`SOLVE_REPO_ROOT` is the one that stops a solve before it starts, and it has no fallback on
 purpose.** A ticket's repository is resolved as `SOLVE_REPO_ROOT/<name>`, where the name comes from

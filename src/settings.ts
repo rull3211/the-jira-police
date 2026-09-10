@@ -62,6 +62,12 @@ export const SETTINGS = [
     fallback: "10009",
   },
   {
+    name: "TRIAGE_ONLY_STATUS",
+    description:
+      'Comma-separated statuses discovery is allowed to triage, by name or id. Blank triages anything not closed. The default is this board\'s untouched columns, measured 2026-09-10: a ticket somebody has already moved into "In Code Review" or "Test" does not want a paid triage comment on it. Cannot be expressed as a status category — "In Progress Concept" is `indeterminate` and belongs here, while "Prioritized" is `new` and does not — which is why it names per-board strings. Blanking it does not disable the restriction, because a blank is indistinguishable from unset; to widen, list the statuses you want.',
+    fallback: "Mottatt,Backlog,On Hold,In Progress Concept",
+  },
+  {
     name: "POLL_INTERVAL_MS",
     description: "Gap between polls.",
     fallback: "300000",

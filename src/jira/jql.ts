@@ -10,6 +10,10 @@
  * is permanently ineligible for the first and can re-enter any of the others on
  * Friday.
  *
+ * `TRIAGE_ONLY_STATUS` blunts that axis without moving it: the new-issue query
+ * now reads board state too. What still divides them is the **dedupe** — the
+ * cursor here, the labels there — and that is the part the axis was ever about.
+ *
  * (This header said "the two queries" until 2026-09-06, by which point there
  * were four. Recorded rather than quietly corrected: a count in prose is a fact
  * that goes stale every time the file grows, and this repository's whole
@@ -126,6 +130,15 @@ export interface NewIssuesJqlOptions extends WindowOptions {
    * demonstrably ours.
    */
   readonly components: readonly string[];
+  /**
+   * Statuses discovery may triage, by id or by name. Empty means no
+   * restriction beyond "not closed".
+   *
+   * A closed ticket is not the only one a paid triage has nothing to say
+   * about: so is one a person has already picked up. The comment lands as
+   * noise on somebody else's work, and it is the same spend either way.
+   */
+  readonly statuses: readonly string[];
 }
 
 export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
@@ -134,15 +147,30 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
 
   const clauses = [`project = ${project}`, `created >= -${minutes}m`];
 
-  // A closed ticket is not worth a paid triage. Unlike the watch and review
-  // queues, nothing here has a label to take off afterwards, so there is no
-  // reason to keep seeing it: the poller's only reaction to a closed ticket
-  // would be to spend a model run describing it.
-  //
-  // On the category rather than the name: status names are per-board and this
-  // board's are Norwegian, so `status != "Done"` matches nothing here. Same
-  // reasoning as `DONE_CATEGORY` in `src/watch/signals.ts`.
-  clauses.push("statusCategory != Done");
+  // Either the allowlist or the closed filter, never both, and the exclusivity
+  // is the point rather than a saving. An allowlist naming a closed status
+  // would be silently defeated by a `statusCategory != Done` sitting beside it
+  // — two clauses that agree today, disagreeing the moment someone configures
+  // the thing the setting exists to configure.
+  if (options.statuses.length > 0) {
+    const values = options.statuses.map((entry) => jqlValue(entry, "status")).join(", ");
+    clauses.push(`status IN (${values})`);
+  } else {
+    // A closed ticket is not worth a paid triage. Unlike the watch and review
+    // queues, nothing here has a label to take off afterwards, so there is no
+    // reason to keep seeing it: the poller's only reaction to a closed ticket
+    // would be to spend a model run describing it.
+    //
+    // On the category rather than the name: status names are per-board and this
+    // board's are Norwegian, so `status != "Done"` matches nothing here. Same
+    // reasoning as `DONE_CATEGORY` in `src/watch/signals.ts`.
+    //
+    // The allowlist above names those per-board strings anyway, because the
+    // eligible set straddles the category taxonomy and no category clause can
+    // express it. This branch is what an operator falls back to when a column
+    // is renamed out from under the list.
+    clauses.push("statusCategory != Done");
+  }
 
   if (options.components.length > 0) {
     const values = options.components.map((entry) => jqlValue(entry, "component")).join(", ");

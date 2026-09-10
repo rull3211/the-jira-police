@@ -54,6 +54,7 @@ import {
   buildNewIssuesJql,
   buildReviewQueueJql,
   buildSolveQueueJql,
+  jqlValue,
 } from "./jira/jql.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
@@ -107,11 +108,42 @@ export function createDiscover(
   settings: Settings,
   client: JiraClient,
 ): (cursor: string | null) => Promise<readonly TicketRef[]> {
+  const statuses = list(settings, "TRIAGE_ONLY_STATUS");
+
+  // Rendered here and thrown away, so an unquotable status is a startup crash
+  // rather than a `JqlError` raised inside every poll cycle from now on. The
+  // query is only built inside the closure below, which means without this the
+  // first sign of a bad character in the setting would be an error at 3am, on
+  // the tick, forever — nothing written, nothing damaged, and nothing that says
+  // the cause is one line of configuration. Only the characters are checkable;
+  // whether the status exists is not, see below.
+  for (const status of statuses) {
+    jqlValue(status, "status");
+  }
+
+  // Once, at wiring, at `info` — unlike `poll.query` below, which is per-cycle
+  // plumbing at `debug`. The failure this is here for is silent: a status name
+  // is a per-board string nothing validates, so one typo or one renamed column
+  // is a filter matching nothing, and the service goes on looking healthy while
+  // triaging zero tickets forever. There is no cheaper check available — this
+  // service's Jira credential cannot read project status metadata (verified
+  // 2026-09-10: `/project/SSX/statuses` is a 404 for it), so the names cannot
+  // be validated at startup. Printing them is what is left, and it at least
+  // means the wrong list is visible in the log rather than inferable from an
+  // absence of work.
+  logger.info("poll.status_filter", {
+    statuses,
+    restricted: statuses.length > 0,
+  });
+
   return async (cursor: string | null): Promise<readonly TicketRef[]> => {
     const jql = buildNewIssuesJql({
       project: settings.JIRA_PROJECT,
       components: list(settings, "JIRA_COMPONENTS"),
       excludedTypeIds: list(settings, "JIRA_EXCLUDED_TYPES"),
+      // The list logged above, not a second read of it: a log line describing a
+      // filter the query does not use is worse than no log line.
+      statuses,
       cursor,
       now: new Date(),
       overlapMs: numeric(settings, "CURSOR_OVERLAP_MS"),
