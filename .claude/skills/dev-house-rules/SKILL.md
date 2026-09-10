@@ -56,7 +56,7 @@ probes rather than by reading — reading them and reporting that they are clear
 
 ## The shortest possible version
 
-- Write the plan before the work; delete it when it ships.
+- Write the plan before the work; delete it in the last commit before you push, not when it merges.
 - Prose falsified by a change is rewritten in the **same** commit. All four documents are source.
 - A guard is not shipped until a test fails when it is unplugged — against the _plausible wrong
   implementation_, not the bug.

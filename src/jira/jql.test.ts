@@ -74,8 +74,19 @@ describe("lookbackMinutes", () => {
 describe("buildNewIssuesJql", () => {
   it("builds the expected query", () => {
     expect(buildNewIssuesJql(BASE)).toBe(
-      "project = SSX AND created >= -60m AND issuetype NOT IN (10009) ORDER BY created ASC",
+      "project = SSX AND created >= -60m AND statusCategory != Done AND issuetype NOT IN (10009) ORDER BY created ASC",
     );
+  });
+
+  it("skips closed tickets, which a paid triage has nothing to say about", () => {
+    // SSX-3859 was closed and inside the window, and bought a model run.
+    expect(buildNewIssuesJql(BASE)).toContain("statusCategory != Done");
+  });
+
+  it("filters closed on the category, never on the status name", () => {
+    // Status names are per-board and Norwegian on this one, so `status = "Done"`
+    // is a clause that matches nothing. Same rule as `src/watch/signals.ts`.
+    expect(buildNewIssuesJql(BASE)).not.toMatch(/status\s*!?=\s*"?Done"?/);
   });
 
   it("uses a relative offset, never an absolute date", () => {
@@ -87,7 +98,7 @@ describe("buildNewIssuesJql", () => {
 
   it("omits the exclusion clause when nothing is excluded", () => {
     expect(buildNewIssuesJql({ ...BASE, excludedTypeIds: [] })).toBe(
-      "project = SSX AND created >= -60m ORDER BY created ASC",
+      "project = SSX AND created >= -60m AND statusCategory != Done ORDER BY created ASC",
     );
   });
 
@@ -142,7 +153,7 @@ describe("jqlValue", () => {
 describe("buildNewIssuesJql component filter", () => {
   it("restricts to a single named component", () => {
     expect(buildNewIssuesJql({ ...BASE, components: ["SSX Advisor"] })).toBe(
-      'project = SSX AND created >= -60m AND component IN ("SSX Advisor") AND issuetype NOT IN (10009) ORDER BY created ASC',
+      'project = SSX AND created >= -60m AND statusCategory != Done AND component IN ("SSX Advisor") AND issuetype NOT IN (10009) ORDER BY created ASC',
     );
   });
 
