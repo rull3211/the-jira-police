@@ -61,7 +61,8 @@ restatement of a rule:
 **And the rules you have already read, one line each:**
 
 - [ ] Documents falsified → rewritten in **this** commit
-- [ ] Anything shipped → its `PLAN.md` entry deleted
+- [ ] **Is any sentence in `PLAN.md` now describing something that exists?** Asked with the file
+      open. Its entry is deleted **now**, in this branch, before the push — not at merge
 - [ ] Structure moved →
       [the map](STARTING.md#architecturemd-is-the-map-and-this-section-is-only-how-to-read-one)
       with it

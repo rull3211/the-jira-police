@@ -793,12 +793,28 @@ describing something that exists** — asked while looking at the file.
 subjective signal — _I thought about this carefully and put it in words_ — is identical whether the
 words land on a reading path or in a commit message nobody will open again.
 
-**How it surfaced.** A human asked, twice. The checklist item that should have caught it — _did
-something get through that these rules do not cover?_ — was skipped in silence: the checklist was
-run from memory after a compaction, and the remembered version was the six commands.
+**Third instance, 2026-09-10, and it is this entry's own subject.** The paragraph above diagnosed
+the ambiguity correctly and proposed the reliable question — and then the diagnosis stayed here,
+in the story, while all four statements of the rule went on saying _delete it when it ships_:
+`STARTING.md` rule 2, `CLAUDE.md`, `SKILL.md`'s one-liner and this file's own checklist. So the next
+branch reproduced it exactly: a `PLAN.md` entry was opened for a JQL clause — deliberately not cited
+by number here, because the number is a hole the moment the rule is obeyed — the clause was written,
+tested and pushed, and the entry describing it as _not built_ went to the reviewer sitting above its
+own implementation. **A story is not a rule, and writing the diagnosis where the rules are indexed
+is not the same as writing it where they are read.** The rule half is now written, with the timing
+made explicit: the last commit before the push, in the branch that built it.
 
-**The rules** — [say what you owe, in the pull request
-body](FINISHING.md#the-rules-you-owe-are-written-down-or-they-are-not-owed);
+**How it surfaced.** A human asked — twice for the first two instances, and a third time here,
+naming the fix: _it should sanitize when implementation is done, right before the final push._ The
+checklist item that should have caught it — _did something get through that these rules do not
+cover?_ — was skipped in silence on the first two: the checklist was run from memory after a
+compaction, and the remembered version was the six commands. On the third it was answered, in a
+pull request body, and answered **wrongly** — `Rules owed:` named a different gap and did not
+notice the entry standing in the same diff.
+
+**The rules** — [the plan entry goes in the branch that built
+it](STARTING.md#the-document-contract-which-is-the-one-that-is-always-in-force); [say what you owe,
+in the pull request body](FINISHING.md#the-rules-you-owe-are-written-down-or-they-are-not-owed);
 [re-read the phase file, never recall it](FINISHING.md#re-read-the-phase-file-never-recall-it).
 
 ### The audit that found eight things and got three of them wrong on the way

@@ -12,8 +12,8 @@ Next: [BUILDING.md](BUILDING.md) · Index: [SKILL.md](SKILL.md) · Evidence:
 
 `README.md`, `ARCHITECTURE.md`, `PLAN.md` and this skill are **all treated as source**; what each
 answers is listed in `CLAUDE.md`. Only the staleness triggers live here: `README.md` on a flag,
-script or setting, `ARCHITECTURE.md` on any module or invariant, `PLAN.md` when work **starts**,
-ships or teaches something, this skill **when a defect gets through that it does not cover**.
+script or setting, `ARCHITECTURE.md` on any module or invariant, `PLAN.md` when work **starts** or
+is pushed, this skill **when a defect gets through that it does not cover**.
 
 Four rules, in order of how often they are broken:
 
@@ -21,11 +21,13 @@ Four rules, in order of how often they are broken:
    makes a sentence false and leaves it is the defect this project exists to catch, committed by the
    person catching it.
    [→ five files that said "discovery only"](INCIDENTS.md#the-credential-that-stopped-being-discovery-only)
-2. **`PLAN.md` records what is not built**, gaining an entry when work _starts_ and losing it when
-   the work ships — **deleted**, not struck through, no exception. A plan that accumulates finished
-   work stops being read. **It is not where lessons live**: what a run taught goes into the rule it
-   changes here, into [INCIDENTS.md](INCIDENTS.md), or nowhere.
+2. **`PLAN.md` records what is not built**, gaining an entry when work _starts_ and losing it **in
+   the last commit before you push** — **deleted**, not struck through, no exception. Not at merge:
+   the reviewer is the one misled. A plan that accumulates finished work stops being read. **It is
+   not where lessons live**: what a run taught goes into the rule it changes, into
+   [INCIDENTS.md](INCIDENTS.md), or nowhere.
    [→ the escape hatch that grew a 409-line sink](INCIDENTS.md#the-lesson-store-that-was-the-incident-it-was-written-to-fix)
+   · [→ deleted too early, then kept too late](INCIDENTS.md#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them)
 3. **Numbers in prose are facts and rot like facts** — grep for them after any change that moves
    them. `docs:check` is a floor — no checker sees a noun nobody listed, and a rewrite can _invent_ a
    figure. **The fix that holds is not stating it:** let the dated list be the count.

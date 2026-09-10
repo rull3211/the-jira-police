@@ -78,8 +78,8 @@ the symbol you need rather than reading it whole; `pnpm docs:check` enforces the
 ## Before you start
 
 **Write it into `PLAN.md` first** — what is being attempted, why now, and what would make it the
-wrong idea, opening with a bold `Branch:` label naming the branch; the entry is deleted when it
-ships. Then pick the branch. Why a diff is not enough:
+wrong idea, opening with a bold `Branch:` label naming the branch; the entry is deleted **in the
+last commit before you push**, not at merge: the reviewer is the one misled. Then pick the branch. Why a diff is not enough:
 [STARTING.md](.claude/skills/dev-house-rules/STARTING.md#the-plan-is-written-before-the-work-not-after-it).
 
 ## Working style
