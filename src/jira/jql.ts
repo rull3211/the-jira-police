@@ -134,6 +134,16 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
 
   const clauses = [`project = ${project}`, `created >= -${minutes}m`];
 
+  // A closed ticket is not worth a paid triage. Unlike the watch and review
+  // queues, nothing here has a label to take off afterwards, so there is no
+  // reason to keep seeing it: the poller's only reaction to a closed ticket
+  // would be to spend a model run describing it.
+  //
+  // On the category rather than the name: status names are per-board and this
+  // board's are Norwegian, so `status != "Done"` matches nothing here. Same
+  // reasoning as `DONE_CATEGORY` in `src/watch/signals.ts`.
+  clauses.push("statusCategory != Done");
+
   if (options.components.length > 0) {
     const values = options.components.map((entry) => jqlValue(entry, "component")).join(", ");
     clauses.push(`component IN (${values})`);

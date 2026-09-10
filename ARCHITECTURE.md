@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2484 tests in 69 files, no build step, no
+Status: running end to end against production Jira. 2486 tests in 69 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -347,6 +347,13 @@ drops anything created in the same minute as the last issue seen. `CURSOR_OVERLA
 min) re-scans, `lookbackMinutes` rounds **up**, and key-level dedupe is what makes the overlap
 free. The dedupe is mandatory, not an optimisation.
 
+**`statusCategory != Done`, and this query is the one place the clause is unarguable.** A closed
+ticket cannot be groomed into anything, and unlike the review and sendback queries the poller holds
+no label on it that would need taking off afterwards — so there is nothing to be gained by seeing
+it and a paid model run to be lost. It went in after `triage.start` fired on a closed `SSX-3859` on
+2026-09-10. On the **category**, never the status name: names are per-board and this board's are
+Norwegian, the same reason `src/watch/signals.ts` compares against `statusCategory.key`.
+
 **JQL has no parameter binding**, so every interpolated value is validated rather than escaped.
 `jqlValue()` also encodes a real Jira subtlety: a bare number is resolved as an **id**, anything
 quoted as a **name**. `component = 12644` finds the component; `component = "12644"` searches for
@@ -435,8 +442,9 @@ work, and a pull request waiting on a person is not that — the in-flight set i
 minutes and this one in days. Sharing a query would have made one merge-request-in-review hold the
 only solve slot for as long as a human took to read it.
 
-**No `statusCategory != Done` and no `labels NOT IN (...)`**, unlike the two above, and both
-omissions are arguments. A ticket somebody closed while its pull request was open still has that
+**No `statusCategory != Done` and no `labels NOT IN (...)`**, and both omissions are arguments —
+which is the whole of the point, because every other query here settles those two clauses
+differently and none of them is a default. A ticket somebody closed while its pull request was open still has that
 pull request, and the look is what writes `agent:done` or `agent:closed` when it ends — filter the
 ticket out and the label is stranded with nothing that could ever clear it. The terminals are
 written in the same edit that removes the two watched labels, so a ticket carrying one is already
@@ -1316,8 +1324,6 @@ being widened or dropped:
 - **Deployment.** No launchd job, no container, no metrics. `pnpm start` in a terminal is the
   current answer.
 - **Concurrency.** Issues are triaged sequentially. Fine at 4–5/day.
-- **`AND statusCategory != Done`** in the JQL — closed tickets currently get triaged. Small in
-  steady state, not small on a first-run backfill. A question of intent, so it is open.
 - **Unproven paths.** REST pagination and REST error handling (401/429/5xx) are unit-tested only;
   the live board has returned a single clean page every time.
 - **Open decision: attachment bytes on the discovery credential.** `fetchAttachmentText` downloads

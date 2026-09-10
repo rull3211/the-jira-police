@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2484 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2486 tests in 69
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -67,7 +67,8 @@ scaffolding-audit skill, shipped in `7237af5` and retired here rather than left 
 entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
 worth a permanent number, because the session was compacted once while it was open; §25 was the
 fitness block owning the region it writes, shipped in PR #37. **§24 is absent from that list and is
-not a hole** — it was skipped rather than spent, for the reason §19 gives, so the next entry is §26.
+not a hole** — it was skipped rather than spent, for the reason §19 gives. §26, §27 and §28 are the
+open triage-selection entries, so the next entry is §29.
 
 <!-- refs:on -->
 
@@ -651,6 +652,84 @@ both half-proven.
 **What would make it the wrong idea.** A sweep that deletes by age can delete a root belonging to a
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
+
+### 26. The new-issue query has no status clause, so closed tickets are triaged
+
+**Branch:** `fix/triage-skips-closed-issues`.
+
+**What is not built.** `AND statusCategory != Done` in `buildNewIssuesJql`.
+
+**Why now.** It stopped being hypothetical: `triage.start` fired on `SSX-3859`, a closed ticket, on
+2026-09-10. `ARCHITECTURE.md` §13 has carried this as an open item — "closed tickets currently get
+triaged … a question of intent, so it is open" — and the intent is now settled. A closed ticket is
+skipped outright: not fetched, not triaged, nothing written to Jira. That entry is deleted in the
+same commit, because a gap that has been closed is no longer a gap.
+
+**Why the clause and not a local filter.** `buildSolveQueueJql` already carries exactly this clause
+for exactly this reason, so the JQL is where a reader of this codebase will look for it. A local
+predicate would also mark the ticket seen, which spends the one mechanism that could pick it up if
+it reopened inside the window.
+
+**On `statusCategory` rather than a status name.** `src/watch/signals.ts` already settles this: names
+are per-board, renameable and Norwegian on this board, so `status != "Done"` is a filter that
+matches nothing here. The category key is the only stable spelling of "closed".
+
+**What would make it the wrong idea.** A ticket closed and reopened outside the created-window is
+now permanently invisible to the poller — it was already, via `seenKeys`, but this widens the set
+that never enters. Acceptable because reopening is a human act and the human can re-trigger; wrong
+if reopening turns out to be routine.
+
+### 27. Triage cannot be restricted to one status
+
+**Branch:** none yet. Follows §26; wants the status field §26 does not need.
+
+**What is not built.** `TRIAGE_ONLY_STATUS` — when set, only issues in that status are triaged.
+Empty means no restriction, the shape `JIRA_COMPONENTS` already uses.
+
+**Why it is owed.** The operator wants to point the service at one column while it is being
+calibrated, rather than at everything the component filter admits. Today the only selection dials
+are project, component, issue type and a time window.
+
+**Both populations, and the watch queue is the awkward half.** It applies to newly discovered issues
+in `buildNewIssuesJql`, and to tickets already under `agent:watching` — those are explicitly _not_
+exempt. But `buildSendbackWatchJql` must keep returning every watched ticket regardless of status,
+because a ticket the query cannot see is a ticket nothing can unsubscribe, and the label would
+outlive every loop that honours it. So the filter lands on the **decision**, not the query:
+`decideWatch` returns `quiet` for a watched ticket outside the status. `quiet` and not
+`unsubscribe` — an out-of-status ticket has not ended, it is merely not being paid for this tick.
+
+**What would make it the wrong idea.** A status name is a per-board string with no validation
+available at startup, so a typo is a filter that silently matches nothing and a service that appears
+to be running and triages zero tickets. Needs a startup log of the rendered query at minimum, and
+possibly a louder signal for "restriction set, zero candidates, every cycle".
+
+### 28. Triage order ignores the board, so the leftmost column waits behind the oldest ticket
+
+**Branch:** none yet. Follows §27.
+
+**What is not built.** `TRIAGE_STATUS_PRIORITY` — an ordered status list, leftmost column first,
+with unlisted statuses sorting last. Triage works down it rather than strictly oldest-first.
+
+**Why it is owed.** Ordering today is `created ASC` end to end, which is fair and says nothing about
+what is worth triaging first. A ticket in the leftmost column is the one a person is about to pick
+up.
+
+**Why a configured list rather than the board.** The real column-to-status mapping lives behind
+Jira's Agile API, which would need a board id, a new client method and a new read grant. The list is
+a setting the operator already knows the answer to, it matches how components and auto issue types
+are configured, and it is testable without a board.
+
+**The cursor is the whole difficulty.** `runPollCycle` advances the cursor across an unbroken run of
+successes _from the oldest issue forward_, so today the processing order **is** the correctness
+mechanism. Re-sorting the loop naively strands older tickets permanently — the exact failure the
+poller's header rule 2 exists to prevent. The two get decoupled: triage in priority order, advance
+the cursor over the contiguous created-ascending prefix of the issues that succeeded. That is a
+guard, so it does not ship until a test fails when it is unplugged.
+
+**What would make it the wrong idea.** If the leftmost column is where tickets are dumped and left,
+priority ordering starves the ones that were actually moving, and the decoupling has bought
+complexity for a worse order. Worth measuring against one real backlog before it goes in the daemon
+rather than only in `poll:once`.
 
 ---
 
