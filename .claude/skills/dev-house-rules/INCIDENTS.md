@@ -15,6 +15,15 @@ written yet. 28 entries also link the other way, from `**The rule**` at the end 
 rested on. Nothing needs to read this file top to bottom, and it is not on the path of doing any
 work.
 
+**Why the stories and not just the rules, measured.** Of **257 rule files sampled across the
+popular collections on 2026-09-02, four contain the word "because"**. The reasoning is the only
+genuinely differentiated thing in this corpus — and it is the first thing length pressure comes for,
+because vendor guidance puts `CLAUDE.md` under 200 lines and a skill body under 500 while `SKILL.md`
+stood at 884. So the war stories **move**; they do not shrink. That is what this file is: off the
+reading path, unbudgeted, and linked from the rules so that
+[a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against what it
+rested on.
+
 **Append-only, and dated.** New incidents go at the bottom. An entry is never edited to make its
 conclusion look better; if a later run refutes it, that is a new entry, because a corrected story
 loses the thing that made it worth keeping. Entries are removed only when the subsystem they
@@ -1271,6 +1280,13 @@ ceiling. It surfaced the way its predecessor did: a human read the file and aske
 the author judges whether it applies, is a leak with a legal path. Deletion rules need the exception
 to name a _destination that is itself maintained_, not a holding area — and if the destination is
 "somewhere I will decide later", the honest options are the rule it changes, or nothing.
+
+**The disposition, for the record.** The section was emptied in the same branch that closed it —
+one verdict per entry, no fourth option. Five were already recorded elsewhere, two of them at the
+call site in more detail than here, which makes the section's own title (_"and is recorded nowhere
+else"_) false for a third of its contents and checked by nothing. Six generalised and became rule
+paragraphs in `PROVING.md` or `STARTING.md`; three were facts about the system and went to the code
+or the map; the run logs went. `PLAN.md` 1,094 → 665 lines.
 
 **The rules** — [`PLAN.md` records what is not built, and never a
 lesson](STARTING.md#the-document-contract-which-is-the-one-that-is-always-in-force); [step 5 routes

@@ -22,15 +22,13 @@ Four rules, in order of how often they are broken:
    person catching it.
    [→ five files that said "discovery only"](INCIDENTS.md#the-credential-that-stopped-being-discovery-only)
 2. **`PLAN.md` records what is not built**, gaining an entry when work _starts_ and losing it when
-   the work ships — **deleted**, not struck through, and with no exception. A plan that accumulates
-   finished work stops being read, and a plan nobody reads is how two people build the same thing
-   twice. **`PLAN.md` is for planning and tracking implementations. It is not where lessons live**:
-   what a run taught goes into the rule it changes in this skill, or into
-   [INCIDENTS.md](INCIDENTS.md) if it changes no rule, or nowhere.
+   the work ships — **deleted**, not struck through, no exception. A plan that accumulates finished
+   work stops being read. **It is not where lessons live**: what a run taught goes into the rule it
+   changes here, into [INCIDENTS.md](INCIDENTS.md), or nowhere.
    [→ the escape hatch that grew a 409-line sink](INCIDENTS.md#the-lesson-store-that-was-the-incident-it-was-written-to-fix)
 3. **Numbers in prose are facts and rot like facts** — grep for them after any change that moves
-   them. `pnpm docs:check` is a floor, not a substitute for looking, and needed a guard of its own
-   to be worth anything.
+   them. `docs:check` is a floor — no checker sees a noun nobody listed, and a rewrite can _invent_ a
+   figure. **The fix that holds is not stating it:** let the dated list be the count.
    [→ the check the formatter could switch off](INCIDENTS.md#the-check-the-formatter-could-switch-off)
 4. **When a document and your reasoning disagree, the document might be right.**
    [→ measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code)

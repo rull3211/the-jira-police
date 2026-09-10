@@ -139,10 +139,9 @@ honest measure of whether these mechanisms fire. Answer it when the answer is un
 noticed" and "nothing; it was found while reading for something else" are the two most useful values
 it can take.
 
-**A rule with one instance is a hypothesis.** Write the case down and wait — as an
-[INCIDENTS.md](INCIDENTS.md) entry closing with `**No rule yet**`, which `pnpm docs:check` counts, or
-in the module's own header. **Not in `PLAN.md`**, which tracks unbuilt work and has already been the
-sink once. This repository named the literal-list rule on its **third** instance.
+**A rule with one instance is a hypothesis.** Write the case down and wait — an
+[INCIDENTS.md](INCIDENTS.md) entry closing `**No rule yet**`, or the module's own header. **Not
+`PLAN.md`.** This repository named the literal-list rule on its **third** instance.
 Premature rules are not free: they dilute the earned ones and lengthen the document until it stops
 being read. [→](INCIDENTS.md#the-literal-lists-that-named-a-types-members)
 
