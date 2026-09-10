@@ -270,7 +270,14 @@ environment cannot answer a question about CI's.**
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **`poll.order` has never been emitted.** It is the instrument `TRIAGE_STATUS_PRIORITY` ships with
   — the argument for the setting being safe is that an operator can see the queue it produced — and
-  it fires only inside a cycle with at least one fresh ticket, which costs a model run per ticket.
+  it fires only inside a cycle with at least one fresh ticket. **That is not merely a model run per
+  ticket.** `WRITE_BACK` falls back to `false`, but `pnpm start` and `pnpm poll:once` both load
+  `.env`, so the fallback is not what decides it on any machine that has one — and on the machine
+  this was measured on, `.env` is demonstrably setting values, because the empty cycle below logged
+  `skill: intake-triage` rather than the `mock-triage` fallback. So the first run that emits
+  `poll.order` against the 35-ticket backlog may also comment and label 35 shared tickets. Observing
+  this instrument is a deliberate act with a blast radius, not a free look, and anyone reaching for
+  it should check `WRITE_BACK` first rather than trust the documented default.
   What has been driven is the free half: `poll:once --dry-run` printed the real 35-ticket backlog in
   priority order, and an empty real cycle was run to watch `poll.status_priority` fire at wiring
   with the parsed list. So the ordering is observed and the wiring line is observed; the per-cycle
