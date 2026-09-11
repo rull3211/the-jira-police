@@ -656,7 +656,10 @@ async function reserve(
  * answering it again is noise on somebody else's pull request.
  *
  * A thread whose **last comment is ours** has been answered in public and the
- * answer is still there. This is the plan's instability rule, and it is keyed on
+ * answer is still there — "ours" being the `BOT_PREFIX`, which `replyToThread`
+ * stamps on every reply it sends. That is the other half of this rule and it
+ * was missing until PR #548 looped in public; read it before changing either.
+ * This is the plan's instability rule, and it is keyed on
  * a fact rather than on a timestamp on purpose: a bot reviewer that re-raises a
  * settled point produces no new comment on the thread, so a date-based cursor
  * would see nothing and a "did the verdict change" check would see an argument
@@ -742,6 +745,9 @@ async function answerThreads(
     const replied = await replyToThread(runner, {
       cwd: opts.cwd,
       threadId: answer.threadId,
+      // Unprefixed on purpose. `replyToThread` marks the body as ours, which is
+      // what stops `unansweredThreads` handing this answer back next round; it
+      // used to be this line's job and this line is where it was forgotten.
       body: answer.reply,
       timeoutMs: opts.timeoutMs,
     });

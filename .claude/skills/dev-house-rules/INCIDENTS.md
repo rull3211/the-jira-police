@@ -8,12 +8,14 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 40 of the 46
-entries below are cited that way, and the other six each say in their own text that no rule has been
-written yet. 28 entries also link the other way, from `**The rule**` at the end of the entry, so that
-[a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against what it
-rested on. Nothing needs to read this file top to bottom, and it is not on the path of doing any
-work.
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 41 of the 48
+entries below are cited that way, and the other seven each say in their own text that no rule has
+been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
+reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
+so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
+what it rested on — **how many is deliberately not given here.** It used to say 28, nothing derived
+it, and by the time anyone noticed, the figure matched no definition of the thing it counted.
+Nothing needs to read this file top to bottom, and it is not on the path of doing any work.
 
 **Append-only, and dated.** New incidents go at the bottom. An entry is never edited to make its
 conclusion look better; if a later run refutes it, that is a new entry, because a corrected story
@@ -1395,3 +1397,121 @@ two are eighty lines apart and nobody scrolls".
 
 **No rule yet** — a third instance in a different file, showing the shape is about where a case is
 filed rather than about these two neighbours, and `filed-out-of-reach` at 2.
+
+**`filed-out-of-reach` is at 3 as of 2026-09-11, and whether that meets the condition above is
+genuinely arguable rather than settled.** [The two tests that proved the loop
+terminates](#the-two-tests-that-proved-the-loop-terminates-while-it-did-not) is a third instance and
+a different pair of functions: the invariant was written above `say` and the writer breaking it was
+`answerThreads`, 690 lines up, added 46 minutes earlier. What the condition asked for was a
+different **file**, and both of those are in `delivery.ts` — so the new case answers "a different
+pair" and not "a different file", and the alternative reading it was meant to rule out, that these
+are just neighbours nobody scrolls between, survives it. Held at 3 and not promoted on that
+technicality, deliberately: the condition was written down in advance precisely so it could not be
+reinterpreted by whoever next wanted the rule, and the first time it binds is the only time that
+matters. The next instance across a file boundary carries it.
+
+---
+
+## 2026-09-11
+
+### The daemon that was only ever guarded by the operator saying so
+
+A session opened with a production bug to diagnose — the bot had answered its own review comments on
+an outside repository — and the daemon was up for all of it. Nothing in the repository said so. The
+operator did, twice, in the middle of sentences about something else: "the daemon is working dont do
+anything now", and a message later, "(again wait the daemon is working)". Both times an agent was
+about to start editing.
+
+**Nothing shipped, and that is the entry.** The guard that held was a human remembering, mid-request,
+that his own service was running out of the directory he had just pointed an agent at. There is no
+build step here: `pnpm dev` is `node --watch src/index.ts`, so the working copy is not compiled into
+the running program, it **is** the running program's text. `git status`, a green suite and the branch
+name all read identically whether the service is live or stopped.
+
+**The first theory was wrong, which is the part worth recording.** The rule was motivated by "a save
+hot-reloads the daemon mid-tick and strands what it was holding". It does not. Node's watcher sends
+one signal — `--watch-kill-signal`, default `SIGTERM` — and `killAndWait` then does `await onExit`
+with no `SIGKILL` escalation and no timeout, verified by reading `internal/main/watch_mode` out of
+the v24.19.0 binary rather than the docs. `createShutdown` (`src/index.ts:101-112`) catches it and
+drains the cycle in flight, a `restarting` guard drops further file events while it waits, and the
+worktree layer self-heals besides (`src/solve/worktree.ts:321-338`). **A save on its own is safe.**
+
+**The hazard is the wait.** Draining can mean finishing an entire solve — several model passes — while
+Node prints `Waiting for graceful termination...`. The Ctrl-C that ends that wait is the **second**
+signal, and `src/index.ts:104` answers it with `process.exit(130)`, which skips every `finally` in
+the service. Three things follow and none is visible afterwards: the `agent:solving` claim is never
+released, and no TTL, lease or reaper exists anywhere in `src/` to reclaim it, so at
+`MAX_CONCURRENT_SOLVES=1` the solve half stops until somebody edits the label by hand; one skill root
+leaks at mode `0o555`, so even `rm -rf` on it fails — `PLAN.md` §22 calls that "a hard kill", where
+it is really any exit that skips a `finally`; and the model subprocess is spawned with neither
+`detached` nor a `signal`, so it keeps running and keeps billing. A clean restart is not free either:
+the attempt ledger and the watch memo are per-process by design, so every save re-grants a solve
+attempt on a failing ticket.
+
+**Two documents were caught overstating on the way**, both by following the mechanism rather than by
+reading them. `ARCHITECTURE.md` invariant 14 said a crash leaves the board "exactly as they found
+it" — true of a thrown exception, false of the signal path that skips the `finally` the whole
+guarantee rests on; qualified in this commit. And `runPublish` returns before the label moves
+(`src/cli/solve-run.ts:1168`, then `:1181`), so a death in that window leaves an open pull request on
+a ticket still marked `agent:solving`, which neither queue selects — recorded as `PLAN.md` §31 rather
+than fixed here.
+
+**Found by** the operator, twice, in the middle of asking for something else. Nothing in the tree
+fired, because nothing in the tree could.
+
+**The rule** — [ask whether the daemon is running, before the first
+edit](STARTING.md#before-the-first-edit), with `pnpm daemon:status` behind it so the answer costs one
+command instead of a guess.
+
+**Written on one instance, deliberately, and against the local rule.**
+[FINISHING.md](FINISHING.md#this-skill-is-a-living-document-and-it-is-amended-from-defects) says a
+rule with one instance is a hypothesis that should wait for a second; that objection was put to the
+operator, who promoted it anyway. What argues for going early is that this is not a claim about how
+often a defect recurs but a **precondition on a hazard that is already in the tree**: the downside is
+not "a bug like the last one" but a queue wedged with no automatic recovery, and the check is one
+command. The objection stands and is written here so a later reader can hold the rule to it — if
+`daemon:status` never once returns `RUNNING` before an edit, this is dead weight and should go.
+
+### The two tests that proved the loop terminates, while it did not
+
+The bug the session above opened with. On PR #548 of `insurance-ssx-mono-repo` the service answered
+its own inline review replies, round after round, until a cap stopped it.
+
+The mechanism is one missing prefix. `unansweredThreads` (`src/solve/delivery.ts`) keeps any thread
+whose last comment is not `isOurs`, and `isOurs` is `startsWith(BOT_PREFIX)` and nothing else,
+because `gh` posts as the operator and there is no login to key on. `answerThreads` passed the pass's
+body to `replyToThread` unmarked. So the reply landed, the next round read it back as a reviewer's
+comment, and answered it. The pushback path made that structural rather than unlucky: a
+`judgement`-basis answer may not resolve its thread (`src/solve/runner.ts:1088`), so the one round
+that declines to change code is exactly the round that leaves the thread open for itself to find.
+
+**What makes this worth an entry is not the missing prefix. It is that two tests asserted the
+correct behaviour and were green the whole time.** `does not re-litigate a thread whose last comment
+is ours` and `acts again when the reviewer comes back after our reply` both built the thread from a
+hand-written `spoke("rull3211", "bot: it is")` — a fixture modelling `replyToThread`'s output. The
+model was right and the module was wrong, and a fixture can only ever test the model. Both tests are
+now built by running the real writer and taking the bytes it puts on the wire; unplug the prefix and
+both go red, which they should have done from the first day.
+
+**The invariant was also written down, 46 minutes too late and 690 lines away.** `delivery.ts` says,
+above the _other_ writer, that the prefix "is not decoration… a comment written without it is read
+back next round as a reviewer asking for something, and the loop argues with itself" — added in
+`b238e39`, while the untagged thread writer had shipped in `151b609` earlier the same afternoon, in
+the same file. The author who stated the invariant did not check the sibling writer already breaking
+it. That is a second instance of [filed out of reach](#the-same-wedge-written-twice-in-one-file-because-the-first-instance-was-filed-inside-the-function-it-happened-to)
+in a different pair of functions.
+
+The fix moves the stamp into `replyToThread`, so an untagged reply is unreachable rather than merely
+absent from today's caller. It does not transfer to `postComment`, whose callers include the marker —
+stamping there would produce `bot: bot: iteration count `, and `findMarker` would post a fresh marker
+every round. That asymmetry is now argued in the header rather than left to look like an oversight.
+
+**Found by** the operator reading the pull request, not by the suite and not by a cap.
+
+**The rule** — [build the fixture with the real
+function](PROVING.md#tests-that-stop-testing), which was already written and which this is the
+worked example of.
+
+**Not retroactive, and that is a real cost.** Replies posted before the fix carry no prefix and are
+indistinguishable from a reviewer's, so any pull request already looping keeps looping until a cap
+fires. There is no repair short of a human resolving the threads.

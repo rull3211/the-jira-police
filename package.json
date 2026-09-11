@@ -13,6 +13,7 @@
     "solve:once": "node --env-file-if-exists=.env src/cli/solve-once.ts",
     "bot:once": "node --env-file-if-exists=.env src/cli/bot-once.ts",
     "watch:once": "node --env-file-if-exists=.env src/cli/watch-once.ts",
+    "daemon:status": "node src/cli/daemon-status.ts",
     "check-types": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",

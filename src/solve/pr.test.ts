@@ -31,6 +31,7 @@ import {
   requestReview,
   resolveThread,
 } from "./pr.ts";
+import { BOT_PREFIX, isOurs } from "./marker.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
@@ -1688,7 +1689,25 @@ describe("replyToThread", () => {
     const argv = runner.calls[0] ?? [];
     expect(argv.slice(0, 3)).toEqual(["gh", "api", "graphql"]);
     expect(argv).toContain(`threadId=${THREAD_ID}`);
-    expect(argv).toContain("body=Checked: public/index.html ships no icon link.");
+    expect(argv).toContain(`body=${BOT_PREFIX}Checked: public/index.html ships no icon link.`);
+  });
+
+  it("marks the reply as ours, because the caller cannot be relied on to", async () => {
+    // The loop on PR #548: `answerThreads` sent the body through unprefixed, so
+    // `unansweredThreads` read every reply back as a reviewer's and answered it
+    // again. Tagging here rather than at the call site is what makes an
+    // untagged reply unreachable instead of merely absent from today's caller.
+    const runner = fakeRunner(replied());
+
+    await replyToThread(runner, {
+      cwd: WORKTREE,
+      threadId: THREAD_ID,
+      body: "the guard is on the other branch",
+      timeoutMs: 60_000,
+    });
+
+    const body = (runner.calls[0] ?? []).find((arg) => arg.startsWith("body=")) ?? "";
+    expect(isOurs(body.slice("body=".length))).toBe(true);
   });
 
   it("passes the body raw, so an @ in it is not read as a filename", async () => {
@@ -1703,11 +1722,20 @@ describe("replyToThread", () => {
       timeoutMs: 60_000,
     });
 
+    // The prefix now sits in front of the `@`, which would defeat `-F` by
+    // accident. Asserting on the flag rather than on the leading character
+    // keeps this a claim about the flag, so it still fails if `-f` becomes
+    // `-F` and still fails if the prefix is later dropped.
     const argv = runner.calls[0] ?? [];
-    expect(argv[argv.indexOf("body=@copilot this is the argument") - 1]).toBe("-f");
+    expect(argv[argv.indexOf(`body=${BOT_PREFIX}@copilot this is the argument`) - 1]).toBe("-f");
   });
 
   it("refuses a blank reply", async () => {
+    // This also pins the order of the two steps above it, which is not obvious
+    // from reading either. Prefix before the check and "   \n " becomes
+    // "bot:    \n ", which no longer trims to empty — the refusal stops firing
+    // and a reply saying nothing becomes grounds to resolve a reviewer's
+    // thread. Swap them and this test goes red on `runner.calls`.
     const runner = fakeRunner(replied());
 
     const result = await replyToThread(runner, {

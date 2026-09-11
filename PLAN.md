@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2526 tests in 70
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2539 tests in 71
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28 and §29, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30 and §32, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -77,7 +77,10 @@ inside the branch that built it. **§29 is the exception the paragraph above fla
 unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
 (unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
 parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
-written down here. The triage-selection entries are now all closed, so the next entry is §30.
+written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
+inside the branch that built it, and §32 was the untagged thread reply that let the service argue
+with itself on PR #548 — same shape, opened and deleted inside its own branch. The triage-selection
+entries are now all closed, so the next entry is §33.
 
 <!-- refs:on -->
 
@@ -668,6 +671,32 @@ both half-proven.
 **What would make it the wrong idea.** A sweep that deletes by age can delete a root belonging to a
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
+
+### 31. A claim stranded by a signal is stranded for ever
+
+**Branch:** none yet.
+
+**What is not built.** Any way for a `agent:solving` label to come back on its own — a TTL, a lease,
+a startup sweep, or a reconciliation of "a pull request exists" against "the ticket still says
+solving".
+
+**Why it is owed.** `ARCHITECTURE.md` invariant 14 rests entirely on a `finally`, which every
+stack-skipping exit misses: `process.exit(130)` on a second signal (`src/index.ts:104`),
+`process.exit(1)` on an uncaught exception (`:156`), `SIGKILL`, a slept laptop. There is no TTL,
+lease or reaper in `src/`. With `MAX_CONCURRENT_SOLVES=1` one stranded claim halts the solve half
+indefinitely, and the repair is a human editing the label field by hand — the exact operation
+invariant 11 exists to have eliminated. A second, narrower window has the same shape: `runPublish`
+returns at `src/cli/solve-run.ts:1168` and the label moves at `:1181`, so a death between them
+leaves an open pull request on a ticket marked `agent:solving`, which neither the solve queue nor
+the review queue selects.
+
+**Why it was not done here.** Found while establishing the mechanism behind the daemon check in
+`STARTING.md`, on a branch whose whole diff is prose and one read-only command. A reaper writes to Jira on a schedule, which is a new
+privilege and wants its own phased branch.
+
+**What would make it the wrong idea.** Anything time-based can reclaim a ticket from a solve that is
+merely slow, which produces two solvers on one ticket — strictly worse than the wedge it fixes. The
+PR-exists reconciliation has no such hazard and is probably the half to build first.
 
 ---
 

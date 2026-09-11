@@ -67,7 +67,9 @@ will leave you trusting a green suite.
   catching exactly that drift.
   [→](INCIDENTS.md#the-literal-lists-that-named-a-types-members)
 - **A fixture that models another module's output is a test that cannot see that module change.**
-  Build the fixture with the real function.
+  Build the fixture with the real function. Two tests hand-wrote the `bot: ` prefix their own writer
+  was failing to send, and stayed green while the loop they asserted against ran in public.
+  [→](INCIDENTS.md#the-two-tests-that-proved-the-loop-terminates-while-it-did-not)
 - **A test whose name describes something it does not check.** The solver has shipped two, both
   green, both guarding nothing. **Read the test back against the wrong implementation.**
   [→](INCIDENTS.md#the-two-regression-tests-that-guarded-nothing)
