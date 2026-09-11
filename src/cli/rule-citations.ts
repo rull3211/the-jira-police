@@ -140,9 +140,9 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
  * debt that is already paid, which is how a budget stops being read. More means
  * a new entry took the exemption. Both are worth stopping for.
  *
- * There is deliberately no grandfather list. 40 of the 46 entries cite a rule
- * today, and a clause forgiving the other six by path would be longer than the
- * debt it excuses — and would still be here after the debt was paid. A
+ * There is deliberately no grandfather list. 40 of the 47 entries cite a rule
+ * today, and a clause forgiving the other seven by path would be longer than
+ * the debt it excuses — and would still be here after the debt was paid. A
  * declaration expires; a path exemption does not.
  *
  * **6 since 2026-09-10**, and the sixth is worth naming because raising this is
@@ -151,8 +151,21 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
  * from one broken in a single term", and `FINISHING.md` refuses rules built
  * from one instance — so the honest options were a declaration or a premature
  * rule, and the declaration comes due at instance two.
+ *
+ * **7 since 2026-09-11**, and the seventh is the harder argument of the two, so
+ * it is made rather than assumed. "The same wedge, written twice in one file"
+ * is at two instances, not one, which is further than the sixth got — but the
+ * thing it wants a rule for is *where a parked case is filed*, and both
+ * instances are the same pair of functions in the same file. That is one
+ * observation about two neighbours, not two observations about filing. Writing
+ * the rule now would generalise from a sample that cannot distinguish "module
+ * headers are the wrong place to park a case" from "these two functions are
+ * eighty lines apart and nobody scrolls". The declaration comes due at an
+ * instance in a different file. **What this number costs while it sits at 7 is
+ * honest: a case that has already been paid for twice is findable only by
+ * someone who opens `INCIDENTS.md`, which is not a mandatory read.**
  */
-export const UNRESOLVED_ON_PURPOSE = 6;
+export const UNRESOLVED_ON_PURPOSE = 7;
 
 /** How stale a dated `**No rule yet**` is allowed to get. */
 export const UNRESOLVED_DAYS = 30;

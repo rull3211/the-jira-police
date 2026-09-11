@@ -324,6 +324,27 @@ describe("describeSolveOutcome", () => {
     expect(line).not.toContain(worktree.path);
   });
 
+  it("warns that the kept worktree is kept, not held", () => {
+    // The other half of the same divergence, and the half that shipped. This
+    // outcome tells an operator to reproduce in the kept worktree, and since
+    // `createWorktree` learned to salvage, the next run for the ticket moves
+    // that directory to a `-salvaged-<timestamp>` sibling and puts a fresh
+    // checkout at the same path. Both failure modes are real: come back later
+    // and the path holds a different checkout that looks right, or work in it
+    // while the daemon ticks and it is renamed out from under you mid-command
+    // — observed 2026-09-11 with a Maven run.
+    const line = describeSolveOutcome({
+      kind: "unusable-base",
+      reason: "the repository's own build does not pass in a fresh worktree",
+      verification: {} as never,
+      worktree,
+    });
+
+    expect(line).toContain(worktree.path);
+    expect(line).toContain("salvaged");
+    expect(line).toContain("stop the daemon");
+  });
+
   it("still points at the worktree when git refused to remove it", () => {
     // `removeWorktree` does not force, so a bail whose worktree is somehow
     // dirty keeps it — and that is precisely the case an operator most needs

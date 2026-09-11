@@ -158,7 +158,14 @@ describe("createWorktree", () => {
         repoPath: "/repos/buy-insurance-advisor-web",
       },
     });
-    expect(runner.calls.map((argv) => argv[3])).toEqual(["fetch", "rev-parse", "worktree"]);
+    // Two words rather than one: both worktree steps are `git worktree`, and a
+    // check reading only the subcommand could not tell the list from the add.
+    expect(runner.calls.map((argv) => argv.slice(3, 5).join(" "))).toEqual([
+      "fetch origin",
+      "rev-parse --verify",
+      "worktree list",
+      "worktree add",
+    ]);
   });
 
   it("cuts from the fetched base, on a branch that must not already exist", async () => {
@@ -168,7 +175,7 @@ describe("createWorktree", () => {
 
     // `-b` rather than a bare add: a second run for the same ticket must fail
     // rather than silently reuse a branch that may already carry commits.
-    expect(runner.calls[2]).toEqual([
+    expect(runner.calls[3]).toEqual([
       "git",
       "-C",
       "/repos/buy-insurance-advisor-web",
@@ -299,12 +306,46 @@ describe("createWorktree", () => {
   });
 
   it("reports a failed add without claiming a worktree exists", async () => {
-    const runner = fakeRunner([OK, OK, FAIL]);
+    // Four replies, not three: the list sits between the base check and the
+    // add, and the failure under test is the add's.
+    const runner = fakeRunner([OK, OK, OK, FAIL]);
 
     const result = await createWorktree(runner, request());
 
     expect(result.outcome).toBe("refused");
     expect(refusal(result)).toContain("could not create the worktree");
+    // The half of the `-b` guard the salvage must not eat. Nothing of ours was
+    // at the path, so this collision is a bare ref of that name — not our
+    // debris, and possibly carrying commits — and it is still refused.
+    expect(runner.calls.map((argv) => argv.slice(3, 5).join(" "))).not.toContain("worktree move");
+  });
+
+  it("salvages its own predecessor's checkout rather than wedging on it", async () => {
+    // The regression, and it cost a ticket. `unusable-base` keeps its worktree
+    // deliberately, so the next run for the same ticket met that checkout
+    // holding that branch, failed at `worktree add -b`, and failed identically
+    // for ever — spending one of MAX_SOLVE_ATTEMPTS_PER_TICKET each time on
+    // something no retry could have passed.
+    const branch = "fix/ssx-3822-favicon-is-missing-on-the-advisor-page";
+    const runner = fakeRunner([
+      OK,
+      OK,
+      { ...OK, stdout: `worktree /tmp/solve/SSX-3822\nHEAD abc123\nbranch refs/heads/${branch}\n` },
+    ]);
+
+    const result = await createWorktree(runner, request());
+
+    expect(result.outcome).toBe("created");
+
+    const verbs = runner.calls.map((argv) => argv.slice(3, 5).join(" "));
+    // Moved, never removed. The checkout is the only place a base that builds
+    // elsewhere and not here can be reproduced, which is the whole reason
+    // `unusable-base` kept it — so salvaging must not become deleting.
+    expect(verbs).toContain("worktree move");
+    expect(verbs).not.toContain("worktree remove");
+    // And the point of all of it: the cold path then runs as though the machine
+    // had never seen this ticket.
+    expect(verbs.at(-1)).toBe("worktree add");
   });
 
   it("treats a timeout as a failure rather than as a zero exit code", async () => {

@@ -192,6 +192,13 @@ export type SolveOutcome =
    * behaves differently *here* than in an ordinary checkout, and the worktree
    * is the only place that difference can be reproduced. Deleting it would
    * throw away the single artifact that explains the refusal.
+   *
+   * **Kept is not kept *there*.** Keeping it and never coming back wedged the
+   * ticket for good — the next run's `worktree add -b` collided with this
+   * checkout and this branch, both derived from the issue key, and failed
+   * identically for ever. So `createWorktree` now moves our own debris to a
+   * timestamped sibling before it cuts. The evidence survives; the path it
+   * survives at is in the `solve.worktree.salvaged` log line, not here.
    */
   | {
       readonly kind: "unusable-base";
@@ -626,11 +633,23 @@ export interface SolveAttempts {
  * worktree's state is unknown by definition, since the run stopped in the
  * middle of writing to it. Which makes the cleanup load-bearing rather than
  * tidy: `createWorktree` derives both the path and the branch from the issue
- * key, so a second attempt collides with its own predecessor unless both are
- * gone. If either survives, there is no retry — `git worktree remove` refuses
- * on a dirty checkout and `branch -d` refuses on unmerged commits, so a refusal
- * here means the first attempt left work behind, and work left behind is
- * evidence rather than debris.
+ * key, so a second attempt meets its own predecessor. If either the worktree or
+ * the branch survives, there is no retry — `git worktree remove` refuses on a
+ * dirty checkout and `branch -d` refuses on unmerged commits, so a refusal here
+ * means the first attempt left work behind, and work left behind is evidence
+ * rather than debris.
+ *
+ * **That block is this function's, and it is no longer a property of
+ * `createWorktree`.** `createWorktree` now salvages a checkout of ours at that
+ * path rather than colliding with it, so it would happily start a second
+ * attempt over the first — the two paths deliberately give opposite answers
+ * about the same dirty checkout. The distinction is who left it: the daemon's
+ * next tick is picking up after a process that is *gone*, and moving its debris
+ * aside is the only way to make progress, whereas here the first attempt just
+ * ended in this process and its worktree is the evidence for the environment
+ * failure we are about to retry past. So the check above must stay explicit,
+ * and must not be simplified away on the grounds that the cold path "handles
+ * it" — it handles it by discarding exactly what this one is protecting.
  */
 export async function solveWithRetry(
   deps: SolveDependencies,
