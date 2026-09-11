@@ -1494,7 +1494,7 @@ now built by running the real writer and taking the bytes it puts on the wire; u
 both go red, which they should have done from the first day.
 
 **The invariant was also written down, 46 minutes too late and 690 lines away.** `delivery.ts` says,
-above the *other* writer, that the prefix "is not decoration… a comment written without it is read
+above the _other_ writer, that the prefix "is not decoration… a comment written without it is read
 back next round as a reviewer asking for something, and the loop argues with itself" — added in
 `b238e39`, while the untagged thread writer had shipped in `151b609` earlier the same afternoon, in
 the same file. The author who stated the invariant did not check the sibling writer already breaking
