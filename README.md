@@ -477,6 +477,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                  | Jira                        |
 | `pnpm start`                                           | The daemon — grooming, plus solve and watch if their flags are on. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
 | `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                    |
+| `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                               | no                          |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                  | no                          |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                          |
 | `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                          |
@@ -486,6 +487,14 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch. Three unrelated meanings of one word, and the
 collision is in Node's flag rather than anywhere it can be renamed.
+
+**Let a shutdown finish, and do not press Ctrl-C twice.** The first signal drains the cycle in
+flight, which on a solve can be several model passes; Node prints `Waiting for graceful
+termination...` and will wait indefinitely, because its watcher never escalates to `SIGKILL`. The
+second signal exits immediately and skips the `finally` that releases `agent:solving`, and nothing
+reclaims that label on its own — with `MAX_CONCURRENT_SOLVES=1` the solve half then does nothing
+until you remove it by hand. Same applies to editing a file under `pnpm dev`, which is a restart:
+`pnpm daemon:status` says whether one is running.
 
 The typecheck script is **`check-types`**, not `typecheck`.
 

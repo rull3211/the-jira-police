@@ -182,11 +182,14 @@ branches that already merged; auto-delete-on-merge cleans the remote only.
 
 ## Before the first edit
 
-- [ ] **Is this in `PLAN.md`?** If it is not a one-line fix, write the entry first, opening with the
-      `Branch:` label — what is being attempted, why now, and what would make it the wrong idea. The
-      session that does the work is not the session that inherits it.
-- [ ] **What branch does this belong on, and how deep is the stack?** One per reviewable unit of
-      privilege, never `main`; if the stack is already deep, ask for a merge instead of another
-      floor, and delete the local branches that already merged.
+- [ ] **[Is this in `PLAN.md`](#the-plan-is-written-before-the-work-not-after-it)?** Unless it is a
+      one-line fix, the entry is written first, opening with the `Branch:` label.
+- [ ] **What branch does this belong on, and [how deep is the
+      stack](#phase-a-privilege-and-drive-it-by-hand-first)?** One per reviewable unit of privilege,
+      never `main`.
+- [ ] **Is the daemon running?** `pnpm daemon:status` — nothing else here will tell you. This working
+      copy _is_ the running service's program text, and the impatient second Ctrl-C strands a claim
+      nothing reclaims.
+      [→ guarded only by the operator saying so](INCIDENTS.md#the-daemon-that-was-only-ever-guarded-by-the-operator-saying-so)
 
 → [BUILDING.md](BUILDING.md)

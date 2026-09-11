@@ -8,12 +8,14 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 40 of the 46
-entries below are cited that way, and the other six each say in their own text that no rule has been
-written yet. 28 entries also link the other way, from `**The rule**` at the end of the entry, so that
-[a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against what it
-rested on. Nothing needs to read this file top to bottom, and it is not on the path of doing any
-work.
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 41 of the 48
+entries below are cited that way, and the other seven each say in their own text that no rule has
+been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
+reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
+so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
+what it rested on — **how many is deliberately not given here.** It used to say 28, nothing derived
+it, and by the time anyone noticed, the figure matched no definition of the thing it counted.
+Nothing needs to read this file top to bottom, and it is not on the path of doing any work.
 
 **Append-only, and dated.** New incidents go at the bottom. An entry is never edited to make its
 conclusion look better; if a later run refutes it, that is a new entry, because a corrected story
@@ -1395,3 +1397,65 @@ two are eighty lines apart and nobody scrolls".
 
 **No rule yet** — a third instance in a different file, showing the shape is about where a case is
 filed rather than about these two neighbours, and `filed-out-of-reach` at 2.
+
+---
+
+## 2026-09-11
+
+### The daemon that was only ever guarded by the operator saying so
+
+A session opened with a production bug to diagnose — the bot had answered its own review comments on
+an outside repository — and the daemon was up for all of it. Nothing in the repository said so. The
+operator did, twice, in the middle of sentences about something else: "the daemon is working dont do
+anything now", and a message later, "(again wait the daemon is working)". Both times an agent was
+about to start editing.
+
+**Nothing shipped, and that is the entry.** The guard that held was a human remembering, mid-request,
+that his own service was running out of the directory he had just pointed an agent at. There is no
+build step here: `pnpm dev` is `node --watch src/index.ts`, so the working copy is not compiled into
+the running program, it **is** the running program's text. `git status`, a green suite and the branch
+name all read identically whether the service is live or stopped.
+
+**The first theory was wrong, which is the part worth recording.** The rule was motivated by "a save
+hot-reloads the daemon mid-tick and strands what it was holding". It does not. Node's watcher sends
+one signal — `--watch-kill-signal`, default `SIGTERM` — and `killAndWait` then does `await onExit`
+with no `SIGKILL` escalation and no timeout, verified by reading `internal/main/watch_mode` out of
+the v24.19.0 binary rather than the docs. `createShutdown` (`src/index.ts:101-112`) catches it and
+drains the cycle in flight, a `restarting` guard drops further file events while it waits, and the
+worktree layer self-heals besides (`src/solve/worktree.ts:321-338`). **A save on its own is safe.**
+
+**The hazard is the wait.** Draining can mean finishing an entire solve — several model passes — while
+Node prints `Waiting for graceful termination...`. The Ctrl-C that ends that wait is the **second**
+signal, and `src/index.ts:104` answers it with `process.exit(130)`, which skips every `finally` in
+the service. Three things follow and none is visible afterwards: the `agent:solving` claim is never
+released, and no TTL, lease or reaper exists anywhere in `src/` to reclaim it, so at
+`MAX_CONCURRENT_SOLVES=1` the solve half stops until somebody edits the label by hand; one skill root
+leaks at mode `0o555`, so even `rm -rf` on it fails — `PLAN.md` §22 calls that "a hard kill", where
+it is really any exit that skips a `finally`; and the model subprocess is spawned with neither
+`detached` nor a `signal`, so it keeps running and keeps billing. A clean restart is not free either:
+the attempt ledger and the watch memo are per-process by design, so every save re-grants a solve
+attempt on a failing ticket.
+
+**Two documents were caught overstating on the way**, both by following the mechanism rather than by
+reading them. `ARCHITECTURE.md` invariant 14 said a crash leaves the board "exactly as they found
+it" — true of a thrown exception, false of the signal path that skips the `finally` the whole
+guarantee rests on; qualified in this commit. And `runPublish` returns before the label moves
+(`src/cli/solve-run.ts:1168`, then `:1181`), so a death in that window leaves an open pull request on
+a ticket still marked `agent:solving`, which neither queue selects — recorded as `PLAN.md` §31 rather
+than fixed here.
+
+**Found by** the operator, twice, in the middle of asking for something else. Nothing in the tree
+fired, because nothing in the tree could.
+
+**The rule** — [ask whether the daemon is running, before the first
+edit](STARTING.md#before-the-first-edit), with `pnpm daemon:status` behind it so the answer costs one
+command instead of a guess.
+
+**Written on one instance, deliberately, and against the local rule.**
+[FINISHING.md](FINISHING.md#this-skill-is-a-living-document-and-it-is-amended-from-defects) says a
+rule with one instance is a hypothesis that should wait for a second; that objection was put to the
+operator, who promoted it anyway. What argues for going early is that this is not a claim about how
+often a defect recurs but a **precondition on a hazard that is already in the tree**: the downside is
+not "a bug like the last one" but a queue wedged with no automatic recovery, and the check is one
+command. The objection stands and is written here so a later reader can hold the rule to it — if
+`daemon:status` never once returns `RUNNING` before an edit, this is dead weight and should go.

@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2526 tests in 70 files, no build step, no
+Status: running end to end against production Jira. 2537 tests in 71 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -729,7 +729,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-77 production modules, 70 test files. Grouped by what they belong to rather than alphabetically,
+79 production modules, 71 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -824,20 +824,22 @@ because the grouping is the architecture.
 
 **Entry points and their argument parsing**
 
-| Path                       | Role                                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------------ |
-| `src/cli/poll-once.ts`     | One poll cycle, then exit. The daemon minus the loop, from the same factory          |
-| `src/cli/triage-once.ts`   | One triage against a named key, no discovery. `--write` to post it                   |
-| `src/cli/solve-once.ts`    | The solve ladder. Dry by default; every write is a typed flag                        |
-| `src/cli/solve-args.ts`    | The ladder and the `--advance` mode, and which rungs the settings can actually reach |
-| `src/cli/solve-run.ts`     | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**   |
-| `src/cli/solve-outcome.ts` | Outcomes to an operator's terminal, and the rule deciding `$?`                       |
-| `src/cli/bot-once.ts`      | The whole bot against one ticket: triage, fitness, claim, solve, PR, review          |
-| `src/cli/bot-args.ts`      | The same ladder, with an issue key always required                                   |
-| `src/cli/watch-once.ts`    | What the sendback watch would do; `--write` does it                                  |
-| `src/cli/watch-args.ts`    | Its argument and output shapes, kept out of a file that ends in a top-level `await`  |
-| `src/cli/docs-check.ts`    | `pnpm docs:check`. Development tooling, not a service entry point — see below        |
-| `src/cli/section-refs.ts`  | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only  |
+| Path                          | Role                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------- |
+| `src/cli/poll-once.ts`        | One poll cycle, then exit. The daemon minus the loop, from the same factory             |
+| `src/cli/triage-once.ts`      | One triage against a named key, no discovery. `--write` to post it                      |
+| `src/cli/solve-once.ts`       | The solve ladder. Dry by default; every write is a typed flag                           |
+| `src/cli/solve-args.ts`       | The ladder and the `--advance` mode, and which rungs the settings can actually reach    |
+| `src/cli/solve-run.ts`        | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**      |
+| `src/cli/solve-outcome.ts`    | Outcomes to an operator's terminal, and the rule deciding `$?`                          |
+| `src/cli/bot-once.ts`         | The whole bot against one ticket: triage, fitness, claim, solve, PR, review             |
+| `src/cli/bot-args.ts`         | The same ladder, with an issue key always required                                      |
+| `src/cli/watch-once.ts`       | What the sendback watch would do; `--write` does it                                     |
+| `src/cli/watch-args.ts`       | Its argument and output shapes, kept out of a file that ends in a top-level `await`     |
+| `src/cli/daemon-status.ts`    | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing |
+| `src/cli/daemon-processes.ts` | Picking the daemon out of `ps` output. Split off so a test can import it                |
+| `src/cli/docs-check.ts`       | `pnpm docs:check`. Development tooling, not a service entry point — see below           |
+| `src/cli/section-refs.ts`     | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only     |
 
 **Output**
 
@@ -1119,8 +1121,10 @@ otherwise mean "open a pull request for every ticket in the queue" — an unboun
 command line one character shorter than the safe one, at the moment an operator is experimenting.
 
 A run that does not reach a pull request releases its own claim on the way out, in a `finally`, so
-a ticket is not left claimed by a run that crashed — unless the outcome _decides_ the ticket's
-fate, in which case it leaves a terminal label and the reason behind instead. A run that opened a
+a ticket is not left claimed by a run that **threw** — unless the outcome _decides_ the ticket's
+fate, in which case it leaves a terminal label and the reason behind instead. An exit that skips
+the stack rather than unwinding it keeps the claim and nothing takes it back; invariant 14 has the
+list and `PLAN.md` §31 the gap. A run that opened a
 pull request does not release either: it moves the ticket to `agent:reviewing`, because releasing
 there would return a solved ticket to the queue for a second solver to duplicate, and keeping
 `agent:solving` would hold the only concurrency slot for as long as a human takes to review.
@@ -1816,6 +1820,17 @@ Things that look like details and are not:
     label this service did not write. And it never throws: it runs on the way out of a run that
     has usually already failed, and turning "the claim was gone before I could undo it" into an
     exception would replace the operator's real error with a bookkeeping one.
+
+    **The guarantee is exactly as strong as the `finally`, which is weaker than the sentence
+    above reads.** It holds for anything that throws. It does not hold for an exit that skips
+    the stack: `process.exit(130)` on a second `SIGINT`/`SIGTERM` (`src/index.ts:104`),
+    `process.exit(1)` on an uncaught exception (`:156`), a `SIGKILL`, or a laptop that slept. In
+    every one of those the claim survives the process, and **nothing reclaims it** — there is no
+    TTL, no lease and no reaper in `src/`, so at `MAX_CONCURRENT_SOLVES=1` a single stranded
+    `agent:solving` halts the solve half until a human clears the label, which is the manual
+    repair this invariant opens by calling unacceptable. That gap is `PLAN.md` §31, and the
+    reason it is stated here rather than only there is that this paragraph is where a reader
+    comes to find out how much the claim protocol is worth.
 
 15. **The pull request body is composed from what the harness measured, not from the model's
     account of itself.** The model writes the commit subject and body — it just made the change
