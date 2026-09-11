@@ -153,7 +153,7 @@ describe("buildNewIssuesJql", () => {
     );
   });
 
-  it("orders oldest first so the cursor can advance monotonically", () => {
+  it("orders oldest first so a truncated search loses the newest, not the oldest", () => {
     expect(buildNewIssuesJql(BASE)).toMatch(/ORDER BY created ASC$/);
   });
 

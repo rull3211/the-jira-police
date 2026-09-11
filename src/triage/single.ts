@@ -40,6 +40,8 @@ export function syntheticTicket(issueKey: string, baseUrl: string): TicketRef {
     labels: [],
     issueTypeId: "",
     issueTypeName: "",
+    statusId: "",
+    statusName: "",
   };
 }
 

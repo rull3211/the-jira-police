@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2496 tests in 69
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2523 tests in 70
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -42,13 +42,15 @@ Default posture is **manual**: nothing is solved until a human adds a label.
 
 **The numbers are identifiers, not an ordering, so they are never reused and the sequence has
 holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion would silently
-repoint every one of them — the failure §14 exists about. A missing number means that entry shipped
-and was deleted. The settled half of the two guardrail entries now lives in `ARCHITECTURE.md` §16,
+repoint every one of them — the failure §14 exists about. A missing number almost always means that
+entry shipped and was deleted. **One of them did not ship**, and it is named with the holes below
+rather than here, because the qualifier is worth nothing without the case: a hole list that flattens
+"built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `ARCHITECTURE.md` §16,
 every file that cited them has been repointed there, and what is still open from them is §17.
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26 and §27, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28 and §29, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -70,7 +72,12 @@ fitness block owning the region it writes, shipped in PR #37; §26 and §27 were
 clause and the status allowlist that narrowed it, and each is a hole one commit after it was written
 — opened and deleted inside the branch that built it, which is what the rule now asks for. **§24 is
 absent from that list and is not a hole** — it was skipped rather than spent, for the reason §19
-gives. §28 and §29 are what is left of the triage-selection entries, so the next entry is §30.
+gives. §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
+inside the branch that built it. **§29 is the exception the paragraph above flags** — the handed-off
+unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
+(unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
+parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
+written down here. The triage-selection entries are now all closed, so the next entry is §30.
 
 <!-- refs:on -->
 
@@ -261,6 +268,13 @@ environment cannot answer a question about CI's.**
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
+- **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
+  daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket
+  queue with the three `Mottatt` ahead of the four older `On Hold` ones, and reported each status by
+  name rather than falling back to its id — which also confirms `statusName` survives normalisation
+  against the live API. What that run could not exercise is the cap: seven against a limit of ten.
+  Both the truncation and the id fallback are covered by tests now, so this is a live-run gap rather
+  than a coverage one, and a first run or a post-outage backlog is what would close it.
 - **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
   suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
   after a compaction — so neither the field name it branches on nor the fact of registration is
@@ -654,63 +668,6 @@ both half-proven.
 **What would make it the wrong idea.** A sweep that deletes by age can delete a root belonging to a
 long-running pass. Any threshold has to be well clear of the slowest pass, and "well clear" is a
 number nobody has measured yet.
-
-### 29. A watched ticket keeps being re-triaged after a human takes it over
-
-**Branch:** none yet. Follows the discovery half, which shipped `TRIAGE_ONLY_STATUS` in `SETTINGS`
-and settled its rendering; this entry is only about the second population.
-
-**What is not built.** A ticket under `agent:watching` that moves into a status outside
-`TRIAGE_ONLY_STATUS` should be **unsubscribed** — `agent:watching` removed — under a new
-`UnsubscribeReason` of `handed-off`.
-
-**Why it is owed.** The watch loop pays for a re-triage on any qualifying activity regardless of
-status, so a ticket a person picked up keeps drawing agent comments. That is the same noise
-`TRIAGE_ONLY_STATUS` removes from discovery, arriving through the other door.
-
-**Why unsubscribe and not `quiet`.** `quiet` was the design until the operator was asked, and they
-chose unsubscribe knowing it is one-way: the created-window means a ticket that later moves back to
-`Mottatt` is far too old for discovery to see, so nothing re-adopts it. Recorded because it is the
-decision most likely to be questioned later, and it was made deliberately rather than by default.
-
-**The query must not change.** `buildSendbackWatchJql` keeps returning every watched ticket
-regardless of status, for the reason its own header gives at length: a ticket the query cannot see
-is a ticket nothing can unsubscribe, so filtering here would strand the label rather than remove it.
-The decision is the only correct place for this.
-
-**What would make it the wrong idea.** If tickets routinely bounce out of and back into the
-allowlist, this converts a recoverable pause into permanent abandonment, and `quiet` was right all
-along. Nobody has measured how often a ticket moves backwards on this board — that measurement is
-the first task of the branch, not an afterthought.
-
-### 28. Triage order ignores the board, so the leftmost column waits behind the oldest ticket
-
-**Branch:** none yet. Wants the cursor work first, and the status list `TRIAGE_ONLY_STATUS` already
-ships.
-
-**What is not built.** `TRIAGE_STATUS_PRIORITY` — an ordered status list, leftmost column first,
-with unlisted statuses sorting last. Triage works down it rather than strictly oldest-first.
-
-**Why it is owed.** Ordering today is `created ASC` end to end, which is fair and says nothing about
-what is worth triaging first. A ticket in the leftmost column is the one a person is about to pick
-up.
-
-**Why a configured list rather than the board.** The real column-to-status mapping lives behind
-Jira's Agile API, which would need a board id, a new client method and a new read grant. The list is
-a setting the operator already knows the answer to, it matches how components and auto issue types
-are configured, and it is testable without a board.
-
-**The cursor is the whole difficulty.** `runPollCycle` advances the cursor across an unbroken run of
-successes _from the oldest issue forward_, so today the processing order **is** the correctness
-mechanism. Re-sorting the loop naively strands older tickets permanently — the exact failure the
-poller's header rule 2 exists to prevent. The two get decoupled: triage in priority order, advance
-the cursor over the contiguous created-ascending prefix of the issues that succeeded. That is a
-guard, so it does not ship until a test fails when it is unplugged.
-
-**What would make it the wrong idea.** If the leftmost column is where tickets are dumped and left,
-priority ordering starves the ones that were actually moving, and the decoupling has bought
-complexity for a worse order. Worth measuring against one real backlog before it goes in the daemon
-rather than only in `poll:once`.
 
 ---
 

@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2496 tests in 69 files, no build step, no
+Status: running end to end against production Jira. 2523 tests in 70 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -369,6 +369,32 @@ somebody is actively working. **It cannot be a status category.** Measured again
 the eligible set straddles the taxonomy and the columns have to be named one by one. In the component
 scope this narrows 106 eligible tickets to 65.
 
+**`TRIAGE_STATUS_PRIORITY` is the second status setting and reads its blank the other way round.**
+It does not select, it orders: an ordered list of statuses, leftmost column first, unlisted last,
+applied in JavaScript after the query rather than as JQL. The query stays `ORDER BY created ASC`,
+but no longer because the cursor needs it — the poller re-sorts and derives the cursor from that
+sort, so the ordering survives on the narrower ground that truncated pagination must lose the
+newest issues rather than the oldest (`jira/jql.ts`). Blank means the
+order the daemon has always used — strict oldest-first — so this cannot arrive by upgrade, which is
+deliberate: the wrong order starves whatever the leftmost column is used for, and only a real
+backlog can say. `poll.order` prints the resulting queue, at `info`, and only when an operator has
+configured one. **The two settings taking a blank in opposite directions is the trap here** —
+a blank widens what `TRIAGE_ONLY_STATUS` admits, and makes `TRIAGE_STATUS_PRIORITY` do nothing at
+all.
+
+**Measured against the real backlog, 2026-09-10, and the result argues for leaving it unset.** A
+139-day discovery window over the component scope returns 35 tickets — **not the 65 above, which is
+the allowlist's eligible set with no created bound at all**; the two numbers count different things
+four lines apart and neither is derived by `docs:check`. Those 35 are 26 `Mottatt`, 7 `On Hold`, 2
+`Backlog` and 0 `In Progress Concept` — so `Mottatt` is 74% of that queue and prioritising it moves
+its oldest ticket (SSX-3499, Backlog, May 11) from first to twenty-seventh. That is the starvation the
+plan predicted, and the mitigating fact is the window rather than the order: at ~5 new issues a day
+against a 90-minute lookback, a steady-state cycle holds one ticket or none, where every order is
+the same order. **This setting only bites on a backlog** — a first run, a long outage, a widened
+`FIRST_RUN_LOOKBACK_MINUTES` — which is also the only time it helps. Name matching was checked at
+the same time: `on hold` matched `On Hold`, confirming that the JQL name problem does not reach
+here.
+
 **Ids rather than names, and the board decided that within a day of the feature shipping.**
 `jqlValue` supports both — a bare number is an id lookup, anything quoted is a name lookup — and the
 first default chose names for legibility. `status = "Mottatt"` matches **zero** issues on this
@@ -615,7 +641,11 @@ Three rules drive the shape of `runPollCycle`:
    means a transient sink failure drops the ticket for good.
 2. **The cursor advances only across an unbroken run of successes from the oldest issue forward.**
    If #3 fails but #4 succeeds, advancing to #4 strands #3 outside the next window. Stopping at
-   the gap costs a little rework and loses nothing.
+   the gap costs a little rework and loses nothing. **This is a fact about `created` order, not
+   about the order the loop ran in** — `settledCursor` (`triage/order.ts`) derives it from the
+   created-ascending list and the set of successes, which is what lets `TRIAGE_STATUS_PRIORITY`
+   below reorder the spending without touching the guarantee. A failure, a shutdown and an issue
+   not yet reached all stop the run identically: none of them proves the issue was handled.
 3. **State is persisted after every issue, not once per cycle.** Each triage is a paid model run;
    per-cycle saving made the cost of an ill-timed kill proportional to the backlog. Per-issue
    saving caps it at one.
@@ -699,7 +729,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-76 production modules, 69 test files. Grouped by what they belong to rather than alphabetically,
+77 production modules, 70 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -738,6 +768,7 @@ because the grouping is the architecture.
 | `src/triage/poster.ts`       | The writer                                                                                                                                                                                   |
 | `src/triage/single.ts`       | Triaging one named key, when discovery is the half being skipped. One copy for three callers                                                                                                 |
 | `src/triage/fitness-note.ts` | Renders the fitness call into the comment from the field, so prose cannot disagree with it — and owns that region of the body, stripping any copy a re-run carried in before writing its own |
+| `src/triage/order.ts`        | What order triage spends in, and how far the cursor may advance — two questions the poll cycle used to answer with one loop variable. `settledCursor` is the guard that separates them       |
 
 **Solve — selection, claim and the model passes**
 
@@ -973,6 +1004,7 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `JIRA_PROJECT`                  | `SSX`                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `JIRA_COMPONENTS`               | `SSX Advisor`                          | The SSX board is shared by several teams; this is what keeps the service off other teams' tickets                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `TRIAGE_ONLY_STATUS`            | `10165,10025,10194,10179`              | Statuses discovery may triage, **by id**. Blank means anything not closed. See §4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `TRIAGE_STATUS_PRIORITY`        | _(blank)_                              | Order triage works the columns in, leftmost first; unlisted last. Blank keeps today's strict oldest-first. Opposite sense of blank to the row above. See §4                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `JIRA_EXCLUDED_TYPES`           | `10009`                                | Deloppgave / sub-task — arrives attached to a parent already triaged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `POLL_INTERVAL_MS`              | `300000`                               |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `CURSOR_OVERLAP_MS`             | `120000`                               | See §4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -1405,7 +1437,7 @@ being widened or dropped:
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 47 settings are read**, and there are no orphan files.
+  the same sweep: **all 48 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

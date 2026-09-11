@@ -10,12 +10,19 @@
  * `--dry-run` stops after discovery. It is free, it spends no model budget, and
  * it is the fastest way to tell whether the credential, the project key, the
  * component filter and the lookback window are all right.
+ *
+ * **It lists in the order a real run would spend in**, not in the order the
+ * query returned, which is the whole point of it for `TRIAGE_STATUS_PRIORITY`:
+ * that setting cannot be judged from its own value, only from the queue it
+ * produces against a real backlog, and this is the way to see that queue
+ * without paying for one model run.
  */
 
 import { logger } from "../logger.ts";
 import { runPollCycle } from "../poller.ts";
-import { describeSettings, readSettings, withConfigErrors } from "../settings.ts";
+import { describeSettings, list, readSettings, withConfigErrors } from "../settings.ts";
 import { isUnseen, loadState } from "../state/store.ts";
+import { byStatusPriority } from "../triage/order.ts";
 import { createDiscover, createJiraClient, createPollDeps } from "../wiring.ts";
 
 async function main(): Promise<void> {
@@ -37,10 +44,17 @@ async function main(): Promise<void> {
     // count would overstate the work — and the spend — of a real run.
     const fresh = candidates.filter((ticket) => isUnseen(state, ticket.key));
 
-    for (const ticket of candidates) {
+    // Sorted the way the cycle would sort it. Applied to everything found
+    // rather than only to the fresh ones, because a line marked `seen` is
+    // context for reading the order, and dropping it would make the listing
+    // disagree with the counts underneath it.
+    const priority = list(settings, "TRIAGE_STATUS_PRIORITY");
+    for (const ticket of candidates.toSorted(byStatusPriority(priority))) {
       const marker = isUnseen(state, ticket.key) ? "NEW " : "seen";
+      const status =
+        ticket.statusName === "" ? ticket.statusId || "(no status)" : ticket.statusName;
       process.stdout.write(
-        `${marker}  ${ticket.key}  ${ticket.created}  ${ticket.issueTypeName}  ${ticket.summary}\n`,
+        `${marker}  ${ticket.key}  ${ticket.created}  ${status}  ${ticket.issueTypeName}  ${ticket.summary}\n`,
       );
     }
 
@@ -48,6 +62,9 @@ async function main(): Promise<void> {
       found: candidates.length,
       alreadySeen: candidates.length - fresh.length,
       wouldTriage: fresh.length,
+      // Named even when empty, so the listing above is never ambiguous about
+      // whether it is showing a configured order or plain oldest-first.
+      priority,
     });
     return;
   }

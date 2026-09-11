@@ -3,13 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { logger } from "./logger.ts";
 import { type PollDeps, runPollCycle } from "./poller.ts";
 import type { OutputSink, TriageResult } from "./output/sink.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { EMPTY_STATE, loadState } from "./state/store.ts";
+import { byCreatedAscending } from "./triage/order.ts";
 import type { TriagePayload } from "./triage/runner.ts";
 
-function ticket(key: string, created: string): TicketRef {
+function ticket(key: string, created: string, status = ""): TicketRef {
   return {
     key,
     summary: `Summary for ${key}`,
@@ -17,6 +19,8 @@ function ticket(key: string, created: string): TicketRef {
     issueTypeName: "Oppgave",
     created,
     updated: created,
+    statusId: status,
+    statusName: status === "" ? "" : `Column ${status}`,
     labels: [],
     url: `https://example.invalid/browse/${key}`,
   };
@@ -59,6 +63,9 @@ class RecordingSink implements OutputSink {
     this.written.push(result);
   }
 }
+
+/** Newest first: the order that breaks a cursor tracked along the loop. */
+const reversed = (a: TicketRef, b: TicketRef) => b.created.localeCompare(a.created);
 
 describe("runPollCycle", () => {
   let dir: string;
@@ -412,5 +419,192 @@ describe("runPollCycle", () => {
     await expect(
       runPollCycle(EMPTY_STATE, deps({ fetchCandidates: async () => candidates })),
     ).rejects.toThrow(/SSX-2 has an unparseable created timestamp/);
+  });
+
+  /**
+   * Triaging out of created order is only safe because the cursor stopped being
+   * a fact about the loop. These are the same guarantees the tests above assert
+   * for oldest-first, re-asserted with the loop deliberately running backwards
+   * — because every one of them used to hold *by construction* and now holds by
+   * `settledCursor`, which is a different claim.
+   *
+   * `order` here reverses created order outright rather than sorting by status.
+   * The comparator is `byStatusPriority`'s business and is tested there; what
+   * the poller has to survive is *any* order, and the reverse is the one that
+   * breaks a cursor tracked along the loop.
+   */
+  describe("triaging out of created order", () => {
+    const OLD = ticket("SSX-1", "2026-09-02T10:00:00Z");
+    const MID = ticket("SSX-2", "2026-09-02T10:05:00Z");
+    const NEW = ticket("SSX-3", "2026-09-02T10:10:00Z");
+
+    it("spends in the order it was given", async () => {
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [OLD, MID, NEW], order: reversed }),
+      );
+
+      expect(sink.written.map((r) => r.issueKey)).toEqual(["SSX-3", "SSX-2", "SSX-1"]);
+    });
+
+    it("still ends with the cursor at the newest, once all of them succeeded", async () => {
+      const outcome = await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [OLD, MID, NEW], order: reversed }),
+      );
+
+      expect(outcome.state.cursor).toBe("2026-09-02T10:10:00Z");
+    });
+
+    /**
+     * The failure this whole change exists to avoid. The newest ticket is
+     * triaged first and succeeds; the oldest then fails. A cursor that tracked
+     * the loop would sit at the newest and SSX-1 would never be seen again.
+     */
+    it("does not strand the oldest issue when a later one succeeded first", async () => {
+      const outcome = await runPollCycle(
+        EMPTY_STATE,
+        deps({
+          fetchCandidates: async () => [OLD, MID, NEW],
+          order: reversed,
+          triage: async (t) => {
+            if (t.key === "SSX-1") {
+              throw new Error("triage blew up");
+            }
+            return PAYLOAD;
+          },
+        }),
+      );
+
+      expect(outcome.state.cursor).toBeNull();
+      expect(outcome.state.seenKeys).toEqual(["SSX-3", "SSX-2"]);
+    });
+
+    /**
+     * The same guarantee against a shutdown rather than a failure. Stopping
+     * after the newest leaves two older tickets never attempted, and the cursor
+     * has to stay behind all of them — on disk, not merely in the return value,
+     * because a shutdown is exactly when the return value is not read.
+     */
+    it("leaves the cursor behind the issues a shutdown never reached", async () => {
+      const controller = new AbortController();
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({
+          fetchCandidates: async () => [OLD, MID, NEW],
+          order: reversed,
+          signal: controller.signal,
+          triage: async () => {
+            controller.abort();
+            return PAYLOAD;
+          },
+        }),
+      );
+
+      const state = await loadState(statePath);
+      expect(state.seenKeys).toEqual(["SSX-3"]);
+      expect(state.cursor).toBeNull();
+    });
+  });
+
+  /**
+   * `poll.order` is the whole argument for shipping `TRIAGE_STATUS_PRIORITY`:
+   * the order cannot be judged from the setting, only from the queue it
+   * produced, so an operator has to be able to read that queue back. An
+   * instrument nobody watches is worth nothing, and this one went out with
+   * nothing asserting it at all.
+   *
+   * A real daemon run on 2026-09-10 emitted it correctly — seven tickets,
+   * `Mottatt` ahead of `On Hold`, statuses by name. These cover what that run
+   * could not: it carried seven tickets against a limit of ten, and every
+   * ticket had a name, so neither the truncation nor the id fallback was
+   * exercised by it.
+   */
+  describe("poll.order", () => {
+    const OLD = ticket("SSX-1", "2026-09-02T10:00:00Z");
+    const NEW = ticket("SSX-3", "2026-09-02T10:10:00Z");
+
+    it("reports the queue when an order is configured", async () => {
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [OLD, NEW], order: reversed }),
+      );
+
+      expect(info).toHaveBeenCalledWith("poll.order", {
+        total: 2,
+        head: [
+          { key: "SSX-3", status: "" },
+          { key: "SSX-1", status: "" },
+        ],
+      });
+
+      info.mockRestore();
+    });
+
+    /**
+     * The default has to stay silent, not merely correct. An operator who never
+     * asked for a priority should not have to read a line about ordering on
+     * every cycle to discover it says nothing.
+     */
+    it("says nothing at all when no order is configured", async () => {
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(EMPTY_STATE, deps({ fetchCandidates: async () => [OLD, NEW] }));
+
+      expect(info).not.toHaveBeenCalledWith("poll.order", expect.anything());
+
+      info.mockRestore();
+    });
+
+    /**
+     * A backlog has no upper bound and this is a log line. The count is
+     * reported separately from the head precisely so a truncated list still
+     * says how much it is hiding — assert both, because a truncation that also
+     * truncated the total would read as a complete queue of ten.
+     */
+    it("truncates the head at ten while still reporting the true total", async () => {
+      const many = Array.from({ length: 12 }, (_, index) =>
+        ticket(`SSX-${index + 10}`, `2026-09-02T10:${String(index).padStart(2, "0")}:00Z`),
+      );
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => many, order: byCreatedAscending }),
+      );
+
+      const call = info.mock.calls.find(([event]) => event === "poll.order");
+      const payload = call?.[1] as { total: number; head: readonly unknown[] };
+      expect(payload.total).toBe(12);
+      expect(payload.head).toHaveLength(10);
+
+      info.mockRestore();
+    });
+
+    /**
+     * Jira can omit the status, which normalises to `""` rather than to a
+     * guess. The id is the only identifying thing left, and printing an empty
+     * string there would make the line unreadable exactly when something is
+     * already wrong.
+     */
+    it("falls back to the status id when the name is empty", async () => {
+      const nameless: TicketRef = { ...OLD, statusId: "10165", statusName: "" };
+      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+
+      await runPollCycle(
+        EMPTY_STATE,
+        deps({ fetchCandidates: async () => [nameless], order: byCreatedAscending }),
+      );
+
+      expect(info).toHaveBeenCalledWith("poll.order", {
+        total: 1,
+        head: [{ key: "SSX-1", status: "10165" }],
+      });
+
+      info.mockRestore();
+    });
   });
 });
