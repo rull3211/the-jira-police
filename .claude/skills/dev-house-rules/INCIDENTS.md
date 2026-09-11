@@ -1398,6 +1398,18 @@ two are eighty lines apart and nobody scrolls".
 **No rule yet** — a third instance in a different file, showing the shape is about where a case is
 filed rather than about these two neighbours, and `filed-out-of-reach` at 2.
 
+**`filed-out-of-reach` is at 3 as of 2026-09-11, and whether that meets the condition above is
+genuinely arguable rather than settled.** [The two tests that proved the loop
+terminates](#the-two-tests-that-proved-the-loop-terminates-while-it-did-not) is a third instance and
+a different pair of functions: the invariant was written above `say` and the writer breaking it was
+`answerThreads`, 690 lines up, added 46 minutes earlier. What the condition asked for was a
+different **file**, and both of those are in `delivery.ts` — so the new case answers "a different
+pair" and not "a different file", and the alternative reading it was meant to rule out, that these
+are just neighbours nobody scrolls between, survives it. Held at 3 and not promoted on that
+technicality, deliberately: the condition was written down in advance precisely so it could not be
+reinterpreted by whoever next wanted the rule, and the first time it binds is the only time that
+matters. The next instance across a file boundary carries it.
+
 ---
 
 ## 2026-09-11
@@ -1459,3 +1471,47 @@ often a defect recurs but a **precondition on a hazard that is already in the tr
 not "a bug like the last one" but a queue wedged with no automatic recovery, and the check is one
 command. The objection stands and is written here so a later reader can hold the rule to it — if
 `daemon:status` never once returns `RUNNING` before an edit, this is dead weight and should go.
+
+### The two tests that proved the loop terminates, while it did not
+
+The bug the session above opened with. On PR #548 of `insurance-ssx-mono-repo` the service answered
+its own inline review replies, round after round, until a cap stopped it.
+
+The mechanism is one missing prefix. `unansweredThreads` (`src/solve/delivery.ts`) keeps any thread
+whose last comment is not `isOurs`, and `isOurs` is `startsWith(BOT_PREFIX)` and nothing else,
+because `gh` posts as the operator and there is no login to key on. `answerThreads` passed the pass's
+body to `replyToThread` unmarked. So the reply landed, the next round read it back as a reviewer's
+comment, and answered it. The pushback path made that structural rather than unlucky: a
+`judgement`-basis answer may not resolve its thread (`src/solve/runner.ts:1088`), so the one round
+that declines to change code is exactly the round that leaves the thread open for itself to find.
+
+**What makes this worth an entry is not the missing prefix. It is that two tests asserted the
+correct behaviour and were green the whole time.** `does not re-litigate a thread whose last comment
+is ours` and `acts again when the reviewer comes back after our reply` both built the thread from a
+hand-written `spoke("rull3211", "bot: it is")` — a fixture modelling `replyToThread`'s output. The
+model was right and the module was wrong, and a fixture can only ever test the model. Both tests are
+now built by running the real writer and taking the bytes it puts on the wire; unplug the prefix and
+both go red, which they should have done from the first day.
+
+**The invariant was also written down, 46 minutes too late and 690 lines away.** `delivery.ts` says,
+above the *other* writer, that the prefix "is not decoration… a comment written without it is read
+back next round as a reviewer asking for something, and the loop argues with itself" — added in
+`b238e39`, while the untagged thread writer had shipped in `151b609` earlier the same afternoon, in
+the same file. The author who stated the invariant did not check the sibling writer already breaking
+it. That is a second instance of [filed out of reach](#the-same-wedge-written-twice-in-one-file-because-the-first-instance-was-filed-inside-the-function-it-happened-to)
+in a different pair of functions.
+
+The fix moves the stamp into `replyToThread`, so an untagged reply is unreachable rather than merely
+absent from today's caller. It does not transfer to `postComment`, whose callers include the marker —
+stamping there would produce `bot: bot: iteration count `, and `findMarker` would post a fresh marker
+every round. That asymmetry is now argued in the header rather than left to look like an oversight.
+
+**Found by** the operator reading the pull request, not by the suite and not by a cap.
+
+**The rule** — [build the fixture with the real
+function](PROVING.md#tests-that-stop-testing), which was already written and which this is the
+worked example of.
+
+**Not retroactive, and that is a real cost.** Replies posted before the fix carry no prefix and are
+indistinguishable from a reviewer's, so any pull request already looping keeps looping until a cap
+fires. There is no repair short of a human resolving the threads.

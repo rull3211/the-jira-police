@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2537 tests in 71
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2539 tests in 71
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29 and §30, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30 and §32, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -78,8 +78,9 @@ unsubscribe, deleted without shipping when the operator deferred it, and the dec
 (unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
 parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
 written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
-inside the branch that built it. The triage-selection entries are now all closed, so the next entry
-is §32.
+inside the branch that built it, and §32 was the untagged thread reply that let the service argue
+with itself on PR #548 — same shape, opened and deleted inside its own branch. The triage-selection
+entries are now all closed, so the next entry is §33.
 
 <!-- refs:on -->
 

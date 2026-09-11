@@ -105,7 +105,7 @@ import { assertWorkBranch, isProtectedRef } from "./branch.ts";
 // The prefix that marks a comment as ours, and the only thing that does. Taken
 // from `marker.ts` rather than restated here: two copies of a sentinel is one
 // sentinel and one silent bug the day somebody changes the other.
-import { isOurs } from "./marker.ts";
+import { BOT_PREFIX, isOurs } from "./marker.ts";
 import { newestInstant } from "./silence.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
@@ -426,7 +426,11 @@ export interface ThreadReplyRequest {
   /** Where `gh` runs. Any checkout of the repository will do; GraphQL takes the ids. */
   readonly cwd: string;
   readonly threadId: string;
-  /** The answer. Refused when blank — a reply nobody can read is not a reply. */
+  /**
+   * The answer, **unprefixed**. Refused when blank — a reply nobody can read is
+   * not a reply. `replyToThread` adds `BOT_PREFIX` itself, so a caller that adds
+   * one too gets it twice; the marking is not the caller's job.
+   */
   readonly body: string;
   readonly timeoutMs: number;
 }
@@ -1652,6 +1656,29 @@ async function mutate(
  *
  * The body is bounded by GitHub rather than here. There is no truncation,
  * because a half-posted argument is worse than a long one.
+ *
+ * **The prefix is applied here, and that is the fix for a loop that ran in
+ * public.** `unansweredThreads` keeps a thread whose last comment is not
+ * `isOurs`, and `isOurs` is the `BOT_PREFIX` and nothing else, because `gh`
+ * posts as the operator and there is no login to key on. This function used to
+ * send the caller's body through untouched, so every reply the service made was
+ * read back on the next round as a reviewer's comment and answered again. PR
+ * #548 on `insurance-ssx-mono-repo` is what that looks like from outside.
+ *
+ * Tagging in the transport rather than at the caller is the whole point: the
+ * caller is where the fault was, and a prefix added there would fix this one
+ * call site and leave the next one free to repeat it. Here there is no way to
+ * post an untagged reply, so the writer and `unansweredThreads` cannot disagree.
+ * It is unconditional — a body that already begins with the prefix is prefixed
+ * again — because the alternative is a branch whose only effect is cosmetic.
+ *
+ * **The blank check runs first, and the order is load-bearing.** Prefix a body
+ * of whitespace and it stops trimming to empty, so the refusal below silently
+ * stops firing and a blank reply becomes grounds to resolve a thread.
+ *
+ * It does not reach backwards. A reply posted before this existed carries no
+ * prefix and is indistinguishable from a reviewer's, so pull requests already
+ * looping keep looping until a cap fires.
  */
 export async function replyToThread(
   runner: CommandRunner,
@@ -1672,7 +1699,7 @@ export async function replyToThread(
     REPLY_MUTATION,
     [
       ["threadId", threadId],
-      ["body", body],
+      ["body", `${BOT_PREFIX}${body}`],
     ],
     { cwd, timeoutMs },
   );
@@ -1787,6 +1814,16 @@ const PR_NODE_QUERY = `query($owner:String!,$name:String!,$number:Int!){
  * was created is the whole point: without it the next round has to find the
  * comment again by prefix, and a round that cannot find what it just wrote
  * posts a second one.
+ *
+ * **This one does not stamp `BOT_PREFIX`, and the asymmetry with `replyToThread`
+ * is deliberate — do not "fix" it.** Both of its callers already send a marked
+ * body, and one of them sends the marker, which opens `bot: iteration count `.
+ * Stamping here would make that `bot: bot: iteration count `, `isMarker` would
+ * stop matching it, `findMarker` would find nothing, and every round would post
+ * a fresh marker and re-run from a count of zero. The threads had no such
+ * conflict, which is why the prefix could move into the transport there and
+ * cannot here. The cost is that this stays the caller's job on this path; the
+ * two call sites are in `delivery.ts` and both are covered.
  */
 export async function postComment(
   runner: CommandRunner,

@@ -6,10 +6,19 @@ import {
   advance,
   publish,
   reviewerComments,
+  unansweredThreads,
 } from "./delivery.ts";
 import { BOT_PREFIX, MARKER_PREFIX, NEVER_READ, parseMarker } from "./marker.ts";
 import type { PassRunner, SolveDependencies } from "./orchestrator.ts";
-import type { BotIdentity, ReviewComment, ReviewOrigin, ReviewState } from "./pr.ts";
+import {
+  type BotIdentity,
+  type ReviewComment,
+  type ReviewOrigin,
+  type ReviewState,
+  type ReviewThread,
+  readReviewThreads,
+  replyToThread,
+} from "./pr.ts";
 import type { Pass, SolveRunOptions } from "./runner.ts";
 import type { CommandResult, CommandRunner, Worktree, WorktreeResult } from "./worktree.ts";
 
@@ -177,6 +186,87 @@ const posts = (h: Harness): readonly string[] =>
     // mutation text for every call and silently matches nothing.
     .map((argv) => argv.find((element) => element.startsWith("body=")) ?? "")
     .map((body) => body.slice("body=".length));
+
+/**
+ * The bodies of every inline thread reply the run posted, in order.
+ *
+ * Reads them off the `gh` argv rather than off the answer the pass produced,
+ * because the gap this exists to catch is between those two: `answerThreads`
+ * hands `replyToThread` a body and `replyToThread` is what decides the bytes.
+ * Asserting on the pass's own text would have passed throughout the loop.
+ */
+const replies = (h: Harness): readonly string[] =>
+  h.calls
+    .filter((argv) => asked("addPullRequestReviewThreadReply")(argv))
+    // Same trap as `posts`: the last element is the mutation text, not the body.
+    .map((argv) => argv.find((element) => element.startsWith("body=")) ?? "")
+    .map((body) => body.slice("body=".length));
+
+/**
+ * The GitHub account this service posts through, which is a person's.
+ *
+ * Named here because the whole sentinel scheme exists to work around it: a
+ * reply the bot wrote and a comment the operator wrote arrive under the same
+ * login, so any test that keys "ours" on the author is testing something the
+ * production code cannot do.
+ */
+const OPERATOR = "rull3211";
+
+/**
+ * A thread comment carrying what this service would really have replied.
+ *
+ * **Not `"bot: " + text`, and that distinction is the whole of PR #548.** Two
+ * tests below assert that a thread we already answered is not answered again,
+ * and both were green for the entire six days the loop was live — because they
+ * hand-wrote a prefix that `answerThreads` never actually sent. A fixture that
+ * models another module's output tests the model.
+ *
+ * So the fixture is built by running the writer and taking the bytes it put on
+ * the wire. Drop the prefix from `replyToThread` and these fixtures lose it
+ * too, and the tests that depend on it fail — which is what they were always
+ * supposed to do.
+ */
+const ourReply = async (text: string): Promise<unknown> => {
+  let sent = "";
+  const runner: CommandRunner = {
+    run: (argv) => {
+      sent = argv.find((arg) => arg.startsWith("body="))?.slice("body=".length) ?? "";
+      return Promise.resolve({
+        ...OK,
+        stdout: JSON.stringify({
+          data: { addPullRequestReviewThreadReply: { comment: { url: REPLY_URL } } },
+        }),
+      });
+    },
+  };
+  const posted = await replyToThread(runner, {
+    cwd: "/tmp/wt",
+    threadId: "PRRT_1",
+    body: text,
+    timeoutMs: 1000,
+  });
+  if (posted.outcome !== "replied") {
+    throw new Error(`the fixture's own reply did not post: ${posted.reason}`);
+  }
+  return spoke(OPERATOR, sent);
+};
+
+/** Threads as a later round would see them: GraphQL's shape through the real parser. */
+const asLaterRoundSees = async (...nodes: readonly unknown[]): Promise<readonly ReviewThread[]> => {
+  const runner: CommandRunner = {
+    run: () => Promise.resolve({ ...OK, stdout: threadsJson(...nodes) }),
+  };
+  const result = await readReviewThreads(runner, {
+    worktreePath: "/tmp/wt",
+    repo: "acme/widgets",
+    number: 548,
+    timeoutMs: 1000,
+  });
+  if (result.outcome !== "read") {
+    throw new Error(`the fixture did not parse: ${result.reason}`);
+  }
+  return result.threads;
+};
 
 /** Does any of these bodies claim to be the iteration marker? */
 const marker = (bodies: readonly string[]): boolean =>
@@ -1687,9 +1777,13 @@ describe("advance's inline threads", () => {
     // restating a settled point leaves no new comment, so nothing time-based
     // could tell this from a fresh objection. Unplug it and the round argues
     // with an answer it already gave, every tick, at full solve cost.
+    //
+    // The fixture is built by the real writer. Hand-written, this test passed
+    // through the whole of PR #548 while production did exactly what it says
+    // cannot happen.
     const h = harness({}, [
       QUIET,
-      inline(talking(spoke("copilot", "this is not idempotent"), spoke("rull3211", "bot: it is"))),
+      inline(talking(spoke("copilot", "this is not idempotent"), await ourReply("it is"))),
     ]);
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -1706,7 +1800,7 @@ describe("advance's inline threads", () => {
       inline(
         talking(
           spoke("copilot", "this is not idempotent"),
-          spoke("rull3211", "bot: it is"),
+          await ourReply("it is"),
           spoke("copilot", "no — bootstrap runs twice under HMR"),
         ),
       ),
@@ -1764,6 +1858,43 @@ describe("advance's inline threads", () => {
 
     expect(outcome).toMatchObject({ kind: "iterated", threads: { answered: 1, resolved: 1 } });
     expect(ran(h, "push")).toBe(false);
+  });
+
+  it("marks its thread reply as its own, so the next round reads it back as answered", async () => {
+    // PR #548 on insurance-ssx-mono-repo. The loop answered its own replies,
+    // round after round, because `answerThreads` sent the pass's body through
+    // untouched and `unansweredThreads` keeps any thread whose last comment is
+    // not `isOurs`. Both halves were tested and neither test spanned the gap.
+    //
+    // So this drives a real round, takes the body `gh` was actually handed, and
+    // feeds *that* back in as the thread's last comment. A hand-written
+    // "bot: ..." fixture here would assert the prefix against itself and stay
+    // green through the whole outage.
+    const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
+
+    await advance(h.deps, advanceRequest);
+
+    const posted = replies(h);
+    expect(posted).toHaveLength(1);
+
+    // Back in through the real reader, not a hand-built `ReviewThread`: the
+    // shape GitHub returns is parsed by `readReviewThreads` and only then
+    // filtered, so a prefix lost in parsing would still be caught here.
+    const answered = await asLaterRoundSees(
+      talking(spoke("copilot", "this is not idempotent"), spoke(OPERATOR, posted[0] ?? "")),
+    );
+    expect(unansweredThreads(answered)).toEqual([]);
+
+    // The control, and the half that says the filter still works: the same
+    // thread with the reviewer speaking last is still owed an answer. Without
+    // it, a filter that dropped everything would pass the line above.
+    const reopened = await asLaterRoundSees(
+      talking(
+        spoke(OPERATOR, posted[0] ?? ""),
+        spoke("copilot", "no, the guard is on the wrong branch"),
+      ),
+    );
+    expect(unansweredThreads(reopened)).toHaveLength(1);
   });
 
   it("posts nothing on a thread it was never given", async () => {

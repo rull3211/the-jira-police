@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2537 tests in 71 files, no build step, no
+Status: running end to end against production Jira. 2539 tests in 71 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -2708,6 +2708,15 @@ both miss every comment we wrote and, worse, mistake a person's comment for mach
 overwrite. The threads use the same rule in a different shape: `unansweredThreads` drops a thread
 whose **last** comment is ours, which answers a bot reviewer restating a settled point without
 needing a timestamp, and retries by itself when a reply failed to post.
+
+**A filter on a prefix is only as good as the write that stamps it, and for the threads that write
+was missing.** The paragraph above described the rule from the day `replyToThread` landed
+(`b4372de`) while `answerThreads` handed it the pass's body unmarked, so every reply came back on the next round looking like
+a reviewer's and got answered again — PR #548 on `insurance-ssx-mono-repo`, in public. The prefix
+is now applied inside `replyToThread` rather than at its caller, which is the difference between
+an untagged reply being absent from today's call site and being unreachable from any. It is not
+retroactive: replies posted before that keep reading as a reviewer's, because nothing can tell them
+apart.
 
 #### The look is cheap and the round is not, so they are two functions
 
