@@ -1,3 +1,7 @@
+import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { JqlError } from "./jira/jql.ts";
@@ -761,13 +765,40 @@ describe("worktree root", () => {
     // It exists because the system temp directory on macOS lands under
     // /private/var, which some tooling cannot open — and the C phase mandates a
     // human reading the diff before anything leaves the machine.
+    //
+    // A real directory rather than a made-up one, because this function now
+    // creates and resolves what it is handed: `/Users/me/solves` would be an
+    // attempt to write outside the test's own space, passing only because the
+    // permission error is caught.
+    const configured = mkdtempSync(join(realpathSync(tmpdir()), "wiring-root-"));
     const request = buildSolveRequest(
-      settingsWith({ ...SOLVE_ENV, SOLVE_WORKTREE_ROOT: "/Users/me/solves" }),
+      settingsWith({ ...SOLVE_ENV, SOLVE_WORKTREE_ROOT: configured }),
       detailWith(["svc:buy-insurance-advisor-web"]),
       "t",
     );
 
-    expect(request.parentDirectory).toBe("/Users/me/solves");
+    expect(request.parentDirectory).toBe(configured);
+  });
+
+  it("resolves the root, because git prints resolved paths and we compare strings", () => {
+    // The wedge this refutes: every recovery in worktree.ts asks `git worktree
+    // list --porcelain` whether a checkout is already at <root>/<issueKey>, and
+    // matches by string equality. git answers with the resolved path. On macOS
+    // the *default* root is under `/var/folders`, a symlink to
+    // `/private/var/folders`, so the comparison could never match and both
+    // salvage paths were silently dead on the machine this service runs on.
+    const real = mkdtempSync(join(realpathSync(tmpdir()), "wiring-real-"));
+    const link = `${real}-link`;
+    symlinkSync(real, link);
+
+    const request = buildSolveRequest(
+      settingsWith({ ...SOLVE_ENV, SOLVE_WORKTREE_ROOT: link }),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "t",
+    );
+
+    expect(request.parentDirectory).toBe(real);
+    expect(request.parentDirectory).not.toBe(link);
   });
 
   it("treats whitespace as unset rather than as a directory named space", () => {

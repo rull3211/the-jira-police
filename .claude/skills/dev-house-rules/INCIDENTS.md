@@ -1338,3 +1338,60 @@ a pull request body, and it was the defect. What argues against is that this is 
 
 **No rule yet** — writing it needs a second instance showing the shape is not specific to JQL name
 resolution, and `filter-terms` at 2.
+
+### The same wedge, written twice in one file, because the first instance was filed inside the function it happened to
+
+SSX-3886 sat unsolvable for two days. Every tick claimed it, refused, released it byte-for-byte and
+posted an `unusable-base` comment. The proximate cause is small: `verifyBase` **keeps** its worktree
+on that outcome, deliberately, because the kept checkout is the only reproducible evidence that the
+repository's build was already broken. Nothing ever came back for it. The next tick's
+`git worktree add -b` then met both a checkout and a branch at paths derived from the issue key, and
+failed identically for ever.
+
+**That is the invariant from
+[SSX-3835, 2026-09-06](#the-worktree-reuse-that-every-real-run-needs-and-the-code-refused),
+unchanged: _a
+tick's ability to make progress must not depend on the previous tick having tidied up._** The first
+instance was the warm path, `attachWorktree`. This is the cold path, `createWorktree`. Same file,
+same invariant, roughly eighty lines apart, four days later.
+
+**The fault is where instance 1 was written down, not that it was.** It was written thoroughly — a
+long, correct paragraph in `attachWorktree`'s header naming the invariant in bold. That header is
+read by someone working on `attachWorktree`. Nobody reaches it while writing `createWorktree`, and
+the rule that would have said _check the sibling_ does not exist, because
+[FINISHING.md](FINISHING.md#this-skill-is-a-living-document-and-it-is-amended-from-defects) is
+explicit that one instance is a hypothesis and directs it to "the module's own header" — which is
+exactly what was done, and exactly what failed. The convention that keeps premature rules out of the
+document also parks the case where only the already-informed will find it.
+
+**A second fault made it invisible for longer than it should have been.** `verifyBase` captures a
+4000-character tail of the failing build into `VerificationResult.steps[].output`, and no caller ever
+reads it. `solve.verify.failed` logs `{step, timedOut}`; the ticket comment says the build does not
+pass. The tail said `Previous attempts to find a Docker environment failed` and, before that, a 401
+from the package registry — the two actual causes, captured, carried and discarded by the one outcome
+whose whole purpose is to say _go look at the repository_. Three paid comments were posted saying
+nothing a person could act on.
+
+**Found by** the operator asking why nothing had been attempted on the ticket, then by reading the
+daemon's own log for the salvage line — not by a test. The suite was green at 2497 before the fix and
+green at 2498 after, and could not have gone red either way: the fake `CommandRunner` returns
+`worktree list` output the test author wrote, so the derived path and the listed path are the same
+string by construction. The defect lived in the gap between those two strings, and the first drive
+against a real git repository reproduced it immediately.
+
+**Fixed** by having `createWorktree` read `worktree list --porcelain` **before** the add and move a
+checkout of its own aside to a `<path>-salvaged-<timestamp>` sibling — read before rather than after
+the failure, because a checkout of ours at that path and a bare ref of that name want opposite
+answers and the exit code cannot tell them apart. Verified in production: four unattended salvages on
+2026-09-10/11, each followed by `solve.worktree.created` on the same path.
+
+The candidate rule is not the invariant itself, which is already written, but the filing rule
+underneath it: _when a case is parked in a module header rather than as a rule, park it where the
+next person to write the same bug will be standing — the sibling that shares the invariant, not only
+the function that broke._ What argues for writing it now is that the cost was two days of a silent,
+free, unbounded loop. What argues against is that both instances are the same pair of functions in
+one file, which cannot distinguish "module headers are the wrong place to park a case" from "these
+two are eighty lines apart and nobody scrolls".
+
+**No rule yet** — a third instance in a different file, showing the shape is about where a case is
+filed rather than about these two neighbours, and `filed-out-of-reach` at 2.

@@ -229,7 +229,7 @@ export function why(result: CommandResult): string {
 /**
  * Creates the worktree, or refuses and leaves the machine untouched.
  *
- * Four commands, in this order, and the order is the point:
+ * Five commands, in this order, and the order is the point:
  *
  * 1. `fetch` — so the base ref means what it will mean for the PR later. A
  *    worktree cut from a stale `origin/main` produces a diff that conflicts on
@@ -237,9 +237,39 @@ export function why(result: CommandResult): string {
  * 2. `rev-parse --verify` the base — separating "the base does not exist" from
  *    "the worktree could not be created", which `worktree add` reports with the
  *    same exit code.
- * 3. `worktree add -b` — `-b` and not a bare add, because `-b` fails when the
+ * 3. `worktree list --porcelain` — whether our own canonical path is already
+ *    taken, which decides between step 4 and going straight to step 5.
+ * 4. `salvageWorktree`, only when it is. See below.
+ * 5. `worktree add -b` — `-b` and not a bare add, because `-b` fails when the
  *    branch already exists. That failure is wanted: a second run for the same
  *    ticket must not quietly reuse a branch that may already carry commits.
+ *
+ * ## Step 4 removes a wedge, and it does not weaken step 5
+ *
+ * Added 2026-09-11, from a ticket that could never have been solved again.
+ * `unusable-base` returns its worktree **deliberately** — it is the only place
+ * a base that builds elsewhere and not here can be reproduced — and nothing
+ * removes it. So the next run for the same ticket met its own predecessor's
+ * checkout holding its own predecessor's branch, failed here at `worktree add
+ * -b`, and did so identically for ever. Both names derive from the issue key,
+ * which is what makes the debris a landmine rather than litter — the phrase
+ * `removeWorktree` already uses for the same collision arriving the other way.
+ * Each attempt spent one of `MAX_SOLVE_ATTEMPTS_PER_TICKET` and not one of them
+ * could have passed, so a transient fault — an expired registry token, in the
+ * run that found this — was laundered into a permanently dead ticket.
+ *
+ * Salvaging rather than refusing is `attachWorktree`'s answer to the identical
+ * wedge on the warm path, and it is safe here for the reason it is safe there:
+ * **nothing is deleted.** The checkout is *moved* to a timestamped sibling, so
+ * the evidence the `unusable-base` outcome exists to keep survives, at a path
+ * the log names.
+ *
+ * **The guard in step 5 is untouched, and that is the delicate part.** This
+ * fires only when a checkout sits at the path *this function derives from the
+ * issue key* — our own debris, by construction. A branch that exists with no
+ * worktree of ours on it still reaches step 5, still collides, and is still
+ * refused, which is exactly the case `attachWorktree`'s header defends when it
+ * argues this must not become a flag. The guard was never about paths we own.
  *
  * Refusals are returned, not thrown. A ticket whose summary yields no usable
  * slug is an ordinary occurrence, not a fault, and the cycle should record it
@@ -284,11 +314,37 @@ export async function createWorktree(
     return refuse(`base ref ${baseRef} does not resolve to a commit (${why(base)})`);
   }
 
+  // Read before the add rather than after its failure, because the two causes
+  // of a collision want opposite answers and the exit code cannot tell them
+  // apart: a checkout of ours at this path is debris to move aside, a bare ref
+  // of that name is the thing step 5's `-b` exists to refuse.
+  const listed = await runner.run(["git", "-C", repoPath, "worktree", "list", "--porcelain"], opts);
+  if (failed(listed)) {
+    return refuse(`could not list the repository's worktrees (${why(listed)})`);
+  }
+
+  const existing = worktreeAt(listed.stdout, path);
+  if (existing.present) {
+    const salvaged = await salvageWorktree(
+      runner,
+      { issueKey, branch, repoPath, parentDirectory },
+      existing.branch,
+      "was left behind by an earlier run for this ticket, which kept it and never came back",
+      opts,
+    );
+    if (salvaged !== null) {
+      return salvaged;
+    }
+  }
+
   const added = await runner.run(
     ["git", "-C", repoPath, "worktree", "add", path, "-b", branch, baseRef],
     opts,
   );
   if (failed(added)) {
+    // Nothing of ours is at the path — either it was clear or step 4 moved it —
+    // so a failure here is the branch name, and a branch with no worktree on it
+    // is the leftover `-b` is meant to refuse rather than reuse.
     return refuse(`could not create the worktree (${why(added)})`);
   }
 
@@ -389,6 +445,14 @@ export interface AttachRequest {
  * window without closing it, since `kill -9`, an OOM and a laptop that slept
  * through `SOLVE_TIMEOUT_MS` all skip it, and this service has already recorded
  * the last of those. Durability has to live in the next tick's recovery.
+ *
+ * **This paragraph was the whole record of that invariant, and that is why it
+ * was violated again.** `createWorktree`, eighty lines down in this same file,
+ * shipped the identical wedge on the cold path four days later (SSX-3886) —
+ * nobody writing that function had a reason to read this header. The case is
+ * now in `INCIDENTS.md` under "the same wedge, written twice in one file", at
+ * two instances and no rule. **If you are changing either function, the other
+ * one shares this invariant.**
  *
  * So a state failure now **salvages**: the checkout is moved aside intact
  * (`salvageWorktree`) and the cold path below rebuilds from the remote. Nothing
@@ -491,9 +555,23 @@ export async function attachWorktree(
  * Porcelain rather than the human format on purpose — the plain listing prints
  * `<path> <sha> [<branch>]` with the branch in brackets, and a path containing
  * a space would make that ambiguous. Matching is exact string equality on the
- * path: git prints the resolved path, so a caller passing one that differs by a
- * symlink falls through to the cold path and gets a refusal naming the path,
- * which is a readable failure rather than a silent reuse of the wrong checkout.
+ * path, and that stays: resolving here would mean an `fs` call in a pure
+ * function whose whole value is that it is a string in and a verdict out.
+ *
+ * **The caller owes it a resolved path, and that is not a preference.** This
+ * paragraph used to say a symlinked path merely "falls through to the cold path
+ * and gets a refusal naming the path, which is a readable failure rather than a
+ * silent reuse of the wrong checkout". That was wrong when it was written and
+ * it is wrong now, on both callers. The path is a pure function of the issue
+ * key, so the state the fallthrough refuses on is the state the next tick
+ * finds: for `attachWorktree` that is SSX-3835 above — four days of identical
+ * refusals every two minutes, at $0, telling nobody — and for `createWorktree`
+ * it is the permanent wedge the call was added to remove. Neither is one bad
+ * round. In both the refusal names a path that looks correct. Worse, the
+ * default root *was* symlinked:
+ * `tmpdir()` on macOS is `/var/folders/…` and git prints `/private/var/…`, so
+ * the mismatch was the normal case rather than the exotic one. `worktreeRoot`
+ * in `wiring.ts` resolves it once, and its header carries the reasoning.
  */
 export function worktreeAt(
   porcelain: string,
@@ -622,6 +700,24 @@ async function reuseWorktree(
 }
 
 /**
+ * The four fields a salvage needs, which is fewer than either caller carries.
+ *
+ * Narrower than `AttachRequest` on purpose. Both paths salvage now — the warm
+ * one from `attachWorktree`, the cold one from `createWorktree` — and their
+ * requests agree on nothing else: one is handed a branch that already exists on
+ * the remote, the other derives a branch name that must not. Typing the
+ * parameter as either request would make this function look like it belonged to
+ * that path, and the next reader would have to check whether the other one was
+ * allowed to call it.
+ */
+interface SalvageTarget {
+  readonly issueKey: string;
+  readonly branch: string;
+  readonly repoPath: string;
+  readonly parentDirectory: string;
+}
+
+/**
  * Moves an unusable checkout aside so the canonical path can be rebuilt.
  *
  * Returns `null` on success, meaning *carry on* — the caller falls through to
@@ -664,14 +760,25 @@ async function reuseWorktree(
  * If `worktree move` fails deterministically — a locked worktree, a permission
  * problem — every tick refuses identically, which is the shape of the deadlock
  * this function exists to remove. The difference is that it is now the *only*
- * such path rather than the ordinary one, and the attempt counter in the pull
- * request marker is what stops it: unlike the state refusals, a salvage failure
- * is a failure to start that something counts. This function must not ship
- * without that counter.
+ * such path rather than the ordinary one, and something has to count it: unlike
+ * the state refusals, a salvage failure is a failure to start.
+ *
+ * **The two callers are not bounded equally, and the weaker one is the new
+ * one.** From `attachWorktree` the counter is the attempt count in the pull
+ * request marker — on the ticket, surviving a restart, readable by a human.
+ * From `createWorktree` there is no pull request and no marker yet, so the only
+ * bound is `AttemptLedger` / `MAX_SOLVE_ATTEMPTS_PER_TICKET`, which is held in
+ * memory, resets when the process restarts, and is ignored entirely by
+ * hand-driven runs. That is weaker than the rule in BUILDING.md ("state lives
+ * in the remote system") asks for, and it is a deliberate gap rather than an
+ * oversight: the marker cannot be the bound before the marker exists. It holds
+ * only because a `worktree move` that fails deterministically is rare and each
+ * refusal is free. **If that stops being true, the cold path needs a counter on
+ * the ticket, not a longer comment here.**
  */
 async function salvageWorktree(
   runner: CommandRunner,
-  request: AttachRequest,
+  request: SalvageTarget,
   branchAt: string | null,
   reason: string,
   opts: CommandOptions,

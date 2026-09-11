@@ -1826,10 +1826,15 @@ describe("solveWithRetry", () => {
     await solveWithRetry(deps, request);
 
     const git = calls.filter((argv) => argv.includes("worktree") || argv.includes("branch"));
+    // Each add is preceded by the list that decides whether anything of ours is
+    // already at the path. Here nothing is — this retry cleans up after itself
+    // explicitly — so the list finds an empty answer twice and no salvage runs.
     expect(git.map((argv) => argv.slice(3, 5).join(" "))).toEqual([
+      "worktree list",
       "worktree add",
       "worktree remove",
       "branch -d",
+      "worktree list",
       "worktree add",
     ]);
   });

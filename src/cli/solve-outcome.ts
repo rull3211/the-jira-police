@@ -194,7 +194,17 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
       // for builds that pass in a normal checkout and fail in a linked one, so
       // "reproduce it in the repo" is the wrong first instruction — reproduce
       // it here.
-      return `UNUSABLE BASE — ${outcome.reason}\nWorktree kept at ${outcome.worktree.path} — reproduce there, not in the main checkout, since that is the difference this found`;
+      //
+      // The path is kept, but it is not held. The next run for this ticket
+      // moves this checkout to a `<path>-salvaged-<timestamp>` sibling and puts
+      // a fresh one here (`createWorktree`), so an operator who reads this line
+      // and comes back later finds a directory that looks right and is not the
+      // evidence. Worse, a reproduction still running in it gets moved out from
+      // under itself — observed 2026-09-11, a Maven run whose working directory
+      // followed the rename while its `-Dmaven.multiModuleProjectDirectory`
+      // went on naming the replacement. So the warning is part of the line, not
+      // a comment only we can see.
+      return `UNUSABLE BASE — ${outcome.reason}\nWorktree kept at ${outcome.worktree.path} — reproduce there, not in the main checkout, since that is the difference this found\nIt is kept, not held: the next run for this ticket moves it to a -salvaged-<timestamp> sibling and puts a fresh checkout at that path, so copy it aside before you rely on it, and stop the daemon while you work in it`;
     }
     case "bailed": {
       // The one outcome whose worktree may be gone, so this is the one line

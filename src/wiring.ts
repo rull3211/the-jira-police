@@ -45,6 +45,7 @@
  * a retry.
  */
 
+import { mkdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -687,10 +688,36 @@ export class NotSolvableError extends Error {}
  * already become the empty string by the time it arrives — so a trim on this
  * line is a guard no test can unplug, which is the kind of reassuring dead code
  * this project treats as worse than none. `SOLVE_MODE` does trim, and should not.
+ *
+ * ## The answer is resolved, because git's is
+ *
+ * Added 2026-09-11, from a drive that reproduced a wedge the whole test suite
+ * missed. Every recovery in `worktree.ts` starts by asking `git worktree list
+ * --porcelain` whether a checkout is already at `<root>/<issueKey>`, and git
+ * prints the **resolved** path. On macOS `tmpdir()` is `/var/folders/…`, which
+ * is a symlink to `/private/var/folders/…` — the same problem this setting was
+ * added to work around, arriving a second time as a string comparison that
+ * cannot match. So the default configuration silently disabled both salvage
+ * paths on the machine this service runs on, and each turned back into the
+ * permanent refusal it was written to remove. An explicitly configured root can
+ * be symlinked too, so it is resolved on the same line rather than trusted.
+ *
+ * `mkdirSync` first, because `realpathSync` needs the directory to exist and on
+ * a fresh machine it does not; `git worktree add` would have created it a
+ * moment later anyway, so this only moves the creation earlier. **Both are
+ * wrapped**, and a failure falls back to the unresolved path: the worst case is
+ * exactly today's behaviour, and refusing to build a request over a directory
+ * git is about to create would be a new way to fail at something that works.
  */
 function worktreeRoot(settings: Settings): string {
   const configured = settings.SOLVE_WORKTREE_ROOT;
-  return configured === "" ? join(tmpdir(), "jira-police-solve") : configured;
+  const root = configured === "" ? join(tmpdir(), "jira-police-solve") : configured;
+  try {
+    mkdirSync(root, { recursive: true });
+    return realpathSync(root);
+  } catch {
+    return root;
+  }
 }
 
 export function buildSolveRequest(
