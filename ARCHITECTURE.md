@@ -1797,8 +1797,8 @@ Things that look like details and are not:
 13. **Nothing may edit the definition of whether it passed.** Mechanical verification is only
     worth anything if the thing being verified cannot move the goalposts — and the harness reads
     its test, typecheck and lint commands out of the repository it is checking. So the diff gate
-    refuses `package.json`, `tsconfig*.json` and the lint and test configs unconditionally, and
-    exempts them from every size cap. The reasoning generalises to anything later that discovers
+    refuses `package.json`, `tsconfig*.json` and the lint and test configs unconditionally, on a
+    change of any size. The reasoning generalises to anything later that discovers
     behaviour from data an agent can write: **discover from the pristine base, not from what the
     run produced**, and treat "the check passed" as meaningless until you know the check was the
     one you meant.
