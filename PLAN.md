@@ -698,6 +698,69 @@ privilege and wants its own phased branch.
 merely slow, which produces two solvers on one ticket — strictly worse than the wedge it fixes. The
 PR-exists reconciliation has no such hazard and is probably the half to build first.
 
+### 32. A ticket may not widen scope, and one out-of-bounds line costs all the others
+
+**Branch:** `fix/scopewidening-support`
+
+**What is not built.** Any way for a ticket to place an unusual file in scope, and any outcome
+between accepting an item and ending the whole run over it. Three phases, smallest first. A is worth
+shipping alone; C is the one that would have let SSX-3894 finish unattended.
+
+**A — the scope prose states bounds the gate does not enforce.** `SOLVE_INSTRUCTIONS.md` tells the
+agent a size bound exists in three places: `:97`, `:498`, and `:528`, where it is a bail row (_"It is
+bigger than the bound once you see the code"_). That cap was removed on 2026-09-06.
+`diff-gate.ts:36-46` records both halves as gone and gives the reason: a cap is sound in one
+direction only, because "a run that lost the plot is usually wide, but a wide diff is usually not a
+run that lost the plot". Separately, `:500` bars "no CI configuration, no repository automation, no
+agent configuration" — three categories with no enumeration, where the gate refuses by path list:
+`FORBIDDEN_PATHS` (`diff-gate.ts:103`) and `VERIFICATION_PATHS` (`:142`), matched at `:345` and
+`:349`. Replace the categories with citations to those constants and remove the dead size bound with
+its bail row. While in the file, `:9` tells every pass it starts in a worktree "cut from the pristine
+base a moment ago", which does not hold on a review round: `worktree.ts:532` attaches with `--track
+-b` against the existing pull-request branch, and `base-sync.ts:460` merges the base into it. `:60`
+and `:585` repeat the claim.
+
+**B — nothing keeps the prose and the gate in agreement.** `docs:check` (`src/cli/docs-check.ts`,
+wired at `package.json:26`) does not read `SOLVE_INSTRUCTIONS.md`. `fb772b3` removed the size caps
+and updated `ARCHITECTURE.md` and `PLAN.md`; the skill file was missed and has been wrong since. Add
+a check that fails when the scope prose states a bound the gate does not implement, so that A cannot
+regress unnoticed. §13 is the same shape against a different target — what the house rules claim and
+nothing checks — and the two should be read together, but the consequence here is a run that ends
+rather than a document that misleads, so the check belongs with this entry.
+
+**C — declining one item requires ending the run.** The two outcomes available are
+`injectionNoticed`, required in three schemas (`schema.ts:41`, `:272`, `:390`) and parsed
+(`runner.ts:799`, `:1165`, `:1210`) but branched on nowhere, and a bail, decided in recon
+(`orchestrator.ts:31`, returned at `:796`, fields at `schema.ts:38-40`). Recon has no `Write` and no
+`Edit` (`orchestrator.ts:213`), so a bail ends the run before the solve pass and the diff gate is
+never reached — the path lists are never consulted, and the categories in A decide instead. A
+nine-file ticket with one questionable line yields zero files. What is missing is a per-item
+outcome: complete the in-scope work, leave the rest undone, and state which items were left and why
+on both the pull request and the ticket.
+
+**Why it is owed.** SSX-3894 asked for nine files, one of them `deployment/manifestor.yaml`. That
+path is in neither list, so the gate would have allowed it; it was declined by judgement against A's
+categories. Sampled judgement probes on the live ticket put the bail rate at 2 of 4. A bail writes no
+label and says nothing about solvability, so the ticket is released as found and offered again on
+the next tick at full solve cost. It was finished by a human making the manifest change by hand and
+removing the step from the ticket, after which the run completed and the result held up under
+mutation testing. The underlying defect is untouched, and the next ticket needing a
+deployment-config change meets the same wall.
+
+**Why it was not done here.** The session that found it was validating a pushed branch in another
+repository; its only writes were a Jira description and a three-line YAML commit. A and B are prose
+plus one check. C changes what a pass may return and how `delivery.ts` reports it — a behavioural
+change wanting its own phase, and a better measurement than the four-sample probe above.
+
+**What would make it the wrong idea.** C carries the risk. Replacing a clear stop with a partial
+result is only an improvement if the reviewer can tell the difference; a pull request that omits part
+of its ticket while reading as finished is worse than none, which is the same reasoning that has plan
+entries deleted before the push. It depends on the declined item being reported prominently enough
+that a reviewer acts on it, and that is a claim about human attention nothing here can test. A is
+nearly free but has one trap: citing `FORBIDDEN_PATHS` by name invites the next reader to treat the
+list as exhaustive of what an agent must not touch. It is exhaustive only of what the gate refuses;
+judgement still owns everything else, and the sentence should say so.
+
 ---
 
 ## Verification
