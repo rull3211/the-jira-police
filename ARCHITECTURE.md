@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2539 tests in 71 files, no build step, no
+Status: running end to end against production Jira. 2555 tests in 72 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -729,7 +729,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-79 production modules, 71 test files. Grouped by what they belong to rather than alphabetically,
+80 production modules, 72 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -840,6 +840,11 @@ because the grouping is the architecture.
 | `src/cli/daemon-processes.ts` | Picking the daemon out of `ps` output. Split off so a test can import it                |
 | `src/cli/docs-check.ts`       | `pnpm docs:check`. Development tooling, not a service entry point — see below           |
 | `src/cli/section-refs.ts`     | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only     |
+| `src/cli/count-phrases.ts`    | Count-noun phrases in tracked markdown: declared fact, or listed history                |
+| `src/cli/pinned-prose.ts`     | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe            |
+| `src/cli/length-budget.ts`    | Word bands for the mandatory-reading path, and the ratchet on raising one               |
+| `src/cli/rule-citations.ts`   | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                 |
+| `src/cli/scope-bounds.ts`     | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions          |
 
 **Output**
 
@@ -850,15 +855,25 @@ because the grouping is the architecture.
 `wiring.ts` exists because there are six entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once` and `watch:once` — and a difference in how they wire the same pipeline
 would be a bug
-that only shows up in production. `docs-check.ts` and `section-refs.ts` are the seventh and eighth
-files in that directory and are deliberately not entry points: they compose nothing, read no
-settings, and touch neither Jira nor a repository. They live here because this is where a file you
-can run lives, and they are called out rather than left to be counted, since "six" above is a claim
-about the composition and a new CLI file is exactly what would quietly falsify it — which is what
-the second one did, to the sentence that predicted it, in the commit that added it. `section-refs.ts`
-is the only one of the eight with no `pnpm` command of its own, because it is a library that
-`docs-check.ts` reads; it is here rather than beside the code it inspects so that the pair stays
-together. The two solve commands go further than sharing `wiring.ts`: their
+that only shows up in production. `docs-check.ts` and the six modules under it are deliberately not
+entry points: they compose nothing, read no settings, and touch neither Jira nor a repository. They
+live here because this is where a file you can run lives, and they are called out rather than left
+to be counted, since "six" above is a claim about the composition and a new CLI file is exactly what
+would quietly falsify it.
+
+**It did exactly that, twice, and the second time nobody noticed for four modules.** The sentence
+here used to say `docs-check.ts` and `section-refs.ts` were "the seventh and eighth files in that
+directory" and to reason about "the eight"; `count-phrases.ts`, `pinned-prose.ts`,
+`length-budget.ts` and `rule-citations.ts` were extracted afterwards and added to neither the table
+nor the count, so the map listed two of six and the prose named a total that had been wrong for four
+commits. Corrected in the commit adding `scope-bounds.ts`, which is the module that made it
+impossible to add one more row without reading the sentence. **A count of files in a directory is
+the shape of fact this document should not be stating**, and it no longer states one: the table is
+the list.
+
+Only `docs-check.ts` has a `pnpm` command; the other six are libraries it reads, kept here rather
+than beside the code they inspect so that the pair stays together. The two solve commands go further
+than sharing `wiring.ts`: their
 write rungs are literally the same functions, in `src/cli/solve-run.ts`, so a command file is now
 argument parsing plus a call into the one module that writes to Jira, a worktree or GitHub.
 `triage:once` used to build its options by hand; the copy drifted the moment the real skill grew
@@ -1797,8 +1812,8 @@ Things that look like details and are not:
 13. **Nothing may edit the definition of whether it passed.** Mechanical verification is only
     worth anything if the thing being verified cannot move the goalposts — and the harness reads
     its test, typecheck and lint commands out of the repository it is checking. So the diff gate
-    refuses `package.json`, `tsconfig*.json` and the lint and test configs unconditionally, and
-    exempts them from every size cap. The reasoning generalises to anything later that discovers
+    refuses `package.json`, `tsconfig*.json` and the lint and test configs unconditionally, on a
+    change of any size. The reasoning generalises to anything later that discovers
     behaviour from data an agent can write: **discover from the pristine base, not from what the
     run produced**, and treat "the check passed" as meaningless until you know the check was the
     one you meant.

@@ -364,8 +364,18 @@ export function packageManagerOf(raw: string): PackageManager | null {
  * Reads the commands out of the pristine manifest.
  *
  * `git show <base>:package.json` and not the worktree's copy — the whole point.
- * The base ref is the same one the worktree was cut from, so these are the
- * commands the repository defined before the run touched anything.
+ * These are the commands the base defines, which is what makes them commands no
+ * pass in this run can have edited.
+ *
+ * Not "the ref the worktree was cut from", which this said until 2026-09-13 and
+ * which is only true of a first solve pass. A review round attaches its worktree
+ * to the existing pull-request branch and merges the base in, so the tree holds
+ * earlier rounds' commits and the base ref is a ref the worktree was *synced
+ * with* rather than cut from. The guarantee survives the correction — the
+ * manifest still comes from a ref no pass in this run wrote to — and it is a
+ * weaker guarantee than the old sentence implied, because on a review round an
+ * *earlier* round's commits are in the tree and only `unverifiableChanges`
+ * stands between them and the definition of passing.
  */
 export async function discoverPlan(
   runner: CommandRunner,

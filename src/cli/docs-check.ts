@@ -78,6 +78,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
+import { checkDiff, FORBIDDEN_PATHS, VERIFICATION_PATHS } from "../solve/diff-gate.ts";
 import { SETTINGS } from "../settings.ts";
 import {
   type CheckedSite,
@@ -101,6 +102,7 @@ import {
   unresolvedBaselineProblem,
 } from "./length-budget.ts";
 import { CHECKLIST_QUESTIONS, pinnedProseProblems } from "./pinned-prose.ts";
+import { scopeBoundsProblems } from "./scope-bounds.ts";
 import {
   CITING_FILES,
   incidentAddedArgs,
@@ -1016,6 +1018,55 @@ record({
     "whether the incident a rule cites is the incident it came from — a slug resolving " +
     "proves the entry exists, not that the story under it earns the rule — and whether a rule " +
     "cites one at all, which is counted in the line above and failed on by nobody",
+});
+
+/**
+ * The solver's scope prose against the gate that actually runs.
+ *
+ * The one check here that reads a skill file for what it *claims* rather than
+ * for its headings, and the only one whose failure costs a run rather than
+ * misleading a reader: a bound the solver believes in is obeyed whether or not
+ * the harness enforces it. `scope-bounds.ts` has the argument and why neither
+ * half matches on vocabulary.
+ *
+ * **`refusesBySize` is measured, not read.** An enormous diff of paths no rule
+ * touches is put through the real `checkDiff`, and its verdict decides which
+ * sentence the two documents are required to carry. Reading `diff-gate.ts` for
+ * the absence of a cap would be the check believing the same source it is
+ * supposed to be holding the prose against — and a cap reinstated anywhere
+ * downstream of the rule tables would not appear there anyway.
+ */
+const beforeScope = problems.length;
+const hugeCleanDiff = Array.from({ length: 500 }, (_, index) => ({
+  path: `src/generated/module-${index}.ts`,
+  added: 400,
+  removed: 400,
+}));
+const sizeVerdict = checkDiff(hugeCleanDiff);
+const instructionsPath = ".claude/skills/agent-solve/SOLVE_INSTRUCTIONS.md";
+const solveSkillPath = ".claude/skills/agent-solve/SKILL.md";
+const scope = scopeBoundsProblems({
+  instructionsPath,
+  instructions: readFileSync(join(ROOT, instructionsPath), "utf8"),
+  skillPath: solveSkillPath,
+  skill: readFileSync(join(ROOT, solveSkillPath), "utf8"),
+  tables: [
+    { name: "FORBIDDEN_PATHS", rules: FORBIDDEN_PATHS },
+    { name: "VERIFICATION_PATHS", rules: VERIFICATION_PATHS },
+  ],
+  refusesBySize: !sizeVerdict.ok,
+});
+problems.push(...scope.problems);
+
+record({
+  ok: problems.length === beforeScope,
+  what: "the solver's scope prose against the diff gate",
+  measured: scope.summary,
+  unchecked:
+    "everything the prose says that is not a path or the size sentence — the bail rows, the " +
+    "worktree description and §0a's out-of-worktree bound have no mechanical counterpart here. " +
+    "It also cannot see a cap added to the prose *alongside* the sentence denying one, since it " +
+    "asks whether that sentence is present and not whether the document contradicts itself",
 });
 
 /**

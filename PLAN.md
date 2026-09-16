@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2539 tests in 71
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2555 tests in 72
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -80,7 +80,7 @@ parent. Nothing in the tree carries it, which is the cost of deferring by deleti
 written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
 inside the branch that built it, and §32 was the untagged thread reply that let the service argue
 with itself on PR #548 — same shape, opened and deleted inside its own branch. The triage-selection
-entries are now all closed, so the next entry is §33.
+entries are now all closed, so the next entry is §34.
 
 <!-- refs:on -->
 
@@ -352,7 +352,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **109 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **110 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 39 point at sections that have never existed** (below,
   "The citations that were never written down"). What is still unresolved is which _document_ a
@@ -697,6 +697,38 @@ privilege and wants its own phased branch.
 **What would make it the wrong idea.** Anything time-based can reclaim a ticket from a solve that is
 merely slow, which produces two solvers on one ticket — strictly worse than the wedge it fixes. The
 PR-exists reconciliation has no such hazard and is probably the half to build first.
+
+### 33. Declining one item of a ticket requires ending the whole run
+
+**Branch:** none yet.
+
+**What is not built.** Any outcome between accepting every item of a ticket and ending the run over
+one of them. A nine-file ticket with one questionable line yields zero files.
+
+**Why it is owed.** The two outcomes available are `injectionNoticed`, required in three schemas
+(`schema.ts:41`, `:272`, `:390`) and parsed (`runner.ts:799`, `:1165`, `:1210`) but branched on
+nowhere, and a bail, decided in recon (`orchestrator.ts:31`, returned at `:796`, fields at
+`schema.ts:38-40`). Recon has no `Write` and no `Edit` (`orchestrator.ts:213`), so a bail ends the
+run before the solve pass and the diff gate is never reached: the path lists are never consulted,
+and judgement about scope decides alone. A bail also writes no label and says nothing about
+solvability, so the ticket is released as found and offered again on the next tick at full solve
+cost. Sampled judgement probes on SSX-3894 put the bail rate at 2 of 4.
+
+What is missing is a per-item outcome: complete the in-scope work, leave the rest undone, and state
+which items were left and why on both the pull request and the ticket.
+
+**Why it was not done here.** `fix/scopewidening-support` shipped the two prose-and-check phases
+this entry was opened with — the scope prose stating a size bound deleted on 2026-09-06, and the
+`docs:check` check that now holds that prose against the gate in both directions. Those removed the
+false bound the judgement was being exercised against. They do not give a pass anywhere to put a
+partial result: this changes what a pass may return and how `delivery.ts` reports it, which is a
+behavioural change wanting its own branch, and a better measurement than a four-sample probe.
+
+**What would make it the wrong idea.** Replacing a clear stop with a partial result is only an
+improvement if the reviewer can tell the difference; a pull request that omits part of its ticket
+while reading as finished is worse than none — the same reasoning that has plan entries deleted
+before the push. It depends on the declined item being reported prominently enough that a reviewer
+acts on it, and that is a claim about human attention nothing here can test.
 
 ---
 
