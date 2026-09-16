@@ -12,6 +12,24 @@
  */
 
 /**
+ * Collapses every whitespace run to one space, so untrusted text cannot forge
+ * structure in a document that separates its parts by newline.
+ *
+ * A filename or a model's sentence containing a newline followed by `## ` or
+ * `- ` writes a heading or a list row that the run never produced, in exactly
+ * the artifact a person reads to find out what the run concluded. Markdown's
+ * remaining tricks can make a line ugly; none of them can make it lie about
+ * structure.
+ *
+ * Three copies of this existed before it moved here — `report.ts`,
+ * `feedback.ts`'s `safeText` and very nearly the image stager — which is the
+ * shape this module was created to stop.
+ */
+export function oneLine(text: string): string {
+  return text.replaceAll(/\s+/gu, " ").trim();
+}
+
+/**
  * Trims to a length on a word boundary, marking that it did.
  *
  * The ellipsis is not decoration. A silently-cut sentence reads as a model that
