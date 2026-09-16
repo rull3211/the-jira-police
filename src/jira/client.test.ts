@@ -455,6 +455,57 @@ describe("JiraClient.fetchAttachmentText", () => {
   });
 });
 
+describe("JiraClient.fetchAttachmentBytes", () => {
+  // A PNG header, which is the case the text method cannot serve: every byte
+  // here is outside what UTF-8 decoding round-trips.
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe]);
+
+  it("returns the bytes unchanged, whatever they decode to", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(png));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const bytes = await client().fetchAttachmentBytes("742005", 32_768);
+
+    expect(bytes).toEqual(png);
+    expect(callArgs(fetchMock, 0).url).toContain("/rest/api/3/attachment/content/742005");
+  });
+
+  it("asks for any type, because the endpoint serves the file rather than JSON", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(png));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client().fetchAttachmentBytes("742005", 32_768);
+
+    const headers = new Headers(callArgs(fetchMock, 0).init?.headers);
+    expect(headers.get("accept")).toBe("*/*");
+  });
+
+  it("refuses an oversized attachment by its declared length", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(png, { headers: { "content-length": "999999" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await client().fetchAttachmentBytes("742005", 10)).toBeNull();
+  });
+
+  it("refuses an oversized attachment that declared no length at all", async () => {
+    vi.stubGlobal("fetch", async () => new Response(Buffer.alloc(500)));
+
+    expect(await client().fetchAttachmentBytes("742005", 10)).toBeNull();
+  });
+
+  it("refuses an attachment id that is not an id", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(png));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of ["../742005", "742005/..", "abc", ""]) {
+      await expect(client().fetchAttachmentBytes(bad, 100)).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("isInlineable", () => {
   it("treats SVG as text, because it is", () => {
     // The case that motivated the function. A `startsWith("image/")` rule would
