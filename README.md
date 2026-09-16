@@ -464,25 +464,31 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 
 ## Commands
 
-| Command                                                | What it does                                                                                              | Writes?                     |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                                                      | no                          |
-| `pnpm poll:once`                                       | One full grooming cycle                                                                                   | only with `WRITE_BACK=true` |
-| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                                                     | `groomed/<KEY>.md`          |
-| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                                                    | Jira                        |
-| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                              | `groomed/<KEY>.md`          |
-| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                               | `groomed/solve-cycle.md`    |
-| `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                           | Jira **and** GitHub         |
-| `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                         | no                          |
-| `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                  | Jira                        |
-| `pnpm start`                                           | The daemon — grooming, plus solve and watch if their flags are on. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
-| `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                    |
-| `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                               | no                          |
-| `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                  | no                          |
-| `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                          |
-| `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                          |
-| `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                             | no                          |
-| `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                                                            | no                          |
+| Command                                                | What it does                                                                                              | Writes?                      |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                                                      | no                           |
+| `pnpm poll:once`                                       | One full grooming cycle                                                                                   | only with `WRITE_BACK=true`  |
+| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                                                     | `groomed/<KEY>.md`           |
+| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                                                    | Jira                         |
+| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                              | `groomed/<KEY>.md`           |
+| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                               | `groomed/solve-cycle.md`     |
+| `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                           | Jira **and** GitHub          |
+| `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                         | no                           |
+| `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                  | Jira                         |
+| `pnpm start`                                           | The daemon — grooming, plus solve and watch if their flags are on. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true`  |
+| `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                     |
+| `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind    | a directory under `tmpdir()` |
+| `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                               | no                           |
+| `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                  | no                           |
+| `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                           |
+| `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                           |
+| `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                             | no                           |
+| `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                                                            | no                           |
+
+**`attach:stage` is the only thing that stages an image, and nothing reads what it stages.** Triage
+and solve still see attachments as text or not at all; the command exists so the capability can be
+judged from a real ticket before any pass is wired to it. It downloads and writes to a temp
+directory, and posts nothing. [`ARCHITECTURE.md` §13](ARCHITECTURE.md) has the decision behind it.
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch. Three unrelated meanings of one word, and the

@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2555 tests in 72 files, no build step, no
+Status: running end to end against production Jira. 2585 tests in 74 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -729,23 +729,24 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-80 production modules, 72 test files. Grouped by what they belong to rather than alphabetically,
+84 production modules, 74 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
 
-| Path                 | Role                                                                                                 |
-| -------------------- | ---------------------------------------------------------------------------------------------------- |
-| `src/index.ts`       | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides       |
-| `src/loop.ts`        | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                 |
-| `src/poller.ts`      | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                       |
-| `src/review-loop.ts` | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once      |
-| `src/watch-loop.ts`  | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one      |
-| `src/wiring.ts`      | **The composition.** Every `create*Deps` and every `build*Request`, for all six entry points         |
-| `src/settings.ts`    | Declarative settings table + generic reader, with a `sensitive` marker                               |
-| `src/logger.ts`      | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did        |
-| `src/duration.ts`    | `30s` / `4m` / `1.5h` for CLI flags                                                                  |
-| `src/text.ts`        | Text bounds shared by anything placing untrusted content where it must fit. Two callers, so one copy |
+| Path                    | Role                                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`          | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                               |
+| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                         |
+| `src/poller.ts`         | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                               |
+| `src/review-loop.ts`    | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                              |
+| `src/watch-loop.ts`     | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                              |
+| `src/wiring.ts`         | **The composition.** Every `create*Deps` and every `build*Request`, for all six entry points                                                                 |
+| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                                                                       |
+| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did                                                                |
+| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                          |
+| `src/text.ts`           | Text bounds shared by anything placing untrusted content where it must fit. Two callers, so one copy                                                         |
+| `src/read-only-tree.ts` | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair |
 
 **Jira**
 
@@ -756,6 +757,17 @@ because the grouping is the architecture.
 | `src/jira/types.ts`  | The slice of the Jira payload actually read, plus `TicketRef`                                    |
 | `src/jira/adf.ts`    | Atlassian Document Format rendered down to plain text. No I/O, so testable against real payloads |
 | `src/state/store.ts` | Cursor + seen keys, atomic write                                                                 |
+
+**Attachments — the image path, and nothing constructs it yet**
+
+| Path                        | Role                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/attachments/images.ts` | Which types may be staged, and what the leading bytes say the file actually is                          |
+| `src/attachments/stage.ts`  | Images written read-only under a derived name, and the block naming them. `staged` / `none` / `refused` |
+
+Both are unreachable from the daemon, `poll:once`, `triage:once`, `solve:once`, `bot:once` and
+`watch:once`: `attach:stage` is their only caller, and it is a dry run. §13 has the decision that
+authorised the bytes and the phases still owed; §14.11 has what the widening cost.
 
 **Triage — the grooming half**
 
@@ -824,27 +836,28 @@ because the grouping is the architecture.
 
 **Entry points and their argument parsing**
 
-| Path                          | Role                                                                                    |
-| ----------------------------- | --------------------------------------------------------------------------------------- |
-| `src/cli/poll-once.ts`        | One poll cycle, then exit. The daemon minus the loop, from the same factory             |
-| `src/cli/triage-once.ts`      | One triage against a named key, no discovery. `--write` to post it                      |
-| `src/cli/solve-once.ts`       | The solve ladder. Dry by default; every write is a typed flag                           |
-| `src/cli/solve-args.ts`       | The ladder and the `--advance` mode, and which rungs the settings can actually reach    |
-| `src/cli/solve-run.ts`        | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**      |
-| `src/cli/solve-outcome.ts`    | Outcomes to an operator's terminal, and the rule deciding `$?`                          |
-| `src/cli/bot-once.ts`         | The whole bot against one ticket: triage, fitness, claim, solve, PR, review             |
-| `src/cli/bot-args.ts`         | The same ladder, with an issue key always required                                      |
-| `src/cli/watch-once.ts`       | What the sendback watch would do; `--write` does it                                     |
-| `src/cli/watch-args.ts`       | Its argument and output shapes, kept out of a file that ends in a top-level `await`     |
-| `src/cli/daemon-status.ts`    | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing |
-| `src/cli/daemon-processes.ts` | Picking the daemon out of `ps` output. Split off so a test can import it                |
-| `src/cli/docs-check.ts`       | `pnpm docs:check`. Development tooling, not a service entry point — see below           |
-| `src/cli/section-refs.ts`     | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only     |
-| `src/cli/count-phrases.ts`    | Count-noun phrases in tracked markdown: declared fact, or listed history                |
-| `src/cli/pinned-prose.ts`     | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe            |
-| `src/cli/length-budget.ts`    | Word bands for the mandatory-reading path, and the ratchet on raising one               |
-| `src/cli/rule-citations.ts`   | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                 |
-| `src/cli/scope-bounds.ts`     | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions          |
+| Path                          | Role                                                                                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/poll-once.ts`        | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                            |
+| `src/cli/triage-once.ts`      | One triage against a named key, no discovery. `--write` to post it                                                                     |
+| `src/cli/solve-once.ts`       | The solve ladder. Dry by default; every write is a typed flag                                                                          |
+| `src/cli/solve-args.ts`       | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                   |
+| `src/cli/solve-run.ts`        | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                     |
+| `src/cli/solve-outcome.ts`    | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                         |
+| `src/cli/bot-once.ts`         | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                            |
+| `src/cli/bot-args.ts`         | The same ladder, with an issue key always required                                                                                     |
+| `src/cli/watch-once.ts`       | What the sendback watch would do; `--write` does it                                                                                    |
+| `src/cli/watch-args.ts`       | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                    |
+| `src/cli/attach-stage.ts`     | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session |
+| `src/cli/daemon-status.ts`    | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                |
+| `src/cli/daemon-processes.ts` | Picking the daemon out of `ps` output. Split off so a test can import it                                                               |
+| `src/cli/docs-check.ts`       | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                          |
+| `src/cli/section-refs.ts`     | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                    |
+| `src/cli/count-phrases.ts`    | Count-noun phrases in tracked markdown: declared fact, or listed history                                                               |
+| `src/cli/pinned-prose.ts`     | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                           |
+| `src/cli/length-budget.ts`    | Word bands for the mandatory-reading path, and the ratchet on raising one                                                              |
+| `src/cli/rule-citations.ts`   | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                |
+| `src/cli/scope-bounds.ts`     | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                         |
 
 **Output**
 
@@ -860,6 +873,11 @@ entry points: they compose nothing, read no settings, and touch neither Jira nor
 live here because this is where a file you can run lives, and they are called out rather than left
 to be counted, since "six" above is a claim about the composition and a new CLI file is exactly what
 would quietly falsify it.
+
+**`attach:stage` is the third kind and the reason the sentence says "pipeline" rather than
+"wiring.ts".** It does read settings and does call `createJiraClient`, so it is a seventh caller of
+that module — but it composes no deps object, runs no pass, and its whole output is a report. Six is
+still the number of entry points that could diverge from one another in production.
 
 **It did exactly that, twice, and the second time nobody noticed for four modules.** The sentence
 here used to say `docs-check.ts` and `section-refs.ts` were "the seventh and eighth files in that
@@ -1410,12 +1428,21 @@ being widened or dropped:
 - **Concurrency.** Issues are triaged sequentially. Fine at 4–5/day.
 - **Unproven paths.** REST pagination and REST error handling (401/429/5xx) are unit-tested only;
   the live board has returned a single clean page every time.
-- **Open decision: attachment bytes on the discovery credential.** `fetchAttachmentText` downloads
-  attachment content and `solve/ticket.ts` inlines it into the solver's prompt. §14.11 records why
-  this is a fresh widening of the governing constraint rather than an ordinary read, and that it
-  landed without the invariant being updated with it. It is bounded three ways and it opens one new
-  trust boundary — bytes uploaded by anyone who can edit the ticket, reaching a session that holds
-  `Write` and `Edit`. **Keep, narrow, or revert is an operator's call and has not been made.**
+- **Attachment bytes on the discovery credential. Decided 2026-09-16: keep, and widen to images for
+  the passes that hold no `Write`.** `fetchAttachmentText` downloads attachment content and
+  `solve/ticket.ts` inlines it into the solver's prompt. §14.11 records why this is a fresh widening
+  of the governing constraint rather than an ordinary read, that it landed without the invariant
+  being updated with it, and what the new bound is. The operator's call was recon and triage, not
+  the write-holding passes: a screenshot is what most tickets here actually contain, and what the
+  fix pass needs out of one reaches it as recon's brief rather than as pixels.
+
+  **What is built is inert.** `attachments/stage.ts` writes a ticket's images read-only under a
+  derived name and `attach:stage` prints the block a pass would be given; nothing in the triage or
+  solve path constructs either. Owed, each on its own branch: `WebFetch` and `WebSearch` off the
+  triage analyst, then recon behind a typed setting defaulting off, then triage. **The bound that
+  does not exist is a text control over a picture** — `sanitiseUntrusted` sees a path, and an
+  instruction painted into a screenshot reaches the model unread by anything else.
+
 - **Dead code, found by a reachability sweep 2026-09-08. The declarations are gone; the reporting
   channels are not.** Removed the same day, with `canvas.ts` above: `isEligible` and `AgentLabel`
   (`labels.ts`), `formatChecklistLine` (`sink.ts`), and `REQUIRED_MCP_SERVERS` (`triage/runner.ts`).
@@ -1796,8 +1823,23 @@ Things that look like details and are not:
     attachment bytes are uploaded by whoever can edit the ticket, and they are inlined into a
     prompt given to a session holding `Write` and `Edit`. That is a fresh untrusted-input path
     into the solver, and the plan named it as one — _"a new privilege and a new untrusted-bytes
-    path, so not now"_. It is now. Whether the capability stays is an operator's decision and is
-    flagged as open in §13 rather than settled here.
+    path, so not now"_. It is now.
+
+    **The operator kept it on 2026-09-16 and widened it to bytes that are not text (§13).**
+    `fetchAttachmentBytes` is the same GET without the UTF-8 decode — `fetchAttachmentText` now
+    calls it, so there is one cap, one id check and one endpoint rather than two of each — and
+    `attachments/stage.ts` writes the image ones to a read-only directory for a pass to `Read`.
+    Three bounds are new with it. The declared type is not believed: a file is staged only if its
+    own leading bytes name a raster format, and the extension written comes from the signature.
+    **The staged path is derived from the attachment id and that signature, never from the
+    uploader's filename** — `../../.ssh/authorized_keys` is a filename. And the pixels stop at the
+    passes that hold no `Write`: the fix pass gets recon's brief, which is text and therefore
+    inside every control the paragraph above describes.
+
+    What none of that bounds is the picture itself. An instruction painted into a screenshot is
+    invisible to `sanitiseUntrusted`, and the transcript records a path and a digest rather than
+    what the model was shown — so the residual risk here is **unmeasured**, not controlled, and
+    that is why the wiring is phased behind a setting that defaults off.
 
 12. **A capability is only withheld if something withholds it.** `--allowedTools` pre-approves;
     it does not restrict. This service ran for its whole life with three comments in
