@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2597 tests in 75
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2599 tests in 75
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -187,7 +187,7 @@ deleted, from an absolute path outside its own working directory. The capability
 only the bytes were missing.
 
 **The machinery exists and nothing constructs it** — `attachments/stage.ts` and `attach:stage`,
-merged inert; `ARCHITECTURE.md` §13 has what they are and §14.11 what the widening cost. What is
+inert in the pull request that adds them and inert after it merges; `ARCHITECTURE.md` §13 has what they are and §14.11 what the widening cost. What is
 below is the wiring, which is the part that spends privilege.
 
 The value is on all three paths and the risk is not, which is why the two are split. Recon looks and

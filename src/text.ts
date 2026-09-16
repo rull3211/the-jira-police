@@ -2,13 +2,13 @@
  * Text bounds shared by everything that puts untrusted content somewhere it has
  * to fit.
  *
- * Top-level beside `duration.ts` rather than inside a slice, because it has two
- * callers in two different directions now: `solve/feedback.ts` shortening a
- * bail so a Jira reader will read it, and `watch/context.ts` bounding a
- * description before it goes into a prompt. Copying it into the second would be
- * the defect this repository keeps naming — **a second copy of a rule is a rule
- * that stops agreeing with itself** — and the copy would have been the one
- * guarding the prompt.
+ * Top-level beside `duration.ts` rather than inside a slice, because the callers
+ * pull in different directions: a bail shortened so a Jira reader will read it,
+ * a description bounded before it goes into a prompt, a ticket summary
+ * collapsed so it cannot forge a heading in a report. Copying any of them into
+ * a second slice would be the defect this repository keeps naming — **a second
+ * copy of a rule is a rule that stops agreeing with itself** — and the copy
+ * would have been the one guarding the prompt.
  */
 
 /**

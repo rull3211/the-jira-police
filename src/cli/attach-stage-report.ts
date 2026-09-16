@@ -30,8 +30,10 @@ export function exitCodeFor(result: ImageStageResult): number {
 /**
  * The artifact, which is the half of this a person reads tomorrow.
  *
- * Filenames and the summary are ticket text: `oneLine` is what stops one of
- * them forging a row or a heading in a document made of rows and headings.
+ * Every field on an attachment row comes off the Jira response — the declared
+ * MIME type as much as the filename — so the row is collapsed whole rather than
+ * field by field, which is the version that does not need revisiting when a
+ * fourth field is added to it.
  */
 export function formatReport(
   detail: IssueDetail,
@@ -56,11 +58,23 @@ export function formatReport(
   }
   for (const attachment of detail.attachments) {
     lines.push(
-      `- ${oneLine(attachment.filename)} — ${attachment.mimeType}, ${String(attachment.size)} bytes`,
+      oneLine(
+        `- ${attachment.filename} — ${attachment.mimeType}, ${String(attachment.size)} bytes`,
+      ),
     );
   }
 
   lines.push("", "## What a pass would have been given", "");
+  if (result.outcome === "staged" && keptAt === null) {
+    // The block below is the one a pass would have been handed, quoted as it
+    // was: the paths in it were removed before this file was written, and a
+    // reader who tries to open one and finds nothing should be told why here
+    // rather than concluding the staging failed.
+    lines.push(
+      "_Quoted as it was. The paths were removed on the way out; `--keep` holds them._",
+      "",
+    );
+  }
   const block = describeStagedImages(result);
   lines.push(block === "" ? "_Nothing: no raster image to stage._" : block);
 

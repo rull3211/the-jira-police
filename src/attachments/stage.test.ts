@@ -179,7 +179,7 @@ describe("stageImages", () => {
       maxImages: 5,
     });
 
-    expect(result.outcome).toBe("none");
+    expect(result.outcome).toBe("refused");
     expect(read.fetchAttachmentBytes).not.toHaveBeenCalled();
     expect(result.omitted[0]).toContain("too large");
   });
@@ -192,7 +192,7 @@ describe("stageImages", () => {
       "SSX-3917",
     );
 
-    expect(result.outcome).toBe("none");
+    expect(result.outcome).toBe("refused");
     expect(result.omitted[0]).toContain("too large");
     await expect(readdir(parent)).resolves.toEqual([]);
   });
@@ -205,7 +205,7 @@ describe("stageImages", () => {
       "SSX-3917",
     );
 
-    expect(result.outcome).toBe("none");
+    expect(result.outcome).toBe("refused");
     expect(result.omitted[0]).toContain("not a readable image");
     await expect(readdir(parent)).resolves.toEqual([]);
   });
@@ -244,6 +244,26 @@ describe("stageImages", () => {
     if (result.outcome === "refused") {
       expect(result.reason).toContain("could not stage images");
     }
+  });
+
+  it("will not join an id it did not check onto a path", async () => {
+    // The reader here is a double, and a double takes ids the real client
+    // refuses. Deleting `assertAttachmentId` from the stager therefore costs
+    // nothing unless a test supplies an id the real client would have thrown
+    // on — this is that test.
+    const read = reader();
+
+    const result = await stageImages(
+      read,
+      [attachment({ id: "../../../etc/passwd", filename: "shot.png" })],
+      parent,
+      "SSX-3917",
+    );
+
+    expect(result.outcome).toBe("refused");
+    expect(read.fetchAttachmentBytes).not.toHaveBeenCalled();
+    expect(result.omitted[0]).toContain("could not be read");
+    await expect(readdir(parent)).resolves.toEqual([]);
   });
 
   it("says nothing was there only when nothing was there", async () => {

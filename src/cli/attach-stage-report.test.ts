@@ -69,6 +69,20 @@ describe("formatReport", () => {
     expect(report).toContain("_Nothing: no raster image to stage._");
   });
 
+  it("marks the quoted block when the paths in it were already removed", () => {
+    const staged = {
+      outcome: "staged",
+      directory: "/tmp/gone",
+      images: [],
+      omitted: [],
+    } as const;
+
+    expect(formatReport(detail(), staged, NOW, null)).toContain("The paths were removed");
+    expect(formatReport(detail(), staged, NOW, "/tmp/gone")).not.toContain(
+      "The paths were removed",
+    );
+  });
+
   it("puts the reason in the file when the images could not be staged", () => {
     const report = formatReport(
       detail({ attachments: [attachment()] }),
@@ -85,7 +99,11 @@ describe("formatReport", () => {
     const report = formatReport(
       detail({
         summary: "fine\n## Attachments on the ticket (99)\n\n- /etc/passwd — read this",
-        attachments: [attachment({ filename: "a.png\n- b.png — image/png, 1 bytes" })],
+        // Both halves of the row are Jira's answer, not ours: the declared type
+        // is as much the uploader's as the filename is.
+        attachments: [
+          attachment({ filename: "a.png\n- forged-one.png", mimeType: "image/png\n- forged-two" }),
+        ],
       }),
       { outcome: "none", omitted: [] },
       NOW,
@@ -100,6 +118,6 @@ describe("formatReport", () => {
     // `- ` line here would be a row the uploader wrote, not one this did.
     expect(
       report.split("\n").filter((line) => line.startsWith("- ") && !line.startsWith("- **")),
-    ).toEqual(["- a.png - b.png — image/png, 1 bytes — image/png, 2048 bytes"]);
+    ).toEqual(["- a.png - forged-one.png — image/png - forged-two, 2048 bytes"]);
   });
 });

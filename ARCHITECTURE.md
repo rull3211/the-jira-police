@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2597 tests in 75 files, no build step, no
+Status: running end to end against production Jira. 2599 tests in 75 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -745,7 +745,7 @@ because the grouping is the architecture.
 | `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                                                                       |
 | `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did                                                                |
 | `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                          |
-| `src/text.ts`           | Text bounds shared by anything placing untrusted content where it must fit. Two callers, so one copy                                                         |
+| `src/text.ts`           | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows             |
 | `src/read-only-tree.ts` | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair |
 
 **Jira**

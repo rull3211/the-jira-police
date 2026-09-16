@@ -42,7 +42,8 @@ function usage(): never {
       "  tmpdir(), and writes the block a session would be given to\n" +
       "  <OUTPUT_DIR>/<KEY>.attachments.md. --keep leaves the directory behind\n" +
       "  so you can look at the files.\n" +
-      "  Exit: 0 staged or nothing to stage, 1 images that could not be staged.\n",
+      "  Exit: 0 staged or nothing on the ticket to stage, 1 the ticket has\n" +
+      "  images and they are not staged, 2 this usage, 3 the run threw.\n",
   );
   process.exit(EXIT.usage);
 }
@@ -104,7 +105,13 @@ async function main(): Promise<number> {
 
   if (keptAt !== null) {
     process.stdout.write(`kept: ${keptAt}\n`);
-    process.stdout.write("Remove it yourself — nothing sweeps this directory.\n");
+    // The tree is `0o555`/`0o444` on purpose, which also means the obvious
+    // removal fails. Saying "remove it yourself" without saying how is how the
+    // one on this machine survived a week.
+    process.stdout.write(
+      "Nothing sweeps this directory, and the tree is read-only, so remove it with:\n" +
+        `  chmod -R u+w ${keptAt} && rm -r ${keptAt}\n`,
+    );
   } else if (staged !== null) {
     process.stdout.write(`removed: ${staged}\n`);
   }

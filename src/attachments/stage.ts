@@ -23,9 +23,12 @@
  * forty round trips — by attaching forty screenshots.
  *
  * **The staged name is derived, never supplied.** A file is written as
- * `<attachment id>.<extension from the signature>`, so neither half of the path
- * comes from the ticket. A filename is the obvious thing to reuse and it is
- * uploader-controlled: `../../.ssh/authorized_keys` is a filename.
+ * `<attachment id>.<extension from the signature>`. The extension comes from
+ * the bytes, and the id is Jira's own — but it still arrives in a response, so
+ * `assertAttachmentId` runs here as well as in the client: this module joins it
+ * onto a path, and a double standing in for the client is free to be more
+ * permissive than the client is. A filename is the obvious thing to reuse and
+ * it is uploader-controlled: `../../.ssh/authorized_keys` is a filename.
  *
  * ## What does not bound it, and is the reason this is phased
  *
@@ -47,7 +50,13 @@ import { lockDown, removeReadOnlyTree } from "../read-only-tree.ts";
 import { oneLine, shorten } from "../text.ts";
 import { isStageableImage, sniffImage } from "./images.ts";
 
-/** The half of `JiraClient` this module needs. */
+/**
+ * The half of `JiraClient` this module needs.
+ *
+ * A double for it accepts ids the real method refuses, so every precondition
+ * the real method enforces has to be enforced here too or the tests run with it
+ * switched off.
+ */
 export interface AttachmentByteReader {
   fetchAttachmentBytes(id: string, maxBytes: number): Promise<Buffer | null>;
 }
@@ -112,6 +121,26 @@ export type ImageStageResult =
   | { readonly outcome: "refused"; readonly reason: string; readonly omitted: readonly string[] };
 
 /**
+ * No image came out, which is two different answers.
+ *
+ * An empty `omitted` means the ticket had nothing to stage. A populated one
+ * means it had something and this did not produce it — whether the reason was a
+ * 403, a file that is not the image it claimed, or a cap of ours. All three
+ * leave a pass blind to a picture that exists, and `none` would tell it there
+ * was nothing to see.
+ */
+function nothingStaged(omitted: readonly string[]): ImageStageResult {
+  if (omitted.length === 0) {
+    return { outcome: "none", omitted };
+  }
+  return {
+    outcome: "refused",
+    reason: `every candidate failed or was capped (${String(omitted.length)} listed below)`,
+    omitted,
+  };
+}
+
+/**
  * Stages every image on a ticket that fits the caps.
  *
  * Three outcomes rather than two, and the third is the one that matters to a
@@ -119,6 +148,12 @@ export type ImageStageResult =
  * show, `refused` means it had one and this could not produce it. Collapsing
  * them would let "there was nothing to see" stand in for "I could not look",
  * which is the substitution the honest-bail rule exists to prevent.
+ *
+ * **A cap counts as "could not produce it".** A ticket whose every screenshot
+ * is over `maxImageBytes` leaves a pass exactly as blind as a ticket whose
+ * every download 403s, and the reason it is blind is ours rather than Jira's —
+ * which makes reporting that one as `none` worse, not better. Anything staged
+ * at all is `staged`, with the rest named in `omitted`.
  */
 export async function stageImages(
   reader: AttachmentByteReader,
@@ -149,7 +184,7 @@ export async function stageImages(
   }
 
   if (candidates.length === 0) {
-    return { outcome: "none", omitted };
+    return nothingStaged(omitted);
   }
 
   let directory: string;
@@ -232,7 +267,7 @@ export async function stageImages(
       // Every candidate failed. The directory exists, so it is removed here
       // rather than left for a caller that has no path to remove it with.
       await removeReadOnlyTree(directory);
-      return { outcome: "none", omitted };
+      return nothingStaged(omitted);
     }
 
     await lockDown(directory);
