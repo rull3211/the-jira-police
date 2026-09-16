@@ -46,10 +46,9 @@
  * directory added to overwrite a file in it and to create a new one — both
  * failed `EACCES`, and the original content survived.
  *
- * Directories are `0o555` rather than only the files being `0o444`, because on
- * a POSIX filesystem it is write permission on the *directory* that governs
- * creating and unlinking entries. Files-only would have left the model free to
- * delete the skill and write its own in its place.
+ * The locking itself is `read-only-tree.ts`, shared with the image stager,
+ * which carries why a directory mode rather than a file mode is what makes the
+ * guarantee.
  *
  * ## The source path is derived, never configured
  *
@@ -59,18 +58,14 @@
  * ships with the code because it is part of the code.
  */
 
-import { chmod, cp, mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { logger } from "../logger.ts";
+import { lockDown, removeReadOnlyTree } from "../read-only-tree.ts";
 
 /** The only skill a solve pass is given. */
 export const SKILL_NAME = "agent-solve";
-
-const DIRECTORY_MODE_READ_ONLY = 0o555;
-const FILE_MODE_READ_ONLY = 0o444;
-const DIRECTORY_MODE_WRITABLE = 0o755;
-const FILE_MODE_WRITABLE = 0o644;
 
 /**
  * Where the skill ships, relative to this file.
@@ -87,35 +82,6 @@ export function sourceSkillDirectory(): string {
 export type SkillRootResult =
   | { readonly outcome: "prepared"; readonly path: string }
   | { readonly outcome: "refused"; readonly reason: string };
-
-/** Read-only, depth-first: children before the directory that contains them. */
-async function lockDown(path: string): Promise<void> {
-  const entries = await readdir(path, { withFileTypes: true });
-  for (const entry of entries) {
-    const child = join(path, entry.name);
-    if (entry.isDirectory()) {
-      await lockDown(child);
-    } else {
-      await chmod(child, FILE_MODE_READ_ONLY);
-    }
-  }
-  // Last. Locking this first would deny us permission to touch its children.
-  await chmod(path, DIRECTORY_MODE_READ_ONLY);
-}
-
-/** The inverse, and it must run outermost-first for the same reason. */
-async function unlock(path: string): Promise<void> {
-  await chmod(path, DIRECTORY_MODE_WRITABLE);
-  const entries = await readdir(path, { withFileTypes: true });
-  for (const entry of entries) {
-    const child = join(path, entry.name);
-    if (entry.isDirectory()) {
-      await unlock(child);
-    } else {
-      await chmod(child, FILE_MODE_WRITABLE);
-    }
-  }
-}
 
 /**
  * Builds the skill root for one run, or refuses.
@@ -210,20 +176,7 @@ export async function prepareSkillRoot(
   return { outcome: "prepared", path: root };
 }
 
-/**
- * Removes the staged skill, unlocking it first.
- *
- * `rm` cannot delete an entry inside a `0o555` directory, so the unlock is not
- * tidiness — without it every run would leave one of these behind. Absence is
- * not an error: this is called on the cleanup path, including after a
- * `prepareSkillRoot` that refused before creating anything.
- */
+/** Removes the staged skill. Absence is not an error; see `removeReadOnlyTree`. */
 export async function removeSkillRoot(root: string): Promise<void> {
-  try {
-    await stat(root);
-  } catch {
-    return;
-  }
-  await unlock(root);
-  await rm(root, { recursive: true, force: true });
+  await removeReadOnlyTree(root);
 }
