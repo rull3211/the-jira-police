@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2585 tests in 74 files, no build step, no
+Status: running end to end against production Jira. 2597 tests in 75 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -729,7 +729,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-84 production modules, 74 test files. Grouped by what they belong to rather than alphabetically,
+85 production modules, 75 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -836,28 +836,29 @@ authorised the bytes and the phases still owed; §14.11 has what the widening co
 
 **Entry points and their argument parsing**
 
-| Path                          | Role                                                                                                                                   |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/cli/poll-once.ts`        | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                            |
-| `src/cli/triage-once.ts`      | One triage against a named key, no discovery. `--write` to post it                                                                     |
-| `src/cli/solve-once.ts`       | The solve ladder. Dry by default; every write is a typed flag                                                                          |
-| `src/cli/solve-args.ts`       | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                   |
-| `src/cli/solve-run.ts`        | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                     |
-| `src/cli/solve-outcome.ts`    | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                         |
-| `src/cli/bot-once.ts`         | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                            |
-| `src/cli/bot-args.ts`         | The same ladder, with an issue key always required                                                                                     |
-| `src/cli/watch-once.ts`       | What the sendback watch would do; `--write` does it                                                                                    |
-| `src/cli/watch-args.ts`       | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                    |
-| `src/cli/attach-stage.ts`     | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session |
-| `src/cli/daemon-status.ts`    | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                |
-| `src/cli/daemon-processes.ts` | Picking the daemon out of `ps` output. Split off so a test can import it                                                               |
-| `src/cli/docs-check.ts`       | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                          |
-| `src/cli/section-refs.ts`     | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                    |
-| `src/cli/count-phrases.ts`    | Count-noun phrases in tracked markdown: declared fact, or listed history                                                               |
-| `src/cli/pinned-prose.ts`     | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                           |
-| `src/cli/length-budget.ts`    | Word bands for the mandatory-reading path, and the ratchet on raising one                                                              |
-| `src/cli/rule-citations.ts`   | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                |
-| `src/cli/scope-bounds.ts`     | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                         |
+| Path                             | Role                                                                                                                                   |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/poll-once.ts`           | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                            |
+| `src/cli/triage-once.ts`         | One triage against a named key, no discovery. `--write` to post it                                                                     |
+| `src/cli/solve-once.ts`          | The solve ladder. Dry by default; every write is a typed flag                                                                          |
+| `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                   |
+| `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                     |
+| `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                         |
+| `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                            |
+| `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                     |
+| `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                    |
+| `src/cli/watch-args.ts`          | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                    |
+| `src/cli/attach-stage.ts`        | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session |
+| `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                            |
+| `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                |
+| `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                               |
+| `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                          |
+| `src/cli/section-refs.ts`        | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                    |
+| `src/cli/count-phrases.ts`       | Count-noun phrases in tracked markdown: declared fact, or listed history                                                               |
+| `src/cli/pinned-prose.ts`        | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                           |
+| `src/cli/length-budget.ts`       | Word bands for the mandatory-reading path, and the ratchet on raising one                                                              |
+| `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                |
+| `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                         |
 
 **Output**
 
@@ -878,6 +879,9 @@ would quietly falsify it.
 "wiring.ts".** It does read settings and does call `createJiraClient`, so it is a seventh caller of
 that module — but it composes no deps object, runs no pass, and its whole output is a report. Six is
 still the number of entry points that could diverge from one another in production.
+`attach-stage-report.ts` is a library and not an entry point either, split off for the reason
+`watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
+check the report or the exit code would run the command instead.
 
 **It did exactly that, twice, and the second time nobody noticed for four modules.** The sentence
 here used to say `docs-check.ts` and `section-refs.ts` were "the seventh and eighth files in that
@@ -889,8 +893,8 @@ impossible to add one more row without reading the sentence. **A count of files 
 the shape of fact this document should not be stating**, and it no longer states one: the table is
 the list.
 
-Only `docs-check.ts` has a `pnpm` command; the other six are libraries it reads, kept here rather
-than beside the code they inspect so that the pair stays together. The two solve commands go further
+Of that group only `docs-check.ts` has a `pnpm` command; the other six are libraries it reads, kept
+here rather than beside the code they inspect so that the pair stays together. The two solve commands go further
 than sharing `wiring.ts`: their
 write rungs are literally the same functions, in `src/cli/solve-run.ts`, so a command file is now
 argument parsing plus a call into the one module that writes to Jira, a worktree or GitHub.

@@ -19,8 +19,8 @@
  * before it reaches a URL. Size is capped before the download on Jira's own
  * figure and again on what arrived, because `content-length` is absent from a
  * chunked response and a cap that trusted it is a cap any large file steps
- * around. Count is capped so a ticket cannot fill a context window by attaching
- * forty screenshots.
+ * around. Count is capped so a ticket cannot fill a context window — or spend
+ * forty round trips — by attaching forty screenshots.
  *
  * **The staged name is derived, never supplied.** A file is written as
  * `<attachment id>.<extension from the signature>`, so neither half of the path
@@ -44,7 +44,7 @@ import { join } from "node:path";
 import { assertAttachmentId, type JiraAttachment } from "../jira/client.ts";
 import { logger } from "../logger.ts";
 import { lockDown, removeReadOnlyTree } from "../read-only-tree.ts";
-import { shorten } from "../text.ts";
+import { oneLine, shorten } from "../text.ts";
 import { isStageableImage, sniffImage } from "./images.ts";
 
 /** The half of `JiraClient` this module needs. */
@@ -55,7 +55,15 @@ export interface AttachmentByteReader {
 export interface ImageStageOptions {
   /** Per-image ceiling, checked against Jira's figure and then against ours. */
   readonly maxImageBytes: number;
-  /** How many images may be staged for one ticket. */
+  /**
+   * How many images this will **fetch** for one ticket.
+   *
+   * Attempts rather than successes, and the difference is visible: a candidate
+   * that fails its signature check or its download has still spent one, so a
+   * later image can be left unfetched while fewer than this many were staged.
+   * Deliberate — capping successes would let a ticket of forty broken files buy
+   * forty round trips — and the reason the omission line says what it says.
+   */
   readonly maxImages: number;
 }
 
@@ -70,6 +78,16 @@ export const DEFAULT_IMAGE_STAGE_OPTIONS: ImageStageOptions = {
 
 /** How long a filename may be before it is cut, in the report and the prompt. */
 const MAX_FILENAME_CHARS = 120;
+
+/**
+ * A filename as it may appear in the block, which is a list of `- ` rows.
+ *
+ * `oneLine` before `shorten`, because the forgery a filename can commit here is
+ * a newline and a second `- ` row naming a file that was never staged.
+ */
+function displayName(filename: string): string {
+  return shorten(oneLine(filename), MAX_FILENAME_CHARS);
+}
 
 export interface StagedImage {
   readonly attachmentId: string;
@@ -116,9 +134,11 @@ export async function stageImages(
     if (!isStageableImage(attachment.mimeType)) {
       continue;
     }
-    const name = shorten(attachment.filename, MAX_FILENAME_CHARS);
+    const name = displayName(attachment.filename);
     if (candidates.length >= options.maxImages) {
-      omitted.push(`${name} — not staged; image limit reached.`);
+      omitted.push(
+        `${name} — not fetched; this run reads at most ${String(options.maxImages)} images.`,
+      );
       continue;
     }
     if (attachment.size > options.maxImageBytes) {
@@ -151,7 +171,7 @@ export async function stageImages(
 
   try {
     for (const attachment of candidates) {
-      const name = shorten(attachment.filename, MAX_FILENAME_CHARS);
+      const name = displayName(attachment.filename);
 
       let bytes: Buffer | null;
       try {

@@ -22,12 +22,19 @@ export interface ImageKind {
   readonly extension: string;
 }
 
-interface ImageSignature extends ImageKind {
+export interface ImageSignature extends ImageKind {
   readonly magic: readonly number[];
   readonly offset: number;
 }
 
-const SIGNATURES: readonly ImageSignature[] = [
+/**
+ * The whole answer to "which images can this service handle", in one place.
+ *
+ * Exported because both questions below are derived from it and a test that
+ * re-listed the formats would keep passing on the day a fifth is added — the
+ * literal-list defect this repository has named three times.
+ */
+export const IMAGE_SIGNATURES: readonly ImageSignature[] = [
   {
     mimeType: "image/png",
     extension: "png",
@@ -43,7 +50,7 @@ const SIGNATURES: readonly ImageSignature[] = [
 
 /** The declared types worth a round trip. */
 const STAGEABLE_MIME_TYPES: ReadonlySet<string> = new Set(
-  SIGNATURES.map((signature) => signature.mimeType),
+  IMAGE_SIGNATURES.map((signature) => signature.mimeType),
 );
 
 /**
@@ -58,13 +65,16 @@ export function isStageableImage(mimeType: string): boolean {
   return STAGEABLE_MIME_TYPES.has(bare);
 }
 
-/** What the bytes actually are, or `null` if they are not an image we stage. */
+/**
+ * What the bytes actually are, or `null` if they are not an image we stage.
+ *
+ * A truncated file needs no length test of its own: `subarray` clamps to what
+ * is there and `equals` is false for a different length, so the comparison
+ * below already answers it — deleting an explicit bounds check changed no test.
+ */
 export function sniffImage(bytes: Buffer): ImageKind | null {
-  for (const signature of SIGNATURES) {
+  for (const signature of IMAGE_SIGNATURES) {
     const end = signature.offset + signature.magic.length;
-    if (bytes.byteLength < end) {
-      continue;
-    }
     const candidate = bytes.subarray(signature.offset, end);
     if (candidate.equals(Buffer.from(signature.magic))) {
       return { mimeType: signature.mimeType, extension: signature.extension };

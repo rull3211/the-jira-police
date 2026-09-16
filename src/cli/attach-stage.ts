@@ -7,8 +7,8 @@
  * **The dry run of the image capability, and for now its only driver.** Nothing
  * in the triage or solve path constructs the stager: this command is step 2 of
  * the privilege ladder in `STARTING.md` — does everything, changes nothing,
- * writes its report for a person to judge — and the passes that will read these
- * files are steps 3 and 4, each behind its own branch.
+ * writes its report to a file to be judged — and the passes that will read
+ * these files are steps 3 and 4, each behind its own branch.
  *
  * It spends a Jira download and a little disk. It posts nothing, labels
  * nothing, and starts no model session, so the report is the whole output and
@@ -20,6 +20,7 @@
  * directory is removed on the way out, including when the report is bad.
  */
 
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,18 +33,21 @@ import {
 import { logger } from "../logger.ts";
 import { readSettings } from "../settings.ts";
 import { createJiraClient } from "../wiring.ts";
+import { EXIT, exitCodeFor, formatReport } from "./attach-stage-report.ts";
 
 function usage(): never {
   process.stderr.write(
     "usage: pnpm attach:stage <ISSUE-KEY> [--keep]\n" +
       "  Downloads the ticket's image attachments, stages them read-only under\n" +
-      "  tmpdir(), and prints the block a session would be given. --keep leaves\n" +
-      "  the directory behind so you can look at the files.\n",
+      "  tmpdir(), and writes the block a session would be given to\n" +
+      "  <OUTPUT_DIR>/<KEY>.attachments.md. --keep leaves the directory behind\n" +
+      "  so you can look at the files.\n" +
+      "  Exit: 0 staged or nothing to stage, 1 images that could not be staged.\n",
   );
-  process.exit(2);
+  process.exit(EXIT.usage);
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const keep = args.includes("--keep");
   const key = args.find((argument) => !argument.startsWith("--"));
@@ -79,34 +83,40 @@ async function main(): Promise<void> {
     process.stdout.write(`reason: ${result.reason}\n`);
   }
   process.stdout.write("\n--- the block a session would be given ---\n");
-  const block = describeStagedImages(result);
   // "Nothing" is not the same as "no pictures": an SVG is an image and is
   // inlined as text by `solve/ticket.ts`, so a ticket can show this line and
   // still put a picture in front of a session by the older route.
+  const block = describeStagedImages(result);
   process.stdout.write(block === "" ? "(nothing — no raster image to stage)\n" : `${block}\n`);
 
-  if (result.outcome !== "staged") {
-    // A ticket with no image is the common case and is not a failure of this
-    // command. Exit status stays 0 so a wrapper cannot read "nothing to stage"
-    // as "the stager is broken".
-    return;
+  const staged = result.outcome === "staged" ? result.directory : null;
+  if (staged !== null && !keep) {
+    await removeStagedImages(staged);
   }
+  const keptAt = staged !== null && keep ? staged : null;
 
-  if (keep) {
-    process.stdout.write(`\nkept: ${result.directory}\n`);
+  // Written after the removal so the report states what is actually on disk
+  // now, rather than what was there while it ran.
+  await mkdir(settings.OUTPUT_DIR, { recursive: true });
+  const reportPath = join(settings.OUTPUT_DIR, `${detail.key}.attachments.md`);
+  await writeFile(reportPath, formatReport(detail, result, new Date(), keptAt), "utf8");
+  process.stdout.write(`\nreport: ${reportPath}\n`);
+
+  if (keptAt !== null) {
+    process.stdout.write(`kept: ${keptAt}\n`);
     process.stdout.write("Remove it yourself — nothing sweeps this directory.\n");
-    return;
+  } else if (staged !== null) {
+    process.stdout.write(`removed: ${staged}\n`);
   }
 
-  await removeStagedImages(result.directory);
-  process.stdout.write(`\nremoved: ${result.directory}\n`);
+  return exitCodeFor(result);
 }
 
 try {
-  await main();
+  process.exitCode = await main();
 } catch (error) {
   logger.error("attach-stage.failed", {
     reason: error instanceof Error ? error.message : String(error),
   });
-  process.exitCode = 1;
+  process.exitCode = EXIT.failed;
 }

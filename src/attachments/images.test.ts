@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isStageableImage, sniffImage } from "./images.ts";
+import { IMAGE_SIGNATURES, isStageableImage, sniffImage, type ImageSignature } from "./images.ts";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x11]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -15,13 +15,33 @@ function riff(payload: string): Buffer {
   ]);
 }
 
-describe("isStageableImage", () => {
-  it("accepts the four raster types a pasted screenshot arrives as", () => {
-    for (const type of ["image/png", "image/jpeg", "image/gif", "image/webp"]) {
-      expect(isStageableImage(type)).toBe(true);
-    }
+/** A shortest file the signature would accept, built from the table itself. */
+function minimalFile(signature: ImageSignature): Buffer {
+  const file = Buffer.alloc(signature.offset + signature.magic.length);
+  Buffer.from(signature.magic).copy(file, signature.offset);
+  return file;
+}
+
+describe("the two questions, against the one table they come from", () => {
+  // Derived rather than listed. A fifth format added to `IMAGE_SIGNATURES` is
+  // covered here the day it is added; a literal list of four would keep passing
+  // and leave the new one untested — the defect this repository has named three
+  // times.
+  it.each(IMAGE_SIGNATURES)("$mimeType is both fetched and recognised", (signature) => {
+    expect(isStageableImage(signature.mimeType)).toBe(true);
+    expect(sniffImage(minimalFile(signature))).toEqual({
+      mimeType: signature.mimeType,
+      extension: signature.extension,
+    });
   });
 
+  it("gives every format a distinct extension, so one id cannot mean two files", () => {
+    const extensions = IMAGE_SIGNATURES.map((signature) => signature.extension);
+    expect(new Set(extensions).size).toBe(extensions.length);
+  });
+});
+
+describe("isStageableImage", () => {
   it("ignores the parameter Jira sometimes appends", () => {
     expect(isStageableImage("image/png; charset=binary")).toBe(true);
     expect(isStageableImage("IMAGE/PNG")).toBe(true);
@@ -39,7 +59,7 @@ describe("isStageableImage", () => {
 });
 
 describe("sniffImage", () => {
-  it("names each format from its leading bytes", () => {
+  it("names each format from the leading bytes of a real file", () => {
     expect(sniffImage(PNG)).toEqual({ mimeType: "image/png", extension: "png" });
     expect(sniffImage(JPEG)).toEqual({ mimeType: "image/jpeg", extension: "jpg" });
     expect(sniffImage(GIF)).toEqual({ mimeType: "image/gif", extension: "gif" });
