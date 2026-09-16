@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2555 tests in 72
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2585 tests in 74
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -157,7 +157,7 @@ relative to a base anyone proved green. On the solve path a red build before the
 that the base is merged in every round, a base that is broken upstream lands in the branch and the
 round takes the blame for it. Recorded, not fixed.
 
-### 4. Attachment bytes, and the decision that is the operator's rather than mine
+### 4. Attachment images, decided and staged, and the three passes still not wired to them
 
 The watch check is handed attachments as **names, types and sizes only**: no bytes are fetched, and
 the copy in `signals.ts` is field by field so the day that changes it is a visible edit rather than
@@ -166,7 +166,7 @@ generous, because an answer is usually appended to an already-long description �
 truncation notice **outside** the fence, beside the omitted-comments notice and for the same reason.
 All three bounds exist because this is attacker-controlled text going into a prompt.
 
-**The open question is whether fetching the bytes is authorised**, and it is not mine to answer.
+**Whether fetching the bytes is authorised was not mine to answer, and it has been answered.**
 The Jira REST credential is **no longer discovery-only**, and that matters for how this question is
 framed. It writes `agent:*` labels through `updateLabels` — REST, atomic `update.labels` add/remove,
 wired into the claim (`wiring.ts:545`), the retriage counter, `end.ts` and `retriage.ts` — because
@@ -176,7 +176,62 @@ read, and adding `summary,description,environment,attachment` to `fetchActivity`
 authorised individually. Attachment _content_ is a further widening and a new untrusted-bytes path.
 It is also the thing that would close the SSX-3822 class of failure, where a ticket names an asset
 the solver cannot fetch and the solver reconstructs a lookalike from the description's adjective
-(§9). Not to be widened without being asked.
+(§9).
+
+**The operator authorised images on 2026-09-16, for recon and for triage, and not for the passes
+that hold `Write`.** An attachment whose bytes are an image is written to a staged directory and
+named to the session by path, so the model reads it with the `Read` tool it already has. No new tool
+and no fetcher: a probe with exactly a recon pass's flags — `--allowedTools Read`,
+`SOLVE_DENIED_COMMON` denied, `dontAsk` — read a token out of a PNG whose source text had been
+deleted, from an absolute path outside its own working directory. The capability was already there;
+only the bytes were missing.
+
+**The machinery exists and nothing constructs it** — `attachments/stage.ts` and `attach:stage`,
+merged inert; `ARCHITECTURE.md` §13 has what they are and §14.11 what the widening cost. What is
+below is the wiring, which is the part that spends privilege.
+
+The value is on all three paths and the risk is not, which is why the two are split. Recon looks and
+reports; what it saw reaches the fix pass as the **brief** — text, schema-bounded, in the transcript
+and in front of the gate. Pixels go no further than the session that has to look at them, because a
+human can read a brief and nobody can read a PNG after the fact. Triage is the widest of the two and
+gets a prerequisite rather than a caveat: the analyst is not denied `WebFetch` or `WebSearch`
+(`triage/runner.ts:103`) and `--allowedTools` withholds nothing (§14.12 of `ARCHITECTURE.md`), so it
+is the one session where an instruction smuggled in a screenshot has somewhere to send what it
+finds. That denial lands before the pixels do.
+
+Not built, in the order it may be built, each its own branch and each merged before the next starts:
+
+1. **The analyst loses `WebFetch` and `WebSearch`.** Independent of the rest and worth having
+   regardless.
+2. **Recon reads staged images**, behind a setting that must be typed and defaults off — with the
+   bail wording for the case the capability exists to serve: the evidence is a picture, the picture
+   could not be staged, and the honest answer is to say so rather than to reconstruct it. **This is
+   the phase that owes a sweep**: nothing removes a staged directory today except the command that
+   made it, and an unattended caller that dies between `mkdtemp` and the removal leaks one per kill,
+   which is §22 with a second instance rather than a new problem.
+3. **Triage reads staged images**, after 1.
+
+**Two images out of eight on SSX-3917 were dropped by the count cap, and they were the two largest
+and newest.** Both were far inside the size cap; they lost only on Jira's ordering, and on that
+ticket they are plausibly the ones a reader would pick. Ordering the candidates by anything else is
+policy nothing has measured, so the cap stays at six and the omitted list names what it skipped —
+but phase 2 is where a pass starts acting on a partial view, and this is the number to revisit
+there.
+
+What would make it the wrong idea, in the order I expect to find out:
+
+- **A screenshot read confidently and wrongly.** This exists to close the favicon failure, and a
+  model that misreads a UI and proceeds reintroduces exactly that failure with a better alibi. The
+  first run that turns on a detail only the image carries is the one to check by hand.
+- **The base rate is small.** It was not measured before building — the operator's call, recorded
+  because the honest version of this entry says the payoff is argued from one incident and not
+  counted. If tickets that hang on an image are rare, this is machinery for a case that does not
+  arrive, and the cheap answer is in the `solve.ticket_attachments_omitted` logs.
+- **Provenance that cannot be checked.** A staged file is only auditable if the transcript ties it
+  to an attachment on the ticket. If that mapping is not legible to a person reading afterwards, the
+  widening has bought a channel nobody can review.
+- **Another leaked directory.** §22 already records a staged skill root that is never swept; a
+  second staging path with the same shape doubles a known defect rather than inheriting it.
 
 ### 5. The wiring that has no test, now with three callers waiting on it
 
@@ -352,7 +407,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **110 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **111 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 39 point at sections that have never existed** (below,
   "The citations that were never written down"). What is still unresolved is which _document_ a
