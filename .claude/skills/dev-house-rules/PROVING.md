@@ -100,10 +100,11 @@ clause away from a positive.
 
 **State which case your check does not cover, before you quote it as evidence.** A green check is a
 statement about the case it ran, and the gap between that and the claim made from it is the
-most-recorded cause in `INCIDENTS.md` — **seven** occurrences, not seven entries; count headings
+most-recorded cause in `INCIDENTS.md` — **eight** occurrences, not eight entries; count headings
 there and you get a different number. Read it with its own gap stated, because it is an instance of
-the rule: all seven happened on 2026-09-09, and the entries predating the convention were never
-re-read for this shape. The discipline is one sentence written next to the evidence: _this measures
+the rule: seven happened on 2026-09-09 and the entries predating the convention were never re-read
+for this shape, so the eighth — 2026-09-17, eight days clear of that sitting — is the first
+independent one the count has ever had. The discipline is one sentence written next to the evidence: _this measures
 X; it does not measure Y._ If you cannot write that sentence, you do not yet know what your check
 proved.
 
@@ -119,7 +120,11 @@ Three things make it hard to remember, and each is an instance:
   [→](INCIDENTS.md#the-dead-step-that-was-alive-from-a-merge-list-read-instead-of-a-count).
 - **Deciding the outcome in advance does not tell you which case you are in.** Pre-registering both
   branches of a probe stops you rationalising the result. It does nothing about a third cause you
-  never listed, and the probe that introduced this rule hit exactly that.
+  never listed, and the probe that introduced this rule hit exactly that. So did the one that made
+  it two: a prediction staking an image-reading capability on one exact string got a verdict quoting
+  a different line of the same picture, which by the plan's own wording scored as a failure while the
+  capability worked
+  [→](INCIDENTS.md#the-fail-first-prediction-that-named-the-wrong-string).
 
 **The direction cuts both ways, and the rarer direction is worse.** Six of the seven overstated a
 guard's coverage, which review can catch. The seventh _under_stated it — a working, testable guard

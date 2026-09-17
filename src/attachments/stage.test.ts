@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { JiraAttachment } from "../jira/client.ts";
 import {
+  DEFAULT_IMAGE_STAGE_OPTIONS,
   describeStagedImages,
   removeStagedImages,
   stageImages,
@@ -27,6 +28,25 @@ function attachment(overrides: Partial<JiraAttachment> = {}): JiraAttachment {
     ...overrides,
   };
 }
+
+/**
+ * SSX-3917 as the Jira API returned it on 2026-09-17, in that order.
+ *
+ * A captured ticket rather than a generated one, because the shape that matters
+ * is not the count: the last upload arrived half an hour after the other seven,
+ * which on a bug report is where the clarifying screenshot tends to land, and it
+ * is the one the cap discards.
+ */
+const SSX_3917: readonly JiraAttachment[] = [
+  attachment({ id: "744704", filename: "image-20260915-105134.png", size: 41_113 }),
+  attachment({ id: "744706", filename: "image-20260915-105209.png", size: 89_634 }),
+  attachment({ id: "744705", filename: "image-20260915-105452.png", size: 30_207 }),
+  attachment({ id: "744702", filename: "image-20260915-105538.png", size: 31_520 }),
+  attachment({ id: "744707", filename: "image-20260915-105656.png", size: 11_072 }),
+  attachment({ id: "744701", filename: "image-20260915-105712.png", size: 29_284 }),
+  attachment({ id: "744703", filename: "image-20260915-105827.png", size: 201_479 }),
+  attachment({ id: "744723", filename: "image-20260915-113334.png", size: 384_134 }),
+];
 
 function reader(
   implementation: (id: string, maxBytes: number) => Promise<Buffer | null> = async () => PNG,
@@ -129,6 +149,36 @@ describe("stageImages", () => {
     expect(result.images).toHaveLength(2);
     expect(result.omitted).toHaveLength(6);
     expect(result.omitted[0]).toContain("this run reads at most 2 images");
+  });
+
+  it("keeps the oldest attachments of a real over-cap ticket, and drops the rest unfetched", async () => {
+    const read = reader();
+    const { maxImages, maxImageBytes } = DEFAULT_IMAGE_STAGE_OPTIONS;
+    const kept = SSX_3917.slice(0, maxImages);
+    const dropped = SSX_3917.slice(maxImages);
+
+    // The scenario, asserted rather than described: every file is comfortably
+    // under the byte cap, and the ones position discards are the two *largest*
+    // on the ticket. Without this, editing a size above could turn the test
+    // into a byte-cap test still named for the count cap.
+    expect(dropped.length).toBeGreaterThan(0);
+    expect(Math.max(...SSX_3917.map((image) => image.size))).toBeLessThan(maxImageBytes);
+    expect(Math.min(...dropped.map((image) => image.size))).toBeGreaterThan(
+      Math.max(...kept.map((image) => image.size)),
+    );
+
+    const result = staged(await stageImages(read, SSX_3917, parent, "SSX-3917"));
+
+    expect(result.images.map((image) => image.filename)).toEqual(
+      kept.map((image) => image.filename),
+    );
+    expect(result.omitted).toEqual(
+      dropped.map(
+        (image) =>
+          `${image.filename} — not fetched; this run reads at most ${String(maxImages)} images.`,
+      ),
+    );
+    expect(read.fetchAttachmentBytes).toHaveBeenCalledTimes(maxImages);
   });
 
   it("spends a slot on a candidate that fails, and says so rather than claiming a full set", async () => {

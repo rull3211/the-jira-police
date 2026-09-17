@@ -91,7 +91,11 @@ export const ALLOWED_TOOLS: readonly string[] = [
  * "deliberately no write path here any more". Until 2026-09-04 both sentences
  * rested on `--allowedTools`, which enforces nothing; they now rest on this.
  *
- * The four built-ins are verified withheld. The Atlassian mutators are listed
+ * The four built-ins named by that probe are verified withheld. `WebFetch`,
+ * `WebSearch` and `Task` rest on the same mechanism and were not in it — a
+ * built-in named to `--disallowedTools` is removed from the model's list, and
+ * nothing distinguishes these three from the four that were measured, but the
+ * measurement is the four. The Atlassian mutators are listed
  * on the same principle but are NOT verified: a bare `storecode -p` run has no
  * MCP server connected, so the probe that would distinguish "denied" from
  * "absent" returned `edit=NO get=NO` and proved nothing either way. Listing
@@ -102,6 +106,17 @@ export const ALLOWED_TOOLS: readonly string[] = [
  */
 export const ANALYST_DENIED_TOOLS: readonly string[] = [
   ...DENIED_BUILTIN_TOOLS,
+  // This is the session staged images reach, and a picture is untrusted text
+  // that `sanitiseUntrusted` cannot see. With no network tool there is no
+  // in-session route from an instruction painted into a screenshot to a request
+  // leaving this machine.
+  "WebFetch",
+  "WebSearch",
+  // The two above are worth nothing while a subagent can be spawned with a tool
+  // surface that is not this list and is not verified to inherit from it. The
+  // triage skill already treats subagents as unusable headlessly, so the run
+  // loses nothing it was using.
+  "Task",
   "mcp__atlassian__editJiraIssue",
   "mcp__atlassian__addCommentToJiraIssue",
   "mcp__atlassian__createJiraIssue",
@@ -157,6 +172,22 @@ export interface TriageRunOptions {
   readonly requiredMcpServers: readonly string[];
   /** Tools the run may use. Defaults to ALLOWED_TOOLS. */
   readonly allowedTools?: readonly string[];
+  /** The ticket's images, already on disk. Absent when `TRIAGE_IMAGES` is off. */
+  readonly images?: StagedImagePrompt;
+}
+
+/**
+ * Staged images as the two things a run needs to know about them.
+ *
+ * A block and a directory rather than the `ImageStageResult` itself, so this
+ * module never learns how staging works: it appends text and widens a
+ * workspace. `directory` is null whenever nothing was written, which includes
+ * the refusal — a `--add-dir` naming a path that does not exist is a startup
+ * failure on a run that should have degraded to reading the text.
+ */
+export interface StagedImagePrompt {
+  readonly block: string;
+  readonly directory: string | null;
 }
 
 export type LinkType = "duplicates" | "relates to";
@@ -396,6 +427,10 @@ export function childEnv(
  * §11 mutation payload, which the schema now collects, but it never offers to
  * write. The analyst therefore produces everything needed to post without being
  * able to post any of it.
+ *
+ * Any staged-image block follows the command on its own lines. It goes in the
+ * prompt rather than an attachment argument because the skill takes a slash
+ * command and this service has no other channel into the session.
  */
 export function buildPrompt(options: TriageRunOptions): string {
   const flags = [
@@ -405,7 +440,9 @@ export function buildPrompt(options: TriageRunOptions): string {
   ]
     .filter(Boolean)
     .join(" ");
-  return `/${options.skillName} ${options.issueKey} ${flags}`;
+  const command = `/${options.skillName} ${options.issueKey} ${flags}`;
+  const block = options.images?.block ?? "";
+  return block === "" ? command : `${command}\n\n${block}`;
 }
 
 /**
@@ -423,6 +460,7 @@ export function toolsFor(options: TriageRunOptions): readonly string[] {
 
 export function buildArgs(options: TriageRunOptions): string[] {
   const vaultPath = options.vaultPath ?? "";
+  const imageDir = options.images?.directory ?? null;
   return [
     "-p",
     buildPrompt(options),
@@ -438,6 +476,11 @@ export function buildArgs(options: TriageRunOptions): string[] {
     "--disallowedTools",
     ANALYST_DENIED_TOOLS.join(","),
     ...(vaultPath === "" ? [] : ["--add-dir", vaultPath]),
+    // Declared intent, not a grant: a probe with these flags read an absolute
+    // path outside the working directory, so the session could open a staged
+    // file whether or not it is named here. Naming it keeps the transcript
+    // honest about which directories a run was meant to touch.
+    ...(imageDir === null ? [] : ["--add-dir", imageDir]),
     "--json-schema",
     TRIAGE_SCHEMA_JSON,
   ];

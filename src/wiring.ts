@@ -57,6 +57,13 @@ import {
   buildSolveQueueJql,
   jqlValue,
 } from "./jira/jql.ts";
+import {
+  DEFAULT_IMAGE_STAGE_OPTIONS,
+  type ImageStageResult,
+  describeStagedImages,
+  removeStagedImages,
+  stageImages,
+} from "./attachments/stage.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { logger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
@@ -276,16 +283,72 @@ export function shouldPost(settings: Settings): boolean {
   return !STAND_IN_SKILLS.has(settings.SKILL_NAME) && flag(settings, "WRITE_BACK");
 }
 
+/**
+ * The ticket's images on disk, or nothing, for the analyst to read.
+ *
+ * A staging failure degrades the run to text instead of failing it. The
+ * pictures enrich a verdict that was already possible without them, so a ticket
+ * that triaged yesterday must not start throwing because one attachment
+ * download timed out — and the analyst is told nothing in that case rather than
+ * being told there were no images, which would be a different claim.
+ */
+async function stageForTriage(
+  client: JiraClient,
+  issueKey: string,
+): Promise<ImageStageResult | null> {
+  try {
+    const detail = await client.fetchDetail(issueKey);
+    return await stageImages(
+      client,
+      detail.attachments,
+      join(tmpdir(), "jira-police-attach"),
+      issueKey,
+      DEFAULT_IMAGE_STAGE_OPTIONS,
+    );
+  } catch (error) {
+    logger.warn("triage.image_staging_failed", {
+      issueKey,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<TriagePayload> {
   // Built once, so a misconfiguration surfaces at startup rather than on the
   // first issue that happens to arrive.
   const template = buildTriageOptions(settings, "");
   const posting = shouldPost(settings);
+  // Null is the off switch, so the extra detail fetch cannot happen by accident:
+  // there is no client to make it with.
+  const imageClient = flag(settings, "TRIAGE_IMAGES") ? createJiraClient(settings) : null;
 
   return async (ticket: TicketRef) => {
     // The ticket carries summary, type and timestamps; only the key crosses
     // over. Everything else the skill needs, it reads over its own session.
-    const analysed = await runTriage({ ...template, issueKey: ticket.key });
+    const staged = imageClient === null ? null : await stageForTriage(imageClient, ticket.key);
+    let analysed: TriagePayload;
+    try {
+      analysed = await runTriage({
+        ...template,
+        issueKey: ticket.key,
+        ...(staged === null
+          ? {}
+          : {
+              images: {
+                block: describeStagedImages(staged),
+                directory: staged.outcome === "staged" ? staged.directory : null,
+              },
+            }),
+      });
+    } finally {
+      // The session is the only consumer, so the directory dies with it. In a
+      // `finally` because a thrown triage is retried by the poller, and a leak
+      // per attempt is a leak per ticket that never succeeds.
+      if (staged?.outcome === "staged") {
+        await removeStagedImages(staged.directory);
+      }
+    }
 
     // Spliced in before the gate runs, not after, so `assertPostable` checks the
     // exact text that reaches Jira rather than an earlier draft of it. Applied

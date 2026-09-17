@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2599 tests in 75 files, no build step, no
+Status: running end to end against production Jira. 2605 tests in 75 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -758,16 +758,28 @@ because the grouping is the architecture.
 | `src/jira/adf.ts`    | Atlassian Document Format rendered down to plain text. No I/O, so testable against real payloads |
 | `src/state/store.ts` | Cursor + seen keys, atomic write                                                                 |
 
-**Attachments — the image path, and nothing constructs it yet**
+**Attachments — the image path, and triage is what constructs it**
 
 | Path                        | Role                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `src/attachments/images.ts` | Which types may be staged, and what the leading bytes say the file actually is                          |
 | `src/attachments/stage.ts`  | Images written read-only under a derived name, and the block naming them. `staged` / `none` / `refused` |
 
-Both are unreachable from the daemon, `poll:once`, `triage:once`, `solve:once`, `bot:once` and
-`watch:once`: `attach:stage` is their only caller, and it is a dry run. §13 has the decision that
-authorised the bytes and the phases still owed; §14.11 has what the widening cost.
+`createGroom` (`wiring.ts:320`) stages before the analyst runs and removes the directory in a
+`finally` after it, whenever `TRIAGE_IMAGES` is on — so the daemon, `poll:once`, `triage:once`,
+`bot:once` and `watch:once` all reach this path through one construction site rather than five.
+It defaults off and the analyst is denied `WebFetch`, `WebSearch` and `Task` before any pixel
+arrives. **No solve pass constructs either module**, by the same decision: the fix pass gets recon's
+brief rather than the picture. `attach:stage` remains the dry run, and the only way to look at a
+staged file, since a pass sweeps its own directory. §13 has the decision that authorised the bytes
+and the recon phase still owed; §14.11 has what the widening cost.
+
+**The watch check is the attachment consumer that fetches nothing.** `watch/context.ts` copies
+names, types and sizes field by field — never bytes — capped at `MAX_CONTEXT_ATTACHMENTS` (20),
+with `MAX_FIELD_CHARS` (4000) on the text beside it and the truncation notice written **outside**
+the fence, next to the omitted-comments notice and for the same reason. The field-by-field copy is
+deliberate: it makes the day that widens a visible edit rather than a widening arriving by
+inheritance.
 
 **Triage — the grooming half**
 
@@ -1440,10 +1452,11 @@ being widened or dropped:
   the write-holding passes: a screenshot is what most tickets here actually contain, and what the
   fix pass needs out of one reaches it as recon's brief rather than as pixels.
 
-  **What is built is inert.** `attachments/stage.ts` writes a ticket's images read-only under a
-  derived name and `attach:stage` prints the block a pass would be given; nothing in the triage or
-  solve path constructs either. Owed, each on its own branch: `WebFetch` and `WebSearch` off the
-  triage analyst, then recon behind a typed setting defaulting off, then triage. **The bound that
+  **What is built reaches triage and nothing else.** `attachments/stage.ts` writes a ticket's
+  images read-only under a derived name, `attach:stage` prints the block a pass would be given, and
+  `createGroom` hands both to the analyst when `TRIAGE_IMAGES` is on — which took `WebFetch`,
+  `WebSearch` and `Task` off that session first. No solve pass constructs either; recon behind a
+  typed setting is still owed. **The bound that
   does not exist is a text control over a picture** — `sanitiseUntrusted` sees a path, and an
   instruction painted into a screenshot reaches the model unread by anything else.
 
@@ -1487,7 +1500,7 @@ being widened or dropped:
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 48 settings are read**, and there are no orphan files.
+  the same sweep: **all 49 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 
