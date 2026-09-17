@@ -159,6 +159,8 @@ round takes the blame for it. Recorded, not fixed.
 
 ### 4. Recon reads staged images
 
+**Branch:** feat/recon-reads-images
+
 Triage reads them already, behind `TRIAGE_IMAGES`; `ARCHITECTURE.md` §7 has what constructs the
 stager, §13 the operator's 2026-09-16 decision and the phases it covered, and §14.11 the bounds the
 widening bought and the one it did not. **Recon is the remainder of that authorisation, and nothing
@@ -170,20 +172,25 @@ capability exists to serve: the evidence is a picture, the picture could not be 
 honest answer is to say so rather than to reconstruct a lookalike from the description's adjective,
 which is the SSX-3822 failure (§9) this whole path exists to close.
 
-**This is the phase that owes a sweep.** Nothing removes a staged directory except the caller that
-made it, and an unattended caller dying between `mkdtemp` and the removal leaks one per kill — §22
-with a second instance rather than a new problem. Triage's `finally` is the only cleanup that exists
-and **it has never been observed against an empty staging root**, so it is not evidence a second
-caller can lean on.
+**This is the phase that builds the sweep §22 named and deferred.** Nothing removes a staged
+directory except the caller that made it, and an unattended caller dying between `mkdtemp` and the
+removal leaks one per kill. Recon reading images is a second caller shaped exactly like triage's, so
+the leak §22 recorded for `skill-root.ts` gets a second instance in `attachments/stage.ts` the moment
+this ships — and triage's own `finally` has never been observed against an empty staging root, so it
+is not evidence a second caller can lean on either. The sweep built here is age-based and walks both
+parent directories rather than one, closing §22 rather than leaving it narrowed to skill roots.
 
 No command drives a recon pass on its own today, and wiring a consumer no test exercises is how §10
 grew. Whatever builds this owes a driver before it owes the setting.
 
-**Two images out of eight on SSX-3917 were dropped by the count cap, and they were the two largest
-and newest.** Both were far inside the size cap; they lost only on Jira's ordering, and on that
-ticket they are plausibly the ones a reader would pick. Ordering by anything else is policy nothing
-has measured, so the cap stays at six and the omitted list names what it skipped — but recon is
-where a pass starts acting on a partial view, and this is the number to revisit here.
+**The count cap moves to 10 and becomes a setting rather than a constant.** Two images out of eight
+on SSX-3917 were dropped by the old cap of six, and they were the two largest and newest — both far
+inside the size cap, losing only on Jira's ordering, and on that ticket plausibly the ones a reader
+would pick. Ordering by anything else is still policy nothing has measured, so the fix is headroom
+rather than a smarter order: one `MAX_STAGED_IMAGES` setting, shared by triage and recon rather than
+a value each could drift from separately, defaulting to 10 and editable by an operator who measures
+differently. Recon is where a pass starts acting on a partial view, which is why the number moves
+here rather than waiting on triage to need it.
 
 What would make it the wrong idea, in the order I expect to find out:
 
