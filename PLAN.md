@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2599 tests in 75
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2600 tests in 75
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -338,6 +338,16 @@ environment cannot answer a question about CI's.**
   after a compaction — so neither the field name it branches on nor the fact of registration is
   confirmed from a session's own vantage point (`ARCHITECTURE.md` §16). It accepts both `trigger`
   and `source` for that reason.
+- **No model has read a staged image.** The stager itself is observed on three real tickets:
+  SSX-3822 took the SVG-only path and staged nothing, SSX-3917 met the caps on eight PNGs and
+  staged six, and SSX-3918 staged its single image and rendered the omission list empty. All three
+  opened and showed what their reporters meant — SSX-3918's holds a field name that appears nowhere
+  in its text. What none of them reaches is the thing the staging is for — nothing constructs the stager inside a pass
+  (§4), so no session has been handed a picture by this route and the block `describeStagedImages`
+  writes has never been in front of a model. `refused` and the byte cap have no real ticket behind
+  them either. **A run leaves its only durable record in `groomed/`, which is gitignored**, so the
+  next session cannot see that any of this happened and will assume none of it did — which is how
+  this entry first got written claiming a first run that was actually the third.
 
 ### 11. Loose ends recorded in no other file
 
