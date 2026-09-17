@@ -80,7 +80,7 @@ parent. Nothing in the tree carries it, which is the cost of deferring by deleti
 written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
 inside the branch that built it, and §32 was the untagged thread reply that let the service argue
 with itself on PR #548 — same shape, opened and deleted inside its own branch. The triage-selection
-entries are now all closed, so the next entry is §35.
+entries are now all closed, so the next entry is §36.
 
 <!-- refs:on -->
 
@@ -773,6 +773,45 @@ improvement if the reviewer can tell the difference; a pull request that omits p
 while reading as finished is worse than none — the same reasoning that has plan entries deleted
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
+
+### 35. House rules, `CLAUDE.md`, and `FINISHING.md` catch up to the comment standard the trim shipped
+
+**Branch:** docs/comment-standard, stacked on `refactor/trim-src-comments` (open its PR first).
+
+**What is being attempted.** Three documents now describe a codebase that no longer exists, because
+the comment-trim entry's sweep changed the tree and, by the rule that deletes a plan entry the
+moment it ships, changed nothing else:
+
+1. **`STARTING.md`** still says "module headers carry the argument — the reasoning, the rejected
+   alternatives, the measurement that settled it." That sentence is what the sweep spent nearly
+   every file under `src/` disagreeing with. Rewrite it to state the standard actually in force: a
+   comment holds a constraint or a non-obvious warning, at most one or two lines; the argument, the
+   alternatives, and the measurement go in the commit message, in `PLAN.md` while the work is still
+   open, or in `ARCHITECTURE.md`/`INCIDENTS.md` once it has settled — never in the header itself.
+2. **`CLAUDE.md`** gets its own commenting-standard section stating that rule directly, so the next
+   session reads it before writing a comment instead of inferring it by noticing the tree disagrees
+   with `STARTING.md`.
+3. **`FINISHING.md`'s checklist** gains a step that looks at the diff's comment lines before a commit
+   closes, not just whether `docs:check` is green — whether this commit is re-adding the prose the
+   sweep removed.
+
+**Why now.** The gap this closes was found by running the sweep itself, not by inspection:
+`STARTING.md`'s own rule was falsified by the commit that shipped it, and the plan entry recording
+why is required to delete itself on the way out. Leaving the contradiction there is exactly the
+defect class rule 1 exists to catch, just aimed at the rule file instead of a source file.
+
+**What would make it the wrong idea, in the order I expect to find out:**
+
+- **The rewritten `STARTING.md` rule overcorrects** and reads as "no header may explain anything,"
+  which contradicts the exception the sweep's own pass carved out for a genuine non-obvious warning.
+  The new wording has to keep that exception legible, not just delete the old rule.
+- **A `FINISHING.md` checklist step with no command behind it decays exactly like the four questions
+  already do** — `pnpm docs:check` is a floor, not a comment-density check, so "look at the diff's
+  comment lines" needs either a real script (a ratio, or a grep for restored incident/PR-number
+  narration) or an honest admission that it is a prompt, not a gate, same as the four questions are.
+- **This branch stacks on an unmerged one.** `CLAUDE.md`'s own rule is not to stack deeply, and the
+  branch stack was already flagged at capacity before this entry was opened; if `refactor/trim-src-comments`
+  is slow to merge, this floor gates on it the way the rule warns against.
 
 ---
 
