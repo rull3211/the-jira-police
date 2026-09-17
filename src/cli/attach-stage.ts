@@ -4,11 +4,12 @@
  *   pnpm attach:stage SSX-3917
  *   pnpm attach:stage SSX-3917 --keep
  *
- * **The dry run of the image capability, and for now its only driver.** Nothing
- * in the triage or solve path constructs the stager: this command is step 2 of
- * the privilege ladder in `STARTING.md` — does everything, changes nothing,
- * writes its report to a file to be judged — and the passes that will read
- * these files are steps 3 and 4, each behind its own branch.
+ * **The dry run of the image capability, and no longer its only driver.**
+ * Triage constructs the stager behind `TRIAGE_IMAGES` (`wiring.ts:320`); the
+ * solve path still does not. This command remains step 2 of the privilege
+ * ladder in `STARTING.md` — does everything, changes nothing, writes its report
+ * to a file to be judged — and is the only way to see the staged files
+ * themselves, since a pass removes its directory on the way out.
  *
  * It spends a Jira download and a little disk. It posts nothing, labels
  * nothing, and starts no model session, so the report is the whole output and

@@ -1548,3 +1548,30 @@ would refuse.
 **One instance, and the amendment is a widening rather than a new rule** — which is the form that
 survives being wrong: if the precondition case never recurs, the sentence costs a line in a list that
 already makes the point next to it.
+
+## 2026-09-17
+
+### The fail-first prediction that named the wrong string
+
+`PLAN.md` §4 predicted that a triage run reading a staged image of SSX-3918 would produce a verdict
+containing `Nyt selskab` — the one field name in the image that also appears nowhere in the ticket's
+text — and staked the whole capability on that single string: "the run either produces that string or
+the feature does not work." The run, 2026-09-17, produced neither `Nyt selskab` nor a failure. It
+quoted a different field and a date instead (`Afg. årsag`, `15 09 26`), both just as absent from the
+ticket's own text and just as impossible without reading the image. The field the plan named is the
+third line of a three-line crop, cut off before its value ever appears; the model had it in view and
+judged it irrelevant to the question the ticket asks, so it never reached the quote a `grep` was
+written to look for.
+
+A prediction naming one exact string treats the model's output as deterministic when the capability
+under test — reading an image and choosing what from it is worth reporting — has real freedom in what
+it reports. The check was narrower than the claim it stood in for, and by the letter of the plan's own
+framing this run would have scored a failure while the capability it was built to test worked.
+
+**Found by** reading the source image by hand and comparing it, line by line, against the posted
+verdict — not by the `grep` the plan specified.
+
+**The rule** — [state which case your check does not
+cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code): a
+single-string match is a check on phrasing, not on whether the picture was read, and the gap between
+the two is exactly this file's recurring shape.
