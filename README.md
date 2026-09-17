@@ -473,6 +473,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                              | `groomed/<KEY>.md`          |
 | `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                               | `groomed/solve-cycle.md`    |
 | `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                           | Jira **and** GitHub         |
+| `pnpm recon:once <KEY>`                                | Recon alone against one real ticket: proceed or bail, no fix, no diff, no PR                              | a report + `tmpdir()`       |
 | `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                         | no                          |
 | `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                  | Jira                        |
 | `pnpm start`                                           | The daemon — grooming, plus solve and watch if their flags are on. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
@@ -491,6 +492,13 @@ judged from a real ticket before any pass is wired to it. It downloads, writes t
 read-only directory under `tmpdir()` and the report to `<OUTPUT_DIR>/<KEY>.attachments.md`, and posts
 nothing. Exit 1 means the ticket has images and none of them is staged, which is the case a pass has
 to bail on. [`ARCHITECTURE.md` §13](ARCHITECTURE.md) has the decision behind it.
+
+**`recon:once` is the only way to run recon outside the full solve pipeline.** It cuts a real
+worktree from `SOLVE_REPO_ROOT`, runs recon in it, and always discards the worktree afterwards,
+whether recon proceeds or bails — there is nothing in there to lose, since recon holds no `Write`
+and no `Edit`. `--claim`, `--pr` and every other write rung `solve:once` has are absent on purpose:
+this command's whole job is to be safe to run against a ticket nobody has decided is solvable yet.
+Its report lands at `<OUTPUT_DIR>/<KEY>.recon.md`.
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch. Three unrelated meanings of one word, and the

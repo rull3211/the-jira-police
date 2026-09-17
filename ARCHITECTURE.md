@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2609 tests in 75 files, no build step, no
+Status: running end to end against production Jira. 2626 tests in 77 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -729,7 +729,7 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-85 production modules, 75 test files. Grouped by what they belong to rather than alphabetically,
+87 production modules, 77 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -741,7 +741,7 @@ because the grouping is the architecture.
 | `src/poller.ts`         | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                               |
 | `src/review-loop.ts`    | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                              |
 | `src/watch-loop.ts`     | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                              |
-| `src/wiring.ts`         | **The composition.** Every `create*Deps` and every `build*Request`, for all six entry points                                                                 |
+| `src/wiring.ts`         | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                               |
 | `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                                                                       |
 | `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did                                                                |
 | `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                          |
@@ -856,6 +856,8 @@ inheritance.
 | `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                   |
 | `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                     |
 | `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                         |
+| `src/cli/recon-once.ts`          | Recon alone against one real ticket: a worktree, a skill root, one pass, always discarded. No fix, no diff, no PR                      |
+| `src/cli/recon-once-report.ts`   | Its report and exit code, split out for the reason `attach-stage-report.ts` gives                                                      |
 | `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                            |
 | `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                     |
 | `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                    |
@@ -878,19 +880,20 @@ inheritance.
 | -------------------- | ------------------------------------------------ |
 | `src/output/sink.ts` | `FileSink` (reports) and the rejection artifacts |
 
-`wiring.ts` exists because there are six entry points — the daemon, `poll:once`, `triage:once`,
-`solve:once`, `bot:once` and `watch:once` — and a difference in how they wire the same pipeline
+`wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
+`solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same
+pipeline
 would be a bug
 that only shows up in production. `docs-check.ts` and the six modules under it are deliberately not
 entry points: they compose nothing, read no settings, and touch neither Jira nor a repository. They
 live here because this is where a file you can run lives, and they are called out rather than left
-to be counted, since "six" above is a claim about the composition and a new CLI file is exactly what
-would quietly falsify it.
+to be counted, since "seven" above is a claim about the composition and a new CLI file is exactly
+what would quietly falsify it.
 
 **`attach:stage` is the third kind and the reason the sentence says "pipeline" rather than
-"wiring.ts".** It does read settings and does call `createJiraClient`, so it is a seventh caller of
-that module — but it composes no deps object, runs no pass, and its whole output is a report. Six is
-still the number of entry points that could diverge from one another in production.
+"wiring.ts".** It does read settings and does call `createJiraClient`, so it is an eighth caller of
+that module — but it composes no deps object, runs no pass, and its whole output is a report. Seven
+is still the number of entry points that could diverge from one another in production.
 `attach-stage-report.ts` is a library and not an entry point either, split off for the reason
 `watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
 check the report or the exit code would run the command instead.

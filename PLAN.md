@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2609 tests in 75
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2626 tests in 77
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -180,8 +180,10 @@ this ships — and triage's own `finally` has never been observed against an emp
 is not evidence a second caller can lean on either. The sweep built here is age-based and walks both
 parent directories rather than one, closing §22 rather than leaving it narrowed to skill roots.
 
-No command drives a recon pass on its own today, and wiring a consumer no test exercises is how §10
-grew. Whatever builds this owes a driver before it owes the setting.
+No command drove a recon pass on its own before this branch, and wiring a consumer no test
+exercises is how §10 grew. Whatever builds this owes a driver before it owes the setting: `recon:once`
+is that driver, built first on this branch; the `RECON_IMAGES` setting and the image read itself are
+the remainder of this section, still unbuilt.
 
 **The count cap moves to 10 and becomes a setting rather than a constant.** Two images out of eight
 on SSX-3917 were dropped by the old cap of six, and they were the two largest and newest — both far
@@ -403,7 +405,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **115 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **117 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 39 point at sections that have never existed** (below,
   "The citations that were never written down"). What is still unresolved is which _document_ a

@@ -15,6 +15,7 @@ import {
   type SolveRequest,
   resolveConflict,
   resolveReview,
+  runReconOnly,
   solveTicket,
   solveWithRetry,
 } from "./orchestrator.ts";
@@ -1875,5 +1876,90 @@ describe("solveWithRetry", () => {
 
     expect(result).toMatchObject({ attempts: 1, retryBlocked: "" });
     expect(result.outcome.kind).toBe("verified");
+  });
+});
+
+describe("runReconOnly", () => {
+  it("never starts the fix pass", async () => {
+    // The scripted fix pass throws if reached, same as `solveTicket`'s own
+    // "never starts the fix pass" test — this function has no fix pass to
+    // reach at all, and a script that only names recon proves it.
+    const { h } = harness({ recon: recon() });
+
+    const outcome = await runReconOnly(h.deps, request);
+
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
+    expect(outcome.kind).toBe("proceed");
+  });
+
+  it("discards the worktree on proceed, unlike the full pipeline", async () => {
+    // `solveTicket` keeps the worktree on `proceed` so `fix` can write to it.
+    // There is no `fix` here, so nothing needs the checkout kept.
+    const { h } = harness({ recon: recon() });
+
+    const outcome = await runReconOnly(h.deps, request);
+
+    expect(outcome.kind === "proceed" ? outcome.cleanup.outcome : null).toBe("removed");
+    expect(
+      h.calls.some(
+        (argv) => argv[0] === "git" && argv.includes("worktree") && argv.includes("remove"),
+      ),
+    ).toBe(true);
+  });
+
+  it("reports a bail and discards the worktree, same as the full pipeline", async () => {
+    const { h } = harness({
+      recon: recon({
+        proceed: false,
+        confidence: "low",
+        bailReason: "the component was deleted three commits ago",
+        bailBlockers: ["`Widget.tsx` was removed; nothing imports it."],
+        bailRemedy: "Confirm whether the behaviour moved.",
+        plannedFiles: [],
+        estimatedLines: 0,
+        approach: "",
+        testPlan: "",
+      }),
+    });
+
+    const outcome = await runReconOnly(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      reason: expect.stringContaining("deleted three commits ago"),
+    });
+    expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("removed");
+  });
+
+  it("keeps the worktree when recon crashes, so a human can see what it saw", async () => {
+    const { h } = harness({}, [], { recon: "pass timed out after 900000ms" });
+
+    const outcome = await runReconOnly(h.deps, request);
+
+    expect(outcome.kind).toBe("crashed");
+    expect(outcome.kind === "crashed" ? outcome.reason : "").toContain("timed out");
+    expect(outcome.kind === "crashed" ? outcome.worktree.path : "").toBe(worktree.path);
+    expect(
+      h.calls.some(
+        (argv) => argv[0] === "git" && argv.includes("worktree") && argv.includes("remove"),
+      ),
+    ).toBe(false);
+  });
+
+  it("never runs verification, because there is nothing to verify", async () => {
+    const { h } = harness({ recon: recon() });
+
+    await runReconOnly(h.deps, request);
+
+    expect(h.calls.some((argv) => argv[0] === "pnpm")).toBe(false);
+  });
+
+  it("refuses a protected branch prefix before any pass starts", async () => {
+    const { h } = harness({});
+
+    const outcome = await runReconOnly(h.deps, { ...request, branchPrefix: "main" });
+
+    expect(outcome.kind).toBe("no-worktree");
+    expect(h.seen).toEqual([]);
   });
 });

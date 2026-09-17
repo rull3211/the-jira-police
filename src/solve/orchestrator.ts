@@ -687,6 +687,111 @@ export async function solveWithRetry(
 }
 
 /**
+ * What recon alone produced, with no fix pass to hand a `proceed` to.
+ *
+ * Not a `SolveOutcome`: there, `proceed` means "run fix next", and every
+ * caller of that type assumes a pipeline continues. Here nothing does, so
+ * `proceed` needs its own shape rather than overloading a kind whose meaning
+ * elsewhere is "and then".
+ */
+export type ReconOnlyOutcome =
+  | { readonly kind: "no-worktree"; readonly reason: string }
+  /**
+   * Kept, not discarded — the same asymmetry `crashed` has in the full
+   * pipeline. A parse failure or a timeout is the one case worth a human
+   * looking at what recon actually saw.
+   */
+  | { readonly kind: "crashed"; readonly reason: string; readonly worktree: Worktree }
+  | {
+      readonly kind: "bailed";
+      readonly reason: string;
+      readonly recon: ReconVerdict;
+      readonly devLens: DevLensFeedback;
+      readonly cleanup: RemoveResult;
+    }
+  | {
+      readonly kind: "proceed";
+      readonly recon: ReconVerdict;
+      readonly devLens: DevLensFeedback;
+      readonly cleanup: RemoveResult;
+    };
+
+/**
+ * Runs recon alone: a worktree, a skill root, one pass, always discarded.
+ *
+ * Skips `verifyBase` on purpose. That check exists to give a later `verify`
+ * a green premise to fail against — see its own comment in `runPipeline` —
+ * and with no fix pass here there is no later `verify` for it to serve.
+ *
+ * Discards the worktree on `bailed` **and** on `proceed`, which the full
+ * pipeline does not do for the latter: there, `proceed` means fix runs next
+ * and needs the checkout. Here nothing does.
+ */
+export async function runReconOnly(
+  deps: SolveDependencies,
+  request: SolveRequest,
+): Promise<ReconOnlyOutcome> {
+  const { issueKey } = request;
+  const staged = await prepareSkillRoot(request.parentDirectory, issueKey);
+  if (staged.outcome === "refused") {
+    return { kind: "no-worktree", reason: staged.reason };
+  }
+  try {
+    const worktreeRequest: WorktreeRequest = {
+      issueKey,
+      summary: request.summary,
+      repoPath: request.repoPath,
+      parentDirectory: request.parentDirectory,
+      baseRef: request.baseRef,
+      ...(request.branchPrefix === undefined ? {} : { branchPrefix: request.branchPrefix }),
+      timeoutMs: request.gitTimeoutMs,
+    };
+    const created = await createWorktree(deps.commands, worktreeRequest);
+    if (created.outcome === "refused") {
+      return { kind: "no-worktree", reason: created.reason };
+    }
+    const { worktree } = created;
+
+    const base: SolveRunOptions = {
+      issueKey,
+      worktreePath: worktree.path,
+      ticket: request.ticket,
+      skillRootPath: staged.path,
+      ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
+      ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
+    };
+    const reconRun = await runPass(deps.passes, "recon", base, (output) =>
+      parseRecon(output, issueKey),
+    );
+    if (!reconRun.ok) {
+      logger.info("solve.crashed", {
+        issueKey,
+        pass: "recon",
+        reason: reconRun.reason,
+        worktreePath: worktree.path,
+      });
+      return { kind: "crashed", reason: reconRun.reason, worktree };
+    }
+
+    const recon = reconRun.value;
+    const devLens = lensOf(recon);
+    logger.info("solve.recon", {
+      issueKey,
+      proceed: recon.proceed,
+      confidence: recon.confidence,
+      devLensAccurate: recon.devLensAccurate,
+    });
+
+    const cleanup = await removeWorktree(deps.commands, worktree, "discard", request.gitTimeoutMs);
+    return recon.proceed
+      ? { kind: "proceed", recon, devLens, cleanup }
+      : { kind: "bailed", reason: recon.bailReason, recon, devLens, cleanup };
+  } finally {
+    await removeSkillRoot(staged.path);
+  }
+}
+
+/**
  * The only place a {@link VerifyRequest} is built.
  *
  * The base check and the post-fix check have to be the same experiment with the
@@ -785,13 +890,16 @@ async function runPipeline(
       leftFiles: false,
       worktreePath: worktree.path,
     });
-    // The one place a worktree is removed, and the one place it is provably
-    // safe to. Recon holds no `Write` and no `Edit`, so there is nothing in
-    // there to lose; and a bail is the *expected* outcome for a ticket triage
-    // called wrong, so leaking a full checkout per bail is the leak that grows
+    // The only place in this pipeline a worktree is discarded on a normal
+    // outcome rather than a retry, and the one place it is provably safe to.
+    // Recon holds no `Write` and no `Edit`, so there is nothing in there to
+    // lose; and a bail is the *expected* outcome for a ticket triage called
+    // wrong, so leaking a full checkout per bail is the leak that grows
     // fastest. `removeWorktree` does not force, so if this reasoning is ever
     // wrong — a future recon that can write — git refuses and says so, and the
     // reason travels out on the outcome rather than into a log nobody reads.
+    // `runReconOnly` repeats this reasoning for its own worktree, separately —
+    // there is no pipeline for it to be "in".
     const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
     return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree, cleanup };
   }
