@@ -351,10 +351,11 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 
 ## 11. Test doubles and the testing rule
 
-`.claude/skills/` holds five directories and only four are the service's. `intake-triage` (§12) and
-`agent-solve` (§24) are the real ones; the two below are their stand-ins. **`dev-house-rules` is not
-a runtime skill at all** — it is the development discipline for this repository, read by whoever is
-editing it and by nothing the service runs. That is structural rather than a convention:
+`.claude/skills/` holds seven directories and only four are the service's. `intake-triage` (§12) and
+`agent-solve` (§24) are the real ones; the two below are their stand-ins. **`dev-house-rules`,
+`claude-validation-work` and `scaffolding-audit` are not runtime skills at all** — they are
+development and audit discipline for this repository, read by whoever is working on it and by
+nothing the service runs. That is structural rather than a convention:
 `prepareSkillRoot` stages `agent-solve` alone into a root that "must contain nothing else", so a
 directory added here cannot reach a pass.
 
@@ -382,6 +383,7 @@ absence of a call.
 
 A second rule, learned from a green suite that shipped the DST bug: **fixtures that agree with
 each other can still disagree with reality.** Every timestamp fixture used `Z`; real Jira does
-not. At least one fixture in `poller.test.ts` is now copied verbatim out of a real API response,
-with a note saying where it came from.
-
+not. `poller.test.ts`'s DST fixtures use the site's real local-offset format (`+0200`/`+0100`)
+instead — the note recording that the format was checked against a live response was cut in the
+September 2026 comment-length pass, so that provenance now lives in git history rather than the
+test.

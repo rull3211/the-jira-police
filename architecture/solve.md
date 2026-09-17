@@ -241,12 +241,14 @@ properties:
 1. **No shell.** `spawn` is called without the shell option, so argv is argv and nothing between
    here and the kernel splits on whitespace, expands a glob or notices a `;`. Every caller builds
    argv arrays for this reason, and this is the end of that chain.
-2. **An executable allowlist.** `argv[0]` must be `git`, `gh`, `pnpm`, `npm` or `yarn`. Not a
-   defence against the callers in this repository — they are all literal — but against the shape
-   of the system: attacker-controlled text goes through a model and the result eventually
-   influences arguments, so bounding _which binary runs_ makes the worst case a malformed `git`
-   command rather than an arbitrary one. The list holds no general-purpose interpreter, because
-   each one is a way to run something else, which is what an allowlist of programs is for.
+2. **An executable allowlist.** `argv[0]` must be `git`, `gh`, `pnpm`, `npm` or `yarn` —
+   `corepack` and `mvn` join this list later, for reasons of their own; see _An undeclared package
+   manager_ and _Two toolchains_ below. Not a defence against the callers in this repository — they
+   are all literal — but against the shape of the system: attacker-controlled text goes through a
+   model and the result eventually influences arguments, so bounding _which binary runs_ makes the
+   worst case a malformed `git` command rather than an arbitrary one. The list holds no
+   general-purpose interpreter, because each one is a way to run something else, which is what an
+   allowlist of programs is for.
 3. **A timeout that kills.** `SIGTERM`, then `SIGKILL` after a grace period. A promise that
    rejects while the child keeps running is worse than no timeout, because the caller believes the
    step is over and the process is still holding the worktree.
@@ -390,9 +392,10 @@ reason, and cannot claim a directory is waiting when it is not. And the field is
 the outcome type, so the compiler made every construction site state what happened to the worktree
 instead of letting the question go unasked.
 
-Still not cleaned up: the branch. `git worktree remove` leaves it behind, so a bailed run still
-costs one empty ref on the pilot repository. Deleting it is a separate privilege and is not taken
-here.
+The branch is cleaned up too, now: once the worktree is removed, `deleteBranch` runs `git branch
+-d` on it — not `-D`, so a branch git considers unmerged is kept rather than discarded, and the
+outcome (`deleted` or `kept`, with git's reason) rides out on `RemoveResult.branch` the same way
+the worktree's own outcome does.
 
 ### The diff gate
 
@@ -420,10 +423,11 @@ Two refusal families, and a third that was deleted:
   refused rather than normalised, because a normalised path is a different string from the one git
   will act on.
 - **Verification integrity** — the subtle one, and §14.13. `package.json`, `tsconfig*.json`, the
-  lint config and the vitest config are refused **unconditionally, at any size**, because they
-  define what passing means. A one-line edit there is the dangerous size, not the safe one. It is
-  a separate list from the forbidden paths only so the refusal can say why in the terms that
-  matter: not "you touched a config file" but "you edited the scoreboard you are being scored on".
+  lint config, the vitest config, `pom.xml` and the Maven wrapper are refused **unconditionally,
+  at any size**, because they define what passing means. A one-line edit there is the dangerous
+  size, not the safe one. It is a separate list from the forbidden paths only so the refusal can
+  say why in the terms that matter: not "you touched a config file" but "you edited the scoreboard
+  you are being scored on".
 - **~~Size~~** — five files, two hundred lines, hardcoded, with no setting. **Deleted
   2026-09-06.** Both families above are sound in both directions: a path that escaped the worktree
   escaped it, and a run that edited `vitest.config.ts` has invalidated its own verification, no
@@ -954,4 +958,3 @@ against a named ticket, and granted in a commit a reviewer can see.** The one it
 clear that bar before the loop was switched on is cost per ticket per day, which §13 now carries as
 the file's largest open item — and the reason it is worth naming there rather than here is that it
 is the only gate the plan set for the daemon that the daemon did not wait for.
-

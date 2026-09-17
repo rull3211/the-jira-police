@@ -102,7 +102,7 @@ label `agent:solvable` goes on the board and a future solver acts on it.
   A wrong `true` costs an unasked-for pull request.
 
 **The `plausible` rules guard a different cost, which is why they are their own function**
-(`checkPlausible`, `gate.ts:425`) rather than four more lines in `checkAgentFitness`. Every
+(`checkPlausible`, `gate.ts:277`) rather than four more lines in `checkAgentFitness`. Every
 `solvable` rule protects against a bot editing source. These protect against a ticket joining a
 list that buys a paid triage run every time somebody touches it — F's watch, §4. Two risks, so
 two paragraphs, and both worth refusing a post over.
@@ -275,7 +275,7 @@ second instance with no lock file. The claim is a label transition on the ticket
 **`labels NOT IN (...)` also excludes issues whose label field is empty**, which is why the
 positive `labels = "agent:solvable"` clause is load-bearing rather than decorative. Measured on
 this board 2026-09-03 rather than taken on trust: 57 unlabelled issues, **0** of which survive the
-clause; 46 `triaged` issues, all 46 surviving it. Numbers are in the `jql.ts` doc comment.
+clause; 46 `triaged` issues, all 46 surviving it.
 
 **The concurrency bound needs its own query.** The queue excludes `agent:solving` by design, so
 the tickets counting against `MAX_CONCURRENT_SOLVES` are precisely the ones the queue cannot see;
@@ -572,7 +572,7 @@ is the only one that changes what the skill reads:
    3. **The recon pass matters more than the plan gave it credit for.** It was justified as the
       check on triage having no source access. It is also the check on triage having been unlucky,
       and it is the only one, because nothing between the label and the worktree re-examines the
-      call. `devLensCorrection` (`src/solve/feedback.ts`) is the channel that carries the
+      call. `devLensCorrection` (`src/solve/runner.ts`) is the channel that carries the
       disagreement back, and the append-only `dev-lens.md` is where a flip rate becomes visible.
 
    What this does **not** show is a bug. Nothing malfunctioned, no guard failed, and the ticket
@@ -592,4 +592,3 @@ being widened or dropped:
 - The six `REVISABLE_LABEL_NAMESPACES` are owned but not freely removable, so removal is conditional
   on a same-namespace add. If a future namespace holds a fact rather than an assessment, copy that
   shape instead — the test is whether "absent" is a state the ticket may legitimately be in.
-

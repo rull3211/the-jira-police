@@ -71,8 +71,8 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
   **Two of those four are worth more than the line count.** `isEligible` looked like the recurring
   defect this file names — a guard with 21 assertions and zero production callers — and it was
-  **not**: it was a boolean wrapper over `eligibility`, which _is_ called, at `poller.ts:304` and
-  `claim.ts:406`, with the same rule mirrored in the JQL at `jql.ts:388`. So the rule is enforced
+  **not**: it was a boolean wrapper over `eligibility`, which _is_ called, at `poller.ts:186` and
+  `claim.ts:236`, with the same rule mirrored in the JQL at `jql.ts:258`. So the rule is enforced
   three ways and only the wrapper was unreachable; the 21 assertions were exercising `eligibility`
   through it and were redirected onto it rather than deleted. Recorded because the first reading of
   the sweep had this backwards, and "a tested guard nothing calls" and "a tested guard called
@@ -85,9 +85,9 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
   presented as a behavioural conclusion about the system, and this document already contradicted it
   in two places (§7's failure table, which records the check firing for real on 2026-09-03, and
   `README.md`'s smoke-test description). The precondition is enforced: `assertMcpReady`
-  (`triage/session.ts:205`) throws `McpUnavailableError` on the init event for any required server
-  not reporting `connected`, and `["atlassian"]` reaches it from `wiring.ts:165`, `poster.ts:321`
-  and `commenter.ts:329`.
+  (`triage/session.ts:140`) throws `McpUnavailableError` on the init event for any required server
+  not reporting `connected`, and `["atlassian"]` reaches it from `wiring.ts:145`, `poster.ts:244`
+  and `commenter.ts:181`.
 
   So what died was a **module-level constant superseded by a per-call option**, which is a
   strictly better shape and the reason it went unreferenced: a fixed `REQUIRED_MCP_SERVERS` cannot
@@ -303,4 +303,3 @@ before it, so the command line reads as the privilege escalation it is.
   `TRIAGE_TIMEOUT_MS` was raised to 1 200 000 all the same. The asymmetry decides it rather than
   the diagnosis: a cap that fires early costs a fully-billed session and produces no artifact,
   while a cap set too high costs only that a genuinely wedged run is reaped later. See §10.
-

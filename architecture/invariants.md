@@ -39,17 +39,19 @@ Things that look like details and are not:
    belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
    attacker-controlled ticket text, so this is a boundary rather than a convention.
 10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
-    value is missing _or blank_ (`settings.ts:209`) — the two are indistinguishable to it. So a
+    value is missing _or blank_ (`settings.ts:333`) — the two are indistinguishable to it. So a
     default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
     an operator emptying the allowlist to take the solver off a repository would have it handed
-    straight back, revocable only by editing source. It is the one solve setting with no
-    fallback, and unset means nothing is allowed. The same reasoning applies to anything future
-    that names what may be written to — **`SOLVE_GITHUB_OWNER` is that future**, and carries a
-    second reason of its own: an owner inferred from the checkout's remote is correct right up
-    until somebody adds a fork as `origin`, at which point a bot opens a pull request against a
-    repository nobody chose. Note this cuts the opposite way from
-    `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_ the restriction — the test to apply is not
-    "does it have a default" but "does silence widen or narrow what the service may touch."
+    straight back, revocable only by editing source. It is one of several solve settings with no
+    fallback — `SOLVE_REPO_ROOT` and `SOLVE_READ_DIRS` share the shape for a related but distinct
+    reason, guarding a guessed path rather than a guessed privilege — and for `SOLVE_REPOS` unset
+    means nothing is allowed. The same reasoning applies to anything that names what may be
+    written to — **`SOLVE_GITHUB_OWNER` is the other one**, and carries a second reason of its
+    own: an owner inferred from the checkout's remote is correct right up until somebody adds a
+    fork as `origin`, at which point a bot opens a pull request against a repository nobody
+    chose. Note this cuts the opposite way from `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
+    the restriction — the test to apply is not "does it have a default" but "does silence widen
+    or narrow what the service may touch."
 11. **A label write names the labels it changes, and nothing else.** Every label edit goes
     through `JiraClient.updateLabels`, which sends Jira's `update.labels.add` / `.remove` and
     refuses any label failing `/^agent:[a-z][a-z0-9-]{0,60}$/`. So the write is physically
@@ -116,7 +118,7 @@ Things that look like details and are not:
     **The line named in the sentence that used to end this invariant has since been crossed, and
     it was not recorded here until 2026-09-08.** That sentence read: _"Nothing about attachment
     **bytes** is fetched — names, types and sizes only — and widening past that is a fresh
-    decision."_ `JiraClient.fetchAttachmentText` (`client.ts:699`) GETs
+    decision."_ `JiraClient.fetchAttachmentText` (`client.ts:488`) GETs
     `/rest/api/3/attachment/content/{id}` on the discovery credential and returns the file's
     contents, which `solve/ticket.ts:158` inlines into the prompt a solve pass is given. That is
     a **third endpoint** and it is **bytes**, so it is the fresh decision the sentence reserved —
@@ -203,8 +205,8 @@ Things that look like details and are not:
 
     **The guarantee is exactly as strong as the `finally`, which is weaker than the sentence
     above reads.** It holds for anything that throws. It does not hold for an exit that skips
-    the stack: `process.exit(130)` on a second `SIGINT`/`SIGTERM` (`src/index.ts:104`),
-    `process.exit(1)` on an uncaught exception (`:156`), a `SIGKILL`, or a laptop that slept. In
+    the stack: `process.exit(130)` on a second `SIGINT`/`SIGTERM` (`src/index.ts:53`),
+    `process.exit(1)` on an uncaught exception (`:84`), a `SIGKILL`, or a laptop that slept. In
     every one of those the claim survives the process, and **nothing reclaims it** — there is no
     TTL, no lease and no reaper in `src/`, so at `MAX_CONCURRENT_SOLVES=1` a single stranded
     `agent:solving` halts the solve half until a human clears the label, which is the manual
@@ -245,7 +247,7 @@ Things that look like details and are not:
     escaping it would mangle every `snake_case` identifier in the prose.
 
     It is a weaker guarantee than the fence and an enumerated one, so it is enumerated in tests —
-    fourteen cases in `pr-text.test.ts`, each mutation-tested. **If a construct is found that gets
+    twenty-one cases in `pr-text.test.ts`, each mutation-tested. **If a construct is found that gets
     through, the fix is another line in `escapeInline` or `escapeLeading` plus a test, not a
     retreat to the fence.** The old reasoning that escaping "would corrupt code samples" was
     overstated: an escaped backtick renders as a backtick.
@@ -301,4 +303,3 @@ Things that look like details and are not:
     import, so anything decided there cannot be asserted about without starting a service. That is
     not tidiness either — the ordering above is the whole of the safety property, and a safety
     property with no test is a comment.
-

@@ -46,7 +46,7 @@ because the grouping is the architecture.
 | `src/attachments/images.ts` | Which types may be staged, and what the leading bytes say the file actually is                          |
 | `src/attachments/stage.ts`  | Images written read-only under a derived name, and the block naming them. `staged` / `none` / `refused` |
 
-`createGroom` (`wiring.ts:320`) stages before the analyst runs and removes the directory in a
+`createGroom` (`wiring.ts:225`) stages before the analyst runs and removes the directory in a
 `finally` after it, whenever `TRIAGE_IMAGES` is on — so the daemon, `poll:once`, `triage:once`,
 `bot:once` and `watch:once` all reach this path through one construction site rather than five.
 It defaults off and the analyst is denied `WebFetch`, `WebSearch` and `Task` before any pixel
@@ -71,32 +71,32 @@ inheritance.
 | `src/triage/runner.ts`       | The analyst                                                                                                                                                                                  |
 | `src/triage/gate.ts`         | The check                                                                                                                                                                                    |
 | `src/triage/poster.ts`       | The writer                                                                                                                                                                                   |
-| `src/triage/single.ts`       | Triaging one named key, when discovery is the half being skipped. One copy for three callers                                                                                                 |
+| `src/triage/single.ts`       | Triaging one named key, when discovery is the half being skipped. One copy for four callers                                                                                                  |
 | `src/triage/fitness-note.ts` | Renders the fitness call into the comment from the field, so prose cannot disagree with it — and owns that region of the body, stripping any copy a re-run carried in before writing its own |
 | `src/triage/order.ts`        | What order triage spends in, and how far the cursor may advance — two questions the poll cycle used to answer with one loop variable. `settledCursor` is the guard that separates them       |
 
 **Solve — selection, claim and the model passes**
 
-| Path                        | Role                                                                                              |
-| --------------------------- | ------------------------------------------------------------------------------------------------- |
-| `src/solve/labels.ts`       | The `agent:` state machine as pure functions; `repoFromLabels`                                    |
-| `src/solve/poller.ts`       | One solve cycle: selection, capacity, and the planned claim                                       |
-| `src/solve/report.ts`       | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                |
-| `src/solve/claim.ts`        | The claim and its release. Read, re-check, write, read back                                       |
-| `src/solve/attempts.ts`     | How often the **daemon** has claimed each ticket, so it stops claiming one that keeps coming back |
-| `src/solve/branch.ts`       | What may be written to: a work-prefix allowlist and a protected-name denylist                     |
-| `src/solve/worktree.ts`     | The throwaway worktree, the branch name, and the `CommandRunner` interface                        |
-| `src/solve/ticket.ts`       | The ticket rendered as the text a pass is given — description, comments, attachments              |
-| `src/solve/read-scope.ts`   | Which other checkouts on this machine a pass may read for context                                 |
-| `src/solve/skill-root.ts`   | A throwaway read-only copy of the `agent-solve` skill, staged per pass                            |
-| `src/solve/schema.ts`       | The draft-07 contracts handed to `agent-solve`, one per pass                                      |
-| `src/solve/runner.ts`       | The pass command lines and their parsers. Where `Write` is granted — and everything withheld      |
-| `src/solve/passes.ts`       | The real `PassRunner`. Working directory is the worktree; no MCP server required                  |
-| `src/solve/exec.ts`         | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env           |
-| `src/solve/diff-gate.ts`    | The bound on what a solve run may have changed. Pure — no git, no fs                              |
-| `src/solve/escape.ts`       | Notices when a pass wrote somewhere it was never meant to reach                                   |
-| `src/solve/verify.ts`       | Mechanical verification. `passed` / `failed` / `refused`, never collapsed. Plus `checkFailFirst`  |
-| `src/solve/orchestrator.ts` | The sequence: worktree → recon → fix → simplify → review → gate → verify                          |
+| Path                        | Role                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/solve/labels.ts`       | The `agent:` state machine as pure functions; `repoFromLabels`                                                                             |
+| `src/solve/poller.ts`       | One solve cycle: selection, capacity, and the planned claim                                                                                |
+| `src/solve/report.ts`       | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                                                         |
+| `src/solve/claim.ts`        | The claim and its release. Read, re-check, write, read back                                                                                |
+| `src/solve/attempts.ts`     | How often the **daemon** has claimed each ticket, so it stops claiming one that keeps coming back                                          |
+| `src/solve/branch.ts`       | What may be written to: a work-prefix allowlist and a protected-name denylist                                                              |
+| `src/solve/worktree.ts`     | The throwaway worktree, the branch name, and the `CommandRunner` interface                                                                 |
+| `src/solve/ticket.ts`       | The ticket rendered as the text a pass is given — description, comments, attachments                                                       |
+| `src/solve/read-scope.ts`   | Which other checkouts on this machine a pass may read for context                                                                          |
+| `src/solve/skill-root.ts`   | A throwaway read-only copy of the `agent-solve` skill, staged per pass                                                                     |
+| `src/solve/schema.ts`       | The draft-07 contracts handed to `agent-solve`, one per pass                                                                               |
+| `src/solve/runner.ts`       | The pass command lines and their parsers. Where `Write` is granted — and everything withheld                                               |
+| `src/solve/passes.ts`       | The real `PassRunner`. Working directory is the worktree; no MCP server required                                                           |
+| `src/solve/exec.ts`         | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                                                    |
+| `src/solve/diff-gate.ts`    | The bound on what a solve run may have changed. Pure — no git, no fs                                                                       |
+| `src/solve/escape.ts`       | Notices when a pass wrote somewhere it was never meant to reach                                                                            |
+| `src/solve/verify.ts`       | Mechanical verification. `passed` / `failed` / `refused`, never collapsed. Plus `checkFailFirst`                                           |
+| `src/solve/orchestrator.ts` | The sequence: worktree → recon → fix → simplify → gate → verify. `resolveReview`'s round-trip lives here too, run later, once a PR is open |
 
 **Solve — delivery and the review round-trip**
 
@@ -204,4 +204,3 @@ hand-driven one cannot diverge, which is the only reason it was safe to give the
 rungs at all. The same argument produced `watch/sweep.ts`, extracted out of `watch:once` when the
 daemon needed it: the two callers differ in exactly the way that makes a divergence invisible, since
 one is run by a person reading the output and the other by nobody.
-
