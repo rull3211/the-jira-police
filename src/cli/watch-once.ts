@@ -5,50 +5,22 @@
  *   node src/cli/watch-once.ts SSX-1234        # one named ticket, whatever its labels
  *   node src/cli/watch-once.ts --write         # ... and act: drop, or re-triage
  *
- * **The flag was `--unsubscribe` until the hand-off landed**, because until then
- * only one of three outcomes had a writer and a `--write` doing nothing on the
- * outcome that matters most, while reporting a clean run, is the divergence this
- * project exists to catch spelled as a command-line flag. Both have writers now.
+ * Unsubscribe and re-triage arrived in that order deliberately: unsubscribing only reduces what
+ * the watcher can spend, so the engine could not be armed with spending power before the
+ * terminals that stop a runaway (`decideWatch`'s `exhausted` and `uncountable`) were reachable.
  *
- * The order those two arrived in was deliberate rather than incidental.
- * Unsubscribing is the action that *reduces* what the watcher can spend: it
- * takes tickets off the list. The re-triage is what puts money on it. Shipping
- * the brake first meant the engine could not be armed without one already in
- * place, and that the terminals in `decideWatch` — `exhausted` and
- * `uncountable`, both of which exist to stop a runaway — were reachable before
- * anything could run away.
+ * A re-triage here always posts — `WRITE_BACK` is forced, not left to `.env` — because a paid
+ * run that analyses and posts nothing leaves the ticket triggered on identical content and buys
+ * the same run again on the next sweep: §7b's infinite loop.
  *
- * **A re-triage here posts, and it is not left to `WRITE_BACK` to decide.** The
- * watch is self-limiting only because a re-triage moves the high-water mark it
- * measures from, and the mark is our own comment. A paid run that analysed and
- * posted nothing would leave the ticket triggered on identical content and buy
- * the same run again on the next sweep — §7b's infinite loop, restored by a
- * setting in `.env` rather than by any code here. So the flag decides
- * `WRITE_BACK` for the run, both ways, exactly as `triage:once` learned to.
+ * A named key skips the query and does not need to carry the label, so a ticket can be examined
+ * before it is subscribed; `unsubscribeEdit` refuses to write on a ticket without the label for
+ * the same reason.
  *
- * Without the flag it is still a calibration tool, which is what it was built
- * for and what it has already earned. Run against SSX-3830 on 2026-09-06 it
- * confirmed that this board spells the changed field `description`, so
- * `BLOCKER_CLEARING_FIELDS` needed no change — and that `labels`, which this
- * service writes constantly, is not in that set and must never be added to it,
- * since the allowlist is the changelog's entire self-trigger defence.
- *
- * A named key skips the query and is not required to carry the label, so a
- * ticket can be examined before it is subscribed. That is also why
- * `unsubscribeEdit` refuses to write on a ticket without the label rather than
- * sending a removal Jira would accept and ignore.
- *
- * **`WATCH_ENABLED` is deliberately not read here**, and that is the opposite
- * of how the master switch works for the daemon. The switch exists so nothing
- * is spent while nobody is watching, and it guards the loop rather than the
- * operator: this is the command someone uses to decide whether the switch is
- * safe to arm, and gating it would mean the only way to find out is to arm it
- * first. That argument was easy while the flag only unsubscribed; it survives
- * `--write` for a narrower reason, and the narrowness is worth stating. What
- * this command can spend is bounded by the tickets already carrying the label,
- * by `MAX_RETRIAGE_PER_TICKET` through a counter it writes before it spends,
- * and by a person typing the command once. `WATCH_ENABLED` bounds the thing
- * none of those bound: a loop that types it again.
+ * `WATCH_ENABLED` is deliberately not read here: this is the command used to decide whether the
+ * switch is safe to arm, and gating it on the switch would make arming the only way to find out.
+ * What this command can spend is bounded by the label, `MAX_RETRIAGE_PER_TICKET`, and a person
+ * typing it once — none of which bound a loop that types it again, which is what `WATCH_ENABLED` bounds.
  */
 
 import { buildSendbackWatchJql } from "../jira/jql.ts";
@@ -71,12 +43,9 @@ import { watchKey, watchWrites } from "./watch-args.ts";
 /**
  * The same settings, with the re-triage's comment turned on.
  *
- * Its own function rather than an inline override, so the one line that decides
- * whether a paid run reaches the ticket is greppable and can be argued with.
- * The argument is in the header: the watch is bounded by its own comment moving
- * the high-water mark, so a re-triage that does not post is a charge that
- * repeats. `triage:once` reached the same conclusion from the other direction —
- * that leaving `.env` in charge makes the flag decorative.
+ * Its own function rather than an inline override, so the one line that decides whether a paid
+ * run reaches the ticket is greppable. See the header: a re-triage that does not post is a
+ * charge that repeats.
  */
 function posting(settings: Settings): Settings {
   return { ...settings, WRITE_BACK: "true" };
@@ -107,15 +76,11 @@ async function main(): Promise<void> {
     keys = [named];
   }
 
-  // Built once, and only when they could be used, because constructing them is
-  // how this command acquires the ability to write at all. A dry run holds
-  // neither, which makes the refusal structural rather than a branch that could
-  // be got wrong — the same argument B1 made for `SolveDeps`.
+  // Constructing these is how this command acquires the ability to write at all; a dry run
+  // holds neither, making the refusal structural rather than a branch that could be got wrong.
   //
-  // The groom is composed with posting forced on rather than left to the
-  // configured value, for the reason in the header: a re-triage that analyses
-  // and posts nothing leaves the mark it measures from where it was, so the
-  // ticket stays triggered and buys the same run again on the next sweep.
+  // The groom is composed with posting forced on rather than the configured value — see the
+  // header for why a re-triage must always post.
   const acting: WatchActing | null = writes
     ? {
         commenter: createSolveCommenter(settings),
@@ -133,10 +98,8 @@ async function main(): Promise<void> {
     {
       client,
       maxRetriage,
-      // Fresh, and it will be thrown away when the process ends. That is right
-      // for a command: the memo bounds a check that answers *no* without
-      // writing anything, and what bounds this command is a person deciding to
-      // type it again. The daemon's is the one that has to survive a tick.
+      // Fresh and thrown away when the process ends — right for a command, since what bounds
+      // this run is a person deciding to type it again. The daemon's memo must survive a tick.
       memo: createWatchMemo(),
       acting,
       report: (line) => process.stdout.write(`${line}\n`),
@@ -148,9 +111,8 @@ async function main(): Promise<void> {
     ...outcome,
     maxRetriage,
     writing: writes,
-    // What a dry run *would* have spent, and what a writing one did. Both are
-    // reported rather than one or the other, so the two runs of this command an
-    // operator makes back to back can be compared line for line.
+    // Reported whether or not `writes` is set, so a dry run and a writing run of this command
+    // can be compared line for line.
     wouldSpend: `${outcome.retriage} re-triage run(s)`,
   });
 }

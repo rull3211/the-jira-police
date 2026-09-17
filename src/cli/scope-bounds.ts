@@ -1,56 +1,27 @@
 /**
  * Whether the scope prose the solver reads still describes the gate that runs.
  *
- * `fb772b3` deleted the diff gate's size caps and updated `ARCHITECTURE.md`; it
- * missed `.claude/skills/agent-solve/SOLVE_INSTRUCTIONS.md` and that skill's
- * `SKILL.md`, which went on telling every solve pass about a cap that no longer
- * existed for a week. Nothing went red, because `docs:check` reads those two
- * files only for their `§N` headings — never for what they claim.
+ * `fb772b3` deleted the diff gate's size caps but missed two prose files, which went on
+ * describing a cap that no longer existed — `docs:check` reads those files only for their
+ * `§N` headings, never for what they claim. A bound the agent believes in is obeyed whether or
+ * not it is enforced, so a stale bound costs a run rather than just misleading a reader.
  *
- * **The consequence is a run that ends, not a document that misleads**, which
- * is why this is a check rather than a note. A bound the agent believes in is
- * obeyed whether or not it is enforced: recon bails, the ticket is released as
- * found, and it is offered again at full solve cost on the next tick. The
- * reasoning is quoted here rather than cited to the plan entry that asked for
- * it: `PLAN.md` entries are deleted in the last commit before the push, so a
- * citation to the one behind this module would have dangled the same day it
- * was written.
+ * Checked by measurement, not by matching vocabulary like "cap" or "limit" — a sentence saying
+ * there is no cap would fail a naive text match, the false positive `BUILDING.md` warns against.
+ * Instead: every example path in the prose is run through the gate's real rule tables, both
+ * directions, and the size sentence is required only when `checkDiff` itself refuses a large diff.
  *
- * ## Both halves are derived, and that is the point
- *
- * The temptation here is to grep the prose for words like "cap" or "limit" and
- * fail on a match. That guard would fire on the sentence that says there is no
- * cap — the prose is *about* size bounds — and `BUILDING.md` has the rule for
- * text matchers that refuse the description instead of the deed: a false
- * positive is how a guard earns the contempt that gets it switched off. So
- * nothing here matches on vocabulary.
- *
- * Instead:
- *
- *   1. **Paths.** The prose enumerates example paths. Each one is run through
- *      the gate's own rule tables, and each rule table entry must be exercised
- *      by at least one example. Both directions, against the real patterns, so
- *      neither side can move without the other.
- *   2. **Size.** The caller asks the real `checkDiff` whether an enormous diff
- *      of innocuous paths is refused, and the answer — not a reading of the
- *      source — decides which sentence the prose is required to carry.
- *
- * Passed its inputs rather than reading them, and separate from
- * `docs-check.ts`, for the reason `pinned-prose.ts` gives in its own header:
- * that file is a script, and importing it from a test runs `vitest list`, which
- * spawns vitest inside vitest.
+ * Passed its inputs rather than reading them, and separate from `docs-check.ts` for the reason
+ * `pinned-prose.ts` gives: importing a script from a test spawns vitest inside vitest.
  */
 
 import { flatten } from "./pinned-prose.ts";
 
 /**
- * The shape of one gate rule.
+ * The shape of one gate rule, structurally identical to `diff-gate.ts`'s own unexported `Rule`.
  *
- * Structurally identical to `diff-gate.ts`'s own `Rule`, which is not exported.
- * Declared here rather than exporting that one because this module must not
- * import the gate: keeping it dependency-free is what lets the test hand it a
- * two-rule fixture and assert on the failure text. The caller passes the real
- * tables in.
+ * Declared here rather than imported so this module stays dependency-free — the test can hand it
+ * a two-rule fixture without importing the gate itself.
  */
 export interface ScopeRule {
   readonly pattern: RegExp;
@@ -70,10 +41,7 @@ export interface ScopeBoundsInput {
   readonly skillPath: string;
   readonly skill: string;
   readonly tables: readonly RuleTable[];
-  /**
-   * Whether the real gate refuses a very large diff of otherwise-clean paths.
-   * Measured by the caller against `checkDiff`, never read out of the source.
-   */
+  /** Whether the real gate refuses a very large diff — measured by the caller, never read from source. */
   readonly refusesBySize: boolean;
 }
 
@@ -85,9 +53,8 @@ export interface ScopeBoundsResult {
 /**
  * Where the enumerated paths start and stop.
  *
- * The closing marker is the next heading rather than `---`, so that adding a
- * subsection between them truncates the list loudly — every rule below the cut
- * reports as unexercised — instead of quietly shortening it.
+ * Closes on the next heading rather than `---`, so a subsection inserted between them truncates
+ * the list loudly instead of shortening it quietly.
  */
 const LIST_OPENS = "### What the gate refuses by path";
 const LIST_CLOSES = "### The bounds that are not path rules";
@@ -95,9 +62,8 @@ const LIST_CLOSES = "### The bounds that are not path rules";
 /**
  * The sentence each document must carry while the gate refuses nothing on size.
  *
- * Pinned text, not a pattern, for the reason in the header. Flattened on both
- * sides before comparison because `oxfmt` reflows markdown and a correct
- * sentence wrapped in a new place is not a defect.
+ * Flattened on both sides before comparison, since `oxfmt` can rewrap a correct sentence onto a
+ * new line without that being a defect.
  */
 const NEVER_BY_SIZE = {
   [".claude/skills/agent-solve/SOLVE_INSTRUCTIONS.md"]:
@@ -109,21 +75,10 @@ const NEVER_BY_SIZE = {
 /**
  * Every backticked token in the enumerated section.
  *
- * Takes *all* of them rather than filtering to things that look like paths: a
- * "looks like a path" heuristic is a silent way to drop an entry, and the whole
- * failure being designed against is an entry nobody noticed was missing. So the
- * agent-facing part of the section must hold nothing in backticks but paths,
- * and a stray `pnpm docs:check` written into it fails this check loudly rather
- * than weakening it.
- *
- * **HTML comments are cut first, and that exemption is load-bearing rather than
- * a convenience.** The list carries a maintainer note naming `FORBIDDEN_PATHS`,
- * `VERIFICATION_PATHS` and `src/solve/diff-gate.ts` — the citation that tells
- * the next person where the other half of this pair lives. Those are the right
- * words in the right place and none of them is a path the gate refuses; the
- * first run of this check reported all four as defects. A comment is invisible
- * to the solver reading the rendered skill, so it is not part of what the
- * solver was told, which is the only thing this check is about.
+ * Takes all of them rather than filtering to things that look like paths, since that heuristic
+ * is a silent way to drop an entry unnoticed. HTML comments are cut first — a maintainer note
+ * naming `FORBIDDEN_PATHS` etc. is invisible to the solver reading the rendered skill, so it
+ * isn't part of what the solver was actually told.
  */
 export function refusalExamples(instructions: string): readonly string[] {
   const opens = instructions.indexOf(LIST_OPENS);
@@ -167,9 +122,8 @@ export function scopeBoundsProblems(input: ScopeBoundsInput): ScopeBoundsResult 
 
   const examples = refusalExamples(instructions);
 
-  // Direction 1: the prose must not name a path the gate allows. This is the
-  // failure the plan entry is named for — prose stating a bound the gate does
-  // not enforce — and the agent pays for it by declining work that was allowed.
+  // Direction 1: the prose must not name a path the gate allows, or the agent declines work
+  // it was actually allowed to do.
   for (const example of examples) {
     const refused = tables.some((table) => table.rules.some((rule) => rule.pattern.test(example)));
     if (!refused) {
@@ -197,8 +151,8 @@ export function scopeBoundsProblems(input: ScopeBoundsInput): ScopeBoundsResult 
     }
   }
 
-  // The size half. `refusesBySize` is a measurement of `checkDiff`, so this
-  // compares the prose against behaviour rather than against the source.
+  // refusesBySize is measured against the real checkDiff, so this compares the prose against
+  // behaviour rather than against the source.
   for (const [path, body] of [
     [instructionsPath, instructions],
     [skillPath, skill],

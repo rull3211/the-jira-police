@@ -41,9 +41,8 @@ function settingsWith(overrides: Partial<Record<string, string>>): Settings {
 
 describe("buildTriageOptions", () => {
   it("refuses to build a real run with no vault", () => {
-    // The failure this prevents is the quiet one: intake-triage stops and asks
-    // a human for the vault path, and a headless run exits 0 having answered
-    // nothing. A service that polls forever producing no verdicts looks healthy.
+    // Otherwise a headless run exits 0 having answered nothing, and the service looks healthy
+    // while producing no verdicts.
     expect(() =>
       buildTriageOptions(settingsWith({ SKILL_NAME: "intake-triage" }), "SSX-1"),
     ).toThrow(SettingsError);
@@ -59,8 +58,7 @@ describe("buildTriageOptions", () => {
   });
 
   it("treats an unknown skill as the real thing, not as a stand-in", () => {
-    // A fork given a vault it does not need loses nothing. One silently denied
-    // a vault produces confident verdicts with no dedup behind them.
+    // A fork given a vault it doesn't need loses nothing; one silently denied one wouldn't.
     expect(() =>
       buildTriageOptions(settingsWith({ SKILL_NAME: "intake-triage-v2" }), "SSX-1"),
     ).toThrow(SettingsError);
@@ -84,8 +82,7 @@ describe("buildTriageOptions", () => {
       skillName: "intake-triage",
       vaultPath: "/vaults/v",
       noHtml: true,
-      // Sub-agents cannot prompt for tool permissions, so the skill's own
-      // instructions forbid them outside --deep. Keeping deep off keeps that true.
+      // Sub-agents can't prompt for tool permissions, so the skill forbids them outside --deep.
       deep: false,
       requiredMcpServers: ["atlassian"],
     });
@@ -105,11 +102,8 @@ describe("buildTriageOptions", () => {
     expect(options.allowedTools).toBeUndefined();
   });
 
-  // `numeric` grew a floor, but a floor only applies where a caller asks for
-  // it, and "the guard is correct" and "the caller uses it" are separate facts
-  // — the same join that has now bitten this codebase in passes.ts, delivery.ts
-  // and the triage skill. Asserted here, at the seam, because zero is the value
-  // that reads like "no limit" and behaves like "already expired".
+  // "The guard is correct" and "the caller uses it" are separate facts; a floor only applies
+  // where a caller asks for it.
   it("refuses a zero triage timeout rather than expiring every run at once", () => {
     expect(() =>
       buildTriageOptions(
@@ -141,10 +135,8 @@ describe("buildTriageOptions", () => {
       "SSX-1",
     );
 
-    // The pairing is the point: moving one budget must not move the other.
-    // Deriving the idle budget from the ceiling — a fraction of it, say — is
-    // the shape this rejects, because it would let raising the ceiling for a
-    // slow repository quietly buy a wedged pass an extra half hour too.
+    // Moving one budget must not move the other: deriving idle from a fraction of the ceiling
+    // would let raising the ceiling for a slow repository quietly buy a wedged pass extra time.
     expect(options.idleMs).toBe(90_000);
     expect(options.maxRunMs).toBe(1_200_000);
   });
@@ -155,9 +147,8 @@ describe("pollIntervalMs", () => {
     expect(pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "30000" }))).toBe(30_000);
   });
 
-  // The daemon's `--interval 0` is a plausible typo for "as fast as possible",
-  // and it would be granted: runLoop would sleep for nothing between cycles and
-  // hammer Jira until something rate-limited it.
+  // `--interval 0` reads like "as fast as possible", but granted it would hammer Jira until
+  // something rate-limited it.
   it("refuses a zero interval, which is an unthrottled loop and not an eager one", () => {
     expect(() => pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "0" }))).toThrow(
       /POLL_INTERVAL_MS must be at least 1/,
@@ -173,10 +164,8 @@ describe("pollIntervalMs", () => {
 
 describe("reviewIntervalMs", () => {
   it("reads REVIEW_POLL_MS and not the poll cadence", () => {
-    // The mutation this catches is a one-word one — returning POLL_INTERVAL_MS
-    // — and it is invisible at both defaults being plausible numbers of
-    // minutes. What it would do is tie how fast the service answers a reviewer
-    // to a setting whose description is "gap between polls".
+    // Returning POLL_INTERVAL_MS instead would tie how fast the service answers a reviewer to
+    // a setting whose description is "gap between polls".
     const settings = settingsWith({ REVIEW_POLL_MS: "45000", POLL_INTERVAL_MS: "300000" });
     expect(reviewIntervalMs(settings)).toBe(45_000);
   });
@@ -196,8 +185,7 @@ describe("shouldPost and WRITE_BACK", () => {
   }
 
   it("does not write back unless asked", () => {
-    // The default matters more than usual here: this is the only setting whose
-    // effect is visible to the whole team.
+    // This is the only setting whose effect is visible to the whole team.
     expect(real()).toBe(false);
   });
 
@@ -212,8 +200,7 @@ describe("shouldPost and WRITE_BACK", () => {
   it.each(["yes", "1", "on", "", "  ", "no", "maybe"])(
     "fails closed on %o rather than guessing",
     (value) => {
-      // Truthiness would make "0" and "false" enable writes. A setting that
-      // posts to shared tickets is the wrong place to be generous.
+      // Truthiness would make "0" and "false" enable writes to shared tickets.
       expect(real({ WRITE_BACK: value })).toBe(false);
     },
   );
@@ -221,17 +208,14 @@ describe("shouldPost and WRITE_BACK", () => {
   it.each(["mock-triage", "live-triage-probe"])(
     "keeps %s in preview even when WRITE_BACK is on",
     (skill) => {
-      // Both exist to rehearse the pipeline. A rehearsal that comments on a
-      // real ticket is not a rehearsal — and the probe does hit a real key.
+      // A rehearsal that comments on a real ticket is not a rehearsal, and the probe hits a real key.
       expect(shouldPost(settingsWith({ SKILL_NAME: skill, WRITE_BACK: "true" }))).toBe(false);
     },
   );
 
   it("never lets the analyst write, whatever WRITE_BACK says", () => {
-    // The two halves are independent: WRITE_BACK decides whether the poster is
-    // dispatched, and cannot re-arm the analyst. Before the split this was one
-    // flag doing both jobs, which is how a comment reached a ticket before the
-    // verdict behind it had been checked.
+    // The two halves are independent: WRITE_BACK decides whether the poster is dispatched, and
+    // cannot re-arm the analyst.
     for (const value of ["true", "false"]) {
       const options = buildTriageOptions(
         settingsWith({ SKILL_NAME: "intake-triage", VAULT_PATH: "/vaults/v", WRITE_BACK: value }),
@@ -263,12 +247,9 @@ function ticket(overrides: Partial<TicketRef> = {}): TicketRef {
 /**
  * A stand-in for the only thing that talks to Jira, recording every query.
  *
- * Answers the two queries differently, and tells them apart the way Jira
- * would — by what they ask for. That is not decoration: on the board these
- * two results are disjoint by construction, since the queue excludes exactly
- * the label the in-flight count selects on. A fake that returned the same
- * rows to both would make a limit of one look like it had no capacity ever,
- * and would hide a wiring bug behind a plausible outcome.
+ * Tells the two queries apart by what they ask for, since on the board they're disjoint by
+ * construction. A fake returning the same rows to both would hide a wiring bug behind a
+ * plausible outcome.
  */
 function fakeClient(
   queue: readonly TicketRef[] = [],
@@ -287,16 +268,10 @@ function fakeClient(
 /**
  * Composition of discovery.
  *
- * `TRIAGE_ONLY_STATUS` is the only setting in this query typed as a per-board
- * string, and `buildNewIssuesJql` is called per cycle rather than at wiring —
- * so these prove the two things that split apart: the characters are rejected
- * once, at startup, and the values reach the query the poller actually runs.
- *
- * What none of them can prove is that a value resolves against the board.
- * `status = "Mottatt"` is well-formed, correctly spelled, matches this file's
- * every expectation, and matched zero issues in production. Only the board
- * settles that, which is why the default is pinned by id and why the test
- * below is about the quoting rather than the names.
+ * Proves two things that split apart: `TRIAGE_ONLY_STATUS` characters are rejected once, at
+ * startup, and the values reach the query the poller actually runs. What none of these prove is
+ * that a value resolves against the board — a well-formed, correctly spelled status name can
+ * still match zero issues there, which is why the default is pinned by id.
  */
 describe("createDiscover", () => {
   async function queryFor(overrides: Partial<Record<string, string>> = {}): Promise<string> {
@@ -312,27 +287,20 @@ describe("createDiscover", () => {
   });
 
   it("ships restricted by default, because the unrestricted query was the defect", async () => {
-    // The fallback is the board's untouched columns. If this ever reads as
-    // unrestricted, discovery silently goes back to triaging other people's
-    // in-flight work — the failure this setting was added for, and one that
-    // shows up as spend rather than as an error.
+    // If this ever reads as unrestricted, discovery silently goes back to triaging other
+    // people's in-flight work — a failure that shows up as spend, not as an error.
     expect(await queryFor()).toContain("status IN (10165, 10025, 10194, 10179)");
   });
 
   it("pins the default statuses by id, unquoted, because the readable spelling missed 51 tickets", async () => {
-    // The regression, and it is about the quoting rather than the values. The
-    // first default spelled these as names, and `status = "Mottatt"` matches
-    // zero issues on this instance while `status = 10165` matches all 51 —
-    // same column, and no error either way. Quoting an id turns it back into a
-    // name lookup (`jqlValue`), so a default that renders quoted is the same
-    // defect wearing the new values.
+    // About the quoting, not the values: quoting an id turns it back into a name lookup
+    // (`jqlValue`), which is the same defect wearing the new values.
     expect(await queryFor()).not.toMatch(/status IN \([^)]*"/);
   });
 
   it("refuses a status that would break out of its JQL literal, at wiring", async () => {
-    // At construction, not on the first cycle. The query is built inside the
-    // returned closure, so without the check in `createDiscover` this same
-    // input is an error every poll for the life of the process.
+    // At construction, not on the first cycle: without the check here, this input is an error
+    // every poll for the life of the process.
     expect(() =>
       createDiscover(settingsWith({ TRIAGE_ONLY_STATUS: 'Mottatt") OR ("x' }), fakeClient().client),
     ).toThrow(JqlError);
@@ -340,20 +308,18 @@ describe("createDiscover", () => {
 });
 
 /**
- * Composition of the grooming cycle, which for ordering is the whole of the
- * behaviour: `byStatusPriority` is tested against a list in `order.test.ts` and
- * the poller is tested against an injected comparator in `poller.test.ts`, so
- * the only thing neither can see is whether the setting reaches either of them.
- * An ordering that is correct and never wired up is the failure mode here, and
- * it is invisible from both sides.
+ * Composition of the grooming cycle.
+ *
+ * `byStatusPriority` and the poller's own comparator handling are each tested elsewhere; the
+ * only thing neither proves is whether the setting reaches either of them, so an ordering that
+ * is correct and never wired up would be invisible from both sides.
  */
 describe("createPollDeps", () => {
   const client = fakeClient().client;
 
   it("wires no comparator at all when no priority is configured", () => {
-    // Not "wires a created-ascending comparator". The poller already defaults
-    // to that, and passing one anyway would make `poll.order` fire for an
-    // operator who never asked for an ordering.
+    // Not "wires a created-ascending comparator": the poller already defaults to that, and
+    // passing one anyway would make `poll.order` fire for an operator who never asked for one.
     expect(createPollDeps(settingsWith({ TRIAGE_STATUS_PRIORITY: "" }), client).order).toBe(
       undefined,
     );
@@ -373,11 +339,9 @@ describe("createPollDeps", () => {
 /**
  * Composition of the solve queue.
  *
- * The unit tests in `src/solve/poller.test.ts` prove the cycle behaves against
- * a fake. These prove the fake resembles what production will hand it — which
- * is the half that was missing when the poller was first written, and the half
- * where a wiring mistake is invisible because every component still passes its
- * own tests.
+ * `src/solve/poller.test.ts` proves the cycle behaves against a fake; these prove the fake
+ * resembles what production hands it — the half where a wiring mistake is invisible because
+ * every component still passes its own tests.
  */
 describe("createSolveDeps", () => {
   const SOLVE_ENV = { JIRA_PROJECT: "SSX", JIRA_COMPONENTS: "SSX Advisor" };
@@ -387,9 +351,8 @@ describe("createSolveDeps", () => {
   }
 
   it("carries the labels and the timestamp the queue selects on", async () => {
-    // The narrowing is where a field gets quietly dropped, and `labels` is the
-    // queue's entire state. Dropping it here would leave every ticket skipped
-    // with a plausible-looking reason and no sign anything was wrong.
+    // `labels` is the queue's entire state; dropped here, every ticket would be skipped with a
+    // plausible-looking reason and no sign anything was wrong.
     const { client } = fakeClient([ticket()]);
 
     const queue = await createSolveDeps(solveSettings(), client).fetchQueue();
@@ -406,9 +369,8 @@ describe("createSolveDeps", () => {
   });
 
   it("asks two different questions for the queue and the in-flight count", async () => {
-    // The bound's whole mechanism. The queue query excludes agent:solving, so
-    // counting in-flight work from the queue result would count zero forever
-    // and cap nothing — a limit of one would start a solve every tick.
+    // The queue excludes agent:solving, so counting in-flight work from the queue result would
+    // count zero forever and cap nothing.
     const { client, queries } = fakeClient();
     const deps = createSolveDeps(solveSettings(), client);
 
@@ -422,9 +384,7 @@ describe("createSolveDeps", () => {
   });
 
   it("counts the tickets the in-flight query returns, not the queued ones", async () => {
-    // Wired to the wrong query this returns 0 forever, because the queue
-    // excludes the claim label — and a bound of one would start a solve every
-    // tick with the previous one still running.
+    // Wired to the wrong query this returns 0 forever, since the queue excludes the claim label.
     const { client } = fakeClient(
       [ticket({ key: "SSX-1" })],
       [ticket({ key: "SSX-2" }), ticket({ key: "SSX-3" })],
@@ -435,8 +395,6 @@ describe("createSolveDeps", () => {
 
   it("has no function capable of writing", () => {
     // Phase B's refusal is structural, not promised: there is nothing to call.
-    // If this ever fails, someone has granted the write, and that is a decision
-    // that should be made in a review rather than discovered in production.
     const deps = createSolveDeps(solveSettings(), fakeClient().client);
 
     const callable = Object.entries(deps)
@@ -447,12 +405,8 @@ describe("createSolveDeps", () => {
   });
 
   it("advertises the same queries it runs", async () => {
-    // The cycle report prints `queueJql` and `inFlightJql` as the explanation
-    // for its numbers, so an operator can paste them into Jira and check the
-    // result by hand. That is only worth anything if the advertised query is
-    // the executed one — a second rendering built alongside the first would be
-    // free to disagree with it, and the report would then be a confident
-    // account of a query nobody ran.
+    // The cycle report prints these as the explanation for its numbers, which only holds if
+    // the advertised query is the executed one and not a second rendering that could disagree.
     const { client, queries } = fakeClient();
     const deps = createSolveDeps(solveSettings(), client);
 
@@ -482,30 +436,24 @@ describe("createSolveDeps", () => {
   });
 
   it("rejects an unrecognised SOLVE_MODE at composition, before any query runs", () => {
-    // Not on the first cycle, and not by falling back. A typo'd mode is an
-    // operator who believes something about this service that is not true, and
-    // the cheapest place to correct them is at startup.
+    // Not by falling back: a typo'd mode is an operator believing something false about this
+    // service, and the cheapest place to correct that is at startup.
     expect(() =>
       createSolveDeps(solveSettings({ SOLVE_MODE: "atuo" }), fakeClient().client),
     ).toThrow(SettingsError);
   });
 
   it("builds both queries eagerly, so a bad one fails at startup", async () => {
-    // Deferring the build into the closures would mean a service that starts
-    // clean, logs nothing, and fails on whichever cycle first reaches the board
-    // — by which time nobody is watching startup. Asserting it by the only
-    // means available: a query that cannot be built at all.
+    // Deferred into the closures, this would fail on whichever cycle first reaches the board,
+    // by which time nobody is watching startup.
     expect(() =>
       createSolveDeps(solveSettings({ JIRA_PROJECT: 'X" OR "1"="1' }), fakeClient().client),
     ).toThrow(JqlError);
   });
 
   it("cannot be blanked into unrestricted auto mode", () => {
-    // `SOLVE_AUTO_ISSUE_TYPES=` does not reach the poller as an empty list —
-    // readSettings substitutes the fallback, and here the fallback IS the
-    // restriction. So the dangerous configuration is unreachable, and the
-    // JqlError in buildSolveQueueJql guards the other route in: a caller
-    // constructing options directly.
+    // `SOLVE_AUTO_ISSUE_TYPES=` never reaches the poller as an empty list — `readSettings`
+    // substitutes the fallback, and the fallback IS the restriction.
     const { client, queries } = fakeClient();
 
     const deps = createSolveDeps(
@@ -520,10 +468,8 @@ describe("createSolveDeps", () => {
   });
 
   it("allows no repository at all until one is named", () => {
-    // The reason SOLVE_REPOS is the one solve setting with no fallback.
-    // `readSettings` cannot tell blank from unset, so a default here would be a
-    // write privilege that survives being deleted from .env — an operator
-    // taking the solver off a repo would have handed it straight back.
+    // The reason SOLVE_REPOS has no fallback: `readSettings` can't tell blank from unset, so
+    // a default would be a write privilege that survives being deleted from .env.
     const allowed = (value?: string): readonly string[] =>
       createSolveDeps(
         solveSettings(value === undefined ? {} : { SOLVE_REPOS: value }),
@@ -536,9 +482,8 @@ describe("createSolveDeps", () => {
   });
 
   it("skips every ticket while the allowlist is empty", async () => {
-    // The empty list has to mean something by the time it reaches the poller,
-    // or the paragraph above is just a comment. Nothing is planned, and the
-    // reason names the setting rather than the ticket.
+    // The empty list has to mean something by the time it reaches the poller: nothing is
+    // planned, and the reason names the setting rather than the ticket.
     const deps = createSolveDeps(
       solveSettings({ SOLVE_ENABLED: "true" }),
       fakeClient([ticket()]).client,
@@ -551,9 +496,8 @@ describe("createSolveDeps", () => {
   });
 
   it("plans a claim end to end once the repository is allowed", async () => {
-    // The whole composition, exercised the way `solve:once` will exercise it:
-    // real settings, real queries, a fake only at the HTTP boundary. Every
-    // piece of this passed its own tests while the queue was unfeedable.
+    // Exercised the way `solve:once` will: real settings, real queries, a fake only at the
+    // HTTP boundary.
     const deps = createSolveDeps(
       solveSettings({ SOLVE_ENABLED: "true", SOLVE_REPOS: "buy-insurance-advisor-web" }),
       fakeClient([ticket()]).client,
@@ -582,8 +526,7 @@ describe("createSolveDeps", () => {
   });
 
   it("omits the signal rather than passing undefined", () => {
-    // Same shape as createPollDeps: the one-shot CLI has nothing to interrupt,
-    // and `exactOptionalPropertyTypes` makes the difference real.
+    // Same shape as `createPollDeps`: `exactOptionalPropertyTypes` makes the absence real.
     expect("signal" in createSolveDeps(solveSettings(), fakeClient().client)).toBe(false);
   });
 
@@ -632,8 +575,7 @@ describe("buildSolveRequest", () => {
   });
 
   it("refuses a repository that is not on the allowlist", () => {
-    // The write-privilege gate. A ticket naming any other repository is refused
-    // here rather than discovered after four model sessions.
+    // Refused here rather than discovered after four model sessions.
     expect(() =>
       buildSolveRequest(
         settingsWith(SOLVE_ENV),
@@ -654,8 +596,7 @@ describe("buildSolveRequest", () => {
   });
 
   it("refuses a ticket that names no repository, or two", () => {
-    // `repoFromLabels` resolves every ambiguous reading to null. Both ends of
-    // that are refusals here, because the value decides what gets written to.
+    // `repoFromLabels` resolves every ambiguous reading to null; both ends are refusals here.
     for (const labels of [[], ["triaged"], ["svc:one", "svc:two"]]) {
       expect(() => buildSolveRequest(settingsWith(SOLVE_ENV), detailWith(labels), "t")).toThrow(
         NotSolvableError,
@@ -674,11 +615,8 @@ describe("buildSolveRequest", () => {
   });
 
   it("resolves the readable checkouts under the same root the write repo comes from", () => {
-    // The motivating case is PR #2663: a frontend fix against an API endpoint
-    // that a pass could only verify by reading the service on the other side of
-    // it. The names are resolved here rather than passed through, so nothing
-    // downstream ever sees an operator-supplied string that is not a path this
-    // function built.
+    // Resolved here rather than passed through, so nothing downstream sees an operator-supplied
+    // string that isn't a path this function built.
     const request = buildSolveRequest(
       settingsWith({ ...SOLVE_ENV, SOLVE_READ_DIRS: "commerce-rest-api, buy-insurance-web" }),
       detailWith(["svc:buy-insurance-advisor-web"]),
@@ -689,9 +627,8 @@ describe("buildSolveRequest", () => {
   });
 
   it("does not list the repository being solved among the ones to read", () => {
-    // It is already the worktree's origin and is `--add-dir`'d nowhere: naming
-    // it here would tell a write pass that the developer's own working copy —
-    // dirty, on a feature branch — is part of its context.
+    // Naming it here would tell a write pass that its own dirty, feature-branch working copy
+    // is part of its context.
     const request = buildSolveRequest(
       settingsWith({
         ...SOLVE_ENV,
@@ -705,9 +642,7 @@ describe("buildSolveRequest", () => {
   });
 
   it("drops a name that is not a repository name rather than joining it onto the root", () => {
-    // `join("/repos", "../..")` is a directory above the root, and these paths
-    // reach `--add-dir`. A traversal in a discovery convenience is still a
-    // traversal.
+    // `join("/repos", "../..")` is a directory above the root, and these paths reach `--add-dir`.
     const request = buildSolveRequest(
       settingsWith({ ...SOLVE_ENV, SOLVE_READ_DIRS: "../.., /etc, commerce-rest-api" }),
       detailWith(["svc:buy-insurance-advisor-web"]),
@@ -718,8 +653,7 @@ describe("buildSolveRequest", () => {
   });
 
   it("reads no other checkout at all when the setting is unset", () => {
-    // The same no-fallback rule `SOLVE_REPOS` has, for the same reason: a
-    // default here would be a privilege that survives being deleted from `.env`.
+    // The same no-fallback rule `SOLVE_REPOS` has, for the same reason.
     const request = buildSolveRequest(
       settingsWith(SOLVE_ENV),
       detailWith(["svc:buy-insurance-advisor-web"]),
@@ -730,8 +664,8 @@ describe("buildSolveRequest", () => {
   });
 
   it("puts the worktree somewhere that is obviously not the repository", () => {
-    // A failed run keeps its worktree for inspection. It should be findable and
-    // it should not be sitting inside a checkout somebody works in.
+    // A failed run keeps its worktree for inspection; it must not sit inside a checkout
+    // somebody works in.
     const request = buildSolveRequest(
       settingsWith(SOLVE_ENV),
       detailWith(["svc:buy-insurance-advisor-web"]),
@@ -762,14 +696,8 @@ describe("buildSolveRequest", () => {
 
 describe("worktree root", () => {
   it("uses the configured directory when there is one", () => {
-    // It exists because the system temp directory on macOS lands under
-    // /private/var, which some tooling cannot open — and the C phase mandates a
-    // human reading the diff before anything leaves the machine.
-    //
-    // A real directory rather than a made-up one, because this function now
-    // creates and resolves what it is handed: `/Users/me/solves` would be an
-    // attempt to write outside the test's own space, passing only because the
-    // permission error is caught.
+    // A real directory, not a made-up one: this function creates and resolves what it's
+    // handed, so a fake path would pass only because the permission error is caught.
     const configured = mkdtempSync(join(realpathSync(tmpdir()), "wiring-root-"));
     const request = buildSolveRequest(
       settingsWith({ ...SOLVE_ENV, SOLVE_WORKTREE_ROOT: configured }),
@@ -781,12 +709,8 @@ describe("worktree root", () => {
   });
 
   it("resolves the root, because git prints resolved paths and we compare strings", () => {
-    // The wedge this refutes: every recovery in worktree.ts asks `git worktree
-    // list --porcelain` whether a checkout is already at <root>/<issueKey>, and
-    // matches by string equality. git answers with the resolved path. On macOS
-    // the *default* root is under `/var/folders`, a symlink to
-    // `/private/var/folders`, so the comparison could never match and both
-    // salvage paths were silently dead on the machine this service runs on.
+    // `worktree.ts` matches recovery paths by string equality against what `git worktree
+    // list --porcelain` prints, which is always resolved — an unresolved root would never match.
     const real = mkdtempSync(join(realpathSync(tmpdir()), "wiring-real-"));
     const link = `${real}-link`;
     symlinkSync(real, link);
@@ -802,9 +726,8 @@ describe("worktree root", () => {
   });
 
   it("treats whitespace as unset rather than as a directory named space", () => {
-    // The trimming is `readSettings`', not this function's — asserted here
-    // because this is where it would be noticed if it stopped happening, and
-    // because a worktree root of "   " creates a directory nobody can find.
+    // The trimming is `readSettings`', not this function's; a worktree root of "   " would
+    // otherwise create a directory nobody can find.
     const request = buildSolveRequest(
       settingsWith({ ...SOLVE_ENV, SOLVE_WORKTREE_ROOT: "   " }),
       detailWith(["svc:buy-insurance-advisor-web"]),
@@ -837,8 +760,8 @@ describe("baseBranchOf", () => {
   });
 
   it("strips only the leading remote, and only one", () => {
-    // A branch genuinely called `release/origin/x` must not be mangled, and
-    // `origin/origin/x` means the branch `origin/x` on the remote `origin`.
+    // `release/origin/x` must not be mangled; `origin/origin/x` means branch `origin/x` on
+    // remote `origin`.
     expect(baseBranchOf("release/origin/x")).toBe("release/origin/x");
     expect(baseBranchOf("origin/origin/x")).toBe("origin/x");
   });
@@ -899,9 +822,8 @@ const PUBLISH_ENV = { ...SOLVE_ENV, SOLVE_GITHUB_OWNER: "storebrand-digital" };
 
 describe("buildPublishRequest", () => {
   it("names the repository from configuration, not from the checkout", () => {
-    // THE PHASE D PRIVILEGE GRANT. The owner is configured because an owner
-    // inferred from the checkout's remote is right until somebody adds a fork
-    // as `origin`, at which point a bot opens a pull request somewhere else.
+    // The phase D privilege grant. An owner inferred from the checkout's remote is right until
+    // somebody adds a fork as `origin`, at which point a bot opens a pull request elsewhere.
     const request = buildPublishRequest(settingsWith(PUBLISH_ENV), verifiedOutcome(), "SSX-3822");
 
     expect(request.repo).toBe("storebrand-digital/buy-insurance-advisor-web");
@@ -918,9 +840,8 @@ describe("buildPublishRequest", () => {
   });
 
   it("refuses an owner that is only whitespace", () => {
-    // Also `readSettings`' trimming rather than this function's. Worth pinning
-    // where the consequence is: a repo of "  /name" is a pull request opened
-    // against a target that does not exist, discovered by gh and not by us.
+    // `readSettings`' trimming, not this function's: an untrimmed owner would open a PR
+    // against a target that doesn't exist, discovered by gh rather than by us.
     expect(() =>
       buildPublishRequest(
         settingsWith({ ...PUBLISH_ENV, SOLVE_GITHUB_OWNER: "  " }),
@@ -953,12 +874,8 @@ describe("buildPublishRequest", () => {
   });
 
   it("carries the bound on attempts that never became rounds", () => {
-    // Three numbers now, and this is the one that counts a different thing.
-    // Both caps above are read off the marker and the marker only moves when a
-    // round reserves, so neither can see an attempt that died before the
-    // reservation — which is what wedged #2663 for four days. Unwired, the
-    // request would carry whatever `AdvanceRequest` was last given and the
-    // brake would be a setting nothing reads.
+    // Counts a different thing from the other two caps: those are read off the marker, which
+    // only moves when a round reserves, so neither sees an attempt that died before reserving.
     const request = buildAdvanceRequest(
       settingsWith({ ...PUBLISH_ENV, MAX_FAILED_STARTS: "5" }),
       advanceBase(),
@@ -970,9 +887,8 @@ describe("buildPublishRequest", () => {
   });
 
   it("does not name a reviewer, so the delivery default applies", () => {
-    // `exactOptionalPropertyTypes` makes absence real, and `requestReview` falls
-    // back to @copilot. Passing an empty string here would ask for a reviewer
-    // called "".
+    // `exactOptionalPropertyTypes` makes absence real; passing an empty string instead would
+    // ask for a reviewer called "".
     expect(
       "reviewer" in buildPublishRequest(settingsWith(PUBLISH_ENV), verifiedOutcome(), "SSX-3822"),
     ).toBe(false);
@@ -1006,8 +922,7 @@ describe("buildPublishRequest", () => {
 
 describe("createSolveRunDeps", () => {
   it("composes the two objects that can change something", () => {
-    // This function is the phase C privilege grant. Asserting its shape is
-    // asserting that the grant is exactly these two and no more.
+    // The phase C privilege grant: asserting its shape asserts the grant is exactly these two.
     const deps = createSolveRunDeps(settingsWith(SOLVE_ENV));
 
     expect(Object.keys(deps).toSorted()).toEqual(["commands", "passes"]);
@@ -1016,9 +931,7 @@ describe("createSolveRunDeps", () => {
   });
 
   it("refuses to build a solver with no vault", () => {
-    // Same reason triage refuses: the branch and commit conventions the solver
-    // is held to live in the vault, and failing now beats failing four sessions
-    // in on a mechanical check.
+    // Same reason triage refuses: failing now beats failing four sessions in on a mechanical check.
     expect(() => createSolveRunDeps(settingsWith({ ...SOLVE_ENV, VAULT_PATH: "" }))).toThrow(
       SettingsError,
     );
@@ -1031,9 +944,7 @@ describe("createSolveRunDeps", () => {
   });
 
   it("does not construct a solver as a side effect of reading the board", () => {
-    // The queue poller runs on every cycle and needs none of this. If the two
-    // were one function, reading the board would build the ability to write to
-    // a repository.
+    // If the two were one function, reading the board would build the ability to write to a repo.
     const readers = createSolveDeps(settingsWith(SOLVE_ENV), {} as JiraClient);
 
     expect(readers).not.toHaveProperty("commands");
@@ -1049,9 +960,8 @@ describe("githubRepoFor", () => {
   });
 
   it("refuses when no owner is configured rather than guessing one", () => {
-    // The single place that decides which GitHub repository this service talks
-    // to. An owner inferred from a remote is right until somebody adds a fork
-    // as `origin`, and then a bot is pushing to a stranger's repository.
+    // An owner inferred from a remote is right until somebody adds a fork as `origin`, and
+    // then a bot pushes to a stranger's repository.
     expect(() =>
       githubRepoFor(settingsWith({ ...PUBLISH_ENV, SOLVE_GITHUB_OWNER: "" }), "/r/x"),
     ).toThrow(SettingsError);
@@ -1075,20 +985,18 @@ const attachedWorktree = {
 };
 
 /**
- * The worktree as a promise of one, which is the shape `advance` now takes.
+ * The worktree as a promise of one, which is the shape `advance` takes.
  *
- * It is never called in these tests, and that is the point of the type: cutting
- * a checkout is work the request describes rather than work it has already
- * done, so building a request costs nothing.
+ * Never called in these tests, which is the point: cutting a checkout is work the request
+ * describes rather than work it has already done, so building a request costs nothing.
  */
 const attachSource = (): Promise<WorktreeResult> =>
   Promise.resolve({ outcome: "created", worktree: attachedWorktree } as const);
 
 describe("buildFindPrRequest", () => {
   it("searches from the repository checkout, not from a worktree", () => {
-    // The order this encodes: whether a pull request exists is what decides
-    // whether there is anything to attach a worktree to, so the search has to
-    // be runnable before one exists.
+    // Whether a pull request exists decides whether there's anything to attach a worktree to,
+    // so the search must be runnable before one exists.
     const request = buildFindPrRequest(
       settingsWith(PUBLISH_ENV),
       advanceBase(),
@@ -1113,9 +1021,9 @@ describe("buildFindPrRequest", () => {
 
 describe("buildAdvanceRequest", () => {
   it("names the repository from configuration, as publishing does", () => {
-    // THE PHASE D2 PRIVILEGE GRANT. Publishing makes work visible; this pushes
-    // to a pull request people are already reading, so the target is decided by
-    // the same setting rather than by whatever remote the worktree carries.
+    // The phase D2 privilege grant: this pushes to a pull request people are already reading,
+    // so the target is decided by the same setting rather than by whatever remote the worktree
+    // carries.
     const request = buildAdvanceRequest(
       settingsWith(PUBLISH_ENV),
       advanceBase(),
@@ -1126,9 +1034,8 @@ describe("buildAdvanceRequest", () => {
     expect(request.repo).toBe("storebrand-digital/buy-insurance-advisor-web");
     expect(request.number).toBe(2657);
     expect(request.attach).toBe(attachSource);
-    // `gh` runs in the repository until a round is actually decided on. Every
-    // read the survey makes names its repository explicitly, so this is a
-    // working directory and not a target.
+    // A working directory, not a target: every read the survey makes names its repository
+    // explicitly.
     expect(request.cwd).toBe("/repos/buy-insurance-advisor-web");
   });
 
@@ -1144,9 +1051,8 @@ describe("buildAdvanceRequest", () => {
   });
 
   it("carries the solve request's own fields through untouched", () => {
-    // The review round runs the same passes against the same repository with
-    // the same timeouts. A separate set of values here would mean a round that
-    // verifies differently from the run that opened the pull request.
+    // A separate set of values here would mean a round that verifies differently from the run
+    // that opened the pull request.
     const base = advanceBase();
 
     const request = buildAdvanceRequest(settingsWith(PUBLISH_ENV), base, attachSource, 1);
@@ -1158,12 +1064,8 @@ describe("buildAdvanceRequest", () => {
   });
 
   it("supplies no round count at all, because the pull request holds it", () => {
-    // This test used to pin `round: 0`, and its comment said so: nothing
-    // persisted a count, so `MAX_REVIEW_ITERATIONS` could not fire from the
-    // command line and the operator was the only thing counting. The marker
-    // replaced that, and the fix was to delete the field rather than to pass
-    // the right number — a caller that cannot supply the count cannot supply a
-    // wrong one. `advance` reads it off the marker comment instead.
+    // The field is deleted rather than given the right number: a caller that cannot supply
+    // the count cannot supply a wrong one. `advance` reads it off the marker comment instead.
     const request = buildAdvanceRequest(
       settingsWith({ ...PUBLISH_ENV, MAX_REVIEW_ITERATIONS: "3" }),
       advanceBase(),
@@ -1176,8 +1078,8 @@ describe("buildAdvanceRequest", () => {
   });
 
   it("carries the absolute per-pull-request brake, separately from the reviewer cap", () => {
-    // Two numbers, deliberately not one. Relaxing how much argument a bot
-    // reviewer is worth must not be able to disable the stop on the machinery.
+    // Two numbers, deliberately not one: relaxing how much argument a bot reviewer gets must
+    // not disable the stop on the machinery.
     const request = buildAdvanceRequest(
       settingsWith({ ...PUBLISH_ENV, MAX_REVIEW_ITERATIONS: "9", MAX_PR_ROUNDS_TOTAL: "20" }),
       advanceBase(),
@@ -1214,10 +1116,8 @@ describe("buildAdvanceRequest", () => {
 /**
  * Composition of the review cycle.
  *
- * The unit tests in `src/solve/review-cycle.test.ts` prove the cycle bounds its
- * spend against a fake. These prove the fake resembles what production hands it,
- * which for this cycle is the half that decides how much it can cost: the query
- * that says which pull requests are in scope, the switch, and the per-tick bound.
+ * `src/solve/review-cycle.test.ts` proves the cycle bounds its spend against a fake; these
+ * prove the fake resembles what production hands it: the query, the switch, the per-tick bound.
  */
 /** Records the query and answers it, without `fakeClient`'s NOT IN routing. */
 function watchClient(watched: readonly TicketRef[] = []): {
@@ -1247,10 +1147,8 @@ describe("createReviewCycleDeps", () => {
   }
 
   it("reads the watched set, not the solve queue", async () => {
-    // THE ONE THAT MATTERS. Wired to `buildSolveQueueJql` this looks at tickets
-    // that have no pull request at all, and `look` would report every one of
-    // them as unlookable — a cycle that is busy, costs Jira round trips, and
-    // never notices the merge it exists to notice.
+    // Wired to `buildSolveQueueJql` instead, this looks at tickets with no pull request at
+    // all, and `look` would report every one as unlookable.
     const { client, queries } = watchClient();
 
     await createReviewCycleDeps(reviewSettings(), client, never, never).fetchWatched();
@@ -1270,10 +1168,8 @@ describe("createReviewCycleDeps", () => {
   });
 
   it("carries the timestamp the cycle orders on", async () => {
-    // The cycle sorts oldest-updated first so the same pull request cannot be
-    // starved twice by the per-tick bound. Drop `updated` in the narrowing and
-    // every ticket parses as NaN, the sort becomes whatever order Jira replied
-    // in, and the starvation the ordering prevents comes back silently.
+    // The cycle sorts oldest-updated first so a pull request can't be starved twice by the
+    // per-tick bound; drop `updated` here and every ticket parses as NaN.
     const { client } = watchClient([ticket()]);
 
     const watched = await createReviewCycleDeps(
@@ -1295,8 +1191,8 @@ describe("createReviewCycleDeps", () => {
   });
 
   it("fails closed on the master switch", () => {
-    // `flag` and not `!== "false"`: an unset or mistyped SOLVE_ENABLED must not
-    // arm the one loop here that pushes to a pull request unattended.
+    // `flag`, not `!== "false"`: an unset or mistyped SOLVE_ENABLED must not arm the one loop
+    // here that pushes to a pull request unattended.
     expect(
       createReviewCycleDeps(reviewSettings(), watchClient().client, never, never).enabled,
     ).toBe(false);
@@ -1322,9 +1218,8 @@ describe("createReviewCycleDeps", () => {
   });
 
   it("allows a bound of zero, which is this cycle's dry run", () => {
-    // Zero must reach the cycle as zero rather than being clamped or read as
-    // absent: look at everything, spend on nothing, is the honest dry run for a
-    // round whose whole effect is on a pull request.
+    // Zero must reach the cycle as zero, not clamped or read as absent: look at everything,
+    // spend on nothing.
     expect(
       createReviewCycleDeps(
         reviewSettings({ MAX_REVIEW_ROUNDS_PER_TICK: "0" }),
@@ -1336,9 +1231,7 @@ describe("createReviewCycleDeps", () => {
   });
 
   it("passes the caller's two halves through untouched", () => {
-    // The cheap look and the paid round are the caller's, so that the loop and
-    // `--advance` cannot drift into doing different things. Rebuilding either
-    // here would put the spend seam in the file nobody reads.
+    // The caller's, so the loop and `--advance` cannot drift into doing different things.
     const look = never;
     const act = never;
     const deps = createReviewCycleDeps(reviewSettings(), watchClient().client, look, act);
@@ -1348,9 +1241,8 @@ describe("createReviewCycleDeps", () => {
   });
 
   it("omits the signal rather than passing undefined", () => {
-    // `exactOptionalPropertyTypes` makes these two different objects, and the
-    // cycle reads `signal?.aborted`. Present-but-undefined is harmless here and
-    // is the shape that stops being harmless the moment anything checks the key.
+    // `exactOptionalPropertyTypes` makes these two different objects; present-but-undefined
+    // stops being harmless the moment anything checks the key.
     const deps = createReviewCycleDeps(reviewSettings(), watchClient().client, never, never);
 
     expect("signal" in deps).toBe(false);

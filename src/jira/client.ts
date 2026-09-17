@@ -1,71 +1,23 @@
 /**
- * Minimal Jira Cloud client — discovery reads, and one narrow write.
+ * Minimal Jira Cloud client — discovery reads, and one narrow write (`updateLabels`).
  *
- * Four operations: a JQL search, one issue's full detail, one attachment's
- * bytes, and `updateLabels`.
+ * `updateLabels` exists because the MCP tool surface only offers `fields` (set semantics), so
+ * adding one label means read-all-N/append/write-all-N-back — destroying any label a human added
+ * in between. This credential may touch only `agent:`-namespaced labels (`assertOwnedLabel`), never
+ * a status, field or comment; comments stay on the MCP path since ADF conversion lives there.
  *
- * ## The rule this file used to state, and what replaced it
- *
- * It said: *"Nothing in this file writes to Jira, and nothing should be added
- * that does"* — the REST credential discovers work, the storecode MCP session
- * performs every mutation, so a credential living in a `.env` file cannot
- * change a ticket even if it leaks. That was true and it is now false in one
- * specific way, so it is rewritten here rather than left to rot into the exact
- * prose/behaviour divergence this project exists to catch.
- *
- * The amendment is `updateLabels`, and it exists because the MCP tool surface
- * cannot express the operation the solve claim needs. `editJiraIssue` takes
- * `fields` — **set** semantics — so adding one label means reading all N,
- * appending, and writing all N back. Any label a human added in between is
- * silently destroyed, and nothing in either party's history explains it. Jira's
- * REST API has supported `update.labels` with atomic `add`/`remove` operations
- * the whole time; the constraint was never Jira's, it was the tool's. So the
- * claim moves here, where the race can be *eliminated* rather than narrowed.
- *
- * Three things keep the amendment narrow, and all three are mechanical:
- *
- * 1. **Labels only.** This is a `labels`-shaped method, not a general issue
- *    edit. There is no way to spend this credential on a status transition, a
- *    field value or a comment.
- * 2. **The `agent:` namespace only.** `assertOwnedLabel` refuses anything else,
- *    so the write cannot touch `triaged`, `svc:*`, `dor:*` or a human's
- *    `next:*` even by accident. That is the same set `gate.ts` calls owned, for
- *    the same reason: these are the labels this service put there.
- * 3. **Comments stay on the MCP path.** Not an oversight — a Jira comment is
- *    ADF, and the MCP tool does the markdown→ADF conversion. Reimplementing
- *    that here to save one round trip would be trading a solved problem for an
- *    unsolved one, and comments have no clobber risk to fix.
- *
- * `search` uses `/rest/api/3/search/jql`, the token-paginated replacement for
- * the removed `/rest/api/3/search`. Pagination is by opaque `nextPageToken`;
- * there is no total count and no numeric offset.
- *
- * Authentication is HTTP Basic with an Atlassian API credential as the password
- * half. The header is built once and never logged; error paths below are
- * written to describe failures without echoing it.
- *
- * ## Why detail is a second call rather than more fields on the search
- *
- * `search` deliberately asks for a narrow `FIELDS` list, because it runs over
- * every new ticket on the board on a timer and pays for each field on each of
- * them. `description`, `comment` and `attachment` are the three largest fields
- * an issue has and the poller reads none of them. So they are fetched once, for
- * the single ticket a solve is about to act on, rather than being added to a
- * list that is evaluated dozens of times an hour to be thrown away.
+ * `search` uses `/rest/api/3/search/jql`, paginated by opaque `nextPageToken` with no total count
+ * or numeric offset, and asks a narrow `FIELDS` list since it runs on a timer over every ticket;
+ * `description`/`comment`/`attachment` are fetched only in `fetchDetail`, for the one ticket a solve
+ * acts on.
  */
 
 import { logger } from "../logger.ts";
 import { type JiraIssue, type JiraSearchResponse, type TicketRef, toTicketRef } from "./types.ts";
 
 /**
- * Issue keys and attachment ids are interpolated into a URL path, so they are
- * validated rather than trusted.
- *
- * The threat is not exotic: an issue key of `../../../rest/api/3/myself` turns
- * a detail fetch into a call to a different endpoint, and an operator typing a
- * key on the command line is the normal way this value arrives. Anchored
- * patterns, and a rejection rather than an escape, because there is no
- * legitimate key this excludes — Jira keys are `PROJECT-123` and nothing else.
+ * Issue keys and attachment ids are interpolated into a URL path, so they are validated rather than
+ * trusted — a key like `../../../rest/api/3/myself` would otherwise redirect the request entirely.
  */
 const ISSUE_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
 const ATTACHMENT_ID_PATTERN = /^\d+$/;
@@ -82,26 +34,10 @@ export function assertAttachmentId(id: string): void {
   }
 }
 
-/**
- * The only namespace this credential may write.
- *
- * Kept here rather than imported from `gate.ts` deliberately. `gate.ts` decides
- * what the *triage bot* may replace in a labels array it is rewriting whole;
- * this decides what a *credential* may touch at all, and the two would drift
- * apart the first time one of them widened for a reason that did not apply to
- * the other. A duplicated four-character string is a cheaper coupling than a
- * shared constant whose two readers mean different things by it.
- */
+/** The only namespace this credential may write; kept separate from `gate.ts`, which governs a different concern (what the triage bot may replace). */
 const WRITABLE_LABEL_PREFIX = "agent:";
 
-/**
- * Jira accepts a label of almost anything without whitespace; this is stricter.
- *
- * The value reaches a JSON body rather than a URL, so this is not injection
- * defence — it is a check that the caller is passing a label and not, say, a
- * whole array stringified by accident. Bounded, because Jira's own limit is 255
- * and a value near it is a bug on this side.
- */
+/** Jira accepts a label of almost anything without whitespace; this is stricter, to catch a caller bug rather than injection. */
 const LABEL_PATTERN = /^agent:[a-z][a-z0-9-]{0,60}$/;
 
 export function assertOwnedLabel(label: string): void {
@@ -121,9 +57,7 @@ const FIELDS = [
   "summary",
   "issuetype",
   "created",
-  // Requested for the solve queue, which orders by it. The new-issue poller has
-  // no use for it and pays a few bytes a ticket, which is cheaper than a second
-  // field list to keep in step with a second normaliser.
+  // Requested for the solve queue, which orders by it; cheaper to pay a few unused bytes than keep two field lists in step.
   "updated",
   "status",
   "priority",
@@ -162,15 +96,9 @@ export interface JiraComment {
   /** ISO-8601 with offset. */
   readonly created: string;
   /**
-   * ISO-8601 with offset. Equal to `created` on a comment nobody has edited.
-   *
-   * Required rather than optional, and read even though `created` was enough
-   * for every earlier caller, because **the triage poster updates its own
-   * comment in place**: it finds the previous one by the footer sentinel and
-   * rewrites it. So on the one ticket a sendback watch cares about, `created`
-   * is pinned at the first triage forever, and a high-water mark built from it
-   * would report that this service last spoke days before it actually did —
-   * every sweep re-reading the same activity as new. See `lastSpokeAt`.
+   * ISO-8601 with offset; equal to `created` on a comment nobody has edited. The triage poster
+   * updates its own comment in place, so `created` alone would look pinned at the first triage
+   * forever — see `lastSpokeAt`.
    */
   readonly updated: string;
   /** ADF. Attacker-controlled; rendered as data, never interpreted. */
@@ -184,14 +112,7 @@ export interface JiraAttachment {
   readonly size: number;
 }
 
-/**
- * Everything a solve needs to know about one ticket.
- *
- * `description` and `body` stay as `unknown` on purpose. They are ADF trees
- * whose shape is Atlassian's to change, and typing them here would be a claim
- * about a structure this service does not control; `renderAdf` is written to be
- * total against arbitrary input for the same reason.
- */
+/** Everything a solve needs to know about one ticket; `description` and `body` stay `unknown` since their ADF shape is Atlassian's to change. */
 export interface IssueDetail {
   readonly key: string;
   readonly summary: string;
@@ -209,52 +130,21 @@ export interface IssueDetail {
 export interface JiraFieldChange {
   /** ISO-8601 with offset. */
   readonly created: string;
-  /**
-   * Jira's `items[].field` values, as returned and not normalised.
-   *
-   * Left raw because the capitalisation varies by field type and the consumer
-   * folds case; normalising here would put the fold in the layer that cannot be
-   * tested against a decision.
-   */
+  /** Jira's `items[].field` values, as returned; left raw because capitalisation varies and the consumer folds case. */
   readonly fields: readonly string[];
 }
 
-/**
- * What a watched ticket has done since anyone last looked.
- *
- * Deliberately not `IssueDetail` with two more members. That type is what a
- * *solve* needs — description, attachments, issue type — and none of it is read
- * here, while the two things this needs are read nowhere else. Widening it
- * would make every solve pay for a changelog fetch to serve a loop that runs on
- * a cadence of days.
- */
-/**
- * What the blocker-clearing fields say *now*.
- *
- * The changelog names the fields that moved and this says what they hold, and
- * both are needed for different halves of one question. A reporter answering a
- * sendback usually does it by editing the description, so a watcher that knows
- * `description` moved and cannot read it has to refuse every one of them — the
- * commonest way an answer arrives, structurally unjudgeable.
- *
- * `description` and `environment` stay `unknown` for the same reason `body`
- * does: they are ADF trees whose shape is Atlassian's to change, and `renderAdf`
- * is where that vocabulary is allowed to be known.
- */
+/** What the blocker-clearing fields say *now*; the changelog names which fields moved, this says what they hold. */
 export interface IssueContent {
   readonly summary: string;
+  /** ADF; `unknown` for the same reason `body` is — Atlassian's shape to change, and `renderAdf`'s to know. */
   readonly description: unknown;
   readonly environment: unknown;
-  /**
-   * Names, types and sizes — never bytes.
-   *
-   * *"Attach the HAR"* is an ordinary sendback and a filename answers it. The
-   * contents would be a new untrusted-bytes path into a prompt, which is a
-   * privilege this read is deliberately not taking.
-   */
+  /** Names, types and sizes — never bytes; a filename answers "attach the HAR" without opening an untrusted-bytes path into a prompt. */
   readonly attachments: readonly JiraAttachment[];
 }
 
+/** What a watched ticket has done since anyone last looked; deliberately narrower than `IssueDetail`, which serves a solve instead. */
 export interface IssueActivity {
   readonly key: string;
   /** Jira's `status.statusCategory.key`: `new`, `indeterminate` or `done`. */
@@ -266,15 +156,7 @@ export interface IssueActivity {
   readonly content: IssueContent;
 }
 
-/**
- * Attachment media types worth inlining into a prompt as text.
- *
- * SVG is the case that motivated this: it is an image by media type and a text
- * file by content, so a naive `startsWith("image/")` check would have hidden
- * exactly the asset a ticket most often supplies. Everything outside this set
- * is listed by name and size and not fetched — a PNG rendered as mojibake helps
- * nobody and costs tokens in proportion to the file.
- */
+/** Attachment media types worth inlining into a prompt as text; SVG is the case that motivated this — an image by MIME type, text by content. */
 const INLINEABLE_MIME_TYPES: ReadonlySet<string> = new Set([
   "image/svg+xml",
   "application/json",
@@ -284,7 +166,6 @@ const INLINEABLE_MIME_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 export function isInlineable(mimeType: string): boolean {
-  // Strip any `; charset=utf-8` parameter before comparing.
   const bare = (mimeType.split(";")[0] ?? "").trim().toLowerCase();
   return bare.startsWith("text/") || INLINEABLE_MIME_TYPES.has(bare);
 }
@@ -314,7 +195,6 @@ export class JiraClient {
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
     } catch (error) {
-      // Network-level failure: no status to report.
       throw new JiraError(0, `Request to ${path} failed: ${(error as Error).message}`);
     }
 
@@ -325,13 +205,7 @@ export class JiraClient {
     return await this.#raise(response);
   }
 
-  /**
-   * Turns a non-OK response into the most specific error available.
-   *
-   * Shared by every verb so a 401 reads the same however it was provoked. Reads
-   * the body for context and never the request headers — the credential is in
-   * those, and an error message is the most likely thing to end up in a log.
-   */
+  /** Turns a non-OK response into the most specific error available; never reads request headers, since the credential lives there. */
   async #raise(response: Response): Promise<never> {
     const detail = (await response.text().catch(() => "")).slice(0, 300);
 
@@ -350,13 +224,7 @@ export class JiraClient {
     throw new JiraError(response.status, `Jira returned ${response.status}: ${detail}`);
   }
 
-  /**
-   * The one verb that changes anything, kept separate from `#post` on purpose.
-   *
-   * A reader auditing what this credential can do should be able to find every
-   * write by grepping for one method name. Folding it into `#post` with a
-   * `method` parameter would make that grep return the searches too.
-   */
+  /** The one verb that changes anything, kept separate from `#post` so every write can be found by grepping one method name. */
   async #put(path: string, body: unknown): Promise<void> {
     let response: Response;
     try {
@@ -377,7 +245,7 @@ export class JiraClient {
     if (!response.ok) {
       await this.#raise(response);
     }
-    // A successful issue edit is 204 with no body. Reading one would throw.
+    // A successful issue edit is 204 with no body; reading one would throw.
   }
 
   async #get(path: string, accept: string): Promise<Response> {
@@ -429,15 +297,7 @@ export class JiraClient {
     return collected;
   }
 
-  /**
-   * Everything one ticket says, for the one ticket a solve is about to act on.
-   *
-   * Asks for `comment` and `attachment` explicitly. Leaving them out is the
-   * mistake this method exists to correct: the solve path was about to be wired
-   * to `search`, whose `FIELDS` list has neither, which would have handed the
-   * solver a one-line summary and no acceptance criteria — while every comment
-   * in the pipeline described it as receiving "the ticket".
-   */
+  /** Everything one ticket says, for the one ticket a solve is about to act on; asks for `comment` and `attachment` explicitly, unlike `search`'s `FIELDS`. */
   async fetchDetail(key: string): Promise<IssueDetail> {
     assertIssueKey(key);
     const fields = "summary,issuetype,status,labels,description,comment,attachment";
@@ -452,9 +312,7 @@ export class JiraClient {
       id: String(raw.id ?? ""),
       author: raw.author?.displayName ?? "unknown",
       created: raw.created ?? "",
-      // Not defaulted to `created`. An absent `updated` means the payload is
-      // not the shape this code was written against, and a caller deciding
-      // whether to spend must see that rather than a plausible timestamp.
+      // Not defaulted to `created`: an absent `updated` must surface as such, not as a plausible timestamp.
       updated: raw.updated ?? "",
       body: raw.body,
     }));
@@ -486,53 +344,20 @@ export class JiraClient {
   }
 
   /**
-   * The activity on one watched ticket: has it closed, who has said what, and
-   * which fields have moved.
+   * The activity on one watched ticket: has it closed, who has said what, and which fields have
+   * moved — a read-only amendment to the discovery-only rule, narrower than `fetchDetail`, recorded
+   * in `ARCHITECTURE.md` §12 beside `updateLabels`.
    *
-   * **This is the second amendment to the discovery-only rule**, authorised
-   * 2026-09-06 after `updateLabels`. It is read-only, and it is narrower than
-   * `fetchDetail`, which this credential already performs on every solve — the
-   * new capability is the changelog, and nothing else. Recorded in
-   * `ARCHITECTURE.md` §12 beside the first.
-   *
-   * **Widened the same day to the blocker-clearing fields**, and deliberately
-   * recorded as a widening rather than a third amendment. It is four more
-   * read-only fields on a request this method already makes, asking for what
-   * `fetchDetail` asks for on every solve; the two amendments before it were
-   * different in kind — one a write, one a new endpoint exposing history. What
-   * forced it: the relevance check was being told `description` had moved and
-   * never shown what it said, so it correctly refused to certify content it
-   * could not see, and the commonest way a reporter answers a sendback could
-   * therefore never produce a yes. Failing closed, invisibly, on the main path.
-   *
-   * **Both lists are paged to completion and a cap is an error, not a
-   * truncation.** The obvious implementation is one request with
-   * `expand=changelog` and `fields=comment`, which is cheaper and wrong in a way
-   * that would never show up in a log: Jira decides how much of each list to
-   * return, so the count of our own comments — which is the entire bound on how
-   * much this ticket may cost (`MAX_RETRIAGE_PER_TICKET`) — would silently be a
-   * count of *some* of them. Undercounting there hands back a free re-triage per
-   * tick, which is the runaway `decideWatch` was written to prevent, arriving
-   * one layer below it. So a list this method cannot read whole is a refusal:
-   * visible, free, and fixable, where a quiet partial read is none of those.
-   *
-   * At `MAX_PAGES` × `MAX_RESULTS_PER_PAGE` the ceiling is 500 of each. A bug
-   * ticket at that volume is a conversation rather than a signal, which is the
-   * thing the bound exists to stop watching anyway.
+   * Both lists (`comment`, `changelog`) are paged to completion and a cap is a refusal, not a
+   * truncation: `expand=changelog`/`fields=comment` in one request would let Jira silently cap the
+   * page, and undercounting a `MAX_RETRIAGE_PER_TICKET` bound is worse than an explicit failure.
    */
   async fetchActivity(key: string): Promise<IssueActivity> {
     assertIssueKey(key);
 
-    // Labels ride along with the status because the caller that unsubscribes a
-    // ticket has to know whether the label is on it. Asking Jira to remove one
-    // that is not there is not an error — it is a write that changes nothing
-    // and still bumps `updated`, which is the field the solve queue orders by.
-    //
-    // The content fields ride along on this same request rather than on a
-    // second one. `BLOCKER_CLEARING_FIELDS` and this list are the same set seen
-    // from two sides — the changelog says which of them moved, this says what
-    // they now hold — and fetching one without the other is what left the
-    // relevance check judging a field name.
+    // Labels ride along because a caller unsubscribing a ticket must know whether the label is on it.
+    // The content fields ride along too: fetching them separately from the changelog is what once
+    // left the relevance check judging a field name instead of its value.
     const statusResponse = await this.#get(
       `/rest/api/3/issue/${key}?fields=status,labels,summary,description,environment,attachment`,
       "application/json",
@@ -565,9 +390,7 @@ export class JiraClient {
 
     return {
       key: statusPayload.key ?? key,
-      // Jira's three category keys are `new`, `indeterminate` and `done`. Only
-      // the last is a terminal, and it is compared rather than the status
-      // *name*, which is board-configurable and Norwegian on this one.
+      // Compared as the category key (`new`/`indeterminate`/`done`), never the status name, which is board-configurable and Norwegian here.
       statusCategoryKey: categoryKey,
       labels: statusPayload.fields?.labels ?? [],
       comments: comments.map((raw) => ({
@@ -595,13 +418,7 @@ export class JiraClient {
     };
   }
 
-  /**
-   * Reads one of Jira's `startAt`/`total` lists to the end, or refuses.
-   *
-   * Shared by both halves of `fetchActivity` because the failure they must not
-   * have is the same one, and writing it twice is how the two would come to
-   * disagree about it.
-   */
+  /** Reads one of Jira's `startAt`/`total` lists to the end, or refuses; shared so both halves of `fetchActivity` fail the same way. */
   async #page<T>(
     key: string,
     path: (startAt: number) => string,
@@ -630,25 +447,11 @@ export class JiraClient {
   }
 
   /**
-   * Adds and removes labels atomically, touching nothing else on the issue.
-   *
-   * `update.labels` with per-label `add`/`remove` operations, which is Jira
-   * applying a delta on the server rather than this process shipping a
-   * replacement array. That is the whole point: the read-modify-write the MCP
-   * tool forces has a window in which a human's edit is destroyed, and no
-   * amount of reading back afterwards closes it — read-back can catch a racer
-   * who wrote *after* us and structurally cannot catch one we overwrote. This
-   * has no window to close, because there is no read.
-   *
-   * Both lists are validated before the request is built, so a rejected label
-   * means nothing was sent at all. A partial application would be the worst
-   * outcome available: half a claim leaves the ticket in a state no reader of
-   * the state machine can name.
-   *
-   * Overlapping `add` and `remove` is refused rather than resolved. Jira would
-   * apply them in order and produce an answer, but which answer depends on
-   * argument order, and a caller that has asked for both has a bug that a
-   * defined-but-arbitrary result would hide.
+   * Adds and removes labels atomically via `update.labels`, so Jira applies the delta server-side
+   * rather than this process reading, modifying and writing back a full array — closing the window
+   * in which a human's concurrent edit gets clobbered. Both lists are validated before the request is
+   * built, so a rejected label sends nothing at all, and overlapping `add`/`remove` is refused rather
+   * than resolved, since the result would depend on argument order.
    */
   async updateLabels(
     key: string,
@@ -666,9 +469,7 @@ export class JiraClient {
       throw new JiraError(0, `Asked to both add and remove ${both.join(", ")} on ${key}`);
     }
     if (add.length === 0 && remove.length === 0) {
-      // Not an error, and not a request either. Sending an empty `update` would
-      // still bump the issue's `updated` timestamp, which the solve queue
-      // orders by.
+      // Not an error, and not a request either: an empty `update` would still bump `updated`.
       return;
     }
 
@@ -683,31 +484,17 @@ export class JiraClient {
     logger.info("jira.labels_updated", { key, add, remove });
   }
 
-  /**
-   * One attachment decoded as text, or `null` if it is too large.
-   *
-   * `null` rather than a truncated string, because half an SVG is not a smaller
-   * SVG — it is a broken one that a model would nonetheless try to use. A caller
-   * that gets `null` can say "attachment too large to inline" and name the file,
-   * which is a true statement; handing over the first 32KB would produce a
-   * confidently wrong artifact instead.
-   */
+  /** One attachment decoded as text, or `null` if too large; `null` rather than a truncated string, since half an SVG is a broken one. */
   async fetchAttachmentText(id: string, maxBytes: number): Promise<string | null> {
     const bytes = await this.fetchAttachmentBytes(id, maxBytes);
     return bytes === null ? null : bytes.toString("utf8");
   }
 
   /**
-   * The same download, undecoded, for the callers whose attachment is not text.
-   *
-   * `attachments/stage.ts` writes these to disk for a session to open with
-   * `Read`; decoding a PNG to a string first and encoding it back would not
-   * round-trip. Everything the text reader promises is promised here, because
-   * this is now where it happens.
-   *
-   * The size is checked twice, before and after the download. `content-length`
-   * is absent on chunked responses, so a check that trusted it would be a cap
-   * that any sufficiently large file could step around.
+   * The same download, undecoded, for callers whose attachment is not text (e.g. images written to
+   * disk by `attachments/stage.ts`). Size is checked twice, before and after download, since
+   * `content-length` is absent on chunked responses and a cap trusting it alone could be stepped
+   * around.
    */
   async fetchAttachmentBytes(id: string, maxBytes: number): Promise<Buffer | null> {
     assertAttachmentId(id);
@@ -765,13 +552,7 @@ interface RawHistory {
   readonly items?: readonly { readonly field?: string }[];
 }
 
-/**
- * The two shapes Jira uses for a paged list, in one type.
- *
- * `/issue/{key}/comment` names its array `comments` and `/issue/{key}/changelog`
- * names its `values`, which is why `#page` takes a reader rather than a key: the
- * pagination is identical and only the noun differs.
- */
+/** The two shapes Jira uses for a paged list: `comment` names its array `comments`, `changelog` names it `values`. */
 interface PagePayload<T> {
   readonly total?: number;
   readonly comments?: readonly T[];

@@ -1,38 +1,8 @@
 /**
- * The real `PassRunner`: the one place a solve pass becomes a process.
+ * The real `PassRunner`: turns a solve pass into a process, scoped to the worktree
+ * (never the repo) with no MCP servers and no Jira credential.
  *
- * `orchestrator.ts` decides *which* pass runs and *when*; this decides what it
- * runs *as*. Kept apart so the whole pipeline is testable without a model, and
- * so the privilege grant — working directory, environment, arguments — sits in
- * one short file a reviewer can read end to end.
- *
- * ## Three properties, all of them about containment
- *
- * 1. **The working directory is the worktree, never the repository.** The
- *    session's `Read`, `Grep` and `Glob` are rooted there, so "it can only see
- *    the copy" is a consequence of this line rather than of anything the model
- *    is asked to observe. Passing `repoPath` here would quietly hand every
- *    pass the operator's dirty checkout and the other five repositories beside
- *    it.
- *
- * 2. **The Jira credential does not travel.** `childEnv` is triage's, reused
- *    rather than reimplemented: the standing rule is that the REST credential
- *    is for discovering tickets and nothing else, and a rule enforced by two
- *    separate copies of the same filter is a rule with two chances to drift.
- *
- * 3. **No MCP server is required, and that is deliberate.** A solve pass reads
- *    the ticket as text handed to it, not from Jira, so it has no reason to
- *    hold a connection to anything it could also write through. `runTriage`
- *    passes `requiredMcpServers` because triage genuinely reads the issue;
- *    here the empty list is the point, not an omission.
- *
- * ## No retries, again
- *
- * A pass that dies is not re-run. Same argument as `exec.ts`: the pipeline
- * distinguishes "this did not work" from "we could not find out", and a silent
- * second attempt turns the second into the first. A `fix` pass in particular
- * may have written files before it died, so re-running it would not be a
- * retry — it would be a second pass over a worktree in an unknown state.
+ * A pass that dies is not retried — it may have left the worktree mid-write.
  */
 
 import { childEnv } from "../triage/runner.ts";
@@ -68,12 +38,12 @@ export function createPassRunner(config: PassRunnerConfig): PassRunner {
         {
           executable: config.executable,
           args: buildSolveArgs(pass, options),
-          // The worktree. See property 1 above.
+          // Never repoPath: that would hand the pass the operator's checkout and sibling repos.
           workingDirectory: options.worktreePath,
           idleMs: config.idleMs,
           maxRunMs: config.maxRunMs,
           env: childEnv(parentEnv, options.vaultPath),
-          // Empty on purpose. See property 3 above.
+          // A solve pass reads the ticket as text, not from Jira, so it needs no MCP server.
           requiredMcpServers: [],
           label: labelFor(pass, options.issueKey),
         },

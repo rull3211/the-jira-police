@@ -4,11 +4,9 @@ import { createAttemptLedger } from "./attempts.ts";
 
 describe("what stops the daemon claiming the same ticket forever", () => {
   it("offers a ticket the operator's number of times and no more", () => {
-    // THE ONE THAT MATTERS. A refused, failed or transiently abandoned run
-    // writes no terminal label and releases every label it found, `agent:start`
-    // included, so the queue offers the ticket again next tick. Unplug this and
-    // the loop pays the full solve cost on the same ticket every two minutes,
-    // with no condition that ever clears it — the runaway D4c recorded as E's.
+    // Without this bound, a refused/failed/abandoned run releases every label it
+    // found (including `agent:start`) and the queue offers the ticket again next
+    // tick, with nothing to ever stop it.
     const ledger = createAttemptLedger(3);
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -20,9 +18,8 @@ describe("what stops the daemon claiming the same ticket forever", () => {
   });
 
   it("counts the attempt at the cap as spent", () => {
-    // The mutation is `>` instead of `>=`, which hands out one attempt more than
-    // was asked for. It is the quiet kind of wrong: the bound still fires, one
-    // solve late, and every test that only checks "it eventually stops" passes.
+    // Guards against `>` in place of `>=`, which would grant one attempt more
+    // than the cap allows.
     const ledger = createAttemptLedger(1);
     ledger.attempted("SSX-1234");
 
@@ -30,9 +27,8 @@ describe("what stops the daemon claiming the same ticket forever", () => {
   });
 
   it("counts each ticket separately", () => {
-    // Keyed wrong — a single counter for the whole loop — and one bad ticket
-    // silently stops the queue for every other one, which looks like an empty
-    // board rather than like a brake.
+    // Guards against a single shared counter, which would let one bad ticket
+    // block every other ticket too.
     const ledger = createAttemptLedger(2);
     ledger.attempted("SSX-1111");
     ledger.attempted("SSX-1111");
@@ -51,9 +47,8 @@ describe("what stops the daemon claiming the same ticket forever", () => {
   });
 
   it("refuses everything when the cap is zero", () => {
-    // Zero means "look at the queue, claim nothing", which is the dry posture
-    // the review side spells `MAX_REVIEW_ROUNDS_PER_TICK=0`. It must not be
-    // treated as unset and floored up to the default.
+    // A cap of zero means claim nothing; it must not be treated as unset and
+    // floored up to a default.
     const ledger = createAttemptLedger(0);
 
     expect(ledger.exhausted("SSX-1234")).toBe(true);

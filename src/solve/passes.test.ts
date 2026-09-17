@@ -26,13 +26,7 @@ interface Captured {
   readonly label: string;
 }
 
-/**
- * The session options the runner passed, or a failure that says so.
- *
- * `mock.calls[0]?.[0] as Captured` types away a value that may not exist, and
- * a test that TypeErrors on a missing session reports the wrong thing. This
- * says "no session was started", which is the actual finding.
- */
+/** Throws a clear error instead of a TypeError when no session was captured. */
 function firstSession(): Captured {
   const first = runSession.mock.calls[0]?.[0] as Captured | undefined;
   if (first === undefined) {
@@ -41,7 +35,6 @@ function firstSession(): Captured {
   return first;
 }
 
-/** Runs one pass against the mocked session and returns what it was given. */
 async function capture(
   overrides: Partial<SolveRunOptions> = {},
   parentEnv: NodeJS.ProcessEnv = {},
@@ -64,8 +57,7 @@ async function capture(
 
 describe("createPassRunner", () => {
   it("runs the pass inside the worktree, not the repository", async () => {
-    // The session's Read, Grep and Glob are rooted here. This one line is why
-    // "it can only see the copy" is structural rather than an instruction.
+    // Read, Grep and Glob are scoped to whatever directory is passed here.
     const session = await capture();
 
     expect(session.workingDirectory).toBe("/tmp/solve/SSX-3822");
@@ -97,9 +89,8 @@ describe("createPassRunner", () => {
   });
 
   it("withholds the shell from the session it actually starts", async () => {
-    // The denylist is tested in runner.test.ts. This asserts the arguments the
-    // real runner builds are the ones that reach the process, which is the
-    // join those tests cannot see.
+    // The denylist itself is tested in runner.test.ts; this checks that the
+    // arguments it builds are the ones that reach the process.
     const session = await capture();
 
     const denied = session.args[session.args.indexOf("--disallowedTools") + 1] ?? "";
@@ -107,12 +98,8 @@ describe("createPassRunner", () => {
   });
 
   it("builds each pass's own arguments, so the grant follows the pass", async () => {
-    // Hardcoding a pass here survives every other test in this file, and the
-    // failure is asymmetric: pinning to `recon` merely breaks the fix pass,
-    // while pinning to `fix` hands recon Write and Edit. Recon being unable to
-    // write is what keeps "should this be attempted" and "here is the attempt"
-    // from collapsing into one answer, so it is asserted at the join and not
-    // only where the lists are declared.
+    // Recon must never receive Write or Edit; pinning the pass argument here
+    // would let that regress silently.
     const grant = async (pass: "recon" | "fix"): Promise<readonly string[]> => {
       runSession.mockReset();
       runSession.mockImplementation((_s: Captured, parse: (value: unknown) => unknown) =>
@@ -165,8 +152,8 @@ describe("createPassRunner", () => {
   });
 
   it("does not retry a pass that threw", async () => {
-    // A fix pass may have written files before it died. A second attempt is
-    // not a retry; it is a pass over a worktree in an unknown state.
+    // A fix pass may have written files before dying, so a second attempt is
+    // not a retry — it's a pass over a worktree in an unknown state.
     runSession.mockReset();
     runSession.mockRejectedValue(new Error("session died"));
 

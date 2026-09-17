@@ -1,33 +1,6 @@
 /**
- * Isolation for a solve run: a throwaway git worktree cut from the pristine
- * base, used once and thrown away.
- *
- * This exists because of what is actually on this machine. Of five SSX repos
- * checked out locally, three are dirty and on feature branches. A solver that
- * edited a working checkout would mix its changes into somebody's in-progress
- * work, and the first symptom would be a diff nobody could attribute. So the
- * solver never touches a checkout: it gets its own worktree, cut from
- * `origin/<base>` after a fetch, on a branch that did not exist a moment ago.
- *
- * ## No shell, ever
- *
- * Every command is an argv array handed to an injected runner, never a string.
- * There is no shell in this module and nothing here depends on quoting — which
- * matters more than usual, because one of the inputs is a Jira summary and Jira
- * summaries are written by whoever opened the ticket. See `slugify`.
- *
- * The runner is injected for the same reason `SolveDeps` and `ClaimCapabilities`
- * are: every rule below is then testable against a fake, with no git, no
- * network, and no repository on disk. A test that needed a real clone to
- * exercise the branch-name guard is a test nobody runs.
- *
- * ## The model has no part in this
- *
- * Nothing here is decided by a model. The path is derived from the issue key,
- * the branch from the key and the summary, the base ref from configuration.
- * That is deliberate: the worktree is the boundary the rest of Phase C relies
- * on, and a boundary whose location was suggested by the thing being contained
- * is not a boundary.
+ * Isolation for a solve run: a throwaway git worktree cut from the pristine base, used once and discarded.
+ * Every git command is an argv array handed to an injected runner, never a shell string, since a Jira summary is attacker-controlled.
  */
 
 import { logger } from "../logger.ts";
@@ -46,13 +19,7 @@ export interface CommandOptions {
   readonly timeoutMs: number;
 }
 
-/**
- * The one capability this module needs.
- *
- * `argv` and not a command string. A string would have to be split by
- * something, and whatever split it would become the place where a ticket
- * summary turns into an extra argument.
- */
+/** The one capability this module needs. `argv`, not a command string, so nothing has to split a ticket summary into extra arguments. */
 export interface CommandRunner {
   run: (argv: readonly string[], options: CommandOptions) => Promise<CommandResult>;
 }
@@ -74,17 +41,7 @@ export type RemoveResult =
   | {
       readonly outcome: "removed";
       readonly path: string;
-      /**
-       * Whether the branch went too, and why not when it did not.
-       *
-       * Removing the worktree leaves its branch behind — `git worktree remove`
-       * touches the checkout, not the ref — so every bail used to leak a ref
-       * into the pilot repository, one per run, invisibly. It is reported here
-       * rather than only logged because a leftover branch is the thing that
-       * makes the *next* run of the same ticket fail: the worktree path and the
-       * branch name are both derived from the issue key, so `worktree add -b`
-       * collides with the ref its own predecessor left.
-       */
+      /** Whether the branch went too: `git worktree remove` leaves it behind, and a leftover collides with the next run's `worktree add -b`. */
       readonly branch: BranchRemoval;
     }
   | { readonly outcome: "kept"; readonly path: string; readonly reason: string };
@@ -102,12 +59,7 @@ export interface WorktreeRequest {
   readonly parentDirectory: string;
   /** Remote-tracking ref to cut from, e.g. `origin/main`. */
   readonly baseRef: string;
-  /**
-   * Branch type — `fix` for a `Feil`, `feat` for an `Oppgave`. Defaults to
-   * `fix`. Must be on `WORK_BRANCH_PREFIXES`; anything else refuses the
-   * worktree rather than falling back, because a caller passing `main` here
-   * has made a mistake that must not be resolved into a working branch.
-   */
+  /** Branch type — `fix` for a `Feil`, `feat` for an `Oppgave`; must be on `WORK_BRANCH_PREFIXES` or the worktree is refused, not defaulted. */
   readonly branchPrefix?: string;
   readonly timeoutMs: number;
 }
@@ -115,14 +67,7 @@ export interface WorktreeRequest {
 /** Jira keys this service will act on. Anything else is refused unparsed. */
 const ISSUE_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/u;
 
-/**
- * Remote-tracking refs only, and only ones made of safe characters.
- *
- * Exported so `base-sync.ts` checks the base against the same rule this module
- * cuts worktrees from. Two spellings of "what a base ref may look like" is one
- * spelling too many when the looser of them decides what gets merged into a
- * branch under review.
- */
+/** Remote-tracking refs only, made of safe characters; exported so `base-sync.ts` checks bases against the same rule this module cuts from. */
 export const BASE_REF = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 
 /** What a finished branch name is allowed to look like, checked as a whole. */
@@ -131,21 +76,8 @@ const BRANCH = /^[a-z]+\/[a-z][a-z0-9]*-\d{1,7}-[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const MAX_SLUG_LENGTH = 40;
 
 /**
- * Turns a ticket summary into a branch-name fragment.
- *
- * An allowlist, not an escape. Everything outside `[a-z0-9]` becomes a
- * separator and runs of separators collapse, so there is no input — no
- * backslash, no quote, no control character, no right-to-left override, no
- * combining mark — that survives into the output as itself. That is the only
- * approach worth taking here: the input is a Jira summary, and the list of
- * characters git treats specially in a ref name is long enough
- * (`~ ^ : ? * [ \` , whitespace, `..`, `@{`, a leading `-` or `.`, a trailing
- * `.` or `.lock`) that enumerating what to remove invites missing one.
- *
- * Returns `""` for anything with no usable characters at all — a summary in a
- * script this cannot transliterate, or one made entirely of punctuation. The
- * caller refuses on empty rather than substituting a placeholder, because two
- * tickets that both slugified to `untitled` would race for one branch name.
+ * Turns a ticket summary into a branch-name fragment. An allowlist, not an escape: everything outside `[a-z0-9]` becomes a separator.
+ * Returns `""` for a summary with no usable characters; the caller refuses on empty rather than substituting a placeholder, since two tickets would then race for one branch name.
  */
 export function slugify(summary: string): string {
   return summary
@@ -158,34 +90,8 @@ export function slugify(summary: string): string {
 }
 
 /**
- * The branch for a ticket, or `null` if a safe one cannot be formed.
- *
- * Built from an allowlist and then re-checked as a whole against `BRANCH`. The
- * second check asserts the thing that actually reaches git, rather than the two
- * halves it was assembled from.
- *
- * Be precise about what that buys, because mutation testing was: **removing the
- * `BRANCH` check on its own kills no test**, and cannot, while `ISSUE_KEY` and
- * `slugify` both hold — by construction there is no input that reaches it in a
- * bad state. Removing it *together with* the empty-slug guard does fail tests.
- * So this is a backstop against a future edit loosening one of the other two,
- * not a control doing work today. Recorded rather than dressed up: a guard
- * whose test passes when you unplug it is exactly the thing this codebase
- * distrusts, and the honest version of that is to say which one it is.
- *
- * Follows the vault convention `{type}/{jira-id}-{slug}`
- * (`insurance-knowledge-vault/.ai-rules/git-conventions.md`), lowercased.
- * `prefix` defaults to `fix` because that is what the pilot queue is made of;
- * the skill solves `Oppgave` as readily as `Feil`, and calling that `fix/` too
- * would be a small lie told a hundred times.
- *
- * The `isWorkBranch` call at the end is the standing rule *"never main, never a
- * protected branch"* applied at the point of construction. It cannot fire while
- * `BRANCH` holds and `prefix` is on the allowlist — `BRANCH` requires a
- * `-<digits>-` segment that no protected name has. It is here because that
- * argument depends on the shape of a regex three constants away, and the rule
- * is absolute enough not to rest on that. Stated plainly rather than presented
- * as active defence.
+ * The branch for a ticket, or `null` if a safe one cannot be formed, following the `{type}/{jira-id}-{slug}` convention.
+ * The trailing `isWorkBranch` check cannot fire while `BRANCH` holds, but stays because the never-work-on-a-protected-branch rule must not rest on a regex three constants away.
  */
 export function branchNameFor(issueKey: string, summary: string, prefix = "fix"): string | null {
   if (!ISSUE_KEY.test(issueKey)) {
@@ -205,14 +111,7 @@ export function branchNameFor(issueKey: string, summary: string, prefix = "fix")
   return isWorkBranch(branch) ? branch : null;
 }
 
-/**
- * A command that did not do what it was asked.
- *
- * Exported for `base-sync.ts`, which runs git in the checkout this module
- * hands over and must read a failure the same way. `pr.ts` has a third copy,
- * predating both; it is left alone rather than folded in here, because moving
- * it is a change to the publish path and this is not that commit.
- */
+/** A command that did not do what it was asked. Exported for `base-sync.ts`, which must read a failure the same way. */
 export function failed(result: CommandResult): boolean {
   return result.timedOut || result.exitCode !== 0;
 }
@@ -229,51 +128,9 @@ export function why(result: CommandResult): string {
 /**
  * Creates the worktree, or refuses and leaves the machine untouched.
  *
- * Five commands, in this order, and the order is the point:
- *
- * 1. `fetch` — so the base ref means what it will mean for the PR later. A
- *    worktree cut from a stale `origin/main` produces a diff that conflicts on
- *    arrival and a review comment about code the author never saw.
- * 2. `rev-parse --verify` the base — separating "the base does not exist" from
- *    "the worktree could not be created", which `worktree add` reports with the
- *    same exit code.
- * 3. `worktree list --porcelain` — whether our own canonical path is already
- *    taken, which decides between step 4 and going straight to step 5.
- * 4. `salvageWorktree`, only when it is. See below.
- * 5. `worktree add -b` — `-b` and not a bare add, because `-b` fails when the
- *    branch already exists. That failure is wanted: a second run for the same
- *    ticket must not quietly reuse a branch that may already carry commits.
- *
- * ## Step 4 removes a wedge, and it does not weaken step 5
- *
- * Added 2026-09-11, from a ticket that could never have been solved again.
- * `unusable-base` returns its worktree **deliberately** — it is the only place
- * a base that builds elsewhere and not here can be reproduced — and nothing
- * removes it. So the next run for the same ticket met its own predecessor's
- * checkout holding its own predecessor's branch, failed here at `worktree add
- * -b`, and did so identically for ever. Both names derive from the issue key,
- * which is what makes the debris a landmine rather than litter — the phrase
- * `removeWorktree` already uses for the same collision arriving the other way.
- * Each attempt spent one of `MAX_SOLVE_ATTEMPTS_PER_TICKET` and not one of them
- * could have passed, so a transient fault — an expired registry token, in the
- * run that found this — was laundered into a permanently dead ticket.
- *
- * Salvaging rather than refusing is `attachWorktree`'s answer to the identical
- * wedge on the warm path, and it is safe here for the reason it is safe there:
- * **nothing is deleted.** The checkout is *moved* to a timestamped sibling, so
- * the evidence the `unusable-base` outcome exists to keep survives, at a path
- * the log names.
- *
- * **The guard in step 5 is untouched, and that is the delicate part.** This
- * fires only when a checkout sits at the path *this function derives from the
- * issue key* — our own debris, by construction. A branch that exists with no
- * worktree of ours on it still reaches step 5, still collides, and is still
- * refused, which is exactly the case `attachWorktree`'s header defends when it
- * argues this must not become a flag. The guard was never about paths we own.
- *
- * Refusals are returned, not thrown. A ticket whose summary yields no usable
- * slug is an ordinary occurrence, not a fault, and the cycle should record it
- * and move to the next ticket.
+ * Five commands: fetch, verify the base resolves, list existing worktrees, salvage one at our path if unusable, then `worktree add -b` —
+ * `-b` deliberately fails on an existing branch, so a second run for the same ticket cannot quietly reuse one that may carry commits.
+ * Refusals are returned, not thrown: a ticket whose summary yields no usable slug is an ordinary occurrence, not a fault.
  */
 export async function createWorktree(
   runner: CommandRunner,
@@ -314,10 +171,7 @@ export async function createWorktree(
     return refuse(`base ref ${baseRef} does not resolve to a commit (${why(base)})`);
   }
 
-  // Read before the add rather than after its failure, because the two causes
-  // of a collision want opposite answers and the exit code cannot tell them
-  // apart: a checkout of ours at this path is debris to move aside, a bare ref
-  // of that name is the thing step 5's `-b` exists to refuse.
+  // Read before the add: a checkout of ours here is debris to move aside, but a bare ref of that name is what `-b` below exists to refuse.
   const listed = await runner.run(["git", "-C", repoPath, "worktree", "list", "--porcelain"], opts);
   if (failed(listed)) {
     return refuse(`could not list the repository's worktrees (${why(listed)})`);
@@ -342,9 +196,7 @@ export async function createWorktree(
     opts,
   );
   if (failed(added)) {
-    // Nothing of ours is at the path — either it was clear or step 4 moved it —
-    // so a failure here is the branch name, and a branch with no worktree on it
-    // is the leftover `-b` is meant to refuse rather than reuse.
+    // Nothing of ours is at the path now, so a failure here is the branch name, a leftover with no worktree on it.
     return refuse(`could not create the worktree (${why(added)})`);
   }
 
@@ -354,10 +206,7 @@ export async function createWorktree(
 
 export interface AttachRequest {
   readonly issueKey: string;
-  /**
-   * The branch to attach to, as a bare name — `fix/ssx-3822-slug`, never
-   * `origin/fix/...`. **Untrusted**; see the function's header.
-   */
+  /** The branch to attach to, as a bare name — `fix/ssx-3822-slug`, never `origin/fix/...`. Untrusted; see the function's header. */
   readonly branch: string;
   readonly repoPath: string;
   readonly parentDirectory: string;
@@ -365,105 +214,11 @@ export interface AttachRequest {
 }
 
 /**
- * A worktree on a branch that already exists on the remote.
- *
- * The counterpart to {@link createWorktree}, and it exists because a review
- * round operates on a pull request that some earlier, finished run opened. That
- * run's worktree is gone — or was never on this machine, once a daemon is doing
- * this. What survives is a branch on `origin`, and answering a reviewer means
- * committing to *that* branch rather than to a fresh cut of the base.
- *
- * ## Why this is not a flag on `createWorktree`
- *
- * The two differ in the one place that matters. `createWorktree` uses
- * `worktree add -b`, and its failure on an already-existing branch *is* a
- * guard: it stops a second run for the same ticket from quietly reusing a
- * branch that may already carry commits. Attaching wants the opposite — the
- * branch must exist — so sharing one function would mean making that guard
- * conditional on an argument, and a guard an argument can switch off is not one
- * you can reason about from the call site. Two functions, one rule each.
- *
- * ## The branch name is not ours, and that is the new risk
- *
- * Every branch `createWorktree` touches was derived by `branchNameFor` from an
- * issue key and a summary. This one is *handed* a branch, and the caller reads
- * it off a pull request — so it is remote data, chosen by anybody who can open
- * a pull request on the repository. `isWorkBranch` is therefore re-checked
- * here rather than assumed of the caller. The difference between honouring it
- * and trusting the input is the difference between checking out
- * `fix/ssx-3822-thing` and checking out `main`, and *"the agent may never work
- * on main or any protected branch, never"* is not a rule that can rest on one
- * call site being right.
- *
- * ## The checkout is usually already there, and that is not a leftover
- *
- * Found by running `--advance` for the first time against a real pull request,
- * 2026-09-05. This function used to go straight to `worktree add --track -b`
- * and refuse when it collided, calling the collision *"a leftover from an
- * earlier run rather than something to work around"*. That sentence was wrong,
- * and wrong about the ordinary case: publishing a pull request **keeps** its
- * worktree so a human can read the diff, and `git worktree remove` never
- * deletes a branch. So every successful `--pr` leaves a clean checkout of
- * exactly the right branch at exactly the path a review round wants, and the
- * review round refused it. On the machine that opened the pull request — which
- * is every hand-driven run — attaching could not succeed even once.
- *
- * So an existing worktree is reused, but only after it has been *proved* to be
- * the thing we would have built. Three checks:
- *
- * - **on the expected branch**, or it is a different piece of work at a
- *   coincidental path,
- * - **clean**, or the round would sweep a human's uncommitted edits into a
- *   commit answering a code review — the single worst thing this module could
- *   do, and it would be attributed to them,
- * - **not ahead of `origin`**, or there are commits here the reviewer has never
- *   seen and a fast-forward would be a lie about what was reviewed.
- *
- * Behind is repaired in place with `merge --ff-only`: it is what a checkout
- * looks like after somebody pushed to the branch, and the merge cannot invent a
- * commit. Nothing here ever discards a commit or an edit; every destructive
- * resolution (`-B`, `reset --hard`, `add --force`) was considered and rejected
- * for that reason, since the value being protected is work a person did and did
- * not tell us about.
- *
- * ## Failing those checks used to stop the loop, and that was the bug
- *
- * Found 2026-09-06 with SSX-3835 four days into a silent wedge. Each of the
- * three failures above returned a refusal, and the argument for that — *somebody
- * else is holding this checkout* — reads as prudence and is a deadlock. The
- * path is `<parentDirectory>/<issueKey>`, a pure function of the ticket, so the
- * checkout the round refused is the checkout the *next* round finds. None of
- * the three states clears itself. And the refusal is free: it happens before
- * any session starts, so no cap counts it, no cost moves, and nothing is
- * labelled or commented. The loop retried the same failure every two minutes
- * for four days at $0 and told nobody.
- *
- * The invariant that was violated is worth naming, because it is not specific
- * to worktrees: **a tick's ability to make progress must not depend on the
- * previous tick having tidied up.** The dirt here was almost always our own —
- * a round that threw before its cleanup ran — and a `finally` narrows that
- * window without closing it, since `kill -9`, an OOM and a laptop that slept
- * through `SOLVE_TIMEOUT_MS` all skip it, and this service has already recorded
- * the last of those. Durability has to live in the next tick's recovery.
- *
- * **This paragraph was the whole record of that invariant, and that is why it
- * was violated again.** `createWorktree`, eighty lines down in this same file,
- * shipped the identical wedge on the cold path four days later (SSX-3886) —
- * nobody writing that function had a reason to read this header. The case is
- * now in `INCIDENTS.md` under "the same wedge, written twice in one file", at
- * two instances and no rule. **If you are changing either function, the other
- * one shares this invariant.**
- *
- * So a state failure now **salvages**: the checkout is moved aside intact
- * (`salvageWorktree`) and the cold path below rebuilds from the remote. Nothing
- * is deleted, so the argument that made these refusals attractive is preserved
- * — a human's work is still there, at a path named in the log — while the loop
- * stops depending on somebody noticing.
- *
- * A *read* failure still refuses, and the split is the whole design: git being
- * unavailable, or answering with counts that will not parse, might succeed on
- * the next tick, so retrying is right and moving a checkout we could not read
- * is not. Refuse what may pass later; salvage what never will.
+ * A worktree on a branch that already exists on the remote — the counterpart to {@link createWorktree}, for a review round answering an
+ * earlier run's pull request. The branch name is remote data (chosen by whoever opened the PR), so `isWorkBranch` is re-checked here.
+ * An existing checkout at the path is reused only if on the expected branch, clean, and not ahead of `origin`; a behind checkout is
+ * fast-forwarded, never rewritten. A *state* failure salvages the checkout aside so the cold path can rebuild; a *read* failure still
+ * refuses, since it might succeed next tick — a tick's progress must not depend on the previous tick having tidied up.
  */
 export async function attachWorktree(
   runner: CommandRunner,
@@ -490,10 +245,7 @@ export async function attachWorktree(
     return refuse(`could not fetch origin (${why(fetched)})`);
   }
 
-  // Resolved through the remote-tracking ref, not the local branch of the same
-  // name. A local `fix/ssx-3822-x` left behind by an earlier run on this
-  // machine can be stale, or ahead, or unrelated; the pull request under review
-  // is whatever `origin` has, and that is the only thing a reviewer has read.
+  // Resolved through the remote-tracking ref, not a same-named local branch, which could be stale, ahead, or unrelated.
   const remote = `origin/${branch}`;
   const head = await runner.run(
     ["git", "-C", repoPath, "rev-parse", "--verify", "--quiet", `${remote}^{commit}`],
@@ -516,12 +268,7 @@ export async function attachWorktree(
     if (reused.outcome !== "salvage") {
       return reused;
     }
-    // The checkout is unusable and the reason is a *state* rather than a failed
-    // read, so it is moved out of the way and the cold path below rebuilds from
-    // the remote. Refusing here instead — which is what this did — is what
-    // wedged the loop: the path is derived from the issue key, so the next tick
-    // finds the same checkout, refuses for the same reason, and does so for
-    // free, which means no cap fires and no cost signal moves.
+    // Moved out of the way rather than refused: refusing here wedges the loop, since the next tick would find the same checkout again.
     const salvaged = await salvageWorktree(runner, request, existing.branch, reused.reason, opts);
     if (salvaged !== null) {
       return salvaged;
@@ -533,8 +280,7 @@ export async function attachWorktree(
     opts,
   );
   if (failed(added)) {
-    // No worktree is at the path — that was just checked — so the collision is
-    // the branch, and a branch with no worktree on it is genuinely a leftover.
+    // No worktree is at the path — just checked — so a branch collision here is genuinely a leftover.
     return refuse(
       `could not attach a worktree to ${branch} (${why(added)}) — a local branch of that name with no worktree on it is the usual cause, and that is a leftover from an earlier run rather than something to work around`,
     );
@@ -545,33 +291,10 @@ export async function attachWorktree(
 }
 
 /**
- * The worktree registered at `path`, read from `git worktree list --porcelain`.
- *
- * Pure, and separate from the command that feeds it, because the interesting
- * cases are all shapes of text: a record for a *different* path whose branch
- * line would otherwise be read as ours, a detached checkout with no branch line
- * at all, and the last record in the output, which has no blank line after it.
- *
- * Porcelain rather than the human format on purpose — the plain listing prints
- * `<path> <sha> [<branch>]` with the branch in brackets, and a path containing
- * a space would make that ambiguous. Matching is exact string equality on the
- * path, and that stays: resolving here would mean an `fs` call in a pure
- * function whose whole value is that it is a string in and a verdict out.
- *
- * **The caller owes it a resolved path, and that is not a preference.** This
- * paragraph used to say a symlinked path merely "falls through to the cold path
- * and gets a refusal naming the path, which is a readable failure rather than a
- * silent reuse of the wrong checkout". That was wrong when it was written and
- * it is wrong now, on both callers. The path is a pure function of the issue
- * key, so the state the fallthrough refuses on is the state the next tick
- * finds: for `attachWorktree` that is SSX-3835 above — four days of identical
- * refusals every two minutes, at $0, telling nobody — and for `createWorktree`
- * it is the permanent wedge the call was added to remove. Neither is one bad
- * round. In both the refusal names a path that looks correct. Worse, the
- * default root *was* symlinked:
- * `tmpdir()` on macOS is `/var/folders/…` and git prints `/private/var/…`, so
- * the mismatch was the normal case rather than the exotic one. `worktreeRoot`
- * in `wiring.ts` resolves it once, and its header carries the reasoning.
+ * The worktree registered at `path`, read from `git worktree list --porcelain`. Porcelain rather than the human format, since the plain
+ * listing's `<path> <sha> [<branch>]` would be ambiguous for a path containing a space.
+ * The caller owes it a resolved path: matching is exact string equality, and macOS's `tmpdir()` (`/var/folders/…`) is a symlink to what
+ * git prints (`/private/var/…`), so an unresolved path silently falls through as if nothing were there. `worktreeRoot` in `wiring.ts` resolves it once.
  */
 export function worktreeAt(
   porcelain: string,
@@ -583,8 +306,7 @@ export function worktreeAt(
   for (const line of porcelain.split("\n")) {
     const text = line.trim();
     if (text.startsWith(marker)) {
-      // A new record begins. If we were inside ours it ended without naming a
-      // branch, which is a detached or bare checkout.
+      // A new record begins; if we were inside ours it ended without naming a branch, a detached or bare checkout.
       if (ours) {
         return { present: true, branch: null };
       }
@@ -604,15 +326,7 @@ export function worktreeAt(
   return ours ? { present: true, branch: null } : { present: false };
 }
 
-/**
- * A checkout that cannot be reused and whose state can be moved out of the way.
- *
- * Distinct from a refusal, and the line between them is the transient/
- * deterministic split. A failed *read* — git did not answer, the counts came
- * back unparseable — might succeed next tick, so it refuses and the loop
- * retries. A *state* the checkout is in will be the same state next tick and
- * for ever, so refusing is a permanent stop dressed as a retry.
- */
+/** A checkout that cannot be reused, distinct from a refusal: a failed *read* might succeed next tick, but a bad *state* never clears itself. */
 interface SalvageNeeded {
   readonly outcome: "salvage";
   /** Why it cannot be reused, as a clause that follows "the checkout at <path>". */
@@ -622,12 +336,8 @@ interface SalvageNeeded {
 const salvage = (reason: string): SalvageNeeded => ({ outcome: "salvage", reason });
 
 /**
- * Reuses the checkout already at the path, or says what is wrong with it.
- *
- * The repairs are argued in `attachWorktree`'s header. What is worth saying
- * here is the ordering: cleanliness is checked before the fast-forward, so a
- * worktree somebody is working in is never merged into, and the ahead/behind
- * counts are read in one command so the two numbers describe the same instant.
+ * Reuses the checkout already at the path, or says what is wrong with it. Cleanliness is checked before the fast-forward, so a worktree
+ * somebody is working in is never merged into, and the ahead/behind counts are read in one command so both describe the same instant.
  */
 async function reuseWorktree(
   runner: CommandRunner,
@@ -651,13 +361,7 @@ async function reuseWorktree(
     return refuse(`could not read the state of the worktree at ${path} (${why(status)})`);
   }
   if (status.stdout.trim() !== "") {
-    // Still never committed from — a review round commits everything it finds,
-    // and answering a reviewer with somebody else's work in progress under our
-    // name is the thing this guard exists to prevent. What changed is the
-    // remedy: the changes are moved aside intact rather than left in place with
-    // the loop stopped on top of them. Note the dirt is usually *ours*, from a
-    // round that threw before its cleanup ran, and git cannot tell us whose it
-    // is — so prevention is not available and preservation is.
+    // A review round commits everything it finds, so this guards against answering a reviewer with somebody else's work in progress.
     return salvage("it has uncommitted changes");
   }
 
@@ -672,9 +376,7 @@ async function reuseWorktree(
   const ahead = Number(aheadText);
   const behind = Number(behindText);
   if (!Number.isInteger(ahead) || !Number.isInteger(behind)) {
-    // Refused rather than assumed zero. Reading an unparseable count as "in
-    // sync" is how a checkout carrying unpushed commits gets committed on top
-    // of and pushed to a pull request under review.
+    // Refused rather than assumed zero: reading an unparseable count as "in sync" would let unpushed commits get pushed to a PR under review.
     return refuse(
       `could not read how ${path} compares with ${remote} — git answered ${JSON.stringify(counts.stdout.trim().slice(0, 100))}`,
     );
@@ -689,8 +391,7 @@ async function reuseWorktree(
   if (behind > 0) {
     const merged = await runner.run(["git", "-C", path, "merge", "--ff-only", remote], opts);
     if (failed(merged)) {
-      // A fast-forward that will not apply is a statement about the checkout,
-      // not about git being unavailable, so it salvages rather than refusing.
+      // A fast-forward that will not apply is a statement about the checkout, not git being unavailable, so it salvages rather than refuses.
       return salvage(`it cannot be fast-forwarded to ${remote} (${why(merged)})`);
     }
   }
@@ -699,17 +400,7 @@ async function reuseWorktree(
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
 }
 
-/**
- * The four fields a salvage needs, which is fewer than either caller carries.
- *
- * Narrower than `AttachRequest` on purpose. Both paths salvage now — the warm
- * one from `attachWorktree`, the cold one from `createWorktree` — and their
- * requests agree on nothing else: one is handed a branch that already exists on
- * the remote, the other derives a branch name that must not. Typing the
- * parameter as either request would make this function look like it belonged to
- * that path, and the next reader would have to check whether the other one was
- * allowed to call it.
- */
+/** The four fields a salvage needs, narrower than either caller's request on purpose, since typing it as either would make it look owned by that one path. */
 interface SalvageTarget {
   readonly issueKey: string;
   readonly branch: string;
@@ -718,63 +409,11 @@ interface SalvageTarget {
 }
 
 /**
- * Moves an unusable checkout aside so the canonical path can be rebuilt.
- *
- * Returns `null` on success, meaning *carry on* — the caller falls through to
- * the cold path and `worktree add` runs exactly as it would on a machine that
- * had never seen this ticket. A `WorktreeResult` is a refusal, and it is
- * returned whenever a step fails, because a half-salvage is worse than the
- * state it started from: a moved worktree whose branch is still checked out
- * there, or a deleted branch whose worktree is still at the canonical path,
- * are both things the cold path would trip over with a less legible error.
- *
- * ## Nothing is deleted, and that is the whole licence for this function
- *
- * The refusals this replaces were right about what they were protecting:
- * uncommitted edits, and commits the remote has never seen, both of which can
- * be somebody's unbacked-up work. Salvage keeps every byte of it. The directory
- * is *moved*, not removed, and the log names where it went, so the recovery is
- * a `cd` rather than a reflog expedition.
- *
- * ## The order is forced by git, not chosen
- *
- * 1. `checkout --detach` in the worktree. Git refuses to check out a branch
- *    that is already checked out in another worktree, so the cold path's
- *    `add -b <branch>` cannot run while this checkout holds the name. Detaching
- *    is the one operation that frees a branch name while touching neither the
- *    working tree nor the commit — dirty files stay dirty, and HEAD still
- *    points at the same commit, which is what keeps the "ahead" commits
- *    reachable after step 3. Skipped when the checkout is on some *other*
- *    branch: that name is not in our way, and detaching it would be a change to
- *    somebody else's checkout for no benefit.
- * 2. `worktree move` to a timestamped sibling. Frees the canonical path.
- * 3. `branch -D`, and only for a branch we detached in step 1. Git refuses to
- *    delete a branch checked out elsewhere, which is why it cannot come first;
- *    and by this point every commit on it is reachable from the salvaged
- *    worktree's detached HEAD, so `-D` destroys no history. A branch we did
- *    *not* detach is left alone — it may carry unpushed work of its own, and if
- *    it then collides, the cold path's refusal says so by name.
- *
- * ## A failed step refuses, and that is a wedge with a bound around it
- *
- * If `worktree move` fails deterministically — a locked worktree, a permission
- * problem — every tick refuses identically, which is the shape of the deadlock
- * this function exists to remove. The difference is that it is now the *only*
- * such path rather than the ordinary one, and something has to count it: unlike
- * the state refusals, a salvage failure is a failure to start.
- *
- * **The two callers are not bounded equally, and the weaker one is the new
- * one.** From `attachWorktree` the counter is the attempt count in the pull
- * request marker — on the ticket, surviving a restart, readable by a human.
- * From `createWorktree` there is no pull request and no marker yet, so the only
- * bound is `AttemptLedger` / `MAX_SOLVE_ATTEMPTS_PER_TICKET`, which is held in
- * memory, resets when the process restarts, and is ignored entirely by
- * hand-driven runs. That is weaker than the rule in BUILDING.md ("state lives
- * in the remote system") asks for, and it is a deliberate gap rather than an
- * oversight: the marker cannot be the bound before the marker exists. It holds
- * only because a `worktree move` that fails deterministically is rare and each
- * refusal is free. **If that stops being true, the cold path needs a counter on
- * the ticket, not a longer comment here.**
+ * Moves an unusable checkout aside so the canonical path can be rebuilt. Returns `null` to mean *carry on* to the cold path; any step
+ * failing returns a refusal instead, since a half-salvage (worktree moved but branch still checked out, or vice versa) is worse than the
+ * starting state. Nothing is deleted — the directory is moved and the log names where it went.
+ * Order is forced by git: `checkout --detach` frees the branch name (only if we hold it), then `worktree move` frees the canonical path,
+ * then `branch -D` deletes only a branch we detached in step 1 — one we did *not* detach may carry unpushed work of its own.
  */
 async function salvageWorktree(
   runner: CommandRunner,
@@ -799,9 +438,7 @@ async function salvageWorktree(
     }
   }
 
-  // Colons are legal in a path and awkward in every shell, so the timestamp is
-  // flattened. It is only there to keep two salvages of the same ticket from
-  // colliding; nothing reads it back.
+  // Colons are legal in a path and awkward in every shell, so the timestamp is flattened; it only exists to keep two salvages from colliding.
   const salvagePath = `${path}-salvaged-${new Date().toISOString().replaceAll(/[:.]/gu, "-")}`;
   const moved = await runner.run(
     ["git", "-C", repoPath, "worktree", "move", path, salvagePath],
@@ -822,17 +459,7 @@ async function salvageWorktree(
   return null;
 }
 
-/**
- * What the caller wants done with the checkout.
- *
- * This used to be `"succeeded" | "failed"` — the run's verdict — and the two
- * readings only coincided by luck. They part company at the first
- * `environment` abandon: the run did not succeed, and its worktree must still
- * go, because the retry cuts a fresh one at the same path from the same branch
- * name and would otherwise collide with its own predecessor. Naming the
- * disposition rather than the verdict means a caller has to say what it wants
- * instead of encoding it in a word that means something else.
- */
+/** What the caller wants done with the checkout. Not `"succeeded" | "failed"`: an abandoned run's worktree must still go so a retry doesn't collide with it. */
 export type Disposition =
   /** Remove it. Only ever safe when nothing was written, or nothing is wanted. */
   | "discard"
@@ -840,23 +467,11 @@ export type Disposition =
   | "keep-as-evidence";
 
 /**
- * Removes the worktree — but only when the caller asks for it gone.
- *
- * A failed run's worktree is the only copy of what the solver actually did, and
- * the diff in it is the evidence a human needs to decide whether the ticket was
- * mis-assessed as `agent:solvable` or the solver simply got it wrong. Deleting
- * that to keep the temp directory tidy trades the answer for the disk space.
- *
- * `--force` is deliberately absent. If git refuses because the worktree is
- * dirty, that is git reporting uncommitted work, and uncommitted work at this
- * point means the run did something the harness did not account for. Keep it
- * and say so.
- *
- * Removing the checkout is only half the cleanup: `git worktree remove` leaves
- * the branch behind. Both names are derived from the issue key, so a leftover
- * ref is not litter but a landmine — the next run of the same ticket fails at
- * `worktree add -b` on a branch its own predecessor created. So the branch goes
- * too, and whether it went is reported rather than only logged.
+ * Removes the worktree, only when the caller asks for it gone: a failed run's worktree is the only
+ * copy of the diff a human needs to judge it by, so it is kept rather than deleted for tidiness.
+ * `--force` is deliberately absent, since a dirty-worktree refusal means the run did something the
+ * harness did not account for. The branch is removed too, since `git worktree remove` leaves it
+ * behind and a leftover ref collides with the next run's `worktree add -b` on the same name.
  */
 export async function removeWorktree(
   runner: CommandRunner,
@@ -892,18 +507,10 @@ export async function removeWorktree(
 }
 
 /**
- * Deletes the branch the worktree was on, without forcing.
- *
- * `-d`, never `-D`, and the difference is the entire safety argument. `-d`
- * refuses to delete a branch holding commits that are not reachable from
- * elsewhere, so this can only ever remove a ref that points at something
- * already safe — which, for the branch of a run that bailed before writing
- * anything, is exactly the base commit it was cut from. If a future pass does
- * commit, git declines and the reason travels back rather than the work going
- * quietly missing. `-D` would turn this from tidying into deletion.
- *
- * Called only after the worktree is gone: git will not delete the branch of a
- * live worktree, so the order is not stylistic.
+ * Deletes the branch the worktree was on, without forcing: `-d` refuses to delete a branch holding
+ * commits unreachable elsewhere, so a future pass that did commit gets a refusal instead of losing
+ * work silently. Called only after the worktree is gone, since git will not delete the branch of a
+ * live worktree.
  */
 async function deleteBranch(
   runner: CommandRunner,

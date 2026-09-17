@@ -10,15 +10,9 @@ import {
 } from "./decide.ts";
 
 /**
- * A triage comment of ours, at a given time.
- *
- * `updated` defaults to `created`, which is what Jira returns for a comment
- * nobody has edited — and the default is where this file was wrong for a day.
- * The poster rewrites its own comment in place on every re-triage, so the real
- * ticket this feature watches has one comment of ours whose two timestamps
- * differ by however long the watch has been running. Every fixture below that
- * leaves them equal is describing a ticket triaged exactly once, and the tests
- * that need the other shape say so explicitly.
+ * A triage comment of ours, at a given time. `updated` defaults to `created`
+ * (a ticket triaged exactly once); tests needing the rewritten shape pass it
+ * explicitly.
  */
 function ourComment(created: string, updated: string = created) {
   return {
@@ -39,9 +33,8 @@ function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
     closed: false,
     comments: [ourComment("2026-09-01T10:00:00.000+0200")],
     changes: [],
-    // Empty rather than absent, and spelled out in each fixture that needs it:
-    // `tsc` fails every one of them if `WatchContent` grows a field, which is
-    // what keeps four literals in step where a hand-copied *list* could not be.
+    // Spelled out per fixture rather than shared, so tsc fails every one if
+    // `WatchContent` grows a field.
     content: { summary: "", description: "", environment: "", attachments: [] },
     ...overrides,
   };
@@ -49,10 +42,8 @@ function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
 
 describe("isOurComment", () => {
   it("keys on the sentinel rather than on an author", () => {
-    // There is no author to key on: the poster writes through an MCP session on
-    // a human's Atlassian account, so our comment and that human's own are
-    // indistinguishable by authorship. Same finding as `reviewerComments` on
-    // GitHub, same answer.
+    // No author to key on: the poster shares a human's Atlassian account, so
+    // authorship can't distinguish the two.
     expect(isOurComment(ourComment("2026-09-01T10:00:00.000+0200"))).toBe(true);
     expect(isOurComment(theirComment("2026-09-01T10:00:00.000+0200"))).toBe(false);
   });
@@ -60,17 +51,12 @@ describe("isOurComment", () => {
 
 describe("the self-trigger, which is the whole point of the function", () => {
   it("does not re-triage a ticket whose only activity is our own comment", () => {
-    // THE mutation named in the plan: unplug the author check and a test must
-    // fail with a re-triage on a ticket nobody touched. Its absence is
-    // invisible in review and obvious on the invoice.
     expect(decideWatch(signals(), 3)).toEqual({ kind: "quiet" });
   });
 
   it("does not re-triage on the label write that follows our own comment", () => {
-    // The precise shape of the runaway. Posting the comment sets `updated`, and
-    // the labels written a moment later set it again — so a rule reading
-    // `updated > ourLastComment` is true the instant we stop typing, and every
-    // watched ticket becomes one paid run per cycle forever.
+    // Posting sets `updated`, and our own follow-up label write sets it again —
+    // a naive rule would fire on that every cycle.
     const afterUs = signals({
       changes: [{ created: "2026-09-01T10:00:03.000+0200", fields: ["labels"] }],
     });
@@ -81,10 +67,8 @@ describe("the self-trigger, which is the whole point of the function", () => {
   it.each(["labels", "Component", "Link", "priority", "assignee", "Sprint", "Rank"])(
     "ignores a change to %s, which cannot clear a blocker",
     (field) => {
-      // Board grooming must not read as "the reporter responded". Over-
-      // triggering does not merely cost a run, it spends the ticket's whole
-      // re-triage budget on noise, so the watch is exhausted by the time the
-      // reporter actually answers.
+      // Board grooming must not read as "the reporter responded", or it burns
+      // the retriage budget on noise before the reporter actually answers.
       const groomed = signals({
         changes: [{ created: "2026-09-02T09:00:00.000+0200", fields: [field] }],
       });
@@ -110,11 +94,7 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("re-triages when somebody edits their own earlier comment to answer", () => {
-    // The blind spot recorded when this file was written, closed by accident:
-    // `updated` had to be fetched for our own comments, and once it is on the
-    // wire withholding it from this side would be choosing to keep missing the
-    // answers. A reporter appending the missing baseline to what they already
-    // wrote moves no `created` anywhere.
+    // A reporter appending an answer to an earlier comment moves no `created`.
     const amended = signals({
       comments: [
         theirComment(
@@ -130,9 +110,8 @@ describe("what does count as somebody else moving", () => {
   });
 
   it.each([...BLOCKER_CLEARING_FIELDS])("re-triages when %s is edited", (field) => {
-    // The description edit is the case the whole feature is built for: a
-    // reporter filling in a placeholder produces no comment at all, so a
-    // comments-only watch would miss the main trigger.
+    // A reporter filling in a placeholder field produces no comment at all, so
+    // a comments-only watch would miss it.
     const edited = signals({
       changes: [{ created: "2026-09-02T09:00:00.000+0200", fields: [field] }],
     });
@@ -144,8 +123,7 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("matches the field name case-insensitively", () => {
-    // Jira's changelog is inconsistent about capitalisation across field types,
-    // and a miss here is silent.
+    // Jira's changelog is inconsistent about capitalisation across field types.
     const edited = signals({
       changes: [{ created: "2026-09-02T09:00:00.000+0200", fields: ["Description"] }],
     });
@@ -154,9 +132,8 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("reads a mixed changelog entry, not just its first field", () => {
-    // One Jira edit produces one entry with several items. Checking only
-    // `fields[0]` would miss a description edit bundled with a label change,
-    // which is exactly what an edit made through the ticket form looks like.
+    // One Jira edit produces one entry with several items; checking only
+    // `fields[0]` would miss a description edit bundled with a label change.
     const bundled = signals({
       changes: [{ created: "2026-09-02T09:00:00.000+0200", fields: ["labels", "description"] }],
     });
@@ -165,12 +142,8 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("counts a comment written in the same millisecond as ours", () => {
-    // A tie goes to "somebody spoke", and that is what keeps the self-trigger
-    // guard alive. `spokeAt` is the maximum over our own comments, so under a
-    // strict `>` nothing of ours could ever match and dropping the
-    // `isOurComment` skip would change no answer — the guard the whole feature
-    // rests on would be untestable. With `>=` the skip is the only thing
-    // holding it, which is where a guard should be.
+    // A tie goes to "somebody spoke" (`>=`), so the `isOurComment` skip — not
+    // the clock — is what excludes our own activity.
     const collided = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
@@ -182,11 +155,8 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("counts a description edit made in the same millisecond as our comment", () => {
-    // Same rule as the comment tie, and it needs its own test because it is a
-    // different comparison. This service writes labels and comments and
-    // nothing else, so a `description` change can never be ours whatever its
-    // clock says — the allowlist has already excluded our own writes, and
-    // giving the tie away as well would drop a real edit for a coincidence.
+    // Same rule as the comment tie: a `description` change can never be ours,
+    // so the tie must not be given away for a coincidence of clock.
     const collided = signals({
       changes: [{ created: "2026-09-01T10:00:00.000+0200", fields: ["description"] }],
     });
@@ -195,8 +165,7 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("ignores somebody else's activity from BEFORE we last spoke", () => {
-    // Already accounted for: it was on the ticket when the comment was written,
-    // so the triage that produced our comment had it in front of it.
+    // Already accounted for: it was on the ticket when our comment was written.
     const stale = signals({
       comments: [
         theirComment("2026-09-01T08:00:00.000+0200"),
@@ -209,15 +178,9 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("measures from the last EDIT of our comment, not from when it was posted", () => {
-    // THE mutation for the `updated` half, and the one no fixture in this file
-    // could have caught before: the poster does not add a comment on a
-    // re-triage, it finds its own by the sentinel and rewrites it in place. So
-    // on the ticket this feature is built for there is exactly one comment of
-    // ours, posted at the first triage and edited at every one since. Date it
-    // by `created` and the mark sits days in the past, every foreign comment
-    // since stays newer than it forever, and the watch pays to re-triage the
-    // same unchanged activity on every sweep — §7b's infinite loop, arriving
-    // through the one write path that does the considerate thing.
+    // The poster rewrites its own comment in place on a re-triage rather than
+    // adding a new one; dating by `created` alone would pin the mark in the
+    // past and re-triage the same unchanged activity forever (§7b).
     const rewritten = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200", "2026-09-05T10:00:00.000+0200"),
@@ -230,9 +193,8 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("refuses when our comment's edit timestamp will not parse", () => {
-    // `touchedAt` takes the later of the two, so a half-readable comment must
-    // not quietly resolve to the readable half: that is a mark that is
-    // plausibly too early, and too early is the direction that spends.
+    // A half-readable comment must not resolve to its readable (too-early,
+    // overspending) half.
     const half = signals({
       comments: [ourComment("2026-09-01T10:00:00.000+0200", "not a date")],
     });
@@ -241,8 +203,7 @@ describe("what does count as somebody else moving", () => {
   });
 
   it("measures from our NEWEST comment when there are several", () => {
-    // Taking the oldest would re-triage on everything that happened between the
-    // two, all of which the later run already saw.
+    // Taking the oldest would re-triage on activity the later comment already saw.
     const twice = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
@@ -257,9 +218,8 @@ describe("what does count as somebody else moving", () => {
 
 describe("the terminals", () => {
   it("unsubscribes a closed ticket before anything else is read", () => {
-    // Checked first because it is free, and reachable at all only because the
-    // query deliberately does not filter closed tickets out — a ticket nothing
-    // can see is a ticket nothing can unsubscribe.
+    // Reachable at all only because the query deliberately doesn't filter out
+    // closed tickets — a ticket nothing can see is a ticket nothing can unsubscribe.
     const closed = signals({
       closed: true,
       comments: [],
@@ -282,13 +242,8 @@ describe("the terminals", () => {
   });
 
   it("counts re-triages and not comments of ours", () => {
-    // **The mutation this whole counter exists for, and the version it replaced
-    // failed it.** The poster rewrites its own comment in place, so a ticket
-    // re-triaged three times still has one comment of ours: count the comments
-    // and the brake reads zero forever on precisely the tickets that have spent
-    // the most. Count the label and the two facts stop being related — three
-    // comments of ours here, none of them re-triages, and the whole budget
-    // intact.
+    // The poster rewrites its own comment in place, so counting our comments
+    // would read a heavily re-triaged ticket as having spent nothing.
     const chatty = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
@@ -302,8 +257,7 @@ describe("the terminals", () => {
   });
 
   it("gives an unlabelled ticket its whole budget", () => {
-    // No counter is zero, not a refusal: a ticket nothing has spent on yet is
-    // the ordinary case and the one the watch exists for.
+    // No counter is zero, not a refusal.
     const fresh = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
@@ -315,8 +269,8 @@ describe("the terminals", () => {
   });
 
   it("counts the budget even when somebody is still talking", () => {
-    // The bound has to beat the trigger, or a ticket somebody edits daily is
-    // re-triaged daily and the limit never fires.
+    // The bound must beat the trigger, or a ticket edited daily is re-triaged
+    // daily and the limit never fires.
     const busy = signals({
       labels: ["agent:watching", "agent:retriage-4"],
       comments: [
@@ -341,10 +295,7 @@ describe("the terminals", () => {
   });
 
   it("refuses a counter it cannot read rather than treating it as a fresh ticket", () => {
-    // The marker rule from the review cursor, arriving in a second loop: a
-    // count that will not read must not read as zero, because losing the count
-    // and starting again from one is how a bounded loop quietly becomes an
-    // unbounded one.
+    // A count that will not read must not read as zero.
     const mangled = signals({
       labels: ["agent:watching", "agent:retriage-lots"],
       comments: [
@@ -360,10 +311,8 @@ describe("the terminals", () => {
   });
 
   it("refuses a watch with no comment of ours, which is the missing mark and not the count", () => {
-    // The counter is a label now, so this ticket is perfectly countable — and
-    // it is still refused, because there is no high-water mark. Every look
-    // would read as new and the first re-triage would judge the sendback
-    // against the conversation that produced it.
+    // Perfectly countable, but still refused: with no high-water mark every
+    // look reads as new.
     const handLabelled = signals({ comments: [theirComment("2026-09-02T08:00:00.000+0200")] });
 
     expect(decideWatch(handLabelled, 3)).toMatchObject({
@@ -373,8 +322,7 @@ describe("the terminals", () => {
   });
 
   it("refuses when our own comment carries an unreadable timestamp", () => {
-    // Same rule one step along: without a high-water mark every look reads as
-    // new, which is the unbounded loop with extra steps.
+    // Without a high-water mark every look reads as new.
     const mangled = signals({
       comments: [{ created: "not a date", updated: "not a date", text: FOOTER_SENTINEL }],
     });
@@ -386,9 +334,7 @@ describe("the terminals", () => {
   });
 
   it("treats a forged sentinel as ours, which is the safe direction", () => {
-    // A human can paste the footer line into a comment. That makes it read as
-    // ours, so it does not trigger a run and it does count against the bound —
-    // both of which end the watch sooner rather than spending more.
+    // A forged sentinel ends the watch sooner rather than spending more.
     const forged = signals({
       comments: [
         ourComment("2026-09-01T10:00:00.000+0200"),
@@ -410,12 +356,9 @@ function AT(iso: string): number {
 
 describe("newestForeignAt, which is what the memo remembers", () => {
   it("reports the newest foreign comment, not the one the decision returned on", () => {
-    // THE ONE THAT MATTERS, and the mutation is reading `WatchDecision.at`
-    // instead of calling this. `decideWatch` returns on its *first* trigger in
-    // list order, so on this ticket it names Tuesday and stops. A memo that
-    // remembered Tuesday would see Thursday as unjudged on the very next sweep
-    // and re-ask, forever — the loop the memo exists to close, restored by
-    // reading a field that looks like it means this.
+    // `decideWatch` returns on its first trigger in list order, so reading
+    // `WatchDecision.at` instead of calling this would remember Tuesday and
+    // re-ask about Thursday forever.
     const at = newestForeignAt(
       signals({
         comments: [
@@ -430,10 +373,8 @@ describe("newestForeignAt, which is what the memo remembers", () => {
   });
 
   it("never lets our own comment be the newest", () => {
-    // Our own comment is always at or after the high-water mark, by definition —
-    // it *is* the mark. Counting it would set the memo to the latest instant on
-    // the ticket every sweep, so nothing foreign could ever look new again and
-    // the watch would go permanently deaf while reporting healthy sweeps.
+    // Our own comment is always at or after the mark (it is the mark);
+    // counting it would make the watch permanently deaf while reporting healthy sweeps.
     const at = newestForeignAt(
       signals({
         comments: [
@@ -455,11 +396,8 @@ describe("newestForeignAt, which is what the memo remembers", () => {
   });
 
   it("ignores a field edit the decision would not have triggered on", () => {
-    // The mutation drops the `BLOCKER_CLEARING_FIELDS` filter, and it fails in
-    // the silent direction: a rank drag on Thursday advances the memo past a
-    // reporter's Tuesday answer, so the answer is skipped and never looked at
-    // again. This service writes labels constantly, which is the same reason
-    // `labels` must never join that set.
+    // Without the `BLOCKER_CLEARING_FIELDS` filter, a rank drag on Thursday
+    // would advance the memo past a reporter's Tuesday answer and skip it forever.
     const at = newestForeignAt(
       signals({
         comments: [
@@ -488,9 +426,8 @@ describe("newestForeignAt, which is what the memo remembers", () => {
   });
 
   it("dates a comment by whichever timestamp is later", () => {
-    // Same rule as the decision, because a reporter who answers by editing
-    // their own earlier comment moves only `updated`. If the two dated
-    // differently the memo could remember an instant the decision never saw.
+    // Same rule as the decision, or the memo could remember an instant the
+    // decision never saw.
     const at = newestForeignAt(
       signals({
         comments: [
@@ -504,9 +441,8 @@ describe("newestForeignAt, which is what the memo remembers", () => {
   });
 
   it("says nothing when there is no high-water mark", () => {
-    // No comment of ours means every look reads as new, which the decision
-    // unsubscribes on. Remembering an instant here would be remembering a
-    // judgement nobody made.
+    // No comment of ours means every look reads as new; remembering an instant
+    // here would remember a judgement nobody made.
     expect(
       newestForeignAt(signals({ comments: [theirComment("2026-09-02T08:00:00.000+0200")] })),
     ).toBeNaN();

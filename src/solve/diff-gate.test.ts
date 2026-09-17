@@ -8,10 +8,7 @@ import {
   pathEscapes,
 } from "./diff-gate.ts";
 
-/**
- * Written out rather than inlined as `\0`, because `"\0"` immediately followed
- * by a digit is an octal escape and a syntax error in a strict-mode module.
- */
+/** Written out rather than inlined as `\0`: `"\0"` immediately followed by a digit is an octal escape and a syntax error in strict mode. */
 const NUL = "\u0000";
 
 const ok = (path: string, added = 1, removed = 1): FileChange => ({ path, added, removed });
@@ -46,9 +43,7 @@ describe("pathEscapes", () => {
   });
 
   it("refuses a backslash rather than guessing what it separates", () => {
-    // The attack this blocks: `.github\workflows\ci.yml` is one filename to a
-    // POSIX regex and two path segments to Windows git, so a gate that let it
-    // through would report "not a CI file" about a CI file.
+    // One filename to a POSIX regex, two path segments to Windows git; letting it through would misreport a CI file.
     expect(pathEscapes(".github\\workflows\\ci.yml")).toBe(true);
   });
 
@@ -72,8 +67,7 @@ describe("parseNumstat", () => {
   });
 
   it("reads a rename as both of its paths", () => {
-    // The source is kept so a run cannot move a forbidden file to an innocuous
-    // name and have only the innocuous half inspected.
+    // The source is kept so a run cannot move a forbidden file to an innocuous name and have only that half inspected.
     expect(parseNumstat(`1\t1\t${NUL}old/x.ts${NUL}new/y.ts${NUL}`)).toEqual([
       { path: "old/x.ts", added: 0, removed: 0 },
       { path: "new/y.ts", added: 1, removed: 1 },
@@ -81,17 +75,14 @@ describe("parseNumstat", () => {
   });
 
   it("marks a binary change rather than reading it as zero lines", () => {
-    // numstat writes `-` for binary. Parsed as 0 it would look like the
-    // smallest possible change instead of an unreviewable one.
+    // numstat writes `-` for binary; parsed as 0 it would look like the smallest change instead of an unreviewable one.
     expect(parseNumstat(`-\t-\timg/logo.png${NUL}`)).toEqual([
       { path: "img/logo.png", added: null, removed: null },
     ]);
   });
 
   it("keeps a path containing a newline as one record", () => {
-    // This is the whole reason for -z. Without it git would quote and escape
-    // this name, and a line-oriented parser would see a second numstat record
-    // whose contents the model chose.
+    // The whole reason for -z: without it a line-oriented parser would see a second numstat record whose contents the model chose.
     const changes = parseNumstat(`1\t0\tsrc/we\nird.ts${NUL}`);
 
     expect(changes).toHaveLength(1);
@@ -99,9 +90,6 @@ describe("parseNumstat", () => {
   });
 
   it("throws rather than guessing at a malformed record", () => {
-    // A numstat this cannot read is not a diff that failed the gate; it is a
-    // gate that does not know what it is looking at, and the caller must be
-    // able to tell those apart.
     expect(() => parseNumstat(`1\tsrc/a.ts${NUL}`)).toThrow(DiffParseError);
     expect(() => parseNumstat(`x\t1\tsrc/a.ts${NUL}`)).toThrow(DiffParseError);
     expect(() => parseNumstat(`1\t1\t${NUL}only-one-half${NUL}`)).toThrow(DiffParseError);
@@ -123,13 +111,7 @@ describe("checkDiff — the plan's named refusals", () => {
   });
 
   it("does not refuse on size, however wide the diff is", () => {
-    // The fourth family, removed 2026-09-06. This is the mutation guard for its
-    // absence: restore either cap and this test fails, which is the only way an
-    // absent rule can be held in place by a test at all.
-    //
-    // The numbers are deliberately far past the caps that used to exist
-    // (5 files, 200 lines) rather than one past them, so that a reinstated cap
-    // is caught whatever value someone picks for it.
+    // Far past any cap that used to exist, so a reinstated cap is caught whatever value someone picks.
     const wide = Array.from({ length: 40 }, (_unused, index) =>
       ok(`src/f${String(index)}.ts`, 200),
     );
@@ -138,9 +120,6 @@ describe("checkDiff — the plan's named refusals", () => {
   });
 
   it("still measures what it no longer refuses", () => {
-    // The veto went; the measurement did not. `solve-outcome.ts` prints these
-    // two numbers on every verified run, so a reviewer is still told how wide
-    // the change was — which was the half of the cap worth keeping.
     const verdict = checkDiff([ok("src/a.ts", 10, 5), ok("src/b.ts", 1, 0)]);
 
     expect(verdict).toEqual({ ok: true, files: 2, lines: 16 });
@@ -148,9 +127,6 @@ describe("checkDiff — the plan's named refusals", () => {
 });
 
 describe("checkDiff — verification integrity", () => {
-  // The category that matters most, because tripping it means the run edited
-  // the signal a reviewer would use to judge the run.
-
   it("refuses the manifest, which defines what the harness runs", () => {
     expect(reasonsFor([ok("package.json")])).toContain("definition of passing");
   });
@@ -171,9 +147,7 @@ describe("checkDiff — verification integrity", () => {
   });
 
   it("refuses the Maven wrapper even though the harness does not run it", () => {
-    // `verify.ts` invokes `mvn` from PATH, so editing `mvnw` cannot change this
-    // run's verdict. It changes everyone else's, which is the wider blast
-    // radius and the reason this is refused rather than merely ignored.
+    // Editing `mvnw` cannot change this run's verdict, but it changes everyone else's.
     for (const path of [
       "mvnw",
       "mvnw.cmd",
@@ -185,12 +159,7 @@ describe("checkDiff — verification integrity", () => {
   });
 
   it("does not refuse a source file that merely mentions a build path", () => {
-    // The Maven patterns are anchored to a whole path segment at both ends, and
-    // this list is one path per anchor: drop any one of the four and the
-    // corresponding entry here is refused for containing a build path's name as
-    // a substring. `pom.xml.ts` is a fixture, `parent-pom.xml` is not the POM
-    // the build reads, `mvnwrapper.ts` is not the wrapper, and `legacy-mvnw` is
-    // not `mvnw`. Refusing any of them blocks an ordinary fix.
+    // The Maven patterns are anchored to a whole path segment at both ends.
     for (const path of [
       "src/fixtures/pom.xml.ts",
       "src/fixtures/parent-pom.xml",
@@ -203,10 +172,7 @@ describe("checkDiff — verification integrity", () => {
   });
 
   it("refuses these regardless of how small the change is", () => {
-    // Size does not enter into it, and never did — this rule was exempt from
-    // the caps back when there were caps. A one-line edit to the manifest is
-    // the dangerous size, not the safe one, because the danger is what the line
-    // says rather than how many there are.
+    // The danger is what the line says, not how many there are.
     const verdict = checkDiff([ok("package.json", 1, 1)]);
 
     expect(verdict.ok).toBe(false);
@@ -224,8 +190,6 @@ describe("checkDiff — the rest", () => {
   });
 
   it("refuses an empty diff", () => {
-    // A run that edits a file and reverts it arrives here looking exactly like
-    // success, and would otherwise open a PR containing nothing.
     expect(reasonsFor([])).toContain("nothing was fixed");
   });
 
@@ -234,8 +198,6 @@ describe("checkDiff — the rest", () => {
   });
 
   it("refuses the agent's own configuration", () => {
-    // A run that may edit these can widen what the next run is allowed to do,
-    // which makes the sandbox a formality.
     expect(reasonsFor([ok(".claude/settings.json")])).toContain("next run");
     expect(reasonsFor([ok(".storecode/some-config")])).toContain("next run");
   });
@@ -246,15 +208,11 @@ describe("checkDiff — the rest", () => {
   });
 
   it("does not mistake the CI directory for the git database", () => {
-    // `.git` and `.github` are separate rules and neither may shadow the other;
-    // if the first pattern matched both, the CI reason would never be given.
     expect(reasonsFor([ok(".github/workflows/ci.yml")])).not.toContain("rewrites history");
     expect(reasonsFor([ok(".git/config")])).toContain("rewrites history");
   });
 
   it("does not refuse an ordinary file whose name merely contains a forbidden word", () => {
-    // The rules are anchored to path segments. Over-refusing is cheap but it is
-    // still wrong, and a gate that cries wolf gets widened by whoever is on call.
     const verdict = checkDiff([ok("src/github-client.ts"), ok("src/env-parser.ts")]);
 
     expect(verdict.ok).toBe(true);
@@ -269,8 +227,6 @@ describe("checkDiff — the rest", () => {
   });
 
   it("says nothing about the contents of a path it refused as unsafe", () => {
-    // The pattern rules assume a normal relative path. Running them on one that
-    // escaped would produce a reason implying the path had been understood.
     const verdict = checkDiff([ok("../../.github/workflows/ci.yml")]);
 
     expect(verdict.ok).toBe(false);

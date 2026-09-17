@@ -23,7 +23,6 @@ describe("isProtectedRef", () => {
   );
 
   it.each(["Main", "MASTER", "  main  ", "MaIn"])("is not fooled by %s", (ref) => {
-    // This laptop's filesystem is case-insensitive, so these are the same ref.
     expect(isProtectedRef(ref)).toBe(true);
   });
 
@@ -35,8 +34,6 @@ describe("isProtectedRef", () => {
   );
 
   it("refuses the empty string rather than treating it as unprotected", () => {
-    // Not a ref at all. Whatever produced it is broken, and the safe reading
-    // of a value that should never have arrived is refusal.
     expect(isProtectedRef("")).toBe(true);
     expect(isProtectedRef("   ")).toBe(true);
   });
@@ -49,8 +46,7 @@ describe("isProtectedRef", () => {
   );
 
   it("does not read a work prefix as a remote name", () => {
-    // `feat/origin/thing` is a branch, not remote `feat`. Reading it the other
-    // way would drop the prefix and change what the later checks see.
+    // `feat/origin/thing` is a branch, not remote `feat`.
     expect(isProtectedRef("feat/origin/thing")).toBe(false);
   });
 });
@@ -82,8 +78,7 @@ describe("isWorkBranch", () => {
   it.each(["chore/main", "feat/release/2026-09", "fix/master"])(
     "refuses %s, which satisfies the allowlist while naming something protected",
     (branch) => {
-      // This is the case an allowlist alone misses, and the reason both halves
-      // are checked rather than one.
+      // The case an allowlist alone misses.
       expect(isWorkBranch(branch)).toBe(false);
     },
   );

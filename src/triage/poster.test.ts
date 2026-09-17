@@ -61,9 +61,7 @@ function receipt(overrides: Record<string, unknown> = {}) {
 
 describe("POSTER_TOOLS", () => {
   it("never grants the transition tool", () => {
-    // The skill promises never to change status — "not after a `y`, not for a
-    // close-as-duplicate". Withholding the tool makes that enforceable rather
-    // than merely promised.
+    // The skill promises never to change status; withholding the tool makes that enforceable.
     expect(POSTER_TOOLS.join(" ")).not.toContain("transitionJiraIssue");
   });
 
@@ -74,24 +72,19 @@ describe("POSTER_TOOLS", () => {
   });
 
   it("grants the reads that §11 requires the write to be based on", () => {
-    // Not blind: the label write must union against what is live, and the
-    // comment must update in place when one matching the sentinel and its own
-    // authorship exists. Both are reads.
     expect(POSTER_TOOLS).toContain("mcp__atlassian__getJiraIssue");
     expect(POSTER_TOOLS).toContain("mcp__atlassian__atlassianUserInfo");
   });
 
   it("grants nothing it could form a second opinion with", () => {
-    // This is the property that makes the poster a transcriber rather than a
-    // second analyst. No vault, no Confluence, no duplicate hunt.
+    // The property that makes the poster a transcriber rather than a second analyst.
     for (const tool of ["search", "Confluence", "Read", "Grep", "Glob"]) {
       expect(POSTER_TOOLS.join(" ")).not.toContain(tool);
     }
   });
 
   it("is a strict subset of nothing the analyst needs to think", () => {
-    // Sanity-check the two allowlists have genuinely diverged: the analyst's
-    // research tools must not have leaked into the writer's.
+    // Sanity-checks the two allowlists have genuinely diverged.
     const research = ALLOWED_TOOLS.filter((tool) => tool.includes("search") || tool === "Read");
 
     for (const tool of research) {
@@ -116,8 +109,7 @@ describe("buildPostPrompt", () => {
   });
 
   it("never invokes the skill, which would re-run the analysis", () => {
-    // The whole point of the split. A slash command here would pay for the
-    // grooming twice and post a verdict nobody checked.
+    // A slash command here would pay for the grooming twice and post a verdict nobody checked.
     const prompt = buildPostPrompt(options());
 
     expect(prompt).not.toContain("/intake-triage");
@@ -142,8 +134,7 @@ describe("buildPostPrompt", () => {
   });
 
   it("asks for a create otherwise, but still has it check first", () => {
-    // Belt and braces: the analyst decided create from what it saw a minute
-    // ago, and a duplicate comment is the failure this sentinel exists to stop.
+    // Belt and braces: the analyst's create decision is a minute stale by the time this runs.
     const prompt = buildPostPrompt(options({ commentAction: "create" }));
 
     expect(prompt).toContain("CREATE a new comment");
@@ -161,8 +152,7 @@ describe("buildPostPrompt", () => {
   });
 
   it("tells it to leave labels alone when there are none to change", () => {
-    // Otherwise it has a tool, an issue and no instruction — which is an
-    // invitation to tidy up.
+    // Otherwise it has a tool, an issue, and no instruction — an invitation to tidy up.
     const prompt = buildPostPrompt(options());
 
     expect(prompt).toContain("no change required. Do not call editJiraIssue");
@@ -203,10 +193,7 @@ describe("buildPostArgs", () => {
   });
 
   it("withholds the shell from the one component allowed to write", () => {
-    // The poster is supposed to mutate Jira, so it cannot be denied by being
-    // given nothing. What it must not have is a second route: Bash means curl,
-    // and curl means the whole REST API, including the status transition the
-    // prompt promises never to make.
+    // Bash means curl, and curl means the whole REST API — including the transition it promises never to make.
     const args = buildPostArgs(options());
     const denied = (args[args.indexOf("--disallowedTools") + 1] ?? "").split(",");
 
@@ -216,17 +203,14 @@ describe("buildPostArgs", () => {
   });
 
   it("does not deny the writes it exists to perform", () => {
-    // The failure this catches is silent and total: deny `editJiraIssue` and
-    // every post still "succeeds", having written nothing, because the poster
-    // reports what it did and what it did is now nothing. Cheaper to assert
-    // than to discover on the board.
+    // Denying `editJiraIssue` would make every post "succeed" silently, having written nothing.
     const overlap = POSTER_DENIED_TOOLS.filter((tool) => POSTER_TOOLS.includes(tool));
 
     expect(overlap).toEqual([]);
   });
 
   it("gives it no extra working directory", () => {
-    // The vault is the analyst's business. The poster has nothing to look up.
+    // The vault is the analyst's business; the poster has nothing to look up.
     expect(buildPostArgs(options())).not.toContain("--add-dir");
   });
 
@@ -284,8 +268,7 @@ describe("runPost", () => {
   });
 
   it("throws when the poster reports it did not post the comment", async () => {
-    // The one outcome that must not pass silently: a run that succeeded
-    // mechanically while doing nothing. Throwing sends the poller round again.
+    // Must not pass silently: a run that succeeded mechanically while doing nothing.
     runSession.mockResolvedValueOnce(receipt({ commentAction: "skipped" }));
 
     await expect(runPost(options())).rejects.toThrow(PostError);
@@ -306,8 +289,6 @@ describe("runPost", () => {
   });
 
   it("does NOT throw on a partial success, because the writes already landed", async () => {
-    // Failing the ticket here would send the poller round to redo work that
-    // partly succeeded. The comment is on the issue; the problem is logged.
     runSession.mockResolvedValueOnce(
       receipt({ commentAction: "created", problems: ["component was rejected by Jira"] }),
     );
@@ -325,8 +306,7 @@ describe("runPost", () => {
   });
 
   it("withholds the Jira REST credential from the write subprocess too", async () => {
-    // The discovery/grooming split holds on both sides: every mutation is made
-    // by the MCP session's own Jira user, never by the polling credential.
+    // Every mutation is made by the MCP session's own Jira user, never the polling credential.
     runSession.mockResolvedValueOnce(receipt());
     await runPost(options());
 
@@ -357,19 +337,14 @@ describe("findLabelDiscrepancies", () => {
   });
 
   it("says nothing when no label change was requested", () => {
-    // The poster is told not to call editJiraIssue at all in this case, so an
-    // empty labelsWritten is the correct outcome, not a missing write.
+    // An empty labelsWritten is the correct outcome here, not a missing write.
     expect(check({}, [])).toEqual([]);
   });
 });
 
 describe("post logging severity", () => {
   it("does NOT log an error when the write completed and the notes are advisory", async () => {
-    // REGRESSION, observed live on SSX-3822. Both entries were advisory — a
-    // tool the run routed around, and Jira normalising trailing whitespace —
-    // on a write that fully succeeded, yet this logged at error. An error line
-    // on a successful run is how a team learns to ignore error lines, and this
-    // one fired on every write the daemon made.
+    // An error line on a successful run is how a team learns to ignore error lines.
     const error = vi.spyOn(logger, "error").mockImplementation(() => {});
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
@@ -390,8 +365,7 @@ describe("post logging severity", () => {
   });
 
   it("DOES log an error when the labels that landed are not the ones requested", async () => {
-    // Severity is decided by comparing intent against the receipt's structured
-    // fields, never by reading the model's own prose about how it went.
+    // Severity is decided against the receipt's structured fields, never the model's own prose.
     const error = vi.spyOn(logger, "error").mockImplementation(() => {});
 
     runSession.mockResolvedValueOnce(

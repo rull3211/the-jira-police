@@ -1,65 +1,9 @@
 /**
- * The solve command line, parsed. Nothing here does anything; it only decides
- * what the operator asked for.
+ * The solve command line, parsed; decides nothing but what the operator asked for.
  *
- * Its own module rather than an export from `solve-once.ts`, which runs `main`
- * at import time — importing that file to test a pure function starts a run.
- * `triage-once.test.ts` lives with it; this does not have to.
- *
- * ## The ladder
- *
- * ```
- *   solve:once                    whole queue, reports what it would claim
- *   solve:once SSX-3822           one ticket, same reporting
- *   solve:once SSX-3822 --claim   writes the claim label
- *   solve:once SSX-3822 --solve   ... and runs the solver, nothing leaves the box
- *   solve:once SSX-3822 --pr      ... and opens the draft pull request
- *   solve:once SSX-3822 --review  ... and works the review until it cannot
- * ```
- *
- * Each flag is a whole phase's worth of privilege, so the command line reads as
- * the escalation it is. Passing two is not an error — the highest wins, because
- * `--claim --pr` can only coherently mean "go as far as the pull request".
- *
- * ## The ladder is cumulative, and this is the change that made it so
- *
- * `--pr` runs the claim and the solve as well. `includes` is the predicate, and
- * every caller asks it rather than comparing the phase for equality.
- *
- * This is the second thing this comment has said, and the history is the useful
- * part. It first said each flag implies the ones before it; that was rewritten,
- * because at the time `--solve` also promised that nothing left the machine and
- * `--claim` writes a label to Jira, so the two sentences could not both be true.
- * The phases had landed out of order — the solver (C) was wired while the claim
- * (B2) was not — and the honest description of that state was a ladder of
- * independent rungs where `--claim` refused and `--solve` worked.
- *
- * Both are wired now, so the reason for the inversion is gone and the chain is
- * back. What went with it is the "nothing leaves the machine" promise: at
- * `--solve` a label is written to the board before any pass runs, and the
- * usage text says so. The unchanged part is what the ordering *means* —
- * privilege read as blast radius. `--claim` writes to a board a team reads,
- * `--solve` changes files in a temporary worktree, `--pr` puts them in front of
- * other people. The rung you name is the furthest one you are willing to go.
- *
- * A run that stops short of its rung undoes its own claim: `releaseClaim` puts
- * the labels back exactly as they were found. That is in `solve-once.ts`, not
- * here, but it is the reason making the ladder cumulative is not a widening of
- * what a failed `--pr` leaves behind.
- *
- * ## Two refusals, and the second is the one that matters
- *
- * **An unknown flag is rejected.** Ignoring it would be safe today — a
- * mistyped `--pr` degrading to a dry run errs toward less privilege — but the
- * failure it sets up is a flag added later that this parser silently drops,
- * and an operator watching their `--no-verify` do nothing has no way to tell.
- *
- * **Anything past the dry run demands an issue key.** This is the load-bearing
- * one. Without it, `solve:once --pr` would mean "open a pull request for every
- * ticket in the queue" — an unbounded write, from a command line one character
- * shorter than the safe one, at the exact moment an operator is experimenting.
- * Every escalation in this ladder is meant to be a person choosing one ticket,
- * so the key is required by the parser rather than remembered by the caller.
+ * Its own module rather than an export from `solve-once.ts`, which runs `main` at import time.
+ * Flags form a ladder (`--claim` < `--solve` < `--pr` < `--review`); the highest one given wins,
+ * and any issue-scoped flag requires an issue key so a bare `--pr` cannot mean "every ticket."
  */
 
 /** In privilege order. The index into this array *is* the ordering. */
@@ -100,68 +44,27 @@ export const USAGE =
 /**
  * The flag that is not a rung.
  *
- * Every other flag names how far up one run should go, so they share an
- * ordering and the highest wins. This one names a *different run*: it operates
- * on a pull request an earlier, finished invocation opened, and the worktree it
- * needs is reconstructed from that pull request's branch rather than cut fresh.
+ * Every other flag names how far up one run should go; this one names a different run — it acts
+ * on a pull request an earlier invocation already opened. Reading it as a fifth rung would make
+ * `--advance` imply `--pr`, which is backwards, so combining it with a rung is refused rather
+ * than resolved.
  *
- * Reading it as a fifth rung would make `--advance` imply `--pr`, which is the
- * opposite of what the word means — the pull request is the precondition, not
- * the thing to create. So it is a separate mode, and combining it with a rung
- * is refused rather than resolved: `--pr --advance` has no coherent reading,
- * and the two guesses available (solve then advance, or advance then ignore the
- * solve) differ by a paid model pass and a force-push.
- *
- * ## `--review` is the fifth rung, and it is not this flag with a longer name
- *
- * The distinction is exactly the one above. `--advance` cannot be a rung because
- * it needs a pull request it did not make, so ordering it against `--pr` is a
- * guess. `--review` *is* a rung because it makes the pull request first: the
- * order is forced by the work rather than chosen by the parser, and every rung
- * below it runs unchanged. One run, going as far as a run can go.
- *
- * What it adds over `--pr` is the only unattended loop in this service: rounds
- * against whatever the reviewer says, until something ends it. That is E's
- * defining capability arriving early, and the thing that keeps it honest is that
- * it is bounded on four sides — `MAX_PR_ROUNDS_TOTAL` on the machinery,
- * `MAX_REVIEW_ITERATIONS` on the reviewer, `REVIEW_SILENCE_MS` on silence, and
- * every non-continuing outcome — and that a person typed one ticket key and is
- * watching it. `chainDecision` is where the first and last of those live.
+ * `--review` is not this flag with a longer name: it makes the pull request first, so its order
+ * is forced by the work rather than guessed by the parser, and it is bounded on four sides —
+ * `MAX_PR_ROUNDS_TOTAL`, `MAX_REVIEW_ITERATIONS`, `REVIEW_SILENCE_MS`, and every non-continuing
+ * outcome. `chainDecision` is where the bounds live.
  */
 const ADVANCE_FLAG = "--advance";
 
 /**
  * The other flag that is not a rung, and the only one that may run bare.
  *
- * `--watch` is `--advance` with the two things a loop needs: it keeps looking,
- * and it looks at the whole watched set rather than at one ticket. Everything it
- * can do to a pull request, `--advance` can already do once; what it adds is
- * that nobody has to type the command again.
+ * A bare `--watch` is allowed where a bare `--advance` is not because it only surveys first —
+ * two `gh` reads per pull request, no checkout — and spends only on the ones a reviewer actually
+ * wrote to; `MAX_REVIEW_ROUNDS_PER_TICK` bounds the worst case per pass.
  *
- * ## Why a bare `--watch` is allowed where a bare `--advance` is not
- *
- * `--advance` refuses to run without a key because it would otherwise push a
- * commit to every open pull request the queue knows about. That reasoning does
- * not carry over, and the difference is the survey. A bare `--watch` reads the
- * `agent:reviewing` / `agent:review-done` query and *looks* at every pull request
- * in it — two `gh` reads each, no checkout — and spends only on the ones a
- * reviewer has actually written to. The unbounded thing `--advance` was
- * protecting against is the checkout and the pass, and those are now behind a
- * gate that a quiet pull request does not open.
- *
- * It is also bounded where `--advance` is not: at most `MAX_REVIEW_ROUNDS_PER_TICK`
- * rounds per pass over the set, with the rest deferred to the next one. So the
- * worst case of the bare form is a number an operator can read off the banner
- * before it starts, which is the same argument `--review` makes for printing its
- * cost up front.
- *
- * ## It is still not a rung, for `--advance`'s reason
- *
- * It acts on pull requests earlier runs opened, so ordering it against `--pr` is
- * the same guess, and combining the two is refused rather than resolved.
- * Combining it with `--advance` is refused as well — not because the reading is
- * ambiguous, but because it is redundant in a way that hides which one is
- * running, and an operator who typed both should be told which they meant.
+ * Still not a rung, for `--advance`'s reason: it acts on pull requests earlier runs opened, so
+ * combining it with `--pr` or with `--advance` is refused rather than resolved.
  */
 const WATCH_FLAG = "--watch";
 
@@ -184,12 +87,10 @@ export type ParsedArgs =
   | { readonly ok: false; readonly error: string };
 
 /**
- * A parse that cannot come back as a review round.
+ * A parse that cannot come back as a review round — `bot:once` has no pull request to advance.
  *
- * `bot:once` triages a ticket and then solves it; there is no pull request in
- * its world yet, so `--advance` is not a flag it can honour. Narrowing the
- * return type rather than checking the mode at the call site means that command
- * stays a compile error away from silently ignoring the flag.
+ * Narrowed here rather than checked at the call site, so that command stays a compile error away
+ * from silently ignoring the flag.
  */
 export type ParsedLadderArgs =
   | { readonly ok: true; readonly invocation: LadderInvocation }
@@ -208,11 +109,9 @@ export function writes(phase: SolvePhase): boolean {
 /**
  * Whether asking for `phase` also means doing `step`.
  *
- * The whole of the ladder's cumulativeness, in one place. Call sites ask
- * `includes(phase, "claim")` rather than `phase === "claim"`, and the difference
- * is not stylistic: an equality check skips the claim on a `--pr` run, leaving
- * the solver working on a ticket the board still shows as unclaimed. Comparing
- * ranks rules that out, and makes inserting a rung a change to `PHASES` alone.
+ * Call sites compare ranks rather than checking `phase === "claim"`: an equality check would
+ * skip the claim on a `--pr` run, leaving the solver working on a ticket the board still shows
+ * as unclaimed.
  */
 export function includes(phase: SolvePhase, step: SolvePhase): boolean {
   return rank(phase) >= rank(step);
@@ -221,25 +120,13 @@ export function includes(phase: SolvePhase, step: SolvePhase): boolean {
 /**
  * Why a rung cannot run, or `null` when it can.
  *
- * ## What this used to be, and what it is now
+ * Checks whether the rung is configured, not whether it's built — `--pr` needs a GitHub owner
+ * with no fallback, and without this the missing setting would surface from
+ * `buildPublishRequest` only after the claim was written and the solver had run.
  *
- * It used to answer "is that phase built yet". Every rung above `plan` returned
- * a sentence naming the function nobody had composed, and landing a phase meant
- * deleting a branch. All four are built, so that version of the function would
- * now return `null` four times — a switch that has stopped asking anything.
- *
- * It is kept because the question it should have been asking all along is a
- * different one and does not go away: **is this rung configured**. `--pr` names
- * a GitHub owner that has no fallback, on purpose, and without this check the
- * missing setting would surface from `buildPublishRequest` — after the claim was
- * written and the solver had run. An operator would then have a labelled ticket,
- * a worktree full of edits and a settings error, for a mistake visible before
- * anything started.
- *
- * So it takes settings now, and it is still checked before the first write.
- * `buildPublishRequest` throws on the same condition and that duplication is
- * deliberate: this one exists to fail early and legibly, the other exists so the
- * privilege cannot be granted by a caller who skipped the check.
+ * `buildPublishRequest` throws on the same condition; the duplication is deliberate — this one
+ * fails early and legibly, the other ensures the privilege can't be granted by a caller who
+ * skipped the check.
  */
 export function unavailable(phase: SolvePhase, settings: LadderSettings): string | null {
   if (includes(phase, "pr") && settings.SOLVE_GITHUB_OWNER.trim() === "") {
@@ -249,11 +136,9 @@ export function unavailable(phase: SolvePhase, settings: LadderSettings): string
 }
 
 /**
- * The settings this module reads, named structurally rather than imported whole.
- *
- * `Settings` is every key the service has; depending on it here would make the
- * argument parser's test fixtures grow every time an unrelated setting is added,
- * and would obscure that this file reads exactly one.
+ * The settings this module reads, named structurally rather than imported whole — depending on
+ * the full `Settings` type would grow this parser's test fixtures every time an unrelated
+ * setting is added.
  */
 export interface LadderSettings {
   readonly SOLVE_GITHUB_OWNER: string;
@@ -300,11 +185,8 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   const issueKey = positional[0] ?? null;
 
   if (watch) {
-    // Both refusals are the same shape as `--advance`'s, and the second is not
-    // about ambiguity. `--advance --watch` reads perfectly well as "watch"; it
-    // is refused because the two differ by whether the command ever returns,
-    // and an operator who typed both should be told which they got rather than
-    // having it chosen for them.
+    // `--advance --watch` reads fine as "watch" but is refused anyway: the two differ by whether
+    // the command ever returns, and an operator who typed both should be told which they meant.
     if (namedRung) {
       return {
         ok: false,

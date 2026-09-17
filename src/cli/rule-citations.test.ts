@@ -21,10 +21,8 @@ const INCIDENTS = ".claude/skills/dev-house-rules/INCIDENTS.md";
 const STARTING = ".claude/skills/dev-house-rules/STARTING.md";
 
 /**
- * A stand-in for `docs-check.ts`'s `slugOf`, which is injected in production
- * precisely so there is one implementation of GitHub's anchor rule. It is not
- * copied here — these fixtures only need slugging to be *consistent*, and a
- * faithful copy in the test would be the second home this whole check exists to
+ * A stand-in for `docs-check.ts`'s `slugOf` — not copied, since these fixtures only need
+ * slugging to be consistent, and a faithful copy would be the second home this check exists to
  * catch.
  */
 function slugOf(heading: string): string {
@@ -46,12 +44,11 @@ interface Fixture {
 }
 
 /**
- * Builds an input whose pins agree with the fixture, so every test below
- * isolates the one thing it is about.
+ * Builds an input whose pins agree with the fixture, so every test below isolates the one thing
+ * it is about.
  *
- * Deriving the population here is safe only because one test overrides it with
- * a wrong value: that is where the pin is exercised, and without it this helper
- * would be quietly disabling the check it is setting up.
+ * Deriving the population here is safe only because one test overrides it with a wrong value —
+ * otherwise this helper would quietly disable the check it's setting up.
  */
 function fixture(over: Fixture = {}): RuleCitationInput {
   const bodies = over.files ?? {};
@@ -140,9 +137,8 @@ describe("ruleParagraphs", () => {
   });
 
   it("does not credit one rule's citation to the rule above it", () => {
-    // Two rules back to back. If the second paragraph counted as the first
-    // one's scope, the reported count of paragraphs citing nothing would be one
-    // lower than the corpus is.
+    // If the second paragraph counted as the first's scope, the reported count of paragraphs
+    // citing nothing would be one lower than the corpus is.
     const rules = ruleParagraphs(
       STARTING,
       [
@@ -159,10 +155,7 @@ describe("ruleParagraphs", () => {
   });
 
   it("does not count bold that opens a list item", () => {
-    // The noise assertion. FINISHING.md's eleven-item checklist and CLAUDE.md's
-    // four pinned questions are all `- **…**`, and counting them would put
-    // fifteen items into a population that is reported as rules. They are
-    // excluded by the definition rather than by an exemption list, so a new
+    // List items are excluded by the definition rather than an exemption list, so a new
     // checklist needs no maintenance here.
     const rules = ruleParagraphs(
       STARTING,
@@ -184,10 +177,8 @@ describe("ruleParagraphs", () => {
         "| ------ | -------------- |",
         "| **The unref that killed the loop** | running it once |",
         "",
-        // The blank line inside the fence matters: without it the sample is a
-        // continuation of the ``` line and would be excluded by the
-        // column-zero rule rather than by the masking, and the assertion would
-        // be green whether or not fences are masked at all. It was, once.
+        // The blank line inside the fence matters: without it the sample is excluded by the
+        // column-zero rule rather than by masking, and the assertion would pass either way.
         "```md",
         "A sample of how a rule is written:",
         "",
@@ -227,9 +218,8 @@ describe("maskFences", () => {
 
 describe("citedSlugs", () => {
   it("resolves the link against the citing document's own directory", () => {
-    // CLAUDE.md writes the whole path and the phase files write the bare
-    // filename. Both have to resolve to the same document, and a link into some
-    // other repository's INCIDENTS.md has to resolve to neither.
+    // CLAUDE.md writes the whole path, the phase files write the bare filename — both must
+    // resolve to the same document, and a link into another repository's must resolve to neither.
     const fromRoot = citedSlugs(
       { path: "CLAUDE.md", body: "[→](.claude/skills/dev-house-rules/INCIDENTS.md#a-slug)" },
       INCIDENTS,
@@ -273,9 +263,8 @@ describe("ruleCitationProblems — every citation resolves", () => {
   });
 
   it("counts a rule that cites nothing and does not fail on it", () => {
-    // The direction this check does not have. "Every rule cites an incident" is
-    // 41% true of the corpus, so the count is printed and nothing goes red —
-    // and the count is the only evidence the extractor is still looking.
+    // Not guarded: "every rule cites an incident" is only 41% true of the corpus, so the count
+    // is printed and nothing goes red.
     const report = ruleCitationProblems(
       fixture({
         incidents,
@@ -298,9 +287,8 @@ describe("ruleCitationProblems — every citation resolves", () => {
   });
 
   it("reports the dead slug in a document that also cites a live one", () => {
-    // The bug this replaced: the old check compared a rule's dangling links
-    // against *all* of its links and said nothing unless every one was broken,
-    // so a rule citing one real entry carried a broken sibling for free.
+    // Checks each link individually rather than "all links broken" — a rule citing one real
+    // entry no longer carries a broken sibling for free.
     const report = ruleCitationProblems(
       fixture({
         incidents,
@@ -319,10 +307,8 @@ describe("ruleCitationProblems — every citation resolves", () => {
   });
 
   it("checks a citation in a table row, which no rule paragraph contains", () => {
-    // 13 of the 69 citations in the tree are table rows and none of them opens
-    // a rule paragraph, so a check scoped to rules inspects none of them. A
-    // table is exactly where a retitled heading goes unnoticed: the row still
-    // reads correctly.
+    // A table row opens no rule paragraph, so a check scoped to rules would miss it — and a
+    // table is exactly where a retitled heading goes unnoticed, since the row still reads correctly.
     const report = ruleCitationProblems(
       fixture({
         incidents,
@@ -346,9 +332,8 @@ describe("ruleCitationProblems — incident to rule", () => {
   const entry = ["# Incidents", "", "### The silent guard", "", "Text."].join("\n");
 
   it("counts an entry cited only from outside CITING_FILES as uncited", () => {
-    // The whole value of the list. claude-validation-work and scaffolding-audit
-    // both link into INCIDENTS.md and are on no reading path; admitting them
-    // turns entries green on a citation nobody is routed to.
+    // claude-validation-work and scaffolding-audit link into INCIDENTS.md but are on no reading
+    // path; admitting them would turn entries green on a citation nobody is routed to.
     expect(CITING_FILES).not.toContain(".claude/skills/claude-validation-work/SKILL.md");
     expect(CITING_FILES).not.toContain(".claude/skills/scaffolding-audit/SKILL.md");
 
@@ -358,9 +343,8 @@ describe("ruleCitationProblems — incident to rule", () => {
       unresolvedOnPurpose: 0,
     });
 
-    // Handed to the check *and* citing the entry, and still it does not count:
-    // the filter is against CITING_FILES, not against what the caller passed.
-    // An exclusion a caller can undo with one more argument is not one.
+    // Handed to the check and citing the entry, and still doesn't count: the filter is against
+    // CITING_FILES, not against what the caller passed.
     const report = ruleCitationProblems({
       ...base,
       citing: [
@@ -402,9 +386,7 @@ describe("ruleCitationProblems — incident to rule", () => {
   });
 
   it("fails a counted **No rule yet** once that many entries share the tag", () => {
-    // INCIDENTS.md already says this in prose — "at instance two, write it" —
-    // about the entry that waited seven instances. This is the sentence with a
-    // command behind it.
+    // This is the mechanical form of INCIDENTS.md's own prose: "at instance two, write it."
     const one = ruleCitationProblems(
       fixture({ incidents: ["# Incidents", "", ...declaration("The first")].join("\n") }),
     );
@@ -475,10 +457,6 @@ describe("ruleCitationProblems — incident to rule", () => {
   });
 
   it("counts declarations written in the file, not entries nothing cites", () => {
-    // The confusion that gave the constant its first value: it was set to the
-    // number of uncited entries, on a tree carrying no declaration at all, and
-    // the message printed was "some were paid" — nothing had ever been paid or
-    // promised. Two orphans, no declarations, and the number says two.
     const report = ruleCitationProblems(
       fixture({
         incidents: [
@@ -505,8 +483,8 @@ describe("ruleCitationProblems — incident to rule", () => {
 
 describe("the pinned population", () => {
   it("fails when the population changes in either direction", () => {
-    // The anti-silent-stop assertion. Every other check here is satisfiable by
-    // an extractor that matches nothing; this is the one that is not.
+    // Every other check here is satisfiable by an extractor that matches nothing; this is the
+    // one that is not.
     const body = ["**One rule.** Text.", "", "**Two rules.** Text."].join("\n");
 
     const grew = ruleCitationProblems(
@@ -537,9 +515,8 @@ describe("the pinned population", () => {
 
 describe("the reported authoring gap", () => {
   it("takes the median of the most recent window and never fails on it", () => {
-    // Rejected as a guard on purpose: an incident found this afternoon whose
-    // rule is written this afternoon is the wanted behaviour, so the number is
-    // not decidable at the moment it would fire.
+    // Not a guard on purpose: an incident and its rule written the same afternoon is the wanted
+    // behaviour, so the number isn't decidable at the moment it would fire.
     const gaps = Array.from({ length: GAP_WINDOW + 5 }, (_, index) =>
       index < GAP_WINDOW ? 10 : 9000,
     );

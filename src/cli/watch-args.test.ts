@@ -41,9 +41,8 @@ describe("watchKey", () => {
   });
 
   it.each(["--write", "-v", "--dry-run"])("does not read %s as an issue key", (flag) => {
-    // The one that matters on the day `--write` lands: read as a key, it would
-    // look up a ticket called `--write`, find nothing, and report a clean sweep
-    // — a typo that produces a plausible-looking success.
+    // Read as a key, it would look up a ticket called `--write`, find nothing, and report a
+    // clean sweep — a typo producing a plausible-looking success.
     expect(watchKey([flag])).toBeNull();
   });
 
@@ -72,18 +71,15 @@ describe("watchWrites", () => {
   });
 
   it("refuses the name the flag used to have", () => {
-    // The one an operator's fingers already know. Read as a dry run it would
-    // report a clean sweep over tickets it declined to touch, which is the
-    // divergence the rename was made to close arriving through the rename.
+    // Read as a dry run, this would report a clean sweep over tickets it declined to touch.
     expect(() => watchWrites(["--unsubscribe"])).toThrow(/--unsubscribe is now --write/);
   });
 
   it.each(["--wrote", "--Write", "-write", "--dry-run"])(
     "refuses %s rather than guessing",
     (flag) => {
-      // Not "reads as the dry run": a near miss is a typo, and a typo that
-      // silently picks the safe branch is indistinguishable from a run that had
-      // nothing to do. Refusing says which of the two happened.
+      // A typo that silently picks the safe branch is indistinguishable from a run with nothing
+      // to do; refusing says which of the two happened.
       expect(() => watchWrites([flag])).toThrow(/does not know/);
     },
   );
@@ -112,10 +108,8 @@ describe("describeRetriage", () => {
   });
 
   it("gives each refusal its own words rather than one shared skip", () => {
-    // The three are *nobody answered*, *the counter is broken* and *Jira would
-    // not take the write*, and they are the difference between a watch working
-    // as designed and one that has quietly stopped counting. Collapse them and
-    // a sweep reads the same either way.
+    // The three are *nobody answered*, *the counter is broken* and *Jira would not take the
+    // write* — collapse them and a sweep reads the same either way.
     const lines = [
       describeRetriage({ kind: "irrelevant", reason: "it only promises the logs" }),
       describeRetriage({ kind: "unreserved", error: "Jira said 403" }),

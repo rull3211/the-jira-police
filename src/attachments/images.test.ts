@@ -23,10 +23,8 @@ function minimalFile(signature: ImageSignature): Buffer {
 }
 
 describe("the two questions, against the one table they come from", () => {
-  // Derived rather than listed. A fifth format added to `IMAGE_SIGNATURES` is
-  // covered here the day it is added; a literal list of four would keep passing
-  // and leave the new one untested — the defect this repository has named three
-  // times.
+  // Derived rather than listed, so a fifth format added to `IMAGE_SIGNATURES`
+  // is covered here automatically.
   it.each(IMAGE_SIGNATURES)("$mimeType is both fetched and recognised", (signature) => {
     expect(isStageableImage(signature.mimeType)).toBe(true);
     expect(sniffImage(minimalFile(signature))).toEqual({

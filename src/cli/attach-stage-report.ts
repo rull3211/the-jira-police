@@ -1,10 +1,7 @@
 /**
  * What `attach:stage` writes down and what it exits with.
  *
- * Split out of `attach-stage.ts` for the reason `watch-args.ts` gives: that
- * file ends in a top-level `await`, so importing it into a test runs the
- * command. The report and the exit rule are the two things about this dry run
- * worth asserting on, and neither of them can be asserted on from there.
+ * Split out of `attach-stage.ts` because that file ends in a top-level `await`, so importing it runs the command.
  */
 
 import type { ImageStageResult } from "../attachments/stage.ts";
@@ -12,14 +9,7 @@ import { describeStagedImages } from "../attachments/stage.ts";
 import type { IssueDetail } from "../jira/client.ts";
 import { oneLine } from "../text.ts";
 
-/**
- * Exit codes, because a wrapper has to be able to tell the outcomes apart.
- *
- * `refused` is the one worth spending a code on: the ticket had an image and
- * this could not produce it, which is the case every later phase has to bail
- * on. Reporting it as success would be the same substitution `stage.ts` splits
- * its outcomes to prevent, made again at the only boundary a script can read.
- */
+/** Exit codes so a wrapper can tell the outcomes apart; `refused` must not collapse into `ok`. */
 export const EXIT = { ok: 0, refused: 1, usage: 2, failed: 3 } as const;
 
 /** `none` is a ticket with no pictures, which is the common case and not a fault. */
@@ -27,14 +17,7 @@ export function exitCodeFor(result: ImageStageResult): number {
   return result.outcome === "refused" ? EXIT.refused : EXIT.ok;
 }
 
-/**
- * The artifact, which is the half of this a person reads tomorrow.
- *
- * Every field on an attachment row comes off the Jira response — the declared
- * MIME type as much as the filename — so the row is collapsed whole rather than
- * field by field, which is the version that does not need revisiting when a
- * fourth field is added to it.
- */
+/** Each attachment row is collapsed via `oneLine`, so a filename with embedded newlines cannot forge extra report lines. */
 export function formatReport(
   detail: IssueDetail,
   result: ImageStageResult,
@@ -66,10 +49,7 @@ export function formatReport(
 
   lines.push("", "## What a pass would have been given", "");
   if (result.outcome === "staged" && keptAt === null) {
-    // The block below is the one a pass would have been handed, quoted as it
-    // was: the paths in it were removed before this file was written, and a
-    // reader who tries to open one and finds nothing should be told why here
-    // rather than concluding the staging failed.
+    // Paths below were already removed by the time this is written; say so, or a reader concludes staging failed.
     lines.push(
       "_Quoted as it was. The paths were removed on the way out; `--keep` holds them._",
       "",

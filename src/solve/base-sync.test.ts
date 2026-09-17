@@ -1,14 +1,4 @@
-/**
- * The guards on merging a base into a branch that is under review.
- *
- * Every assertion here is about something the module must *not* do, which is
- * the shape of the risk: the happy path is one `git merge` and one `git push`,
- * and the interesting cases are all refusals. Three of them protect work that
- * cannot be recovered — a human's uncommitted edits, a conflict resolved by
- * discarding one side, a merge commit pushed under nobody's name — and the
- * rest exist because #2661 proved that a wrong answer here is not a wrong
- * answer, it is seventeen paid rounds of the same one.
- */
+/** The guards on merging a base into a branch under review; the happy path is one merge and one push, and the interesting cases are all refusals. */
 
 import { describe, expect, it } from "vitest";
 
@@ -20,15 +10,7 @@ const FAIL: CommandResult = { exitCode: 1, stdout: "", stderr: "fatal: nope", ti
 
 const out = (stdout: string): CommandResult => ({ ...OK, stdout });
 
-/**
- * Replies by matching the argv, not by counting calls.
- *
- * A positional script would pass a mutation that skipped a command and shifted
- * every later reply onto the wrong one, which is exactly the class of edit
- * these tests exist to catch. Matching on the argv means a test that expected
- * a `push` reply and got no `push` at all fails rather than silently reading
- * somebody else's answer.
- */
+/** Replies by matching the argv, not by counting calls, so a skipped command fails the test instead of silently shifting replies. */
 function fakeGit(replies: Readonly<Record<string, CommandResult>> = {}): CommandRunner & {
   calls: string[][];
 } {
@@ -62,7 +44,7 @@ const request = (overrides: Partial<BaseSyncRequest> = {}): BaseSyncRequest => (
   ...overrides,
 });
 
-/** A repository seven commits ahead of the branch, and everything else fine. */
+/** Seven commits behind the base, everything else fine. */
 const BEHIND_SEVEN = { "rev-list --count": out("7\n") };
 
 const reason = (result: Awaited<ReturnType<typeof syncWithBase>>): string =>
@@ -75,9 +57,7 @@ describe("syncWithBase", () => {
     const result = await syncWithBase(git, request());
 
     expect(result).toEqual({ outcome: "current" });
-    // The reason this matters beyond tidiness: `advance` calls this on every
-    // round that has work, and a merge commit per round on an up-to-date branch
-    // would be a wall of noise on a pull request a human has to read.
+    // Called on every round with work; a merge commit per round on an already-current branch would be noise on a reviewed PR.
     expect(ran(git, "merge")).toBe(false);
     expect(ran(git, "push")).toBe(false);
   });
@@ -88,11 +68,7 @@ describe("syncWithBase", () => {
     const result = await syncWithBase(git, request());
 
     expect(result).toEqual({ outcome: "merged", behind: 7 });
-    // Drop the push and this is the mutation that survives everything else: the
-    // merge is right, the round proceeds, and the checkout is now *ahead* of
-    // `origin` — which `attachWorktree` treats as unusable, so the next tick
-    // salvages it and rebuilds. One wedged pull request made fifteen
-    // `-salvaged-` directories that way.
+    // Without the push, the checkout is ahead of `origin`, which `attachWorktree` treats as unusable and salvages on the next tick.
     expect(ran(git, "push origin fix/ssx-3833-date-of-birth")).toBe(true);
   });
 
@@ -102,10 +78,7 @@ describe("syncWithBase", () => {
     await syncWithBase(git, request());
 
     const merge = git.calls.find((argv) => argv.includes("merge")) ?? [];
-    // `-c` is a git option and must precede the subcommand, so the position is
-    // load-bearing rather than cosmetic: after `-C` it is parsed as an argument
-    // to `merge` and the commit is attributed to whatever global config the
-    // machine happens to carry, or to nobody.
+    // `-c` must precede `-C`, or it's parsed as a `merge` argument and the commit is attributed to whatever global config exists, or nobody.
     expect(merge.indexOf("-c")).toBeLessThan(merge.indexOf("-C"));
     expect(merge).toContain("user.name=jira-police");
     expect(merge).toContain("user.email=jira-police@example.invalid");
@@ -117,9 +90,7 @@ describe("syncWithBase", () => {
     const result = await syncWithBase(git, request());
 
     expect(reason(result)).toContain("uncommitted changes");
-    // The worst thing this module could do, and the only one that is not
-    // recoverable: a merge commits everything it finds, and a merge commit is
-    // the last place anyone would look for their lost afternoon.
+    // Unrecoverable if this happened: a merge commits everything it finds.
     expect(ran(git, "merge")).toBe(false);
   });
 
@@ -137,9 +108,7 @@ describe("syncWithBase", () => {
       behind: 7,
       files: ["src/utils/DateUtils.ts", "package.json"],
     });
-    // Conflict markers in the working tree are uncommitted changes. Leave the
-    // merge in progress and the next tick's reuse check salvages the checkout —
-    // the loop tidies away the very state a resolver was meant to look at.
+    // A merge left in progress makes the next tick's reuse check salvage the checkout the resolver needed.
     expect(ran(git, "merge --abort")).toBe(true);
     expect(ran(git, "push")).toBe(false);
   });
@@ -149,9 +118,7 @@ describe("syncWithBase", () => {
 
     const result = await syncWithBase(git, request());
 
-    // A merge that fails with nothing in `--diff-filter=U` failed for some
-    // other reason — a hook, a lock, an index git would not touch — and that is
-    // not something a resolver can be handed a file list for.
+    // No paths in `--diff-filter=U` means the merge failed for some other reason a resolver can't be handed a file list for.
     expect(result.outcome).toBe("refused");
     expect(ran(git, "push")).toBe(false);
   });
@@ -162,11 +129,7 @@ describe("syncWithBase", () => {
     const result = await syncWithBase(git, request());
 
     expect(reason(result)).toContain("could not push");
-    // `ORIG_HEAD` is set by the merge and names the commit the branch was on a
-    // moment ago, so this discards our own merge commit and nothing else — the
-    // tree was proved clean two commands earlier. Without it the branch is
-    // ahead of `origin` with no way to get the commit there, which is the
-    // salvage churn again by a different route.
+    // `ORIG_HEAD` names the pre-merge commit, so this discards only our merge commit, not any other work.
     expect(ran(git, "reset --hard ORIG_HEAD")).toBe(true);
   });
 
@@ -175,9 +138,7 @@ describe("syncWithBase", () => {
 
     const result = await syncWithBase(git, request());
 
-    // Zero is the answer that skips the merge, so a count that will not parse
-    // must not land on it. That mutation is #2661 exactly: a stale branch
-    // declared current, and the round pays a pass to discover otherwise.
+    // Zero skips the merge, so an unparseable count must not land on it.
     expect(result.outcome).toBe("refused");
     expect(reason(result)).toContain("how far");
   });
@@ -187,9 +148,7 @@ describe("syncWithBase", () => {
 
     const result = await syncWithBase(git, request({ branch: "main" }));
 
-    // The standing rule, re-checked here rather than assumed of the caller,
-    // because this function commits and pushes and the branch name reaches it
-    // from a pull request.
+    // Re-checked rather than assumed of the caller, since this function commits and pushes.
     expect(reason(result)).toContain("not an implementation branch");
     expect(git.calls).toEqual([]);
   });
@@ -254,12 +213,7 @@ describe("attachSynced", () => {
 
     const result = await attachSynced(git, attachRequest);
 
-    // Not a refusal. A refusal reaches `recordFailedStart`, bounded at three and
-    // free, which is the right home for *this side cannot start* — and a
-    // conflict is not that: the checkout is fine, the branch is fine, and there
-    // is work to do that only a pass can do. So it comes back as its own outcome
-    // carrying the worktree, and the caller reserves a round for the merge pass
-    // rather than counting a failed start against a run that started perfectly.
+    // Not a refusal: the checkout and branch are fine, only the merge failed, and a resolver pass can fix it.
     expect(result.outcome).toBe("conflicted");
     if (result.outcome !== "conflicted") {
       return;
@@ -267,12 +221,9 @@ describe("attachSynced", () => {
     expect(result.worktree.path).toBe(`${attachRequest.parentDirectory}/${attachRequest.issueKey}`);
     expect(result.worktree.branch).toBe(attachRequest.branch);
     expect(result.behind).toBe(7);
-    // Read out of `--diff-filter=U`, never from a model: these paths decide what
-    // a resolver is allowed to have touched.
+    // Read from `--diff-filter=U`, never from a model: these paths decide what a resolver is allowed to touch.
     expect(result.files).toEqual(["src/utils/DateUtils.ts"]);
-    // Aborted before the handover. Conflict markers are uncommitted changes, and
-    // leaving them on disk is how the next tick's cleanliness check salvages away
-    // the state the resolver was going to work on. `beginMerge` re-cuts it.
+    // Aborted before the handover, so the reuse check finds nothing to salvage; `beginMerge` re-cuts the merge.
     expect(ran(git, "merge --abort")).toBe(true);
   });
 

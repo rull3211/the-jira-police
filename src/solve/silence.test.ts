@@ -14,9 +14,7 @@ describe("newestInstant", () => {
   });
 
   it("answers null when there is nothing to read", () => {
-    // Not the epoch, and this is the mutation worth naming: reading an absent
-    // date as 1970 would say the pull request had been quiet for fifty years,
-    // which fires the bound on exactly the payload it failed to understand.
+    // Not the epoch: reading an absent date as 1970 would say the pull request had been quiet for fifty years.
     expect(newestInstant([])).toBe(null);
     expect(newestInstant(["", "not a date"])).toBe(null);
   });
@@ -32,16 +30,12 @@ describe("quietFor", () => {
   });
 
   it("answers null when nothing carries a date, rather than zero or infinity", () => {
-    // The two wrong answers fail in opposite directions and both are worse than
-    // saying so: zero means the pull request is permanently busy and the bound
-    // never fires, infinity means it fires immediately.
+    // Zero would read as permanently busy (the bound never fires); infinity would fire immediately.
     expect(quietFor(NOW, [])).toBe(null);
   });
 
   it("clamps a future date to zero", () => {
-    // Clock skew between GitHub and this host, which is a fact about the two
-    // machines rather than about the pull request. Negative would read as
-    // "very recently active" by luck instead of by intent.
+    // Clock skew between GitHub and this host; negative would misread as "very recently active".
     const later = new Date(NOW + 60_000).toISOString();
 
     expect(quietFor(NOW, [later])).toBe(0);
@@ -55,10 +49,7 @@ describe("hasGoneQuiet", () => {
   });
 
   it("never fires on a measurement it does not have", () => {
-    // The guard on the guard. A bound that fires when it cannot measure is not
-    // a bound, it is a timeout on the measurement — and what it would end is a
-    // pull request somebody is waiting on. Unplug this and an unreadable
-    // payload silently abandons the pull request it could not read.
+    // Otherwise it would silently abandon a pull request it never actually read.
     expect(hasGoneQuiet(null, 1_200_000)).toBe(false);
     expect(hasGoneQuiet(null, 0)).toBe(false);
   });

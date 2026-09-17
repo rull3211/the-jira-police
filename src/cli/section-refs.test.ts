@@ -2,11 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { maskDisabled, referencesIn, sectionIds, unresolved } from "./section-refs.ts";
 
-// Every `§N` below is a fixture, so the region is the whole file rather than a
-// paragraph — the one place where that is the honest scope, since a reference
-// this file *makes* rather than tests would be the anomaly. The markers only
-// match a line that is nothing but a marker, which is why the ones appearing
-// inside the fixtures further down do not close this region.
+// Every `§N` below is a fixture, so the region is the whole file. The markers only match a line
+// that is nothing but a marker, so the ones inside the fixtures further down do not close it.
 // refs:off
 
 describe("sectionIds", () => {
@@ -36,9 +33,8 @@ describe("sectionIds", () => {
 
     expect(ids.has("14.1")).toBe(true);
     expect(ids.has("14.2")).toBe(true);
-    // The whole point of declaring it: §6.1 is a reference this check must
-    // catch, and inferring sub-sections from any numbered list would legalise
-    // it the moment §6 grew one.
+    // §6.1 is a reference this check must catch — inferring sub-sections from any numbered list
+    // would legalise it the moment §6 grew one.
     expect(ids.has("6.1")).toBe(false);
   });
 
@@ -90,9 +86,8 @@ describe("maskDisabled", () => {
   });
 
   it("runs an unterminated region to the end of the file", () => {
-    // Fails loudly by silencing the rest of the document. The alternative —
-    // ignoring an unclosed marker — silences nothing and reads identically in
-    // the diff, so the mistake would only ever show up as the check passing.
+    // Fails loudly by silencing the rest of the document — the alternative, ignoring an
+    // unclosed marker, reads identically in the diff and would only show up as a false pass.
     const masked = maskDisabled(["<!-- refs:off -->", "§7b", "§3a"].join("\n"));
 
     expect(masked).not.toContain("§7b");
@@ -125,8 +120,8 @@ describe("referencesIn", () => {
   });
 
   it("does not let a marker mentioned mid-sentence open a region", () => {
-    // This file and its module both have to document the markers. A substring
-    // rule made writing that sentence disable the rest of the document.
+    // A substring rule would let this very sentence, naming both markers, disable the rest of
+    // the document.
     const found = referencesIn("a.md", "Wrap it in `refs:off` and `refs:on`, then cite §3.");
 
     expect(found.map((ref) => ref.id)).toEqual(["3"]);

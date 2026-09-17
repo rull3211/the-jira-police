@@ -26,8 +26,7 @@ describe("parseDuration", () => {
   });
 
   it("does not silently accept a unit it cannot scale", () => {
-    // A typo like `4d` must fail loudly: falling back to milliseconds would
-    // turn an intended four days into four milliseconds.
+    // Falling back to milliseconds would turn a typo'd `4d` into four milliseconds.
     expect(() => parseDuration("4d")).toThrow(/Not a duration/);
   });
 });
