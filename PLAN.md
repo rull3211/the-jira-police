@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2600 tests in 75
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2605 tests in 75
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -194,15 +194,17 @@ The value is on all three paths and the risk is not, which is why the two are sp
 reports; what it saw reaches the fix pass as the **brief** — text, schema-bounded, in the transcript
 and in front of the gate. Pixels go no further than the session that has to look at them, because a
 human can read a brief and nobody can read a PNG after the fact. Triage is the widest of the two and
-gets a prerequisite rather than a caveat: the analyst is not denied `WebFetch` or `WebSearch`
-(`triage/runner.ts:103`) and `--allowedTools` withholds nothing (§14.12 of `ARCHITECTURE.md`), so it
-is the one session where an instruction smuggled in a screenshot has somewhere to send what it
-finds. That denial lands before the pixels do.
+gets a prerequisite rather than a caveat: `--allowedTools` withholds nothing (§14.12 of
+`ARCHITECTURE.md`), so until the analyst was denied the network it was the one session where an
+instruction smuggled in a screenshot had somewhere to send what it finds. That denial lands before
+the pixels do, and in this branch it lands in the same commit as them.
 
-Not built, in the order it may be built, each its own branch and each merged before the next starts:
+Not built, in the order it may be built, and no step starts before the one under it has merged:
 
-1. **The analyst loses `WebFetch` and `WebSearch`.** Independent of the rest and worth having
-   regardless.
+1. **The analyst loses `WebFetch`, `WebSearch` and `Task`.** Independent of the rest and worth
+   having regardless. `Task` joins the two the operator named because a subagent's tool surface is
+   not the parent's list and is not verified to inherit from it, so denying the first two while the
+   third stands is decorative (`solve/runner.ts:29-38`).
 2. **Recon reads staged images**, behind a setting that must be typed and defaults off — with the
    bail wording for the case the capability exists to serve: the evidence is a picture, the picture
    could not be staged, and the honest answer is to say so rather than to reconstruct it. **This is
@@ -210,6 +212,29 @@ Not built, in the order it may be built, each its own branch and each merged bef
    made it, and an unattended caller that dies between `mkdtemp` and the removal leaks one per kill,
    which is §22 with a second instance rather than a new problem.
 3. **Triage reads staged images**, after 1.
+
+**Branch:** `feat/triage-reads-images`, carrying 1 and 3 as one commit, off
+`feat/attachment-image-staging` because the stager is not merged yet. **Steps 1 and 3 are not
+separable in practice even though 1 is separately valuable** — 3 without 1 is the exfiltration path
+this section exists to refuse, and a reviewer reading either half alone sees a trade that was never
+offered: the denial without the reason it was worth paying for, or the pixels without the thing that
+makes them safe to look at. One commit is the smallest unit that cannot be reverted into the unsafe
+state. Step 2 stays unbuilt: `triage:once` does not drive recon, and wiring a consumer no test in
+this branch exercises is how the unobserved list grew in the first place.
+
+Why now: `attach:stage` has been driven at three real tickets and the stager is settled, but every
+run so far ends with a person reading the block. **Nothing has yet put a picture in front of a model
+by this route**, and that is the only claim the capability actually rests on. SSX-3918 is the target
+— a cropped green-screen capture holding a field name, `Nyt selskab`, that appears nowhere in the
+ticket's text — so the run either produces that string or the feature does not work.
+
+What would make it the wrong idea is the list below, unchanged, plus one this branch adds: **the
+analyst's denial is a list of strings, and only four of its names have ever been measured**
+(`runner.ts:103`). The probe that measured them named four other built-ins; `WebFetch`, `WebSearch`
+and `Task` rest on the same mechanism and were not in it, and the effect of the list on MCP names is
+unverified. A test asserts the three reach `--disallowedTools`, which is a claim about this
+service's command line and not about what the subprocess then does with it. If a future MCP server
+offers a fetch under another name, nothing here would notice.
 
 **Two images out of eight on SSX-3917 were dropped by the count cap, and they were the two largest
 and newest.** Both were far inside the size cap; they lost only on Jira's ordering, and on that

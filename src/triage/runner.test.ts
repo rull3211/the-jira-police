@@ -30,6 +30,11 @@ const BASE = {
   requiredMcpServers: ["atlassian"],
 } as const;
 
+const IMAGES = {
+  block: "## Images (1)\n\n- /tmp/stage/744806.png — shot.png (image/png, 58997 bytes)",
+  directory: "/tmp/stage",
+} as const;
+
 const MUTATION: Mutation = {
   commentBody: "## report",
   labelsAdd: [],
@@ -84,6 +89,27 @@ describe("buildPrompt", () => {
   it("leaves --no-html off for skills that never write a dashboard", () => {
     expect(buildPrompt(BASE)).not.toContain("--no-html");
   });
+
+  it("puts the staged-image block under the command rather than inside it", () => {
+    const prompt = buildPrompt({ ...BASE, images: IMAGES });
+
+    // The first line is parsed as a slash command and its flags, so a block
+    // joined with a space would arrive as arguments to the skill.
+    expect(prompt.split("\n")[0]).toBe("/intake-triage SSX-1234 --no-write");
+    expect(prompt).toContain(IMAGES.block);
+  });
+
+  it("is byte-identical to an imageless run when staging produced no block", () => {
+    // Staging that ran and found no raster image must look like staging that
+    // never ran. The branch is on the block's content rather than on `images`
+    // being present, and only this test separates the two: the prompt tests
+    // above never pass `images` at all, so a presence check satisfies every one
+    // of them while appending two blank lines to every ticket that has an
+    // attachment but no picture.
+    expect(buildPrompt({ ...BASE, images: { block: "", directory: null } })).toBe(
+      buildPrompt(BASE),
+    );
+  });
 });
 
 describe("buildArgs", () => {
@@ -103,6 +129,22 @@ describe("buildArgs", () => {
     expect(buildArgs(BASE).join(" ")).not.toContain("bypassPermissions");
   });
 
+  it("withholds the network and subagents, which is what lets this session read pictures", () => {
+    // The prerequisite for TRIAGE_IMAGES: an instruction painted into a
+    // screenshot arrives unread by anything else, so the session it reaches
+    // must have no way to act on it off-box. `Task` belongs with the other two
+    // because a subagent's tool surface is not this list and is not verified to
+    // inherit from it, which would make denying the first two decorative.
+    //
+    // Read off the command line rather than the constant: a correct list that
+    // never reaches `--disallowedTools` is the failure asserting on
+    // ANALYST_DENIED_TOOLS cannot distinguish from success.
+    const args = buildArgs(BASE);
+    const denied = (args[args.indexOf("--disallowedTools") + 1] ?? "").split(",");
+
+    expect(denied).toEqual(expect.arrayContaining(["WebFetch", "WebSearch", "Task"]));
+  });
+
   it("passes the schema inline, not as a path", () => {
     // Verified against the arg parser: a path is rejected as invalid JSON.
     const schema = buildArgs(BASE)[buildArgs(BASE).indexOf("--json-schema") + 1];
@@ -115,6 +157,23 @@ describe("buildArgs", () => {
     );
     const mocked = buildArgs({ ...BASE, allowedTools: [] });
     expect(mocked[mocked.indexOf("--allowedTools") + 1]).toBe("");
+  });
+
+  it("widens the workspace to the staged directory, alongside the vault", () => {
+    const args = buildArgs({ ...BASE, images: IMAGES, vaultPath: "/vaults/v" });
+    const dirs = args.filter((_, index) => args[index - 1] === "--add-dir");
+
+    expect(dirs).toEqual(["/vaults/v", "/tmp/stage"]);
+  });
+
+  it("names no staged directory when nothing was written to disk", () => {
+    // Both the refusal and the no-raster-image outcome leave `directory` null
+    // while still carrying text. An `--add-dir` naming a path that was never
+    // created fails the session at startup, which would turn a ticket with one
+    // unreadable attachment into a ticket with no verdict at all.
+    const args = buildArgs({ ...BASE, images: { block: "note", directory: null } });
+
+    expect(args).not.toContain("--add-dir");
   });
 
   it("adds the vault as a working directory so Read can reach it", () => {

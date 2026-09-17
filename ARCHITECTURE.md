@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2600 tests in 75 files, no build step, no
+Status: running end to end against production Jira. 2605 tests in 75 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -1440,10 +1440,11 @@ being widened or dropped:
   the write-holding passes: a screenshot is what most tickets here actually contain, and what the
   fix pass needs out of one reaches it as recon's brief rather than as pixels.
 
-  **What is built is inert.** `attachments/stage.ts` writes a ticket's images read-only under a
-  derived name and `attach:stage` prints the block a pass would be given; nothing in the triage or
-  solve path constructs either. Owed, each on its own branch: `WebFetch` and `WebSearch` off the
-  triage analyst, then recon behind a typed setting defaulting off, then triage. **The bound that
+  **What is built reaches triage and nothing else.** `attachments/stage.ts` writes a ticket's
+  images read-only under a derived name, `attach:stage` prints the block a pass would be given, and
+  `createGroom` hands both to the analyst when `TRIAGE_IMAGES` is on — which took `WebFetch`,
+  `WebSearch` and `Task` off that session first. No solve pass constructs either; recon behind a
+  typed setting is still owed. **The bound that
   does not exist is a text control over a picture** — `sanitiseUntrusted` sees a path, and an
   instruction painted into a screenshot reaches the model unread by anything else.
 
@@ -1487,7 +1488,7 @@ being widened or dropped:
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 48 settings are read**, and there are no orphan files.
+  the same sweep: **all 49 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

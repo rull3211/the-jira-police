@@ -119,6 +119,12 @@ export const SETTINGS = [
     fallback: "false",
   },
   {
+    name: "TRIAGE_IMAGES",
+    description:
+      "Whether the analyst is handed the ticket's image attachments as staged files. Off by default: it is the only setting that puts bytes this service cannot read into a model's context, and a picture is untrusted text that sanitiseUntrusted never sees. On, each triage costs one extra Jira detail fetch plus a download per image. The analyst is denied WebFetch, WebSearch and Task so that an instruction painted into a screenshot has nowhere to send what it finds — that denial is unconditional and does not depend on this setting.",
+    fallback: "false",
+  },
+  {
     name: "STORECODE_PATH",
     description: "Executable used to run the skill.",
     fallback: "storecode",
