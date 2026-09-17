@@ -228,9 +228,13 @@ by this route**, and that is the only claim the capability actually rests on. SS
 — a cropped green-screen capture holding a field name, `Nyt selskab`, that appears nowhere in the
 ticket's text — so the run either produces that string or the feature does not work.
 
-**State, 2026-09-17: the code is in `84de6ee` and the run has not happened.** Types, lint, the suite
-and `docs:check` are green, which is a statement about the tests. Nothing below this line has been
-observed, and a session resuming here should not describe any of it as working.
+**State, 2026-09-17: the code is in `84de6ee` and the run has happened, once, with `--write`.** Types,
+lint, the suite and `docs:check` were green before the run, which was a statement about the tests and
+not about the ticket. The leak-check line below was not run first — a directory from an earlier,
+unrelated `attach:stage --keep` inspection was already under the parent root — so this run is not the
+clean-slate observation it was specified to be. What it showed is recorded under **Measured** below
+the four predictions, and it does not read as a clean pass or a clean fail: read that paragraph rather
+than this one before deciding what "the run has happened" means.
 
 The run, and it is step 3 of the loop rather than a smoke test:
 
@@ -263,6 +267,28 @@ Predicted before the run, so that it can refute something:
 **What would falsify the feature rather than the wiring:** no `Nyt selskab`, with the staged block
 present in the transcript. That says the picture reached the context and was not read — the plumbing
 works and the capability does not, and §10's entry gets a harder sentence than the one it has.
+
+**Measured, 2026-09-17.** Prediction 1 as written is refuted: `grep -ic "nyt selskab"` is 0 in both
+the posted comment and `groomed/SSX-3918.md`. The capability it stood in for is not. The source image
+survives — kept read-only by that earlier, separate `attach:stage SSX-3918 --keep` inspection, not by
+this run (`.../jira-police-attach/SSX-3918-img-4f6Whx/744806.png`) — and reading it directly shows a
+three-line green-screen crop: `Afg.dato` / `15 09 26`, `Afg. årsag` / `94 Konv. ALIS`, and a third
+line, `Nyt selskab`, cropped before its value ever appears. The posted verdict quotes the first two
+lines verbatim, including the date — present in neither the ticket's description nor its comment
+history, so it has no source but the picture. It does not quote the third line, whose value the crop
+never shows and whose field answers nothing the ticket asks; the omission reads as selection, not
+blindness. **The binary the prediction was written against — that string, or the feature does not
+work — was a false dichotomy.** A third outcome happened: genuine image content reached the verdict,
+through a string nobody predicted, and by this entry's own fail-first framing the run would score as a
+failure while the capability it was built to test worked. Predictions 2 and 3 held as written: the
+fitness blockers dropped to the two DoR gaps, the screenshot question is marked resolved in the
+posted comment's own evidence line, and the JQL dedup, the `index.yaml` vault lookup and the SSX-3754
+link all completed. Prediction 4 is unresolved, not refuted: because the root was not emptied first, a
+directory from the unrelated `--keep` inspection was already sitting where this run's own would have
+been made; no directory attributable to this run's `mkdtemp` call survives it, consistent with the
+`finally` at `wiring.ts:344-351` firing, but that is inference from absence, not the clean-slate
+observation the run was specified to produce — rerun with the leak check honoured before this one
+counts as closed.
 
 What would make it the wrong idea is the list below, unchanged, plus one this branch adds: **the
 analyst's denial is a list of strings, and only four of its names have ever been measured**
@@ -399,19 +425,20 @@ environment cannot answer a question about CI's.**
   after a compaction — so neither the field name it branches on nor the fact of registration is
   confirmed from a session's own vantage point (`ARCHITECTURE.md` §16). It accepts both `trigger`
   and `source` for that reason.
-- **No model has read a staged image.** The stager itself is observed on three real tickets:
-  SSX-3822 took the SVG-only path and staged nothing, SSX-3917 met the caps on eight PNGs and
-  staged six, and SSX-3918 staged its single image and rendered the omission list empty. All three
-  opened and showed what their reporters meant — SSX-3918's holds a field name that appears nowhere
-  in its text. What none of them reaches is the thing the staging is for. `createGroom` now
-  constructs the stager behind `TRIAGE_IMAGES` (§4), but **built is not observed**: no session has
-  been handed a picture by this route and the block `describeStagedImages` writes has never been in
-  front of a model. The run that would settle it is specified in §4, down to the string it must
-  produce; until its output is in this file, this entry stands exactly as written. `refused` and the
-  byte cap have no real ticket behind them either. **A run leaves its only durable record in
-  `groomed/`, which is gitignored**, so the
-  next session cannot see that any of this happened and will assume none of it did — which is how
-  this entry first got written claiming a first run that was actually the third.
+- **A model has read a staged image, once, and the proof of it is not the one that was planned.**
+  The stager itself is observed on three real tickets: SSX-3822 took the SVG-only path and staged
+  nothing, SSX-3917 met the caps on eight PNGs and staged six, and SSX-3918 staged its single image
+  and rendered the omission list empty. On 2026-09-17, `TRIAGE_IMAGES=true pnpm triage:once SSX-3918
+  --write` reached the thing the staging is for: the posted verdict quotes a field label and a date
+  (`Afg. årsag`, `15 09 26`) that are in the image and nowhere in the ticket's own text, which is the
+  mechanical evidence §4's run was written to produce — by a different string than the one predicted
+  there, which §4 now records as its own false dichotomy. `refused`, the byte cap and the recon path
+  (§4 step 2) still have no real ticket behind them. **A run leaves its only durable record in
+  `groomed/`, which is gitignored, and in whatever the operator's own Jira account posted** — this
+  entry was corrected only because both were checked by hand against the live ticket and the staged
+  file itself, which is exactly the check that caught this entry claiming a first run that was
+  actually the third, the last time this bullet was wrong. A session starting fresh still cannot see
+  any of this from the repository alone.
 
 ### 11. Loose ends recorded in no other file
 
