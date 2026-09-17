@@ -185,6 +185,38 @@ exercises is how §10 grew. Whatever builds this owes a driver before it owes th
 is that driver, built first on this branch; the `RECON_IMAGES` setting and the image read itself are
 the remainder of this section, still unbuilt.
 
+**Wiring notes for the still-unbuilt half, so the next session does not re-derive the shape of
+`TRIAGE_IMAGES` from scratch:**
+
+- `RECON_IMAGES` mirrors `TRIAGE_IMAGES` in `settings.ts` exactly — boolean, defaults off, same
+  reasoning about untrusted bytes `sanitiseUntrusted` never sees.
+- The block-and-directory pair is `StagedImagePrompt` (`triage/runner.ts:188`), reused rather than
+  redefined — `solve/runner.ts` would import the type from there the way it already imports
+  `DENIED_BUILTIN_TOOLS` from `triage/session.ts`. `SolveRunOptions` (`solve/runner.ts:187`) gets an
+  `images?: StagedImagePrompt` field.
+- `buildSolvePrompt` (`solve/runner.ts:318`) splices the block in only when `pass === "recon"` —
+  not by trusting the caller to omit `images` on other passes, since `orchestrator.ts` builds one
+  `base: SolveRunOptions` object and reuses it across passes (`runPipeline` at line ~859,
+  `runReconOnly` at line ~755; `fix` spreads `{...base, brief}` from the same object at line ~909).
+  Gating on `pass` is the same pattern `buildSolveArgs` already uses for `writes` before adding
+  `readDirs` as `--add-dir`.
+- `buildSolveArgs` (`solve/runner.ts:428`) adds the staged directory as `--add-dir` the same way,
+  gated to the recon pass — mirrors `buildArgs`'s `imageDir` handling in `triage/runner.ts:463,483`.
+  `RECON_DENIED_TOOLS` already withholds `Write`/`Edit` by inheriting `DENIED_BUILTIN_TOOLS`, so no
+  change is owed there.
+- The staging call itself: `wiring.ts`'s `stageForTriage` (`wiring.ts:309`) is the pattern to
+  generalise or duplicate for recon — same `client.fetchDetail` + `stageImages` shape, called from
+  wherever `runPipeline`/`runReconOnly` build `base`, using `imageStageOptions(settings)` (already
+  built in Phase 1). Decide there whether one shared `stageForPass` helper is worth it or whether a
+  second near-identical function is the honest cost of two callers with different failure logging
+  (`triage.image_staging_failed` vs. a `solve.*` equivalent).
+- Needs its own `finally`-cleanup call to `removeStagedImages`, same as `createGroom` does. This is
+  exactly the second caller the age-based sweep is meant to backstop — but that sweep is Phase 4,
+  **still unbuilt as of this note** (only Phases 1 and 2 are committed, `e515e9c` and `c1551bf`), so
+  until it lands this caller's own `finally` is the only thing standing between a kill and a leaked
+  directory. Not a reason to defer the `finally`; if anything a reason to do Phase 4 before or
+  alongside this rather than after.
+
 **The count cap moves to 10 and becomes a setting rather than a constant.** Two images out of eight
 on SSX-3917 were dropped by the old cap of six, and they were the two largest and newest — both far
 inside the size cap, losing only on Jira's ordering, and on that ticket plausibly the ones a reader
