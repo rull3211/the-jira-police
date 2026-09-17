@@ -1,7 +1,7 @@
 /**
  * The WRITER half: applies an already-decided, checked mutation via its own Atlassian MCP
  * session, never the REST credential — except `updateLabels`, which writes `agent:*` over REST
- * since MCP's `editJiraIssue` has set semantics (`ARCHITECTURE.md` §12).
+ * since MCP's `editJiraIssue` has set semantics (`architecture/triage.md` §12).
  *
  * Given no skill, vault or search, so it cannot re-analyse; §11 still requires read access
  * (`getJiraIssue`, `atlassianUserInfo`) so the label union and comment idempotency can be checked.

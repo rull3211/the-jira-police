@@ -45,7 +45,7 @@ holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion w
 repoint every one of them — the failure §14 exists about. A missing number almost always means that
 entry shipped and was deleted. **One of them did not ship**, and it is named with the holes below
 rather than here, because the qualifier is worth nothing without the case: a hole list that flattens
-"built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `ARCHITECTURE.md` §16,
+"built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `architecture/guardrails.md` §16,
 every file that cited them has been repointed there, and what is still open from them is §17.
 
 <!-- refs:off -->
@@ -161,7 +161,7 @@ round takes the blame for it. Recorded, not fixed.
 
 ### 4. Recon reads staged images
 
-Triage reads them already, behind `TRIAGE_IMAGES`; `ARCHITECTURE.md` §7 has what constructs the
+Triage reads them already, behind `TRIAGE_IMAGES`; `architecture/module-map.md` §7 has what constructs the
 stager, §13 the operator's 2026-09-16 decision and the phases it covered, and §14.11 the bounds the
 widening bought and the one it did not. **Recon is the remainder of that authorisation, and nothing
 drives it.** The pixels stop at the passes holding no `Write` by the same decision, so the fix pass
@@ -304,7 +304,7 @@ environment cannot answer a question about CI's.**
 - **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
   suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
   after a compaction — so neither the field name it branches on nor the fact of registration is
-  confirmed from a session's own vantage point (`ARCHITECTURE.md` §16). It accepts both `trigger`
+  confirmed from a session's own vantage point (`architecture/guardrails.md` §16). It accepts both `trigger`
   and `source` for that reason.
 - **The analyst's denial list is a list of strings, and only four of its names have ever been
   measured** (`runner.ts:103`). The probe that measured them named four other built-ins; `WebFetch`,
@@ -454,7 +454,7 @@ not a plan item. What is left below is only what is still missing.
 - **This one is closed, and is kept because it was wrong in a specific way.** It said registration
   was the operator's and outside this tree, so every guard was built inert and the whole of the
   evidence was `pnpm test:hooks` and hand-fed payloads, never an observed refusal. Registration moved
-  into the tree as PR #23 and a refusal **was** observed on 2026-09-09 (`ARCHITECTURE.md` §16). The
+  into the tree as PR #23 and a refusal **was** observed on 2026-09-09 (`architecture/guardrails.md` §16). The
   narrower claim it was replaced with — "the agent still cannot read the settings file, so it can
   watch a guard refuse without ever confirming what is wired" — was wrong in turn, and that is the
   second correction this item has taken. The read is allowed; what stays true is only that reading a
@@ -470,7 +470,7 @@ these accumulate, and it is one instance of a possible rule rather than a rule.
 repository's own evidence is that checks on documents catch less than driving a command does. The
 guard work that was worth more than the whole `docs:check` list has now shipped, so what is left
 here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
-which is not ours (`ARCHITECTURE.md` §16). If the next session has budget for exactly one, take the
+which is not ours (`architecture/guardrails.md` §16). If the next session has budget for exactly one, take the
 class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
 
@@ -499,7 +499,7 @@ stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **no r
 `ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 16.
 
 **The quieter half is worse.** Some references are in range and silently repointed: six files say
-"§1 refuses on-disk state", but that rule moved to `ARCHITECTURE.md §5`. A dangling number fails
+"§1 refuses on-disk state", but that rule moved to `architecture/overview.md §5`. A dangling number fails
 when checked; a repointed one reads correctly forever.
 
 **The root cause is structural.** `PLAN.md` numbers its sections and rule 2 deletes entries when
@@ -511,10 +511,10 @@ had not named.
 
 **The deletion case, found while retiring §12 and §15 on `fix/unverified-claims`.** Five files cited
 "`PLAN.md` §12". Deleting §12 does not dangle any of them, because `§12` is still a heading in
-`ARCHITECTURE.md` — so `docs:check` stayed green while every one of those citations came to point at
+`architecture/triage.md` — so `docs:check` stayed green while every one of those citations came to point at
 "Local divergence from upstream" instead of the guardrail argument. The resolver's rule is _this
 token is a heading in **some** document_, and that rule is blind by construction to a citation
-becoming wrong by deletion elsewhere. They were repointed by hand, at `ARCHITECTURE.md` §16, and
+becoming wrong by deletion elsewhere. They were repointed by hand, at `architecture/guardrails.md` §16, and
 nothing would have failed if they had not been. **A check that cannot see the failure mode its own
 document describes is the sharpest version of item 3's argument**, which is why item 3 is now
 partly instanced rather than only recommended.
@@ -530,7 +530,7 @@ Three fixes were named; the first is done, the third matters most and has its fi
    that cites nothing sometimes destroys the only record of a decision.
 3. **Stop citing `PLAN.md` by number from code.** Cite `ARCHITECTURE.md`, whose sections are stable,
    or quote the reasoning where it is used. **First instance done:** the guardrail argument moved out
-   of `PLAN.md` §12 into `ARCHITECTURE.md` §16 precisely because five files were citing a plan entry
+   of `PLAN.md` §12 into `architecture/guardrails.md` §16 precisely because five files were citing a plan entry
    as though it were a permanent home. The general form of the rule is that an argument other
    documents cite does not belong in the document whose entries are deleted on purpose.
 
@@ -573,10 +573,10 @@ Dangling, grouped by the token they cite. None of these tokens has ever been a h
 **In range and silently repointed — the harder half, because nothing will ever flag these:**
 
 - "§1 refuses on-disk state" — `solve/attempts.ts:31`, `watch/relevance.ts:40`, `watch/memo.ts:21,26`,
-  `solve/review-cycle.ts:24,26`. That rule is now `ARCHITECTURE.md §5`; `PLAN.md §1` is the model
+  `solve/review-cycle.ts:24,26`. That rule is now `architecture/overview.md §5`; `PLAN.md §1` is the model
   question.
 - "§6's rule is _advance, then claim_" — `index.ts:44`, `review-loop.ts:97`, `review-loop.test.ts:150`.
-  Now `ARCHITECTURE.md §2` (L143); `PLAN.md §6` is the second gate.
+  Now `architecture/overview.md §2` (L143); `PLAN.md §6` is the second gate.
 
 **Clean, and worth knowing so the resolver is not written to re-check them:** all 7 `invariant N`
 references (`README.md:447`, `ARCHITECTURE.md:1511,1635,1726,1735,1750`, `solve/claim.ts:26`) cite
@@ -594,7 +594,7 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 ### 17. Two guardrail questions that outlived the entries they were written in
 
 **Branch:** none yet. These came out of §12 and §15, which shipped and were deleted; the settled
-half of both is now `ARCHITECTURE.md` §16 and this is the half that is still open. They are here
+half of both is now `architecture/guardrails.md` §16 and this is the half that is still open. They are here
 rather than there because §16 describes what the guardrails **are**, and a document describing a
 built thing is the wrong place to keep a defect nobody has fixed.
 
@@ -648,7 +648,7 @@ onto; the substring floor is what covers it today and the fix must not remove th
 **What is wrong.** `docs-check.ts` builds one `defined` set by unioning the section ids of
 `ARCHITECTURE.md`, `PLAN.md` and the two instruction skills, then asks whether each `§N` reference
 appears in it. The document a reference belongs to is discarded. So `PLAN.md §12` — an entry that
-shipped and was deleted — resolves happily against `ARCHITECTURE.md`'s §12, and a reader following
+shipped and was deleted — resolves happily against `architecture/triage.md`'s §12, and a reader following
 it lands somewhere unrelated. Three of this file's own dead numbers were passing that way.
 
 **How it was found.** By accident, and only because the accident was the right shape: the entry
@@ -669,7 +669,7 @@ in §17's own opening line, this file citing its retired numbers and being told 
 
 **The shape of the fix.** References already carry the file they were found in — `referencesIn`
 takes a path — so the work is to key `defined` by document and resolve `§N` against the document
-that owns it, with an explicit rule for the cross-document form (`ARCHITECTURE.md §16` names its
+that owns it, with an explicit rule for the cross-document form (`architecture/guardrails.md §16` names its
 target and should resolve there, a bare `§16` should resolve locally). The 15 pooling-only citations
 are the whole migration; the eleven are the debt it exposes.
 
@@ -728,7 +728,7 @@ number nobody has measured yet.
 a startup sweep, or a reconciliation of "a pull request exists" against "the ticket still says
 solving".
 
-**Why it is owed.** `ARCHITECTURE.md` invariant 14 rests entirely on a `finally`, which every
+**Why it is owed.** `architecture/invariants.md` invariant 14 rests entirely on a `finally`, which every
 stack-skipping exit misses: `process.exit(130)` on a second signal (`src/index.ts:104`),
 `process.exit(1)` on an uncaught exception (`:156`), `SIGKILL`, a slept laptop. There is no TTL,
 lease or reaper in `src/`. With `MAX_CONCURRENT_SOLVES=1` one stranded claim halts the solve half
@@ -777,45 +777,6 @@ improvement if the reviewer can tell the difference; a pull request that omits p
 while reading as finished is worse than none — the same reasoning that has plan entries deleted
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
-
-### 37. `ARCHITECTURE.md` split into a directory, and the map no longer fits a session budget
-
-**Branch:** `refactor/architecture-split`
-
-**What is being attempted.** `ARCHITECTURE.md` reached 3160 lines / 16 top-level sections — reading
-it in full to touch one module now costs most of a context window. It moves to an `architecture/`
-directory, one file per module or cross-cutting concern (`overview.md`, `module-map.md`,
-`triage.md`, `solve.md`, `configuration.md`, `invariants.md`, `not-built.md`, `guardrails.md`), with
-section numbers **carried over unchanged** — every `§N` citation in `src/` and the other three
-source documents names no file today (`section-refs.ts`'s own header explains why), so the split
-must not renumber a single heading. The root `ARCHITECTURE.md` becomes a quickindex: the existing
-front-matter (the flow diagram, the test count, the pointer sentence) plus a table routing a task to
-the file that answers it. `docs-check.ts`'s `NUMBERED_DOCUMENTS` array gets one entry per new file
-instead of one for the whole document, and the `HISTORICAL` entries pinned to `ARCHITECTURE.md:264`,
-`:21` and `:4562` move to whichever file now holds that sentence. After the split: a citation-repoint
-pass over every place that names `ARCHITECTURE.md` and a section number together (README, PLAN,
-CLAUDE.md, five skill files, eight `src/` comments — none of them checked, all of them found by
-`grep`) so each names the file the content actually lives in now; then a deep verify pass over every
-new file's claims against the current tree, since a document this size has not been read end to end
-in one sitting in a long time; then `dev-house-rules` gets a rule that finishing work on a module
-means checking that module's `architecture/*.md` file against what changed, not the whole document.
-
-**Why now.** The four-document contract (`STARTING.md`) already requires `ARCHITECTURE.md` to move
-in the same commit as the module it describes; a file too large to read is a file that rule quietly
-stops applying to, because nobody rereads 3160 lines to check one paragraph. Splitting by module
-makes "check the map" cost proportional to the change again.
-
-**What it would let the service do that it cannot do today.** Nothing — this is prose, not code.
-What it buys is a document the existing rule can actually be followed against, and a lower cost for
-every future session that has to decide whether the map still matches the tree.
-
-**What would make it the wrong idea.** If the split cannot be kept mechanically lossless — if
-`pnpm docs:check`'s dangling-reference count (`KNOWN_DANGLING`, currently 39) or either `tests in
-<N> files` citation site moves as a side effect of moving text rather than a deliberate, explained
-change — the split has silently repointed or dropped a fact the same way `PLAN.md` §14 describes,
-and is the wrong shape until that stops being true. If the module boundaries turn out to cut through
-a section that two modules both depend on (the subprocess contract, `§6`, is the likely case), a file
-per concern rather than strictly per module is the fallback, not a reason to abandon the split.
 
 ---
 

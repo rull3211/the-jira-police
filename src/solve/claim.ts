@@ -1,7 +1,7 @@
 /**
  * The claim and release — the single write that takes a ticket off the solve queue and its
  * inverse — sent as a label delta (`JiraClient.updateLabels`), not a full-field replace, which
- * is what closed the clobber hazard ARCHITECTURE.md §14.11 describes.
+ * is what closed the clobber hazard architecture/invariants.md §14.11 describes.
  * Still no compare-and-swap (`MAX_CONCURRENT_SOLVES=1` covers races); re-reads immediately
  * before writing and verifies the read-back, since a bystander edit is no longer at risk but
  * eligibility can still have changed underneath the queue's stale snapshot.
