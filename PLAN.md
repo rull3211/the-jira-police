@@ -228,6 +228,42 @@ by this route**, and that is the only claim the capability actually rests on. SS
 — a cropped green-screen capture holding a field name, `Nyt selskab`, that appears nowhere in the
 ticket's text — so the run either produces that string or the feature does not work.
 
+**State, 2026-09-17: the code is in `84de6ee` and the run has not happened.** Types, lint, the suite
+and `docs:check` are green, which is a statement about the tests. Nothing below this line has been
+observed, and a session resuming here should not describe any of it as working.
+
+The run, and it is step 3 of the loop rather than a smoke test:
+
+```
+chmod -R u+w "$TMPDIR/jira-police-attach" && rm -r "$TMPDIR/jira-police-attach"   # read the leak check against an empty root
+TRIAGE_IMAGES=true pnpm triage:once SSX-3918
+```
+
+**No `--write` on the first invocation.** It posts before anybody has read the verdict, and the
+report line `No write happens (--no-write)` is the analyst's flag rather than the poster's, so the
+artifact a `--write` run leaves behind says the opposite of what happened. Posting is a second
+invocation, taken deliberately.
+
+Predicted before the run, so that it can refute something:
+
+1. **The verdict contains `Nyt selskab`.** The control run — same ticket, same command, staging
+   off — scored `grep -ic "nyt selskab" → 0`, and there is no route to that string through the
+   ticket's text. This is the one that decides it.
+2. **Blocker 4 of 4 from the control is gone** — _the pasted screenshot cannot be read at triage_,
+   which today costs a reporter round-trip for data already attached. If it survives verbatim, the
+   block reached the prompt and the model never opened the file, which is a different failure from
+   staging not running and is diagnosed from the transcript, not the verdict.
+3. **JQL dedup, the vault lookup and the SSX-3754 link still complete.** Already seen once under
+   the new denials, so a regression here means `Task` broke something the skill was using quietly.
+4. **Exactly one `SSX-3918-img-*` directory exists during the run and none after it.** The
+   `finally` in `createGroom` has no test — `wiring.test.ts` does not cover `createGroom` at all —
+   so this run is the only evidence the cleanup works, and the check is worth nothing if the temp
+   root was not emptied first.
+
+**What would falsify the feature rather than the wiring:** no `Nyt selskab`, with the staged block
+present in the transcript. That says the picture reached the context and was not read — the plumbing
+works and the capability does not, and §10's entry gets a harder sentence than the one it has.
+
 What would make it the wrong idea is the list below, unchanged, plus one this branch adds: **the
 analyst's denial is a list of strings, and only four of its names have ever been measured**
 (`runner.ts:103`). The probe that measured them named four other built-ins; `WebFetch`, `WebSearch`
@@ -367,10 +403,13 @@ environment cannot answer a question about CI's.**
   SSX-3822 took the SVG-only path and staged nothing, SSX-3917 met the caps on eight PNGs and
   staged six, and SSX-3918 staged its single image and rendered the omission list empty. All three
   opened and showed what their reporters meant — SSX-3918's holds a field name that appears nowhere
-  in its text. What none of them reaches is the thing the staging is for — nothing constructs the stager inside a pass
-  (§4), so no session has been handed a picture by this route and the block `describeStagedImages`
-  writes has never been in front of a model. `refused` and the byte cap have no real ticket behind
-  them either. **A run leaves its only durable record in `groomed/`, which is gitignored**, so the
+  in its text. What none of them reaches is the thing the staging is for. `createGroom` now
+  constructs the stager behind `TRIAGE_IMAGES` (§4), but **built is not observed**: no session has
+  been handed a picture by this route and the block `describeStagedImages` writes has never been in
+  front of a model. The run that would settle it is specified in §4, down to the string it must
+  produce; until its output is in this file, this entry stands exactly as written. `refused` and the
+  byte cap have no real ticket behind them either. **A run leaves its only durable record in
+  `groomed/`, which is gitignored**, so the
   next session cannot see that any of this happened and will assume none of it did — which is how
   this entry first got written claiming a first run that was actually the third.
 
