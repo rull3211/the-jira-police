@@ -7,7 +7,7 @@ claim, fix in an isolated worktree, draft PR, answer the review. Node ≥24, pnp
 
 1. **Never work on `main` or any protected branch.** Branch first — `feat/`, `fix/`, `chore/`,
    `docs/`, `refactor/`. One branch per reviewable unit of privilege. Do not look for a way
-   around this; ask instead.
+   around this; ask.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
 
@@ -29,7 +29,7 @@ has the story.
 ## The working contract, by phase
 
 **`.claude/skills/dev-house-rules/` is the working contract, not a style guide — its rules generalise
-defects that already got through, and those with an incident cite it.** **Load the phase you are in**, or
+defects that already got through.** **Load the phase you are in**, or
 [SKILL.md](.claude/skills/dev-house-rules/SKILL.md) if you do not know which:
 
 | when you are                                 | load                                                                                                        |
@@ -42,8 +42,8 @@ defects that already got through, and those with an incident cite it.** **Load t
 | asking _why_ a rule exists                   | [INCIDENTS.md](.claude/skills/dev-house-rules/INCIDENTS.md) — cited from the rules that have one            |
 
 **The first row is the one that gets skipped, because nothing announces that it applies.** A compacted
-context, or a session picking up somebody else's branch, inherits an account of the work, not the
-work. Find out where you are before matching a row.
+context inherits an account of the work, not the work itself. Find out where you are before matching
+a row.
 
 **Every rule in there is provisional**, amended from incidents, not theory; if one is wrong, say so.
 
@@ -72,15 +72,20 @@ never by the suite ([§16](ARCHITECTURE.md)). Both remind; neither can check. Re
 - [dev-house-rules](.claude/skills/dev-house-rules/SKILL.md) — how we work
 
 **All four are treated as source.** Prose falsified by a change is rewritten in the same commit, not
-the next. Structural facts live in `ARCHITECTURE.md` and are cited, never copied — grep it for
-the symbol you need rather than reading it whole; `pnpm docs:check` enforces the mechanical part.
+the next. Structural facts live in `ARCHITECTURE.md`, cited rather than copied — grep for the
+symbol; `pnpm docs:check` enforces the mechanical part.
 
 ## Before you start
 
 **Write it into `PLAN.md` first** — what is being attempted, why now, and what would make it the
 wrong idea, opening with a bold `Branch:` label naming the branch; the entry is deleted **in the
-last commit before you push**, not at merge: the reviewer is the one misled. Then pick the branch. Why a diff is not enough:
+last commit before you push**, not at merge: the reviewer is the one misled. Then pick the branch:
 [STARTING.md](.claude/skills/dev-house-rules/STARTING.md#the-plan-is-written-before-the-work-not-after-it).
+
+## Code comments
+
+A comment holds a constraint or a non-obvious warning, one line, at most two. The argument and
+measurement belong in the commit, `PLAN.md`, or `ARCHITECTURE.md`/`INCIDENTS.md` — never the comment.
 
 ## Working style
 

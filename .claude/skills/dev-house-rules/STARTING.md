@@ -92,9 +92,10 @@ from the component's own source is answered wrongly, with confidence.
 · [→ a refusal reasoned from the wrong tool
 surface](INCIDENTS.md#the-fitness-call-that-was-refused-three-times-for-two-wrong-reasons)
 
-**Module headers carry the argument** — the reasoning, the rejected alternatives, the measurement
-that settled it — so skimming for the signature discards what took longest to acquire. They can also
-be stale: where a doc comment and a test disagree, prefer the test.
+**A comment holds a constraint or a non-obvious warning, at most one or two lines** — the argument
+and the measurement belong in the commit message, `PLAN.md`, or `ARCHITECTURE.md`/`INCIDENTS.md`,
+never the header; the standard is in [`CLAUDE.md`](../../../CLAUDE.md#code-comments). Comments can
+be stale too: prefer the test where they disagree.
 
 ### Read wide in a subagent; decide in the main context
 
