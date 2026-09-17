@@ -80,7 +80,7 @@ parent. Nothing in the tree carries it, which is the cost of deferring by deleti
 written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
 inside the branch that built it, and §32 was the untagged thread reply that let the service argue
 with itself on PR #548 — same shape, opened and deleted inside its own branch. The triage-selection
-entries are now all closed, so the next entry is §34.
+entries are now all closed, so the next entry is §35.
 
 <!-- refs:on -->
 
@@ -773,6 +773,43 @@ improvement if the reviewer can tell the difference; a pull request that omits p
 while reading as finished is worse than none — the same reasoning that has plan entries deleted
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
+
+### 34. Comments in `src/` cut to a line or two, everywhere
+
+**Branch:** refactor/trim-src-comments
+
+**What is being attempted.** A pass over every file in `src/` that shortens every comment to at most
+one or two lines: prose reasoning, rejected alternatives, and restatements of what the code already
+says are cut; a bare non-obvious "why" or a warning against a change that looks safe can stay, in one
+sentence. No behaviour changes — comments only.
+
+**Why now.** `BUILDING.md` asks module headers to carry "the argument — the reasoning, the rejected
+alternatives, the measurement that settled it" precisely so skimming for the signature does not
+discard what took longest to acquire. This entry is the operator overriding that on purpose: those
+same headers are what a session reads first when it opens a file, and on this codebase's own evidence
+(`14814` comment-shaped lines across `87` non-test files, measured 2026-09-17) they now cost more
+context budget at the start of a session than they return. This is a policy call, not a defect found
+by an incident, and it is recorded as one deliberately, the way the rule asks a disagreement to be
+recorded.
+
+**What would make it the wrong idea, in the order I expect to find out:**
+
+- **A `§N` citation gets shortened away rather than kept.** `sectionReferences()` and the resolver in
+  `section-refs.ts`/`docs-check.ts` count every `§N` token in `src/*.ts` against an exact figure;
+  deleting one changes a number `docs:check` compares with `!==`, not a ceiling. The rule for every
+  editing pass here is: keep the token verbatim, cut the prose around it.
+- **A count-noun phrase or historical figure inside a src comment is what `count-phrases.ts` was
+  checking**, and trimming the sentence around it removes the citation site instead of the prose. Run
+  `pnpm docs:check` after every batch, not once at the end, so a break is attributed to the batch that
+  caused it.
+- **A comment was the only record of a rejected alternative**, and a future session repeats the
+  experiment that already failed once, paying for the measurement twice. `git log -- <path>` still has
+  the sentence; nothing here claims otherwise, but nobody rediscovers a fact by knowing it is
+  retrievable.
+- **The four questions never get asked** because the diff is enormous and every file in `src/` looks
+  like every other file. A mechanical pass across the whole tree is exactly the shape of change most
+  likely to be rubber-stamped; it still needs `pnpm test` and `pnpm docs:check` green for real, not
+  assumed.
 
 ---
 
