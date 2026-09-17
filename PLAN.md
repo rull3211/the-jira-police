@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30 and §32, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30, §32 and §36, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -79,8 +79,10 @@ unsubscribe, deleted without shipping when the operator deferred it, and the dec
 parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
 written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
 inside the branch that built it, and §32 was the untagged thread reply that let the service argue
-with itself on PR #548 — same shape, opened and deleted inside its own branch. The triage-selection
-entries are now all closed, so the next entry is §36.
+with itself on PR #548 — same shape, opened and deleted inside its own branch. §36 was
+`branch-stack.sh` counting commit identity instead of commit content, opened and deleted inside the
+branch that built it — the story is `INCIDENTS.md`'s 2026-09-18 entry. The triage-selection entries
+are now all closed, so the next entry is §37.
 
 <!-- refs:on -->
 

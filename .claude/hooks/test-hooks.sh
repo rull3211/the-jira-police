@@ -442,6 +442,30 @@ git -C "$clone" switch -q -c feat/elsewhere
 expect "the base is not counted as its own backlog" SILENT \
   "$(BRANCH_STACK_MAX=1 CLAUDE_PROJECT_DIR="$clone" "$HOOKS/branch-stack.sh" </dev/null | decision)"
 
+# `--no-merged` compares commits by SHA, so a branch whose content already
+# reached the base under a different hash — a rewritten message, a rebase, a
+# cherry-pick standing in here for either — stayed "unmerged" forever. Found
+# live: two backup branches with rewritten commit messages tripped this hook
+# with zero open pull requests behind either.
+landed="$(scratch)"
+git -C "$landed" switch -q -c feat/already-landed
+printf 'x' >"$landed/a.txt"
+git -C "$landed" add a.txt
+git -C "$landed" commit -q -m "add a"
+git -C "$landed" switch -q main
+git -C "$landed" cherry-pick --no-edit feat/already-landed >/dev/null
+expect "content landed under a different hash is quiet" SILENT \
+  "$(BRANCH_STACK_MAX=1 CLAUDE_PROJECT_DIR="$landed" "$HOOKS/branch-stack.sh" </dev/null | decision)"
+
+# The contrast case, in the same fixture: real unapplied work must still ask.
+git -C "$landed" switch -q -c feat/still-open
+printf 'y' >"$landed/b.txt"
+git -C "$landed" add b.txt
+git -C "$landed" commit -q -m "add b"
+git -C "$landed" switch -q main
+expect "genuinely unmerged content still asks" ASK \
+  "$(BRANCH_STACK_MAX=1 CLAUDE_PROJECT_DIR="$landed" "$HOOKS/branch-stack.sh" </dev/null | decision)"
+
 # The command gate. Without it the hook prompts on every Bash call once the
 # stack is deep, and a guard that cries wolf gets approved without being read.
 for creating in "git switch -c feat/x" "git switch --track -c feat/x" \
