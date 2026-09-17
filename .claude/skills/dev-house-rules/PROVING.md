@@ -70,6 +70,11 @@ will leave you trusting a green suite.
   Build the fixture with the real function. Two tests hand-wrote the `bot: ` prefix their own writer
   was failing to send, and stayed green while the loop they asserted against ran in public.
   [→](INCIDENTS.md#the-two-tests-that-proved-the-loop-terminates-while-it-did-not)
+- **The same rule on the input side: a double more permissive than the collaborator it replaces
+  retires that collaborator's refusals.** The caller's own copy of a precondition is then untested by
+  construction — feed it something the real collaborator would throw on. An id guard survived a
+  mutation sweep this way, in a branch that named eight others.
+  [→](INCIDENTS.md#the-guard-that-could-be-deleted-with-the-whole-suite-green-because-the-double-was-kinder-than-the-client)
 - **A test whose name describes something it does not check.** The solver has shipped two, both
   green, both guarding nothing. **Read the test back against the wrong implementation.**
   [→](INCIDENTS.md#the-two-regression-tests-that-guarded-nothing)

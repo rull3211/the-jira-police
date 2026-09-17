@@ -67,7 +67,7 @@ import { mkdir, appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { logger } from "../logger.ts";
-import { shorten } from "../text.ts";
+import { oneLine, shorten } from "../text.ts";
 import { FOOTER_SENTINEL } from "../triage/gate.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
 
@@ -109,14 +109,10 @@ export interface FeedbackDeps {
  *
  * Two defences, and neither is about politeness:
  *
- * 1. **Every whitespace run collapses to one space.** This document separates
- *    one section from the next with `##` headings and one row from the next
- *    with a newline. A correction containing a newline followed by `## ` would
- *    forge a section that the run never produced, in the one artifact a human
- *    reads to find out what the run concluded. Same defence, same reasoning, as
- *    `oneLine` in `report.ts`; markdown's remaining tricks can make a line ugly
- *    but cannot make it lie about structure. Pipes are escaped too, since the
- *    calibration record is a table and an unescaped pipe forges a column.
+ * 1. **Every whitespace run collapses to one space**, which is `oneLine` in
+ *    `text.ts` and is shared rather than repeated here. Pipes are escaped on
+ *    top of it, since the calibration record is a table and an unescaped pipe
+ *    forges a column — that part is this document's and belongs here.
  *
  * 2. **Triage's footer sentinel is removed.** This is the sharper one. Triage
  *    identifies its own comment — the one it overwrites in place on every
@@ -127,11 +123,7 @@ export interface FeedbackDeps {
  *    here, and impossible to notice afterwards.
  */
 export function safeText(text: string): string {
-  return text
-    .replaceAll(FOOTER_SENTINEL, "[sentinel removed]")
-    .replaceAll(/\s+/gu, " ")
-    .replaceAll("|", "\\|")
-    .trim();
+  return oneLine(text.replaceAll(FOOTER_SENTINEL, "[sentinel removed]")).replaceAll("|", "\\|");
 }
 
 /**

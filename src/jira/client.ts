@@ -684,19 +684,32 @@ export class JiraClient {
   }
 
   /**
-   * One attachment's bytes, as text, or `null` if it is too large.
+   * One attachment decoded as text, or `null` if it is too large.
    *
    * `null` rather than a truncated string, because half an SVG is not a smaller
    * SVG — it is a broken one that a model would nonetheless try to use. A caller
    * that gets `null` can say "attachment too large to inline" and name the file,
    * which is a true statement; handing over the first 32KB would produce a
    * confidently wrong artifact instead.
+   */
+  async fetchAttachmentText(id: string, maxBytes: number): Promise<string | null> {
+    const bytes = await this.fetchAttachmentBytes(id, maxBytes);
+    return bytes === null ? null : bytes.toString("utf8");
+  }
+
+  /**
+   * The same download, undecoded, for the callers whose attachment is not text.
+   *
+   * `attachments/stage.ts` writes these to disk for a session to open with
+   * `Read`; decoding a PNG to a string first and encoding it back would not
+   * round-trip. Everything the text reader promises is promised here, because
+   * this is now where it happens.
    *
    * The size is checked twice, before and after the download. `content-length`
    * is absent on chunked responses, so a check that trusted it would be a cap
    * that any sufficiently large file could step around.
    */
-  async fetchAttachmentText(id: string, maxBytes: number): Promise<string | null> {
+  async fetchAttachmentBytes(id: string, maxBytes: number): Promise<Buffer | null> {
     assertAttachmentId(id);
     const response = await this.#get(`/rest/api/3/attachment/content/${id}`, "*/*");
 
@@ -706,12 +719,12 @@ export class JiraClient {
       return null;
     }
 
-    const text = await response.text();
-    if (Buffer.byteLength(text, "utf8") > maxBytes) {
-      logger.warn("jira.attachment_too_large", { id, bytes: text.length, maxBytes });
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) {
+      logger.warn("jira.attachment_too_large", { id, bytes: bytes.byteLength, maxBytes });
       return null;
     }
-    return text;
+    return bytes;
   }
 }
 

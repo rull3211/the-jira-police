@@ -2,14 +2,32 @@
  * Text bounds shared by everything that puts untrusted content somewhere it has
  * to fit.
  *
- * Top-level beside `duration.ts` rather than inside a slice, because it has two
- * callers in two different directions now: `solve/feedback.ts` shortening a
- * bail so a Jira reader will read it, and `watch/context.ts` bounding a
- * description before it goes into a prompt. Copying it into the second would be
- * the defect this repository keeps naming — **a second copy of a rule is a rule
- * that stops agreeing with itself** — and the copy would have been the one
- * guarding the prompt.
+ * Top-level beside `duration.ts` rather than inside a slice, because the callers
+ * pull in different directions: a bail shortened so a Jira reader will read it,
+ * a description bounded before it goes into a prompt, a ticket summary
+ * collapsed so it cannot forge a heading in a report. Copying any of them into
+ * a second slice would be the defect this repository keeps naming — **a second
+ * copy of a rule is a rule that stops agreeing with itself** — and the copy
+ * would have been the one guarding the prompt.
  */
+
+/**
+ * Collapses every whitespace run to one space, so untrusted text cannot forge
+ * structure in a document that separates its parts by newline.
+ *
+ * A filename or a model's sentence containing a newline followed by `## ` or
+ * `- ` writes a heading or a list row that the run never produced, in exactly
+ * the artifact a person reads to find out what the run concluded. Markdown's
+ * remaining tricks can make a line ugly; none of them can make it lie about
+ * structure.
+ *
+ * Three copies of this existed before it moved here — `report.ts`,
+ * `feedback.ts`'s `safeText` and very nearly the image stager — which is the
+ * shape this module was created to stop.
+ */
+export function oneLine(text: string): string {
+  return text.replaceAll(/\s+/gu, " ").trim();
+}
 
 /**
  * Trims to a length on a word boundary, marking that it did.

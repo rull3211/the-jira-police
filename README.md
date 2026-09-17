@@ -477,12 +477,20 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                  | Jira                        |
 | `pnpm start`                                           | The daemon — grooming, plus solve and watch if their flags are on. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
 | `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                    |
+| `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind    | a report + `tmpdir()`       |
 | `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                               | no                          |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                  | no                          |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                          |
 | `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                          |
 | `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                             | no                          |
 | `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                                                            | no                          |
+
+**`attach:stage` is the only thing that stages an image, and nothing reads what it stages.** Triage
+and solve still see attachments as text or not at all; the command exists so the capability can be
+judged from a real ticket before any pass is wired to it. It downloads, writes the staged files to a
+read-only directory under `tmpdir()` and the report to `<OUTPUT_DIR>/<KEY>.attachments.md`, and posts
+nothing. Exit 1 means the ticket has images and none of them is staged, which is the case a pass has
+to bail on. [`ARCHITECTURE.md` §13](ARCHITECTURE.md) has the decision behind it.
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch. Three unrelated meanings of one word, and the

@@ -1515,3 +1515,36 @@ worked example of.
 **Not retroactive, and that is a real cost.** Replies posted before the fix carry no prefix and are
 indistinguishable from a reviewer's, so any pull request already looping keeps looping until a cap
 fires. There is no repair short of a human resolving the threads.
+
+## 2026-09-16
+
+### The guard that could be deleted with the whole suite green, because the double was kinder than the client
+
+The image stager joins an attachment id onto a path (`src/attachments/stage.ts`), so it calls
+`assertAttachmentId` before the fetch even though `JiraClient.fetchAttachmentBytes` calls it too. The
+branch shipped that guard, a commit naming eight mutations, and no way to notice that deleting this
+one changed nothing: `AttachmentByteReader` is a two-line interface, every test stands a `vi.fn` in
+for it, and **a stand-in accepts ids the real method throws on**. Every test in the file supplied a
+digit-string id, so the guard was never asked a question it could answer wrongly.
+
+The mechanism is the fixture rule read backwards. The
+[known form](#the-two-tests-that-proved-the-loop-terminates-while-it-did-not) is a fixture modelling
+a collaborator's **output**, which stops seeing that collaborator change. This is the **precondition**
+side: a double that is more permissive than what it replaces silently retires the real one's
+refusals, and the caller's own copy of them is then untested by construction. It looks nothing like
+the output case while reading the diff — the interface is honestly narrow, the double is honestly
+simple, and the guard is honestly there.
+
+**Found by** an audit run under
+[FINISHING.md's own procedure](FINISHING.md#the-rules-you-owe-are-written-down-or-they-are-not-owed)
+— a fresh context handed the diff and the rules and primed with nothing else — before the pull
+request opened. Not by the suite, which was wholly green, and not by the mutation sweep that commit
+ran, which enumerated the guards the author already had in mind.
+
+**The rule** — [the fixture rule's other direction](PROVING.md#tests-that-stop-testing): when a
+double is narrower than the collaborator, test the caller against an input the real collaborator
+would refuse.
+
+**One instance, and the amendment is a widening rather than a new rule** — which is the form that
+survives being wrong: if the precondition case never recurs, the sentence costs a line in a list that
+already makes the point next to it.

@@ -28,26 +28,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { oneLine } from "../text.ts";
 import type { SolveCandidate, SolveCycleOutcome, SolveDeps } from "./poller.ts";
 
 /** Stable name, so the artifact is easy to open and impossible to confuse with an issue key. */
 export const SOLVE_REPORT_FILE = "solve-cycle.md";
-
-/**
- * Ticket text on one line, always.
- *
- * A summary is attacker-controlled — anyone who can file an SSX issue chooses
- * it — and this document uses `##` headings to separate one ticket's decision
- * from the next. A summary containing a newline and a `## PLAN — SSX-9999`
- * would therefore forge a decision that the cycle never made, in the one file
- * an operator reads to find out what the cycle decided. Collapsing every
- * whitespace run to a single space removes the newline and with it the forgery;
- * nothing else about the text needs sanitising, because markdown's remaining
- * tricks can only make a line ugly, not make it lie about structure.
- */
-function oneLine(text: string): string {
-  return text.replaceAll(/\s+/gu, " ").trim();
-}
 
 function labelList(labels: readonly string[]): string {
   return labels.length > 0 ? labels.map((label) => `\`${label}\``).join(" ") : "—";
