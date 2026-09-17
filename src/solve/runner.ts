@@ -1,5 +1,5 @@
 /**
- * Builds and validates the four `agent-solve` passes.
+ * Builds and validates the five `agent-solve` passes.
  *
  * Only recon is read-only: the decision "should an agent touch this" is made
  * by something that cannot touch it, so a prompt-injection attempt needs to

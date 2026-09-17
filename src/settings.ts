@@ -292,7 +292,7 @@ export const SETTINGS = [
   {
     name: "MAX_RETRIAGE_PER_TICKET",
     description:
-      "How many times one watched ticket may be re-triaged before the watch is dropped with a comment saying so. Three. Counted from this service's own comments on the ticket rather than from disk, so it survives a restart and a second instance for the same reason the solve queue's dedupe does. A ticket edited more often than this is a conversation rather than a signal, and the watch is the one loop with no human waiting on the result, so the bound is the only thing that ends it. Note the number was chosen in the plan against a measured triage cost of $0.11 that later proved to be $1.56, so it is understated as a spending limit by roughly an order of magnitude — re-derive it before the watch runs on a timer.",
+      "How many times one watched ticket may be re-triaged before the watch is dropped with a comment saying so. Three. Counted from an `agent:retriage-N` label on the ticket rather than from disk, so it survives a restart and a second instance for the same reason the solve queue's dedupe does. A ticket edited more often than this is a conversation rather than a signal, and the watch is the one loop with no human waiting on the result, so the bound is the only thing that ends it. Note the number was chosen in the plan against a measured triage cost of $0.11 that later proved to be $1.56, so it is understated as a spending limit by roughly an order of magnitude — re-derive it before the watch runs on a timer.",
     fallback: "3",
   },
   {

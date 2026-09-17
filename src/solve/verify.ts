@@ -4,7 +4,7 @@
  *
  * Commands are discovered from the base manifest (`git show <base>:package.json`), never the
  * worktree, and `verify` refuses to run unless `VERIFICATION_PATHS` are unchanged from the base —
- * see ARCHITECTURE.md §15 for why a base declaring both `package.json` and `pom.xml` is also refused.
+ * see architecture/solve.md §15 for why a base declaring both `package.json` and `pom.xml` is also refused.
  */
 
 import { logger } from "../logger.ts";
@@ -65,7 +65,7 @@ const MAVEN = "mvn";
 /**
  * Turns off git-commit-id's build stamping, which cannot read a linked worktree's `gitdir` line and
  * fails the build before anything compiles. Safe to send unconditionally: an unknown `-D` property
- * is inert, unlike an unknown flag. See ARCHITECTURE.md §15 for why this is accepted despite not
+ * is inert, unlike an unknown flag. See architecture/solve.md §15 for why this is accepted despite not
  * being byte-for-byte the build CI runs.
  */
 const SKIP_GIT_STAMP = "-Dmaven.gitcommitid.skip=true";
@@ -109,7 +109,7 @@ export interface StepResult {
   readonly passed: boolean;
   readonly exitCode: number;
   readonly timedOut: boolean;
-  /** Tail of the output, for the artifact. Bounded; this ends up in a report. */
+  /** Tail of the output, for the artifact. Bounded; computed but not read by anything downstream yet. */
   readonly output: string;
 }
 
@@ -372,7 +372,7 @@ export type BaseCheck =
  * change is bad* — a claim only true relative to a base that would otherwise have passed. Both
  * non-passing outcomes become `unusable`, but the whole `VerificationResult` is carried out rather
  * than a boolean since "failed" and "refused" reach the same decision without being the same
- * sentence. See ARCHITECTURE.md §15.
+ * sentence. See architecture/solve.md §15.
  */
 export async function verifyBase(
   runner: CommandRunner,
