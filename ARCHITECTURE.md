@@ -758,16 +758,28 @@ because the grouping is the architecture.
 | `src/jira/adf.ts`    | Atlassian Document Format rendered down to plain text. No I/O, so testable against real payloads |
 | `src/state/store.ts` | Cursor + seen keys, atomic write                                                                 |
 
-**Attachments — the image path, and nothing constructs it yet**
+**Attachments — the image path, and triage is what constructs it**
 
 | Path                        | Role                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `src/attachments/images.ts` | Which types may be staged, and what the leading bytes say the file actually is                          |
 | `src/attachments/stage.ts`  | Images written read-only under a derived name, and the block naming them. `staged` / `none` / `refused` |
 
-Both are unreachable from the daemon, `poll:once`, `triage:once`, `solve:once`, `bot:once` and
-`watch:once`: `attach:stage` is their only caller, and it is a dry run. §13 has the decision that
-authorised the bytes and the phases still owed; §14.11 has what the widening cost.
+`createGroom` (`wiring.ts:320`) stages before the analyst runs and removes the directory in a
+`finally` after it, whenever `TRIAGE_IMAGES` is on — so the daemon, `poll:once`, `triage:once`,
+`bot:once` and `watch:once` all reach this path through one construction site rather than five.
+It defaults off and the analyst is denied `WebFetch`, `WebSearch` and `Task` before any pixel
+arrives. **No solve pass constructs either module**, by the same decision: the fix pass gets recon's
+brief rather than the picture. `attach:stage` remains the dry run, and the only way to look at a
+staged file, since a pass sweeps its own directory. §13 has the decision that authorised the bytes
+and the recon phase still owed; §14.11 has what the widening cost.
+
+**The watch check is the attachment consumer that fetches nothing.** `watch/context.ts` copies
+names, types and sizes field by field — never bytes — capped at `MAX_CONTEXT_ATTACHMENTS` (20),
+with `MAX_FIELD_CHARS` (4000) on the text beside it and the truncation notice written **outside**
+the fence, next to the omitted-comments notice and for the same reason. The field-by-field copy is
+deliberate: it makes the day that widens a visible edit rather than a widening arriving by
+inheritance.
 
 **Triage — the grooming half**
 

@@ -157,96 +157,47 @@ relative to a base anyone proved green. On the solve path a red build before the
 that the base is merged in every round, a base that is broken upstream lands in the branch and the
 round takes the blame for it. Recorded, not fixed.
 
-### 4. Attachment images, decided and staged, and the pass still not wired to them
+### 4. Recon reads staged images
 
-The watch check is handed attachments as **names, types and sizes only**: no bytes are fetched, and
-the copy in `signals.ts` is field by field so the day that changes it is a visible edit rather than
-a widening arriving by inheritance. `MAX_CONTEXT_ATTACHMENTS` is 20 and `MAX_FIELD_CHARS` is 4000 —
-generous, because an answer is usually appended to an already-long description — with the
-truncation notice **outside** the fence, beside the omitted-comments notice and for the same reason.
-All three bounds exist because this is attacker-controlled text going into a prompt.
+Triage reads them already, behind `TRIAGE_IMAGES`; `ARCHITECTURE.md` §7 has what constructs the
+stager, §13 the operator's 2026-09-16 decision and the phases it covered, and §14.11 the bounds the
+widening bought and the one it did not. **Recon is the remainder of that authorisation, and nothing
+drives it.** The pixels stop at the passes holding no `Write` by the same decision, so the fix pass
+is not owed this and is not waiting for it.
 
-**Whether fetching the bytes is authorised was not mine to answer, and it has been answered.**
-The Jira REST credential is **no longer discovery-only**, and that matters for how this question is
-framed. It writes `agent:*` labels through `updateLabels` — REST, atomic `update.labels` add/remove,
-wired into the claim (`wiring.ts:545`), the retriage counter, `end.ts` and `retriage.ts` — because
-MCP's `editJiraIssue` has set semantics and cannot add one label without rewriting all of them. So
-the rule is not a wall, it is an amendment process: `updateLabels`, the changelog
-read, and adding `summary,description,environment,attachment` to `fetchActivity`'s GET were each
-authorised individually. Attachment _content_ is a further widening and a new untrusted-bytes path.
-It is also the thing that would close the SSX-3822 class of failure, where a ticket names an asset
-the solver cannot fetch and the solver reconstructs a lookalike from the description's adjective
-(§9).
+Behind a setting that must be typed and defaults off, with the bail wording for the case the
+capability exists to serve: the evidence is a picture, the picture could not be staged, and the
+honest answer is to say so rather than to reconstruct a lookalike from the description's adjective,
+which is the SSX-3822 failure (§9) this whole path exists to close.
 
-**The operator authorised images on 2026-09-16, for recon and for triage, and not for the passes
-that hold `Write`.** An attachment whose bytes are an image is written to a staged directory and
-named to the session by path, so the model reads it with the `Read` tool it already has. No new tool
-and no fetcher: a probe with exactly a recon pass's flags — `--allowedTools Read`,
-`SOLVE_DENIED_COMMON` denied, `dontAsk` — read a token out of a PNG whose source text had been
-deleted, from an absolute path outside its own working directory. The capability was already there;
-only the bytes were missing.
+**This is the phase that owes a sweep.** Nothing removes a staged directory except the caller that
+made it, and an unattended caller dying between `mkdtemp` and the removal leaks one per kill — §22
+with a second instance rather than a new problem. Triage's `finally` is the only cleanup that exists
+and **it has never been observed against an empty staging root**, so it is not evidence a second
+caller can lean on.
 
-**The machinery exists, and triage now constructs it.** `attachments/stage.ts` and `attach:stage`
-shipped inert; `createGroom` (`wiring.ts:320`, `:436`) now stages behind `TRIAGE_IMAGES` — off by
-default, identically wired for the daemon poll loop and for `triage:once`, no divergent tool list
-between them — and removes the directory in a `finally` (`wiring.ts:344-351`) once the pass returns.
-`ARCHITECTURE.md` §13 has what the stager is and §14.11 what the widening cost. Recon does not
-construct it yet, which is the one step still below.
-
-The value is on all three paths and the risk is not, which is why the two are split. Recon looks and
-reports; what it saw reaches the fix pass as the **brief** — text, schema-bounded, in the transcript
-and in front of the gate. Pixels go no further than the session that has to look at them, because a
-human can read a brief and nobody can read a PNG after the fact. Triage was the widest of the two and
-got a prerequisite rather than a caveat: `--allowedTools` withholds nothing (§14.12 of
-`ARCHITECTURE.md`), so until the analyst was denied the network it was the one session where an
-instruction smuggled in a screenshot had somewhere to send what it finds. That denial shipped in the
-same commit as the pixels, `84de6ee`, for that reason.
-
-**Not built: recon reads staged images**, behind a setting that must be typed and defaults off — with
-the bail wording for the case the capability exists to serve: the evidence is a picture, the picture
-could not be staged, and the honest answer is to say so rather than to reconstruct it. **This is the
-phase that owes a sweep**: nothing removes a staged directory today except the command that made it,
-and an unattended caller that dies between `mkdtemp` and the removal leaks one per kill, which is §22
-with a second instance rather than a new problem. `triage:once` does not drive recon, and wiring a
-consumer no test exercises is how the unobserved list grew in the first place.
-
-The analyst losing `WebFetch`, `WebSearch` and `Task`, and triage reading staged images, both shipped
-in `84de6ee`. SSX-3918 (2026-09-17) is the first observed run of the second: the run and its four
-predictions are in
-[`INCIDENTS.md`, 2026-09-17](.claude/skills/dev-house-rules/INCIDENTS.md#the-fail-first-prediction-that-named-the-wrong-string) —
-the specific string predicted never appeared, but different image-only content did, and this entry's
-own fail-first framing would have scored the run a failure while the capability worked. The cleanup
-prediction is unresolved rather than confirmed: the run did not empty the staging root first, so it is
-not the clean-slate proof it was meant to be.
-
-What would make it the wrong idea is the list below, unchanged, plus: **the analyst's denial is a
-list of strings, and only four of its names have ever been measured** (`runner.ts:103`). The probe
-that measured them named four other built-ins; `WebFetch`, `WebSearch` and `Task` rest on the same
-mechanism and were not in it, and the effect of the list on MCP names is unverified. A test asserts
-the three reach `--disallowedTools`, which is a claim about this service's command line and not about
-what the subprocess then does with it. If a future MCP server offers a fetch under another name,
-nothing here would notice.
+No command drives a recon pass on its own today, and wiring a consumer no test exercises is how §10
+grew. Whatever builds this owes a driver before it owes the setting.
 
 **Two images out of eight on SSX-3917 were dropped by the count cap, and they were the two largest
 and newest.** Both were far inside the size cap; they lost only on Jira's ordering, and on that
-ticket they are plausibly the ones a reader would pick. Ordering the candidates by anything else is
-policy nothing has measured, so the cap stays at six and the omitted list names what it skipped —
-but recon is where a pass starts acting on a partial view, and this is the number to revisit there.
+ticket they are plausibly the ones a reader would pick. Ordering by anything else is policy nothing
+has measured, so the cap stays at six and the omitted list names what it skipped — but recon is
+where a pass starts acting on a partial view, and this is the number to revisit here.
 
 What would make it the wrong idea, in the order I expect to find out:
 
 - **A screenshot read confidently and wrongly.** This exists to close the favicon failure, and a
-  model that misreads a UI and proceeds reintroduces exactly that failure with a better alibi. The
-  first run that turns on a detail only the image carries is the one to check by hand.
-- **The base rate is small.** It was not measured before building — the operator's call, recorded
-  because the honest version of this entry says the payoff is argued from one incident and not
-  counted. If tickets that hang on an image are rare, this is machinery for a case that does not
-  arrive, and the cheap answer is in the `solve.ticket_attachments_omitted` logs.
+  model that misreads a UI and proceeds reintroduces exactly that failure with a better alibi. One
+  triage run has been checked by hand against the source image and read it correctly; that is one
+  run, on one picture, and recon acts on what it reads in a way triage does not.
+- **The base rate is small.** Never measured — the operator's call, recorded because the honest
+  version says the payoff is argued from one incident and not counted. If tickets that hang on an
+  image are rare, this is machinery for a case that does not arrive, and the cheap answer is in the
+  `solve.ticket_attachments_omitted` logs.
 - **Provenance that cannot be checked.** A staged file is only auditable if the transcript ties it
   to an attachment on the ticket. If that mapping is not legible to a person reading afterwards, the
   widening has bought a channel nobody can review.
-- **Another leaked directory.** §22 already records a staged skill root that is never swept; a
-  second staging path with the same shape doubles a known defect rather than inheriting it.
 
 ### 5. The wiring that has no test, now with three callers waiting on it
 
@@ -353,14 +304,21 @@ environment cannot answer a question about CI's.**
   after a compaction — so neither the field name it branches on nor the fact of registration is
   confirmed from a session's own vantage point (`ARCHITECTURE.md` §16). It accepts both `trigger`
   and `source` for that reason.
+- **The analyst's denial list is a list of strings, and only four of its names have ever been
+  measured** (`runner.ts:103`). The probe that measured them named four other built-ins; `WebFetch`,
+  `WebSearch` and `Task` rest on the same mechanism and were not in it, and the effect of the list
+  on MCP names is unverified. A test asserts the three reach `--disallowedTools`, which is a claim
+  about this service's command line and not about what the subprocess does with it. If a future MCP
+  server offers a fetch under another name, nothing here would notice — and this is the denial the
+  staged-image path was made safe by, so it is the one worth probing rather than asserting.
 - **A model has read a staged image, once, and the proof of it is not the one that was planned.**
   The stager itself is observed on three real tickets: SSX-3822 took the SVG-only path and staged
   nothing, SSX-3917 met the caps on eight PNGs and staged six, and SSX-3918 staged its single image
   and rendered the omission list empty. On 2026-09-17, `TRIAGE_IMAGES=true pnpm triage:once SSX-3918
 --write` reached the thing the staging is for: the posted verdict quotes a field label and a date
   (`Afg. årsag`, `15 09 26`) that are in the image and nowhere in the ticket's own text, which is the
-  mechanical evidence the run was written to produce — by a different string than the one §4
-  predicted, which
+  mechanical evidence the run was written to produce — by a different string than the one predicted,
+  which
   [`INCIDENTS.md`, 2026-09-17](.claude/skills/dev-house-rules/INCIDENTS.md#the-fail-first-prediction-that-named-the-wrong-string)
   records as a false dichotomy. `refused`, the byte cap and the unbuilt recon path (§4) still have no
   real ticket behind them. **A run leaves its only durable record in
@@ -438,7 +396,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **112 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **114 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 39 point at sections that have never existed** (below,
   "The citations that were never written down"). What is still unresolved is which _document_ a
