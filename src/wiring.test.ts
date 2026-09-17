@@ -27,6 +27,7 @@ import {
   createSolveDeps,
   createSolveRunDeps,
   githubRepoFor,
+  imageStageOptions,
   pollIntervalMs,
   reviewIntervalMs,
   shouldPost,
@@ -167,6 +168,30 @@ describe("pollIntervalMs", () => {
   it("refuses a negative interval", () => {
     expect(() => pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "-1" }))).toThrow(
       /POLL_INTERVAL_MS must be at least 1/,
+    );
+  });
+});
+
+describe("imageStageOptions", () => {
+  it("defaults the count cap to 10", () => {
+    expect(imageStageOptions(settingsWith({})).maxImages).toBe(10);
+  });
+
+  it("reads an operator-raised cap", () => {
+    expect(imageStageOptions(settingsWith({ MAX_STAGED_IMAGES: "25" })).maxImages).toBe(25);
+  });
+
+  it("refuses a zero cap rather than silently staging nothing", () => {
+    // Zero reads as "no limit" and would behave as "already exhausted" —
+    // the same shape `numeric`'s floor exists to catch elsewhere in this file.
+    expect(() => imageStageOptions(settingsWith({ MAX_STAGED_IMAGES: "0" }))).toThrow(
+      /MAX_STAGED_IMAGES must be at least 1/,
+    );
+  });
+
+  it("leaves the byte ceiling alone, since only the count is a setting", () => {
+    expect(imageStageOptions(settingsWith({ MAX_STAGED_IMAGES: "25" })).maxImageBytes).toBe(
+      4 * 1024 * 1024,
     );
   });
 });

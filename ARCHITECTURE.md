@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2605 tests in 75 files, no build step, no
+Status: running end to end against production Jira. 2609 tests in 75 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -765,7 +765,7 @@ because the grouping is the architecture.
 | `src/attachments/images.ts` | Which types may be staged, and what the leading bytes say the file actually is                          |
 | `src/attachments/stage.ts`  | Images written read-only under a derived name, and the block naming them. `staged` / `none` / `refused` |
 
-`createGroom` (`wiring.ts:320`) stages before the analyst runs and removes the directory in a
+`createGroom` (`wiring.ts:332`) stages before the analyst runs and removes the directory in a
 `finally` after it, whenever `TRIAGE_IMAGES` is on — so the daemon, `poll:once`, `triage:once`,
 `bot:once` and `watch:once` all reach this path through one construction site rather than five.
 It defaults off and the analyst is denied `WebFetch`, `WebSearch` and `Task` before any pixel
@@ -1481,7 +1481,7 @@ being widened or dropped:
   in two places (§7's failure table, which records the check firing for real on 2026-09-03, and
   `README.md`'s smoke-test description). The precondition is enforced: `assertMcpReady`
   (`triage/session.ts:205`) throws `McpUnavailableError` on the init event for any required server
-  not reporting `connected`, and `["atlassian"]` reaches it from `wiring.ts:165`, `poster.ts:321`
+  not reporting `connected`, and `["atlassian"]` reaches it from `wiring.ts:214`, `poster.ts:321`
   and `commenter.ts:329`.
 
   So what died was a **module-level constant superseded by a per-call option**, which is a
@@ -1500,7 +1500,7 @@ being widened or dropped:
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 49 settings are read**, and there are no orphan files.
+  the same sweep: **all 50 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

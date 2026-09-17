@@ -59,6 +59,7 @@ import {
 } from "./jira/jql.ts";
 import {
   DEFAULT_IMAGE_STAGE_OPTIONS,
+  type ImageStageOptions,
   type ImageStageResult,
   describeStagedImages,
   removeStagedImages,
@@ -284,6 +285,19 @@ export function shouldPost(settings: Settings): boolean {
 }
 
 /**
+ * The staging caps read from settings, shared by every caller of `stageImages`.
+ *
+ * `MAX_STAGED_IMAGES` is the only cap made editable — see the setting's own
+ * description for why the count moved and the byte ceiling did not.
+ */
+export function imageStageOptions(settings: Settings): ImageStageOptions {
+  return {
+    ...DEFAULT_IMAGE_STAGE_OPTIONS,
+    maxImages: numeric(settings, "MAX_STAGED_IMAGES", 1),
+  };
+}
+
+/**
  * The ticket's images on disk, or nothing, for the analyst to read.
  *
  * A staging failure degrades the run to text instead of failing it. The
@@ -295,6 +309,7 @@ export function shouldPost(settings: Settings): boolean {
 async function stageForTriage(
   client: JiraClient,
   issueKey: string,
+  options: ImageStageOptions,
 ): Promise<ImageStageResult | null> {
   try {
     const detail = await client.fetchDetail(issueKey);
@@ -303,7 +318,7 @@ async function stageForTriage(
       detail.attachments,
       join(tmpdir(), "jira-police-attach"),
       issueKey,
-      DEFAULT_IMAGE_STAGE_OPTIONS,
+      options,
     );
   } catch (error) {
     logger.warn("triage.image_staging_failed", {
@@ -322,11 +337,13 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
   // Null is the off switch, so the extra detail fetch cannot happen by accident:
   // there is no client to make it with.
   const imageClient = flag(settings, "TRIAGE_IMAGES") ? createJiraClient(settings) : null;
+  const imageOptions = imageStageOptions(settings);
 
   return async (ticket: TicketRef) => {
     // The ticket carries summary, type and timestamps; only the key crosses
     // over. Everything else the skill needs, it reads over its own session.
-    const staged = imageClient === null ? null : await stageForTriage(imageClient, ticket.key);
+    const staged =
+      imageClient === null ? null : await stageForTriage(imageClient, ticket.key, imageOptions);
     let analysed: TriagePayload;
     try {
       analysed = await runTriage({

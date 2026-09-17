@@ -125,6 +125,12 @@ export const SETTINGS = [
     fallback: "false",
   },
   {
+    name: "MAX_STAGED_IMAGES",
+    description:
+      "How many of a ticket's image attachments a stager will attempt for one run, shared by TRIAGE_IMAGES and recon's own image reading rather than one value each could drift from. Attempts, not successes: a candidate that fails its download or its signature check still spends one, so a ticket of broken files cannot buy unlimited retries. Ten, raised from a hardcoded six after SSX-3917 dropped its two largest and newest images on Jira's own attachment order — both were far inside the size cap, so the cost of the old number was images a reader would plausibly pick, not oversized ones. Ordering by anything other than Jira's own is still policy nothing has measured; this only buys headroom against the ordering as it stands.",
+    fallback: "10",
+  },
+  {
     name: "STORECODE_PATH",
     description: "Executable used to run the skill.",
     fallback: "storecode",

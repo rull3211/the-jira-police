@@ -77,13 +77,18 @@ export interface ImageStageOptions {
   readonly maxImages: number;
 }
 
+/**
+ * The fallback for a caller that passes no options, kept in step with
+ * `MAX_STAGED_IMAGES`'s own fallback (`settings.ts`) rather than diverging from
+ * it — every real caller reads that setting instead of this constant.
+ */
 export const DEFAULT_IMAGE_STAGE_OPTIONS: ImageStageOptions = {
   // A full-page screenshot off a retina display runs to a couple of megabytes,
   // and a ticket that needs more than that is not making its point with a
   // picture. Well above the 32KB text cap because an image costs context in
   // proportion to its dimensions rather than its bytes.
   maxImageBytes: 4 * 1024 * 1024,
-  maxImages: 6,
+  maxImages: 10,
 };
 
 /** How long a filename may be before it is cut, in the report and the prompt. */

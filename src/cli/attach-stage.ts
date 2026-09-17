@@ -5,7 +5,7 @@
  *   pnpm attach:stage SSX-3917 --keep
  *
  * **The dry run of the image capability, and no longer its only driver.**
- * Triage constructs the stager behind `TRIAGE_IMAGES` (`wiring.ts:320`); the
+ * Triage constructs the stager behind `TRIAGE_IMAGES` (`wiring.ts:339`); the
  * solve path still does not. This command remains step 2 of the privilege
  * ladder in `STARTING.md` — does everything, changes nothing, writes its report
  * to a file to be judged — and is the only way to see the staged files
@@ -25,15 +25,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  DEFAULT_IMAGE_STAGE_OPTIONS,
-  describeStagedImages,
-  removeStagedImages,
-  stageImages,
-} from "../attachments/stage.ts";
+import { describeStagedImages, removeStagedImages, stageImages } from "../attachments/stage.ts";
 import { logger } from "../logger.ts";
 import { readSettings } from "../settings.ts";
-import { createJiraClient } from "../wiring.ts";
+import { createJiraClient, imageStageOptions } from "../wiring.ts";
 import { EXIT, exitCodeFor, formatReport } from "./attach-stage-report.ts";
 
 function usage(): never {
@@ -77,7 +72,7 @@ async function main(): Promise<number> {
     detail.attachments,
     parent,
     detail.key,
-    DEFAULT_IMAGE_STAGE_OPTIONS,
+    imageStageOptions(settings),
   );
 
   process.stdout.write(`outcome: ${result.outcome}\n`);
