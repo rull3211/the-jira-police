@@ -1,11 +1,6 @@
 /**
  * The solve pipeline, end to end: one ticket in, a verified branch or a reason
- * out.
- *
- * Every module in `src/solve/` up to now answered one question well and knew
- * nothing about the others. This is the file that puts them in order, and its
- * whole job is sequencing and refusal — there is no new capability here, only
- * decisions about when to stop.
+ * out. This file's job is sequencing and refusal, not new capability.
  *
  * ```
  *   worktree      cut from the pristine base, on an implementation branch
@@ -23,30 +18,14 @@
  *   verified      handed to the delivery half, which commits and opens a PR
  * ```
  *
- * ## Three shapes of "no", kept apart on purpose
+ * Three shapes of "no", kept apart because they call for different action:
+ * **bailed** (recon declined, nothing written, a human picks it up), **failed**
+ * (the change was made and tests say it's wrong), and **refused** (the harness
+ * declines to have an opinion — never report it as a statement about the code).
  *
- * Collapsing these would make the reports useless, because they call for
- * different actions from different people:
- *
- *   - **bailed** — recon read the code and says an agent should not do this.
- *     The fitness call was wrong. Nothing was written. A human picks it up.
- *   - **failed** — the change was made and the tests say it is wrong. A fact
- *     about the code.
- *   - **refused** — the harness declines to have an opinion: the diff broke
- *     its bounds, or verification could not be trusted. Says nothing about
- *     whether the change was any good, and must never be reported as if it
- *     did.
- *
- * ## What this file deliberately does not do
- *
- * It does not touch Jira, and it takes no Jira client. The caller owns labels
- * and comments. That keeps the pipeline runnable by hand against one ticket
- * with nothing on the board changing, which is the phase order this project
- * committed to: every stage driven by a person before the daemon drives any.
- *
- * It also does not clean up after a failure. A failed worktree is kept so a
- * human can read the diff that did not work — `removeWorktree` enforces that
- * itself, and this file does not argue with it.
+ * Takes no Jira client — the caller owns labels and comments, keeping the
+ * pipeline runnable by hand against one ticket. Does not clean up after a
+ * failure: a failed worktree is kept so a human can read the diff.
  */
 
 import { logger } from "../logger.ts";
@@ -98,14 +77,7 @@ import {
   type WorktreeRequest,
 } from "./worktree.ts";
 
-/**
- * One model pass, run to completion, parsed.
- *
- * Injected rather than imported so the whole pipeline is testable without
- * starting a model. The parse function is passed through because each pass
- * validates differently and a run that produces incoherent structured output
- * must fail at the point of parsing, not three stages later.
- */
+/** One model pass, run to completion, parsed. Injected so the pipeline is testable without starting a model. */
 export interface PassRunner {
   run: <T>(
     pass: Pass,
@@ -134,23 +106,16 @@ export interface SolveRequest {
   /**
    * Other checkouts a pass may read, absolute paths, from `SOLVE_READ_DIRS`.
    *
-   * Named to every pass in its prompt and `--add-dir`'d on the read-only one —
-   * `read-scope.ts` and `runner.ts` explain the asymmetry. Also the set the
-   * write-escape guard watches, which is why one value serves both: a directory
-   * a pass was told about and the guard was not is precisely the case the guard
-   * exists for.
+   * Also the set the write-escape guard watches, since a directory a pass was
+   * told about and the guard was not is exactly the case the guard exists for.
    */
   readonly readDirs?: readonly string[];
   /**
    * Whether to run the fail-first experiment, `FAIL_FIRST_CHECK`.
    *
-   * Optional and **on when absent**, which is the opposite of how every
-   * privilege setting in this service defaults, and deliberately so. This is
-   * not a privilege — it grants nothing and writes nothing — it is a quality
-   * check, and the failure mode of it being off is the one it exists to stop:
-   * a regression test that is green against the bug it names, shipped quietly.
-   * The reason it is switchable at all is cost, since it buys one extra install
-   * and one extra test run per solve.
+   * Defaults on, unlike every privilege setting in this service, because it
+   * grants nothing and writes nothing — it is a quality check, catching a
+   * regression test that is green against the bug it names.
    */
   readonly failFirstCheck?: boolean;
   readonly gitTimeoutMs: number;
@@ -161,13 +126,9 @@ export interface SolveRequest {
 /**
  * What recon learned about triage's guess.
  *
- * Carried on every outcome that got past recon, and it is the reason this
- * field is on the result type rather than buried in the verdict: triage makes
- * the `agent:solvable` call **without reading any source**, and recon is the
- * first thing in the pipeline that does. Its correction is the only feedback
- * that assessment ever receives. Computing it and dropping it on the floor —
- * which is what happened before this existed — means the blind call never
- * gets any better.
+ * Triage marks a ticket `agent:solvable` without reading any source; recon is
+ * the first thing that does, and this correction is the only feedback that
+ * blind call ever receives.
  */
 export interface DevLensFeedback {
   readonly accurate: boolean;
@@ -181,24 +142,11 @@ export type SolveOutcome =
    * The worktree exists but the repository's own build does not pass in it,
    * before any pass ran. Says nothing about the ticket or any fix.
    *
-   * A separate kind rather than a `refused` stage for two reasons. It happens
-   * **before recon**, so there is no `devLens` to carry, and `refused` requires
-   * one. And it is the outcome most likely to be misread as a bad fix, so every
-   * exhaustive switch should have to be edited to admit it — the argument
-   * `crashed` already makes below.
-   *
-   * **The worktree is kept**, unlike `bailed`, which also holds nothing the
-   * model wrote. The defining property of this outcome is that the build
-   * behaves differently *here* than in an ordinary checkout, and the worktree
-   * is the only place that difference can be reproduced. Deleting it would
-   * throw away the single artifact that explains the refusal.
-   *
-   * **Kept is not kept *there*.** Keeping it and never coming back wedged the
-   * ticket for good — the next run's `worktree add -b` collided with this
-   * checkout and this branch, both derived from the issue key, and failed
-   * identically for ever. So `createWorktree` now moves our own debris to a
-   * timestamped sibling before it cuts. The evidence survives; the path it
-   * survives at is in the `solve.worktree.salvaged` log line, not here.
+   * A separate kind rather than a `refused` stage because it happens before
+   * recon, so there is no `devLens` to carry. The worktree is kept, since it's
+   * the only place the build's odd behavior can be reproduced — but
+   * `createWorktree` moves it to a timestamped sibling first, so the next run's
+   * `worktree add -b` on the same issue key does not collide with it forever.
    */
   | {
       readonly kind: "unusable-base";
@@ -209,13 +157,10 @@ export type SolveOutcome =
   /**
    * Recon read the code and declined. Not a failure.
    *
-   * The only outcome that cleans up after itself, and the reason is narrow:
-   * recon is the one pass with no `Write` and no `Edit`, so a bailed run's
-   * worktree is a pristine checkout that cost disk and holds nothing. Every
-   * other outcome keeps its worktree because **nothing in this phase commits** —
-   * `composeCommitMessage` composes a message that no `git commit` ever
-   * consumes — so the worktree is the only copy of the work, and removing it
-   * would be the destructive reading of "clean up on success".
+   * The only outcome that cleans up its worktree: recon has no `Write` and no
+   * `Edit`, so a bailed worktree holds nothing. Every other outcome keeps its
+   * worktree, since it's the only copy of any work done and nothing in this
+   * phase commits.
    */
   | {
       readonly kind: "bailed";
@@ -229,18 +174,11 @@ export type SolveOutcome =
   /**
    * The fix pass stopped once it saw the files.
    *
-   * `cause` is the whole point of this variant carrying more than a string.
-   * `judgement` means the model read the code and declined — a verdict about
-   * the ticket, and the correction triage's blind fitness call exists to
-   * receive. `environment` means it was prevented from working, which is a
-   * fact about this machine and says nothing whatever about the ticket.
-   *
-   * They are one kind rather than two because everything downstream of the
-   * pipeline treats them identically — no commit, no push, keep the worktree —
-   * and splitting the kind would force every exhaustive switch to handle a
-   * distinction only two callers care about. The two that do are `feedback.ts`,
-   * which must not score an environment failure as a misjudged ticket, and the
-   * retry in `solveWithRetry`.
+   * `cause` distinguishes `judgement` (the model declined — a verdict about the
+   * ticket) from `environment` (it was prevented from working — a fact about
+   * the machine, not the ticket). One kind rather than two because everything
+   * downstream treats them identically; only `feedback.ts` and
+   * `solveWithRetry` care about the difference.
    */
   | {
       readonly kind: "abandoned";
@@ -260,27 +198,15 @@ export type SolveOutcome =
   /**
    * Something outside the worktree changed while this run was in flight.
    *
-   * Its own kind rather than a third `refused` stage, and the reason is the one
-   * `crashed` already gives: every exhaustive switch should have to be edited
-   * to admit it. A reader who takes this for a diff-gate verdict has concluded
-   * "the change was too big" from a fact about a *different repository*.
+   * Overrides whatever the pipeline concluded, including `verified`: a run
+   * that also wrote into somebody else's checkout has not earned a pull
+   * request, since `diff-gate.ts` only sees the worktree and cannot tell.
    *
-   * **It overrides whatever the pipeline concluded, including `verified`.** A
-   * run that produced a green diff and also wrote into somebody else's checkout
-   * has not earned a pull request, because the pull request would contain the
-   * first thing and not the second, and `diff-gate.ts` reads only the worktree
-   * so nothing else in this service can see the difference.
-   *
-   * **`paths` is evidence, not an accusation, and the renderer must say so.**
-   * The guard compares `git status` before and after; it cannot tell a pass's
-   * write from the operator opening a file in their editor during the thirty
-   * minutes a solve takes. On a hand-driven run a person can answer that in a
-   * second. Under E, where nobody is watching and the operator is working in
-   * these very checkouts, false positives are expected and are one more input
-   * to the transient-versus-deterministic split E already owes.
-   *
-   * `would` carries what the run had concluded, because a reader's first
-   * question is whether the fix itself was any good.
+   * `paths` is evidence, not an accusation — the guard compares `git status`
+   * before and after, and cannot tell a pass's write from an operator editing
+   * a file by hand during the run, so false positives are expected when nobody
+   * is watching. `would` carries what the run had concluded, since a reader's
+   * first question is whether the fix itself was any good.
    */
   | {
       readonly kind: "escaped";
@@ -291,15 +217,8 @@ export type SolveOutcome =
   /**
    * A pass died — timed out, or produced output the parser refused.
    *
-   * **This is a refusal and must never be reported as a statement about the
-   * code**, for the same reason `verify.ts` keeps `refused` apart from
-   * `failed`: nothing was learned. It is a separate kind rather than another
-   * `refused` stage so that every exhaustive switch has to be edited to admit
-   * it, instead of a crash quietly arriving at a caller that thinks it is
-   * looking at a diff-gate verdict.
-   *
-   * It carries no `devLens` because the pass that produces one may be the pass
-   * that died.
+   * A refusal, never a statement about the code: nothing was learned. Carries
+   * no `devLens` because the pass that produces one may be the pass that died.
    */
   | {
       readonly kind: "crashed";
@@ -327,10 +246,8 @@ export type SolveOutcome =
       /**
        * Whether the run's own tests notice when its fix is taken away.
        *
-       * On the outcome rather than in a log because it is feedback for a
-       * reviewer, and this service's recurring failure is producing its best
-       * reasoning on a channel nobody reads. It is never a reason to withhold
-       * the pull request — see `checkFailFirst`.
+       * On the outcome rather than only in a log, since it is feedback for a
+       * reviewer. Never a reason to withhold the pull request — see `checkFailFirst`.
        */
       readonly failFirst: FailFirstResult;
       readonly devLens: DevLensFeedback;
@@ -343,36 +260,20 @@ function lensOf(recon: ReconVerdict): DevLensFeedback {
 }
 
 /**
- * The two reads of the worktree, and why they are two.
+ * The two reads of the worktree, kept separate rather than shared.
  *
- * These were one function called `realDiff`, whose output went both to the
- * diff gate and into the simplify pass's prompt. They need opposite things and
- * the single version served the gate, so the prompt got the gate's format:
- * `2\t0\0src/bootstrap.tsx\0`, fenced under a heading that said `BEGIN DIFF`.
- *
- * It surfaced on 2026-09-04 as a crash — `spawn` rejects a NUL in argv, so the
- * first real solve died at the simplify pass with `ERR_INVALID_ARG_VALUE`. The
- * crash was the lucky outcome. Drop the `-z` and it would have run: the model
- * would have been shown a table of line counts, told it was a patch, and asked
- * to simplify it. It would have found nothing to simplify, every time, and the
- * pass would have looked like it was working.
- *
- * So the split is not defensive tidying. A comment saying "given the diff" and
- * a call sending a numstat is the exact prose/behaviour divergence this project
- * exists to catch, and it was in the code that catches it.
+ * Sharing one `--numstat -z` output between the gate and the simplify prompt
+ * once sent the model a NUL-delimited numstat table instead of a patch, and it
+ * silently found nothing to simplify every time — the crash on a stray NUL in
+ * argv was the lucky version of that bug.
  */
 
 /**
  * The machine-readable read, for the gate.
  *
- * `--numstat -z`, and the `-z` is load-bearing: without it a filename
- * containing a newline — which git will happily accept and a ticket can
- * plausibly suggest — forges an extra numstat record and can push a real
- * change out of the gate's view. Documented at length in `diff-gate.ts`.
- *
- * Consequence of that same `-z`: this output contains NUL bytes and can
- * therefore never reach a prompt. `parseNumstat` is its only legitimate
- * consumer.
+ * The `-z` is load-bearing: without it a filename containing a newline forges
+ * an extra numstat record and can push a real change out of the gate's view.
+ * Contains NUL bytes as a result, so `parseNumstat` is its only legitimate consumer.
  */
 async function readNumstat(
   runner: CommandRunner,
@@ -383,14 +284,7 @@ async function readNumstat(
   return await gitDiff(runner, worktreePath, timeoutMs, ["--numstat", "-z", baseRef]);
 }
 
-/**
- * The human-readable read, for a prompt.
- *
- * A real unified patch, which is what a pass asked to review the change needs
- * to see. No `-z`: there is nothing to parse here, the text goes to a model,
- * and the filename-with-a-newline attack that `-z` defends against is a threat
- * to the *gate's* accounting, not to a model reading prose.
- */
+/** The human-readable read, for a prompt. No `-z`: nothing here is parsed, so the gate's newline-in-filename defense does not apply. */
 async function readPatch(
   runner: CommandRunner,
   worktreePath: string,
@@ -403,28 +297,11 @@ async function readPatch(
 /**
  * Makes new files visible to `git diff`, and it is a security fix.
  *
- * `git diff <base>` reports tracked files only. A pass that *creates* a file
- * does not appear in it at all, so before this the gate bounded a change it
- * could not see: measured on the first real solve, it passed a five-file change
- * having read two files and four lines. The implementation, its test and a new
- * asset were all invisible.
- *
- * That is not a reporting inaccuracy, it is a hole through every categorical
- * refusal the gate makes. Each one — `.github/`, CI config, lockfiles, the
- * files that define what verification means — names a path that must not be
- * *touched*, and each was evadable by writing a new file rather than editing an
- * existing one. A fresh `.github/workflows/*.yml` would have passed the gate
- * and then run on push. The caps were equally hollow: fifty new files counted
- * as zero.
- *
- * `--intent-to-add` rather than a real `add`: it records the path in the index
- * and nothing else, so the content still shows as a pending change and the
- * worktree is left in the state a human inspecting it would expect.
- *
- * Ignored files stay invisible, which is correct — they are not part of the
- * change and cannot be pushed — but it does mean the gate's bound is on what
- * git would carry, not on every byte the pass wrote to disk. The worktree is
- * disposable, so that is the right line.
+ * `git diff <base>` reports tracked files only, so a pass that creates a file
+ * was invisible to every categorical refusal the gate makes — a fresh
+ * `.github/workflows/*.yml` would have passed the gate and then run on push.
+ * `--intent-to-add` rather than a real `add` records the path in the index
+ * only, leaving the worktree looking as a human inspecting it would expect.
  */
 async function stageIntentToAdd(
   runner: CommandRunner,
@@ -438,21 +315,14 @@ async function stageIntentToAdd(
   return !result.timedOut && result.exitCode === 0;
 }
 
-/**
- * Both reads go through here, and that is the point.
- *
- * The gate and the simplify prompt must be looking at the same set of files. If
- * only one of them staged, a pass could be shown a change the gate never
- * bounded, or bounded against a change it was never shown.
- */
+/** Both reads go through here so the gate and the simplify prompt see the same set of files. */
 async function gitDiff(
   runner: CommandRunner,
   worktreePath: string,
   timeoutMs: number,
   args: readonly string[],
 ): Promise<string | null> {
-  // Refuse rather than fall back to the tracked-only diff. A partial answer
-  // here reads as "nothing else changed", which is the failure being fixed.
+  // Refuse rather than fall back to the tracked-only diff, which would read as "nothing else changed".
   if (!(await stageIntentToAdd(runner, worktreePath, timeoutMs))) {
     return null;
   }
@@ -469,15 +339,9 @@ async function gitDiff(
 /**
  * A pass that ran, or the reason it did not — never an exception.
  *
- * `passes.run` throws two quite different ways: `runSession` rejects when the
- * session times out or exits non-zero, and the parsers throw `SolveParseError`
- * when the model's output contradicts itself. Neither was caught. A solve is a
- * long-running job holding a worktree, so an uncaught throw took the whole
- * process down and orphaned the worktree — survivable while a human is watching
- * a single command, fatal once the daemon runs the loop unattended.
- *
- * Both become the same thing here, because the caller's decision is identical:
- * no verdict was reached. Which of the two it was survives in the reason.
+ * `passes.run` throws both on a session timeout/non-zero exit and on
+ * `SolveParseError`; an uncaught throw here would take the whole process down
+ * and orphan the worktree once the daemon runs unattended.
  */
 type PassResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -486,13 +350,7 @@ type PassResult<T> =
       readonly reason: string;
     };
 
-/**
- * The outcome for a dead pass, logged on the way out.
- *
- * Logged for the same reason the bail reasons are: this is the one record that
- * a run existed at all, and without it a solve that died mid-pass is
- * indistinguishable from one that was never started.
- */
+/** The outcome for a dead pass, logged on the way out, so a solve that died mid-pass is distinguishable from one never started. */
 function crashed(issueKey: string, pass: Pass, reason: string, worktree: Worktree): SolveOutcome {
   logger.info("solve.crashed", { issueKey, pass, reason, worktreePath: worktree.path });
   return { kind: "crashed", pass, reason, worktree };
@@ -508,32 +366,20 @@ async function runPass<T>(
   try {
     return { ok: true, value: await passes.run(pass, options, parse) };
   } catch (error) {
-    // The message only. A stack trace here would be the harness's own frames,
-    // which say nothing about why the pass did not produce a verdict, and this
-    // string reaches a ticket comment.
+    // The message only — a stack trace would be the harness's own frames, and this string reaches a ticket comment.
     const reason = error instanceof Error ? error.message : String(error);
     return { ok: false, reason };
   }
 }
 
-/**
- * Runs one ticket through the pipeline.
- *
- * Reads top to bottom as the sequence it is. Each stage either produces the
- * input to the next or returns an outcome; there is no state machine and no
- * shared mutable context, because the value of this file is that a reader can
- * see every exit in one pass.
- */
+/** Runs one ticket through the pipeline. No state machine and no shared mutable context — each stage either feeds the next or returns an outcome. */
 export async function solveTicket(
   deps: SolveDependencies,
   request: SolveRequest,
 ): Promise<SolveOutcome> {
   const staged = await prepareSkillRoot(request.parentDirectory, request.issueKey);
   if (staged.outcome === "refused") {
-    // `no-worktree` is the right shape even though no worktree was attempted:
-    // it is the outcome that means "the run never started", and starting a run
-    // whose every prompt opens with an unresolvable `/agent-solve` is worse
-    // than not starting one.
+    // `no-worktree` means "the run never started", which is right here too: no worktree was attempted.
     return { kind: "no-worktree", reason: staged.reason };
   }
   const watched = watchedDirs(request);
@@ -543,30 +389,18 @@ export async function solveTicket(
     const after = await snapshotRepos(deps.commands, watched, request.gitTimeoutMs);
     return escapeVerdict(request.issueKey, outcome, escapedRepos(before, after));
   } finally {
-    // Always, including on the paths that keep the worktree. A failed run's
-    // worktree is evidence; a copy of a skill that is still in git is not.
+    // Always, even on paths that keep the worktree: a failed run's worktree is evidence, a staged skill copy is not.
     await removeSkillRoot(staged.path);
   }
 }
 
 /**
- * The checkouts a run must leave exactly as it found them.
- *
- * The repository first, and it is the one that matters most: the worktree is
- * cut from it, so it is the checkout a confused pass is likeliest to reach for,
- * and on this operator's machine it is somebody's working copy with uncommitted
- * work in it. The vault next, which is `--add-dir`'d on every pass including
- * the write ones — an exposure that shipped unnoticed and is closed here by
- * watching it rather than by withdrawing it, since the passes legitimately read
- * the conventions it holds. Then the read-only checkouts, which is the whole
- * reason this guard was written in the same change that opened them.
- *
- * Not the worktree itself: writing there is the job. Not the skill root: it is
- * a staged copy that is deleted either way, and `skill-root.ts` owns it.
+ * The checkouts a run must leave exactly as it found them: the repository
+ * (holding the operator's own uncommitted work), the vault, and the read-only
+ * checkouts — but not the worktree itself, where writing is the job.
  *
  * `git worktree add`, `git fetch` and `git branch -d` all write inside `.git`
- * and none of them appear in `git status`, so the harness's own git traffic
- * against the repository does not trip this.
+ * and none appear in `git status`, so the harness's own git traffic does not trip this.
  */
 function watchedDirs(request: SolveRequest): readonly string[] {
   const candidates = [request.repoPath, request.vaultPath ?? "", ...(request.readDirs ?? [])];
@@ -576,13 +410,8 @@ function watchedDirs(request: SolveRequest): readonly string[] {
 /**
  * Folds an escape into the run's verdict, or leaves the verdict alone.
  *
- * Two things it deliberately does not do. It does not override `no-worktree`:
- * that outcome means `createWorktree` refused, so no pass ever started and
- * anything that moved was moved by somebody else — reporting it as this run's
- * escape would be a false accusation with no candidate. And it does not swallow
- * the finding in either case; the log line goes out before the branch, because
- * a guard whose only quiet path is also its silent path is the failure this
- * repository keeps finding in its own code.
+ * Never overrides `no-worktree`: that means `createWorktree` refused, so no
+ * pass ever started and reporting an escape would be a false accusation.
  */
 function escapeVerdict(
   issueKey: string,
@@ -604,52 +433,26 @@ export interface SolveAttempts {
   readonly outcome: SolveOutcome;
   /** 1 or 2. Never more — see `solveWithRetry`. */
   readonly attempts: number;
-  /**
-   * Why a warranted retry did not happen, or "" when none was warranted or one
-   * ran. Returned rather than only logged: a caller reporting "abandoned" for
-   * an environment cause is saying something quite different depending on
-   * whether the pipeline tried twice, and a human reading the ticket comment is
-   * the person who has to know.
-   */
+  /** Why a warranted retry did not happen, or "" when none was warranted or one ran. */
   readonly retryBlocked: string;
 }
 
 /**
  * Runs the ticket, and runs it once more if the *machine* got in the way.
  *
- * Observed on SSX-3822, 2026-09-04: the host's own safety hook denied a `Write`
- * mid-pass, twice in eight write-capable sessions, non-deterministically — the
- * successful run of the same feature wrote materially identical content to a
- * neighbouring path. Nothing about the ticket changed between those runs, so
- * recording that as "the fix pass declined" would have written a falsehood into
- * the calibration record and marked a fixable ticket unfixable.
+ * Only for `environment` causes, and only once: a `judgement` cause is a
+ * verdict about the ticket, and an environment obstacle that survives a clean
+ * retry is not transient. The retry is a fresh worktree, never a second pass
+ * over the first, since the first stopped mid-write and its state is unknown.
  *
- * Only `environment`, and only once. A `judgement` cause is a verdict about the
- * ticket and rerunning it is asking the same question twice at full price; an
- * environment obstacle that survives a clean retry is not transient, and a loop
- * that keeps trying turns a blocked machine into an unbounded bill.
- *
- * The retry is a *fresh worktree*, never a second pass over the first — that
- * worktree's state is unknown by definition, since the run stopped in the
- * middle of writing to it. Which makes the cleanup load-bearing rather than
- * tidy: `createWorktree` derives both the path and the branch from the issue
- * key, so a second attempt meets its own predecessor. If either the worktree or
- * the branch survives, there is no retry — `git worktree remove` refuses on a
- * dirty checkout and `branch -d` refuses on unmerged commits, so a refusal here
- * means the first attempt left work behind, and work left behind is evidence
- * rather than debris.
- *
- * **That block is this function's, and it is no longer a property of
- * `createWorktree`.** `createWorktree` now salvages a checkout of ours at that
- * path rather than colliding with it, so it would happily start a second
- * attempt over the first — the two paths deliberately give opposite answers
- * about the same dirty checkout. The distinction is who left it: the daemon's
- * next tick is picking up after a process that is *gone*, and moving its debris
- * aside is the only way to make progress, whereas here the first attempt just
- * ended in this process and its worktree is the evidence for the environment
- * failure we are about to retry past. So the check above must stay explicit,
- * and must not be simplified away on the grounds that the cold path "handles
- * it" — it handles it by discarding exactly what this one is protecting.
+ * The cleanup check below is load-bearing, not tidying: `createWorktree`
+ * derives both the path and branch from the issue key, so if either the
+ * worktree or branch from the first attempt survives, there's a refusal here
+ * rather than a silent collision — because that survival means the first
+ * attempt left evidence behind, not debris. This is deliberately stricter than
+ * `createWorktree`'s own salvage behavior, which exists for a different case
+ * (the daemon resuming after a dead process) and must not be relied on to
+ * "handle" this one, since it would discard exactly what this guards.
  */
 export async function solveWithRetry(
   deps: SolveDependencies,
@@ -686,16 +489,7 @@ export async function solveWithRetry(
   return { outcome: await solveTicket(deps, request), attempts: 2, retryBlocked: "" };
 }
 
-/**
- * The only place a {@link VerifyRequest} is built.
- *
- * The base check and the post-fix check have to be the same experiment with the
- * same budgets, because the whole argument for calling a later red a *failure*
- * is that these identical steps were green before the change. Two construction
- * sites could drift — a longer timeout here, a different base ref there — and
- * the drift would be invisible, showing up only as a confident verdict about
- * code that was never the problem.
- */
+/** The only place a {@link VerifyRequest} is built, so the base check and the post-fix check cannot drift apart on timeout or base ref. */
 function verifyRequestOf(
   request: Pick<SolveRequest, "repoPath" | "baseRef" | "stepTimeoutMs" | "installTimeoutMs">,
   worktree: Worktree,
@@ -733,10 +527,7 @@ async function runPipeline(
   const { worktree } = created;
 
   // ---- the base ------------------------------------------------------------
-  // Before any pass, and deliberately before the expensive one. `verify`'s
-  // `failed` means "the change is bad", which is only true if the same steps
-  // would have passed without it. This is where that premise is established;
-  // see `verifyBase`.
+  // Before any pass: `verify`'s `failed` means "the change is bad", which is only true if these steps would have passed without it.
   const baseCheck = await verifyBase(deps.commands, verifyRequestOf(request, worktree));
   if (baseCheck.outcome === "unusable") {
     logger.info("solve.base.unusable", {
@@ -774,10 +565,6 @@ async function runPipeline(
     devLensAccurate: recon.devLensAccurate,
   });
   if (!recon.proceed) {
-    // The bail reason is the whole product of a read-only pass. It is the only
-    // calibration the fitness assessment ever gets — triage cannot read source,
-    // so this is the first time anything with the code in front of it has had
-    // an opinion — and it was going nowhere.
     logger.info("solve.abandoned", {
       issueKey,
       pass: "recon",
@@ -785,13 +572,8 @@ async function runPipeline(
       leftFiles: false,
       worktreePath: worktree.path,
     });
-    // The one place a worktree is removed, and the one place it is provably
-    // safe to. Recon holds no `Write` and no `Edit`, so there is nothing in
-    // there to lose; and a bail is the *expected* outcome for a ticket triage
-    // called wrong, so leaking a full checkout per bail is the leak that grows
-    // fastest. `removeWorktree` does not force, so if this reasoning is ever
-    // wrong — a future recon that can write — git refuses and says so, and the
-    // reason travels out on the outcome rather than into a log nobody reads.
+    // The one place a worktree is removed: recon has no Write/Edit, so there is nothing in it to lose.
+    // `removeWorktree` does not force, so if a future recon can write, git refuses and the reason travels out on the outcome.
     const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
     return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree, cleanup };
   }
@@ -806,15 +588,8 @@ async function runPipeline(
   }
   const fix = fixRun.value;
   if (fix.abandoned.trim() !== "") {
-    // Logged, because it was not. A bail is the most informative thing a solve
-    // produces — it is the fitness assessment being corrected by something that
-    // can actually read the code — and until now the reason was returned to a
-    // caller that printed a one-word outcome, so it reached nobody. `leftFiles`
-    // because an abandoned run may still have touched the worktree, and whether
-    // there is debris to look at changes what a human does next.
-    // `cause` is narrowed here rather than trusted: `parseFix` has already
-    // rejected `none` on an abandoned run, so this cast documents a check that
-    // has happened rather than performing one.
+    // `leftFiles` matters because an abandoned run may still have touched the worktree.
+    // `parseFix` already rejects `none` on an abandoned run; this cast documents that check rather than performing one.
     const cause = fix.abandonedCause as Exclude<AbandonCause, "none">;
     logger.info("solve.abandoned", {
       issueKey,
@@ -827,34 +602,20 @@ async function runPipeline(
     return { kind: "abandoned", reason: fix.abandoned, cause, devLens, worktree };
   }
 
-  // The pass that actually spends the privilege, and until the first verified
-  // run it was the only one that logged nothing — recon, simplify and verify
-  // each did. So the write pass was the single step with no record that it had
-  // run, which is precisely backwards: in a six-minute gap between two log
-  // lines there was no way to tell a slow fix from a hung one, and afterwards
-  // no way to tell what it had claimed to touch.
-  //
-  // Counts and flags only. `filesTouched` is model-authored text derived from a
-  // ticket anyone can edit, and the diff gate is what checks those paths
-  // against git's own account a few lines below; putting them in a log line
-  // that a human skims would invite trusting the claim instead of the check.
+  // Counts and flags only, not the paths themselves: `filesTouched` is model-authored text from an editable ticket,
+  // and logging it invites trusting the claim instead of the diff gate's check against git's own account below.
   logger.info("solve.fix", {
     issueKey,
     changed: fix.changed,
     files: fix.filesTouched.length,
     testAdded: fix.testAdded,
-    // Empty on a healthy run. Non-empty means the pass shipped a change while
-    // telling us why it might not hold, and that is worth having in the log
-    // next to the outcome rather than only inside a returned object.
+    // Empty on a healthy run; non-empty means the pass shipped a change while flagging why it might not hold.
     residualRisk: fix.residualRisk,
     testOmittedReason: fix.testOmittedReason,
   });
 
   // ---- simplify ----------------------------------------------------------
-  //
-  // Given the diff rather than the brief, because it is not implementing
-  // anything and showing it the requirement would invite it to reconsider the
-  // change instead of the way the change is written.
+  // Given the diff rather than the brief: showing the requirement would invite reconsidering the change, not just its style.
   const diffText = await readPatch(commands, worktree.path, request.baseRef, request.gitTimeoutMs);
   const simplifyRun = await runPass(
     passes,
@@ -863,21 +624,14 @@ async function runPipeline(
     (output) => parseSimplify(output, issueKey, fix.filesTouched),
   );
   if (!simplifyRun.ok) {
-    // Note this discards a fix that may have been perfectly good. Deliberate:
-    // the diff gate has not run yet, so nothing has bounded what is in the
-    // worktree, and shipping an unbounded diff because the pass that would have
-    // tidied it died is the wrong way to fail. The worktree is kept, so the
-    // work is not lost — it is just not automatically believed.
+    // Discards a fix that may have been fine: the diff gate has not run yet, so nothing bounds the worktree. Kept, not lost.
     return crashed(issueKey, "simplify", simplifyRun.reason, worktree);
   }
   const simplify = simplifyRun.value;
   logger.info("solve.simplify", { issueKey, changed: simplify.changed });
 
   // ---- the diff gate -----------------------------------------------------
-  //
-  // Read fresh, after simplify, and never from either model's own account of
-  // what it touched. `fix.filesTouched` bounded the simplify pass; this bounds
-  // both of them against what git actually says happened.
+  // Read fresh, after simplify, against what git says happened rather than either model's own account.
   const finalDiff = await readNumstat(
     commands,
     worktree.path,
@@ -903,8 +657,7 @@ async function runPipeline(
   // ---- verification ------------------------------------------------------
   const verification = await verify(commands, verifyRequestOf(request, worktree));
   if (verification.outcome === "refused") {
-    // Not a statement about the change. Kept distinct from `failed` all the way
-    // out of this function so no caller can report it as one.
+    // Not a statement about the change; kept distinct from `failed` so no caller can report it as one.
     return {
       kind: "refused",
       stage: "verification",
@@ -918,15 +671,7 @@ async function runPipeline(
   }
 
   // ---- fail-first ----------------------------------------------------------
-  //
-  // After verification and never instead of it. The two questions are ordered
-  // the way they are because only the first one can withhold a pull request:
-  // there is no point asking whether the tests notice the fix being taken away
-  // until they have been seen to pass with it there.
-  //
-  // The paths come from the same numstat the gate was given, so the experiment
-  // is bounded by exactly the change the gate bounded — not by either model's
-  // account of what it touched.
+  // After verification, never instead of it: no point asking whether the tests notice the fix's absence before it's seen to pass with it there.
   const failFirst =
     request.failFirstCheck === false
       ? ({ outcome: "skipped", reason: "FAIL_FIRST_CHECK is off" } as const)
@@ -992,17 +737,11 @@ export interface ConflictRoundRequest extends SolveRequest {
 }
 
 /**
- * What the pass is told about the conflict.
- *
- * The paths and nothing else. Not the conflicted text: the session's working
- * directory *is* the worktree and it has `Read`, so pasting file contents into
- * the prompt would be handing it a copy of something it can open — a copy that
- * can go stale the moment it edits anything, which is the worst kind.
- *
- * The list is git's, which is the property that makes the rest of this round
- * checkable. Every later question — did it resolve them, did it touch anything
- * else — is asked against this set rather than against what the pass says it
- * did.
+ * What the pass is told about the conflict: the paths, not the conflicted
+ * text, since the session already has `Read` on the worktree and a pasted copy
+ * would go stale the moment it edits anything. The list is git's, which makes
+ * every later question checkable against it rather than against the pass's
+ * own account.
  */
 function renderConflict(baseRef: string, behind: number, files: readonly string[]): string {
   return [
@@ -1016,35 +755,16 @@ function renderConflict(baseRef: string, behind: number, files: readonly string[
 /**
  * One attempt at merging a base that will not merge itself.
  *
- * ## Why this is a round of its own rather than a step in one
- *
- * A branch that will not take its base cannot be verified — `pnpm install`,
- * typecheck and test all run against a tree that does not exist yet — so a
- * review round layered on top of an unresolved conflict would be answering a
- * reviewer from a state nobody can build. This round therefore spends itself
- * entirely on the merge and answers nobody. The reviewer's thread stays
- * unanswered on purpose, which is also what brings the next tick back here.
- *
- * ## The merge is re-run rather than kept
- *
- * `base-sync.ts` aborted the conflict it found in the attach path, and this
- * starts a fresh one. That is not waste: the merge is deterministic and costs
- * milliseconds, and the alternative is a conflicted working tree sitting
- * through a reservation and a model start-up while `attachWorktree`'s
- * cleanliness check would salvage it out from under this function.
- *
- * ## Nothing the pass says about the tree is believed
- *
- * The pass writes a report and the harness reads git. `acceptResolution` asks
- * whether the paths are unmerged, whether markers survive, and whether anything
- * outside the conflicted set moved; `verify` asks whether the result builds.
- * The report's own `resolutions` are checked for *coherence* — that they name
- * files git actually flagged — and are otherwise a record for a human, not
- * evidence.
- *
- * Every exit but `current`, `merged` and `resolved` leaves the checkout as it
- * was found, because a conflicted tree left behind is the state the next tick
- * salvages.
+ * Its own round rather than a step in one, because a branch that will not
+ * take its base cannot be verified, so a review round on top of it would be
+ * answering a reviewer from a state nobody can build — the reviewer's thread
+ * stays unanswered on purpose. The merge is re-run rather than kept from
+ * `base-sync.ts`'s attach-path attempt, since it's deterministic and cheap and
+ * a conflicted tree left sitting through a model call would be salvaged out
+ * from under this function anyway. Nothing the pass says about the tree is
+ * believed — `acceptResolution` and `verify` check git directly, and the
+ * report's own `resolutions` are only checked for naming files git actually
+ * flagged.
  */
 export async function resolveConflict(
   deps: SolveDependencies,
@@ -1085,8 +805,7 @@ async function runConflictRound(
     return { kind: "refused", reason: started.reason };
   }
   if (started.outcome === "merged") {
-    // It conflicted when the attach path tried and does not now, which happens
-    // when the base moved between the two. Push it and spend nothing else.
+    // Conflicted on the attach path but not now, since the base moved between the two; push and spend nothing else.
     const pushed = await pushBranch(commands, sync);
     return pushed.outcome === "pushed"
       ? { kind: "merged", behind: started.behind }
@@ -1135,11 +854,7 @@ async function runConflictRound(
     return await undo({ kind: "abandoned", reason: report.abandoned });
   }
 
-  // Checked before the tree is, because it is the cheap half and because a
-  // report naming a file git never flagged is a report about some other
-  // situation — most likely one the pass invented for itself, which is the
-  // failure mode the review loop already met when it argued with a comment
-  // nobody had written.
+  // Checked before the tree is: a report naming a file git never flagged is describing a situation the pass invented.
   const claimed = report.resolutions.map((resolution) => resolution.path);
   const unasked = claimed.filter((path) => !files.includes(path));
   if (unasked.length > 0) {
@@ -1163,9 +878,7 @@ async function runConflictRound(
     return await undo({ kind: "refused", reason: verification.reason });
   }
   if (verification.outcome === "failed") {
-    // Aborted rather than pushed. A red merge commit on a branch under review
-    // replaces one problem a reviewer can see with one they cannot, and the
-    // conflict is still there to be tried again with the next base.
+    // Aborted rather than pushed: a red merge commit replaces a problem a reviewer can see with one they cannot.
     return await undo({ kind: "failed", reason: verification.reason, verification });
   }
 
@@ -1177,9 +890,7 @@ async function runConflictRound(
     });
   }
 
-  // Not `undo` — the merge is committed, so `merge --abort` has nothing to
-  // abort. `pushBranch` undoes it by resetting to `ORIG_HEAD`, which is the
-  // same discard by the only route still available.
+  // Not `undo`: the merge is committed, so `merge --abort` has nothing to abort. `pushBranch` resets to `ORIG_HEAD` instead.
   const pushed = await pushBranch(commands, sync);
   if (pushed.outcome === "refused") {
     return { kind: "refused", reason: pushed.reason };
@@ -1199,15 +910,9 @@ export type ReviewRoundOutcome =
   | { readonly kind: "no-change"; readonly report: ReviewReport }
   | { readonly kind: "abandoned"; readonly reason: string }
   /**
-   * `write-escape` is the same guard `solveTicket` runs, reported differently.
-   *
-   * A solve gets its own `escaped` kind because the outcomes an escape can
-   * override there — `crashed`, `unusable-base` — carry no dev lens, and
-   * `SolveOutcome.refused` requires one; inventing a lens would put a
-   * fabricated row in the record that calibrates the fitness call. A review
-   * round has no lens and no calibration row, so the refusal it already has is
-   * the honest shape: the harness will not offer this work, and the paths that
-   * decided that are in `reasons` where the renderer already prints them.
+   * `write-escape` is the same guard `solveTicket` runs, reported differently:
+   * a review round has no dev lens and no calibration row, so `refused` is
+   * the honest shape rather than a dedicated `escaped` kind.
    */
   | {
       readonly kind: "refused";
@@ -1231,16 +936,11 @@ export interface ReviewRoundRequest extends SolveRequest {
 /**
  * One round of resolving reviewer feedback.
  *
- * Deliberately re-runs the same gate and the same verification as the first
- * pass, against the whole diff rather than the increment. A round that fixes
- * what the reviewer asked for and breaks something else has not improved the
- * pull request, and bounding only the delta would be measuring the wrong
- * thing — the reviewer is looking at the cumulative diff, so that is what has
- * to stay inside the bound.
- *
- * No simplify pass here. The reviewer *is* the second opinion at this point,
- * and inserting another editor between their comment and their re-read would
- * mean they are no longer reviewing the thing they commented on.
+ * Re-runs the gate and verification against the whole diff, not the
+ * increment, since the reviewer is looking at the cumulative diff. No
+ * simplify pass here: the reviewer is the second opinion, and another editor
+ * between their comment and re-read would mean they're no longer reviewing
+ * what they commented on.
  */
 export async function resolveReview(
   deps: SolveDependencies,
@@ -1250,11 +950,7 @@ export async function resolveReview(
   if (staged.outcome === "refused") {
     return { kind: "abandoned", reason: staged.reason };
   }
-  // The review pass is a write pass, so it gets the same guard as the three
-  // above it. It needs it more, if anything: a solve that escapes has produced
-  // nothing anyone has seen, while a review round is answering a human on a
-  // pull request that is already open, and pushing there is one step closer to
-  // a merge than anything `solveTicket` can do.
+  // The review pass is a write pass and gets the same write-escape guard as the passes in solveTicket.
   const watched = watchedDirs(request);
   const before = await snapshotRepos(deps.commands, watched, request.gitTimeoutMs);
   try {
@@ -1298,9 +994,7 @@ async function runReviewRound(
     (output) => parseReview(output, issueKey),
   );
   if (!reviewRun.ok) {
-    // A dead review round is `abandoned` rather than its own kind: unlike the
-    // three passes above, a pull request already exists here, so the loop has
-    // somewhere to put the reason and a human is already on the other end.
+    // `abandoned` rather than its own kind: unlike the passes in solveTicket, a pull request already exists to carry the reason.
     logger.info("solve.crashed", {
       issueKey,
       pass: "review",
@@ -1322,8 +1016,7 @@ async function runReviewRound(
     return { kind: "abandoned", reason: report.abandoned };
   }
   if (!report.changed) {
-    // A review can raise only questions. Answering them without touching code
-    // is a legitimate round, and there is nothing to re-verify.
+    // A review round can raise only questions, with nothing to re-verify.
     return { kind: "no-change", report };
   }
 

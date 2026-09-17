@@ -1,18 +1,10 @@
 /**
- * One headless storecode run: spawn it, read its event stream, return its
- * structured output.
+ * One headless storecode run: spawn it, read its event stream, return its structured output.
  *
- * Extracted because there are now two kinds of run — the analyst that decides
- * and the poster that writes — and they need identical handling of the parts
- * that are easy to get subtly wrong: the line-buffered NDJSON stream, the two
- * budgets and the watchdog that must kill the child rather than merely reject,
- * the MCP connectivity check, the tool denials a run reports while still
- * calling itself a success, and the rule that a run which exits 0 without
- * structured output is a failure rather than an empty success.
- *
- * Duplicating that between two files would mean two chances to fix a bug in
- * one place only. Everything specific to *what* is being run lives in the
- * caller; this module only knows how to run it.
+ * Shared by the analyst and the poster so the parts easy to get subtly wrong — the line-buffered
+ * NDJSON stream, the two budgets and watchdog, the MCP connectivity check, tool denials a run
+ * reports while still calling itself a success, and a success exit with no structured output being
+ * a failure — have one implementation, not two chances to get it wrong.
  */
 
 import { spawn } from "node:child_process";
@@ -22,40 +14,18 @@ import { logger } from "../logger.ts";
 /**
  * Tools withheld from every run this service starts, by name.
  *
- * This exists because `--allowedTools` does not do what three comments in
- * `runner.ts` and one in `poster.ts` said it did. Probed against the local arg
- * parser 2026-09-04, four ways:
- *
- *   --permission-mode dontAsk --allowedTools "Bash(git status:*)"  → both a
- *       scoped and an unscoped git command ran
- *   --permission-mode dontAsk --allowedTools "Read"                → Bash ran
- *   --allowedTools "Read" (no permission-mode at all)              → Bash ran
- *   the same, from /tmp rather than this repo                      → Bash ran
- *
- * So `--allowedTools` is an auto-approve list, not an allowlist: naming a tool
- * pre-approves it, and omitting a tool restricts nothing. Under `dontAsk`
- * everything is pre-approved regardless, which is the mode this service uses.
- * Every triage run it has ever made had `Bash`, `Write` and `Edit` available.
- *
- * `--disallowedTools` is the mechanism that actually restricts, and it does it
- * in the strongest available form — the tool never appears in the model's tool
- * list, so there is no call to permit or deny. A run given
- * `--disallowedTools "Bash,Write,Edit"` reported `bash=NO write=NO read=YES`,
- * which also confirms the comma-separated form parses.
- *
- * Keep both flags. The allowlist still suppresses prompts and still documents
- * intent; it simply is not the guard, and must never again be described as one.
+ * `--allowedTools` is an auto-approve list, not an allowlist: naming a tool pre-approves it, and
+ * omitting one restricts nothing — under `dontAsk`, everything is pre-approved regardless.
+ * `--disallowedTools` is what actually restricts: the tool never appears in the model's tool list.
+ * Keep both flags — the allowlist still suppresses prompts and documents intent, but must never be
+ * described as the guard.
  */
 export const DENIED_BUILTIN_TOOLS: readonly string[] = ["Bash", "Write", "Edit", "NotebookEdit"];
 
 /**
- * How often the watchdog looks at the clock.
- *
- * Short next to any real budget, because it is not only a poll: the gap
- * between two consecutive ticks is the entire evidence that the machine
- * stopped existing for a while. A long interval cannot tell a twenty-minute
- * suspend from a twenty-minute interval, so this has to be much smaller than
- * the shortest sleep worth detecting.
+ * How often the watchdog looks at the clock. Short next to any real budget: the gap between two
+ * consecutive ticks is the only evidence the machine stopped existing for a while, and a long
+ * interval cannot tell a twenty-minute suspend from a twenty-minute interval.
  */
 const WATCHDOG_INTERVAL_MS = 15_000;
 
@@ -66,17 +36,10 @@ const WATCHDOG_INTERVAL_MS = 15_000;
 const MIN_WATCHDOG_INTERVAL_MS = 25;
 
 /**
- * How often to look, given the budgets this run was handed.
- *
- * A fixed fifteen seconds is right for the shipped budgets and wrong for any
- * budget near it: enforcement can only be as fine as the tick, so a
- * ten-second limit checked every fifteen seconds is a fifteen-second limit
- * wearing the wrong number. Halving the smaller budget keeps at least two
- * looks inside it, which is the weakest claim worth making.
- *
- * Exported for the tests, which need budgets in the hundreds of milliseconds
- * and would otherwise have to wait a quarter of a minute per assertion or mock
- * the clock the watchdog is the only thing reading.
+ * How often to look, given the budgets this run was handed. A fixed fifteen seconds is wrong for
+ * any budget near it — enforcement can only be as fine as the tick — so this halves the smaller
+ * budget to keep at least two looks inside it. Exported so tests with sub-second budgets don't
+ * have to wait a quarter of a minute or mock the clock.
  */
 export function watchdogIntervalFor(idleMs: number, maxRunMs: number): number {
   const half = Math.floor(Math.min(idleMs, maxRunMs) / 2);
@@ -84,10 +47,7 @@ export function watchdogIntervalFor(idleMs: number, maxRunMs: number): number {
 }
 
 /**
- * Drift on a single tick above which the machine is taken to have slept.
- *
- * Ten seconds of overshoot in a process that does nothing but parse NDJSON
- * lines is not scheduling noise. It is deliberately far below the shortest
+ * Drift on a single tick above which the machine is taken to have slept. Far below the shortest
  * interesting suspend and far above anything the event loop does under load.
  */
 const SLEEP_DRIFT_MS = 10_000;
@@ -110,12 +70,9 @@ export class McpUnavailableError extends SessionError {
 }
 
 /**
- * Which budget ran out, because they mean opposite things about the run.
- *
- * `idle` is a child that stopped talking: hung, wedged, or holding a socket
- * that died under it. `total` is a child that talked the whole way and simply
- * took too long. Collapsing them loses the only distinction that tells an
- * operator whether to raise a limit or go looking for a bug.
+ * Which budget ran out. `idle` is a child that stopped talking: hung, wedged, or holding a dead
+ * socket. `total` is a child that talked the whole way and simply took too long — the distinction
+ * an operator needs to know whether to raise a limit or go looking for a bug.
  */
 export type SessionTimeoutKind = "idle" | "total";
 
@@ -123,16 +80,10 @@ export class SessionTimeoutError extends SessionError {
   readonly kind: SessionTimeoutKind;
   readonly elapsedMs: number;
   /**
-   * The killed run's storecode session, when the init event got far enough to
-   * name one.
-   *
-   * Carried because a killed pass is not necessarily lost work. Probed
-   * 2026-09-06: the transcript is written as the run goes, survives `SIGKILL`,
-   * and `storecode --resume <id> -p "..."` reads it back with the completed
-   * turns and their tool results intact. Nothing in this service resumes
-   * automatically — that would be state on disk, which the queue design
-   * refuses — but an operator holding this id can pick the pass back up by
-   * hand, and a null here means they cannot.
+   * The killed run's storecode session, when the init event got far enough to name one. Carried
+   * because a killed pass is not necessarily lost work: the transcript survives `SIGKILL`, and
+   * `storecode --resume <id> -p "..."` reads it back intact. Nothing here resumes automatically —
+   * that would be state on disk — but an operator holding this id can pick it up by hand.
    */
   readonly sessionId: string | null;
 
@@ -164,28 +115,15 @@ export interface SessionOptions {
   readonly args: readonly string[];
   readonly workingDirectory: string;
   /**
-   * How long the child may go without producing a byte on either stream.
-   *
-   * This is the budget that does the work, and it replaced a wall-clock
-   * deadline set once at spawn. That deadline could not tell a pass working
-   * hard for thirty minutes from one wedged for thirty seconds, so it was
-   * sized for the former and therefore caught neither.
-   *
-   * Silence is the signal because a healthy headless run is never silent: it
-   * emits an NDJSON event per turn and per tool call. Time spent asleep is
-   * excluded — see the watchdog in `runSession`.
+   * How long the child may go without producing a byte on either stream. A healthy headless run is
+   * never silent — it emits an NDJSON event per turn and per tool call. Time spent asleep is
+   * excluded; see the watchdog in `runSession`.
    */
   readonly idleMs: number;
   /**
-   * The absolute ceiling on a single pass, counting only time the machine was
-   * awake.
-   *
-   * Deliberately a second knob rather than a longer `idleMs`, and for the same
-   * reason `MAX_PR_ROUNDS_TOTAL` is not `MAX_REVIEW_ITERATIONS`: one is a
-   * policy about how long this kind of work is worth, the other is a brake on
-   * the machinery, and relaxing the first must not be able to disable the
-   * second. A pass that streams an event every minute forever is alive by
-   * every test `idleMs` can apply, and this is what stops it.
+   * The absolute ceiling on a single pass, counting only time the machine was awake. A second knob
+   * rather than a longer `idleMs`, since a pass that streams an event every minute forever is alive
+   * by every `idleMs` test but must still be stopped.
    */
   readonly maxRunMs: number;
   readonly env: NodeJS.ProcessEnv;
@@ -195,12 +133,9 @@ export interface SessionOptions {
 }
 
 /**
- * Inspects an init event and throws if a required server is not connected.
- *
- * Exported so this can be unit-tested against recorded events without spawning
- * a real run. Worth checking explicitly because the failure is otherwise
- * silent: with the Atlassian session expired the run still exits 0, having
- * simply reported that it could not read the issue.
+ * Inspects an init event and throws if a required server is not connected. Worth checking
+ * explicitly because the failure is otherwise silent: with the Atlassian session expired the run
+ * still exits 0, having simply reported that it could not read the issue.
  */
 export function assertMcpReady(
   servers: readonly McpServerStatus[],
@@ -216,17 +151,10 @@ export function assertMcpReady(
 }
 
 /**
- * What one run cost, as far as the result event is willing to say.
- *
- * Every field is `number | null`, and the null is load-bearing: **absent is not
- * zero.** A run that did not report a cost and a run that was free are
- * different facts, and collapsing them to `0` would quietly understate a total
- * that someone is going to sum over a day of solves.
- *
- * Extraction is total — it cannot throw. This is telemetry attached to a run
- * whose verdict has already been decided, and a malformed usage block must not
- * be able to turn a successful solve into a failed one. Anything that is not a
- * finite number reads as "not reported".
+ * What one run cost, as far as the result event is willing to say. Every field is `number | null`,
+ * and the null is load-bearing: absent is not zero, since collapsing "not reported" to `0` would
+ * quietly understate a summed total. Extraction is total — it cannot throw, since a malformed usage
+ * block must not turn a successful solve into a failed one.
  */
 export interface SessionCost {
   readonly costUsd: number | null;
@@ -240,28 +168,17 @@ export interface SessionCost {
 }
 
 /**
- * A finite number, or nothing.
- *
- * `Number.isFinite` rather than `typeof === "number"` because `NaN` is a
- * number and would propagate through any sum it touched, turning one
- * malformed run into a whole day's total reading `NaN`. Strings are not
- * coerced: a cost arriving as `"0.12"` means the shape changed, and guessing
- * would hide that.
+ * A finite number, or nothing. `Number.isFinite` rather than `typeof === "number"`, since `NaN` is
+ * a number and would propagate through any sum, turning one malformed run into a whole day's total
+ * reading `NaN`. Strings are not coerced — a cost arriving as `"0.12"` means the shape changed.
  */
 function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**
- * Pulls the cost fields out of a `result` event.
- *
- * Exported for testing against recorded events, in the same spirit as
- * `assertMcpReady` — the alternative is spending real money per assertion.
- *
- * Confirmed present under Vertex 2026-09-04: a `storecode -p "say ok"` run
- * reported `total_cost_usd: 0.127` on 20,351 cache-creation tokens. Worth
- * writing down, because it means the per-run floor is roughly a tenth of a
- * dollar before the model does anything at all, and a solve is four sessions.
+ * Pulls the cost fields out of a `result` event. Exported for testing against recorded events, in
+ * the same spirit as `assertMcpReady` — the alternative is spending real money per assertion.
  */
 export function sessionCost(event: Record<string, unknown>): SessionCost {
   const usage = event["usage"];
@@ -280,79 +197,36 @@ export function sessionCost(event: Record<string, unknown>): SessionCost {
 }
 
 /**
- * A tool call the environment refused.
- *
- * The name and nothing else. The result event's `permission_denials` entries
- * also carry the whole `tool_input`, and dropping it is the point rather than
- * an omission: the 2026-09-06 probe caught a denial whose input was the body of
- * a `.env` write, so carrying that field would copy the exact bytes a guard had
- * just refused into a log this service writes and keeps. The name answers the
- * question the harness is actually asking — *was a tool I granted vetoed* — and
- * the input does not.
+ * A tool call the environment refused: the name and nothing else. The result event's
+ * `permission_denials` entries also carry the whole `tool_input`, and dropping it is deliberate —
+ * carrying it could copy the exact bytes of a refused write into a log this service keeps.
  */
 export interface SessionDenial {
   readonly tool: string;
 }
 
 /**
- * Every tool call the run reports as refused, which is the second gate this
- * harness could not see.
+ * Every tool call the run reports as refused — a gate `DENIED_BUILTIN_TOOLS` cannot see, since a
+ * `PreToolUse` hook fires ahead of permission resolution and vetoes per call regardless of
+ * permission mode.
  *
- * `DENIED_BUILTIN_TOOLS` above reasons about `--allowedTools` and
- * `--disallowedTools` and concludes what the session may do. A `PreToolUse`
- * hook fires ahead of permission resolution and vetoes per call, so no
- * permission mode this harness can pass evades it — and the solve subprocess
- * inherits the operator's hooks, because `childEnv` passes `HOME`. One of them
- * denied the write pass its `Write` tool on SSX-3832, the run reported a clean
- * exit, and the only record was the model happening to mention it.
+ * Read from `permission_denials` on the `result` event, not the mid-stream message, since the
+ * `result` event is the one place the whole set is complete with nothing to correlate across events.
  *
- * ## Probed 2026-09-06, and the result event is the honest place to read it
+ * The run still says `subtype: "success"` and `is_error: false` even when a tool was vetoed, so
+ * the existing success check alone sees nothing wrong.
  *
- * A denial arrives mid-stream as an ordinary `user` message whose `tool_result`
- * carries `is_error: true` — by that field alone indistinguishable from a file
- * that did not exist. What separates them is `tool_result_meta[]
- * .non_execution_kind === "permission-rule"`, which is `null` on an ordinary
- * error. The `result` event then repeats the whole set in `permission_denials`,
- * which is what this reads: one place, complete, and nothing to correlate
- * across events.
+ * Deliberately does not attribute a denial to a hook versus a deny rule versus don't-ask mode, all
+ * of which land in the same array tagged `"permission-rule"` — guessing from free text would
+ * undercount.
  *
- * **The run still says `subtype: "success"` and `is_error: false`.** That is
- * the whole of the defect. A pass can have a tool vetoed and exit clean, so the
- * existing check three lines below this function's only call site sees nothing.
+ * A hook that allows a call but alters its effect leaves no structural signal anywhere in the
+ * stream, since both denial-bearing fields are gated on the call not executing at all.
  *
- * ## Two things it deliberately does not do, both measured rather than assumed
- *
- * A hook, a deny rule and don't-ask mode all land in the same array, all tagged
- * `"permission-rule"`. Only the free text of the mid-stream message names a
- * hook, and some hooks emit no recognisable prefix, so attributing a denial to
- * a hook would undercount — quietly, and in the direction of reassurance. It is
- * not attempted: *the environment refused a tool I granted* is the fact worth
- * having, and its source changes nothing about what to do next.
- *
- * And a hook that **allows but degrades** — mutating the input, injecting
- * context — leaves no structural signal anywhere in the stream, since both
- * denial-bearing fields are gated on the call not executing. The quieter half
- * of SSX-3832, a `Grep` that came back useless, is therefore *not* covered
- * here, and this must not be read as covering it. That was the one question the
- * probe could not answer, because authoring a hook to test it is blocked on
- * this machine by three separate guards.
- *
- * ## Why nothing acts on it yet
- *
- * A denial is material but not automatically fatal, and this service has the
- * counterexample in its own history: the D4c commenter run was denied
- * `getAccessibleAtlassianResources` by don't-ask mode, worked around it, and
- * posted the comment correctly. Failing that run would have been wrong. The
- * obvious next consumer is `AbandonCause` — a fix pass that abandons for
- * `judgement` while the harness watched its `Write` be vetoed is reporting
- * `environment`, whatever it says — but the denials would have to reach the
- * orchestrator, which means widening `PassRunner.run`, and that is a larger
- * change than the observation it would rest on. Until then the log line is the
- * product, and it carries the pass and the issue key in its label.
- *
- * Total, like `sessionCost`: this is telemetry about a run whose verdict is
- * already decided, and a malformed array must not turn a working solve into a
- * failed one.
+ * Nothing consumes this yet beyond the log line: a denial is material but not automatically
+ * fatal, since a run can be denied a tool, work around it, and still complete correctly.
+ * Extraction is total, like `sessionCost`, since a malformed array must not turn a working solve
+ * into a failed one.
  */
 export function sessionDenials(event: Record<string, unknown>): readonly SessionDenial[] {
   const denials = event["permission_denials"];
@@ -366,11 +240,8 @@ export function sessionDenials(event: Record<string, unknown>): readonly Session
 }
 
 /**
- * Runs the child and hands its `structured_output` to `parse`.
- *
- * `parse` may throw to reject the run — that is how the analyst refuses an
- * incoherent verdict. A throw from there is preserved as the run's failure
- * rather than being wrapped, so the caller sees the specific error it raised.
+ * Runs the child and hands its `structured_output` to `parse`. A throw from `parse` — how the
+ * analyst refuses an incoherent verdict — is preserved as the run's failure rather than wrapped.
  */
 export async function runSession<T>(
   options: SessionOptions,
@@ -414,27 +285,13 @@ export async function runSession<T>(
     };
 
     /**
-     * The watchdog, which is also the sleep detector, because on this machine
-     * they are the same measurement.
-     *
-     * A suspended laptop was the failure that motivated this: the old deadline
-     * was a single `setTimeout` armed at spawn, so a machine that slept for
-     * twenty-five of a thirty-minute budget spent it without the pass running,
-     * and killed a recon on SSX-3831 that had done nothing wrong.
-     *
-     * Sleep is inferred from drift rather than from any clock API, and that is
-     * on purpose: it does not matter whether the platform's monotonic clock
-     * ticks through a suspend. If it pauses, this fires one interval after
-     * wake with a large wall gap; if it counts, it fires immediately on wake
-     * with the same large wall gap. Both are the same observation, so the
-     * detector is correct either way and does not have to be right about which
-     * platform it is on.
-     *
-     * The threshold's failure directions are asymmetric and chosen for it. A
-     * false positive — an event loop genuinely blocked for that long, in a
-     * process whose only job is parsing NDJSON lines — credits a pass some
-     * extra time. A false negative kills a pass that was frozen rather than
-     * stuck. Only the second one costs money.
+     * The watchdog is also the sleep detector: a suspended machine and a genuinely idle one look
+     * identical from inside the process, so drift is charged to the sleep budget rather than the
+     * silence budget. Sleep is inferred from drift rather than a clock API, since it does not
+     * matter whether the platform's monotonic clock ticks through a suspend — either way this
+     * fires with the same large wall gap. The threshold's failure directions are asymmetric on
+     * purpose: a false positive credits a pass extra time, a false negative kills a frozen pass;
+     * only the second one costs money.
      */
     const tickMs = watchdogIntervalFor(options.idleMs, options.maxRunMs);
     const watchdog = setInterval(() => {
@@ -444,8 +301,7 @@ export async function runSession<T>(
 
       if (drift >= SLEEP_DRIFT_MS) {
         sleptMs += drift;
-        // The child was frozen, not quiet. Charging this gap to the silence
-        // budget is exactly the bug being fixed, one layer down.
+        // The child was frozen, not quiet; charging this gap to the silence budget would be wrong.
         lastActivityAt += drift;
         logger.warn("session.slept", {
           label: options.label,
@@ -453,20 +309,8 @@ export async function runSession<T>(
           totalSleptMs: sleptMs,
           sessionId,
         });
-        // No kill check on the tick that found the sleep, deliberately. The
-        // child has just been handed back a socket that died while the machine
-        // was away, and it needs a moment to notice and reconnect. Judging it
-        // in the same breath as waking it would kill the healthy case for
-        // being slow to recover from something that was not its fault.
-        //
-        // This is a grace period rather than a guard, and it has no mutation
-        // test, which is a statement about it rather than a gap. Deleting the
-        // `return` changes nothing in any reachable case: the credit above has
-        // already moved both budgets, so a pass that was inside them before the
-        // sleep is still inside them on this tick. What it buys is one interval
-        // for the pathological case — a pass that was a hair from its silence
-        // budget at the moment the lid closed — and one interval is not a
-        // difference a test can assert without pinning the scheduler.
+        // No kill check on the tick that found the sleep: the child has just regained a socket
+        // that died while the machine was away and needs a moment to reconnect.
         return;
       }
 
@@ -487,9 +331,8 @@ export async function runSession<T>(
         const id = event["session_id"];
         if (typeof id === "string" && id !== "") {
           sessionId = id;
-          // Logged rather than stored. It is the only handle by which a killed
-          // pass can be resumed by hand, and it exists nowhere else once the
-          // child is gone.
+          // Logged rather than stored: the only handle to resume a killed pass by hand, and it
+          // exists nowhere else once the child is gone.
           logger.info("session.started", { label: options.label, sessionId });
         }
         const servers = Array.isArray(event["mcp_servers"])
@@ -506,28 +349,19 @@ export async function runSession<T>(
       }
 
       if (event["type"] === "result") {
-        // Before the success check, deliberately. A run that failed, refused or
-        // timed out has already been paid for, and those are exactly the runs
-        // whose cost would otherwise never be counted — which would make the
-        // per-ticket total look best on the days it went worst.
+        // Before the success check, deliberately: a failed or timed-out run has already been
+        // paid for and would otherwise never be counted.
         logger.info("session.cost", { label: options.label, ...sessionCost(event) });
 
-        // Also before the success check, and for a sharper version of the same
-        // reason: a run that was stopped by a hook reports `success`, so the
-        // denials on a run that *did* fail are the ones most worth having.
-        //
-        // `warn` rather than `info`. This is the harness being told that its
-        // own model of the session's tool surface was wrong for this run, which
-        // is not a statistic — it is the reason a $4.50 pass may have to be
-        // bought again, and under E nobody is watching the terminal.
+        // Also before the success check: a run stopped by a hook still reports `success`, so
+        // these denials are the ones most worth having. `warn` rather than `info` since this
+        // means the harness's own model of the session's tool surface was wrong for this run.
         const denials = sessionDenials(event);
         if (denials.length > 0) {
           logger.warn("session.denied", {
             label: options.label,
             count: denials.length,
-            // Deduplicated for reading, counted above for arithmetic: the model
-            // retries a refused call under another tool, so three denials of
-            // two tools is a different event from three denials of three.
+            // Deduplicated for reading, counted above for arithmetic.
             tools: [...new Set(denials.map((denial) => denial.tool))].toSorted(),
             sessionId,
           });
@@ -547,9 +381,8 @@ export async function runSession<T>(
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
-      // Before the parse, not after. A line this module cannot read is still
-      // proof the child is alive, and the silence budget is asking about the
-      // child rather than about the schema.
+      // Before the parse: an unreadable line still proves the child is alive, which is what the
+      // silence budget tracks.
       lastActivityAt = Date.now();
       buffered += chunk;
       const lines = buffered.split("\n");

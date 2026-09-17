@@ -1,39 +1,11 @@
 /**
  * The ticket, rendered as the text a solve pass is actually given.
  *
- * `SolveRequest.ticket` has always been documented as "the ticket, rendered as
- * text", and until now nothing rendered it. This is that function, and writing
- * it turned up the gap it exists to close: the only Jira reader in the service
- * is `JiraClient.search`, whose field list carries neither `description` nor
- * `comment`. Wiring the solver to that would have handed it a summary, a status
- * and a label list — no acceptance criteria, no attachments, and no sign that
- * anything was missing, because "the ticket" would have been present and merely
- * empty of everything that matters.
- *
- * ## Comments are part of the ticket, not commentary on it
- *
- * The same lesson the triage path learned. On this board the specification
- * routinely arrives in a comment: acceptance criteria added after review, a
- * reproduction supplied later, an asset attached with "use this one". A reader
- * that stops at `description` reads a draft and believes it read the ticket.
- *
- * ## Attachments, and why SVG in particular
- *
- * An attachment is inlined only when it is text by content, which is a
- * different question from being text by media type. `image/svg+xml` is the case
- * that matters: it sorts as an image and reads as a file, and a ticket that
- * says "here is the icon to use" means the bytes, not the filename. Binary
- * attachments are listed by name, type and size and not fetched — the solver
- * can then say it needs a file it cannot see, which is a better failure than
- * silently shipping something else.
- *
- * ## Everything here is attacker-controlled
- *
- * Summary, description, comment bodies, attachment filenames and attachment
- * contents are all written by whoever opened or touched the issue. This module
- * renders them; it never interprets them, and it never lets them stop looking
- * like data — see `fenceFor` for the one place that could otherwise be
- * subverted.
+ * Renders comments as part of the ticket, not commentary on it — on this board the specification
+ * routinely arrives in a later comment, and a reader that stops at `description` reads a draft.
+ * Everything here (summary, description, comments, attachment filenames and contents) is
+ * attacker-controlled; this module renders it but never interprets it or lets it stop looking like
+ * data — see `fenceFor` for the one place that could otherwise be subverted.
  */
 
 import { type IssueDetail, type JiraAttachment, isInlineable } from "../jira/client.ts";
@@ -53,9 +25,7 @@ export interface TicketRenderOptions {
 }
 
 export const DEFAULT_TICKET_RENDER_OPTIONS: TicketRenderOptions = {
-  // Comfortably larger than any icon, stylesheet or config fragment, and small
-  // enough that a ticket cannot push the real instructions out of the context
-  // window by attaching a large file.
+  // Large enough for an icon or config fragment, small enough that a ticket can't push instructions out of the context window.
   maxAttachmentBytes: 32 * 1024,
   maxAttachments: 5,
 };
@@ -69,12 +39,8 @@ export interface RenderedTicket {
 }
 
 /**
- * A code fence guaranteed not to be closed by its own content.
- *
- * Attachment bytes are attacker-controlled, so a fixed three-backtick fence is
- * escapable by attaching a file that contains one. Counting the longest run in
- * the content and going one longer is the rule CommonMark already defines for
- * this, and it makes the escape impossible rather than unlikely.
+ * A code fence guaranteed not to be closed by its own content — attachment bytes are
+ * attacker-controlled, so a fixed three-backtick fence is escapable by a file that contains one.
  */
 export function fenceFor(content: string): string {
   let longest = 0;
@@ -157,9 +123,7 @@ export async function renderTicket(
     try {
       text = await reader.fetchAttachmentText(attachment.id, options.maxAttachmentBytes);
     } catch (error) {
-      // One unreadable attachment must not fail the solve. The solver is told
-      // the file exists and could not be read, and can bail on that if it
-      // matters to the fix.
+      // One unreadable attachment must not fail the solve; the solver is told it exists and could not be read.
       logger.warn("solve.attachment_unreadable", {
         issueKey: detail.key,
         filename: attachment.filename,

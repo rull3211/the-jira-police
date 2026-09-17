@@ -7,9 +7,8 @@ const TUESDAY = Date.parse("2026-09-02T10:00:00.000+0200");
 
 describe("what the memo stops the watch paying for twice", () => {
   it("skips activity it has already paid to decline", () => {
-    // The whole point. A `no` writes nothing to the ticket, so the trigger is
-    // still there next sweep and the content is identical. Without this the
-    // daemon buys the same refusal every six hours until somebody speaks.
+    // A `no` writes nothing to the ticket, so without this the daemon buys the
+    // same refusal every sweep until somebody speaks.
     const memo = createWatchMemo();
     memo.declined("SSX-1234", MONDAY);
 
@@ -17,11 +16,8 @@ describe("what the memo stops the watch paying for twice", () => {
   });
 
   it("does not skip when something newer has arrived", () => {
-    // THE ONE THAT MATTERS, and the direction that is not recoverable: a
-    // reporter who was told to add a baseline, said "I'll get to it" on Monday
-    // and added it on Tuesday. Get this wrong and the answer this whole feature
-    // exists to catch is never read — silently, and for as long as the ticket
-    // stays subscribed.
+    // The unrecoverable direction: get this wrong and a genuine later answer
+    // is never read, silently, for as long as the ticket stays subscribed.
     const memo = createWatchMemo();
     memo.declined("SSX-1234", MONDAY);
 
@@ -29,10 +25,8 @@ describe("what the memo stops the watch paying for twice", () => {
   });
 
   it("treats the same instant as the same activity", () => {
-    // The mutation is `<` instead of `<=`. It looks more careful and it disables
-    // the memo completely: the remembered instant *is* one that was judged, so
-    // a strict comparison re-asks on every sweep for exactly the tickets whose
-    // newest foreign item never moves — which is every ticket this exists for.
+    // A strict `<` here would disable the memo entirely: it would re-ask every
+    // sweep on exactly the tickets whose newest foreign item never moves.
     const memo = createWatchMemo();
     memo.declined("SSX-1234", MONDAY);
 
@@ -48,8 +42,7 @@ describe("what the memo stops the watch paying for twice", () => {
   });
 
   it("never skips activity it cannot date", () => {
-    // Fails towards spending, and it is the only place in this feature that
-    // does. A skip is silent and permanent for that ticket; a check is cents.
+    // Fails towards spending: a skip here is silent and permanent, a check is cents.
     const memo = createWatchMemo();
     memo.declined("SSX-1234", MONDAY);
 
@@ -57,9 +50,8 @@ describe("what the memo stops the watch paying for twice", () => {
   });
 
   it("does not remember an undatable decline as anything", () => {
-    // The mutation stores `NaN`, and every later comparison against it is false,
-    // so the entry is a no-op that looks like a bound. Dropping it is the same
-    // outcome and is legible in `size()`.
+    // Storing `NaN` would be a no-op that looks like a bound; dropping it is
+    // the same outcome and legible in `size()`.
     const memo = createWatchMemo();
     memo.declined("SSX-1234", Number.NaN);
 
@@ -77,9 +69,8 @@ describe("what the memo stops the watch paying for twice", () => {
   });
 
   it("starts empty, so a fresh one is a run that has judged nothing", () => {
-    // `watch:once` builds one of these per invocation and relies on this: a
-    // command run by hand must look at what an operator pointed it at, not at
-    // what some earlier process decided about the same ticket.
+    // `watch:once` builds one of these per invocation, so a hand run must look
+    // at what the operator pointed it at, not an earlier process's decision.
     expect(createWatchMemo().seen("SSX-1234", MONDAY)).toBe(false);
   });
 });

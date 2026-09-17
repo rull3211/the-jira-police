@@ -1,19 +1,9 @@
 /**
  * Locking and removing a directory staged for a model to read.
  *
- * Two things here are staged: the `agent-solve` skill (`solve/skill-root.ts`)
- * and a ticket's image attachments (`attachments/stage.ts`). Both hand a
- * directory to a session that may pre-approve `Write`, so both want the same
- * guarantee, and one copy of it is the point of this module.
- *
- * Directories are `0o555` rather than only the files being `0o444`, because on
- * a POSIX filesystem it is write permission on the *directory* that governs
- * creating and unlinking entries. Files-only would leave a model free to delete
- * a staged file and write its own in its place.
- *
- * Verified 2026-09-04 against the skill root: a session with `Write`
- * pre-approved and the directory added could neither overwrite a file in it nor
- * create one, and the original content survived.
+ * Directories are made `0o555` rather than only their files `0o444`: on a POSIX filesystem it is
+ * write permission on the *directory* that governs creating and unlinking entries, so files-only
+ * would leave a model free to delete a staged file and write its own in its place.
  */
 
 import { chmod, readdir, rm, stat } from "node:fs/promises";
@@ -54,12 +44,9 @@ async function unlock(path: string): Promise<void> {
 }
 
 /**
- * Removes a staged tree, unlocking it first.
- *
- * `rm` cannot delete an entry inside a `0o555` directory, so the unlock is not
- * tidiness — without it every run would leave one behind. Absence is not an
- * error: this is called on cleanup paths, including after staging refused
- * before it created anything.
+ * Removes a staged tree, unlocking it first since `rm` cannot delete an entry inside a `0o555`
+ * directory. Absence is not an error: this also runs on cleanup paths after staging refused
+ * before creating anything.
  */
 export async function removeReadOnlyTree(path: string): Promise<void> {
   try {

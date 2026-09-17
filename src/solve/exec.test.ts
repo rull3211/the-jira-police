@@ -4,11 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ALLOWED_EXECUTABLES, childEnv, createCommandRunner, isAllowedExecutable } from "./exec.ts";
 
-/**
- * A stand-in for a `ChildProcess`, good enough for everything this module
- * touches: two output streams, a `kill` that records signals, and the two
- * events it listens for.
- */
+/** A stand-in for a `ChildProcess`: two output streams, a `kill` that records signals, and the two events it listens for. */
 class FakeChild extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
@@ -50,17 +46,13 @@ describe("isAllowedExecutable", () => {
   it.each(["sh", "bash", "zsh", "env", "xargs", "make", "node", "npx", "curl", "/bin/sh", ""])(
     "refuses %s",
     (program) => {
-      // Every one of these is a way to run something that is not on the list,
-      // which is the whole point of having one.
+      // Each is a way to run something not on the list, which is the point of having one.
       expect(isAllowedExecutable(program)).toBe(false);
     },
   );
 
   it.each(["./mvnw", "mvnw", "mvnw.cmd", ".mvn/wrapper/mvnw"])("refuses %s", (program) => {
-    // Separate from the list above because the reason is different. These are
-    // not ways to run something else in general — they are the one program the
-    // *repository under verification* gets to choose, and a solve run can write
-    // to it. `mvn` is allowed; the wrapper that the repo ships is not.
+    // Unlike the list above, the risk isn't "runs something else" — it's the one program the repository under verification gets to choose.
     expect(isAllowedExecutable(program)).toBe(false);
   });
 });
@@ -98,8 +90,7 @@ describe("childEnv", () => {
   });
 
   it("is an allowlist, so an unknown variable is not inherited", () => {
-    // The distinction that matters: a credential added to `.env` next month is
-    // absent by default rather than absent because someone remembered it.
+    // A credential added to `.env` next month is absent by default, not absent because someone remembered it.
     const env = childEnv({ PATH: "/usr/bin", SOME_TOKEN_INVENTED_LATER: "x" });
 
     expect(env["SOME_TOKEN_INVENTED_LATER"]).toBeUndefined();
@@ -133,9 +124,7 @@ describe("createCommandRunner", () => {
   });
 
   it("never asks for a shell", async () => {
-    // The single most important assertion in this file. With `shell: true`,
-    // every argv array carefully built elsewhere in `src/solve/` becomes a
-    // string a shell re-parses, and a ticket summary becomes a command.
+    // With `shell: true`, every argv array built elsewhere in `src/solve/` becomes a string a shell re-parses, and a ticket summary becomes a command.
     const { spawnFn, calls, child } = fakeSpawn();
     const runner = createCommandRunner({ spawnFn, parentEnv: {} });
 
@@ -186,8 +175,7 @@ describe("createCommandRunner", () => {
   });
 
   it("reports a non-zero exit as a result rather than a rejection", async () => {
-    // Callers branch on exit codes. Rejecting here would route an ordinary
-    // test failure into the path meant for infrastructure problems.
+    // Callers branch on exit codes; rejecting would route an ordinary test failure into the path meant for infrastructure problems.
     const { spawnFn, child } = fakeSpawn();
     const runner = createCommandRunner({ spawnFn, parentEnv: {} });
 
@@ -222,8 +210,7 @@ describe("createCommandRunner", () => {
   });
 
   it("does not report a signalled death as success", async () => {
-    // `code` is null when a process is killed. Passing that through as 0 would
-    // read as a clean run to every caller that checks the exit code.
+    // `code` is null when a process is killed; passing that through as 0 would read as a clean run.
     const { spawnFn, child } = fakeSpawn();
     const runner = createCommandRunner({ spawnFn, parentEnv: {} });
 
@@ -246,9 +233,7 @@ describe("createCommandRunner", () => {
         await vi.advanceTimersByTimeAsync(1_000);
         expect(child.signals).toEqual(["SIGTERM"]);
 
-        // A package manager mid-install frequently ignores SIGTERM. Without the
-        // escalation the process outlives the run that owns the worktree, and
-        // the next step removes a directory from under a live process.
+        // A package manager mid-install frequently ignores SIGTERM; without escalation it would outlive the run that owns the worktree.
         await vi.advanceTimersByTimeAsync(2_000);
         expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
 
@@ -296,11 +281,7 @@ describe("createCommandRunner", () => {
   });
 });
 
-/**
- * A handful of real processes, because everything above is a fake and a fake
- * agreeing with itself proves nothing about `spawn`. Kept to `git --version`
- * and friends: no network, no writes, present wherever this service runs.
- */
+/** Real processes, because a fake agreeing with itself proves nothing about `spawn`. Kept to `git --version` and friends: no network, no writes. */
 describe("against a real process", () => {
   const runner = createCommandRunner();
 
@@ -322,16 +303,8 @@ describe("against a real process", () => {
   });
 
   it("does not let a real argument reach a shell", async () => {
-    // If a shell were involved this creates the file. `git` receives it as one
-    // argument, fails to parse it as a ref, and exits non-zero.
-    //
-    // The witness path is unique per run, and the earlier version of this test
-    // — which used a fixed `/tmp/jira-police-pwned` — taught the lesson the
-    // hard way: mutating `exec.ts` to `shell: true` really did create the
-    // file, and it then sat there failing this test on every subsequent run
-    // for a reason that had nothing to do with the code under test. A test
-    // that a previous test run can poison is a test that will one day be
-    // deleted for flapping.
+    // If a shell were involved this creates the file; `git` instead receives it as one argument and exits non-zero.
+    // The witness path is unique per run so a leftover file from a previous run cannot poison this one.
     const { existsSync, rmSync } = await import("node:fs");
     const witness = `/tmp/jira-police-shell-witness-${String(process.pid)}-${String(Date.now())}`;
     rmSync(witness, { force: true });

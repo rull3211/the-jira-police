@@ -1,56 +1,12 @@
 /**
- * Rules and incidents, checked where the corpus supports a check and counted
- * where it does not.
+ * Rules and incidents, checked where the corpus supports it and counted where it does not.
  *
- * **Guarded: every citation resolves, and every entry has a rule or a
- * declaration that parses.** Measured on 2026-09-09 by this file against the
- * tree: 44 entries, 39 of them cited from the six documents in `CITING_FILES`,
- * 69 citation links, none dangling. That nothing dangles today is the argument
- * for the check and not against it — anchors follow headings, so retitling one
- * entry breaks every link to it from the other files at once, silently, without
- * either document being edited. The second half is the same fact read
- * backwards: an incident with no rule is a story, so an entry nothing cites
- * either gets a rule or says in the file that it has not got one, in a
- * `**No rule yet**` line that is parsed rather than read.
+ * Guaranteed: every citation resolves, and every entry has a rule or a `**No rule yet**`
+ * declaration. Reported only, never guarded: how many rule paragraphs cite no incident, and
+ * whether a rule's citation actually supports it — both need a human to judge.
  *
- * **Reported and guarded by nobody: how many rule paragraphs cite no
- * incident.** 42 of the 71, on the same measurement. "Every rule cites an
- * incident" is a property somebody wants, not one this corpus has. The
- * population is every paragraph opening with a bold sentence at column zero,
- * and 18 of those 42 are file openers, reading pointers, list lead-ins and
- * section labels rather than rules — one of them is the sentence "Why every
- * rule here exists is in `INCIDENTS.md`", flagged for citing no incident. There
- * is no per-paragraph citation convention here to enforce, so the only routes
- * to green are 42 citations written to satisfy a check, or a grandfather list
- * longer than the debt it excuses and still present after it is paid. The
- * number goes in the summary instead: the same move this file already makes for
- * the authoring gap below, for the same reason.
- *
- * **What this deliberately does not check.** Whether the incident a rule cites
- * is the incident it came from. A link resolving proves the slug exists, not
- * that the story underneath supports the rule; that needs a human, and this
- * file's job is to shrink the set that needs one rather than to claim it is
- * empty. A clean run here does not mean the rules are earned.
- *
- * **And it does not guard the authoring gap.** Writing the incident and its
- * rule in one commit was considered as a rule and rejected as too clever: it is
- * not decidable at the moment it fires, because an incident found this
- * afternoon legitimately producing its rule this afternoon is the behaviour we
- * want, and the same argument is already made in writing in `CLAUDE.md` about
- * `commit-brief.sh` carrying no permission decision. The gap is reported as a
- * number and guarded by nobody.
- *
- * This module is separate from `docs-check.ts` rather than inside it for the
- * reason `pinned-prose.ts` gives: that file is a top-level script with no
- * exports, which is why it is the only one of `docs:check`'s own modules with
- * no test — the entrypoints `poll-once`, `solve-once` and `watch-once` have
- * none either, for the same reason. These are the two checks whose failure mode
- * is silently matching nothing, so they are the last two that could afford to
- * live somewhere a test cannot reach.
- *
- * No line count here on purpose: the first draft said "755-line", and the same
- * commit added 322 lines to that file. A number describing a file this one only
- * refers to has no check behind it and rots the moment either moves.
+ * Separate from `docs-check.ts` for the reason `pinned-prose.ts` gives, and untested for the
+ * same reason `poll-once`/`solve-once`/`watch-once` are: importing it would run it.
  */
 
 import { dirname, join, normalize } from "node:path/posix";
@@ -64,22 +20,10 @@ export interface SourceFile {
 /**
  * The documents whose citations count as a rule citing an incident.
  *
- * **The exclusions are the whole value of this list.**
- * `.claude/skills/claude-validation-work/SKILL.md` carries two citations into
- * `INCIDENTS.md`, and both name entries nothing else cites: admitting that one
- * file turns two of the five uncited entries green, on a citation from a skill
- * that is on no reading path and is loaded only when somebody invokes it by
- * name. An incident whose only rule lives there has not produced a rule; it has
- * produced a footnote in a document the working contract never routes you to.
- * `.claude/skills/scaffolding-audit/SKILL.md` is the other off-path skill and
- * cites no entry at all today, which is the state in which an inclusion gets
- * added without anybody noticing what it forgives. If either is ever put on the
- * path from `SKILL.md`, add it here in the same commit that does so.
- *
- * Listed by exact path rather than by directory, following `NOT_OURS` in
- * `docs-check.ts`: an exemption that covers a folder quietly covers the next
- * file put in it, and this list has the opposite failure — an *inclusion* that
- * covers a folder quietly blesses the next skill written under it.
+ * Deliberately excludes `.claude/skills/claude-validation-work/SKILL.md` and
+ * `.claude/skills/scaffolding-audit/SKILL.md` — both link into `INCIDENTS.md` but are off the
+ * reading path, so a citation there is not a citation anyone is routed to. Listed by exact path
+ * rather than by directory, so an inclusion cannot silently bless the next skill written there.
  */
 export const CITING_FILES: readonly string[] = [
   "CLAUDE.md",
@@ -101,20 +45,9 @@ export const PHASE_FILES: readonly string[] = [
 /**
  * How many rule paragraphs each phase file is known to have.
  *
- * **This pin is the only thing between the reported bare count and a silent
- * zero.** Nothing fails on how many rule paragraphs cite no incident — see the
- * header — so that number's only job is to be read, and a dead extractor
- * reports "0 citing no incident", which reads like the debt was paid. Change
- * how a rule opens — indent it, wrap it in a list, reflow the `**` onto a
- * second line — and a derived population finds nothing, compares nothing, and
- * is green forever. Declared rather than derived for the reason `docs-check.ts`
- * declares `expectSites` and `pinned-prose.ts` declares `CHECKLIST_QUESTIONS`,
- * and it is the one thing here that fails on the extractor rather than on the
- * corpus.
- *
- * Two-sided on purpose. Fewer means the extractor lost sight of rules that are
- * still there; more means rules arrived without anyone updating the count they
- * are pinned by.
+ * Pinned rather than derived: a dead extractor (say, a headline that starts wrapping across a
+ * second line) would otherwise report "0 citing no incident" silently, which reads as paid debt.
+ * Two-sided: fewer means the extractor lost sight of rules; more means the count went stale.
  */
 export const RULE_PARAGRAPHS: Record<string, number> = {
   ".claude/skills/dev-house-rules/STARTING.md": 15,
@@ -126,44 +59,12 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
 /**
  * How many `**No rule yet**` declarations are written in `INCIDENTS.md`.
  *
- * **Counted against declarations in the file, not against entries nothing
- * cites.** Those two were confused when this constant first got a value: it was
- * set to 5 by pointing at the five uncited entries, at a moment when the file
- * carried no declaration at all, so the check it pins was red the day it
- * shipped. The five are written now — one per uncited entry, each naming what
- * would have to be true and when it comes due — which is what makes 5 the
- * number. An uncited entry that carries no declaration is a different failure,
- * reported per entry.
+ * Counted against declarations in the file, not against entries nothing cites — those are
+ * different failures, each reported on its own. Exact, not a ceiling: fewer means a paid debt is
+ * still being claimed, more means a new entry took the exemption without writing one.
  *
- * **Exact, not a ceiling, for the same reason `KNOWN_DANGLING` is.** Fewer
- * means somebody wrote one of the missing rules and left this number claiming a
- * debt that is already paid, which is how a budget stops being read. More means
- * a new entry took the exemption. Both are worth stopping for.
- *
- * There is deliberately no grandfather list. 40 of the 47 entries cite a rule
- * today, and a clause forgiving the other seven by path would be longer than
- * the debt it excuses — and would still be here after the debt was paid. A
- * declaration expires; a path exemption does not.
- *
- * **6 since 2026-09-10**, and the sixth is worth naming because raising this is
- * the move the check exists to make somebody argue for. The status-filter
- * incident is one instance of "an aggregate count cannot tell a working filter
- * from one broken in a single term", and `FINISHING.md` refuses rules built
- * from one instance — so the honest options were a declaration or a premature
- * rule, and the declaration comes due at instance two.
- *
- * **7 since 2026-09-11**, and the seventh is the harder argument of the two, so
- * it is made rather than assumed. "The same wedge, written twice in one file"
- * is at two instances, not one, which is further than the sixth got — but the
- * thing it wants a rule for is *where a parked case is filed*, and both
- * instances are the same pair of functions in the same file. That is one
- * observation about two neighbours, not two observations about filing. Writing
- * the rule now would generalise from a sample that cannot distinguish "module
- * headers are the wrong place to park a case" from "these two functions are
- * eighty lines apart and nobody scrolls". The declaration comes due at an
- * instance in a different file. **What this number costs while it sits at 7 is
- * honest: a case that has already been paid for twice is findable only by
- * someone who opens `INCIDENTS.md`, which is not a mandatory read.**
+ * Deliberately no grandfather list — a path exemption never expires the way a dated declaration
+ * does.
  */
 export const UNRESOLVED_ON_PURPOSE = 7;
 
@@ -171,13 +72,10 @@ export const UNRESOLVED_ON_PURPOSE = 7;
 export const UNRESOLVED_DAYS = 30;
 
 /**
- * Fenced code blocks, blanked line by line so every line number after them
- * stays true — the same trick `section-refs.ts` uses for `refs:off` regions,
- * and for the same reason: a message that points at the wrong line is a message
- * somebody stops trusting.
+ * Fenced code blocks, blanked line by line so every line number after them stays true.
  *
- * A fence closes only on a marker of the same character and at least the same
- * length, which is what lets a ```` ``` ```` block contain a `~~~` sample.
+ * A fence closes only on a marker of the same character and at least the same length, which is
+ * what lets a ```` ``` ```` block contain a `~~~` sample.
  */
 export function maskFences(body: string): string {
   let fence: string | null = null;
@@ -203,24 +101,8 @@ export function maskFences(body: string): string {
 /**
  * A rule paragraph: a paragraph opening at column zero with a bold sentence.
  *
- * **The definition was picked by measurement, out of three.** `^#{2,4} `
- * headings give 46, which is a section and not a rule — most sections here
- * carry three or four. Any line containing bold gives 157, which sweeps in
- * every checklist item and every table cell. A bold sentence at column zero
- * gives 71, and it is the shape the corpus mostly uses for "here is a rule".
- *
- * **Mostly, not always, which is why nothing fails on this population.** 18 of
- * the 71 are file openers, reading pointers, list lead-ins and section labels
- * wearing the same shape. The definition is not tightened to exclude them,
- * because every tightening is a place a rule could be parked out of sight, and
- * the number it feeds is reported rather than enforced — an over-broad
- * population costs an inflated count in the summary and nothing else.
- *
- * **The obvious noise is excluded by the definition rather than by an exemption
- * list.** `- **…**` list items do not start at column zero, so `FINISHING.md`'s
- * eleven-item checklist and the four pinned questions are out without anything
- * naming them; table rows start with `|`, so they are out too. An exemption
- * list would have had to be maintained against every new checklist.
+ * Picked by measurement over headings (too coarse) and any bold text (too broad); the shape is
+ * not tightened further, since every tightening is a place a rule could be parked out of sight.
  */
 export interface RuleParagraph {
   readonly file: string;
@@ -237,14 +119,8 @@ const RULE_OPENS = /^\*\*(.+?)\*\*/u;
 /**
  * A run of non-blank lines, with the 1-indexed line it starts on.
  *
- * Paragraphs rather than lines, because **the headline is matched against the
- * flattened paragraph and not against its first line.** Four of the 71 rules
- * here wrap their bold sentence onto a second line, and a line-at-a-time match
- * finds none of them — which is not a hypothetical: `oxfmt` reflows this prose,
- * so which rules a line-based extractor can see is decided by the formatter.
- * `pinned-prose.ts` hit the same thing and its header says so in one sentence:
- * matching line-by-line looks correct in the file and breaks the moment a
- * headline wraps.
+ * Paragraphs rather than lines: a bold sentence wrapped onto a second line by `oxfmt` is
+ * invisible to a line-at-a-time match.
  */
 function paragraphsOf(body: string): { line: number; text: string }[] {
   const found: { line: number; text: string }[] = [];
@@ -278,16 +154,8 @@ function headlineOf(paragraph: string): string | undefined {
 /**
  * Every rule paragraph in one document.
  *
- * A rule's scope is its own paragraph and the paragraph after it — the corpus
- * puts the `[→ …](INCIDENTS.md#…)` citation on its own line, sometimes inside
- * the paragraph and sometimes after a blank. The following paragraph is
- * **not** in scope when it is itself a rule, because then the citation belongs
- * to that one, and rules here are routinely written back to back.
- *
- * Attribution decides only the reported count of paragraphs citing nothing, not
- * whether anything fails. It is kept exact anyway: a number that quietly credits
- * one paragraph's citation to its neighbour is a number that reads better than
- * the corpus is, which is the failure this whole file was written out of.
+ * A rule's scope is its own paragraph plus the next, unless that next paragraph is itself a rule
+ * — rules here are routinely written back to back, and its citation belongs to it, not its neighbour.
  */
 export function ruleParagraphs(file: string, body: string): RuleParagraph[] {
   const paragraphs = paragraphsOf(maskFences(body));
@@ -335,11 +203,8 @@ export type Unresolved =
 /**
  * `**No rule yet** — <what would have to be true>, and <a date, or a count>.`
  *
- * Shaped after the `**Found by**` line the file already carries, and parsed
- * rather than read: a deliberate exemption that nothing can check is a comment,
- * and this repository's whole subject is what happens to those. The trailing
- * clause is required to be the last thing on the line so that a date mentioned
- * in the reason cannot be mistaken for the deadline.
+ * Parsed rather than read: a deliberate exemption nothing can check is a comment. The trailing
+ * clause must be the last thing on the line so a date in the reason isn't mistaken for the deadline.
  */
 const NO_RULE_YET = /\*\*No rule yet\*\*\s*—\s*(.+?),\s+and\s+(.+?)\.\s*$/u;
 
@@ -388,10 +253,8 @@ export function incidentEntries(
       end++;
     }
 
-    // The declaration is taken as a *paragraph*, not as a line. `oxfmt` reflows
-    // this prose and the trailing `, and <a date, or a count>.` is the last
-    // thing on it, so a line-at-a-time read loses exactly the half that is
-    // parsed and reports every wrapped declaration as malformed.
+    // Taken as a paragraph, not a line: `oxfmt` can wrap the trailing clause onto a second line,
+    // and a line-at-a-time read would report every wrapped declaration as malformed.
     const opens = lines
       .slice(index, end)
       .findIndex((entryLine) => entryLine.startsWith("**No rule yet**"));
@@ -416,13 +279,10 @@ export function incidentEntries(
 }
 
 /**
- * Which incident slugs one document cites, resolved against that document's own
- * location.
+ * Which incident slugs one document cites, resolved against that document's own location.
  *
- * Per source file, not by substring: `CLAUDE.md` writes the path as
- * `.claude/skills/dev-house-rules/INCIDENTS.md` and the phase files write it as
- * `INCIDENTS.md`, and a check that matched the tail of either would also count
- * a link into some other repository's `INCIDENTS.md` the day one appears.
+ * Resolved per source file rather than by substring match, since different documents write the
+ * path to `INCIDENTS.md` differently and a substring match would also catch another repository's.
  */
 export function citedSlugs(source: SourceFile, incidentsPath: string): Set<string> {
   const target = normalize(incidentsPath);
@@ -446,11 +306,7 @@ export interface RuleCitationInput {
   readonly incidents: string;
   /** One entry per `CITING_FILES` path. */
   readonly citing: readonly SourceFile[];
-  /**
-   * `slugOf` from `docs-check.ts`, passed in rather than copied. GitHub's
-   * heading-to-anchor rule is a fact with one home, and this check exists
-   * because facts with two homes drift.
-   */
+  /** `slugOf` from `docs-check.ts`, passed in rather than copied — a fact with two homes drifts. */
   readonly slugOf: (heading: string) => string;
   /** Passed in so the dated exemption can be tested without waiting a month. */
   readonly today: Date;
@@ -460,10 +316,8 @@ export interface RuleCitationInput {
    */
   readonly authoringGaps?: readonly number[];
   /**
-   * The pinned counts, defaulting to the constants above.
-   *
-   * Overridable for one reason: a pin that cannot be given a wrong value in a
-   * test is a pin nothing proves fires. Production passes neither of these.
+   * The pinned counts, defaulting to the constants above — overridable only so the pin can be
+   * given a wrong value in a test. Production passes neither of these.
    */
   readonly population?: Readonly<Record<string, number>>;
   readonly unresolvedOnPurpose?: number;
@@ -493,10 +347,10 @@ export const GAP_WINDOW = 15;
 const DAY = 24 * 60 * 60 * 1000;
 
 /**
- * `git log` arguments that find when an incident heading was first written, and
- * when the first citation of its slug was. Built here rather than in
- * `docs-check.ts` so the semantics of "authoring gap" live beside the check
- * that reports it, and so they can be asserted.
+ * `git log` arguments finding when an incident heading was first written.
+ *
+ * Built here rather than in `docs-check.ts` so the semantics of "authoring gap" live beside the
+ * check that reports it.
  */
 export function incidentAddedArgs(entry: IncidentEntry, incidentsPath: string): string[] {
   return ["log", "--reverse", "--format=%ct", `-S### ${entry.title}`, "--", incidentsPath];
@@ -507,12 +361,10 @@ export function ruleCitedArgs(entry: IncidentEntry, citing: readonly string[]): 
 }
 
 /**
- * Every failure, as messages ready to print, plus the one line that prints
- * either way.
+ * Every failure, as messages ready to print, plus the one line that prints either way.
  *
- * Order matters for reading: the population check comes first, because if it
- * has moved then every count after it is describing a population nobody has
- * agreed to — including the reported one, which nothing else would catch.
+ * Order matters: the population check comes first, since a moved population makes every count
+ * after it describe something nobody agreed to.
  */
 export function ruleCitationProblems(input: RuleCitationInput): RuleCitationReport {
   const problems: string[] = [];
@@ -559,26 +411,19 @@ export function ruleCitationProblems(input: RuleCitationInput): RuleCitationRepo
   const entries = incidentEntries(input.incidents, input.slugOf);
   const slugs = new Set(entries.map((entry) => entry.slug));
 
-  // How many rule paragraphs cite nothing. Reported in the summary and never a
-  // problem — the header says why, and `RULE_PARAGRAPHS` above is what stops
-  // this number reaching zero by the extractor dying rather than by the corpus
-  // changing.
+  // How many rule paragraphs cite nothing — reported in the summary and never a problem, since
+  // `RULE_PARAGRAPHS` above is what stops this number reaching zero by the extractor dying rather
+  // than by the corpus changing.
   const bare = rules.filter((rule) => [...rule.scope.matchAll(INCIDENT_LINK)].length === 0).length;
 
   // Direction 1 — every citation resolves to an entry that is there.
   //
-  // Over whole documents rather than over rule scopes. A citation is at risk
-  // from a heading being renamed wherever it sits, and half of them sit outside
-  // any rule's scope: of the 69 in the tree on 2026-09-09, 13 are table rows
-  // and 20 are indented continuations, and not one of the 69 opens a bold
-  // paragraph. Scoping the check to rule paragraphs inspects 37 of the 69 and
-  // says nothing about the other 32.
+  // Checked over whole documents rather than rule scopes: half of all citations sit outside any
+  // rule's scope, so scoping the check to rules would miss most of them.
   //
-  // Direction 2's `cited` set is built in the same pass, and is filtered
-  // against `CITING_FILES` here rather than trusting what the caller handed
-  // over. The exclusion of the two off-path skills is the whole value of that
-  // direction, and an exclusion a caller can undo by passing one more file is
-  // not one.
+  // Direction 2's `cited` set is built in the same pass and filtered against `CITING_FILES` here
+  // rather than trusting the caller — an exclusion the caller can undo by passing one more file
+  // isn't one.
   const counts = new Set(CITING_FILES);
   const cited = new Set<string>();
   for (const file of input.citing) {
@@ -588,10 +433,8 @@ export function ruleCitationProblems(input: RuleCitationInput): RuleCitationRepo
     for (const slug of citedSlugs(file, input.incidentsPath)) {
       cited.add(slug);
       if (!slugs.has(slug)) {
-        // `docs-check.ts`'s link check reports the broken anchor. This says the
-        // other half, and it is worth saying twice because the repairs differ:
-        // one is a typo in a link, the other is a document standing on evidence
-        // that is not there.
+        // `docs-check.ts`'s link check reports the broken anchor; this says the other half — the
+        // repairs differ, a typo in a link vs. a document standing on evidence that isn't there.
         problems.push(
           `${file.path} cites ${input.incidentsPath}#${slug}, which is not an entry there.\n` +
             `  Either the entry was retitled — anchors follow the heading, so renaming one heading\n` +
@@ -679,10 +522,8 @@ export function ruleCitationProblems(input: RuleCitationInput): RuleCitationRepo
 
   const owed = input.unresolvedOnPurpose ?? UNRESOLVED_ON_PURPOSE;
   if (declared.length !== owed) {
-    // Three different repairs, and the middle one used to be printed for all
-    // three: "some were paid" was the message on a tree where none had ever
-    // been written, which is the confusion that gave this constant its first
-    // wrong value. It counts **No rule yet** lines, not entries nothing cites.
+    // Counts **No rule yet** lines, not entries nothing cites — a different failure, reported
+    // separately below.
     const why =
       declared.length > owed
         ? "A new entry took the exemption — that is a debt going up, not a number to raise."

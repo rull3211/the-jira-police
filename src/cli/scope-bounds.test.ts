@@ -9,12 +9,8 @@ import {
 } from "./scope-bounds.ts";
 
 /**
- * A minimal document pair in the shape the real ones have.
- *
- * Built by a helper rather than pasted per test so that a change to the pinned
- * sentences fails in one place. The fixtures deliberately do *not* copy the real
- * skill files: a fixture that models another document is a test that cannot see
- * that document change, and the real pair is exercised by its own case below.
+ * A minimal document pair in the shape the real ones have, built once so a pinned-sentence change
+ * fails in one place; the real pair is exercised separately below.
  */
 function documents(options: {
   readonly examples?: readonly string[];
@@ -105,11 +101,7 @@ describe("scopeBoundsProblems", () => {
     expect(run({}).problems).toEqual([]);
   });
 
-  /**
-   * The plan entry's own failure, in the direction that costs work: the prose
-   * claims a refusal the gate does not make, so the solver declines a path it
-   * was allowed to touch.
-   */
+  /** The direction that costs work: the prose claims a refusal the gate does not make. */
   it("fails when the prose names a path no rule refuses", () => {
     const problems = run({
       examples: [".github/workflows/ci.yml", "deployment/manifestor.yaml"],
@@ -119,11 +111,7 @@ describe("scopeBoundsProblems", () => {
     expect(problems[0]).toContain("no rule in FORBIDDEN_PATHS");
   });
 
-  /**
-   * The quieter direction. A rule added to the gate with nothing in the prose
-   * matching it means the solver is never told, and the run is discarded after
-   * it has been paid for.
-   */
+  /** The quieter direction: a gate rule with no matching example means the solver is never told. */
   it("fails when a gate rule is matched by no example", () => {
     const twoRules: readonly RuleTable[] = [
       {
@@ -152,10 +140,8 @@ describe("scopeBoundsProblems", () => {
   });
 
   /**
-   * The extractor going quiet is the failure `pinned-prose.ts` designs against,
-   * and it must not read as "nothing to check". Here it fails twice over: the
-   * missing section is reported in its own right, and every rule then reports
-   * as unexercised rather than passing vacuously.
+   * A missing section must not read as "nothing to check": it fails in its own right, and every
+   * rule then reports as unexercised rather than passing vacuously.
    */
   it("fails loudly when the enumerated section cannot be found", () => {
     const problems = run({ openHeading: "### Paths the gate refuses" }).problems;
@@ -181,10 +167,8 @@ describe("scopeBoundsProblems", () => {
     });
 
     /**
-     * The regression that produced this check, replayed from the other end: a
-     * cap is reinstated in the gate and the prose is left denying one. The
-     * caller measures `refusesBySize` from `checkDiff`, so this is what
-     * `docs:check` would report the day a cap came back.
+     * `refusesBySize` is measured from `checkDiff`, so this is what `docs:check` reports the day a
+     * cap comes back while the prose still denies one.
      */
     it("fails when a cap is reinstated and both documents still deny one", () => {
       const problems = run({}, oneRule, true).problems;
@@ -203,11 +187,7 @@ describe("scopeBoundsProblems", () => {
       expect(problems).toEqual([]);
     });
 
-    /**
-     * `oxfmt` reflows markdown, so a pinned sentence that happens to wrap in a
-     * new place is not a defect. Both sides are flattened before comparison —
-     * the failure that disabled half of the count check in this command twice.
-     */
+    /** `oxfmt` reflows markdown, so a rewrapped pinned sentence is not a defect; both sides are flattened before comparison. */
     it("accepts the sentence rewrapped across a line break", () => {
       const base = documents({});
       const wrapped = base.instructions.replace(
@@ -226,12 +206,8 @@ describe("scopeBoundsProblems", () => {
 });
 
 /**
- * The real documents against the real gate.
- *
- * `docs:check` runs exactly this, and duplicating it here is deliberate: the
- * fixtures above prove the logic and would all stay green if the shipped prose
- * drifted, because none of them reads it. This is the case that fails when
- * somebody edits the skill.
+ * The real documents against the real gate — `docs:check` runs exactly this. Duplicated
+ * deliberately: the fixtures above never read the shipped prose, so none would catch it drifting.
  */
 describe("the shipped skill against the shipped gate", () => {
   it("refuses nothing on size, measured rather than read", () => {

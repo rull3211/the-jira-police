@@ -36,12 +36,7 @@ describe("statusRank", () => {
     ).toBe(1);
   });
 
-  /**
-   * Names are matched case-insensitively and ids are not, which is the one
-   * asymmetry in the matcher. A status typed `mottatt` is the same column as
-   * `Mottatt`; an id that differs at all is a different id, and folding case on
-   * a numeric string would only ever hide a typo.
-   */
+  /** Names fold case; ids don't, since a case-differing id is a different id, not a typo. */
   it("folds case on names but treats an id as exact", () => {
     const t = ticket("SSX-1", "2026-09-02T10:00:00Z", MOTTATT);
     expect(statusRank(["MOTTATT"], t)).toBe(0);
@@ -54,13 +49,7 @@ describe("statusRank", () => {
     expect(statusRank(["10025", "10165"], ticket("SSX-1", "2026-09-02T10:00:00Z", HOLD))).toBe(2);
   });
 
-  /**
-   * A ticket whose status Jira did not return must not accidentally match a
-   * blank entry in the list — `TRIAGE_STATUS_PRIORITY=10165,,10025` is a typo,
-   * and reading it as "unknown-status tickets go second" would be an ordering
-   * nobody asked for, arrived at through an empty string matching an empty
-   * string.
-   */
+  /** An unknown status must not match a blank entry — `TRIAGE_STATUS_PRIORITY=10165,,10025` is a typo. */
   it("never matches an empty configured entry against an unknown status", () => {
     expect(statusRank(["10165", "", "10025"], ticket("SSX-1", "2026-09-02T10:00:00Z"))).toBe(3);
   });
@@ -86,12 +75,7 @@ describe("byStatusPriority", () => {
     expect(ordered.map((t) => t.key)).toEqual(["SSX-3", "SSX-2", "SSX-1", "SSX-4"]);
   });
 
-  /**
-   * The unset case is the daemon's, and it must be today's behaviour exactly.
-   * An operator upgrading without touching their configuration gets the order
-   * they already had, which is what makes this setting an opt-in rather than a
-   * change of policy shipped in a release.
-   */
+  /** The unset case must be today's behaviour exactly, so this setting is opt-in, not a silent policy change. */
   it("is plain created-ascending when no priority is configured", () => {
     const tickets = [
       ticket("SSX-2", "2026-09-02T10:05:00Z", MOTTATT),
@@ -116,12 +100,7 @@ describe("byStatusPriority", () => {
 });
 
 describe("byCreatedAscending", () => {
-  /**
-   * The DST case, kept next to the comparator it constrains. Jira prints an
-   * offset rather than `Z`, so the string order and the instant order disagree
-   * across the boundary — and the cursor is derived from this order, so getting
-   * it backwards would advance past a ticket that had not been triaged.
-   */
+  /** Jira prints an offset rather than `Z`, so string order and instant order disagree across a DST boundary. */
   it("orders by instant rather than by the printed string", () => {
     const earlier = ticket("SSX-1", "2026-10-25T02:30:00.000+0200");
     const later = ticket("SSX-2", "2026-10-25T02:00:00.000+0100");
@@ -142,17 +121,9 @@ describe("byCreatedAscending", () => {
 });
 
 /**
- * The guard. Its property is that the cursor never passes an issue that did not
- * succeed, whatever order the loop attempted them in — which is the whole
- * licence for triaging out of created order.
- *
- * Unplug it by returning the newest success rather than the end of the
- * contiguous prefix, the repair anyone would reach for to "advance further",
- * and the second, third and fourth cases below fail — counted by running it,
- * because the first draft of this comment guessed two and was wrong. Only the
- * all-succeeded and empty cases survive, which is the point: they are the two
- * where "newest success" and "end of the prefix" are the same answer, so a
- * mutant that kept only them would look healthy on the happy path alone.
+ * Unplugging the guard — returning the newest success instead of the end of the contiguous
+ * prefix — fails every case below except all-succeeded and empty, since those two are the only
+ * ones where the two answers coincide.
  */
 describe("settledCursor", () => {
   const oldest = ticket("SSX-1", "2026-09-02T10:00:00Z");
@@ -172,13 +143,7 @@ describe("settledCursor", () => {
     expect(settledCursor(all, new Set(["SSX-2", "SSX-3"]))).toBeNull();
   });
 
-  /**
-   * The case the reordering actually creates. Priority order triaged the newest
-   * ticket first and the loop stopped — a shutdown, or simply not there yet —
-   * so two older tickets have not been attempted. They are not failures, and it
-   * would be easy to argue the cursor may pass them; it may not, because
-   * nothing distinguishes "not attempted" from "lost" on the next cycle.
-   */
+  /** Priority order can triage the newest ticket first and stop before the older ones are attempted; the cursor may not pass them regardless. */
   it("treats an unattempted issue exactly like a failed one", () => {
     expect(settledCursor(all, new Set(["SSX-3"]))).toBeNull();
   });

@@ -1,35 +1,11 @@
 /**
  * The queries this service runs, and the validation all of them share.
  *
- * There are five, and they divide on one axis. `buildNewIssuesJql` selects on
- * **time** — what appeared since the last look — and is the only one with a
- * cursor. The other four (`buildInFlightJql`, `buildReviewQueueJql`,
- * `buildSolveQueueJql`, `buildSendbackWatchJql`) select on **state**: what the
- * board says right now, with the labels themselves as the dedupe. That is why
- * they share nothing but the helpers below, and why a ticket triaged on Monday
- * is permanently ineligible for the first and can re-enter any of the others on
- * Friday.
- *
- * `TRIAGE_ONLY_STATUS` blunts that axis without moving it: the new-issue query
- * now reads board state too. What still divides them is the **dedupe** — the
- * cursor here, the labels there — and that is the part the axis was ever about.
- *
- * (This header said "the two queries" until 2026-09-06, by which point there
- * were four. Recorded rather than quietly corrected: a count in prose is a fact
- * that goes stale every time the file grows, and this repository's whole
- * subject is prose drifting away from behaviour.)
- *
- * On the new-issue query:
- *
- * Uses a relative minute offset (`created >= -90m`) rather than an absolute
- * timestamp. Absolute dates in JQL are interpreted in the *server's* timezone,
- * not the caller's, which makes them a persistent source of off-by-hours bugs.
- * A relative offset has no timezone to get wrong.
- *
- * Note that Jira's date filters are minute-precision: two issues created
- * seconds apart are indistinguishable to the query. That is why the window
- * deliberately overlaps and why key-level dedupe in the poller is mandatory
- * rather than an optimisation.
+ * `buildNewIssuesJql` selects on time and carries the only cursor; the rest select on board state,
+ * with labels as the dedupe, so a ticket triaged on Monday can re-enter any of them on Friday. The
+ * new-issue query uses a relative minute offset (`created >= -90m`) rather than an absolute timestamp,
+ * since JQL dates resolve in the server's timezone; Jira's date filters are minute-precision, so the
+ * window overlaps deliberately and key-level dedupe in the poller is mandatory, not an optimisation.
  */
 
 import type { SolveMode } from "../settings.ts";
@@ -42,10 +18,7 @@ export class JqlError extends Error {
   }
 }
 
-/**
- * JQL has no parameter binding, so every interpolated value is validated
- * against this instead. Project keys and issue type ids are both covered.
- */
+/** JQL has no parameter binding; every interpolated project key or issue type id is checked against this instead. */
 const SAFE_IDENTIFIER = /^[A-Za-z0-9_-]+$/;
 
 export function assertSafe(value: string, label: string): string {
@@ -61,19 +34,10 @@ const QUOTE_BREAKERS = /["'\\\r\n]/;
 /**
  * Renders a value that may be either an entity id or an entity name.
  *
- * Jira resolves these differently and the quoting decides which: a bare number
- * is looked up as an id, anything quoted is looked up as a name. So
- * `component = 12644` finds the component by id, while `component = "12644"`
- * searches for a component *named* "12644" and finds nothing. Both forms are
- * worth supporting — ids are stable across renames, names are legible in a
- * config file — which makes the numeric check the deciding rule rather than a
- * shortcut.
- *
- * Names are quoted rather than validated against SAFE_IDENTIFIER because real
- * ones contain spaces ("SSX Advisor"). JQL has no parameter binding, so the
- * characters that could terminate the literal early are rejected outright
- * instead of escaped — no legitimate component name contains them, and
- * rejecting is easier to be sure of than escaping.
+ * Jira resolves these differently and the quoting decides which: a bare number is looked up as an id,
+ * anything quoted is looked up as a name, so `component = 12644` and `component = "12644"` are
+ * different queries. Names are quoted rather than checked against `SAFE_IDENTIFIER` since real ones
+ * contain spaces; the characters that could terminate the literal early are rejected rather than escaped.
  */
 export function jqlValue(value: string, label: string): string {
   const trimmed = value.trim();
@@ -121,29 +85,17 @@ export interface NewIssuesJqlOptions extends WindowOptions {
   /** Issue type ids to exclude, e.g. sub-tasks. */
   readonly excludedTypeIds: readonly string[];
   /**
-   * Components to restrict the search to, by id or by name. Empty means no
-   * restriction.
+   * Components to restrict the search to, by id or by name. Empty means no restriction.
    *
-   * The SSX board is shared by several teams, and triaging another team's
-   * tickets is both noise and spend. Note that this also excludes issues with
-   * no component at all, which is intended: an unclassified ticket is not
+   * Also excludes issues with no component at all, which is intended: an unclassified ticket is not
    * demonstrably ours.
    */
   readonly components: readonly string[];
   /**
-   * Statuses discovery may triage, by id or by name. Empty means no
-   * restriction beyond "not closed".
+   * Statuses discovery may triage, by id or by name. Empty means no restriction beyond "not closed".
    *
-   * A closed ticket is not the only one a paid triage has nothing to say
-   * about: so is one a person has already picked up. The comment lands as
-   * noise on somebody else's work, and it is the same spend either way.
-   *
-   * **Prefer ids, and the default does.** `jqlValue` above explains the
-   * quoting rule; what the board added on 2026-09-10 is that the name half of
-   * it cannot be relied on for statuses. `status = "Mottatt"` matches zero
-   * issues on this instance, `status = 10165` matches all 51, and the two
-   * spellings name the same column — so a name that resolves to nothing is a
-   * silent hole in the allowlist rather than an error.
+   * Prefer ids: on this instance `status = "Mottatt"` matches zero issues while `status = 10165`
+   * matches the same column's 51, so a name that resolves to nothing is a silent hole, not an error.
    */
   readonly statuses: readonly string[];
 }
@@ -154,28 +106,13 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
 
   const clauses = [`project = ${project}`, `created >= -${minutes}m`];
 
-  // Either the allowlist or the closed filter, never both, and the exclusivity
-  // is the point rather than a saving. An allowlist naming a closed status
-  // would be silently defeated by a `statusCategory != Done` sitting beside it
-  // — two clauses that agree today, disagreeing the moment someone configures
-  // the thing the setting exists to configure.
+  // Either the allowlist or the closed filter, never both: an allowlist naming a closed status would
+  // be silently defeated by a `statusCategory != Done` sitting beside it.
   if (options.statuses.length > 0) {
     const values = options.statuses.map((entry) => jqlValue(entry, "status")).join(", ");
     clauses.push(`status IN (${values})`);
   } else {
-    // A closed ticket is not worth a paid triage. Unlike the watch and review
-    // queues, nothing here has a label to take off afterwards, so there is no
-    // reason to keep seeing it: the poller's only reaction to a closed ticket
-    // would be to spend a model run describing it.
-    //
-    // On the category rather than the name: status names are per-board and this
-    // board's are Norwegian, so `status != "Done"` matches nothing here. Same
-    // reasoning as `DONE_CATEGORY` in `src/watch/signals.ts`.
-    //
-    // The allowlist above names those per-board strings anyway, because the
-    // eligible set straddles the category taxonomy and no category clause can
-    // express it. This branch is what an operator falls back to when a column
-    // is renamed out from under the list.
+    // Status names are per-board and this board's are Norwegian, so `status != "Done"` matches nothing.
     clauses.push("statusCategory != Done");
   }
 
@@ -189,19 +126,8 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
     clauses.push(`issuetype NOT IN (${ids})`);
   }
 
-  // Ascending because truncation has to fall on the newest issues.
-  //
-  // This used to say the poller needs it to advance its cursor monotonically,
-  // and that has not been the reason for a while: the poller re-sorts what it
-  // gets with its own comparator, and since `TRIAGE_STATUS_PRIORITY` the cursor
-  // comes from `settledCursor` over that sort rather than from arrival order.
-  // Handing this query back in any order at all would leave the cursor correct.
-  //
-  // What the direction still decides is which issues a truncated search loses.
-  // `client.ts` stops paginating at `MAX_PAGES` and warns; ascending means the
-  // page it never fetched holds the *newest* issues, which sit beyond the
-  // cursor and come back next cycle. Descending would truncate the oldest — the
-  // ones the cursor is about to advance past — and those never come back.
+  // Ascending: `client.ts` truncates at `MAX_PAGES`, and this way the unfetched page holds the newest
+  // issues, which come back next cycle rather than being lost past the cursor for good.
   return `${clauses.join(" AND ")} ORDER BY created ASC`;
 }
 
@@ -213,26 +139,10 @@ export interface InFlightJqlOptions {
 /**
  * Builds the JQL that counts solves already running.
  *
- * A separate query because it has to be one. The solve queue excludes
- * `agent:solving` by design — a claimed ticket is not waiting to be claimed —
- * so the tickets that count against `MAX_CONCURRENT_SOLVES` are exactly the
- * ones the queue cannot see. A bound computed from the queue result would cap
- * claims *per cycle* and let the next tick start another, which is not a bound
- * at all.
- *
- * Two differences from `buildSolveQueueJql`, and only one of them is
- * arbitrary:
- *
- *   - **No `statusCategory != Done`.** The queue filters closed tickets out
- *     because working one is pointless; this query must not, because a solve
- *     whose ticket someone closed mid-run is still a solve in flight. Dropping
- *     it here would *undercount*, and undercounting a concurrency limit is the
- *     failure that lets a second claim through. Over-counting only means
- *     waiting, which is the direction to be wrong in.
- *   - **Same project and component scope as the queue.** Kept identical rather
- *     than widened, because this poller only ever writes `agent:solving` inside
- *     that scope, so a claim outside it was not made here and blocking on it
- *     forever would be a stall with no cause anyone could find.
+ * A separate query because the solve queue excludes `agent:solving` by design, so the tickets that
+ * count against `MAX_CONCURRENT_SOLVES` are exactly the ones the queue cannot see. Unlike the queue it
+ * does not filter `statusCategory != Done` — a solve whose ticket closed mid-run is still in flight,
+ * and undercounting a concurrency limit is the failure that lets a second claim through.
  */
 export function buildInFlightJql(options: InFlightJqlOptions): string {
   const clauses = [`project = ${assertSafe(options.project, "project")}`];
@@ -255,39 +165,11 @@ export interface ReviewQueueJqlOptions {
 /**
  * Builds the JQL that selects the pull requests still worth looking at.
  *
- * **Both labels, and selecting only the first is the bug this query exists to
- * avoid.** `agent:reviewing` is a pull request the loop is still pushing to;
- * `agent:review-done` is one that has been undrafted and is waiting on a person.
- * The second is not a terminal — the loop keeps listening through human review,
- * and the arrow between the two runs in both directions, because a human comment
- * on an undrafted pull request starts another round and moves the ticket back.
- * Watching `agent:reviewing` alone would mean undrafting silently ends the loop,
- * which is exactly the ending §6.1 of the plan was written to remove,
- * reintroduced through a label instead of through a `return`.
- *
- * Neither label is a claim on `MAX_CONCURRENT_SOLVES`, which is why this is a
- * third query rather than a variant of `buildInFlightJql`: concurrency bounds
- * *active work*, and a pull request waiting on a person is not that. The set
- * this returns is measured in days and the set that one returns is measured in
- * minutes.
- *
- * **No `statusCategory != Done`**, for the reason `buildInFlightJql` gives and
- * one more of its own. A ticket somebody closed while its pull request was open
- * still has that pull request, and the look is what writes `agent:done` or
- * `agent:closed` when it ends. Filtering the ticket out here would leave the
- * label on it forever with nothing that could ever clear it — the leak §3c
- * names, arriving through the query instead of through the state machine.
- *
- * **No `labels NOT IN (...)`**, unlike the solve queue, and the omission is
- * deliberate rather than an oversight. The terminals (`agent:done`,
- * `agent:closed`, `agent:failed`) are written in the same edit that removes
- * `agent:reviewing` or `agent:review-done`, so a ticket carrying a terminal is
- * already outside this query's positive clause. Adding the exclusion would be a
- * second copy of that rule, and the two copies are what drift.
- *
- * Oldest touched first, like the solve queue: a look is cheap, but if a cycle is
- * ever bounded, the pull request nobody has touched in longest is the one to
- * look at first.
+ * Both labels: watching `agent:reviewing` alone would mean an undraft silently ends the loop, which is
+ * exactly the ending §6.1 of the plan was written to remove, reintroduced through a label instead of a
+ * `return`. No `statusCategory != Done` either — a ticket closed while its pull request is open still
+ * needs the look that writes `agent:done`/`agent:closed`; filtering it out would leave the label on it
+ * forever, the leak §3c names, arriving through the query instead of the state machine.
  */
 export function buildReviewQueueJql(options: ReviewQueueJqlOptions): string {
   const clauses = [`project = ${assertSafe(options.project, "project")}`];
@@ -313,32 +195,9 @@ export interface SendbackWatchJqlOptions {
 /**
  * Builds the JQL that selects the sent-back tickets under watch.
  *
- * The cheapest of the five and the one that must stay that way. Its whole
- * premise is that a ticket sitting in `agent:watching` costs nothing until
- * somebody else touches it, so this query is a *look* — the decision about
- * whether to pay for a re-triage is made afterwards, from the ticket's own
- * comments and changelog, and never from membership of this set.
- *
- * **It deliberately does NOT filter `statusCategory != Done`, and the plan said
- * it should.** §7c argued both halves of a contradiction in one paragraph: that
- * a closed ticket should have its watch label removed, and that "the query
- * already excludes these, so removal is not needed for correctness". Both
- * cannot hold. A ticket the query cannot see is a ticket nothing can unsubscribe,
- * so excluding closed tickets would leave `agent:watching` on them forever,
- * claiming a subscription no loop honours — which is precisely the leak
- * `buildReviewQueueJql` refuses two functions above, arriving here through the
- * same clause. Including them costs nothing: a closed ticket is a look that
- * decides "unsubscribe" without paying for anything.
- *
- * **No `labels NOT IN (...)`**, for `buildReviewQueueJql`'s reason. The watch
- * ends by removing `agent:watching` in the same edit that writes whatever
- * replaced it, so a ticket that has moved on is already outside the positive
- * clause. A second copy of that rule is a second thing to keep in step.
- *
- * Oldest touched first. Unlike the solve queue this is close to arbitrary — the
- * set is expected to be small and nothing here is capacity-bound — but a stable
- * order makes two consecutive dry runs comparable, which is what a person
- * calibrating this feature will actually be doing with it.
+ * Deliberately does NOT filter `statusCategory != Done`, though §7c argued it should: a ticket the
+ * query cannot see is one nothing can unsubscribe, so excluding closed tickets would leave
+ * `agent:watching` on them forever — the same leak `buildReviewQueueJql` refuses above.
  */
 export function buildSendbackWatchJql(options: SendbackWatchJqlOptions): string {
   const clauses = [`project = ${assertSafe(options.project, "project")}`];
@@ -360,24 +219,14 @@ export interface SolveQueueJqlOptions {
   /**
    * `manual` additionally requires `agent:start`, the human go-ahead.
    *
-   * Passed as the mode rather than as a boolean on purpose. A
-   * `requireStartLabel: false` left at its default by a careless caller is a
-   * silent promotion to unattended solving; a mode has to be spelled `"auto"`
-   * to mean it, and anything else is read below as manual.
+   * Passed as a mode rather than a boolean: a `requireStartLabel: false` left at its default by a
+   * careless caller is a silent promotion to unattended solving, where a mode must spell `"auto"`.
    */
   readonly mode: SolveMode;
   /**
-   * Issue types eligible for *unattended* solving, by id or by name.
-   *
-   * Only consulted in auto mode, and there it is mandatory — see the throw
-   * below. Manual mode ignores it entirely, because a human typing `agent:start`
-   * on an Epic has said something this list could only second-guess.
-   *
-   * Rendered through `jqlValue`, so `10004` is resolved as a type id and `Feil`
-   * as a type name. Prefer the id: names are localised and renameable, and this
-   * board's bug type is `Feil` rather than `Bug` — a hardcoded English default
-   * would have matched nothing and turned autosolve into a feature that appeared
-   * to be on and never fired.
+   * Issue types eligible for *unattended* solving, by id or by name; only consulted, and mandatory, in
+   * auto mode. Prefer the id: this board's bug type is `Feil`, not `Bug`, so a hardcoded English
+   * default would match nothing and turn autosolve into a feature that never fires.
    */
   readonly autoIssueTypes: readonly string[];
 }
@@ -385,41 +234,13 @@ export interface SolveQueueJqlOptions {
 /**
  * Builds the JQL that selects tickets waiting to be solved.
  *
- * Deliberately has **no time or cursor clause**, which is the one structural
- * difference from `buildNewIssuesJql` and the reason the two queries cannot be
- * merged. The new-issue poller asks "what appeared since I last looked" and
- * dedupes against a local `seenKeys` list; this one asks "what is in the
- * waiting state right now", and its dedupe is the ticket's own labels. A
- * ticket triaged on Monday is permanently ineligible for the first query and
- * must still be eligible for this one the moment a human labels it on Friday.
- *
- * Because the queue's state lives in Jira rather than on disk, it survives a
- * restart, a wiped `state/` and a second instance without a lock file — but
- * only for as long as the exclusion clause below and the claim written by the
- * solver name exactly the same labels. That is why both come from
- * `src/solve/labels.ts` rather than being spelled out here: two copies of this
- * vocabulary that drifted apart would mean a ticket claimed by one instance
- * and re-claimed by the next.
- *
- * Note the classic `labels NOT IN (...)` gotcha: in Jira that clause also
- * excludes issues whose `labels` field is *empty*, because the field has no
- * value to compare. It is harmless here — `labels = "agent:solvable"`
- * guarantees every candidate already carries at least one label — but the next
- * reader should not have to rediscover that, and any future rewrite that drops
- * the positive label clause would silently start missing unlabelled tickets.
- *
- * Measured against this board rather than taken on trust, 2026-09-03:
- *
- *   labels IS EMPTY                                    → 57 issues
- *   labels IS EMPTY AND labels NOT IN (the three)      →  0 issues
- *   labels = "triaged"                                 → 46 issues
- *   labels = "triaged" AND labels NOT IN (the three)   → 46 issues
- *   labels = "triaged" AND labels NOT IN ("triaged")   →  0 issues
- *
- * So the clause excludes on absence as well as on presence, it does not touch
- * a labelled ticket that simply lacks the named labels, and it does exclude one
- * that carries them. All three are load-bearing, and the first is the reason
- * the positive clause above cannot be removed as redundant.
+ * Deliberately has no time or cursor clause: this asks "what is in the waiting state right now" and
+ * dedupes on the ticket's own labels, so a ticket ineligible Monday must still be eligible the moment
+ * a human labels it Friday. The exclusion clause below and the claim the solver writes must name
+ * exactly the same labels — both come from `src/solve/labels.ts` rather than being spelled out here,
+ * so the two cannot drift and double-claim a ticket. `labels NOT IN (...)` also excludes issues whose
+ * `labels` field is empty; harmless here since the positive `labels = "agent:solvable"` clause already
+ * guarantees a label, but dropping that positive clause would silently start missing unlabelled tickets.
  */
 export function buildSolveQueueJql(options: SolveQueueJqlOptions): string {
   const project = assertSafe(options.project, "project");
@@ -431,36 +252,19 @@ export function buildSolveQueueJql(options: SolveQueueJqlOptions): string {
     clauses.push(`component IN (${values})`);
   }
 
-  // A closed ticket is not worth a code change, and the solve queue has no
-  // cursor to carry it out of range — without this it would sit in the queue
-  // forever.
+  // The solve queue has no cursor to carry a closed ticket out of range without this.
   clauses.push("statusCategory != Done");
 
   clauses.push(`labels = ${jqlValue(AGENT_LABELS.solvable, "label")}`);
 
-  // Not `=== "manual"`. The privilege here is running unattended, so the test
-  // is for the one value that grants it; every other value, including one that
-  // slipped past validation, falls through to requiring a human's label.
+  // Not `=== "manual"`: the test is for the one value that grants unattended running, so anything else,
+  // including a value that slipped past validation, falls through to requiring a human's label.
   if (options.mode !== "auto") {
     clauses.push(`labels = ${jqlValue(AGENT_LABELS.start, "label")}`);
   } else {
-    // Auto mode drops the human's label, so it takes on a restriction in
-    // exchange rather than simply being manual-minus-a-check. A bug has a
-    // defined broken behaviour and a fix has a definition of done; a Story or an
-    // Epic assessed as "solvable" is a judgement about scope, and that is the
-    // one this service is least equipped to make without a person.
-    //
-    // Empty is a hard error, and the reason is not the obvious one. An empty
-    // list does not render as "every type" — `issuetype IN ()` is malformed and
-    // Jira rejects it — so the immediate behaviour is already a refusal.
-    //
-    // What this guards is the *fix*. Someone meeting a Jira 400 from a
-    // poller cycle reads it as a query-building bug, and the natural repair is
-    // to omit the clause when the list is empty, exactly as the component filter
-    // legitimately does eight lines above. That repair is a one-line diff, looks
-    // like consistency with its neighbour, and quietly promotes auto mode to
-    // solving every issue type unattended. Failing here instead, with a message
-    // naming the setting, makes the safe repair the obvious one.
+    // Empty is a hard error even though `issuetype IN ()` already fails: omitting the clause instead,
+    // the repair that looks consistent with the component filter above, would quietly promote auto
+    // mode to solving every issue type unattended.
     if (options.autoIssueTypes.length === 0) {
       throw new JqlError(
         "SOLVE_MODE=auto with no SOLVE_AUTO_ISSUE_TYPES: set it (the bug type on this board is Feil) rather than removing this restriction — auto mode has no human check, and the issue-type filter is the one it trades for that",
@@ -473,7 +277,6 @@ export function buildSolveQueueJql(options: SolveQueueJqlOptions): string {
   const excluded = SOLVE_QUEUE_EXCLUDED_LABELS.map((label) => jqlValue(label, "label")).join(", ");
   clauses.push(`labels NOT IN (${excluded})`);
 
-  // Oldest touched first, so a backlog drains in a fair order rather than
-  // whichever ticket Jira happened to return first.
+  // Oldest touched first, so a backlog drains in a fair order.
   return `${clauses.join(" AND ")} ORDER BY updated ASC`;
 }

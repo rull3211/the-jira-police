@@ -1,51 +1,13 @@
 /**
- * The title and body of the draft pull request.
+ * The title and body of the draft pull request. Pure and its own module so the
+ * wording can be read in a test rather than only by opening a PR.
  *
- * Its own module, and pure. `delivery.ts` executes — it runs git and gh and
- * interprets exit codes — and mixing "what does the PR say" into that would mean
- * the only way to see the wording was to open a pull request. This function can
- * be read in a test.
- *
- * ## Who the body is written for
- *
- * A colleague who did not ask for this pull request and is now looking at one.
- * That reader needs four things in the first two lines — a machine wrote it,
- * it is a draft, here is the ticket, here is why — and then wants to stop
- * reading. Everything else is evidence, and evidence goes in `<details>`.
- *
- * The first version of this put all of it on the page and was told, accurately,
- * that it was "a bit long and hard to read". Three model-written blocks did most
- * of the damage: recon's correction to the dev lens, the fix pass's account of
- * itself, and simplify's log of what it considered and rejected. Each is worth
- * keeping and none is worth reading first, which is exactly what a disclosure
- * widget is for. What stayed on the page is what a reviewer decides with: is it
- * green, how big is it, and did anything disagree with anything.
- *
- * ## The model does not write the body
- *
- * It writes the *commit* — `composeCommitMessage` — and its account of the
- * passes. That prose is quoted here under headings that say whose words they
- * are. Everything else is composed from facts the harness established itself:
- * exit codes it read, file and line counts it measured, the recon verdict it
- * parsed. This split is the same one the whole pipeline runs on, and it matters
- * most here because the PR body is the most widely-read artifact the service
- * produces. A model asked to summarise its own work will say the tests pass, and
- * it has no way to know.
- *
- * ## Why the quoted prose is escaped rather than fenced
- *
- * It descends from ticket text, which anyone with a Jira account can write, so
- * it must not be able to forge document structure — a heading, a table, a
- * checklist that reads as though the harness wrote it, a link pointing
- * somewhere else.
- *
- * This used to be a code fence, which is the stronger guarantee and was the
- * right first move. It was traded for `asProse` deliberately and with the
- * tradeoff named: a fence renders prose as a monospace dump with a horizontal
- * scrollbar, and the body's whole job is to be read. `asProse` neutralises the
- * constructs that create structure and leaves the words alone. It is a weaker
- * guarantee than a fence and a testable one — see its own comment for the list
- * and for what is deliberately left renderable.
+ * The model writes the commit message and its account of each pass, quoted here
+ * under headings that say whose words they are; everything else (exit codes,
+ * file/line counts, the recon verdict) is composed from facts the harness
+ * itself measured, since a model summarising its own work can't know it passed.
+ * Long model-written prose goes behind `<details>` — the page itself is what a
+ * reviewer decides from: green or not, how big, did anything disagree.
  */
 
 import type { SolveOutcome } from "./orchestrator.ts";
@@ -67,40 +29,11 @@ export interface PullRequestContext {
 }
 
 /**
- * Renders untrusted text as markdown prose that cannot create structure.
- *
- * Two steps, and the first is why the second is simple.
- *
- * **Paragraphs are reflowed to one line each.** Blank lines still separate
- * paragraphs; every other run of whitespace becomes one space. This is a
- * readability fix first — GitHub renders a single newline in a pull request body
- * as a line break, so a commit body wrapped at 72 columns for git's sake arrives
- * broken mid-sentence — and it collapses the escaping problem second. A
- * paragraph that is one line has exactly one line-start, so exactly one place a
- * block-level construct can begin.
- *
- * **Then the dangerous characters are escaped.** In order:
- *
- *  - `\` first, or every escape added below could be cancelled by a backslash
- *    the text already contained.
- *  - `` ` ``, `[`, `]`, `|` — inline code, links, images, reference definitions
- *    and table cells. All render as themselves once escaped.
- *  - `<` becomes `&lt;`, closing off raw HTML. An entity rather than a
- *    backslash, because markdown does not escape `<` with one.
- *  - a leading `#`, `>`, `-`, `+`, `*`, `=`, `~` or `1.` — headings, block
- *    quotes, lists, thematic breaks, setext underlines and fences. Only at the
- *    start of a paragraph, which after the reflow is the only place they mean
- *    anything.
- *
- * **What is deliberately left alone:** `*` and `_` inside a paragraph, so
- * emphasis and `snake_case` both survive. Emphasis is cosmetic — it cannot
- * forge a section, a link or a table row, which are the things that would make a
- * reviewer believe something the harness did not say.
- *
- * This is a weaker guarantee than a code fence and the weakness is the point of
- * the trade: the fence could not be read. If a construct is found that gets
- * through, the fix is another line in this function and a test, not a retreat to
- * the fence.
+ * Renders untrusted text as markdown prose that cannot create structure: reflows
+ * each paragraph to one line (so a block-level construct can only start there),
+ * then escapes `\`, `` ` ``/`[`/`]`/`|`, `<`, and a leading `#>-+*=~`/`1.`.
+ * `*`/`_` are left alone deliberately — emphasis is cosmetic and can't forge a
+ * section, link, or table row.
  */
 export function asProse(text: string): string {
   return text
@@ -125,34 +58,17 @@ function escapeLeading(paragraph: string): string {
   return paragraph.replace(/^([#>\-+*=~])/u, "\\$1").replace(/^(\d+)([.)])/u, "$1\\$2");
 }
 
-/**
- * `asProse`, or an explicit marker when there was nothing to render.
- *
- * For text that is shown unconditionally. A blank where prose was promised reads
- * as a rendering fault rather than as an absence, and the two are worth telling
- * apart in a document whose whole claim is that everything in it was measured.
- *
- * A `<details>` section wants the opposite and does not use this — see below.
- */
+/** `asProse`, or an explicit marker when empty, so a blank doesn't read as a rendering fault. */
 function prose(text: string): string {
   const rendered = asProse(text);
   return rendered === "" ? "_(nothing said)_" : rendered;
 }
 
 /**
- * A collapsed section, or nothing at all when there is nothing to put in it.
- *
- * It takes raw text and escapes it itself, rather than accepting rendered
- * markdown, so that "there was nothing to say" is decided here. Composing this
- * with `prose` instead was the first attempt and it rendered a widget for every
- * absent field: `_(nothing said)_` is not empty, so nothing was ever omitted. A
- * marker earns its place on the page, where the reader can see it without
- * acting; behind a disclosure triangle it is a click that returns nothing, and
- * a few of those teach the reader that none of these widgets is worth opening.
- *
+ * A collapsed section, or nothing at all when empty — an empty widget teaches the
+ * reader that none of these are worth opening.
  * The blank lines around the content are load-bearing: GitHub stops parsing
- * markdown inside an HTML block unless a blank line reopens it, and without them
- * the whole section renders as one run of literal text.
+ * markdown inside an HTML block unless a blank line reopens it.
  */
 function details(summary: string, text: string): string {
   const content = asProse(text);
@@ -161,15 +77,7 @@ function details(summary: string, text: string): string {
     : `<details>\n<summary>${summary}</summary>\n\n${content}\n\n</details>`;
 }
 
-/**
- * The PR title.
- *
- * The commit subject with the issue key appended, rather than the ticket
- * summary. The subject is a Conventional Commits line the fix pass wrote about
- * what it actually did; the summary is what somebody hoped would be done, and
- * the two part company whenever recon corrected the brief. The key goes in
- * because a PR list is read without opening anything.
- */
+/** The PR title: commit subject (what was actually done) plus the issue key, not the ticket summary. */
 export function composeTitle(outcome: Verified, issueKey: string): string {
   return `${outcome.commit.subject} (${issueKey})`;
 }
@@ -178,30 +86,15 @@ function browseUrl(base: string, issueKey: string): string {
   return `${base.replace(/\/+$/u, "")}/browse/${issueKey}`;
 }
 
-/**
- * The commit body without the trailer the harness appended to it.
- *
- * `Refs: SSX-1234` is there so `git log` can be searched. In a pull request that
- * already links the ticket in its first line it is a duplicate, and a reader who
- * has to skip a line learns to skip the block.
- */
+/** The commit body without the `Refs:` trailer — redundant once the PR links the ticket up top. */
 export function withoutTrailer(body: string): string {
   return body.replace(/\n*^Refs:.*$/mu, "").trim();
 }
 
-/**
- * The verification steps as one scannable line.
- *
- * A four-row table for four values that are all `exit 0` spent eight lines
- * saying "green". Exit codes appear only where they are not zero, because a
- * number a reader has to check against an expectation is worse than a tick, and
- * a failure is the only case where the number itself tells them anything.
- */
+/** The verification steps as one scannable line; exit codes shown only when non-zero. */
 function checkLine(outcome: Verified): string {
   if (outcome.verification.outcome === "refused") {
-    // Unreachable today — a `verified` outcome always carries passed steps — and
-    // written rather than asserted, so that widening `verified` later produces a
-    // thinner pull request body instead of a crash while rendering one.
+    // Unreachable today; written so widening `verified` later degrades the body instead of crashing it.
     return "_no verification steps were discovered_";
   }
   return outcome.verification.steps
@@ -210,19 +103,9 @@ function checkLine(outcome: Verified): string {
 }
 
 /**
- * The fail-first finding, and it is a line only when there is something to say.
- *
- * `guarded` renders nothing. It is the expected result, it is the one this
- * experiment is not sound about (see `checkFailFirst`), and a green tick for it
- * next to the verification ticks would read as a stronger claim than it is —
- * "the tests are good" rather than "one specific way of them being empty was
- * ruled out". `skipped` and `inconclusive` render nothing for the plainer
- * reason that no experiment ran.
- *
- * `vacuous` is the whole point of the feature reaching this page. It says a
- * regression test passes against the unfixed code, which is a defect in the
- * change a reviewer is about to approve and is invisible from the diff — every
- * assertion in it is green either way.
+ * The fail-first finding, rendered only for `vacuous` (a regression test that
+ * passes even against the unfixed code — invisible from the diff otherwise).
+ * `guarded`/`skipped`/`inconclusive` render nothing rather than overclaim (see `checkFailFirst`).
  */
 function failFirstLine(outcome: Verified): string {
   if (outcome.failFirst.outcome !== "vacuous") {
@@ -244,11 +127,8 @@ export function composePullRequest(
   const { issueKey, jiraBaseUrl, maxReviewRounds } = context;
   const { recon, fix, simplify } = outcome;
 
-  // Stated on the page rather than in a disclosure, because it is the single
-  // most useful thing this pipeline produces and the only feedback triage's
-  // `agent:solvable` call ever receives — triage makes that call without reading
-  // a line of source. The correction itself is long and goes below; that it
-  // happened at all is one line and stays up here.
+  // On the page, not in a disclosure: it's the only feedback triage's `agent:solvable`
+  // call ever gets, since triage never reads a line of source.
   const lens = recon.devLensAccurate
     ? "✅ Recon confirmed triage's read of this ticket before making any edit."
     : "⚠️ **Recon disagreed with triage's read of this ticket** and proceeded on its own reading.";
@@ -271,9 +151,7 @@ export function composePullRequest(
     details("What a reviewer should check by hand", fix.residualRisk),
     recon.devLensAccurate ? "" : details("Where triage was wrong", recon.devLensCorrection),
     details("What the fix pass says it did", fix.summary),
-    // The declined case is reported, not omitted. "The simplify pass looked and
-    // left it alone" and "the simplify pass never ran" are different facts about
-    // a diff a reviewer is about to read, and a missing section conflates them.
+    // Reported, not omitted: "looked and left it alone" and "never ran" are different facts.
     details(
       simplify.changed ? "What the simplify pass changed" : "Why the simplify pass changed nothing",
       simplify.changed ? simplify.changes.join("\n\n") : simplify.declined,

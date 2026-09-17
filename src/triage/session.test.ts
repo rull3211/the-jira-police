@@ -11,12 +11,8 @@ import {
 } from "./session.ts";
 
 /**
- * A real `result` event, trimmed to the fields this reads.
- *
- * The numbers are from an actual `storecode -p "say ok"` run on 2026-09-04 —
- * two input tokens, four output tokens, twelve cents. Kept verbatim rather than
- * rounded to something tidy, because the whole point of the shape is that the
- * cost is dominated by the 20k cache-creation tokens rather than by the work.
+ * A real `result` event, trimmed to the fields this reads. Kept verbatim rather than rounded: the
+ * cost here is dominated by cache-creation tokens rather than by the work itself.
  */
 const RESULT = {
   type: "result",
@@ -45,9 +41,7 @@ describe("sessionCost", () => {
     });
   });
 
-  // The distinction the whole `number | null` shape exists for. A run that did
-  // not say what it cost and a run that cost nothing are different facts, and
-  // only one of them should be safe to add to a total.
+  // An absent cost and a free run are different facts; only one is safe to sum.
   it("does not report an absent cost as a free one", () => {
     expect(sessionCost({ type: "result" }).costUsd).toBeNull();
     expect(sessionCost({ type: "result", total_cost_usd: 0 }).costUsd).toBe(0);
@@ -58,8 +52,7 @@ describe("sessionCost", () => {
     expect(sessionCost({ usage: {} }).cacheReadTokens).toBeNull();
   });
 
-  // `NaN` is a number, and one of these in a day's worth of runs would make the
-  // whole day's total `NaN` rather than merely wrong by one run.
+  // `NaN` is a number and would poison a whole day's summed total, not just one run.
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
     "refuses %p, which would poison every sum it reached",
     (value) => {
@@ -67,8 +60,7 @@ describe("sessionCost", () => {
     },
   );
 
-  // Not coerced. A cost arriving as a string means the event shape changed, and
-  // a silent `Number("0.12")` would hide that for as long as it kept working.
+  // Not coerced: a cost arriving as a string means the event shape changed.
   it.each([["0.12"], [null], [undefined], [{}], [[]], [true]])(
     "reports %p as not reported rather than guessing at it",
     (value) => {
@@ -76,9 +68,7 @@ describe("sessionCost", () => {
     },
   );
 
-  // Telemetry attached to a verdict that has already been decided. If this can
-  // throw, a malformed usage block turns a solve that worked into one that did
-  // not — the tail wagging the dog.
+  // A malformed usage block must not turn a solve that worked into one that did not.
   it.each([
     ["a missing usage block", { type: "result" }],
     ["a null usage block", { type: "result", usage: null }],
@@ -104,13 +94,8 @@ describe("sessionCost", () => {
 
 describe("sessionDenials", () => {
   /**
-   * A real denial, captured 2026-09-06 from a nested headless run whose `Write`
-   * was refused by a local guard.
-   *
-   * The `tool_input` is kept in the fixture precisely because it must not come
-   * out the other side: this is the shape of the field, and its content is the
-   * body of a `.env` write, which is what a denial's input looks like when it
-   * is worth denying.
+   * A real denial shape. `tool_input` is kept in the fixture precisely because it must not come
+   * out the other side.
    */
   const DENIED = {
     ...RESULT,
@@ -127,22 +112,19 @@ describe("sessionDenials", () => {
     expect(sessionDenials(DENIED)).toStrictEqual([{ tool: "Write" }]);
   });
 
-  // The guard, not the formatting. `toStrictEqual` above would already fail on
-  // an extra key, but this says why in the name: the refused bytes must not be
-  // copied into a log by a later change that helpfully carries more through.
+  // The refused bytes must not be copied into a log by a later change that carries more through.
   it("does not carry the refused input out with the name", () => {
     expect(Object.keys(sessionDenials(DENIED)[0] ?? {})).toStrictEqual(["tool"]);
   });
 
-  // The run that was stopped still calls itself a success, which is the entire
-  // reason this array is read rather than the result's error status.
+  // Read from the array rather than the result's error status, since a stopped run still calls
+  // itself a success.
   it("reads a denial off an event reporting success", () => {
     expect(DENIED.subtype).toBe("success");
     expect(sessionDenials(DENIED)).toHaveLength(1);
   });
 
-  // Counted, not deduplicated. The model retries a refused call under another
-  // tool, so the number of attempts and the number of tools are two facts.
+  // Counted, not deduplicated: attempts and distinct tools are two different facts.
   it("counts every attempt, including a second denial of the same tool", () => {
     expect(
       sessionDenials({
@@ -156,8 +138,7 @@ describe("sessionDenials", () => {
     expect(sessionDenials({ ...RESULT, permission_denials: [] })).toStrictEqual([]);
   });
 
-  // Same rule as `sessionCost`: telemetry attached to a verdict already
-  // reached must not be able to turn a solve that worked into one that did not.
+  // Same rule as `sessionCost`: must not turn a solve that worked into one that did not.
   it.each([
     ["a missing array", {}],
     ["a null array", { permission_denials: null }],
@@ -171,12 +152,8 @@ describe("sessionDenials", () => {
 });
 
 /**
- * A fake storecode: a node process that prints the events it was handed.
- *
- * Cheaper and more honest than mocking `spawn` — it exercises the real
- * line-buffered NDJSON reader, which is the part of `runSession` most likely to
- * be broken by a change to it. The cost of a real model run per assertion is
- * why nothing else in this file spawns anything.
+ * A fake storecode: a node process that prints the events it was handed. Exercises the real
+ * line-buffered NDJSON reader without the cost of a real model run per assertion.
  */
 function fakeSession(events: readonly Record<string, unknown>[]) {
   const script = events.map((event) => `${JSON.stringify(event)}\n`).join("");
@@ -193,11 +170,8 @@ function fakeSession(events: readonly Record<string, unknown>[]) {
 }
 
 /**
- * A fake storecode that behaves rather than merely printing.
- *
- * The budgets here are in hundreds of milliseconds, which is the whole reason
- * `watchdogIntervalFor` is a function: a fixed fifteen-second tick would make
- * every assertion below either a fifteen-second wait or a lie.
+ * A fake storecode that behaves rather than merely printing. Budgets are in hundreds of
+ * milliseconds, which needs `watchdogIntervalFor` to scale the tick down from its fixed default.
  */
 function behavingSession(body: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -213,38 +187,17 @@ function behavingSession(body: string, overrides: Record<string, unknown> = {}) 
   };
 }
 
-/**
- * Speaks once and then wedges, which is the case worth testing.
- *
- * A child that never says anything would also be caught by a deadline armed at
- * spawn; a child that starts normally and then stops is the one the old
- * mechanism could not see, because from its point of view a healthy long run
- * and a run that died after ten seconds look identical until the budget
- * expires.
- */
+/** Speaks once and then wedges — a child that starts normally and then stops. */
 const WEDGED = 'process.stdout.write("starting\\n"); setTimeout(() => {}, 60000)';
 
-/**
- * Talks steadily for 2.5s and then exits of its own accord.
- *
- * Deliberately not JSON: a line this module cannot parse is still proof the
- * child is alive, and liveness is a question about the process rather than
- * about the schema.
- */
+// Talks steadily for 2.5s then exits. Deliberately not JSON: liveness is about the process, not the schema.
 const CHATTY =
   'const t = setInterval(() => process.stdout.write("still here\\n"), 100); setTimeout(() => clearInterval(t), 2500)';
 
 /**
- * The rejection, typed, and an assertion that there was one.
- *
- * `runSession` resolves to whatever the parser returned, so the obvious
- * `runSession(...).catch((thrown) => thrown as SessionTimeoutError)` awaits a
- * union with that value in it and every property read off the result is a type
- * error. The cast is also a lie in the case that matters: a run which
- * unexpectedly *succeeded* would carry the parsed value into the assertions
- * below and fail somewhere that says nothing about why. This narrows by
- * observing the rejection rather than by asserting it, and a resolution stops
- * here with the reason.
+ * The rejection, typed, and an assertion that there was one — narrows by observing the rejection
+ * rather than casting, so a run that unexpectedly succeeds fails here with the reason instead of
+ * downstream with a type error.
  */
 async function failureOf<E extends Error>(run: Promise<unknown>): Promise<E> {
   try {
@@ -260,8 +213,7 @@ describe("watchdogIntervalFor", () => {
     expect(watchdogIntervalFor(600_000, 1_800_000)).toBe(15_000);
   });
 
-  // Enforcement can only be as fine as the tick, so a budget near or below the
-  // interval would otherwise be silently rounded up to it.
+  // Enforcement can only be as fine as the tick; a small budget must not be rounded up past it.
   it("looks at least twice inside the smaller budget", () => {
     expect(watchdogIntervalFor(1000, 60_000)).toBe(500);
     expect(watchdogIntervalFor(60_000, 1000)).toBe(500);
@@ -273,42 +225,20 @@ describe("watchdogIntervalFor", () => {
 });
 
 describe("runSession budgets", () => {
-  /**
-   * The bug this whole mechanism replaced, stated as a test.
-   *
-   * A child that is producing output is working, and the old single
-   * `setTimeout` armed at spawn could not tell it from one that had wedged in
-   * the first second. This child talks continuously and must therefore die of
-   * the ceiling and never of the silence budget.
-   *
-   * The mutation: delete the `lastActivityAt = Date.now()` in the stdout
-   * handler and this fails, killed as `idle` at 1.5s.
-   *
-   * The budget is well above what node needs to boot, deliberately. The silence
-   * clock starts at spawn — correct in production, where it is ten minutes
-   * against a startup measured in hundreds of milliseconds — but an earlier
-   * draft of this test set it to 300ms and passed alone while failing inside
-   * the full suite, where the machine is busy enough that the child had not
-   * started before its budget expired.
-   */
+  // A child producing output must die of the ceiling, never of the silence budget. The idle
+  // budget is set well above node's boot time so the test isn't flaky under a loaded machine.
   it("does not charge a streaming pass against the silence budget", async () => {
     const error = await failureOf(
       runSession(behavingSession(CHATTY, { idleMs: 1500, maxRunMs: 60_000 }), () => "parsed"),
     );
 
-    // It ran its full 2.5 seconds and exited on its own, so it was never
-    // killed — the failure here would be a SessionTimeoutError of kind
-    // `idle`, and the only thing keeping it alive is that its own chatter
-    // keeps resetting the budget.
+    // Ran its full 2.5s and exited on its own; an idle-kind SessionTimeoutError here would mean
+    // its chatter stopped resetting the silence budget.
     expect(error).toBeInstanceOf(SessionError);
     expect(error).not.toBeInstanceOf(SessionTimeoutError);
     expect(error.message).toMatch(/without structured output/);
   }, 20_000);
 
-  /**
-   * The path that had no test at all before this change: nothing anywhere
-   * asserted that a child is ever actually killed.
-   */
   it("kills a child that has stopped talking", async () => {
     const started = Date.now();
     const error = await failureOf<SessionTimeoutError>(
@@ -322,16 +252,8 @@ describe("runSession budgets", () => {
     expect(Date.now() - started).toBeLessThan(8000);
   });
 
-  /**
-   * The resume handle, and the reason the init event is now read for more than
-   * its MCP block.
-   *
-   * Probed 2026-09-06: a storecode transcript is written as the run goes,
-   * survives `SIGKILL`, and `--resume <id>` reads it back with the completed
-   * turns intact. So this id is the difference between a killed pass being lost
-   * work and being recoverable by hand. It exists nowhere else once the child
-   * is gone.
-   */
+  // A storecode transcript survives SIGKILL and `--resume <id>` reads it back intact, so this id
+  // is the difference between a killed pass being lost work and recoverable by hand.
   it("carries the killed run's session id out with the error", async () => {
     const init = JSON.stringify({
       type: "system",
@@ -357,26 +279,15 @@ describe("runSession budgets", () => {
       runSession(behavingSession(WEDGED, { idleMs: 800 }), () => "parsed"),
     );
 
-    // That it was the budget which killed it, rather than something else
-    // producing a null id for an unrelated reason.
     expect(error).toBeInstanceOf(SessionTimeoutError);
-    // Null rather than a placeholder: an operator holding a fake id would go
-    // looking for a transcript that does not exist.
+    // Null rather than a placeholder: an operator holding a fake id would go looking for a
+    // transcript that does not exist.
     expect(error.sessionId).toBeNull();
   });
 
-  /**
-   * Machine sleep, which is the failure that killed a recon on SSX-3831 that
-   * had done nothing wrong.
-   *
-   * The clock is jumped forward an hour mid-run, which is what a suspend looks
-   * like from inside this process whether or not the platform's monotonic clock
-   * ticks through one. The child is silent for the whole hour and must survive
-   * it, because it was frozen rather than quiet — and it must survive the
-   * sixty-second ceiling too, since that is sleep-excluded for the same reason.
-   *
-   * The mutation: delete the drift branch and this fails, killed as `idle`.
-   */
+  // The clock is jumped forward an hour mid-run to simulate a suspend. The child is silent for
+  // the whole hour and must survive it (frozen, not idle) and survive the maxRun ceiling too,
+  // since sleep is excluded from both budgets.
   it("does not spend either budget on time the machine was asleep", async () => {
     const realNow = Date.now.bind(Date);
     let offset = 0;
@@ -389,10 +300,8 @@ describe("runSession budgets", () => {
     try {
       const error = await failureOf(
         runSession(
-          // The child is silent for its whole 2.5s life, which is inside both
-          // budgets; the injected hour is the only thing that could blow
-          // either, and it must blow neither. It exits by itself, so the only
-          // way this run produces a SessionTimeoutError is by being killed.
+          // Silent for its whole 2.5s life and exits on its own; only the injected hour could
+          // produce a SessionTimeoutError here, and it must not.
           behavingSession("setTimeout(() => {}, 2500)", { idleMs: 3000, maxRunMs: 8000 }),
           () => "parsed",
         ),
@@ -400,34 +309,8 @@ describe("runSession budgets", () => {
 
       expect(error).toBeInstanceOf(SessionError);
       expect(error).not.toBeInstanceOf(SessionTimeoutError);
-      // Not an exact match: drift is `now - lastTickAt - tickMs`, so the figure
-      // carries the tick's scheduling jitter and is inherently up to one whole
-      // interval out. The comment here used to say that and then assert
-      // `>= 3_600_000` against an observed 3_600_001 — one millisecond of
-      // margin, which is pinning the millisecond by another name. That
-      // assertion failed intermittently under a loaded full-suite run.
-      //
-      // CI printed the value: **3_599_999**. One millisecond under, which is
-      // the injected hour arriving a millisecond early — a timer is allowed to
-      // fire before `Date.now()` agrees it is due, so the first gap can measure
-      // 1499 against a 1500 period. Nothing exotic, and nothing to do with a
-      // second event.
-      //
-      // That is worth spelling out because the first diagnosis written here was
-      // wrong and was argued from a measurement. A probe on macOS — a 300ms
-      // interval with a 700ms block inside one tick — gave gaps of 301, 301,
-      // 300, 700, 301 and never one below the period, and that was taken as
-      // proof the hour's drift could only land at or above 3_600_000, so the
-      // failing value had to be some other `session.slept` event. The probe
-      // never measured the case that matters: the *first* gap, against a
-      // timestamp taken before `setInterval` exists. CI, on other hardware,
-      // produced the counter-example on its first run.
-      //
-      // So: a tolerance of one tick rather than none, because that is the real
-      // precision of a figure computed as `now - lastTickAt - tickMs`. The
-      // largest event rather than the first is kept as well — it costs nothing
-      // and every session in this file shares one label, so `.find()` could not
-      // tell two apart if there ever were two.
+      // Not an exact match: drift is `now - lastTickAt - tickMs`, so a timer firing slightly
+      // before it's due can put the figure up to one tick under the injected value.
       const slept = warn.mock.calls.filter(([event]) => event === "session.slept");
       expect(slept.length).toBeGreaterThan(0);
       const details = slept.map(([, detail]) => detail as { label: string; sleptMs: number });
@@ -457,13 +340,8 @@ describe("runSession cost reporting", () => {
     info.mockRestore();
   });
 
-  /**
-   * The reason the log line sits above the success check rather than below it.
-   *
-   * A run that failed has already been paid for, and a total that silently
-   * omitted every failure would look best on exactly the days that went worst —
-   * the opposite of what a budget cap needs to be built on.
-   */
+  // The log line sits above the success check: a failed run has already been paid for, and
+  // silently omitting failures would make the total look best on the worst days.
   it("still reports the cost of a run that failed", async () => {
     const info = vi.spyOn(logger, "info").mockImplementation(() => {});
 
@@ -485,20 +363,9 @@ describe("runSession cost reporting", () => {
 });
 
 describe("runSession denial reporting", () => {
-  /**
-   * The second gate, which the harness could not see until this landed.
-   *
-   * Two assertions and they pull in opposite directions on purpose. The run
-   * **resolves** — a denial is material, not fatal, and the counterexample is
-   * this service's own: the D4c commenter was denied an Atlassian tool by
-   * don't-ask mode, routed around it, and posted the right comment. And the
-   * denial is **warned** — because the same event says `subtype: "success"`,
-   * so silence here is indistinguishable from a run whose tools were all
-   * granted, which is exactly what happened on SSX-3832.
-   *
-   * The mutation: drop the log and this fails while every other test in the
-   * file still passes, which is the shape of the bug being fixed.
-   */
+  // Two assertions pulling in opposite directions on purpose: the run resolves, since a denial is
+  // material but not fatal (a run can be denied a tool, route around it, and still succeed); and
+  // the denial is warned, since the event's own `subtype: "success"` would otherwise hide it.
   it("records a refused tool on a run that otherwise succeeded", async () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
@@ -527,8 +394,7 @@ describe("runSession denial reporting", () => {
     warn.mockRestore();
   });
 
-  // The guard against a log line that cries every run. `session.denied` is
-  // warn-level and meant to be read, so an empty array must say nothing.
+  // `session.denied` is warn-level and meant to be read, so an empty array must say nothing.
   it("says nothing about a run that had no tool refused", async () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 
@@ -540,14 +406,8 @@ describe("runSession denial reporting", () => {
     warn.mockRestore();
   });
 
-  /**
-   * Same placement argument as the cost line, one notch sharper.
-   *
-   * A denial is most interesting on the run it stopped, and that run reaches
-   * the result event with a failing `subtype`. Move this below the success
-   * check and the harness reports denials for every run except the ones where
-   * the denial mattered.
-   */
+  // Same placement argument as the cost line: a denial is most interesting on the run it stopped,
+  // and that run reaches the result event with a failing `subtype`.
   it("still reports the denial on a run that then failed", async () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 

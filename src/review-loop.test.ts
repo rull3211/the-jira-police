@@ -12,15 +12,7 @@ function settingsWith(overrides: Partial<Record<string, string>>): Settings {
   return readSettings({ ...ENV, ...overrides });
 }
 
-/**
- * Never called: nothing here starts a loop.
- *
- * `createReviewLoop` composes a schedule and returns it, so every assertion
- * below reads what it decided rather than watching it happen. A client that
- * throws on use is the cheapest way to keep it that way — if a future change
- * makes this function reach Jira, these tests fail rather than quietly
- * acquiring a network dependency.
- */
+/** Never called; throws so a future change that makes `createReviewLoop` touch Jira fails loudly. */
 const CLIENT = new Proxy({} as JiraClient, {
   get() {
     throw new Error("createReviewLoop must not touch Jira");
@@ -52,11 +44,8 @@ describe("createReviewLoop", () => {
     expect(loop).toBeNull();
   });
 
-  // The guard is the *order* rather than the switch. Build the dependencies
-  // first and a grooming-only daemon — the configuration this service has run
-  // in since before the solver existed — refuses to start, for want of a vault
-  // path it would never read. The operator's fault report would be "it stopped
-  // working", and the cause would be a feature they had switched off.
+  // Building dependencies before the switch check would make a grooming-only daemon refuse to
+  // start for want of a vault path it never reads.
   it("does not need a vault path when the solve side is off", () => {
     expect(() =>
       createReviewLoop(
@@ -69,11 +58,8 @@ describe("createReviewLoop", () => {
     ).not.toThrow();
   });
 
-  // The other half of the same ordering, and the reason the dependencies are
-  // built here at all: with the solve side armed, a missing vault path is a
-  // startup error. Left to the tick, it is a cycle that throws identically
-  // every two minutes, backs off to the cap, and reports itself only as
-  // "loop.cycle_failed".
+  // With the solve side armed, a missing vault path must be a startup error, not a cycle that
+  // fails identically forever.
   it("refuses at startup when the solve side is armed with no vault path", () => {
     expect(() =>
       createReviewLoop(
@@ -98,9 +84,7 @@ describe("createReviewLoop", () => {
   });
 
   it("carries the caller's backoff cap and shutdown signal", () => {
-    // Both are pass-throughs and both fail silently if dropped: a loop with no
-    // signal ignores Ctrl-C until its own cycle ends, and one built with the
-    // default cap would back off on a schedule nobody chose.
+    // Both fail silently if dropped: no signal means Ctrl-C is ignored until the cycle ends.
     const controller = new AbortController();
     const loop = createReviewLoop(
       settingsWith(ARMED),
@@ -114,8 +98,7 @@ describe("createReviewLoop", () => {
   });
 
   it("accepts a per-tick bound of zero, which is the dry run", () => {
-    // Zero is meaningful — look at everything, pay for nothing — so it must not
-    // be treated as unset and floored up to the default of three.
+    // Zero is meaningful (look at everything, pay for nothing) and must not be floored to the default.
     expect(() =>
       createReviewLoop(
         settingsWith({ ...ARMED, MAX_REVIEW_ROUNDS_PER_TICK: "0" }),
@@ -128,14 +111,7 @@ describe("createReviewLoop", () => {
   });
 });
 
-/**
- * A client that answers every query with nothing and writes down what it was
- * asked, in order.
- *
- * Both halves of a tick start with a search and neither can act on an empty
- * board, so the pair of query strings is the whole tick made observable without
- * a repository, a `gh`, or a paid pass anywhere in it.
- */
+/** Answers every query with nothing and records what it was asked, in order. */
 function recordingClient(asked: string[]): JiraClient {
   return {
     search: async (jql: string) => {
@@ -147,13 +123,8 @@ function recordingClient(asked: string[]): JiraClient {
 
 describe("what one review tick does, in order", () => {
   it("advances what is under review before it claims anything new", async () => {
-    // **The mutation this exists for.** §6's rule is *advance, then claim*, and
-    // it is not a preference: at `MAX_CONCURRENT_SOLVES=1` a tick that claims
-    // first spends the only slot on a new ticket, and the pull request a human
-    // is waiting on is not read until the tick after — every tick, for as long
-    // as the queue has anything in it. Swap the two `await`s in `runCycle` and
-    // nothing else in this suite notices, because both halves succeed either
-    // way. The order is the behaviour.
+    // §6: advance, then claim. Swap the two `await`s in `runCycle` and nothing else in this
+    // suite notices — the order is the behaviour under test here.
     const asked: string[] = [];
     const loop = createReviewLoop(
       settingsWith(ARMED),
@@ -173,10 +144,7 @@ describe("what one review tick does, in order", () => {
   });
 
   it("claims at all, which is the whole of Phase E", async () => {
-    // Before this change the tick was `runReviewSweep` alone, so the solve queue
-    // was read by nothing on a timer: a ticket the watch handed back as
-    // `agent:solvable` sat there until a person typed `solve:once`. Delete the
-    // second `await` and the assertion above still passes on its first half.
+    // Delete the second `await` in `runCycle` and the assertion above still passes on its first half.
     const asked: string[] = [];
     const loop = createReviewLoop(
       settingsWith(ARMED),
@@ -192,10 +160,8 @@ describe("what one review tick does, in order", () => {
   });
 
   it("does not consult the ledger for a ticket the queue did not offer", async () => {
-    // The ledger is read per candidate, not per tick. Hoisting it out — asking
-    // once and skipping the sweep — would turn one exhausted ticket into a stop
-    // on the whole queue, which looks from the board like an idle daemon rather
-    // than like a brake.
+    // Read per candidate, not per tick: hoisted out, one exhausted ticket would stop the whole
+    // queue rather than just itself.
     const ledger: AttemptLedger = {
       exhausted: () => {
         throw new Error("nothing was offered, so nothing should have been weighed");
@@ -221,13 +187,8 @@ describe("what one review tick does, in order", () => {
 
 describe("the mode the daemon claims under, which is the human gate", () => {
   it("asks for agent:start in manual mode, which is the default", async () => {
-    // **The most security-relevant line in the daemon.** Manual mode is the
-    // default posture and the only thing standing between "triage thinks this
-    // is fixable" and a machine writing code unasked. The daemon claims under
-    // `solveMode(settings)`, never under `named` — `named` is self-authorising
-    // because a person typed the key, and there is nobody here to type one.
-    // Hardcode the authority and the human gate is gone from the one path where
-    // nobody is watching, silently, with every other test still green.
+    // The human gate: the daemon must claim under `solveMode(settings)`, never under `named`,
+    // since `named` is self-authorising by a person typing the key — which nobody does here.
     const asked: string[] = [];
     const loop = createReviewLoop(
       settingsWith({ ...ARMED, SOLVE_MODE: "manual" }),
@@ -243,10 +204,8 @@ describe("the mode the daemon claims under, which is the human gate", () => {
   });
 
   it("drops that clause in auto mode and takes an issue-type restriction instead", async () => {
-    // Auto is not manual-minus-a-check: it gives up the human label and takes
-    // on `SOLVE_AUTO_ISSUE_TYPES` in exchange. A daemon that dropped the first
-    // without applying the second would claim every solvable ticket on the
-    // board, which is the widest this service can be made to spend.
+    // Dropping the human label without applying `SOLVE_AUTO_ISSUE_TYPES` would claim every
+    // solvable ticket on the board.
     const asked: string[] = [];
     const loop = createReviewLoop(
       settingsWith({ ...ARMED, SOLVE_MODE: "auto", SOLVE_AUTO_ISSUE_TYPES: "Feil" }),
@@ -263,10 +222,8 @@ describe("the mode the daemon claims under, which is the human gate", () => {
   });
 
   it("refuses to start on a mode it does not recognise", () => {
-    // Not a fallback to manual. Guessing here guesses in the direction of more
-    // privilege on the reading that a typo is more likely to be a typo for
-    // "auto" than a deliberate choice — so it is a startup error, beside the
-    // setting it was read from, rather than a posture nobody chose.
+    // Not a fallback to manual: a typo could as easily mean "auto", so an unrecognised mode
+    // is a startup error rather than a guessed posture.
     expect(() =>
       createReviewLoop(
         settingsWith({ ...ARMED, SOLVE_MODE: "automatic" }),

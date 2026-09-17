@@ -1,14 +1,8 @@
 /**
- * Structured-output contract for a triage run.
- *
- * Passed to Claude Code via `--json-schema`, which takes inline JSON (verified
- * by probing the arg parser: a path argument is rejected with
- * "not valid JSON: Unrecognized token '/'"). Draft-07.
- *
- * When the model's reply does not validate, Claude Code re-prompts and
- * eventually gives up with subtype `error_max_structured_output_retries`, so
- * the schema is kept deliberately small — every extra required field is
- * another way for a run to fail after paying for the work.
+ * Structured-output contract for a triage run. Passed to Claude Code via `--json-schema`, which
+ * takes inline JSON, not a path. Kept deliberately small: a reply that fails validation eventually
+ * gives up with `error_max_structured_output_retries`, so every extra required field is another
+ * way for a run to fail after paying for the work.
  */
 
 export const TRIAGE_SCHEMA = {
@@ -20,12 +14,8 @@ export const TRIAGE_SCHEMA = {
     verdict: {
       type: "string",
       enum: ["duplicate", "not-our-team", "out-of-scope", "needs-info", "ready-ish"],
-      // The skill's own banners are ✅ ACCEPT / ⛔ REJECT / ↪ ROUTE / ↩ SEND
-      // BACK, so the mapping is spelled out here rather than left to be
-      // guessed. `out-of-scope` earns its place the hard way: without it a
-      // live run picked `needs-info` as "closest" and said so in its own
-      // caveat, which reads as "go ask the reporter" for a ticket that wants
-      // nothing of the sort.
+      // Mapping spelled out here rather than left to be guessed from the skill's own banners.
+      // `out-of-scope` is needed: without it a model picks `needs-info` as "closest".
       description:
         'The verdict, taken from the report banner. "ACCEPT" is ready-ish. "REJECT → duplicate" (or possible duplicate) is duplicate. "REJECT → out-of-scope" is out-of-scope. "ROUTE" is not-our-team. "SEND BACK" is needs-info.',
     },
@@ -37,19 +27,9 @@ export const TRIAGE_SCHEMA = {
     },
     dorPlaceholders: {
       type: "array",
-      // Doubles as an instruction. The model reads this description, so stating
-      // the rule here is the cheapest place to state it. A run once reported
-      // "baseline [N] left unfilled" in its own scorecard and marked the row
-      // green anyway, which is what this field exists to make impossible to do
-      // silently.
-      //
-      // The row number is what makes that possible now that rows 8 and 9 are
-      // advisory. Before, any placeholder blocked, because every placeholder
-      // was read as the row 9 baseline; with row 9 unable to fail an item, an
-      // unattributed placeholder cannot say whether it is evidence of a
-      // contradiction or of a nudge. Asking which row it belongs to is the
-      // cheapest way to keep the check — and it is a question the model is
-      // already answering implicitly by scoring the row.
+      // Doubles as an instruction: the model reads this description, so stating the rule here is
+      // the cheapest place to state it. The row number lets an unattributed placeholder be told
+      // apart from a nudge, now that rows 8 and 9 are advisory and can no longer block on their own.
       items: {
         type: "object",
         additionalProperties: false,
@@ -84,25 +64,15 @@ export const TRIAGE_SCHEMA = {
       type: "object",
       additionalProperties: false,
       required: ["commentBody", "labelsAdd", "labelsRemove", "component", "links", "commentAction"],
-      // This is the §11 payload preview, returned as data instead of only
-      // printed. The skill already computes every field of it on a `--no-write`
-      // run — "render the full payload preview below but do NOT offer to write"
-      // — so nothing new is being asked of it, only that the render be
-      // machine-readable. Capturing it is what lets the verdict be checked
-      // BEFORE anything reaches the ticket: a separate run posts this verbatim,
-      // and posts nothing if the check fails.
+      // The §11 payload preview, returned as data instead of only printed, so the verdict can be
+      // checked before anything reaches the ticket.
       description:
         "The exact §11 mutation payload — what a confirmed write WOULD send. Fill this in fully even on a --no-write run: it is the payload preview, rendered as data. It is never posted by this run.",
       properties: {
         commentBody: {
           type: "string",
-          // §11 suppresses the DoR send-back reporter note "in preview / before
-          // the operator confirms". That rule exists so a dry run does not show
-          // an operator text addressed to someone it will not be sent to. Here
-          // the field IS the confirmed payload, so the suppression would drop
-          // the most useful part of a send-back comment — hence the override,
-          // stated explicitly because the model is otherwise following §11
-          // correctly by leaving it out.
+          // §11 suppresses the DoR send-back reporter note in preview; here the field IS the
+          // confirmed payload, so that suppression is overridden explicitly below.
           description:
             "The VERBATIM comment body to post, exactly as §11 would render it on a confirmed write. Must end with the footer sentinel line `_🤖 Generated by intake-triage · re-run the command to refresh._` and include the glyph + CONF legend. IMPORTANT: include the DoR send-back reporter note when the verdict warrants one — §11 suppresses that note in preview, but this field is the confirmed payload rather than a preview, and a send-back posted without its reporter note tells the reporter nothing.",
         },
@@ -115,9 +85,7 @@ export const TRIAGE_SCHEMA = {
         labelsRemove: {
           type: "array",
           items: { type: "string" },
-          // Kept in step with §11 by hand, and it had already fallen behind:
-          // this omitted `next:*` for as long as `next:*` was missing from §11
-          // itself. `agent:` is the namespace where the omission would cost
+          // Kept in step with §11 by hand; `agent:` is the namespace where an omission would cost
           // most, since the rest of it belongs to a human and to the solver.
           description:
             "The `- remove:` half of the LABEL DELTA. ONLY the skill's own stale namespaced labels (route:*, dup:*, dor:*, tier:*, intake:*, next:*, and agent:solvable). Never a human label, and never any other agent:* label — agent:start is a human's authorisation for a bot to attempt a fix, and agent:solving / agent:done / agent:failed are that bot's own lifecycle.",
@@ -152,45 +120,27 @@ export const TRIAGE_SCHEMA = {
     agentFitness: {
       type: "object",
       additionalProperties: false,
-      // `plausible` is absent from this list while every other subfield is on
-      // it, and the asymmetry is deliberate. The five below have been in the
-      // schema since Phase A and every run since has supplied them; adding a
-      // sixth to the same list would make the next run of an unchanged skill
-      // fail its own schema — a payload rejected after the analyst has already
-      // been paid for. Omission reads as `false`, which is the same "no" the
-      // whole object's omission means, so nothing is lost by asking rather
-      // than requiring. Promote it once the skill has been emitting it for a
-      // while and the absence would be a real surprise.
+      // `plausible` is deliberately absent from this list: requiring it would make the next run of
+      // an unchanged skill fail its own schema. Its omission reads as `false`, same as the whole
+      // object's omission, so nothing is lost by asking rather than requiring.
       required: ["solvable", "confidence", "repo", "rationale", "blockers"],
-      // Deliberately absent from the top-level `required` list. Two reasons,
-      // and they point the same way.
-      //
-      // The schema's own header warns that every extra required field is
-      // another way for a run to fail after paying for the work — and this
-      // one is five subfields deep. But more importantly, omission has to
-      // mean something safe. `parseAgentFitness` reads a missing object as
-      // `solvable: false`, so a run that never mentions agent fitness has
-      // declined to authorise anything. Requiring the field would turn a
-      // model's silence into a retry loop; making it optional turns it into
-      // a "no". A field that grants privilege should fail closed.
+      // Deliberately absent from the top-level `required` list: `parseAgentFitness` reads a
+      // missing object as `solvable: false`, so a field that grants privilege fails closed rather
+      // than turning a model's silence into a retry loop.
       description:
         "Whether an autonomous coding agent could safely and reliably fix this ticket without a human writing the patch. Judge conservatively: this drives whether a bot is later allowed to edit source and open a pull request, so the cost of a wrong `true` is far higher than the cost of a wrong `false`. Omit this object entirely if you are unsure — omission is read as `solvable: false`.",
       properties: {
         solvable: {
           type: "boolean",
-          // The verdict coupling is stated here as well as enforced in the
-          // gate, because a model told the rule up front produces a coherent
-          // payload, whereas one told it only by rejection produces a retry.
+          // The verdict coupling is stated here as well as enforced in the gate: a model told the
+          // rule up front produces a coherent payload rather than a retry.
           description:
             'True ONLY if ALL of: the verdict is "ready-ish"; the fault is localised to one repo you can name; the acceptance criteria are concrete enough that a passing test could demonstrate the fix; and the change does not need a product decision, a design, a schema/API migration, or credentials. A missing size estimate (DoR row 8) or a missing baseline metric (row 9) is NOT a reason to say false — those rows are advisory and describe measurement, not fixability. If the verdict is anything other than "ready-ish", this MUST be false — a ticket that does not meet Definition of Ready has nothing an agent could verify itself against. When true, you MUST also include the label "agent:solvable" in the top-level `labels` array. NEVER emit any other `agent:*` label: "agent:start" in particular is a human authorisation and is not yours to grant.',
         },
         plausible: {
           type: "boolean",
-          // Deliberately the *narrow* half of a send-back rather than a second
-          // opinion about it. `needs-info` is far too broad to subscribe to —
-          // most of it will never be agent work, and every re-look is a paid
-          // run — so this field's whole job is to pick the few tickets where a
-          // named, fillable gap is the only thing in the way.
+          // Deliberately the narrow half of a send-back, not a second opinion about it:
+          // `needs-info` is far too broad to subscribe to, since every re-look is a paid run.
           description:
             'True if this ticket is NOT solvable today but WOULD BE if the items you list in `blockers` were filled in by the reporter. This is the narrow case: a send-back with a concrete, fillable gap — missing reproduction steps, an unspecified expected value, an acceptance criterion nobody has made testable — and nothing else standing in the way. It is NOT "this might be automatable one day". If the ticket would still need a product decision, a design, a migration, or work in more than one repository once the blockers were filled, this is false. MUST be false whenever `solvable` is true; the two are alternatives, not a scale. MUST NOT be true with an empty `blockers` array — "nearly solvable but I cannot say what is missing" is a guess, and it would put the ticket on a watch list with no condition that could ever clear it. When true, you MUST also include the label "agent:watching" in the top-level `labels` array, and when it is false that label MUST NOT appear there.',
         },

@@ -1,19 +1,8 @@
 /**
- * Which attachments are images, asked twice because the two answers come from
- * different people.
- *
- * The declared MIME type is chosen by whoever uploaded the file. It decides one
- * thing only: whether a download is worth spending. What arrived is decided by
- * the file's own leading bytes, and that is the answer the stager acts on — the
- * extension a staged file gets comes from the signature, never from the
- * ticket, so a `.png` that is really something else is staged as what it is or
- * not at all.
- *
- * Four formats, because a screenshot pasted or dragged into Jira arrives as one
- * of them and each is understood by the `Read` tool the sessions already hold.
- * A format outside the list is not refused on suspicion; it is simply something
- * this service has never seen on a ticket and has no evidence a session can
- * read.
+ * Which attachments are images. The declared MIME type decides whether a
+ * download is worth spending; the file's own leading bytes decide what it
+ * actually is, and a staged file's extension comes from the signature, never
+ * from the ticket.
  */
 
 export interface ImageKind {
@@ -28,11 +17,10 @@ export interface ImageSignature extends ImageKind {
 }
 
 /**
- * The whole answer to "which images can this service handle", in one place.
+ * Every image format this service recognises.
  *
- * Exported because both questions below are derived from it and a test that
- * re-listed the formats would keep passing on the day a fifth is added — the
- * literal-list defect this repository has named three times.
+ * Exported so `isStageableImage` and `sniffImage` both derive from this one
+ * list rather than each keeping their own.
  */
 export const IMAGE_SIGNATURES: readonly ImageSignature[] = [
   {
@@ -54,11 +42,9 @@ const STAGEABLE_MIME_TYPES: ReadonlySet<string> = new Set(
 );
 
 /**
- * Is this worth downloading?
- *
- * `image/svg+xml` is deliberately absent: it is text, it is already inlined
- * into the prompt by `solve/ticket.ts`, and staging it as a file would give one
- * attachment two routes to the model.
+ * Is this worth downloading? `image/svg+xml` is deliberately absent: it is
+ * already inlined as text by `solve/ticket.ts`, and staging it too would give
+ * one attachment two routes to the model.
  */
 export function isStageableImage(mimeType: string): boolean {
   const bare = (mimeType.split(";")[0] ?? "").trim().toLowerCase();
@@ -68,9 +54,8 @@ export function isStageableImage(mimeType: string): boolean {
 /**
  * What the bytes actually are, or `null` if they are not an image we stage.
  *
- * A truncated file needs no length test of its own: `subarray` clamps to what
- * is there and `equals` is false for a different length, so the comparison
- * below already answers it — deleting an explicit bounds check changed no test.
+ * A truncated file needs no explicit length check: `subarray` clamps to what
+ * exists and `equals` is false for a different length.
  */
 export function sniffImage(bytes: Buffer): ImageKind | null {
   for (const signature of IMAGE_SIGNATURES) {

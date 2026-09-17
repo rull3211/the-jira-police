@@ -5,11 +5,7 @@ import { FOOTER_SENTINEL } from "../triage/gate.ts";
 import { decideWatch, isOurComment } from "./decide.ts";
 import { toWatchSignals } from "./signals.ts";
 
-/**
- * The footer as Jira actually stores it: a paragraph whose text sits under an
- * `em` mark, because the poster wrote it as `_…_` markdown and the API
- * converted it. The delimiters are not in the payload — that is the point.
- */
+/** The footer as Jira actually stores it: text under an `em` mark, with the `_…_` markdown delimiters not in the payload. */
 function footerAdf(lead: string): unknown {
   return {
     type: "doc",
@@ -44,12 +40,8 @@ function activity(overrides: Partial<IssueActivity> = {}): IssueActivity {
 
 describe("toWatchSignals", () => {
   it("renders a stored footer back into something isOurComment recognises", () => {
-    // THE test in this file, and the one that found the defect. The sentinel is
-    // written `_…_`; ADF keeps the words and drops the underscores; `renderAdf`
-    // puts emphasis back as `*…*`. So a check comparing the sentinel whole
-    // matches nothing, every watched ticket reads as having no comment of ours,
-    // and the whole population is refused as uncountable — or, with the
-    // refusal removed, re-triaged forever. Reasoning about it said it was fine.
+    // A comparison against the sentinel whole would match nothing here, since
+    // ADF drops the `_…_` delimiters and `renderAdf` restores them as `*…*`.
     const signals = toWatchSignals(
       activity({
         comments: [
@@ -69,11 +61,8 @@ describe("toWatchSignals", () => {
   });
 
   it("carries the edit timestamp, which is the one our own comment moves on", () => {
-    // The poster does not add a second comment on a re-triage; it finds its own
-    // by the sentinel and rewrites it. So `created` on our comment names the
-    // first triage forever and `updated` is the only field that says when this
-    // service last spoke. Dropping it here reads as a mark days in the past,
-    // which re-triages the same activity on every sweep.
+    // The poster rewrites its own comment on a re-triage, so `updated` is the
+    // only field saying when this service last spoke.
     const signals = toWatchSignals(
       activity({
         comments: [
@@ -116,9 +105,7 @@ describe("toWatchSignals", () => {
   });
 
   it("reads closed off the category key rather than the status name", () => {
-    // This board is Norwegian, so its done status is not called "Done". A
-    // comparison against the name would be a watch that never ends here and
-    // passes every test written in English.
+    // This board's done status is not called "Done" — it's Norwegian.
     expect(toWatchSignals(activity({ statusCategoryKey: "done" })).closed).toBe(true);
     expect(toWatchSignals(activity({ statusCategoryKey: "Done" })).closed).toBe(true);
     expect(toWatchSignals(activity({ statusCategoryKey: "indeterminate" })).closed).toBe(false);
@@ -127,9 +114,8 @@ describe("toWatchSignals", () => {
   });
 
   it("carries the changelog through with its field names unfolded", () => {
-    // The fold belongs to the decision, which is tested against it. Folding
-    // here as well would put the same rule in two places, and the one without a
-    // test is the one that would change.
+    // The fold belongs to the decision; doing it here too would put the same
+    // rule in two places.
     const signals = toWatchSignals(
       activity({
         changes: [{ created: "2026-09-02T09:00:00.000+0200", fields: ["Description", "labels"] }],
@@ -140,8 +126,7 @@ describe("toWatchSignals", () => {
   });
 
   it("carries a whole ticket through to a decision", () => {
-    // End to end over the two modules, because each is convincing alone and the
-    // seam between them is where the sentinel was lost.
+    // End to end over both modules — the seam between them is where the sentinel was lost.
     const answered = toWatchSignals(
       activity({
         comments: [

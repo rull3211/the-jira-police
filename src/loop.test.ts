@@ -72,8 +72,7 @@ describe("runLoop", () => {
     });
 
     expect(summary).toEqual({ cycles: 3, failures: 0 });
-    // No trailing sleep: shutdown during a cycle should not be followed by a
-    // wait the caller then has to sit through.
+    // No trailing sleep: shutdown during a cycle isn't followed by a wait.
     expect(waits).toEqual([INTERVAL, INTERVAL]);
   });
 

@@ -1,24 +1,7 @@
 /**
- * Cases for `findDaemons`, written against the **plausible wrong
- * implementation** rather than against a defect that happened, because this
- * probe has no incident behind it yet.
- *
- * The wrong implementation is not a straw one — it is the version anybody
- * writes first, and the version this file's own author wrote first:
- *
- *     command.includes("src/index.ts")
- *
- * with no check on the program. Every case below names which direction it
- * fails in, because the two directions do not cost the same. A missed daemon
- * lets an edit restart a service mid-solve and invites the impatient second
- * Ctrl-C that strands a claim; a phantom daemon only costs a question. So the
- * cases that matter most are the ones where the loose version says **running**
- * and nothing is — a probe answering "yes" to a `grep` would retire the rule
- * that depends on it within a week.
- *
- * The last case feeds in the output of the real `ps` on this machine, which is
- * the only one that can fail if the two-column format is not what the parser
- * assumes. A hand-written fixture agrees with the parser by construction.
+ * Cases for `findDaemons`, written against the plausible wrong implementation
+ * `command.includes("src/index.ts")` with no check on the program; a false "running" costs more
+ * than a false negative, so that direction gets the most cases.
  */
 
 import { execFileSync } from "node:child_process";
@@ -76,9 +59,7 @@ describe("what is actually the daemon", () => {
 });
 
 describe("lines that name the daemon and are not it", () => {
-  // Unplug the program check and this returns 2. The wrapper is not a second
-  // daemon, and counting it would make `pnpm daemon:status` disagree with
-  // itself about how many things are running.
+  // Unplug the program check and this returns 2; the wrapper is not a second daemon.
   it("ignores the shell wrapper pnpm interposes", () => {
     const found = findDaemons(
       ps(
@@ -91,10 +72,7 @@ describe("lines that name the daemon and are not it", () => {
     expect(found.map((daemon) => daemon.pid)).toEqual([4821]);
   });
 
-  // The expensive direction, and the reason the program is checked at all:
-  // unplug it and this says the daemon is running when nothing is. A probe
-  // that answers "running" to a `grep` for its own name is the search-that-
-  // confirms failure wearing process-table clothes.
+  // The expensive direction: unplug the program check and this says the daemon is running when nothing is.
   it("ignores a grep that happens to name the entry point", () => {
     const found = findDaemons(
       ps(
@@ -121,8 +99,6 @@ describe("lines that name the daemon and are not it", () => {
     expect(found).toEqual([]);
   });
 
-  // `pnpm daemon:status` is itself a node process in this tree. If it ever
-  // grows an argument naming the entry point, it must not find itself.
   it("ignores its own pid", () => {
     const found = findDaemons(ps("  7777 node src/index.ts"), 7777);
 
@@ -136,10 +112,7 @@ describe("lines that name the daemon and are not it", () => {
 });
 
 describe("against the real process table", () => {
-  // The one case a fixture cannot cover: whether `ps` on this machine emits the
-  // two columns the parser expects. Asserting on *which* processes come back
-  // would make the suite depend on what the developer has running, so this
-  // asserts only on the shape — that the format was understood at all.
+  // Asserts only on shape, not on which processes come back, so the suite doesn't depend on what's running.
   const real = execFileSync("ps", ["-Ao", "pid=,command="], {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
@@ -153,10 +126,7 @@ describe("against the real process table", () => {
   });
 
   it("finds this very test run when told to look for node, proving the format parses", () => {
-    // vitest runs as `node .../vitest.mjs`, so swapping the entry point for a
-    // string certain to be present turns the shape check into a positive one.
-    // Without this, a parser that matched nothing at all would pass the case
-    // above by returning an empty array.
+    // Without this, a parser matching nothing would pass the shape check above via an empty array.
     const anyNode = real.split("\n").filter((line) => /^\s*\d+\s+\S*node(\s|$)/.test(line));
 
     expect(anyNode.length).toBeGreaterThan(0);

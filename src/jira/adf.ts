@@ -1,95 +1,21 @@
 /**
- * ADF (Atlassian Document Format) rendered down to plain text.
+ * ADF (Atlassian Document Format) rendered to markdown-flavoured plain text, for feeding to a model.
  *
- * Jira Cloud's REST API v3 does not return rich text as a string. Descriptions
- * and comments come back as ADF — a JSON tree of typed nodes — and every
- * consumer in this service ultimately wants a string to hand to a model as
- * data. This module is that conversion, and nothing else: it reads a tree and
- * returns text. It performs no I/O, so it can be tested exhaustively against
- * payloads copied verbatim off the board.
- *
- * The output is markdown-flavoured rather than stripped bare. The reader is a
- * language model, and `**must**` carries the emphasis the author intended in a
- * notation the reader already understands, whereas dropping the marks throws
- * that signal away and keeping the raw JSON spends tokens on structure. The
- * same reasoning covers links: `[text](href)` keeps both halves, where a bare
- * `text` loses the destination and a bare href loses the sentence.
- *
- * ## The media/attachment id trap
- *
- * This is the one non-obvious fact in the format, and it has already cost time
- * once. A media node looks like this:
- *
- * ```json
- * {"type":"media","attrs":{"type":"file","id":"fd700241-…","alt":"svgtest.svg",
- *  "collection":"","localId":"d9fe878bd36b"}}
- * ```
- *
- * `attrs.id` is a **Media Services UUID**. It is *not* the Jira attachment id,
- * it does not appear anywhere in the issue's `attachment` array, and no amount
- * of string matching will connect the two. The only field that links a media
- * node to a real attachment is `attrs.alt`, which holds the **filename** —
- * matched against `attachment[].filename`. So the rendering here is
- * `[attachment: svgtest.svg]`, built from `alt`, and `referencedAttachments`
- * returns filenames for the same reason. Anyone who "fixes" this to use the id
- * because it looks more like an identifier will produce a lookup that matches
- * nothing, and will get an empty result rather than an error.
- *
- * ## Totality
- *
- * `renderAdf` never throws, whatever it is given. That is a hard requirement,
- * not politeness: the input is the body of a ticket or comment written by
- * whoever opened it, which makes it attacker-controlled, and it arrives from a
- * remote API whose shape can change without notice. A parser that throws on an
- * unexpected shape turns "one weird comment" into "the poller is down". So
- * every shape that is not recognised renders as the empty string, and both
- * public entry points sit behind a catch that logs and degrades.
- *
- * Two specific defences hold that promise up:
- *
- * 1. **Unknown node types recurse into `content` rather than being dropped.**
- *    Atlassian adds node types; this service does not get to be told. Losing a
- *    paragraph of a bug report because it was wrapped in something new is worse
- *    than rendering it without its wrapper's formatting, so the default case is
- *    "render the children" and not "return nothing".
- *
- * 2. **Recursion is depth-capped**, and a subtree below the cap renders as
- *    nothing. The catch above would already turn the `RangeError` from a
- *    stack-busting payload into an empty string — measured: twenty thousand
- *    nested blockquotes overflow, and the catch holds. The cap is for the two
- *    failures the catch cannot help with. One is cost: without it, a few
- *    kilobytes of nested JSON make this module build a string of tens of
- *    megabytes, quadratically, before anyone notices. The other is a reference
- *    cycle — impossible out of `JSON.parse`, quite possible from a caller
- *    passing a live object — which does not throw at all. It hangs, and a hung
- *    poller is the one failure nothing downstream reports.
+ * A media node's `attrs.id` is a Media Services UUID, not the Jira attachment id — only `attrs.alt`
+ * (the filename) links it to `attachment[].filename`. `renderAdf` never throws: unknown node types
+ * recurse into `content` rather than being dropped, and recursion is depth-capped against both a
+ * stack overflow and quadratic blowup from a reference cycle.
  */
 
 import { logger } from "../logger.ts";
 
-/**
- * How deep the walk will follow `content` before giving up on a subtree.
- *
- * Real ADF from a human nests a handful of levels: a list inside a list inside
- * a table cell is already unusual. A hundred is far past anything a person
- * writes and far short of anything that endangers the stack, so the cap only
- * ever bites on input that was constructed to make it bite — at which point
- * losing the content below it is the intended outcome, not a regression.
- */
+/** How deep the walk follows `content` before giving up on a subtree; real ADF nests only a handful of levels. */
 const MAX_DEPTH = 100;
 
 /** Two spaces, so a nested list sits under its parent item rather than beside it. */
 const LIST_INDENT = "  ";
 
-/**
- * Node types that are inline by nature, used only to guess at unknown wrappers.
- *
- * Not a general registry — the switch below is that. This exists for the
- * default case: when an unrecognised node's children turn out to be all text,
- * they are a sentence and must be concatenated. Block-joining them would put a
- * blank line between "the" and "cost" merely because a mark change split the
- * run into two `text` nodes.
- */
+/** Node types treated as inline when guessing whether an unknown wrapper's children are a sentence or a block list. */
 const INLINE_TYPES = new Set([
   "text",
   "hardBreak",
@@ -100,16 +26,7 @@ const INLINE_TYPES = new Set([
   "mediaInline",
 ]);
 
-/**
- * A node as it is actually available to us: a bag of unknowns.
- *
- * Deliberately not an `AdfNode` interface with optional typed fields. Such an
- * interface would be a claim about the payload that this module is in no
- * position to make — it describes what Atlassian sent last time — and it would
- * invite property access that reads as safe while being a lie. A record of
- * `unknown` forces every read through the narrowing helpers below, which is
- * exactly the discipline the totality requirement needs.
- */
+/** A node as received: an untyped bag of unknowns, forcing every read through the narrowing helpers below. */
 type AdfObject = Record<string, unknown>;
 
 function asObject(value: unknown): AdfObject | null {
@@ -128,13 +45,7 @@ function attrsOf(node: AdfObject): AdfObject {
   return asObject(node["attrs"]) ?? {};
 }
 
-/**
- * A node's children, or none.
- *
- * `content` being something other than an array is the single most likely way
- * for a malformed payload to reach this module, so it is answered here once and
- * every caller below can treat children as an array without asking again.
- */
+/** A node's children, or none — `content` not being an array is the likeliest way a malformed payload arrives. */
 function contentOf(node: AdfObject): readonly unknown[] {
   const content = node["content"];
   return Array.isArray(content) ? content : [];
@@ -149,14 +60,7 @@ function isInline(value: unknown): boolean {
   return node !== null && INLINE_TYPES.has(asText(node["type"]));
 }
 
-/**
- * Block-level children, separated by a blank line.
- *
- * Empty renderings are dropped rather than joined. ADF is full of nodes that
- * produce no text — an empty paragraph used as a spacer, a media node the
- * author deleted the alt from — and keeping them would emit runs of blank lines
- * that say nothing and cost tokens.
- */
+/** Block-level children, separated by a blank line; empty renderings are dropped rather than joined. */
 function renderBlocks(children: readonly unknown[], depth: number): string {
   return children
     .map((child) => renderNode(child, depth + 1))
@@ -177,14 +81,7 @@ function renderChildren(children: readonly unknown[], depth: number): string {
   return renderBlocks(children, depth);
 }
 
-/**
- * Blocks inside a single list item, separated by one newline rather than two.
- *
- * A list item's own bullet already separates it from its neighbours, and a
- * blank line between an item's text and the list nested under it is what
- * markdown reads as a "loose" list — extra vertical space for no reason, and a
- * structure that looks broken when the text is shown back to a human.
- */
+/** Blocks inside one list item, joined by a single newline — a blank line here reads as markdown's "loose" list. */
 function renderItemBlocks(children: readonly unknown[], depth: number): string {
   return children
     .map((child) => renderNode(child, depth + 1))
@@ -192,13 +89,7 @@ function renderItemBlocks(children: readonly unknown[], depth: number): string {
     .join("\n");
 }
 
-/**
- * A mark, wrapped around already-rendered text.
- *
- * Unknown marks return the text untouched, for the same reason unknown nodes
- * recurse: the mark is decoration, the text is the message, and a mark this
- * service has never heard of is not a reason to lose a sentence.
- */
+/** A mark, wrapped around already-rendered text; unknown marks return the text untouched. */
 function applyMark(text: string, type: string, attrs: AdfObject): string {
   switch (type) {
     case "strong":
@@ -210,9 +101,7 @@ function applyMark(text: string, type: string, attrs: AdfObject): string {
     case "strike":
       return `~~${text}~~`;
     case "link": {
-      // A link mark with no usable href is a link to nowhere; emitting
-      // `[text]()` would be worse than emitting the text, since it reads as a
-      // deliberate empty destination rather than as missing data.
+      // No usable href: emit the bare text rather than a link to nowhere.
       const href = asText(attrs["href"]).trim();
       return href === "" ? text : `[${text}](${href})`;
     }
@@ -222,16 +111,8 @@ function applyMark(text: string, type: string, attrs: AdfObject): string {
 }
 
 /**
- * A text node with its marks applied, outermost last.
- *
- * Marks are applied in array order, so the first mark ends up innermost. That
- * matches how Atlassian's own renderer nests them, and it is the order that
- * makes `[**text**](href)` out of `[strong, link]` — a bolded link — rather
- * than the meaningless `**[text](href)**`.
- *
- * Whitespace-only text keeps its marks off. A `**  **` in the output is not
- * emphasis, it is a rendering artefact that markdown does not even parse as a
- * mark, and the space between two bolded words arrives as exactly such a node.
+ * A text node with its marks applied, outermost last, matching Atlassian's own nesting order.
+ * Whitespace-only text keeps its marks off, since `**  **` is not emphasis.
  */
 function renderText(node: AdfObject): string {
   const text = asText(node["text"]);
@@ -254,15 +135,7 @@ function renderText(node: AdfObject): string {
   return rendered;
 }
 
-/**
- * `[attachment: filename]`, built from `attrs.alt`.
- *
- * See the module header: `alt` is the only field that ties this node to an
- * entry in the issue's `attachment` array. When it is missing the node is still
- * announced, because "there is a file here and I cannot name it" is information
- * the reader needs — silently omitting it makes a comment that says "see the
- * screenshot" look like it referenced nothing.
- */
+/** `[attachment: filename]`, built from `attrs.alt`; a missing alt still renders as `[attachment]` rather than nothing. */
 function renderMedia(node: AdfObject): string {
   const filename = asText(attrsOf(node)["alt"]).trim();
   return filename === "" ? "[attachment]" : `[attachment: ${filename}]`;
@@ -285,18 +158,7 @@ function listStart(attrs: AdfObject): number {
   return 1;
 }
 
-/**
- * A list, one item per line, with continuation lines indented under the marker.
- *
- * Numbering is this module's, counted off the items present, rather than
- * anything read out of the individual items — ADF does not put a number on a
- * `listItem`, the position in `content` *is* the number.
- *
- * An item that renders to nothing still gets its marker. Dropping it would
- * renumber every item after it, which turns a cosmetically empty bullet into a
- * quietly wrong document: "step 4" in the output would no longer be step 4 on
- * the ticket.
- */
+/** A list, one item per line; an item that renders to nothing still gets a marker so later items keep their numbers. */
 function renderList(node: AdfObject, ordered: boolean, depth: number): string {
   const items = contentOf(node);
   let counter = listStart(attrsOf(node));
@@ -312,13 +174,7 @@ function renderList(node: AdfObject, ordered: boolean, depth: number): string {
   return lines.join("\n");
 }
 
-/**
- * Prefixes every line, so a multi-line quote stays one quote.
- *
- * Blank lines get the prefix with its trailing space removed rather than being
- * left bare. A bare blank line inside a blockquote ends the quote, so the
- * second paragraph of a quoted passage would silently stop being quoted.
- */
+/** Prefixes every line, so a multi-line quote stays one quote; a bare blank line would otherwise end the quote early. */
 function prefixLines(text: string, prefix: string): string {
   if (text === "") {
     return "";
@@ -329,43 +185,26 @@ function prefixLines(text: string, prefix: string): string {
     .join("\n");
 }
 
-/**
- * Flattens a rendering onto one line.
- *
- * Table cells only. A cell holds blocks, blocks are separated by newlines, and
- * a newline inside a cell breaks the row it belongs to — the columns after it
- * would appear to be a new row with a different number of fields.
- */
+/** Flattens a rendering onto one line — for table cells, where a newline would break the row into a bogus new one. */
 function singleLine(text: string): string {
   return text.replace(/\s*\n+\s*/gu, " ").trim();
 }
 
 /** One row: cells joined by a pipe, including the empty ones. */
 function renderRow(node: AdfObject, depth: number): string {
-  // Not filtered on `hasContent`, unlike every other join here. An empty cell
-  // is still a column, and dropping it would shift every value after it left
-  // by one — a table that reads as well-formed while saying something else.
+  // Not filtered on `hasContent`: an empty cell is still a column, and dropping it shifts every later value left.
   return contentOf(node)
     .map((cell) => renderNode(cell, depth + 1))
     .join(" | ");
 }
 
-/**
- * The dispatcher. Every recursion in this module goes through here.
- *
- * The cases are ordered inline atoms first, then blocks, then the containers,
- * and the default is deliberately not an error: see point 1 of the module
- * header. A node type nobody here has heard of is treated as a transparent
- * wrapper around its children.
- */
+/** The dispatcher; an unrecognised node type is treated as a transparent wrapper around its children rather than an error. */
 function renderNode(value: unknown, depth: number): string {
   if (depth > MAX_DEPTH) {
     return "";
   }
 
-  // A bare array is not a node, but it is a perfectly reasonable thing for a
-  // caller to hold — `doc.content` handed over on its own, say — and reading it
-  // as a sequence of blocks costs one line and removes a sharp edge.
+  // A bare array (e.g. `doc.content` handed over alone) is read as a sequence of blocks.
   if (Array.isArray(value)) {
     return renderBlocks(value, depth);
   }
@@ -389,15 +228,11 @@ function renderNode(value: unknown, depth: number): string {
       return "---";
 
     case "emoji":
-      // `shortName` first: it is the field ADF guarantees, and `:warning:`
-      // survives a terminal, a log line and a diff, where the codepoint in
-      // `text` may not.
+      // `shortName` survives a terminal, log line or diff; the codepoint in `text` may not.
       return asText(attrs["shortName"]) || asText(attrs["text"]);
 
     case "mention":
-      // `attrs.text` is the display form, "@Jane Doe". The `id` beside it is an
-      // Atlassian account id, which means nothing to a reader and is not worth
-      // the tokens.
+      // `attrs.text` is the display form; the account id beside it means nothing to a reader.
       return asText(attrs["text"]);
 
     case "status":
@@ -405,8 +240,7 @@ function renderNode(value: unknown, depth: number): string {
 
     case "inlineCard":
     case "blockCard":
-      // A card is a URL that Jira draws as a preview. The URL is the whole
-      // content; there is no other text to recover.
+      // A card is a URL Jira draws as a preview; there is no other text to recover.
       return asText(attrs["url"]);
 
     case "media":
@@ -425,9 +259,7 @@ function renderNode(value: unknown, depth: number): string {
     }
 
     case "codeBlock": {
-      // Marks are ignored inside a fence on purpose: a `**` that the author
-      // typed as code must survive as `**`, and rendering the marks would make
-      // the code sample differ from the code the reporter actually ran.
+      // Marks are ignored inside a fence so the sample matches the code the reporter actually ran.
       const language = asText(attrs["language"]).trim();
       const body = contentOf(node)
         .map((child) => asText(asObject(child)?.["text"]))
@@ -458,10 +290,7 @@ function renderNode(value: unknown, depth: number): string {
     case "tableHeader":
       return singleLine(renderBlocks(contentOf(node), depth));
 
-    // Transparent wrappers, named rather than left to the default so a reader
-    // can see they were considered. `mediaSingle` is how every image on this
-    // board arrives — it wraps exactly one `media` node, and the layout and
-    // width it carries have no meaning in plain text.
+    // Transparent wrappers; `mediaSingle` wraps exactly one `media` node and its layout carries no meaning here.
     case "doc":
     case "mediaSingle":
     case "mediaGroup":
@@ -475,17 +304,7 @@ function renderNode(value: unknown, depth: number): string {
   }
 }
 
-/**
- * Normalises whitespace, once, at the top.
- *
- * Every rule here exists because some composition of the renderers above can
- * produce the thing it removes: trailing spaces come from an empty list marker,
- * runs of blank lines come from a paragraph that ends in two `hardBreak`s
- * meeting the blank line that separates it from the next block, and leading
- * blank lines come from a document that opens with an empty paragraph. Doing it
- * here rather than in each renderer keeps the renderers composable — they may
- * emit whatever is natural, knowing the seams get cleaned up afterwards.
- */
+/** Normalises whitespace once, at the top, so individual renderers can emit whatever is natural. */
 function tidy(text: string): string {
   return text
     .split("\n")
@@ -495,15 +314,7 @@ function tidy(text: string): string {
     .trim();
 }
 
-/**
- * Renders an ADF document, subtree, or anything at all, as plain text.
- *
- * Total by contract: unrecognised input is the empty string, and the catch is
- * the backstop for the shapes that narrowing cannot anticipate — an object with
- * a throwing getter, a `Proxy`, a revoked one. It logs, because a silent
- * `return ""` here would look exactly like a genuinely empty comment and there
- * would be nothing to find later.
- */
+/** Renders an ADF document, subtree, or anything at all, as plain text; unrecognised input returns the empty string rather than throwing. */
 export function renderAdf(node: unknown): string {
   try {
     return tidy(renderNode(node, 0));
@@ -544,29 +355,15 @@ function collectAttachments(value: unknown, depth: number, into: string[]): void
 }
 
 /**
- * Filenames referenced by media nodes, in document order, deduplicated.
- *
- * Filenames, emphatically not ids — see the module header. This is what lets a
- * caller answer "which of the issue's attachments is this comment actually
- * talking about", by matching these against `attachment[].filename`; the media
- * UUID in `attrs.id` cannot answer it at all.
- *
- * Nodes whose `alt` is missing or blank contribute nothing. `renderAdf` still
- * announces them as `[attachment]`, because a reader benefits from knowing a
- * file is there, but a caller resolving names has nothing to resolve and an
- * empty string in this list would only be a lookup that silently matches
- * nothing.
- *
- * Order is first-appearance and duplicates are collapsed: a comment that embeds
- * the same screenshot twice references one attachment, not two.
+ * Filenames referenced by media nodes, in document order, deduplicated — never the media UUID in
+ * `attrs.id`, which matches nothing in `attachment[].filename`.
  */
 export function referencedAttachments(node: unknown): readonly string[] {
   const found: string[] = [];
   try {
     collectAttachments(node, 0, found);
   } catch (error) {
-    // Partial results are kept rather than discarded. Whatever was collected
-    // before the walk hit trouble is still true.
+    // Partial results are kept: whatever was collected before the walk failed is still valid.
     logger.warn("adf.attachment_scan_failed", { error });
   }
   return [...new Set(found)];

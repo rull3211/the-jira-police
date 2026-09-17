@@ -1,13 +1,4 @@
-/**
- * Human-writable durations for command-line flags.
- *
- * Settings express every duration in milliseconds, which is right for a config
- * file and miserable on a command line: `--for 240000` is a number nobody reads
- * correctly at a glance, and `--interval 30s` is unambiguous.
- *
- * Its own module because the entry point that uses it executes on import, and
- * a test should be able to reach this without starting a service.
- */
+/** Human-writable durations (`30s`, `4m`) for CLI flags; settings themselves stay in milliseconds. */
 
 const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/;
 
@@ -18,7 +9,6 @@ const SCALE: Record<string, number> = {
   h: 3_600_000,
 };
 
-/** Parses `30s`, `4m`, `2h`, `1.5m`, or a bare millisecond count. */
 export function parseDuration(value: string): number {
   const match = DURATION.exec(value.trim());
   const scale = match === null ? undefined : SCALE[match[2] ?? "ms"];

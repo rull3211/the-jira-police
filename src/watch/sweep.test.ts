@@ -16,13 +16,7 @@ function adf(text: string): unknown {
   return { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] };
 }
 
-/**
- * A watched ticket somebody has answered.
- *
- * Our own comment first, so there is a high-water mark, then a reply after it —
- * which is the only combination that reaches the memo, since every other
- * decision is `quiet` or an unsubscribe.
- */
+/** A watched ticket somebody has answered: our comment first, then their reply. */
 function answered(key: string): IssueActivity {
   return {
     key,
@@ -65,18 +59,14 @@ const SINK: OutputSink = {
 
 interface Harness {
   readonly deps: WatchSweepDeps;
-  /** Every relevance check the sweep paid for, in order. */
   readonly checked: string[];
   readonly lines: string[];
 }
 
 /**
- * A sweep wired to fakes, with the paid call counted.
- *
- * `answer` decides what the check says; passing `null` makes the check *throw*,
- * which is how the tests below say "nothing paid may run here" rather than
- * "nothing paid ran usefully". The sweep swallows a re-triage failure by design,
- * so a throw alone proves nothing — `checked` is what the assertions read.
+ * A sweep wired to fakes, with the paid call counted. `answer` returning
+ * `null` makes the check throw, since the sweep swallows a re-triage failure —
+ * `checked` is what actually proves nothing paid ran.
  */
 function harness(options: {
   readonly memo: WatchSweepDeps["memo"];
@@ -127,11 +117,8 @@ function harness(options: {
 
 describe("what the sweep pays for", () => {
   it("asks the memo before it asks the model", async () => {
-    // **The position of the gate, not its existence.** Put the memo check after
-    // `runRetriage` and the ticket is still skipped — on the next sweep, having
-    // bought the answer it exists to avoid. The outcome counts cannot see that:
-    // the sweep catches a re-triage failure, so a late gate leaves `skipped: 1`
-    // and looks identical. Counting the checks is what makes it visible.
+    // A memo check placed after `runRetriage` would leave the same outcome
+    // counts, having already bought the answer it exists to avoid.
     const memo = { seen: () => true, declined: () => {}, size: () => 0 };
     const { deps, checked } = harness({ memo, answer: () => null });
 
@@ -144,10 +131,8 @@ describe("what the sweep pays for", () => {
   });
 
   it("remembers a refusal, so the second sweep over the same activity is free", async () => {
-    // The whole feature, end to end and in the small: a `no` writes nothing to
-    // the ticket, so the trigger is still there next sweep on identical content.
-    // Unplug `memo.declined` and the check is bought again on every sweep for as
-    // long as the ticket stays subscribed — which is the invoice, not an error.
+    // A `no` writes nothing to the ticket, so without `memo.declined` the same
+    // trigger would be bought again on every sweep for as long as it's subscribed.
     const memo = createWatchMemo();
     const { deps, checked } = harness({
       memo,
@@ -164,9 +149,7 @@ describe("what the sweep pays for", () => {
   });
 
   it("keeps sweeping after one ticket's re-triage throws", async () => {
-    // A loop that gives up on the first bad ticket hides every ticket behind it,
-    // and under the daemon it also backs off to the cap — so one unreadable
-    // ticket stops the watch entirely, silently, until somebody looks at a log.
+    // Giving up on the first bad ticket would hide every ticket behind it.
     const memo = createWatchMemo();
     const { deps, checked } = harness({
       memo,
@@ -179,17 +162,14 @@ describe("what the sweep pays for", () => {
     expect(checked).toEqual(["SSX-1111", "SSX-2222"]);
     expect(outcome.looked).toBe(2);
     expect(outcome.failed).toBe(1);
-    // And the ticket that threw is not remembered as declined: the check never
-    // returned an answer, so there is nothing to have judged, and recording one
+    // The ticket that threw is not remembered as declined — recording one
     // would make a transient failure permanent silence.
     expect(memo.size()).toBe(1);
   });
 
   it("cannot spend at all without an acting half", async () => {
-    // B1's argument, and the reason `acting` is nullable rather than a flag: a
-    // dry run holds no writer and no checker, so the refusal is structural. The
-    // memo is untouched too — a look that was never going to cost anything must
-    // not teach the daemon that this activity has been judged.
+    // A dry run holds no writer and no checker; the memo is untouched too, since
+    // a look that was never going to cost anything must not count as judged.
     const memo = createWatchMemo();
     const { deps, checked } = harness({ memo, answer: () => null, acting: false });
 

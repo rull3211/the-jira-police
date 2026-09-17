@@ -5,10 +5,8 @@ import { PHASES, includes, parseSolveArgs, rank, unavailable, writes } from "./s
 /**
  * The ladder invocation, or a failure that names what went wrong.
  *
- * `mode` is dropped rather than asserted, so the tests below stay pairs of key
- * and phase. The mode itself is not unchecked — asking for it here and getting
- * `advance` throws, which is what makes `parsed(["SSX-3822", "--advance"])`
- * a failing test rather than a quietly different shape.
+ * `mode` is checked and dropped rather than asserted, so `parsed(["SSX-3822", "--advance"])`
+ * throws instead of quietly returning a different shape.
  */
 function parsed(argv: readonly string[]): { issueKey: string | null; phase: string } {
   const result = parseSolveArgs(argv);
@@ -23,13 +21,9 @@ function parsed(argv: readonly string[]): { issueKey: string | null; phase: stri
 }
 
 /**
- * Every flag that names a rung, derived rather than typed out again.
- *
- * Three `it.each` lists below used to be hand-copied `["--claim", "--solve",
- * "--pr"]`, which is the same defect `client.test.ts` had against `AGENT_LABELS`
- * and `solve-outcome.test.ts` had against `AdvanceOutcome`: adding `--review`
- * left all three green while testing nothing about it. `plan` is dropped because
- * it is the absence of a flag, not one.
+ * Every flag that names a rung, derived rather than typed out again — a hand-copied list stayed
+ * green when `--review` was added while testing nothing about it. `plan` is dropped since it is
+ * the absence of a flag, not one.
  */
 const RUNG_FLAGS = PHASES.filter((phase) => phase !== "plan").map((phase) => `--${phase}`);
 
@@ -47,8 +41,8 @@ describe("parseSolveArgs", () => {
   });
 
   it("takes a bare issue key without escalating", () => {
-    // The single-ticket dry run is still a dry run. Naming a ticket narrows what
-    // is reported; it must not by itself grant anything.
+    // The single-ticket dry run is still a dry run: naming a ticket narrows what's reported, it
+    // must not by itself grant anything.
     expect(parsed(["SSX-3822"])).toEqual({ issueKey: "SSX-3822", phase: "plan" });
   });
 
@@ -60,8 +54,7 @@ describe("parseSolveArgs", () => {
     // `--claim --pr` has one coherent reading, and it is not "claim".
     expect(parsed(["SSX-3822", "--claim", "--pr"]).phase).toBe("pr");
     expect(parsed(["SSX-3822", "--pr", "--claim"]).phase).toBe("pr");
-    // And the newest rung is the highest, which is the whole reason it is one:
-    // `--review` is a longer run than `--pr`, not a different one.
+    // `--review` is a longer run than `--pr`, not a different one, which is why it ranks highest.
     expect(parsed(["SSX-3822", "--review", "--claim"]).phase).toBe("review");
   });
 
@@ -70,18 +63,14 @@ describe("parseSolveArgs", () => {
   });
 
   it.each(RUNG_FLAGS)("refuses %s with no issue key", (flag) => {
-    // THE ONE THAT MATTERS. Without this, `solve:once --pr` means "open a pull
-    // request for every ticket in the queue" — an unbounded write, from a
-    // command line one character shorter than the safe one, typed by someone
-    // who is by definition still experimenting.
+    // Without this, `solve:once --pr` means "open a pull request for every ticket in the queue."
     expect(error([flag])).toContain("needs an issue key");
     expect(error([flag])).toContain("every ticket in the queue");
   });
 
   it("rejects an unknown flag instead of ignoring it", () => {
-    // Ignoring errs toward less privilege today, which is why it is tempting.
-    // The failure it sets up is a flag added later that this parser silently
-    // drops, leaving an operator watching it do nothing with no way to tell.
+    // Ignoring is tempting since it errs toward less privilege today, but it means a flag added
+    // later is silently dropped with no way for the operator to tell.
     expect(error(["SSX-3822", "--yolo"])).toContain("unknown flag: --yolo");
   });
 
@@ -95,8 +84,7 @@ describe("parseSolveArgs", () => {
   });
 
   it("does not treat --dry-run as a known flag", () => {
-    // There is no such flag and there never was. Accepting it would let someone
-    // believe they had asked for something.
+    // Accepting it would let someone believe they had asked for something.
     expect(error(["SSX-1", "--dry-run"])).toContain("unknown flag");
   });
 });
@@ -123,23 +111,20 @@ describe("--advance, the flag that is not a rung", () => {
   });
 
   it("leaves the ladder at its lowest rung when it is not asked for", () => {
-    // The mode is a fork, not a default. A run without the flag must still be a
-    // ladder run, or every existing caller changes meaning.
+    // The mode is a fork, not a default: a run without the flag must still be a ladder run.
     expect(parsed(["SSX-3822"])).toEqual({ issueKey: "SSX-3822", phase: "plan" });
   });
 
   it("needs an issue key", () => {
-    // Same shape of refusal as the rungs, different consequence: a keyless
-    // advance would push a commit to every open pull request the queue knows
-    // about, on pull requests people are in the middle of reading.
+    // Different consequence from the rungs' refusal: a keyless advance would push a commit to
+    // every open pull request the queue knows about.
     expect(error(["--advance"])).toContain("needs an issue key");
     expect(error(["--advance"])).toContain("every open pull request");
   });
 
   it.each(RUNG_FLAGS)("refuses to be combined with %s", (flag) => {
-    // Refused rather than resolved. The two available guesses — solve then
-    // advance, or advance and drop the solve — differ by a paid model pass and
-    // a push, so neither is a reading the parser is entitled to pick.
+    // Refused rather than resolved: the two guesses (solve then advance, or drop the solve)
+    // differ by a paid model pass and a push, so neither is the parser's to pick.
     const reason = error(["SSX-3822", flag, "--advance"]);
     expect(reason).toContain("cannot be combined");
     expect(reason).toContain(flag);
@@ -150,9 +135,8 @@ describe("--advance, the flag that is not a rung", () => {
   });
 
   it("reports the missing key before the ladder's own keyless refusal", () => {
-    // `--pr --advance` with no key breaks two rules at once. The combination is
-    // the one to report: an operator told "--pr needs an issue key" would supply
-    // one and hit the real refusal on the next attempt, having learned nothing.
+    // Breaks two rules at once; the combination is reported first, since "needs an issue key"
+    // would only lead to hitting the real refusal on the next attempt.
     expect(error(["--pr", "--advance"])).toContain("cannot be combined");
   });
 });
@@ -179,12 +163,9 @@ describe("--watch, the flag that is not a rung and may run bare", () => {
   });
 
   it("runs bare, and that is the difference from --advance", () => {
-    // THE ONE THAT MATTERS, and it is the opposite assertion to every other
-    // keyless test in this file. A keyless `--advance` is refused because it
-    // would push to every open pull request; a keyless `--watch` looks at every
-    // one and pays for at most `MAX_REVIEW_ROUNDS_PER_TICK` of them, because the
-    // survey gates the spend. Turn this into a refusal and the whole watched-set
-    // mode is unreachable — which is what it was before this change.
+    // The opposite of every other keyless test here: a keyless `--advance` is refused because it
+    // would push to every open pull request, but a keyless `--watch` only surveys and pays for at
+    // most `MAX_REVIEW_ROUNDS_PER_TICK` of them.
     expect(watch(["--watch"])).toEqual({ issueKey: null });
   });
 
@@ -199,10 +180,8 @@ describe("--watch, the flag that is not a rung and may run bare", () => {
   });
 
   it("refuses to be combined with --advance, in either order", () => {
-    // Not an ambiguity refusal — `--advance --watch` reads fine as "watch". It
-    // is refused because the two differ by whether the command ever returns,
-    // and choosing for the operator means choosing whether their terminal comes
-    // back.
+    // Not an ambiguity refusal — `--advance --watch` reads fine as "watch" — but the two differ
+    // by whether the command ever returns.
     expect(error(["SSX-3822", "--advance", "--watch"])).toContain("cannot be combined");
     expect(error(["SSX-3822", "--watch", "--advance"])).toContain("cannot be combined");
   });
@@ -235,9 +214,8 @@ describe("includes", () => {
   });
 
   it("makes the pull request rung do the claim and the solve", () => {
-    // THE ONE THAT MATTERS on this function. An equality check here would skip
-    // the claim on a `--pr` run and leave the solver working on a ticket the
-    // board shows as unclaimed.
+    // An equality check here would skip the claim on a `--pr` run, leaving the solver working on
+    // a ticket the board shows as unclaimed.
     expect(includes("pr", "claim")).toBe(true);
     expect(includes("pr", "solve")).toBe(true);
   });
@@ -260,19 +238,14 @@ const OWNED = { SOLVE_GITHUB_OWNER: "storebrand-digital" };
 
 describe("unavailable", () => {
   it("lets every rung through once the owner is configured", () => {
-    // This block used to assert that the rungs above `plan` refused because
-    // nothing had been wired, and it did its job twice: wiring phase C broke it,
-    // then wiring B2 and D broke it again, each time forcing the header and the
-    // usage text to be corrected in the same change.
     for (const phase of PHASES) {
       expect(unavailable(phase, OWNED)).toBeNull();
     }
   });
 
   it("refuses the pull request rung when no GitHub owner is configured", () => {
-    // The setting has no fallback on purpose. Without this check the failure
-    // arrives from `buildPublishRequest` — after the ticket has been claimed and
-    // the solver has run.
+    // The setting has no fallback on purpose: without this check, the failure would arrive from
+    // `buildPublishRequest` after the ticket was claimed and the solver ran.
     expect(unavailable("pr", { SOLVE_GITHUB_OWNER: "" })).toContain("SOLVE_GITHUB_OWNER");
   });
 
@@ -281,8 +254,7 @@ describe("unavailable", () => {
   });
 
   it("does not refuse the rungs that do not need an owner", () => {
-    // A missing GitHub owner must not stop a claim or a solve. Both are useful
-    // on their own, and neither goes near GitHub.
+    // A missing GitHub owner must not stop a claim or a solve — neither goes near GitHub.
     for (const phase of ["plan", "claim", "solve"] as const) {
       expect(unavailable(phase, { SOLVE_GITHUB_OWNER: "" })).toBeNull();
     }
@@ -295,10 +267,8 @@ describe("unavailable", () => {
   });
 
   it("still demands an issue key for everything that can change anything", () => {
-    // `unavailable` and `writes` used to be required to agree, on the grounds
-    // that every writing phase was also unwired. Wiring `--solve` separated
-    // them: it writes — to a worktree — and is available. The property worth
-    // keeping is the parser's, and it is unchanged.
+    // `unavailable` and `writes` no longer have to agree: `--solve` writes to a worktree and is
+    // available, so only the parser's own property below still holds.
     for (const phase of PHASES) {
       expect(writes(phase)).toBe(phase !== "plan");
     }

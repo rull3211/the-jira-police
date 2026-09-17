@@ -2,13 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NEWS_MARK, QUIET_MARK, logger } from "./logger.ts";
 
-/**
- * Captures what actually reached the stream, parsed back the way a reader would.
- *
- * Deliberately reads the written string rather than spying on `emit`: the two
- * properties under test here are *what the JSON looks like* and *which stream it
- * went to*, and neither is observable from inside.
- */
+/** Captures the raw written string rather than spying on `emit`, since JSON shape and stream choice aren't observable from inside. */
 function capture(): {
   readonly out: string[];
   readonly err: string[];
@@ -49,9 +43,8 @@ describe("logger", () => {
   });
 
   it("marks a line news when nobody said otherwise", () => {
-    // The fail-safe direction, and the mutation that matters most in this file:
-    // flip the default to quiet and every call site nobody has classified — 130
-    // of them today — disappears into the noise pile at once.
+    // Guards the fail-safe default: flip it to quiet and every unclassified call site
+    // disappears into the noise pile at once.
     const { out } = capture();
 
     logger.info("solve.pr.opened", { number: 2663 });
@@ -68,9 +61,7 @@ describe("logger", () => {
   });
 
   it("treats `quiet: false` as news, not as an absent option", () => {
-    // `isQuietCycle(...)` is passed straight in, so `false` is the commonest way
-    // a call site says "news" and must not be read as "unspecified" by some
-    // future truthiness check that only looks for the key.
+    // `false` must not be read as "unspecified" by a future truthiness check on the key.
     const { out } = capture();
 
     logger.info("review.cycle", { watched: 5 }, { quiet: false });
@@ -79,9 +70,7 @@ describe("logger", () => {
   });
 
   it("puts the mark first, so a person can run their eye down one column", () => {
-    // The whole reason it is a field and not a prefix: the line stays one
-    // `JSON.parse`, and the emoji still lands at a fixed offset. Move `q` after
-    // `ts` and it is at a column that moves with the timestamp's length.
+    // Must stay first: after `ts` it would land at a column that moves with the timestamp's length.
     const { out } = capture();
 
     logger.info("poll.done", { triaged: 1 });
@@ -90,8 +79,7 @@ describe("logger", () => {
   });
 
   it("stays valid JSON with the emoji in it", () => {
-    // The mark buys a human something and must cost the machine nothing —
-    // `jq 'select(.q=="⏳")'` is half the point of putting it on a key.
+    // The mark must cost the machine nothing: still valid, `jq`-selectable JSON.
     const { out } = capture();
 
     logger.info("review.cycle", { watched: 5 }, { quiet: true });
@@ -103,10 +91,8 @@ describe("logger", () => {
   });
 
   it("keeps the mark when a field is called `q`, and keeps the field too", () => {
-    // Nobody passes this today. The reason it is guarded is `WatchSweepOutcome`,
-    // which has a numeric member named `quiet` that `watch-loop.ts` spreads
-    // wholesale into its fields — a payload arriving under a name the logger
-    // cares about is a thing that has already happened once.
+    // Guards against `WatchSweepOutcome`, whose `quiet` member `watch-loop.ts` spreads
+    // wholesale into fields, colliding with the marker's own key.
     const { out } = capture();
 
     logger.info("watch.cycle.done", { q: 3 }, { quiet: true });
@@ -117,9 +103,7 @@ describe("logger", () => {
   });
 
   it("marks warnings and errors as news whatever they ask for", () => {
-    // Not a rule in `emit` — it is the default doing its job. The test exists
-    // because a future reader might add `{ quiet: true }` to a warning, and
-    // this records that the answer is to delete the warning instead.
+    // If a warning seems to need `{ quiet: true }`, delete the warning instead.
     const { err } = capture();
 
     logger.warn("poll.interrupted", { abandoned: 2 });
@@ -128,8 +112,7 @@ describe("logger", () => {
   });
 
   it("still routes by level, and the mark does not change the stream", () => {
-    // The mark is about attention, the stream is about severity. A quiet error
-    // is still an error and still goes to stderr.
+    // The mark is about attention, the stream is about severity — a quiet error still goes to stderr.
     const { out, err } = capture();
 
     logger.error("poll.issue_failed", {}, { quiet: true });

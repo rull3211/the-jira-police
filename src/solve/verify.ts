@@ -1,73 +1,17 @@
 /**
- * Mechanical verification of a solve run.
+ * Mechanical verification of a solve run: the model is never asked whether the tests passed, since
+ * that is the one question the thing being judged must not answer about itself.
  *
- * The model is never asked whether the tests passed. This module runs them and
- * reads exit codes, because "did it work" is the one question the thing being
- * judged must not answer about itself.
- *
- * ## Discovery comes from the base, and that is not enough on its own
- *
- * The vault records no test or build command, so the commands have to be
- * discovered from the repository. They are read from `git show <base>:package.json`
- * — the pristine manifest — never from the worktree, so that a run which edited
- * `package.json` cannot change which commands are considered proof.
- *
- * Discovery from the base is necessary and **insufficient**, which is worth
- * being blunt about because it is easy to stop at. Knowing the base said
- * `"test": "vitest run"` does not help if the command executes in a worktree
- * where `package.json` now says something else: the package manager reads the
- * manifest on disk, not the one we consulted. So there are two halves, and both
- * are here:
- *
- *   1. discover from the base (`discoverPlan`), and
- *   2. refuse to run at all unless the files that define passing are still
- *      byte-identical to the base (`unverifiableChanges`).
- *
- * The second half shares `VERIFICATION_PATHS` with the diff gate on purpose.
- * The diff gate refuses such a diff *after* the fact; this refuses to produce a
- * verdict about it at all. Two mechanisms, one list — and if the list grows, it
- * grows for both.
- *
- * ## Two toolchains, chosen by the base
- *
- * Node (`package.json`) and Maven (`pom.xml`). The base decides which applies.
- * A base carrying both is refused rather than resolved — see ARCHITECTURE.md
- * §15 for that argument and for why Maven has no install step, no typecheck
- * step, no lint step, and exactly one flag.
- *
- * ## Two questions, and only the first one gates
- *
- * `verify` asks *do the tests pass with the change*. `checkFailFirst`, at the
- * bottom, asks *do they fail without it* — the house mutation rule applied to
- * the tests the solver writes rather than to the ones this repository writes.
- * The second is a report and never a refusal, for a reason given in full at its
- * own doc comment: a vacuous test does not make a correct fix wrong.
- *
- * ## Known limitation, deliberately not solved here
- *
- * If the base itself is already failing lint or typecheck, every run on that
- * repository fails verification through no fault of the solver. Proving that
- * would mean verifying the base too, doubling the runtime of every solve. The
- * cheaper mitigation is to keep the per-step results, which the caller reports,
- * so a step that fails identically on every ticket is visible as the repository
- * problem it is rather than looking like a run of bad luck.
+ * Commands are discovered from the base manifest (`git show <base>:package.json`), never the
+ * worktree, and `verify` refuses to run unless `VERIFICATION_PATHS` are unchanged from the base —
+ * see ARCHITECTURE.md §15 for why a base declaring both `package.json` and `pom.xml` is also refused.
  */
 
 import { logger } from "../logger.ts";
 import { VERIFICATION_PATHS } from "./diff-gate.ts";
 import type { CommandRunner } from "./worktree.ts";
 
-/**
- * Package managers this service will execute, and the install each needs.
- *
- * An allowlist because this value decides which binary runs. `packageManager`
- * in a manifest is a string like `pnpm@11.20.0`; treating the part before the
- * `@` as a command name without checking it against a fixed set would make
- * "what do we execute" a property of a file, which is the wrong place for it.
- *
- * These are the arguments only. The command in front of them comes from
- * `invocationOf`, because it depends on whether a version was declared.
- */
+/** An allowlist: treating the manifest's `packageManager` name unchecked would make "what do we execute" a property of a file. */
 const PACKAGE_MANAGERS: Record<string, readonly string[]> = {
   pnpm: ["install", "--frozen-lockfile"],
   npm: ["ci"],
@@ -77,23 +21,10 @@ const PACKAGE_MANAGERS: Record<string, readonly string[]> = {
 const DEFAULT_PACKAGE_MANAGER = "pnpm";
 
 /**
- * Versions this service will hand to corepack. **Plain semver and nothing else.**
- *
- * This is the guard that makes honouring the declared version safe rather than
- * merely useful, and it is narrow on purpose. Corepack resolves far more than
- * version numbers: `pnpm@https://example.com/x.tgz` is valid input to it and
- * means "download this tarball and execute it". The manifest is a file in a
- * repository a solve run has already been allowed to check out, so a value that
- * reaches corepack unvalidated is arbitrary code execution sourced from the
- * thing being verified.
- *
- * Ranges and dist-tags (`^9`, `latest`) are refused as well as URLs, for a
- * different reason: they are not reproducible. The point of reading the field
- * at all is to run the exact toolchain the repository pins, and a range makes
- * "which pnpm ran" a fact about the day rather than about the manifest.
- *
- * The optional `+sha…` suffix is corepack's integrity hash and is allowed
- * precisely because it narrows what can be fetched.
+ * Plain semver only: corepack accepts `pnpm@https://example.com/x.tgz` and treats it as "download
+ * and execute", so an unvalidated manifest value would be arbitrary code execution. Ranges and
+ * dist-tags (`^9`, `latest`) are refused too as non-reproducible; the `+sha…` suffix is allowed
+ * because it only narrows what can be fetched.
  */
 const PACKAGE_MANAGER_VERSION = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+sha\d+\.[0-9a-f]+)?$/;
 
@@ -103,30 +34,14 @@ export interface PackageManager {
   readonly version: string | null;
 }
 
-/**
- * How to invoke this package manager: the argv prefix, and nothing after it.
- *
- * A declared version goes through `corepack`, which is Node's own shim for
- * exactly this and is why the version does not have to be installed first. No
- * declared version means the bare name, resolved from `PATH` — see
- * `versionNote` for why that case is reported rather than silently accepted.
- */
+/** A declared version goes through `corepack` so it need not be installed first; otherwise the bare name resolves from `PATH`. */
 export function invocationOf(manager: PackageManager): readonly string[] {
   return manager.version === null
     ? [manager.name]
     : ["corepack", `${manager.name}@${manager.version}`];
 }
 
-/**
- * Steps, cheapest first, and the script names each will accept.
- *
- * The names are literals from this table, never keys read out of the manifest.
- * That distinction is the reason nothing here needs to sanitise a script name:
- * the only strings that can become arguments are the ones written below.
- *
- * `test` is required. The other two run when the repository has them — absence
- * is a repository that does not typecheck or lint, not a run that skipped it.
- */
+/** Script names are literals from this table, never keys read out of the manifest, so none need sanitising. `test` is required; the other two run only when present. */
 const STEPS = [
   { name: "typecheck", scripts: ["check-types", "typecheck"] },
   { name: "lint", scripts: ["lint"] },
@@ -148,51 +63,18 @@ const MANIFESTS: Record<Toolchain, string> = {
 const MAVEN = "mvn";
 
 /**
- * Turns off git-commit-id's build stamping, because it cannot read a worktree.
- *
- * The only concession this harness makes to a specific repository's build, and
- * it is here rather than in a per-repo config because the thing it works around
- * is not specific to a repository — it is specific to *worktrees*, which is the
- * isolation every solve runs in.
- *
- * `pl.project13.maven:git-commit-id-plugin` binds `revision` to `initialize`,
- * so it runs before anything compiles, and its `GitDirLocator` parses the
- * `.git` file with `split(":")` and no trim. In a linked worktree that file
- * reads `gitdir: /abs/path`, so the plugin gets `" /abs/path"` with a leading
- * space, `File.isAbsolute()` says false, and it resolves an absolute path as a
- * relative one. Measured on `insurance-commerce-rest-api` 2026-09-05: the build
- * died nine seconds in with `Could not get HEAD Ref`, and the same commit built
- * green in an ordinary checkout.
- *
- * Three properties make this safe to send unconditionally:
- *
- * 1. **An unknown `-D` property is inert.** Maven ignores user properties it
- *    has no plugin for — unlike an unknown *flag*, which exits non-zero on the
- *    test step and would be reported as `failed`, a harness mistake printed as
- *    a verdict. That is why this is a property and why no flag joins `-B`.
- * 2. **It cannot weaken the test signal.** The goal writes `git.properties`, a
- *    metadata file. It compiles nothing, runs nothing and skips no test.
- * 3. **The plugin's other goal is out of reach.** `validateRevision` binds to
- *    `verify`, and this plan stops at `test`.
- *
- * The cost is honest and is printed in `note` below: this is not byte-for-byte
- * the build the repository's CI runs. That is a real gap, and the reason it is
- * accepted is that the alternative — cutting a full clone per solve so Maven
- * sees an ordinary `.git` — buys correctness for a metadata file at the price
- * of a second isolation strategy and reworked push mechanics. See ARCHITECTURE
- * §15 for that argument in full.
+ * Turns off git-commit-id's build stamping, which cannot read a linked worktree's `gitdir` line and
+ * fails the build before anything compiles. Safe to send unconditionally: an unknown `-D` property
+ * is inert, unlike an unknown flag. See ARCHITECTURE.md §15 for why this is accepted despite not
+ * being byte-for-byte the build CI runs.
  */
 const SKIP_GIT_STAMP = "-Dmaven.gitcommitid.skip=true";
 
 /**
- * One manifest's presence in the base tree.
- *
- * `absent` and `unreadable` are separate because they lead to different
- * refusals: no recognised manifest is a fact about the repository, while a read
- * that timed out is a fact about this machine. Only the timeout can be told
- * apart mechanically — `git show` exits non-zero both for a path that is not in
- * the tree and for a ref that does not exist, so a wrong base ref reads as both
- * manifests absent, and that refusal names the ref for exactly this reason.
+ * `absent` and `unreadable` lead to different refusals: no manifest is a fact about the repository,
+ * a timed-out read is a fact about this machine. Only the timeout can be told apart mechanically —
+ * `git show` exits non-zero for both a missing path and a bad ref, so a wrong base ref reads as
+ * both manifests absent.
  */
 type Shown =
   | { readonly kind: "found"; readonly raw: string }
@@ -202,12 +84,7 @@ type Shown =
 export interface Step {
   readonly name: StepName;
   readonly argv: readonly string[];
-  /**
-   * Charged the install budget rather than the step budget.
-   *
-   * True when the step resolves its own dependencies, so its first run on a
-   * machine is dominated by downloading rather than by the work being measured.
-   */
+  /** True when the step resolves its own dependencies, so it's charged the install budget rather than the step budget. */
   readonly cold: boolean;
 }
 
@@ -220,16 +97,7 @@ export interface VerificationPlan {
   readonly note: string;
 }
 
-/**
- * What to append to an install refusal about where the toolchain came from.
- *
- * An undeclared version is not an error — most repositories do not pin one, and
- * refusing them all would mean verifying nothing. But it is the single most
- * likely explanation for an install that dies on a repository whose own CI is
- * green, so the refusal says so instead of leaving a package manager's stack
- * trace to be interpreted. The first time this mattered, the diagnosis took
- * four runs and a detour through someone else's `package.json`.
- */
+/** An undeclared version is the single most likely explanation for an install dying on a repository whose own CI is green, so the refusal names it. */
 export function versionNote(manager: PackageManager): string {
   return manager.version === null
     ? ` — note the manifest pins no \`packageManager\` version, so this ran whichever ${manager.name} is on PATH; if the repository's CI pins one, that mismatch is the first thing to check`
@@ -268,13 +136,8 @@ export interface VerifyRequest {
 const MAX_OUTPUT = 4000;
 
 /**
- * The `-z` record separator, as an escape rather than the byte itself.
- *
- * Written this way so the file stays plain text: a literal NUL in source makes
- * `grep` treat the whole file as binary and go quiet, which is a bad property
- * for the one module whose reason to exist is being auditable. The `\u0000`
- * form rather than `\0` because `\0` followed by a digit is an octal escape and
- * a syntax error in a strict-mode module.
+ * The `-z` record separator, escaped rather than a literal byte — a literal NUL in source makes
+ * `grep` treat the file as binary and go quiet.
  */
 const NUL = "\u0000";
 
@@ -284,12 +147,8 @@ function tail(result: { stdout: string; stderr: string }): string {
 }
 
 /**
- * The manifest's `scripts` map, or `null` if this is not a manifest we can read.
- *
- * Everything unexpected collapses to `null` and the caller refuses. A manifest
- * that fails to parse is not a repository without tests; it is a repository
- * this cannot make a statement about, and those must not produce the same
- * outcome.
+ * Everything unexpected collapses to `null` and the caller refuses — a manifest that fails to
+ * parse is not a repository without tests, and those must not produce the same outcome.
  */
 function scriptsOf(raw: string): Record<string, string> | null {
   let parsed: unknown;
@@ -314,15 +173,7 @@ function scriptsOf(raw: string): Record<string, string> | null {
   return out;
 }
 
-/**
- * The declared package manager and version, or the default. Never unvetted.
- *
- * The version used to be parsed and thrown away, which made "which pnpm runs" a
- * property of whatever was on `PATH` on the day. That is how the first real
- * solve run died: the pilot repository's lockfile was written by pnpm 9 and the
- * machine had pnpm 11, which no longer reads the `pnpm.overrides` block the
- * lockfile was generated from, so install refused and no verdict was reached.
- */
+/** The version must be honoured rather than discarded, since a lockfile written by one major version of pnpm can be unreadable by another on `PATH`. */
 export function packageManagerOf(raw: string): PackageManager | null {
   let parsed: unknown;
   try {
@@ -337,20 +188,11 @@ export function packageManagerOf(raw: string): PackageManager | null {
   if (typeof declared !== "string") {
     return null;
   }
-  // The *first* `@`, which is what `name@version` means. Being straight about
-  // this one: switching it to `lastIndexOf` kills no test and cannot while the
-  // other two checks hold, because every string the two readings disagree about
-  // puts an `@` in the name half and no allowlisted name contains one. So it is
-  // a backstop against a future edit loosening the allowlist, not active
-  // defence — recorded as such rather than dressed up, same as the whole-string
-  // ref check in `worktree.ts`.
+  // The *first* `@`, which is what `name@version` means.
   const at = declared.indexOf("@");
   const name = at === -1 ? declared : declared.slice(0, at);
   const version = at === -1 ? null : declared.slice(at + 1);
-  // `Object.hasOwn` and not `in`. `in` walks the prototype chain, so a manifest
-  // declaring `constructor@1` or `toString@1` would satisfy `name in
-  // PACKAGE_MANAGERS` and be treated as an allowed package manager — an
-  // allowlist that admits three names it was never given.
+  // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so `constructor@1` would pass.
   if (!Object.hasOwn(PACKAGE_MANAGERS, name)) {
     return null;
   }
@@ -361,21 +203,10 @@ export function packageManagerOf(raw: string): PackageManager | null {
 }
 
 /**
- * Reads the commands out of the pristine manifest.
- *
- * `git show <base>:package.json` and not the worktree's copy — the whole point.
- * These are the commands the base defines, which is what makes them commands no
- * pass in this run can have edited.
- *
- * Not "the ref the worktree was cut from", which this said until 2026-09-13 and
- * which is only true of a first solve pass. A review round attaches its worktree
- * to the existing pull-request branch and merges the base in, so the tree holds
- * earlier rounds' commits and the base ref is a ref the worktree was *synced
- * with* rather than cut from. The guarantee survives the correction — the
- * manifest still comes from a ref no pass in this run wrote to — and it is a
- * weaker guarantee than the old sentence implied, because on a review round an
- * *earlier* round's commits are in the tree and only `unverifiableChanges`
- * stands between them and the definition of passing.
+ * Reads via `git show <base>:package.json`, never the worktree's copy, so no pass in this run can
+ * have edited the commands. On a review round the base ref is one the worktree was synced with
+ * rather than cut from, so `unverifiableChanges` is what stands between earlier rounds' commits
+ * and the definition of passing.
  */
 export async function discoverPlan(
   runner: CommandRunner,
@@ -404,9 +235,7 @@ export async function discoverPlan(
     };
   }
 
-  // Both is a contradiction, not a preference. Two build systems disagree about
-  // what passing means here, and whichever were checked first would win — which
-  // would make the verdict a property of this function's line order.
+  // Both is a contradiction, not a preference: whichever were checked first would win, making the verdict a property of this function's line order.
   if (node.kind === "found" && maven.kind === "found") {
     return {
       outcome: "refused",
@@ -425,20 +254,13 @@ export async function discoverPlan(
   };
 }
 
-/**
- * Maven's plan: one step, cold, and only after proving Maven exists.
- *
- * The `mvn -v` probe is the point of this being separate. Without it an absent
- * Maven makes the test step exit non-zero, which is reported as `failed` — the
- * harness's own missing dependency, printed as a verdict about the model's code.
- */
+/** Probes Maven exists first — without it an absent Maven makes the test step exit non-zero, reported as `failed`: the harness's own missing dependency read as a verdict about the model's code. */
 async function mavenPlan(
   runner: CommandRunner,
   raw: string,
   request: Pick<VerifyRequest, "repoPath" | "baseRef" | "stepTimeoutMs">,
 ): Promise<PlanResult> {
-  // The same rule the Node manifest gets: unreadable is not the same as
-  // untested, so it refuses rather than proceeding.
+  // Unreadable is not the same as untested, so it refuses rather than proceeding.
   if (!raw.includes("<project")) {
     return {
       outcome: "refused",
@@ -463,11 +285,6 @@ async function mavenPlan(
       install: null,
       steps: [{ name: "test", argv: [MAVEN, "-B", SKIP_GIT_STAMP, "test"], cold: true }],
       toolchain: "maven",
-      // Both departures from the repository's own build are named, because a
-      // reader deciding whether to trust this result needs to know them without
-      // reading this file. The wrapper clause is hedged: the repository that
-      // prompted all of this has no `mvnw` at all, and a note asserting one was
-      // skipped would send an operator looking for a file that is not there.
       note: ` — using ${MAVEN} from PATH with ${SKIP_GIT_STAMP}, so this is not byte-for-byte the build CI runs; if the repository has a wrapper it was not executed either, which makes a toolchain difference the first thing to check`,
     },
   };
@@ -521,13 +338,7 @@ function nodePlan(raw: string): PlanResult {
   };
 }
 
-/**
- * Paths changed against the base that would invalidate the verdict.
- *
- * Uses `--name-only -z` for the same reason the diff gate uses `-z`: without
- * it, git quotes and escapes unusual filenames, and a filename containing a
- * newline becomes two entries.
- */
+/** Uses `--name-only -z` for the same reason the diff gate does: without it, a filename containing a newline becomes two entries. */
 export async function unverifiableChanges(
   runner: CommandRunner,
   request: Pick<VerifyRequest, "worktreePath" | "baseRef" | "stepTimeoutMs">,
@@ -557,43 +368,11 @@ export type BaseCheck =
     };
 
 /**
- * Runs the plan against the worktree **before the model has touched it**.
- *
- * Added 2026-09-05, from a run that got the verdict wrong. `verify` correctly
- * reports "a step ran and did not pass" as `failed`, and `failed` means *the
- * change is bad* — which is only true if the step would have passed without the
- * change. Nothing checked that, so the first Java solve was booked as a broken
- * fix when the truth was that this repository cannot build in a git worktree at
- * all: `git-commit-id-plugin` 4.9.10 binds to `initialize` and cannot read a
- * linked worktree's `.git`, which is a *file* (`gitdir: …`) and not a directory.
- * The build died eleven lines in, no test ran, and the model's diff was never
- * compiled, let alone evaluated. Same Maven, same JDK, same plugin: green in
- * the main checkout, red in the worktree.
- *
- * So `failed` was a statement about code nothing had read. That is the precise
- * failure the three-outcome type exists to prevent, arriving through the one
- * door it did not cover — not a mislabelled outcome, but a missing premise.
- *
- * **Both non-passing outcomes become `unusable`, and the distinction is kept
- * anyway.** A base that fails and a base that refuses lead to the same
- * decision — do not run the model — but not to the same sentence, so the whole
- * `VerificationResult` is carried out rather than a boolean.
- *
- * ## Why this is cheaper than it looks
- *
- * It runs before the model does. On a repository whose build does not work
- * here, this costs one build and saves an entire solve — strictly less than
- * the run it replaces. Only on a healthy base is it an extra pass, and there
- * the expensive half is shared: pnpm's store and Maven's `~/.m2` are warm the
- * second time, and `target/` is already populated.
- *
- * ARCHITECTURE.md §15 previously named this as a known limitation *stated
- * rather than solved*, on the grounds that it doubles the runtime of every
- * solve. That reasoning was written for Node, where the base check is install
- * plus three steps. It did not survive contact with a base that could not run
- * at all, and the trade it described — double runtime — turns out to be the
- * wrong axis: the cost is not runtime, it is that without this the verdict
- * does not mean what the type says it means.
+ * Runs the plan against the worktree before the model has touched it, since `failed` means *the
+ * change is bad* — a claim only true relative to a base that would otherwise have passed. Both
+ * non-passing outcomes become `unusable`, but the whole `VerificationResult` is carried out rather
+ * than a boolean since "failed" and "refused" reach the same decision without being the same
+ * sentence. See ARCHITECTURE.md §15.
  */
 export async function verifyBase(
   runner: CommandRunner,
@@ -616,22 +395,9 @@ export async function verifyBase(
 }
 
 /**
- * Runs the plan against the worktree and returns what actually happened.
- *
- * Three outcomes, and keeping `refused` apart from `failed` is the point of the
- * type. "The tests failed" is a fact about the code the run produced; "the
- * manifest was edited" or "install died" is the harness declining to have an
- * opinion. Collapsing them would let a broken harness read as a broken fix, and
- * a solver would then be judged on evidence that was never gathered.
- *
- * **`failed` is only true relative to a base that passes.** `verifyBase` above
- * establishes that premise; without it this function's `failed` is an
- * unsupported claim rather than a verdict.
- *
- * A timed-out step is a **failure**, not a refusal. It ran; it did not pass in
- * the time allowed; and a hang is a plausible thing for a bad fix to cause. The
- * alternative — inconclusive — is the reading that lets an infinite loop
- * through.
+ * Keeps `refused` apart from `failed`: "the tests failed" is a fact about the code, while "install
+ * died" is the harness declining an opinion, and collapsing them would judge a solver on evidence
+ * never gathered. A timed-out step is a failure, not a refusal, since a hang is plausible for a bad fix to cause.
  */
 export async function verify(
   runner: CommandRunner,
@@ -658,9 +424,7 @@ export async function verify(
 
   const results: StepResult[] = [];
 
-  // Skipped entirely when the toolchain has no install phase, rather than run
-  // as a no-op: an "install" line in the artifact that never ran is a step a
-  // reader would count as evidence.
+  // Skipped entirely rather than run as a no-op: an "install" line that never ran is a step a reader would count as evidence.
   if (plan.install !== null) {
     const installed = await runner.run(plan.install, {
       cwd: worktreePath,
@@ -674,15 +438,7 @@ export async function verify(
       output: tail(installed),
     });
     if (installed.timedOut || installed.exitCode !== 0) {
-      // Not a failure: nothing was verified, so there is nothing to have failed.
-      //
-      // The last of the install's own output is quoted, and it was missing here
-      // until a live run went without it. The refusal said `exit 1` and named
-      // the unpinned `packageManager` as a thing to check, which is a
-      // hypothesis; the install had printed `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`,
-      // which is the answer. `results` already held it and this branch returned
-      // before anyone could read it — the output was captured and then thrown
-      // away, which is the most annoying shape a diagnostic bug takes.
+      // Not a failure: nothing was verified. Output is quoted here rather than left in `results`, since this branch returns before a caller could otherwise read it.
       const said = tail(installed);
       return {
         outcome: "refused",
@@ -696,9 +452,7 @@ export async function verify(
   }
 
   for (const step of plan.steps) {
-    // A cold step resolves its own dependencies, so charging it the step budget
-    // would time out the first Java build on a machine and report that as the
-    // change being wrong.
+    // A cold step's own dependency resolution would otherwise time out the first Java build on a machine and report that as the change being wrong.
     const budget = step.cold ? installTimeoutMs : stepTimeoutMs;
     const result = await runner.run(step.argv, { cwd: worktreePath, timeoutMs: budget });
     const passed = !result.timedOut && result.exitCode === 0;
@@ -714,9 +468,7 @@ export async function verify(
       return {
         outcome: "failed",
         steps: results,
-        // The note rides on the cold step because that step is also the
-        // install, so there is no install refusal to carry it. Without this,
-        // Maven's "the wrapper was not executed" hint could never be printed.
+        // The note rides on the cold step because that step is also the install, so there is no install refusal to carry it.
         reason:
           `${step.name} did not pass (${result.timedOut ? "timed out" : `exit ${String(result.exitCode)}`})` +
           `${step.cold ? plan.note : ""}`,
@@ -728,22 +480,7 @@ export async function verify(
   return { outcome: "passed", steps: results };
 }
 
-/**
- * Paths this treats as tests, and the direction it is deliberately wrong in.
- *
- * There is no reliable way to know what a repository considers a test, so this
- * is a heuristic and is written to fail in one direction only. Over-matching —
- * calling a source file a test — leaves that file in place during the
- * experiment below, which biases the answer towards `guarded`, the weak
- * verdict. Under-matching takes a test away with the fix, which also biases
- * towards `guarded`. Neither can manufacture a `vacuous`, and `vacuous` is the
- * only finding this makes. That asymmetry is the whole reason the heuristic is
- * allowed to be a heuristic.
- *
- * The third rule covers `src/utils/tests/DateUtils.test.ts` in the pilot repo
- * and `src/test/java/...` in the Maven ones with the same pattern, which is
- * luck rather than design and is recorded so nobody trims it as duplication.
- */
+/** Written to fail in one direction only: both over- and under-matching bias the answer towards `guarded`, the weak verdict, and neither can manufacture a `vacuous` finding. */
 export const TEST_PATHS: readonly RegExp[] = [
   /(^|\/)[^/]*\.(test|spec)\.[cm]?[jt]sx?$/u,
   /(^|\/)__tests__(\/|$)/u,
@@ -767,11 +504,7 @@ export type FailFirstResult =
 export interface FailFirstRequest {
   readonly repoPath: string;
   readonly worktreePath: string;
-  /**
-   * Where to cut the throwaway checkout. Derived by the caller from the solve
-   * worktree's own path, never supplied by a model — this is a directory this
-   * service creates and then force-removes.
-   */
+  /** Derived by the caller from the solve worktree's own path, never supplied by a model. */
   readonly probePath: string;
   readonly baseRef: string;
   /** Every path the run changed, as git reported it. */
@@ -781,51 +514,13 @@ export interface FailFirstRequest {
 }
 
 /**
- * Runs the run's own tests against the base, and reports whether they notice.
- *
- * ## What this is for
- *
- * This repository holds itself to *a guard is not shipped until a test fails
- * when it is unplugged*, and until now the solver was never held to it for the
- * tests it writes. Two live runs shipped a regression test whose name described
- * something it did not check — the timezone test on PR #1413, and the
- * run-date block on PR #2661, where all four cases used an issue date in a
- * 31-day month so no run date could overflow it. Both were found by a person
- * reading the diff afterwards. This is the mechanical half of the answer.
- *
- * ## It is not test-first, and the distinction is measured rather than argued
- *
- * Replaying PR #2661's seven assertions against the two wrong versions of the
- * function: **all seven** go red against the original defect, and **one** goes
- * red against the plausible wrong fix (`setMonth(month - 1)`). So a red-green
- * rule would have been satisfied in full by a suite that was six-sevenths
- * decorative. What this check catches is the weaker failure — a test that is
- * red against nothing at all — and the stronger one is asked for in prose, in
- * `SOLVE_INSTRUCTIONS.md` §2, because "the obvious wrong fix" is not something
- * a harness can enumerate.
- *
- * ## Only one of the two answers is sound, and that is why nothing gates on it
- *
- * `vacuous` is trustworthy: the run's tests were laid onto the base and passed,
- * so they do not distinguish the fix from the bug, full stop. `guarded` means
- * only that *this experiment did not find them vacuous* — a new test importing
- * a new non-test helper goes red at the import, which looks identical from
- * outside. So the result is reported, onto the pull request where a reviewer
- * reads it, and never used to refuse a fix. A vacuous test does not make a
- * correct fix wrong, and PR #2661's fix was correct.
- *
- * ## Why a second worktree rather than reverting this one
- *
- * The obvious implementation takes the fix away in place and puts it back. It
- * was rejected: at this point in the run the fix is verified and uncommitted,
- * so the restore is the only thing standing between a good change and losing
- * it, and `git stash create` — the one save point that does not touch the
- * working tree — was measured to refuse outright once `--intent-to-add` has
- * staged the run's new files (`Entry 'x' not uptodate. Cannot merge.`, git
- * 2.50.1). Isolation is this service's answer everywhere else and it is the
- * answer here: the probe is a detached checkout of the base with the run's test
- * files laid on top, and the solve worktree is not touched at all. The cost is
- * one install and one test run, which is why an operator can switch it off.
+ * Applies the house mutation rule (a guard is not shipped until it fails when unplugged) to the
+ * tests the solver writes. This catches only the weaker failure — red against nothing at all, not
+ * necessarily against a plausible wrong fix, which `SOLVE_INSTRUCTIONS.md` §2 asks for in prose
+ * instead since a harness cannot enumerate "the obvious wrong fix". Only `vacuous` is trustworthy;
+ * `guarded` just means this experiment didn't find them vacuous, so it is reported and never used
+ * to refuse a fix. Uses a second worktree — a detached checkout of the base with the run's test
+ * files laid on top — rather than reverting this one, since the fix here is verified and uncommitted.
  */
 export async function checkFailFirst(
   runner: CommandRunner,
@@ -848,12 +543,7 @@ export async function checkFailFirst(
     };
   }
 
-  // The save point, and it is taken before anything is created so that a
-  // failure here costs nothing. `write-tree` refuses an index holding
-  // `--intent-to-add` entries, which `gitDiff` leaves behind for every new
-  // file, so the add is not optional tidying — it is what makes the tree
-  // writable. `commitAll` stages everything again later, so this is invisible
-  // to the rest of the run.
+  // Not optional tidying: `write-tree` refuses an index holding `--intent-to-add` entries, which `gitDiff` leaves behind for every new file.
   const staged = await runner.run(["git", "-C", worktreePath, "add", "--", ...changedPaths], {
     cwd: worktreePath,
     timeoutMs: stepTimeoutMs,
@@ -869,9 +559,7 @@ export async function checkFailFirst(
     timeoutMs: stepTimeoutMs,
   });
   const tree = written.stdout.trim();
-  // Checked as a whole string. This becomes an argument to `git checkout`, and
-  // a partial match would let a ref-ish thing through where an object id is
-  // expected. Length is left open because the repository may be SHA-256.
+  // Checked as a whole string: this becomes an argument to `git checkout`, and a partial match would let a ref-ish thing through where an object id is expected.
   if (written.timedOut || written.exitCode !== 0 || !/^[0-9a-f]{40,64}$/u.test(tree)) {
     return { outcome: "inconclusive", reason: "could not write a tree for the run's own changes" };
   }
@@ -883,9 +571,7 @@ export async function checkFailFirst(
   const { plan } = planned;
   const testStep = plan.steps.find((step) => step.name === "test");
   if (testStep === undefined) {
-    // Unreachable: both plans refuse without a test step. Written rather than
-    // asserted so that a third toolchain produces no finding here instead of a
-    // crash after the pull request has already been paid for.
+    // Unreachable today, but written rather than asserted so a third toolchain produces no finding here instead of a crash after the pull request has already been paid for.
     return { outcome: "inconclusive", reason: "the base declares no test step" };
   }
 
@@ -901,17 +587,13 @@ export async function checkFailFirst(
   }
 
   try {
-    // Safe by construction: every path this overwrites holds base content and
-    // nothing else, because the checkout was cut one command ago. The same
-    // operation against the solve worktree is the one this design refuses.
+    // Safe by construction: the checkout was cut one command ago, so every path this overwrites holds only base content.
     const laid = await runner.run(["git", "-C", probePath, "checkout", tree, "--", ...tests], {
       cwd: probePath,
       timeoutMs: stepTimeoutMs,
     });
     if (laid.timedOut || laid.exitCode !== 0) {
-      // A deleted test file lands here: it is not in the tree, so the checkout
-      // refuses. Reported rather than worked around — a run that removes a test
-      // is not one this experiment has anything to say about.
+      // A deleted test file lands here: not in the tree, so the checkout refuses — reported rather than worked around.
       return {
         outcome: "inconclusive",
         reason: `could not lay the run's tests onto ${baseRef} — ${tail(laid)}`,
@@ -935,9 +617,7 @@ export async function checkFailFirst(
       cwd: probePath,
       timeoutMs: testStep.cold ? installTimeoutMs : stepTimeoutMs,
     });
-    // A timeout counts as red, matching `verify`'s reading of the same event,
-    // and it is the conservative direction here too: it produces `guarded`,
-    // the verdict this function is not trusted on.
+    // A timeout counts as red, matching `verify` — the conservative direction, since it produces `guarded`, the verdict this function is not trusted on.
     const passed = !ran.timedOut && ran.exitCode === 0;
     logger.info("solve.fail_first", { outcome: passed ? "vacuous" : "guarded", tests });
     return passed ? { outcome: "vacuous", tests } : { outcome: "guarded", tests };
@@ -947,9 +627,7 @@ export async function checkFailFirst(
       { cwd: repoPath, timeoutMs: stepTimeoutMs },
     );
     if (removed.timedOut || removed.exitCode !== 0) {
-      // Logged and not returned. The finding is about the change; a leftover
-      // directory is about this machine, and losing the former to report the
-      // latter would be the wrong trade.
+      // Logged and not returned: the finding is about the change, a leftover directory is about this machine.
       logger.warn("solve.fail_first.probe_left", { probePath, output: tail(removed) });
     }
   }

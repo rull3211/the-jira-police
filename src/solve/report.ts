@@ -1,28 +1,11 @@
 /**
- * The solve cycle, written down so it can be checked.
+ * The solve cycle, written down so a dry-run decision can be checked against
+ * the ticket's actual labels rather than only logged.
  *
- * Phase B runs dry on purpose: the fitness call that fills this queue is made
- * by a model with no access to source code, so the queue's picks are meant to
- * be watched for a while before anything acts on them. Watching requires an
- * artifact. Until now the only trace a cycle left was a log line and some
- * stdout, which answers "what did it decide" and not "was that decision right"
- * — and the second question is the entire reason the phase exists.
- *
- * So this renders the whole cycle: the configuration it ran under, the two
- * queries verbatim, and every candidate with the decision made about it and the
- * labels that decision was made from. A `SKIP` reading "no single svc:<repo>
- * label" is unactionable on its own and self-evident beside the ticket's actual
- * labels.
- *
- * It goes to `<OUTPUT_DIR>/solve-cycle.md` — beside the groomed reports, under
- * a name no issue key can collide with, and **never** into `<KEY>.md`. Those
- * files are rewritten wholesale by `FileSink` on the next triage, so a section
- * appended to one would vanish at a moment unrelated to anything the solve
- * queue did. The same reasoning that gives refusals their own `.rejected.md`.
- *
- * One cycle at a time: the file is replaced on every run, and it is a snapshot
- * rather than a history. The log line `solve.dry_run` remains the append-only
- * record.
+ * Goes to `<OUTPUT_DIR>/solve-cycle.md`, never `<KEY>.md` — those files are
+ * rewritten wholesale by `FileSink` on the next triage, so a section appended
+ * there would vanish unrelated to anything the solve queue did. One snapshot
+ * per run, replaced each cycle; `solve.dry_run` is the append-only record.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -46,11 +29,8 @@ function index(candidates: readonly SolveCandidate[]): Map<string, SolveCandidat
 /**
  * The lines every section shares: what the ticket is, and what it looks like now.
  *
- * Returns nothing when the candidate is missing, which cannot happen for a
- * decision the cycle made — every one of them came from the candidate list. It
- * is handled rather than asserted because a report is a diagnostic, and a
- * diagnostic that throws while explaining a problem is worse than one with a
- * gap in it.
+ * Returns nothing when the candidate is missing (which shouldn't happen) rather
+ * than throwing — a diagnostic that crashes explaining a problem is worse than one with a gap.
  */
 function ticketLines(candidate: SolveCandidate | undefined): readonly string[] {
   if (candidate === undefined) {
@@ -74,10 +54,8 @@ function plannedSection(
     "",
     ...ticketLines(candidate),
     `- **Repo:** \`${claim.repo}\``,
-    // Additions and removals in one list, signed. Two lists would let a reader
-    // take in the additions and miss that the human's `agent:start` is being
-    // consumed in the same edit, which is the half of the claim that stops the
-    // ticket coming round again.
+    // One signed list, not two: separating additions from removals would let a
+    // reader miss that the human's `agent:start` is being consumed in the same edit.
     `- **Claim:** ${labelList([
       ...claim.claim.add.map((label) => `+${label}`),
       ...claim.claim.remove.map((label) => `-${label}`),
@@ -115,15 +93,7 @@ function deferredSection(key: string, candidate: SolveCandidate | undefined): re
   ];
 }
 
-/**
- * Why the cycle read nothing, when it read nothing.
- *
- * `found: 0` is the most common outcome and the least self-explanatory one, and
- * it has two entirely different causes that look identical in the logs: the
- * switch is off, or the switch is on and the board genuinely has no work. The
- * artifact distinguishes them, because an operator who has just added a label
- * and seen nothing happen is about to debug the wrong one.
- */
+/** Why the cycle read nothing — distinguishes "disabled" from "board genuinely empty", which look identical in the logs. */
 function emptyNote(enabled: boolean): readonly string[] {
   if (!enabled) {
     return [
@@ -150,18 +120,12 @@ function planLine(claim: SolveCycleOutcome["planned"][number]): string {
 }
 
 /**
- * The cycle as stdout lines — the same decisions as the artifact, for the
- * operator watching the run rather than reading it back later.
+ * The cycle as stdout lines, for the operator watching the run live.
  *
- * `issueKey` narrows to one ticket. The narrowing is a filter over decisions the
- * cycle already made, never a second query: a single-ticket run reads the same
- * board as a full one, so what it prints is what the queue would have done, not
- * what a differently-scoped queue might do.
- *
- * A ticket with no decisions gets an explicit `NONE` line rather than silence.
- * Empty output is the one result an operator cannot act on — it looks identical
- * to a crash, a typo in the key, and a correctly-working queue that simply does
- * not want that ticket.
+ * `issueKey` filters decisions the cycle already made rather than running a
+ * second query, so a single-ticket run reflects the same board a full one
+ * would. A ticket with no decisions gets an explicit `NONE` line — silence
+ * would look identical to a crash or a typo in the key.
  */
 export function decisionLines(outcome: SolveCycleOutcome, issueKey?: string): readonly string[] {
   const mine = (key: string): boolean => issueKey === undefined || key === issueKey;
@@ -170,9 +134,6 @@ export function decisionLines(outcome: SolveCycleOutcome, issueKey?: string): re
     ...outcome.deferred
       .filter((key) => mine(key))
       .map((key) => `WAIT  ${key}  eligible, but out of capacity this cycle`),
-    // Printed rather than counted. A skip is the interesting output of a dry
-    // run: it is how you find out that a ticket you expected to be picked up is
-    // missing a label, or names a repository nobody added to SOLVE_REPOS.
     ...outcome.skipped
       .filter((skip) => mine(skip.issueKey))
       .map((skip) => `SKIP  ${skip.issueKey}  ${oneLine(skip.reason)}`),
@@ -204,10 +165,6 @@ export function formatSolveReport(outcome: SolveCycleOutcome, deps: SolveDeps, n
     `- **Allowed repos:** ${labelList(deps.allowedRepos)}`,
     `- **Max concurrent:** ${deps.maxConcurrent}`,
     "",
-    // Stated in the artifact itself, not only in the module that produced it.
-    // This file is the thing someone reads six weeks from now, possibly after
-    // the write path has landed, and a planned claim reads exactly like a
-    // performed one unless the page says otherwise.
     "> **Dry run.** No label was written, no branch created, no command run.",
     "",
     "## Queries",

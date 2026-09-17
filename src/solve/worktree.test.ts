@@ -17,14 +17,7 @@ const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false
 const FAIL: CommandResult = { exitCode: 128, stdout: "", stderr: "fatal: nope", timedOut: false };
 const TIMEOUT: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: true };
 
-/**
- * Records every argv it is handed and replies from a script.
- *
- * `calls` holds the argv arrays themselves rather than joined strings, so a
- * test asserting on arguments cannot accidentally pass because two adjacent
- * arguments were concatenated — which is the exact failure the argv interface
- * exists to prevent.
- */
+/** Records every argv it is handed and replies from a script. `calls` holds argv arrays, not joined strings, so adjacent arguments can't hide a concatenation. */
 function fakeRunner(replies: readonly CommandResult[] = []): CommandRunner & {
   calls: string[][];
 } {
@@ -83,8 +76,7 @@ describe("slugify", () => {
   });
 
   it("passes through nothing outside the allowlist, whatever it is", () => {
-    // Not a list of things to strip — a list of things that must not survive.
-    // Each of these means something to git, a shell, or a filesystem.
+    // Not a list of things to strip — a list of things that must not survive; each means something to git, a shell, or a filesystem.
     for (const hostile of [
       "fix: `rm -rf /` in the handler",
       "crash when path is ../../etc/passwd",
@@ -99,8 +91,7 @@ describe("slugify", () => {
   });
 
   it("never begins or ends with a separator", () => {
-    // A leading `-` makes the branch name look like an option to git, and a
-    // trailing one is how `.lock` suffixes and empty path components creep in.
+    // A leading `-` makes the branch name look like an option to git; a trailing one is how `.lock` suffixes and empty path components creep in.
     for (const summary of ["   leading spaces", "trailing spaces   ", "--dashes--", "...dots..."]) {
       const slug = slugify(summary);
       expect(slug.startsWith("-")).toBe(false);
@@ -109,8 +100,7 @@ describe("slugify", () => {
   });
 
   it("is bounded, and does not leave a trailing separator when it truncates", () => {
-    // Truncation mid-separator is the case worth naming: cutting
-    // `...-x-|-long` at the bar would otherwise end the slug on a dash.
+    // Truncation mid-separator: cutting `...-x-|-long` at the bar would otherwise end the slug on a dash.
     const slug = slugify(`${"word ".repeat(40)}end`);
 
     expect(slug.length).toBeLessThanOrEqual(40);
@@ -137,8 +127,7 @@ describe("branchNameFor", () => {
   });
 
   it("refuses rather than substituting a placeholder for an underivable slug", () => {
-    // Two tickets that both fell back to `untitled` would race for one branch,
-    // and the second run would fail somewhere much less obvious than here.
+    // Two tickets that both fell back to `untitled` would race for one branch.
     expect(branchNameFor("SSX-3822", "!!!")).toBeNull();
   });
 });
@@ -158,8 +147,7 @@ describe("createWorktree", () => {
         repoPath: "/repos/buy-insurance-advisor-web",
       },
     });
-    // Two words rather than one: both worktree steps are `git worktree`, and a
-    // check reading only the subcommand could not tell the list from the add.
+    // Two words, not one: both worktree steps are `git worktree`, so the subcommand alone can't tell list from add.
     expect(runner.calls.map((argv) => argv.slice(3, 5).join(" "))).toEqual([
       "fetch origin",
       "rev-parse --verify",
@@ -173,8 +161,7 @@ describe("createWorktree", () => {
 
     await createWorktree(runner, request());
 
-    // `-b` rather than a bare add: a second run for the same ticket must fail
-    // rather than silently reuse a branch that may already carry commits.
+    // `-b` rather than a bare add: a second run for the same ticket must fail rather than reuse a branch that may already carry commits.
     expect(runner.calls[3]).toEqual([
       "git",
       "-C",
@@ -195,8 +182,7 @@ describe("createWorktree", () => {
 
     for (const argv of runner.calls) {
       expect(argv[0]).toBe("git");
-      // If any single element carried more than one argument, quoting would be
-      // load-bearing somewhere — and the summary is attacker-controlled text.
+      // If any single element carried more than one argument, quoting would be load-bearing — and the summary is attacker-controlled text.
       for (const argument of argv) {
         expect(argument).not.toMatch(/\s/u);
       }
@@ -261,9 +247,7 @@ describe("createWorktree", () => {
   it.each(["main", "master", "develop", "release", "hotfix", "origin", "HEAD", ""])(
     "touches nothing when asked to branch as %o",
     async (prefix) => {
-      // The standing rule is absolute: never main, never a protected branch.
-      // A caller passing one here has made a mistake, and the mistake must not
-      // be resolved into a working branch by falling back to the default.
+      // Never main, never a protected branch: a caller passing one made a mistake that must not resolve into a working branch by default.
       const runner = fakeRunner();
 
       const result = await createWorktree(runner, request({ branchPrefix: prefix }));
@@ -294,9 +278,7 @@ describe("createWorktree", () => {
   });
 
   it("stops when the base ref does not resolve, and says so distinctly", async () => {
-    // `worktree add` reports a missing base with the same exit code as every
-    // other failure, so without this step the operator gets "could not create
-    // the worktree" for a misconfigured base branch.
+    // `worktree add` reports a missing base with the same exit code as every other failure, so without this step the reason would be generic.
     const runner = fakeRunner([OK, FAIL]);
 
     const result = await createWorktree(runner, request());
@@ -306,26 +288,19 @@ describe("createWorktree", () => {
   });
 
   it("reports a failed add without claiming a worktree exists", async () => {
-    // Four replies, not three: the list sits between the base check and the
-    // add, and the failure under test is the add's.
+    // Four replies, not three: the list sits between the base check and the add, and the failure under test is the add's.
     const runner = fakeRunner([OK, OK, OK, FAIL]);
 
     const result = await createWorktree(runner, request());
 
     expect(result.outcome).toBe("refused");
     expect(refusal(result)).toContain("could not create the worktree");
-    // The half of the `-b` guard the salvage must not eat. Nothing of ours was
-    // at the path, so this collision is a bare ref of that name — not our
-    // debris, and possibly carrying commits — and it is still refused.
+    // Nothing of ours is at the path, so this collision is a bare ref of that name and must still be refused rather than salvaged.
     expect(runner.calls.map((argv) => argv.slice(3, 5).join(" "))).not.toContain("worktree move");
   });
 
   it("salvages its own predecessor's checkout rather than wedging on it", async () => {
-    // The regression, and it cost a ticket. `unusable-base` keeps its worktree
-    // deliberately, so the next run for the same ticket met that checkout
-    // holding that branch, failed at `worktree add -b`, and failed identically
-    // for ever — spending one of MAX_SOLVE_ATTEMPTS_PER_TICKET each time on
-    // something no retry could have passed.
+    // A checkout left behind by an earlier run, still holding the branch, must be salvaged rather than making every retry fail identically.
     const branch = "fix/ssx-3822-favicon-is-missing-on-the-advisor-page";
     const runner = fakeRunner([
       OK,
@@ -338,19 +313,15 @@ describe("createWorktree", () => {
     expect(result.outcome).toBe("created");
 
     const verbs = runner.calls.map((argv) => argv.slice(3, 5).join(" "));
-    // Moved, never removed. The checkout is the only place a base that builds
-    // elsewhere and not here can be reproduced, which is the whole reason
-    // `unusable-base` kept it — so salvaging must not become deleting.
+    // Moved, never removed: salvage must not become deletion.
     expect(verbs).toContain("worktree move");
     expect(verbs).not.toContain("worktree remove");
-    // And the point of all of it: the cold path then runs as though the machine
-    // had never seen this ticket.
+    // The cold path then runs as though the machine had never seen this ticket.
     expect(verbs.at(-1)).toBe("worktree add");
   });
 
   it("treats a timeout as a failure rather than as a zero exit code", async () => {
-    // The runner reports a killed command as exit 0 plus `timedOut`, so a check
-    // that only read the exit code would read a hung fetch as a good one.
+    // The runner reports a killed command as exit 0 plus `timedOut`, so a check reading only the exit code would read a hung fetch as good.
     const runner = fakeRunner([TIMEOUT]);
 
     const result = await createWorktree(runner, request());
@@ -394,9 +365,7 @@ describe("removeWorktree", () => {
   });
 
   it("deletes the branch too, since removing the checkout does not", async () => {
-    // The path and the branch name are both derived from the issue key, so a
-    // ref left behind does not merely accumulate — it makes the next run of
-    // this same ticket fail at `worktree add -b`.
+    // Both derived from the issue key, so a ref left behind makes the next run of this same ticket fail at `worktree add -b`.
     const runner = fakeRunner();
 
     await removeWorktree(runner, worktree, "discard", 30_000);
@@ -412,9 +381,7 @@ describe("removeWorktree", () => {
   });
 
   it("never force-deletes the branch", async () => {
-    // `-d` is the whole safety argument: git refuses when the branch holds
-    // commits reachable from nowhere else, and that refusal is wanted. `-D`
-    // would turn cleanup into data loss on exactly the runs that did work.
+    // `-d` refuses when the branch holds commits reachable from nowhere else; `-D` would turn cleanup into data loss on exactly the runs that did work.
     const runner = fakeRunner();
 
     await removeWorktree(runner, worktree, "discard", 30_000);
@@ -424,8 +391,7 @@ describe("removeWorktree", () => {
   });
 
   it("deletes the branch only after the worktree is gone", async () => {
-    // git will not delete the branch of a live worktree, so the order is not a
-    // matter of taste — reversed, the delete always fails.
+    // git will not delete the branch of a live worktree, so reversed, the delete always fails.
     const runner = fakeRunner();
 
     await removeWorktree(runner, worktree, "discard", 30_000);
@@ -450,8 +416,7 @@ describe("removeWorktree", () => {
   });
 
   it("still reports the worktree removed when only the branch delete failed", async () => {
-    // The checkout really is gone. Collapsing that into "kept" would send a
-    // human to inspect a directory that no longer exists.
+    // The checkout really is gone; collapsing that into "kept" would send a human to inspect a directory that no longer exists.
     const runner = fakeRunner([OK, FAIL]);
 
     expect((await removeWorktree(runner, worktree, "discard", 30_000)).outcome).toBe("removed");
@@ -466,8 +431,7 @@ describe("removeWorktree", () => {
   });
 
   it("does not touch the branch when git would not remove the worktree", async () => {
-    // Deleting the branch of a worktree that is still there is the one call
-    // that can strand a checkout with no ref pointing at its commits.
+    // Deleting the branch of a worktree that is still there can strand a checkout with no ref pointing at its commits.
     const runner = fakeRunner([FAIL]);
 
     await removeWorktree(runner, worktree, "discard", 30_000);
@@ -476,8 +440,7 @@ describe("removeWorktree", () => {
   });
 
   it("keeps the worktree of a failed run, and does not even ask git", async () => {
-    // The diff in there is the only record of what the solver did, and it is
-    // what a human needs to tell a mis-assessed ticket from a bad fix.
+    // The diff in there is the only record of what the solver did — what a human needs to tell a mis-assessed ticket from a bad fix.
     const runner = fakeRunner();
 
     const result = await removeWorktree(runner, worktree, "keep-as-evidence", 30_000);
@@ -537,10 +500,7 @@ describe("attachWorktree", () => {
 
     await attachWorktree(runner, attach());
 
-    // Same reason `createWorktree` fetches first: the branch under review is
-    // whatever the reviewer can see, and a stale remote-tracking ref would
-    // answer a review by committing on top of a commit that is not the one
-    // being reviewed.
+    // The branch under review is whatever the reviewer can see; a stale remote-tracking ref would answer on top of the wrong commit.
     expect(runner.calls[0]).toContain("fetch");
   });
 
@@ -549,18 +509,13 @@ describe("attachWorktree", () => {
 
     await attachWorktree(runner, attach());
 
-    // The mutation this exists to catch is dropping the `origin/` prefix. A
-    // leftover local branch from an earlier run on this machine can be stale or
-    // ahead of the pull request, and resolving it would review the wrong code
-    // while every other assertion here still passed.
+    // Catches dropping the `origin/` prefix: a leftover local branch can be stale or ahead, and resolving it would review the wrong code.
     expect(runner.calls[1]).toContain("origin/fix/ssx-3822-favicon-is-missing^{commit}");
     expect(runner.calls[1]).not.toContain("fix/ssx-3822-favicon-is-missing^{commit}");
   });
 
   it("refuses a branch that is not an implementation branch", async () => {
-    // The whole reason `isWorkBranch` is re-checked here: this name arrives
-    // from a pull request, so anyone who can open one on the repository picks
-    // it. Each of these satisfies some weaker reading of "looks like a branch".
+    // The whole reason `isWorkBranch` is re-checked here: this name arrives from a pull request, so anyone who can open one picks it.
     for (const hostile of [
       "main",
       "master",
@@ -576,8 +531,7 @@ describe("attachWorktree", () => {
       const result = await attachWorktree(runner, attach({ branch: hostile }));
 
       expect(refused(result)).toContain("implementation branch");
-      // Nothing ran. A refusal that had already fetched would still be a
-      // refusal, but it would mean the guard sits after the first side effect.
+      // Nothing ran: a refusal that had already fetched would mean the guard sits after the first side effect.
       expect(runner.calls).toEqual([]);
     }
   });
@@ -618,11 +572,7 @@ describe("attachWorktree", () => {
 });
 
 describe("attachWorktree, when the checkout is already there", () => {
-  /**
-   * The state a successful `--pr` leaves behind: a clean worktree at the
-   * derived path, on the branch, level with the remote. Found in production on
-   * the first real `--advance`, which refused it.
-   */
+  /** The state a successful `--pr` leaves behind: a clean worktree at the derived path, on the branch, level with the remote. */
   const listing = (branch: string | null = "fix/ssx-3822-favicon-is-missing"): CommandResult => ({
     ...OK,
     stdout: [
@@ -663,10 +613,7 @@ describe("attachWorktree, when the checkout is already there", () => {
         repoPath: "/repos/buy-insurance-advisor-web",
       },
     });
-    // The mutation this catches is the whole of the bug: go straight to
-    // `worktree add` and every run on the machine that opened the pull request
-    // refuses, because publishing keeps its worktree and removing a worktree
-    // does not remove its branch.
+    // Going straight to `worktree add` would refuse every run on the machine that opened the pull request, since publishing keeps its worktree.
     expect(runner.calls.some((argv) => argv.includes("add"))).toBe(false);
   });
 
@@ -701,8 +648,7 @@ describe("attachWorktree, when the checkout is already there", () => {
   });
 
   it("refuses when the state of the worktree cannot be read, and moves nothing", async () => {
-    // A *read* failure, so it retries. Moving a checkout whose contents we
-    // could not look at would be acting on no information at all.
+    // A *read* failure, so it retries: moving a checkout whose contents we couldn't look at would be acting on no information at all.
     const runner = fakeRunner(upTo(listing(), FAIL));
 
     expect(refused(await attachWorktree(runner, attach()))).toContain(
@@ -712,9 +658,7 @@ describe("attachWorktree, when the checkout is already there", () => {
   });
 
   it("refuses a count it cannot read rather than assuming zero", async () => {
-    // Unplug this and an unparseable answer reads as "in sync", which is the
-    // ahead case wearing a disguise: commits nobody reviewed, built on and
-    // pushed to an open pull request. Still a read failure, so still a refusal.
+    // Unplug this and an unparseable answer reads as "in sync" — the ahead case wearing a disguise. Still a read failure, so still a refusal.
     const runner = fakeRunner(upTo(listing(), OK, { ...OK, stdout: "warning: no upstream\n" }));
 
     expect(refused(await attachWorktree(runner, attach()))).toContain("could not read how");
@@ -722,18 +666,7 @@ describe("attachWorktree, when the checkout is already there", () => {
   });
 });
 
-/**
- * The four states that used to be refusals, and the deadlock that made them one
- * bug rather than four judgement calls.
- *
- * SSX-3835 sat wedged for four days behind the first of them. The path is a
- * pure function of the issue key, so the checkout a round refuses is the
- * checkout the next round finds; none of these states clears itself; and the
- * refusal is free, so no cap counts it and no cost signal moves. Each of these
- * tests therefore asserts the same two things — the loop got a worktree, and
- * nothing was destroyed to give it one — because those are the two halves the
- * old refusals were trading against each other.
- */
+/** Each of these states is salvaged rather than refused, since the path is a pure function of the issue key and none clears itself. */
 describe("attachWorktree, when the checkout at the path cannot be reused", () => {
   const branch = "fix/ssx-3822-favicon-is-missing";
   const path = "/tmp/solve/SSX-3822";
@@ -771,9 +704,7 @@ describe("attachWorktree, when the checkout at the path cannot be reused", () =>
   });
 
   it("moves the dirty checkout aside rather than discarding it", async () => {
-    // The refusal this replaces was right about what it protected, and the
-    // protection has to survive the replacement: uncommitted work is somebody's
-    // unbacked-up work, and it is usually not recoverable from anywhere else.
+    // Uncommitted work is usually not recoverable elsewhere, so it must survive the move intact.
     const runner = fakeRunner(upTo(listing(), dirty));
 
     await attachWorktree(runner, attach());
@@ -794,11 +725,7 @@ describe("attachWorktree, when the checkout at the path cannot be reused", () =>
   });
 
   it("frees the branch name in the order git will accept, or not at all", async () => {
-    // Git refuses to check out a branch checked out in another worktree, so the
-    // detach has to precede the rebuild; and it refuses to delete a branch
-    // checked out anywhere, so the delete has to follow the detach. Reorder any
-    // pair and the sequence fails on a live repository while every stub in this
-    // file still answers OK.
+    // Git refuses to check out a branch already checked out elsewhere, so detach must precede the rebuild and delete must follow detach.
     const runner = fakeRunner(upTo(listing(), dirty));
 
     await attachWorktree(runner, attach());
@@ -815,16 +742,12 @@ describe("attachWorktree, when the checkout at the path cannot be reused", () =>
   });
 
   it("salvages a checkout that is ahead, keeping the unreviewed commits reachable", async () => {
-    // `branch -D` is only safe because the detach happened first: HEAD in the
-    // moved worktree still points at the tip, so deleting the name destroys no
-    // history. Drop the detach and this is the one case where the salvage
-    // becomes the data loss the refusal was avoiding.
+    // `branch -D` is safe only because detach happened first: HEAD in the moved worktree still points at the tip, so no history is lost.
     const runner = fakeRunner(upTo(listing(), OK, counts(1, 0)));
 
     expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
     const detach = at(runner, "checkout", "--detach");
-    // Asserted present before it is asserted early: `-1 < anything` is true, so
-    // an ordering check alone passes most loudly when the step is missing.
+    // Asserted present before asserted early: `-1 < anything` is true, so an ordering check alone passes even when the step is missing.
     expect(detach).toBeGreaterThan(-1);
     expect(detach).toBeLessThan(at(runner, "branch", "-D"));
   });
@@ -837,9 +760,7 @@ describe("attachWorktree, when the checkout at the path cannot be reused", () =>
   });
 
   it("salvages a checkout on some other branch, and leaves that branch alone", async () => {
-    // The name in our way is the one the cold path is about to create. A branch
-    // that merely happens to be checked out here is somebody else's, may carry
-    // unpushed work of its own, and is not ours to detach or delete.
+    // The name in our way is the one the cold path is about to create; a branch merely checked out here is somebody else's, not ours to touch.
     const runner = fakeRunner(upTo(listing("fix/ssx-9999-something-else")));
 
     expect(await attachWorktree(runner, attach())).toMatchObject({ outcome: "created" });
@@ -866,8 +787,7 @@ describe("attachWorktree, when the checkout at the path cannot be reused", () =>
   });
 
   it("refuses when the checkout cannot be moved aside, rather than building over it", async () => {
-    // A half-salvage is worse than the state it started from, and the refusal
-    // has to carry both facts: what was wrong, and that the repair did not run.
+    // A half-salvage is worse than the starting state, so the refusal must carry both: what was wrong, and that the repair didn't run.
     const runner = fakeRunner(upTo(listing(), dirty, OK, FAIL));
 
     const reason = refused(await attachWorktree(runner, attach()));
@@ -915,8 +835,7 @@ describe("worktreeAt", () => {
   });
 
   it("reads no branch from a record that is not ours", () => {
-    // The mutation: drop the path comparison and the first record's branch is
-    // returned for every query, so a review round reuses `main`'s checkout.
+    // Drop the path comparison and the first record's branch is returned for every query, so a review round reuses `main`'s checkout.
     expect(worktreeAt(porcelain, "/tmp/solve/SSX-9999")).toEqual({ present: false });
   });
 

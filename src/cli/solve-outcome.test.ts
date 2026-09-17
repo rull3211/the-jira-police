@@ -43,20 +43,8 @@ const verified = {
 /**
  * Every solve outcome kind there is, checked by the compiler.
  *
- * The three tables below say they cover "every outcome kind" and none of them
- * did: each was pinned against `OUTCOMES`, and `OUTCOMES` was a list somebody
- * wrote once. `escaped` was added to `SolveOutcome`, wired through the
- * orchestrator, the ticket comment and the exit code, and all three tables
- * stayed green while testing none of it — including the one whose comment
- * promises that "a new SolveOutcome member reaches this test before it reaches
- * production". It did not.
- *
- * This is the fourth instance of the same defect after `client.test.ts`,
- * `solve-args.test.ts` and this file's own review-round tables, so it gets the
- * guard `ADVANCE_KINDS` already gives the other union in this file rather than
- * a fourth correction: a `Record` over the union, so adding a kind without
- * adding it here is a type error, and the fixture is compared to these keys at
- * runtime.
+ * A `Record` over the union makes adding a kind without adding it here a type error, and the
+ * fixture is compared to these keys at runtime.
  */
 const SOLVE_KINDS: Record<SolveOutcome["kind"], null> = {
   "no-worktree": null,
@@ -128,10 +116,8 @@ const OUTCOMES: readonly SolveOutcome[] = [
 /**
  * A key for the exhaustiveness table, which is `kind` except for `abandoned`.
  *
- * That kind is the one place where two rows of the table disagree — an
- * `environment` cause exits non-zero and a `judgement` cause does not — so
- * folding them under one key would let whichever came last silently stand in
- * for both, and the exhaustiveness check would pass while covering one of them.
+ * `environment` and `judgement` causes disagree on exit code, so folding them under one key
+ * would let one silently stand in for both.
  */
 function exitKey(outcome: SolveOutcome): string {
   return outcome.kind === "abandoned" ? `abandoned:${outcome.cause}` : outcome.kind;
@@ -139,10 +125,8 @@ function exitKey(outcome: SolveOutcome): string {
 
 describe("the solve-outcome fixture", () => {
   it("has an example of every kind the type admits", () => {
-    // The guard the three tables below were each missing, and the only one of
-    // the four that cannot be satisfied by editing a literal: the keys come
-    // from the compiler. Every "covers every outcome kind" claim in this file
-    // is downstream of this one assertion.
+    // The keys come from the compiler, not a literal — every "covers every outcome kind" claim
+    // in this file depends on this assertion.
     const present = new Set(OUTCOMES.map((outcome) => outcome.kind));
     expect([...present].toSorted()).toEqual(Object.keys(SOLVE_KINDS).toSorted());
   });
@@ -150,9 +134,8 @@ describe("the solve-outcome fixture", () => {
 
 describe("isFailureExit", () => {
   it("does not fail the shell on a bail", () => {
-    // A bail is the pipeline working. Recon declining is the honest answer to a
-    // fitness call made with no source access, and a non-zero code here would
-    // teach an operator — and, in Phase E, a backoff — to read success as error.
+    // A bail is the pipeline working, not a failure — a non-zero code here would teach a backoff
+    // to read success as error.
     expect(
       isFailureExit({
         kind: "bailed",
@@ -166,17 +149,15 @@ describe("isFailureExit", () => {
   });
 
   it("fails the shell on a crash", () => {
-    // The one most easily grouped with `bailed`, because neither is a verdict
-    // about the code. The rule is not "was the code bad" — it is "did this run
-    // produce a usable answer", and a dead pass did not, at full cost.
+    // The rule is not "was the code bad" but "did this run produce a usable answer" — a dead
+    // pass did not, at full cost.
     expect(
       isFailureExit({ kind: "crashed", pass: "recon", reason: "pass timed out", worktree }),
     ).toBe(true);
   });
 
   it("agrees with itself across every outcome kind", () => {
-    // Pinned as a whole so that adding a kind forces a decision here rather
-    // than defaulting it to zero, which is the direction that fails quietly.
+    // Pinned as a whole so a new kind forces a decision here rather than silently defaulting to zero.
     expect(Object.fromEntries(OUTCOMES.map((o) => [exitKey(o), isFailureExit(o)]))).toEqual({
       "no-worktree": true,
       bailed: false,
@@ -192,9 +173,8 @@ describe("isFailureExit", () => {
   });
 
   it("fails the shell on an unusable base, cheap though it is", () => {
-    // The temptation is to exit zero because nothing was spent — the check runs
-    // before the model. But the rule is "did this produce a usable answer", and
-    // an operator who sees zero here will re-run and get the same nothing.
+    // Nothing was spent, but the rule is "did this produce a usable answer" — an operator seeing
+    // zero here would re-run and get the same nothing.
     expect(
       isFailureExit({
         kind: "unusable-base",
@@ -220,10 +200,8 @@ describe("isFailureExit", () => {
   });
 
   it("fails the shell when the machine got in the way", () => {
-    // And this is why the cause exists. Observed 2026-09-04: a safety hook on
-    // the host denied a write mid-pass. Nothing was learned, the session was
-    // paid for, and reporting it as a clean exit would file a working ticket
-    // as one an agent declined.
+    // A safety hook denying a write mid-pass is why the cause exists — reporting it as a clean
+    // exit would file a working ticket as one an agent declined.
     expect(
       isFailureExit({
         kind: "abandoned",
@@ -244,10 +222,8 @@ describe("describeSolveOutcome", () => {
   });
 
   it("tells an operator which kind of abandon they are looking at", () => {
-    // The next command differs. `judgement` means read the reason and decide
-    // whether the ticket was misjudged; `environment` means find out what
-    // stopped the machine, and re-running is reasonable. One word for both
-    // sends half of them to the wrong place.
+    // The next command differs: `judgement` means review whether the ticket was misjudged,
+    // `environment` means find out what stopped the machine and re-run.
     const machine = describeSolveOutcome({
       kind: "abandoned",
       reason: "a safety hook denied the write",
@@ -278,9 +254,8 @@ describe("describeSolveOutcome", () => {
 
     expect(line).toContain("CRASHED");
     expect(line).toContain("no verdict was reached");
-    // The two words an operator scanning output would act on, and neither is
-    // true here. `FAILED` in particular means the repository's own checks
-    // rejected the change, which nothing in a crashed run ever established.
+    // `FAILED` means the repository's own checks rejected the change — nothing a crashed run
+    // ever established.
     expect(line).not.toContain("FAILED");
     expect(line).not.toContain("VERIFIED");
   });
@@ -295,10 +270,7 @@ describe("describeSolveOutcome", () => {
   });
 
   it("points at the kept worktree on every outcome that keeps one", () => {
-    // The worktree is the evidence, and a path an operator has to reconstruct
-    // by hand is one they will not look at. `bailed` is excluded because it is
-    // the one outcome that removes its own worktree — and `no-worktree` never
-    // had one.
+    // `bailed` is excluded because it removes its own worktree, and `no-worktree` never had one.
     const keeps = OUTCOMES.filter((o) => o.kind !== "no-worktree" && o.kind !== "bailed");
     expect(keeps.length).toBeGreaterThan(3);
     for (const outcome of keeps) {
@@ -307,10 +279,8 @@ describe("describeSolveOutcome", () => {
   });
 
   it("does not send an operator to a worktree it just deleted", () => {
-    // The prose/behaviour divergence this whole project exists to catch, in
-    // miniature: the line used to say "Worktree kept at <path>" on every
-    // outcome, and a bail now removes it. Printing the path anyway would send
-    // someone to an empty directory to work out why it was empty.
+    // A bail removes its own worktree; printing the path anyway would send someone to an empty
+    // directory.
     const line = describeSolveOutcome({
       kind: "bailed",
       reason: "the described file does not exist",
@@ -325,14 +295,8 @@ describe("describeSolveOutcome", () => {
   });
 
   it("warns that the kept worktree is kept, not held", () => {
-    // The other half of the same divergence, and the half that shipped. This
-    // outcome tells an operator to reproduce in the kept worktree, and since
-    // `createWorktree` learned to salvage, the next run for the ticket moves
-    // that directory to a `-salvaged-<timestamp>` sibling and puts a fresh
-    // checkout at the same path. Both failure modes are real: come back later
-    // and the path holds a different checkout that looks right, or work in it
-    // while the daemon ticks and it is renamed out from under you mid-command
-    // — observed 2026-09-11 with a Maven run.
+    // The next run for this ticket salvages the directory to a `-salvaged-<timestamp>` sibling
+    // and puts a fresh checkout at the same path — it can be renamed out from under you mid-command.
     const line = describeSolveOutcome({
       kind: "unusable-base",
       reason: "the repository's own build does not pass in a fresh worktree",
@@ -346,9 +310,8 @@ describe("describeSolveOutcome", () => {
   });
 
   it("still points at the worktree when git refused to remove it", () => {
-    // `removeWorktree` does not force, so a bail whose worktree is somehow
-    // dirty keeps it — and that is precisely the case an operator most needs
-    // the path for, because something wrote to a read-only pass's checkout.
+    // `removeWorktree` does not force, so a dirty worktree on a bail is kept — exactly the case
+    // an operator needs the path for.
     const line = describeSolveOutcome({
       kind: "bailed",
       reason: "the described file does not exist",
@@ -381,14 +344,8 @@ const NO_THREADS = { answered: 0, resolved: 0, failures: [] } as const;
 /**
  * Every review-round kind there is, checked by the compiler.
  *
- * A `Record` over the union, so adding a kind to `AdvanceOutcome` without adding
- * it here is a type error, and removing one is too. The fixture below is then
- * pinned against these keys at runtime — which is the part that was missing:
- * both tables in this file claimed to cover "every review-round kind" and
- * neither had a `capped` entry, because the fixture was a hand-written list and
- * nothing compared it to anything. Same defect `client.test.ts` had against
- * `AGENT_LABELS`, found the same way, and worth a second guard rather than a
- * second correction.
+ * A `Record` over the union makes adding or removing a kind a type error, and the fixture below
+ * is pinned against these keys at runtime.
  */
 const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
   waiting: null,
@@ -444,10 +401,8 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
 
 describe("the review-round fixture", () => {
   it("has an example of every kind the type admits", () => {
-    // The guard the two "every review-round kind" tables below were missing.
-    // Without it the fixture is a list somebody wrote once, and a kind added
-    // later is silently untested by three separate tables that all say they
-    // cover everything.
+    // Without this, the fixture is a list somebody wrote once, and a kind added later is
+    // silently untested by every table that claims to cover everything.
     const present = new Set(ADVANCE_OUTCOMES.map((outcome) => outcome.kind));
     expect([...present].toSorted()).toEqual(Object.keys(ADVANCE_KINDS).toSorted());
   });
@@ -469,33 +424,28 @@ describe("reviewStageAfter", () => {
   });
 
   it("says reviewing when the undraft failed, which is the truth about the PR", () => {
-    // Not pessimism. The pull request really is still a draft, and a ticket
-    // claiming otherwise would send a human to review something whose own flag
-    // says it is unfinished.
+    // Not pessimism: the pull request really is still a draft, and claiming otherwise would send
+    // a human to review something its own flag says is unfinished.
     expect(reviewStageAfter({ ...ITERATED_UNDRAFTED, undrafted: "failed" })).toBe("reviewing");
   });
 
   it("undrafts the ticket when the reviewer's budget runs out", () => {
-    // `exhausted` undrafts the pull request, so it reaches the same label by a
-    // different road. What made it different — the loop gave up rather than
-    // agreed — is recorded in the comment on the ticket, not in this label.
+    // `exhausted` undrafts the pull request, reaching the same label by a different road — that
+    // the loop gave up rather than agreed is recorded in the ticket comment, not this label.
     expect(
       reviewStageAfter({ kind: "reviewer-exhausted", rounds: 3, unresolved: "still slow" }),
     ).toBe("review-done");
   });
 
   it("writes nothing while the reviewer has said nothing", () => {
-    // The mutation this pins is the expensive one. Once the advance step runs on
-    // a timer this is the outcome of almost every tick, so a stage here is a
-    // Jira write per tick per pull request under review, forever.
+    // Once the advance step runs on a timer this is the outcome of almost every tick, so a stage
+    // here would be a Jira write per tick per pull request under review, forever.
     expect(reviewStageAfter({ kind: "waiting", quietMs: 60_000 })).toBe(null);
   });
 
   it("leaves the label alone for every round that left the draft flag alone", () => {
-    // `capped`, `abandoned`, `refused` and the error kinds all deliberately
-    // return a pull request exactly as they found it. Writing a label after
-    // changing nothing overrides an earlier, better-informed decision with a
-    // default.
+    // `capped`, `abandoned`, `refused` and the error kinds deliberately leave the pull request as
+    // found; labelling after changing nothing overrides an earlier, better-informed decision.
     expect(reviewStageAfter({ kind: "capped", rounds: 20, unresolved: "" })).toBe(null);
     expect(reviewStageAfter({ kind: "abandoned", reason: "needs a migration" })).toBe(null);
     expect(reviewStageAfter({ kind: "refused", stage: "diff-gate", reasons: ["lockfile"] })).toBe(
@@ -505,9 +455,7 @@ describe("reviewStageAfter", () => {
   });
 
   it("agrees with itself across every review-round kind", () => {
-    // Pinned whole, for the reason the exit-code table below is: a new outcome
-    // has to force a decision rather than defaulting to null, which is the
-    // direction that fails quietly.
+    // Pinned whole so a new outcome forces a decision rather than silently defaulting to null.
     const table = ADVANCE_OUTCOMES.map((outcome) => [outcome.kind, reviewStageAfter(outcome)]);
     expect(table).toEqual([
       ["waiting", null],
@@ -516,20 +464,14 @@ describe("reviewStageAfter", () => {
       ["iterated", "review-done"],
       ["reviewer-exhausted", "review-done"],
       ["capped", null],
-      // The draft flag is untouched, exactly as `capped` leaves it. A stall
-      // never reached the checkout, so it has no opinion about whether the pull
-      // request is finished — and writing `review-done` here would tell a board
-      // the agentic cycle ended well on the one pull request it could not open.
+      // A stall never reached the checkout, so it has no opinion about whether the pull request
+      // is finished; `review-done` here would falsely tell a board the cycle ended well.
       ["stalled", null],
       ["abandoned", null],
       ["refused", null],
       ["failed", null],
-      // A merge round touches the branch and not the pull request, so the draft
-      // flag is exactly as it was and the label must not move. `reviewing` would
-      // be the tempting answer — the round did work, and work means still
-      // working — but the label mirrors the flag rather than the activity, and a
-      // merge round that ran after an undraft would silently pull the ticket
-      // back out of `review-done` while a human was reading the pull request.
+      // A merge round touches the branch, not the pull request, so the draft flag — and this
+      // label — must not move, even though the round did work.
       ["synced", null],
     ]);
   });
@@ -537,9 +479,8 @@ describe("reviewStageAfter", () => {
 
 describe("isAdvanceFailureExit", () => {
   it("does not fail the shell while the reviewer has said nothing", () => {
-    // The common case by a wide margin: most ticks find no new comment. A
-    // non-zero code here would make an idle loop indistinguishable from a
-    // broken one, which is the reading a daemon's backoff would act on.
+    // Most ticks find no new comment; a non-zero code here would make an idle loop
+    // indistinguishable from a broken one to a daemon's backoff.
     expect(isAdvanceFailureExit({ kind: "waiting", quietMs: 60_000 })).toBe(false);
   });
 
@@ -558,8 +499,7 @@ describe("isAdvanceFailureExit", () => {
   });
 
   it("agrees with itself across every review-round kind", () => {
-    // Pinned whole, so a new outcome forces a decision rather than defaulting
-    // to zero — the direction that fails quietly.
+    // Pinned whole so a new outcome forces a decision rather than silently defaulting to zero.
     const table = ADVANCE_OUTCOMES.map((outcome) => [outcome.kind, isAdvanceFailureExit(outcome)]);
     expect(Object.fromEntries(table)).toEqual({
       waiting: false,
@@ -567,17 +507,14 @@ describe("isAdvanceFailureExit", () => {
       iterated: false,
       "reviewer-exhausted": false,
       capped: false,
-      // Zero, and it is the counter-intuitive one: a stall is something being
-      // broken. The N attempts that produced it each exited non-zero already,
-      // and a non-zero code here would drive a daemon's backoff to retry the
-      // one pull request that has just been declared not worth retrying.
+      // Counter-intuitive: the attempts that produced a stall each exited non-zero already, so a
+      // non-zero code here would retry a pull request just declared not worth retrying.
       stalled: false,
       abandoned: false,
       refused: true,
       failed: true,
-      // A merge round that reached this outcome did what it set out to do. The
-      // failures on that path are `failed`/`merge` and `refused`, which are
-      // already non-zero above.
+      // A merge round reaching this outcome did what it set out to do — failures on that path
+      // are `failed`/`merge` and `refused`, already non-zero above.
       synced: false,
     });
   });
@@ -588,10 +525,8 @@ const SILENCE_MS = 1_200_000;
 
 describe("chainDecision", () => {
   it("keeps going only while the reviewer is still in the conversation", () => {
-    // Pinned whole, and the direction matters: an outcome this function has not
-    // been taught about must stop the chain, not join it. `--review` is the one
-    // loop in this service with nobody between the iterations, so a new kind
-    // defaulting to `continue` is a new way to spend money unattended.
+    // The direction matters: an untaught outcome must stop the chain, not join it — `--review`
+    // runs unattended, so defaulting to `continue` is a new way to spend money.
     const table = ADVANCE_OUTCOMES.map((outcome) => [
       outcome.kind,
       chainDecision(outcome, SILENCE_MS).stop,
@@ -607,27 +542,22 @@ describe("chainDecision", () => {
       ["abandoned", true],
       ["refused", true],
       ["failed", true],
-      // The third continuing outcome, and the only one that continues without
-      // the reviewer having said anything new. The feedback that was waiting is
-      // still waiting: the merge answered the base, not the review, so stopping
-      // here would end the chain one round before the round that reads it.
+      // The merge answered the base, not the review — stopping here would end the chain one
+      // round before the round that reads the still-waiting feedback.
       ["synced", false],
     ]);
   });
 
   it("ends the chain on the round that hands the pull request to a human", () => {
-    // Undrafting means this side has finished (§6.1c). The loop keeping watch
-    // afterwards is right for a daemon and wrong for a foreground command,
-    // which would hold a terminal open for as long as a review takes.
+    // Undrafting means this side has finished (§6.1c); watching afterward is right for a daemon
+    // but would hold a foreground command's terminal open for as long as a review takes.
     expect(chainDecision(ITERATED_UNDRAFTED, SILENCE_MS).stop).toBe(true);
     expect(chainDecision(ITERATED_DRAFTING, SILENCE_MS).stop).toBe(false);
   });
 
   it("counts a silence only when the reviewer has actually said nothing", () => {
-    // `silent` marks the one outcome where nobody said anything, and it is
-    // deliberately not `!stop`. A round that ran and pushed is the loop
-    // working; folding it in here would let a productive pull request trip the
-    // absent-reviewer brake.
+    // `silent` is deliberately not `!stop` — a round that ran and pushed is the loop working, and
+    // folding it in would trip the absent-reviewer brake on productive work.
     const silent = ADVANCE_OUTCOMES.filter((outcome) => chainDecision(outcome, SILENCE_MS).silent);
     expect(silent.map((outcome) => outcome.kind)).toEqual(["waiting"]);
   });
@@ -639,10 +569,8 @@ describe("chainDecision", () => {
   });
 
   it("stops once the pull request has been quiet for longer than the bound", () => {
-    // The bound that used to be a counter on the chain's own stack. It is a
-    // duration now, read off the pull request, so it means the same number of
-    // minutes whatever `REVIEW_POLL_MS` is — and unplugging it gives back the
-    // one loop in this service that polls forever with nobody watching.
+    // A duration read off the pull request, so it means the same number of minutes whatever
+    // `REVIEW_POLL_MS` is — without it, this is the one loop that polls forever unwatched.
     const decision = chainDecision({ kind: "waiting", quietMs: SILENCE_MS }, SILENCE_MS);
 
     expect(decision.stop).toBe(true);
@@ -657,17 +585,14 @@ describe("chainDecision", () => {
   });
 
   it("keeps waiting when it could not measure how quiet the pull request is", () => {
-    // `null` is "the question cannot be answered from this payload", and the
-    // safe reading of that is to look again. Making it stop would end a live
-    // pull request on a parse failure, which is unrecoverable in the direction
-    // that matters: one more free `gh` read against an abandoned review.
+    // `null` means "cannot be answered from this payload" — stopping here would end a live pull
+    // request on a parse failure, unrecoverable in the direction that matters.
     expect(chainDecision({ kind: "waiting", quietMs: null }, 0).stop).toBe(false);
   });
 
   it("distinguishes the two caps in the sentence it prints", () => {
-    // They stop the chain identically and mean opposite things: one is a policy
-    // about how much argument a bot reviewer is worth, the other a brake on the
-    // machinery. An operator reading only "stopped" cannot tell which to relax.
+    // The two stop the chain identically but mean opposite things: one is a policy on how much
+    // argument a bot reviewer is worth, the other a brake on the machinery.
     const budget = chainDecision(
       { kind: "reviewer-exhausted", rounds: 3, unresolved: "" },
       SILENCE_MS,
@@ -698,10 +623,8 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("does not let a merge round read like a round that answered the reviewer", () => {
-    // From the outside a merge round looks like every other one: it reserved,
-    // it cost money, it pushed a commit. The one thing it did not do is read
-    // the review — so an operator who took it for a review round would read the
-    // reviewer's continuing silence as agreement with an answer never given.
+    // A merge round costs money and pushes a commit like any other, but it never read the review
+    // — mistaking it for one would read the reviewer's silence as agreement never given.
     const clean = describeAdvanceOutcome({ kind: "synced", round: 3, behind: 7, conflicts: [] });
     expect(clean).toContain("SYNCED");
     expect(clean).toContain("7 commit(s)");
@@ -719,9 +642,8 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("says out loud when the reviewer was not asked to look again", () => {
-    // The failure this guards against is silent: the round succeeded, the code
-    // is pushed, and nobody will ever read it because the notification did not
-    // go out. The recovery is a person clicking one button, so they must be told.
+    // The failure is silent: code pushed, nobody reads it because the notification never went
+    // out. Recovery is one button, so the operator must be told.
     const text = describeAdvanceOutcome({
       kind: "iterated",
       round: 2,
@@ -789,10 +711,8 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("does not claim a push on a round that only answered", () => {
-    // The bug this pins was found on a live pull request: round 2 of #2658
-    // deliberately changed nothing, and the headline still read "round 2
-    // pushed". An operator who goes looking for that commit and does not find
-    // it has no way to tell which half of the line is wrong.
+    // An operator who goes looking for a commit that was never pushed has no way to tell which
+    // half of the headline is wrong.
     const text = describeAdvanceOutcome({
       kind: "iterated",
       round: 2,
@@ -829,9 +749,8 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("says the cap fired rather than that the reviewer was satisfied", () => {
-    // `ready` and `reviewer-exhausted` both undraft, and reading one as the
-    // other would tell a human the bot and the reviewer agreed when they did
-    // not.
+    // `ready` and `reviewer-exhausted` both undraft — reading one as the other would tell a human
+    // the bot and reviewer agreed when they did not.
     const text = describeAdvanceOutcome({
       kind: "reviewer-exhausted",
       rounds: 3,
@@ -843,10 +762,8 @@ describe("describeAdvanceOutcome", () => {
   });
 
   it("says which budget ran out, and that the other one has not", () => {
-    // The rename is the whole of it. This used to be an ending: undraft, report,
-    // stop. It is now a statement about one of two channels, and an operator who
-    // reads it as a terminal will go and do by hand the thing the loop is still
-    // willing to do — answer the next human comment.
+    // This is a statement about one of two channels, not a terminal state — reading it as one
+    // sends an operator to do by hand what the loop is still willing to do.
     const text = describeAdvanceOutcome({ kind: "reviewer-exhausted", rounds: 3, unresolved: "x" });
 
     expect(text).toContain("REVIEWER EXHAUSTED");
@@ -864,11 +781,8 @@ describe("terminalLabelAfter", () => {
   /**
    * The whole table, because this function is defined by what it excludes.
    *
-   * A test naming only the two outcomes that label would pass just as happily
-   * if a third started labelling too, and a wrongly-labelled ticket leaves the
-   * queue permanently with nothing but a human to notice. So every kind is
-   * pinned, and `exitKey` splits `abandoned` for the reason it was written:
-   * that kind is the one whose two causes disagree here as well.
+   * A test naming only the labelled outcomes would pass just as happily if a third started
+   * labelling too, and a wrongly-labelled ticket leaves the queue permanently stuck.
    */
   const EXPECTED: Readonly<Record<string, "failed" | null>> = {
     "no-worktree": null,
@@ -897,9 +811,8 @@ describe("terminalLabelAfter", () => {
   }
 
   it("does not label a machine failure, so a re-run stays possible", () => {
-    // The case with teeth. A crash says nothing about the ticket — SSX-3831's
-    // recon was killed by a sleeping laptop — and labelling it would turn a
-    // transient failure into one only a human could clear.
+    // A crash says nothing about the ticket, and labelling it would turn a transient failure
+    // into one only a human could clear.
     expect(
       terminalLabelAfter({
         kind: "crashed",
@@ -926,12 +839,8 @@ describe("terminalLabelAfter", () => {
 
 describe("reportsToTicket", () => {
   /**
-   * The same exhaustive table as above, and for a stronger reason.
-   *
-   * This function's failure mode is an absence. A wrongly-silent outcome posts
-   * nothing, releases the claim, and leaves a ticket byte-for-byte as it was
-   * found — there is no artefact to notice, so nothing but this table stands
-   * between a new outcome kind and a run that is invisible to the team.
+   * The same exhaustive table as above, for a stronger reason: a wrongly-silent outcome leaves
+   * no artefact to notice, so only this table stands between a new kind and an invisible run.
    */
   const EXPECTED: Readonly<Record<string, boolean>> = {
     "no-worktree": true,
@@ -958,11 +867,8 @@ describe("reportsToTicket", () => {
   }
 
   it("reports a blocked machine, which is the case the old gate lost", () => {
-    // SSX-3832, 2026-09-05: a policy hook denied the write pass its Write tool.
-    // The run had claimed the ticket, cut a worktree and verified the base build
-    // before it was stopped, then released every label and said nothing. This is
-    // the mutation that matters — restore the old `terminalLabelAfter` gate and
-    // this is the assertion that fails.
+    // Restoring the old `terminalLabelAfter` gate here is the mutation that matters — this
+    // assertion is what catches it.
     expect(
       reportsToTicket({
         kind: "abandoned",
@@ -994,10 +900,8 @@ describe("reportsToTicket", () => {
   });
 
   it("disagrees with terminalLabelAfter, because they ask different questions", () => {
-    // The pairing that must not collapse back. An environment abandon is
-    // reported and must NOT be labelled: reporting tells a team the run
-    // happened, labelling would take a retryable ticket out of the queue for
-    // good. Any change making one derive from the other breaks this.
+    // An environment abandon must be reported but NOT labelled: reporting tells the team the run
+    // happened, labelling would take a retryable ticket out of the queue for good.
     const blocked: SolveOutcome = {
       kind: "abandoned",
       cause: "environment",
@@ -1025,9 +929,8 @@ describe("describeReviewSweep", () => {
   };
 
   it("says a quiet pass in one line", () => {
-    // A watch prints this every tick forever. If a pass on which nothing
-    // happened is more than one line, the log is unreadable by the time
-    // anything does happen.
+    // Printed every tick forever — if a quiet pass is more than one line, the log is unreadable
+    // by the time anything happens.
     const line = describeReviewSweep(7, quiet);
     expect(line).toBe("pass 7: 4 watched");
     expect(line).not.toContain("\n");
@@ -1050,10 +953,8 @@ describe("describeReviewSweep", () => {
   });
 
   it("reports the deferral, because that is the bound doing something", () => {
-    // The mutation this catches is dropping the branch as noise. Deferred work
-    // is actionable work this pass declined to pay for, and hiding it makes
-    // MAX_REVIEW_ROUNDS_PER_TICK invisible at the only moment it is visible —
-    // which reads, from a terminal, as a loop ignoring a reviewer.
+    // Deferred work is actionable work this pass declined to pay for — hiding it makes
+    // MAX_REVIEW_ROUNDS_PER_TICK invisible at the only moment it is visible.
     expect(describeReviewSweep(1, { ...quiet, deferred: ["SSX-9", "SSX-10"] })).toContain(
       "2 deferred",
     );
@@ -1094,11 +995,8 @@ describe("describeReviewSweep", () => {
 
 describe("endedState and completionLabelFor", () => {
   it("gives agent:done to a merge and nothing else", () => {
-    // THE ONE GUARDING THE NUMBER. `agent:done` is the count of bugs this tool
-    // fixed. Widen it to any ended pull request and the count silently absorbs
-    // every change a person declined — a failure that shows up as a
-    // plausible-looking figure in a report rather than as a malfunction, which
-    // is the only reason it needs a test of its own.
+    // `agent:done` is the count of bugs this tool fixed — widening it to any ended pull request
+    // would silently absorb every change a person declined.
     expect(completionLabelFor("MERGED")).toBe("done");
     expect(completionLabelFor("CLOSED")).toBe("closed");
   });
@@ -1109,10 +1007,8 @@ describe("endedState and completionLabelFor", () => {
   });
 
   it("treats a state it has never seen as closed", () => {
-    // The safe direction, and the direction a `state ===` check flipped to
-    // `!==` would get wrong. `closed` counts nothing, so an unrecognised
-    // spelling costs a ticket the wrong label; the inverse would let a future
-    // `gh` inflate the number of bugs this service claims to have fixed.
+    // `closed` counts nothing, so an unrecognised spelling costs the wrong label — the inverse
+    // would let a future `gh` inflate the number of bugs this service claims to have fixed.
     expect(endedState("merged")).toBe("CLOSED");
     expect(endedState("DRAFT")).toBe("CLOSED");
     expect(endedState("")).toBe("CLOSED");

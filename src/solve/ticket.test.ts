@@ -48,8 +48,7 @@ describe("renderTicket", () => {
   });
 
   it("includes comments, because the specification often lives in one", async () => {
-    // The failure this guards is the one triage already had: a reader that
-    // stops at `description` reads a draft and believes it read the ticket.
+    // A reader that stops at `description` reads a draft and believes it read the ticket.
     const { text } = await renderTicket(
       reader(),
       detail({
@@ -82,8 +81,7 @@ describe("renderTicket", () => {
 
     expect(inlined).toEqual(["svgtest.svg"]);
     expect(omitted).toEqual([]);
-    // The actual bytes, not just the filename. A ticket saying "use this icon"
-    // means the contents.
+    // The actual bytes, not just the filename.
     expect(text).toContain(SVG);
   });
 
@@ -99,8 +97,7 @@ describe("renderTicket", () => {
     expect(inlined).toEqual([]);
     expect(omitted[0]).toContain("screenshot.png");
     expect(text).toContain("screenshot.png");
-    // Not fetched: a PNG rendered as mojibake costs tokens and tells nobody
-    // anything.
+    // Not fetched: a PNG rendered as mojibake costs tokens and tells nobody anything.
     expect(read.fetchAttachmentText).not.toHaveBeenCalled();
   });
 
@@ -132,7 +129,6 @@ describe("renderTicket", () => {
   });
 
   it("survives an attachment that cannot be read at all", async () => {
-    // One unreadable file must not cost the whole solve.
     const read: AttachmentReader = {
       fetchAttachmentText: vi.fn(async () => {
         throw new Error("403");
@@ -168,8 +164,7 @@ describe("renderTicket", () => {
   });
 
   it("says so explicitly when there is nothing to show", async () => {
-    // An empty section beats a missing one: "no comments" and "the comments
-    // were never fetched" must not look the same to a reader.
+    // An empty section beats a missing one: "no comments" must not look the same as "never fetched".
     const { text } = await renderTicket(reader(), detail());
 
     expect(text).toContain("Comments (0)");
@@ -217,8 +212,7 @@ describe("renderTicket", () => {
       }),
     );
 
-    // The three facts that have to line up for the instruction to be followable:
-    // the sentence, the reference by filename, and the bytes.
+    // Three facts have to line up for the instruction to be followable: the sentence, the filename, and the bytes.
     expect(text).toContain("This is the svg that should be used in thest");
     expect(text).toContain("[attachment: svgtest.svg]");
     expect(text).toContain(SVG);
@@ -232,8 +226,6 @@ describe("fenceFor", () => {
   });
 
   it("outgrows any backtick run inside the content", () => {
-    // Attachment bytes are attacker-controlled, so a fixed fence is escapable
-    // by attaching a file containing one.
     expect(fenceFor("a ``` b")).toBe("````");
     expect(fenceFor("a ````` b")).toBe("``````");
   });
@@ -247,8 +239,7 @@ describe("fenceFor", () => {
       }),
     );
 
-    // The opening fence is longer than anything in the payload, so the payload
-    // stays inside it.
+    // The opening fence is longer than anything in the payload, so the payload stays inside it.
     expect(text).toContain("````");
   });
 });

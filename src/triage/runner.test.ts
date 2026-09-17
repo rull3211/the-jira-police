@@ -50,8 +50,7 @@ describe("buildPrompt", () => {
   });
 
   it("passes --no-write unconditionally, so this half can never publish", () => {
-    // There is no combination of options that drops it. The analyst decides;
-    // `poster.ts` writes, and only after the gate has agreed.
+    // No combination of options drops it; the analyst decides, `poster.ts` writes.
     for (const options of [
       BASE,
       { ...BASE, deep: true },
@@ -64,9 +63,7 @@ describe("buildPrompt", () => {
   });
 
   it("never passes --yes, which is what used to make the skill post mid-run", () => {
-    // `--yes` skips the skill's confirm gate and writes. Its removal is the
-    // change that made checking-before-posting possible at all: while the write
-    // happened inside this run, structured_output arrived too late to stop it.
+    // `--yes` skips the skill's confirm gate and writes, which made checking-before-posting impossible.
     expect(buildPrompt({ ...BASE, deep: true, noHtml: true })).not.toContain("--yes");
   });
 
@@ -93,19 +90,15 @@ describe("buildPrompt", () => {
   it("puts the staged-image block under the command rather than inside it", () => {
     const prompt = buildPrompt({ ...BASE, images: IMAGES });
 
-    // The first line is parsed as a slash command and its flags, so a block
-    // joined with a space would arrive as arguments to the skill.
+    // The first line is parsed as a slash command and its flags; a block joined with a space
+    // would arrive as arguments to the skill.
     expect(prompt.split("\n")[0]).toBe("/intake-triage SSX-1234 --no-write");
     expect(prompt).toContain(IMAGES.block);
   });
 
   it("is byte-identical to an imageless run when staging produced no block", () => {
-    // Staging that ran and found no raster image must look like staging that
-    // never ran. The branch is on the block's content rather than on `images`
-    // being present, and only this test separates the two: the prompt tests
-    // above never pass `images` at all, so a presence check satisfies every one
-    // of them while appending two blank lines to every ticket that has an
-    // attachment but no picture.
+    // The branch is on the block's content rather than on `images` being present; a presence
+    // check would append two blank lines to every ticket with an attachment but no picture.
     expect(buildPrompt({ ...BASE, images: { block: "", directory: null } })).toBe(
       buildPrompt(BASE),
     );
@@ -130,15 +123,10 @@ describe("buildArgs", () => {
   });
 
   it("withholds the network and subagents, which is what lets this session read pictures", () => {
-    // The prerequisite for TRIAGE_IMAGES: an instruction painted into a
-    // screenshot arrives unread by anything else, so the session it reaches
-    // must have no way to act on it off-box. `Task` belongs with the other two
-    // because a subagent's tool surface is not this list and is not verified to
-    // inherit from it, which would make denying the first two decorative.
-    //
-    // Read off the command line rather than the constant: a correct list that
-    // never reaches `--disallowedTools` is the failure asserting on
-    // ANALYST_DENIED_TOOLS cannot distinguish from success.
+    // `Task` belongs with the other two: a subagent's tool surface is not this list and is not
+    // verified to inherit from it, which would make denying the first two decorative. Read off
+    // the command line rather than the constant, since a correct list that never reaches
+    // `--disallowedTools` is a failure this could otherwise miss.
     const args = buildArgs(BASE);
     const denied = (args[args.indexOf("--disallowedTools") + 1] ?? "").split(",");
 
@@ -167,18 +155,15 @@ describe("buildArgs", () => {
   });
 
   it("names no staged directory when nothing was written to disk", () => {
-    // Both the refusal and the no-raster-image outcome leave `directory` null
-    // while still carrying text. An `--add-dir` naming a path that was never
-    // created fails the session at startup, which would turn a ticket with one
-    // unreadable attachment into a ticket with no verdict at all.
+    // An `--add-dir` naming a path that was never created fails the session at startup, turning a
+    // ticket with one unreadable attachment into a ticket with no verdict at all.
     const args = buildArgs({ ...BASE, images: { block: "note", directory: null } });
 
     expect(args).not.toContain("--add-dir");
   });
 
   it("adds the vault as a working directory so Read can reach it", () => {
-    // The vault is a sibling of this repo, not inside it. Without --add-dir the
-    // skill's reads land outside every directory the run is allowed to touch.
+    // The vault is a sibling of this repo, not inside it, so without --add-dir it's unreachable.
     const args = buildArgs({ ...BASE, vaultPath: "/vaults/insurance-knowledge-vault" });
     expect(args[args.indexOf("--add-dir") + 1]).toBe("/vaults/insurance-knowledge-vault");
   });
@@ -189,8 +174,7 @@ describe("buildArgs", () => {
   });
 
   it("does not pass the vault as a prompt flag", () => {
-    // It travels as an environment variable instead: a path the model has to
-    // parse back out of a prompt string is a path that can be misread.
+    // Travels as an environment variable instead: a path parsed out of a prompt string can be misread.
     expect(buildPrompt({ ...BASE, vaultPath: "/vaults/v" })).not.toContain("/vaults/v");
   });
 
@@ -204,10 +188,8 @@ describe("buildArgs", () => {
 
 describe("toolsFor", () => {
   it("grants the analyst no way to mutate a ticket", () => {
-    // Every one of these is a tool the old write-enabled run was granted.
-    // Note this asserts only that they are not PRE-APPROVED. Absence from the
-    // allowlist is not denial — that is what `--disallowedTools` is for, and it
-    // is asserted separately below.
+    // Asserts only that these are not PRE-APPROVED; absence from the allowlist is not denial —
+    // that's `--disallowedTools`, asserted separately below.
     const granted = toolsFor(BASE).join(" ");
 
     for (const tool of [
@@ -235,43 +217,37 @@ describe("toolsFor", () => {
 });
 
 describe("the analyst denylist", () => {
-  // Probed 2026-09-04: --allowedTools pre-approves, it does not restrict. A run
-  // given `--allowedTools Read` used Bash, inside this repo and outside it. So
-  // every guarantee this file makes about what the analyst cannot do rests on
-  // these args and not on the allowlist above.
+  // --allowedTools pre-approves, it does not restrict — a run given `--allowedTools Read` still
+  // used Bash. Every guarantee about what the analyst cannot do rests on these args, not the allowlist.
 
   it("withholds the shell and both write tools", () => {
     const args = buildArgs(BASE);
     const denied = (args[args.indexOf("--disallowedTools") + 1] ?? "").split(",");
 
-    // Bash is the load-bearing one: with a shell the run has curl, and with
-    // curl it has the whole Jira REST API regardless of which MCP tools exist.
+    // Bash is load-bearing: with a shell the run has curl, and with curl the whole Jira REST API.
     expect(denied).toContain("Bash");
     expect(denied).toContain("Write");
     expect(denied).toContain("Edit");
   });
 
   it("withholds them even when the caller supplies its own allowlist", () => {
-    // The mock skill passes `allowedTools: []`. That must not be a way to end
-    // up with a run that is denied nothing, which is what would happen if the
-    // denylist were derived from the allowlist rather than fixed.
+    // The mock skill passes `allowedTools: []`; that must not end up denying nothing, which is
+    // what would happen if the denylist were derived from the allowlist rather than fixed.
     const args = buildArgs({ ...BASE, allowedTools: [] });
 
     expect(args[args.indexOf("--disallowedTools") + 1]).toBe(ANALYST_DENIED_TOOLS.join(","));
   });
 
   it("never pre-approves a tool it also denies", () => {
-    // These two lists reach the same command line. A name in both is a
-    // contradiction the arg parser resolves silently, in a direction nobody
-    // here has checked — so it must not be reachable.
+    // A name in both lists is a contradiction the arg parser resolves silently, in a direction
+    // nobody here has checked.
     const overlap = ANALYST_DENIED_TOOLS.filter((tool) => ALLOWED_TOOLS.includes(tool));
 
     expect(overlap).toEqual([]);
   });
 
   it("denies every built-in the shared list denies", () => {
-    // Guards against a future edit that rebuilds this list by hand and quietly
-    // drops one, which would be invisible: the run would simply succeed.
+    // Guards against a future edit that rebuilds this list by hand and quietly drops one.
     for (const tool of DENIED_BUILTIN_TOOLS) {
       expect(ANALYST_DENIED_TOOLS).toContain(tool);
     }
@@ -279,8 +255,8 @@ describe("the analyst denylist", () => {
 });
 
 describe("assertMcpReady", () => {
-  // The failure this guards against: when the Atlassian session has expired the
-  // run still exits 0, having produced a verdict without reading the ticket.
+  // Guards against an expired Atlassian session: the run would otherwise exit 0 having produced
+  // a verdict without reading the ticket.
   it("accepts a connected server", () => {
     expect(() =>
       assertMcpReady([{ name: "atlassian", status: "connected" }], ["atlassian"]),
@@ -318,12 +294,6 @@ describe("assertMcpReady", () => {
   });
 });
 
-/**
- * The poller and the skill reach Jira by different routes on purpose: a REST
- * credential to discover which tickets are new, the Atlassian MCP session to
- * read what is in them. The skill has no use for the REST credential, so it
- * must not be handed one.
- */
 describe("assertDorCoherent", () => {
   const clean = {
     verdict: "needs-info",
@@ -347,25 +317,15 @@ describe("assertDorCoherent", () => {
   });
 
   it("passes when placeholders are reported alongside dor:gaps", () => {
-    // This is the correct handling, and it must not be punished — the whole
-    // point is to make honest reporting free and contradiction expensive.
+    // Must not be punished — the point is to make honest reporting free and contradiction expensive.
     expect(() =>
       assertDorCoherent({ ...clean, dorPlaceholders: [{ text: "[N]", row: 3 }] }, "SSX-1"),
     ).not.toThrow();
   });
 
   it("allows the exact SSX-3822 payload, because row 9 is now advisory", () => {
-    // Reconstructed from the posted comment and the labels now on the issue,
-    // and it is the payload this guard was BUILT to refuse — the run wrote
-    // "baseline [N] left unfilled" into its own scorecard and shipped dor:pass
-    // anyway.
-    //
-    // It passes now, and that is the change rather than a regression. Row 9
-    // cannot fail an item, so a pass alongside an unfilled baseline is no
-    // longer a contradiction; it is the advisory rule working. What the guard
-    // still refuses is the same claim about a blocking row — the case below.
-    // If this ever needs reverting, the lever is BLOCKING_DOR_ROWS, not this
-    // test.
+    // Row 9 cannot fail an item, so a pass alongside an unfilled baseline is no longer a
+    // contradiction. The lever for reverting this is BLOCKING_DOR_ROWS, not this test.
     expect(() =>
       assertDorCoherent(
         {
@@ -380,9 +340,7 @@ describe("assertDorCoherent", () => {
   });
 
   it("still rejects the SSX-3822 shape when the placeholder is on a blocking row", () => {
-    // Same payload, one field different: the [N] stands in for an acceptance
-    // criterion rather than a baseline metric. This is the half of the old
-    // guard that survives, and it is the half worth keeping.
+    // Same payload, one field different: [N] stands in for an acceptance criterion, not a baseline metric.
     expect(() =>
       assertDorCoherent(
         {
@@ -397,9 +355,7 @@ describe("assertDorCoherent", () => {
   });
 
   it("treats an unattributed placeholder as blocking", () => {
-    // Fails closed on purpose. "There is a placeholder and I cannot say which
-    // row" is the SSX-3822 shape with the attribution missing, and the escape
-    // costs the model one honest integer.
+    // Fails closed on purpose; the escape costs the model one honest integer.
     expect(() =>
       assertDorCoherent(
         {
@@ -452,9 +408,7 @@ describe("assertDorCoherent", () => {
   });
 
   it("catches a bad verdict even when the labels are honest", () => {
-    // The verdict is the field this service actually consumes — it sets the
-    // emoji and the sink heading — so guarding only the label would leave the
-    // one that matters unguarded.
+    // The verdict is what this service actually consumes; guarding only the label leaves it unguarded.
     expect(() =>
       assertDorCoherent(
         {
@@ -491,9 +445,8 @@ describe("assertDorCoherent", () => {
   });
 
   it("is enforced by parsePayload, not merely available to it", () => {
-    // Regression: an earlier version tested this function directly and nothing
-    // else. Deleting the call from parsePayload kept every test green, which
-    // meant the guard was decorative on the only path that runs in production.
+    // Testing this function only in isolation would leave the suite green even if the call to it
+    // were deleted from parsePayload, the only path that runs in production.
     expect(() =>
       parsePayload(
         {
@@ -524,9 +477,8 @@ describe("assertDorCoherent", () => {
   });
 
   it("reads a legacy bare string as unattributed, so a stale skill fails closed", () => {
-    // The skill is prose the model interprets, not code deployed with this
-    // file, so a run mid-rollout can still answer in the old shape. It must
-    // keep the old behaviour rather than silently switching the guard off.
+    // The skill is prose the model interprets, not code deployed with this file, so a run
+    // mid-rollout can still answer in the old shape.
     expect(() =>
       parsePayload(
         {
@@ -577,8 +529,8 @@ describe("assertDorCoherent", () => {
   });
 
   it("is a TriageError, so the poller's existing handling applies", () => {
-    // Which means the key is not recorded as seen and the next cycle retries —
-    // and the skill's comment is idempotent, so a better run overwrites it.
+    // The key is not recorded as seen, so the next cycle retries; the comment is idempotent, so a
+    // better run overwrites it.
     const error = new TriageContradictionError(
       "SSX-1",
       [{ text: "[N]", row: 3 }],
@@ -609,11 +561,8 @@ describe("childEnv", () => {
   it.each(["1", "0", "true", ""])(
     "strips the undocumented hook kill switch, whatever the parent set it to (%o)",
     (value) => {
-      // Never forwarded and never set. The variable is documented nowhere, and
-      // the reading that treats it as a presence check would mean the "0" this
-      // file used to set was disabling every safety hook in the subprocess —
-      // the opposite of what its comment claimed. Absent is the only value that
-      // means "hooks on" under both readings.
+      // The variable is documented nowhere; absent is the only value that means "hooks on" under
+      // both plausible readings of it.
       expect(childEnv({ PATH: "/usr/bin", CLAUDE_SKIP_HOOKS: value })).not.toHaveProperty(
         "CLAUDE_SKIP_HOOKS",
       );
@@ -649,12 +598,8 @@ describe("childEnv", () => {
 });
 
 describe("parseAgentFitness", () => {
-  // Every test in this block is a variation on one question: what does this
-  // function do when it is not told a clear yes? The answer has to be "no" in
-  // all of them, because `solvable: true` is the first value in this service
-  // that eventually authorises a subprocess to edit source. A wrong `false`
-  // costs a human triaging a ticket they were going to triage anyway; a wrong
-  // `true` costs an unasked-for pull request. The asymmetry is not close.
+  // Every test here answers "no" when not told a clear yes: `solvable: true` authorises a
+  // subprocess to edit source, and a wrong `false` is far cheaper than a wrong `true`.
 
   it.each([undefined, null, "yes", 42, [], "{}"])("reads %o as not solvable", (value) => {
     expect(parseAgentFitness(value).solvable).toBe(false);
@@ -671,11 +616,8 @@ describe("parseAgentFitness", () => {
   });
 
   it.each([undefined, null, "yes", 1, "true", {}])("reads plausible %o as no watch", (value) => {
-    // Same asymmetry one field over, and the reason it is worth repeating: a
-    // wrong `true` here does not authorise a code change, it authorises a
-    // *recurring charge*. `plausible` is also the one subfield the schema does
-    // not require, so its absence is the ordinary case rather than a malformed
-    // reply, and absence has to read as a decline.
+    // A wrong `true` here authorises a recurring triage run, not a code change. `plausible` also
+    // isn't schema-required, so its absence is the ordinary case, not a malformed reply.
     expect(parseAgentFitness({ plausible: value }).plausible).toBe(false);
   });
 
@@ -717,8 +659,7 @@ describe("parseAgentFitness", () => {
   });
 
   it("is applied by parsePayload, not merely available to it", () => {
-    // The lesson from `assertDorCoherent`: testing the helper in isolation
-    // proved nothing, because deleting the call site left the suite green.
+    // Testing the helper in isolation proves nothing if deleting its call site leaves the suite green.
     const parsed = parsePayload(
       {
         verdict: "ready-ish",
@@ -743,9 +684,7 @@ describe("parseAgentFitness", () => {
   });
 
   it("gives parsePayload a declining fitness when the field is absent", () => {
-    // The schema leaves `agentFitness` optional on purpose, so this is the
-    // ordinary path for any run that does not volunteer an opinion — including
-    // every run made before this field existed.
+    // `agentFitness` is optional on purpose: the ordinary path for a run that volunteers no opinion.
     const parsed = parsePayload(
       {
         verdict: "needs-info",

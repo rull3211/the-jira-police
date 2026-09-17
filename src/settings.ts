@@ -1,19 +1,8 @@
 /**
  * Declarative settings table plus a generic reader.
  *
- * Every setting the service understands is declared once, here, as data. The
- * reader is generic over that table, which buys three things over hand-written
- * `process.env` lookups scattered across modules:
- *
- *   - one place to see everything the service needs to run;
- *   - a single validation pass at startup, so a misconfigured deployment fails
- *     immediately with a complete list rather than one error at a time, hours
- *     in, when some code path is first reached;
- *   - a `sensitive` marker, so diagnostics can print the resolved config
- *     without leaking the values that matter.
- *
- * No values live in this file. Sensitive ones are supplied at runtime through
- * the environment; see .env.example for the template.
+ * Every setting is declared once, here, as data, so a misconfigured deployment fails at startup
+ * with a complete list rather than one error at a time as code paths are reached.
  */
 
 export interface SettingSpec {
@@ -157,36 +146,21 @@ export const SETTINGS = [
     name: "SOLVE_REPOS",
     description:
       "Comma-separated allowlist of repositories the solver may touch. Unlike JIRA_COMPONENTS, blank means *nothing* is allowed rather than everything: this list grants a write privilege, so its empty state has to be the safe one. A ticket naming a repo outside the list is skipped and not failed, so widening the list later picks it up without a manual reset.",
-    // Deliberately has no fallback, and it is the only solve setting that
-    // doesn't. Every other blank here falls back to something *more*
-    // restrictive than the alternative, so the fallback is safe. This one is an
-    // allowlist: a default would name a repository that no operator ever typed,
-    // and — because `readSettings` cannot tell blank from unset — it would make
-    // the privilege unrevokable by the obvious means. Someone emptying
-    // SOLVE_REPOS to take the solver off a repo would have handed it straight
-    // back. Unset means no repository is allowed, which costs a line in .env
-    // and buys an allowlist that can actually be emptied.
+    // No fallback: since `readSettings` can't tell blank from unset, defaulting to a repo would
+    // make the allowlist impossible to fully empty again.
   },
   {
     name: "SOLVE_REPO_ROOT",
     description:
       "Directory holding the local checkouts the solver works from; a ticket's repository is resolved as SOLVE_REPO_ROOT/<name> where the name comes from the ticket's own svc: label. The solver never edits these checkouts — it creates a git worktree from one — but it does read and fetch in them, so this points at real repositories and is deliberately not guessed.",
-    // No fallback, for the same reason as SOLVE_REPOS. A default of "the
-    // directory above this one" would be right on this machine and silently
-    // wrong on any other, and the way it would be wrong is by finding some
-    // other checkout with a matching name. Naming the path costs one line and
-    // makes the answer to "which code can this touch" readable.
+    // No fallback, for the same reason as SOLVE_REPOS: a guessed path would be silently wrong
+    // on any machine but this one.
   },
   {
     name: "SOLVE_READ_DIRS",
     description:
       "Comma-separated names of OTHER checkouts under SOLVE_REPO_ROOT that a pass may read for context — the backend a frontend calls, the shared library both depend on. Names, not paths, so this cannot point outside SOLVE_REPO_ROOT. It grants no write: the only repository a run may change is still the one its svc: label named, and SOLVE_REPOS still decides that. It exists because a pass reasoning about how another service behaves will produce a confident answer with or without the code — PR #2663 asserted what a backend mapper did rather than reading it — and a wrong answer about somebody else's service is the expensive kind. Blank means no checkout but the one being solved.",
     // No fallback, for the same reason as SOLVE_REPOS and SOLVE_REPO_ROOT.
-    // Unlike those two this grants only reads, so the argument is weaker — but
-    // it is the same argument, and the checkouts here are a developer's own
-    // working copies rather than fresh clones. A default would name directories
-    // nobody typed and, since `readSettings` cannot tell blank from unset,
-    // emptying it would not take them away again.
   },
   {
     name: "SOLVE_BASE_REF",
@@ -228,18 +202,14 @@ export const SETTINGS = [
     name: "SOLVE_GITHUB_OWNER",
     description:
       "The GitHub owner or organisation pull requests are opened against; a ticket's repository becomes SOLVE_GITHUB_OWNER/<name>, where the name is the same one SOLVE_REPOS allows and the ticket's svc: label supplies. gh is never left to infer the repository from whatever remote the worktree happens to carry, because a wrong inference here opens a pull request on somebody else's repository and there is no undo that unsends the notifications.",
-    // No fallback, for the same reason as SOLVE_REPOS and SOLVE_REPO_ROOT: this
-    // names a place that gets written to. An owner guessed from the checkout's
-    // remote would be right until the day someone adds a fork as `origin`.
+    // No fallback: a guessed owner (from the checkout's remote) breaks the day a fork is added as `origin`.
   },
   {
     name: "SOLVE_WORKTREE_ROOT",
     description:
       "Directory the solver cuts its worktrees into, one per issue key. Defaults to the system temp directory, which is where a temporary checkout belongs — deliberately nowhere near the repository, so a failed run leaves its evidence somewhere obviously not the working copy. Configurable because a run that fails keeps its worktree for a human to read, and on macOS the default lands under /private/var, which some tooling cannot open; pointing this at a readable directory is the difference between a diff that can be reviewed by hand and one that can only be described.",
     fallback: "",
-    // Empty means the system temp directory. It cannot default to the literal
-    // path because `tmpdir()` is a function of the environment, and freezing
-    // today's answer into a string would break the first machine that disagrees.
+    // Empty means the system temp directory; can't freeze `tmpdir()`'s answer into a literal fallback.
   },
   {
     name: "SOLVE_BOT_NAME",
@@ -338,14 +308,7 @@ export const SETTINGS = [
   },
 ] as const satisfies readonly SettingSpec[];
 
-/**
- * Widened view used for iteration.
- *
- * `as const` above is what makes SettingName a union of literals, but it also
- * means each element's type lists only the properties it actually declares —
- * so `spec.fallback` is a type error on entries that have no fallback. Reading
- * through the interface restores uniform access without losing the literals.
- */
+/** Widened view for iteration: `as const` above narrows each entry to only its declared properties. */
 const SPECS: readonly SettingSpec[] = SETTINGS;
 
 export type SettingName = (typeof SETTINGS)[number]["name"];
@@ -367,9 +330,8 @@ export class SettingsError extends Error {
 /**
  * Resolves every declared setting, reporting all missing ones at once.
  *
- * Blank strings count as absent. An empty value in a .env file is almost always
- * an unfilled template line rather than a deliberate choice, and treating it as
- * present produces a confusing downstream failure instead of a clear one here.
+ * Blank strings count as absent, since an empty `.env` value is almost always an unfilled
+ * template line rather than a deliberate choice.
  */
 export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   const resolved: Record<string, string> = {};
@@ -402,11 +364,8 @@ export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 /**
  * Runs an entry point, turning a configuration problem into a message.
  *
- * Wraps the whole of `main` rather than just `readSettings`, because not every
- * such problem is visible from one setting alone: `SKILL_NAME=intake-triage`
- * with no `VAULT_PATH` is only wrong as a pair, and it is caught at wiring
- * time. A misconfiguration is the operator's to fix either way, so it earns a
- * sentence and EX_CONFIG rather than a stack trace.
+ * Wraps all of `main`, not just `readSettings`, since some misconfigurations (e.g.
+ * `SKILL_NAME=intake-triage` with no `VAULT_PATH`) are only visible as a pair, at wiring time.
  */
 export async function withConfigErrors(main: () => Promise<void>): Promise<void> {
   try {
@@ -434,25 +393,9 @@ export function describeSettings(settings: Settings): Record<string, string> {
 /**
  * Reads a numeric setting, with a floor.
  *
- * The finite check alone was not enough, and the gap is easy to miss because
- * every value here is a duration or a count and neither has a meaningful
- * negative. `Number("-1")` is perfectly finite, so a stray minus sign used to
- * sail through and land somewhere that reads much worse than it looks: a
- * negative `TRIAGE_TIMEOUT_MS` does not disable the budget, it makes the run
- * already over it, so the watchdog kills every session on its first tick. A
- * negative poll interval is the same bug wearing a different hat — a busy loop
- * against Jira.
- *
- * `min` defaults to 0 because that is the weakest claim true of every caller.
- * The two settings where zero is itself nonsense pass `min: 1`; the ones where
- * zero is a legitimate choice — no cursor overlap, a concurrency cap of none —
- * keep the default, so the floor stays a statement about each setting rather
- * than a blanket rule that would have to be argued with.
- *
- * Range lives here rather than at the call sites for the reason the whole
- * module exists: a bad value should stop the process at startup with the
- * setting's name in the message, not surface later as behaviour nobody
- * connects back to a typo in `.env`.
+ * A finite check alone isn't enough: `Number("-1")` is finite, and a negative duration or count
+ * (e.g. `TRIAGE_TIMEOUT_MS`) fails in a way that reads nothing like "negative was the problem."
+ * `min` defaults to 0; callers where zero itself is nonsense pass `min: 1`.
  */
 export function numeric(settings: Settings, name: SettingName, min = 0): number {
   const raw = settings[name];
@@ -466,26 +409,16 @@ export function numeric(settings: Settings, name: SettingName, min = 0): number 
   return parsed;
 }
 
-/**
- * Reads a boolean setting.
- *
- * Only "true" enables — deliberately strict rather than truthy. The one flag
- * this reads today decides whether the service writes to shared Jira tickets,
- * and a typo there should fail closed, not open.
- */
+/** Reads a boolean setting. Only "true" enables — deliberately strict, so a typo fails closed. */
 export function flag(settings: Settings, name: SettingName): boolean {
   return settings[name].trim().toLowerCase() === "true";
 }
 
 /**
- * Whether the fail-first experiment runs. **Only "false" turns it off.**
+ * Whether the fail-first experiment runs. Only "false" turns it off.
  *
- * The mirror image of `flag` above, and the asymmetry is the point rather than
- * an oversight. `flag` fails closed because the thing it reads decides whether
- * this service writes to shared tickets, so a typo must not grant a privilege.
- * This reads a quality check that grants nothing, and there a typo must not
- * silently withdraw a guard — `FAIL_FIRST_CHECK=fasle` should keep checking.
- * Two settings, two directions, both chosen by what a mistake costs.
+ * Deliberately the mirror of `flag`: this guards a quality check that grants no privilege, so a
+ * typo (`FAIL_FIRST_CHECK=fasle`) must not silently withdraw it.
  */
 export function failFirstCheck(settings: Settings): boolean {
   return settings["FAIL_FIRST_CHECK"].trim().toLowerCase() !== "false";
@@ -499,34 +432,18 @@ export function list(settings: Settings, name: SettingName): readonly string[] {
 }
 
 /**
- * How much human approval a solve needs.
+ * How much human approval a solve needs: `manual` requires the `agent:start` label, `auto` doesn't.
  *
- * `manual` requires the label `agent:start` on the ticket; `auto` does not.
- * There is no third value and there is deliberately no "off" — that is
- * `SOLVE_ENABLED`, kept separate so that arming the machinery and lowering the
- * approval bar are two decisions rather than one.
+ * No "off" value here — that's `SOLVE_ENABLED`, kept separate so arming the machinery and
+ * lowering the approval bar stay two decisions.
  */
 export type SolveMode = "manual" | "auto";
 
 /**
  * Reads `SOLVE_MODE`, refusing anything it does not recognise.
  *
- * The obvious alternative — treat an unreadable value as `manual`, since
- * `manual` is the safe one — is wrong for a reason worth writing down. Falling
- * back silently means `SOLVE_MODE=atuo` runs the service in a mode the operator
- * did not choose and cannot see, and the failure is invisible in exactly the
- * case they were trying to change the setting. Refusing at startup costs a
- * restart; a silent fallback costs a wrong belief about what the service is
- * doing, and the whole point of this setting is that somebody knows.
- *
- * That this fails closed *and* loudly is not a compromise between the two: an
- * unreadable value is not evidence of intent in either direction, so there is
- * nothing to fail closed to.
- *
- * The wording of the resulting message is inherited from `SettingsError`, which
- * frames every configuration problem as a missing setting. That reads slightly
- * off for a present-but-invalid one; `missing` still names `SOLVE_MODE`, and
- * the value is quoted below so the operator can see their typo.
+ * Does not fall back to `manual`: a silent fallback for `SOLVE_MODE=atuo` would run the service
+ * in a mode the operator can't see, invisible in exactly the case they were trying to change it.
  */
 export function solveMode(settings: Settings): SolveMode {
   const raw = settings.SOLVE_MODE.trim().toLowerCase();

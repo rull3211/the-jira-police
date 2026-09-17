@@ -1,44 +1,11 @@
 /**
- * The sendback watch's place in the daemon's schedule: whether it runs, how
- * often, and what it is allowed to do when it does.
+ * The sendback watch's place in the daemon's schedule: whether it runs, how often, and what it
+ * may do when it does.
  *
- * Beside `review-loop.ts` and built the same way, for the same reason: `index.ts`
- * runs `main` at import, so anything decided inside it cannot be asserted about
- * without starting a service. Every decision this loop adds is in this function,
- * and it does not run the loop — `runLoop` is the caller's to start, so a test
- * can read the schedule that was chosen without anything ticking.
- *
- * ## This is the switch that most deserves to be a switch
- *
- * Every other loop in this service spends because somebody asked for something.
- * A ticket was labelled, a reviewer commented, an operator typed a command. This
- * one spends because a reporter edited a ticket, which is not a request for
- * anything and may not even be about us. `WATCH_ENABLED` is therefore read
- * first, and returning `null` rather than a loop that declines every tick is the
- * same choice `createReviewLoop` made: a scheduled no-op would write
- * `watch.disabled` into the operator's log forever, which is a service reporting
- * that nothing is happening into the stream read to find out what is.
- *
- * ## The memo is a parameter, and that is the whole reason this file is not two
- * lines
- *
- * `relevance.ts` names the one cost its own design cannot pay for: **a `no` is
- * silent, and silence does not clear the trigger.** Every other brake works
- * because the action leaves a mark on the ticket. A check that declines writes
- * nothing, so the ticket stays triggered on that same activity and is re-judged
- * on the next sweep, and the next, on identical content.
- *
- * `watch:once` is safe from that because it has no next sweep. This file is the
- * next sweep, and the bound is *one memo for as long as the process lives*.
- *
- * **So the caller supplies it rather than this function building one**, and the
- * choice is about which mutations are reachable. Built here and closed over, the
- * failure is one line moving into `runCycle` — after which the loop pays for the
- * same refusal every sweep forever, while every test still passes, because a
- * test that runs a single tick cannot see the difference. Taken as a parameter,
- * a `runCycle` that ignored it would have to ignore an argument, which a test
- * that hands in a memo and ticks twice does see. The lifetime is the process's,
- * and `index.ts` is what has one.
+ * `WATCH_ENABLED` is read first and returns `null` rather than a scheduled no-op, same as
+ * `createReviewLoop`. The memo is a parameter, not built inside `runCycle`, because a relevance
+ * check that says no writes nothing to the ticket — nothing clears the trigger — so the memo
+ * must live as long as the process, not the cycle, or the same refusal repeats every sweep.
  */
 
 import type { JiraClient } from "./jira/client.ts";
@@ -60,15 +27,8 @@ import {
 /**
  * The same settings with the re-triage's comment turned on.
  *
- * `watch:once` has the identical override and the identical argument, and the
- * duplication is two lines rather than an import because the two are separate
- * grants: an operator's `--write` and a daemon's `WATCH_ENABLED` are different
- * decisions by different people, and a shared helper would make relaxing one
- * relax the other. The argument itself: the watch is self-limiting only because
- * a re-triage moves the high-water mark it measures from, and the mark is our
- * own comment. A paid run that analysed and posted nothing would leave the
- * ticket triggered on identical content and buy the same run on the next sweep —
- * §7b's infinite loop, restored by a value in `.env` rather than by any code.
+ * A re-triage that posted nothing would leave the ticket triggered on identical content and
+ * buy the same run every sweep — §7b's infinite loop, restored by a `.env` value rather than code.
  */
 function posting(settings: Settings): Settings {
   return { ...settings, WRITE_BACK: "true" };
@@ -77,14 +37,9 @@ function posting(settings: Settings): Settings {
 /**
  * The watch loop's schedule, or `null` if the watch is switched off.
  *
- * Dependencies are built after the switch and before the first tick, for the two
- * reasons `createReviewLoop` gives: a daemon with the watch off must not refuse
- * to start over a setting it will never read, and a misconfiguration must be one
- * message at startup rather than a cycle that fails identically forever, backing
- * off to the cap, visible only as "the cycle threw".
- *
- * `backoffCapMs` and `memo` are parameters because `index.ts` owns both and
- * cannot be imported from — it starts the service on import.
+ * Dependencies are built after the switch check, for the same reasons as `createReviewLoop`:
+ * a disabled watch must not refuse to start over a setting it never reads, and a
+ * misconfiguration must fail once at startup rather than every cycle.
  */
 export function createWatchLoop(
   settings: Settings,
@@ -107,11 +62,8 @@ export function createWatchLoop(
     components: list(settings, "JIRA_COMPONENTS"),
   });
 
-  // **The daemon always acts.** `watch:once` has a dry mode because its whole
-  // second job is calibration — a person deciding whether this switch is safe to
-  // arm. Here the switch *is* that decision, already made, and a loop that swept
-  // every six hours and changed nothing would be the most expensive way
-  // available to write "would have" into a log nobody reads.
+  // The daemon always acts, unlike `watch:once`'s dry mode: arming `WATCH_ENABLED` is itself
+  // the decision that switch exists to make.
   const acting: WatchActing = {
     commenter: createSolveCommenter(settings),
     sink: new FileSink(settings.OUTPUT_DIR),
@@ -123,10 +75,8 @@ export function createWatchLoop(
     } satisfies RetriageDeps,
   };
 
-  // The operator is the last bound on what this costs, and a bound cannot act on
-  // a number it has not been shown — least of all here, where the point is that
-  // nobody is looking. The cadence and the per-ticket cap are both stated,
-  // because the worst case is their product and neither alone says it.
+  // Cadence and per-ticket cap are both logged because the worst case is their product;
+  // neither alone says it.
   logger.info("watch.loop.start", {
     intervalMs,
     maxRetriagePerTicket: maxRetriage,
@@ -141,13 +91,8 @@ export function createWatchLoop(
       logger.info(
         "watch.cycle.done",
         { ...outcome, remembered: memo.size() },
-        // A sweep that only looked is the normal state of this loop: watched
-        // tickets change when a reporter edits one, which is a thing measured
-        // in days. News is a re-triage that ran or threw, or a watch coming
-        // off. `outcome.quiet` is **not** read here and must not be — it is a
-        // count of tickets nobody touched, not a verdict on the sweep, and the
-        // two words meaning different things one line apart is why the mark is
-        // an argument to the logger rather than a field it looks for.
+        // `outcome.quiet` is deliberately not read here: it counts tickets nobody touched, not
+        // a verdict on the sweep, and colliding the two would invert the marker.
         { quiet: outcome.retriaged === 0 && outcome.failed === 0 && outcome.ended === 0 },
       );
     },
@@ -157,13 +102,7 @@ export function createWatchLoop(
   };
 }
 
-/**
- * Where a per-ticket line goes when nobody is at a terminal.
- *
- * The log rather than stdout: a service's stdout is wherever it was started
- * from, which is frequently nothing, and these lines are the only per-ticket
- * record of a decision that may have cost money.
- */
+/** Logged rather than written to stdout, which is frequently nothing for a daemon. */
 function report(line: string): void {
   logger.info("watch.cycle.ticket", { line: line.trim() });
 }

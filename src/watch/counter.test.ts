@@ -13,8 +13,7 @@ describe("reading the count", () => {
   });
 
   it("counts a ticket with no counter label as nothing spent", () => {
-    // The ordinary case, and it must not be a refusal: a ticket nobody has
-    // re-triaged is exactly the ticket the watch exists for.
+    // The ordinary case, and must not be a refusal.
     expect(retriageCount(["agent:watching"])).toBe(0);
     expect(retriageCount([])).toBe(0);
   });
@@ -29,17 +28,13 @@ describe("reading the count", () => {
     "agent:retriage--1",
     "agent:retriage-99999",
   ])("refuses %s rather than reading it as zero", (label) => {
-    // THE mutation on this module: skip what will not parse and every one of
-    // these reads as a fresh ticket with its whole budget intact, on every
-    // sweep, forever. A count that will not read must not read as zero — the
-    // marker rule from the review cursor, arriving in a second loop.
+    // A count that fails to parse must refuse, not read as a fresh budget.
     expect(retriageCount(["agent:watching", label])).toBeNull();
   });
 
   it("takes the highest when a remove failed and two are present", () => {
-    // The one ordinary cause of this shape: the add landed and the remove did
-    // not. The maximum spends less than any alternative, and adding a label can
-    // only ever raise the number, so it cannot be engineered into spending more.
+    // Two labels means an add landed and a remove didn't; taking the max can't
+    // be engineered into overspending, since adding a label only raises it.
     expect(retriageCount(["agent:retriage-1", "agent:retriage-3", "agent:retriage-2"])).toBe(3);
   });
 
@@ -52,9 +47,8 @@ describe("reading the count", () => {
 
 describe("reserving the next one", () => {
   it("writes the successor and clears what it supersedes in one delta", () => {
-    // One counter on the board rather than a growing pile, and both halves in
-    // one server-side operation, so there is no moment where the ticket carries
-    // neither.
+    // Both halves apply in one server-side operation, so the ticket never
+    // carries neither label.
     expect(reserveRetriage(["agent:watching", "agent:retriage-1"])).toEqual({
       add: ["agent:retriage-2"],
       remove: ["agent:retriage-1"],
@@ -71,8 +65,7 @@ describe("reserving the next one", () => {
   });
 
   it("refuses to reserve from a base it cannot read", () => {
-    // Reserving from an unreadable count would write a number derived from
-    // nothing, which is the reset this whole mechanism exists to refuse.
+    // Reserving from an unreadable count would write a number derived from nothing.
     expect(reserveRetriage(["agent:retriage-nope"])).toBeNull();
   });
 

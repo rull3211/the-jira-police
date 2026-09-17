@@ -1,66 +1,17 @@
 /**
  * What the solve run tells the ticket, and what it tells whoever tunes triage.
  *
- * `orchestrator.ts` takes no Jira client on purpose — the caller owns labels and
- * comments. This is that caller's half: it turns a `SolveOutcome` into words,
- * and it is where the dev-lens correction finally goes somewhere.
+ * `orchestrator.ts` takes no Jira client on purpose — the caller owns labels and comments. This
+ * turns a `SolveOutcome` into words, posts the dev-lens correction, and appends a calibration row
+ * to `dev-lens.md` (append-only, unlike the snapshot `solve-cycle.md` beside it) so the blind
+ * `agent:solvable` call in triage can eventually be scored.
  *
- * ## Why the dev lens is the point of this file
+ * `TicketCommenter` is one method wide, the same reasoning as `ClaimCapabilities`: the type tells
+ * a reviewer the blast radius without them reading the implementation. An absent `commenter` means
+ * only one thing — the run succeeded and opened a pull request instead; see `reportsToTicket`.
  *
- * Triage calls `agent:solvable` **without reading a line of source**: `--deep`
- * is hard-off and `Task` is not granted, so the fitness assessment is made from
- * the ticket text and the vault alone. Recon is the first thing in the pipeline
- * that opens the repository, so `devLensCorrection` is the only feedback that
- * assessment will ever receive. Until this module existed it was computed on
- * every run and dropped on the floor, which made the blind call permanently
- * blind — it could never be scored, so it could never improve.
- *
- * So the correction goes to two places, because it has two audiences:
- *
- *   - **the ticket**, for the person holding it, who needs to know an agent
- *     looked and what it concluded;
- *   - **`<OUTPUT_DIR>/dev-lens.md`**, append-only, for whoever is deciding
- *     whether the fitness call is trustworthy yet. That question is answered by
- *     reading fifty rows at once, not one ticket at a time, and a per-ticket
- *     comment cannot be counted.
- *
- * The local record is append-only and says so in its own header, unlike
- * `solve-cycle.md` beside it, which is a snapshot replaced every run. The
- * difference is deliberate: a snapshot answers "what is the queue doing now",
- * and calibration is a question about a trend.
- *
- * ## Posting is a capability the caller supplies, and now one does
- *
- * `TicketCommenter` is one method wide. An implementation of it cannot
- * transition an issue, edit a field, or touch a label — the same reasoning as
- * `ClaimCapabilities`, and for the same reason: the type should tell a reviewer
- * the blast radius without them reading the implementation.
- *
- * This paragraph used to end "nothing in this tree constructs one yet", and
- * what that cost is worth keeping now that it is false. The seam sat empty
- * through every phase, so a run's conclusion reached a local file and an
- * operator's terminal and stopped — including the SSX-3831 bail, where recon
- * declined the ticket, named the two acceptance criteria that admit no single
- * implementation, and proposed the split that would fix them, to a scrollback.
- * `src/solve/commenter.ts` fills it.
- *
- * **An absent commenter now means only one thing: the run succeeded.** It was
- * the phase gate through D4c, then briefly meant *this outcome is not about the
- * ticket* — a crash or an unusable base got the calibration row and no Jira
- * write, on the argument that posting "this says nothing about whether the
- * ticket is solvable" was worse than staying quiet. That argument weighed the
- * noise and never weighed the silence, which is harder to notice because it
- * looks like nothing at all: a run stopped by a policy hook released its claim
- * and left the ticket byte-for-byte as found, indistinguishable from one the
- * queue had never reached. The caller now supplies a commenter for every outcome
- * except `verified`, which needs none because it opens a pull request instead.
- * See `reportsToTicket`.
- *
- * ## The correction is untrusted text
- *
- * It is model-authored, but the model wrote it after reading a ticket anyone
- * with a Jira account can edit. Two defences, both in `safeText`, and both
- * about structure rather than taste — see there.
+ * The correction is model-authored text read from a ticket anyone with a Jira account can edit;
+ * `safeText` defends against it being read as structure.
  */
 
 import { mkdir, appendFile, readFile } from "node:fs/promises";
@@ -91,51 +42,24 @@ export interface TicketCommenter {
 export interface FeedbackDeps {
   readonly outputDirectory: string;
   /**
-   * Absent means *do not post*, and the caller decides that per outcome.
-   *
-   * It gated the phase until D4c, then gated relevance, and now gates almost
-   * nothing: `reportsToTicket` supplies one for every outcome but `verified`.
-   * Deciding it is no longer `terminalLabelAfter`'s job — the two shared a
-   * predicate until 2026-09-05, and the sharing is what made a blocked run
-   * silent. The parameter stays optional because a caller that wants the
-   * calibration row without a Jira write is still a legitimate thing to be, and
-   * every test in this file relies on it.
+   * Absent means *do not post*; `reportsToTicket` supplies one for every outcome but `verified`.
+   * Kept optional because a caller that wants the calibration row without a Jira write is legitimate.
    */
   readonly commenter?: TicketCommenter;
 }
 
 /**
- * Makes untrusted text safe to place inside a structured document.
- *
- * Two defences, and neither is about politeness:
- *
- * 1. **Every whitespace run collapses to one space**, which is `oneLine` in
- *    `text.ts` and is shared rather than repeated here. Pipes are escaped on
- *    top of it, since the calibration record is a table and an unescaped pipe
- *    forges a column — that part is this document's and belongs here.
- *
- * 2. **Triage's footer sentinel is removed.** This is the sharper one. Triage
- *    identifies its own comment — the one it overwrites in place on every
- *    re-run — by author *and* that exact sentinel. Both bots post under the
- *    same Jira account, so a correction carrying the sentinel through to a
- *    posted comment would make the next triage run adopt *our* comment as its
- *    own and overwrite the solve report with a triage report. Cheap to prevent
- *    here, and impossible to notice afterwards.
+ * Makes untrusted text safe to place inside a structured document: collapses whitespace runs
+ * (shared with `oneLine`), escapes pipes so it cannot forge a table column, and strips triage's
+ * footer sentinel so a correction can't make triage's next run adopt this comment as its own.
  */
 export function safeText(text: string): string {
   return oneLine(text.replaceAll(FOOTER_SENTINEL, "[sentinel removed]")).replaceAll("|", "\\|");
 }
 
 /**
- * How much of each part of a bail reaches the ticket.
- *
- * Measured against the SSX-3822 bail, which arrived as one unbroken 4,000-character
- * paragraph because `bailReason` was a single field asked for two things at once —
- * the diagnosis and the remedy — and `safeText` correctly flattens every newline in
- * it. Splitting the field gives the structure; these give the brevity, and both were
- * needed. The schema asks for one or two sentences per blocker, but a schema
- * description is a request and this file's whole subject is what to do when the text
- * is not what was asked for.
+ * How much of each part of a bail reaches the ticket. A schema description asking for one or two
+ * sentences per blocker is a request, not a guarantee — these are the enforced caps.
  */
 const LIMITS = {
   /** The first line of the comment, read on its own in a notification. */
@@ -150,39 +74,14 @@ const LIMITS = {
 
 /**
  * The dev-lens feedback an outcome carries, if it got far enough to have any.
- *
- * `?? null` covers a case the types say cannot happen: an outcome whose kind is
- * not `no-worktree` but which carries no `devLens`. Handled rather than
- * asserted, on the same grounds `report.ts` gives for `ticketLines` — this
- * module runs at the end of every solve, including the ones that went badly,
- * and a diagnostic that throws while explaining a problem replaces a real
- * finding with a stack trace about itself.
+ * `?? null` covers a case the types disallow — handled rather than asserted, since a diagnostic
+ * that throws while explaining a problem replaces a real finding with a stack trace about itself.
  */
 function lensOf(outcome: SolveOutcome): { accurate: boolean; correction: string } | null {
-  // `crashed` joins `no-worktree` here for a different reason worth keeping
-  // straight: not that no pass ran, but that the pass which produces the lens
-  // may be the one that died. An absent correction is honest; a fabricated one
-  // would feed the fitness assessment evidence nobody gathered.
-  //
-  // Deleting the `crashed` clause kills no test, and the honest reason is that
-  // it cannot: `crashed` carries no `devLens` field, so `?? null` reaches the
-  // same answer by accident. What does catch it is `tsc` — the property does
-  // not exist on that member of the union, so the narrowing is load-bearing at
-  // compile time even though it is inert at run time. Recorded as mechanically
-  // enforced by the type checker rather than by a test, in the same spirit as
-  // the backstop notes in `worktree.ts` and `verify.ts`.
-  //
-  // `unusable-base` joins them for the first reason rather than the second: it
-  // is decided before recon runs, so there is no lens to be accurate or
-  // inaccurate about. Scoring the fitness call on a run that never read the
-  // code would credit or blame triage for a broken build.
-  //
-  // `escaped` joins them on the second reason. It overrides whatever the run
-  // concluded, so the lens it would carry belongs to a verdict this outcome has
-  // just withdrawn — and the run's honest state is that nobody knows whether
-  // the change was any good, which includes not knowing whether triage's guess
-  // about it was right. `would` keeps the withdrawn verdict legible without
-  // letting it into the calibration record.
+  // `crashed`: the pass that produces the lens may be itself the one that died, so a fabricated
+  // correction would feed the fitness assessment evidence nobody gathered. `unusable-base`: decided
+  // before recon runs, so there is no lens. `escaped`: overrides the run's verdict, so scoring it
+  // would credit or blame triage for a verdict this outcome just withdrew.
   return outcome.kind === "no-worktree" ||
     outcome.kind === "crashed" ||
     outcome.kind === "unusable-base" ||
@@ -193,12 +92,7 @@ function lensOf(outcome: SolveOutcome): { accurate: boolean; correction: string 
 
 /**
  * One sentence saying what happened, in terms of who has to act.
- *
- * The three shapes of "no" that `orchestrator.ts` works to keep apart are worth
- * nothing if they arrive on the ticket as one word. `refused` in particular
- * must not read like `failed`: it says the harness declined to judge, which is
- * a statement about the harness, and a reader who takes it as a statement about
- * their code will go looking for a bug that was never reported.
+ * `refused` must not read like `failed`: it says the harness declined to judge, not that the code is wrong.
  */
 function headline(outcome: SolveOutcome): string {
   switch (outcome.kind) {
@@ -206,42 +100,23 @@ function headline(outcome: SolveOutcome): string {
       return `No branch could be cut, so nothing was attempted: ${safeText(outcome.reason)}`;
     }
     case "unusable-base": {
-      // Phrased to put the repository, not the ticket, in the reader's way. The
-      // ticket may be perfectly solvable; this run could not have told anyone.
-      //
-      // This frames the reason rather than summarising it, and the summary it
-      // replaces was wrong in two directions at once. `verifyBase` already
-      // returns a complete sentence, carefully qualified — *in a fresh
-      // worktree*, and *a fact about the repository or this harness* — so
-      // restating it here printed the claim twice and the first copy had both
-      // qualifiers stripped, telling a Jira reader that `main` is broken. On
-      // the other branch it was not merely unqualified but false: when the
-      // build could not be *run*, a headline asserting it "does not pass"
-      // states as fact the one thing that run failed to establish.
-      //
-      // So the rule for this case is deliberately narrow — say who has to act
-      // and defer on what happened, because the layer that found out has
-      // already said it better and knows which of the two things went wrong.
+      // Says who has to act and defers on what happened: `verifyBase`'s reason is already
+      // qualified ("in a fresh worktree", "a fact about the repository or this harness"), and
+      // restating it here risks dropping a qualifier and asserting more than the run established.
       return `Nothing was attempted and nothing can be concluded about this ticket, because ${safeText(
         outcome.reason,
       )}`;
     }
     case "bailed": {
-      // Capped as well as sectioned. `bailReason` is now specified as one
-      // sentence, and a cap is what makes that a property of the comment rather
-      // than a hope about the model — the detail has its own section below and
-      // a headline that swallowed it would put the wall of text back.
+      // Capped as well as sectioned: `bailReason` is one sentence here, and detail lives below.
       return `An agent read the code and stopped before changing anything: ${shorten(
         safeText(outcome.reason),
         LIMITS.headline,
       )}`;
     }
     case "abandoned": {
-      // The two causes are opposite claims and must not share a sentence. A
-      // `judgement` abandon says the ticket was misjudged; an `environment`
-      // abandon says this machine got in the way and the ticket was never
-      // reached. Phrased in the same register as `crashed` for that reason —
-      // it is the same class of statement.
+      // The two causes are opposite claims and must not share a sentence: `environment` says the
+      // machine got in the way; `judgement` says the ticket was misjudged as briefed.
       return outcome.cause === "environment"
         ? `An agent was prevented from working — this is about the machine, not the ticket, and says nothing about whether it is solvable: ${safeText(
             outcome.reason,
@@ -256,12 +131,8 @@ function headline(outcome: SolveOutcome): string {
         .join("; ")}`;
     }
     case "escaped": {
-      // Two things this sentence has to do, and the second is why it is long.
-      // It has to withhold the run — nothing here becomes a pull request — and
-      // it has to name the other explanation out loud, because the guard cannot
-      // distinguish a stray write from the operator saving a file in one of
-      // these checkouts while the solve ran. A reader who is not told that will
-      // read a machine accusing them of nothing in particular.
+      // Withholds the run and names the alternate explanation — the guard cannot distinguish a
+      // stray write from the operator editing one of these checkouts while the solve ran.
       return `Files changed outside this run's own working copy while it was in flight, so nothing it produced is being offered${
         outcome.would === "verified"
           ? " — including a change that had otherwise passed every check"
@@ -278,9 +149,8 @@ function headline(outcome: SolveOutcome): string {
       )}`;
     }
     case "crashed": {
-      // Phrased to be unmistakably about the harness. This is the outcome most
-      // likely to be misread as "the agent could not do it", which would put a
-      // false data point into the fitness assessment.
+      // Phrased to be unmistakably about the harness — misread as "the agent could not do it", it
+      // would put a false data point into the fitness assessment.
       return `The ${outcome.pass} step did not finish, so nothing was judged and this says nothing about whether the ticket is solvable: ${safeText(
         outcome.reason,
       )}`;
@@ -293,9 +163,7 @@ function headline(outcome: SolveOutcome): string {
 
 /**
  * Whether a human should be told the fitness call was wrong.
- *
- * An accurate lens is not worth a paragraph on the ticket — it is worth a row
- * in the calibration record, which is where accurate readings are counted.
+ * An accurate lens belongs in the calibration record, not a paragraph on the ticket.
  */
 function correctionBlock(outcome: SolveOutcome): readonly string[] {
   const lens = lensOf(outcome);
@@ -312,51 +180,21 @@ function correctionBlock(outcome: SolveOutcome): readonly string[] {
 }
 
 /**
- * The two sections a bail owes the person holding the ticket.
- *
- * ## Why this is a section list and not a longer sentence
- *
- * The first bail this service posted, on SSX-3822, was one paragraph of about four
- * thousand characters: three numbered blockers, a file-by-file scope estimate and a
- * proposed ticket split, run together with no line breaks. Every word of it was
- * right and useful, and nobody was going to read it.
- *
- * Two separate things made it that shape and both had to change. `bailReason` was a
- * single schema field asked for two different things — *what is wrong* and *what
- * would fix the ticket* — so the model had nowhere to put them but one string. And
- * `safeText` collapses every whitespace run to a space, which is a defence that
- * must stay: structure this file did not create is structure an editable Jira ticket
- * could forge. So the structure comes from **here**, out of separate fields, and the
- * untrusted text keeps arriving flat and gets placed rather than trusted.
- *
- * ## The remedy is the point, and it goes last on purpose
- *
- * §5 of the plan records the pattern this closes: the service keeps producing its
- * best reasoning on the channel nobody reads. A bail's diagnosis is evidence and its
- * remedy is the only part anyone can act on, so the remedy gets the most room, its
- * own heading naming what it is for, and the last word before the footer.
- *
- * Absent fields render nothing rather than an empty heading. A run predating these
- * schema fields, or one whose reply the parser accepted with an empty list, still
- * produces a comment that is merely shorter — never one promising a section it does
- * not have.
+ * The two sections a bail owes the person holding the ticket: what blocks it and what would fix
+ * it, from separate schema fields rather than one string that `safeText` would flatten into a
+ * wall of text.
+ * §5 of the plan records the pattern this closes: the remedy is the only actionable part, so it
+ * gets the most room and the last word before the footer. Absent fields render nothing rather
+ * than an empty heading.
  */
 function bailDetail(outcome: SolveOutcome): readonly string[] {
-  // Deleting this narrowing kills no test, and the honest reason is that it
-  // cannot: no other member of the union carries a verdict with these fields, so
-  // the defensive read below reaches the same empty answer by accident. What
-  // catches it is `tsc` — `recon` does not exist on most of the union — so this
-  // line is enforced at compile time and inert at run time. Same standing as the
-  // `crashed` clause in `lensOf`, and recorded for the same reason.
+  // No other member of the union carries these fields; `tsc` enforces this at compile time even
+  // though it's inert at run time — same standing as the `crashed` clause in `lensOf`.
   if (outcome.kind !== "bailed") {
     return [];
   }
-  // Defensively read, on the same grounds as `lensOf`: the types say a bail
-  // always carries its verdict, and this module runs at the end of every solve
-  // including the ones that went badly. A renderer that throws while explaining
-  // a problem replaces the finding with a stack trace about itself — and here it
-  // would do so *after* the headline had already been composed, so the one
-  // sentence that was safe to print would be lost with the rest.
+  // Defensively read, like `lensOf`: a renderer that throws here would discard the headline that
+  // was already composed, not just this section.
   const recon = outcome.recon as Partial<typeof outcome.recon> | undefined;
   const blockers = (recon?.bailBlockers ?? [])
     .map((blocker) => safeText(blocker))
@@ -374,9 +212,7 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
           ...blockers
             .slice(0, LIMITS.blockers)
             .map((blocker) => `* ${shorten(blocker, LIMITS.blocker)}`),
-          // Said rather than silently dropped. A truncated list that does not
-          // admit it is one tells a reporter they have seen every blocker, and
-          // they will split the ticket against an incomplete set.
+          // Said rather than dropped silently — an unmarked truncation would let a reporter split the ticket against an incomplete blocker list.
           ...(extra > 0 ? [`* …and ${String(extra)} more, in the run's own report.`] : []),
         ]),
     ...(remedy === ""
@@ -387,16 +223,8 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
 
 /**
  * The ticket comment. Pure, so it is testable without a Jira account.
- *
- * It used to close with *"A human merges. This bot has no merge path."* on every
- * outcome, and the test pinning it demonstrated the line on `verified` — the one
- * outcome that actually has a pull request to not merge. `reportsToTicket` made
- * that the one outcome which never renders. So the sentence now only ever
- * appears on comments about runs that produced nothing to merge, where it
- * answers a question the reader was not asking, at the bottom of a comment whose
- * whole job is to be short enough to read. Removed rather than made conditional:
- * the condition would be `kind === "verified"`, which is `!reportsToTicket`,
- * which is unreachable from here.
+ * Never renders for `verified` — the only outcome with a pull request — because `reportsToTicket`
+ * withholds the commenter for it.
  */
 export function renderSolveComment(issueKey: string, outcome: SolveOutcome): string {
   return [
@@ -412,11 +240,8 @@ export function renderSolveComment(issueKey: string, outcome: SolveOutcome): str
 
 /**
  * Written once, when the record does not exist yet.
- *
- * The annotation paragraph is in here rather than only in the file because the
- * file is gitignored: a convention documented solely in the artifact is lost the
- * first time the artifact is regenerated, and what comes back is a record whose
- * rows carry hand-written notes its own header does not admit to allowing.
+ * Duplicated here rather than living only in the file: the file is gitignored, so a convention
+ * documented solely in the artifact is lost the first time the artifact regenerates.
  */
 const HEADER = [
   "# Dev-lens calibration",
@@ -439,13 +264,9 @@ const HEADER = [
 ].join("\n");
 
 /**
- * The `Outcome` column, which is read down the page as a scoreboard.
- *
- * `abandoned` alone is the one kind that means two incompatible things, and the
- * table is the place where that matters most: a reader counting abandons to
- * decide whether triage's blind call can be trusted would be counting the
- * host's safety hook among the ticket's own failures. The cause is appended
- * rather than folded into a second column so old rows stay readable.
+ * The `Outcome` column, read down the page as a scoreboard.
+ * `abandoned` is the one kind meaning two incompatible things; the cause is appended rather than
+ * folded into a second column so old rows stay readable.
  */
 function outcomeLabel(outcome: SolveOutcome): string {
   return outcome.kind === "abandoned" ? `abandoned (${outcome.cause})` : outcome.kind;
@@ -461,11 +282,8 @@ export function calibrationRow(issueKey: string, outcome: SolveOutcome, now: Dat
 
 /**
  * Appends one row, writing the header first if this is the first run.
- *
- * The header is written only when the file does not already start with it,
- * rather than only when the file is absent. An empty file left behind by an
- * interrupted first write would otherwise collect rows under no table at all,
- * and a markdown table without its header row does not render as a table.
+ * Checked by content, not file existence: an empty file left by an interrupted first write would
+ * otherwise collect rows under no table at all.
  */
 export async function recordDevLens(
   directory: string,
@@ -496,17 +314,11 @@ export interface FeedbackResult {
 
 /**
  * Records the outcome locally and, if a commenter was supplied, on the ticket.
- *
- * The local record is written **first and unconditionally**. It is the cheaper
- * and more durable of the two, and a run that manages to comment on Jira but
- * loses its own calibration row has thrown away the only part of this that
- * accumulates.
- *
- * A failed comment does not throw. By the time this is called the work is done
- * and, in the `verified` case, already pushed; turning "we could not annotate
- * the ticket" into an exception would let a reporting problem look like a solve
- * problem, which is the exact confusion the outcome types spend so much effort
- * keeping apart.
+ * The local record is written first and unconditionally: it is the cheaper, more durable of the
+ * two, so a run that comments but loses its own calibration row loses the part that accumulates.
+ * A failed comment does not throw — by the time this runs the work is already done, and turning
+ * "could not annotate the ticket" into an exception would make a reporting problem look like a
+ * solve problem.
  */
 export async function reportOutcome(
   deps: FeedbackDeps,

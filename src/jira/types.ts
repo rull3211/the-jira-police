@@ -10,16 +10,7 @@ export interface JiraNamed {
   readonly name: string;
 }
 
-/**
- * A status, which unlike the other named entities is read by both halves.
- *
- * Its own interface rather than `JiraNamed` because the id is the half that can
- * be relied on. The board's Norwegian column names do not all resolve — see
- * `TRIAGE_ONLY_STATUS` in `settings.ts` for the measurement — so anything
- * matching a configured status against a real one has to be able to compare
- * ids. `name` is carried too, because it is what a log line has to print for a
- * person to recognise the column.
- */
+/** Its own interface rather than `JiraNamed` since matching a configured status against a real one needs the id, not just the name. */
 export interface JiraStatus {
   readonly id: string;
   readonly name: string;
@@ -58,51 +49,18 @@ export interface JiraSearchResponse {
   readonly isLast?: boolean;
 }
 
-/**
- * Normalised shape passed to the rest of the pipeline.
- *
- * Carries the union of what both queues need rather than splitting into two
- * types. The new-issue poller ignores `labels` and `updated`; the solve queue
- * ignores `created` and `status`. That is a little waste in exchange for one
- * normaliser over one payload — and the alternative was tried on paper and
- * rejected, because two functions mapping the same Jira response are two things
- * that drift, and the drift shows up as a field that is silently empty on one
- * path only.
- */
+/** Carries the union of what both queues need rather than splitting into two types, since two mappers of the same response drift apart. */
 export interface TicketRef {
   readonly key: string;
   readonly summary: string;
   readonly issueTypeId: string;
   readonly issueTypeName: string;
   readonly created: string;
-  /**
-   * Last modification, as Jira reports it.
-   *
-   * Empty when Jira did not return the field. That is not expected — `updated`
-   * is a system field present on every issue — but the honest normalisation of
-   * an absent value is an absent value, not `created` standing in for it. A
-   * caller that sorts on this will fail loudly on the empty string rather than
-   * silently ordering a ticket by the wrong instant, which is the behaviour
-   * worth having if this ever does go missing.
-   */
+  /** Empty, not `created`, when Jira did not return the field: a caller sorting on this fails loudly instead of silently ordering by the wrong instant. */
   readonly updated: string;
-  /**
-   * Every label live on the issue.
-   *
-   * The solve queue's entire state is in here — the claim, the human's
-   * go-ahead and both terminal verdicts are all labels — so dropping this
-   * during normalisation, as this function used to, made the queue unfeedable.
-   */
+  /** Every label live on the issue; the solve queue's entire state — claim, go-ahead, terminal verdicts — is here. */
   readonly labels: readonly string[];
-  /**
-   * The status id and name, both empty when Jira did not return the field.
-   *
-   * Empty rather than a placeholder, for `updated`'s reason one field up: a
-   * ticket whose column we do not know must not be made to look like a ticket
-   * in some particular column. `TRIAGE_STATUS_PRIORITY` sorts an unknown status
-   * last, which is where an unlisted one goes anyway, so the honest empty value
-   * and the safe ordering agree without a special case.
-   */
+  /** Empty rather than a placeholder when Jira did not return the field, for `updated`'s reason above. */
   readonly statusId: string;
   readonly statusName: string;
   readonly url: string;

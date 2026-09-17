@@ -1,35 +1,21 @@
 /**
  * `§N` cross-references, resolved against the headings that would satisfy them.
  *
- * This is the most-used citation form in the repository and the only one that
- * appears in `.ts` comments as well as in prose, and until this file existed
- * nothing checked it. Thirty-nine references named a section that has never
- * been a heading in any document here — not renamed, not renumbered, never
- * written — and they were found by reading, which does not scale and does not
- * happen twice.
+ * The most-used citation form in the repository, appearing in `.ts` comments as well as prose,
+ * and the only check for it.
  *
  * refs:off
  *
- * **What it can prove, and it is weaker than it looks.** Almost no citation
- * names its target document: `§7b` in `src/watch/decide.ts` says nothing about
- * where §7b would live. So the strongest rule available is _this token is a
- * heading in **some** section-numbered document_. That is enough to catch every
- * one of the 39, and it is not enough to catch a reference that still resolves
- * while meaning something else — six sites say "§1 refuses on-disk state" when
- * that rule is `ARCHITECTURE.md` §5. Those need a human, and this file's job is
- * to shrink the set that needs one rather than to claim it is empty. A clean
- * run here does not mean the cross-references are right.
+ * Almost no citation names its target document — `§7b` in `src/watch/decide.ts` says nothing
+ * about where §7b would live — so the strongest rule available is that the token is a heading in
+ * **some** section-numbered document. A clean run does not mean the cross-references are right:
+ * six sites say "§1 refuses on-disk state" when that rule is `ARCHITECTURE.md` §5, and those need
+ * a human.
  *
  * refs:on
  *
- * **Why the exemption is a region and not a file.** Checking markdown means the
- * check reads the documents that _discuss_ dangling references — this file's
- * own plan entry quotes ten of them — so prose about the problem would fail the
- * check for the problem. The last count added to `docs:check` had the same
- * shape and was fixed by narrowing its scope to `.ts`; that cannot work here,
- * because four of the 39 are in `ARCHITECTURE.md`. A file-level exemption would
- * silently cover every reference added to that document afterwards, so the
- * exemption is `refs:off` / `refs:on` around the paragraph that needs it.
+ * The exemption is a region, not a file, because checking markdown means the check would flag
+ * prose that discusses dangling references, like this comment, as more of them.
  */
 
 /** A `§N` occurrence in the tree, with enough to go and look at it. */
@@ -41,14 +27,12 @@ export interface SectionRef {
 }
 
 /**
- * Where a document's section numbers come from. Declared per document rather
- * than inferred, because inference here loses the check:
+ * Where a document's section numbers come from. Declared per document, not inferred:
  *
  * refs:off
  *
- * a rule that "any numbered list under a section defines sub-sections" would
- * make `§6.1` legal the moment §6 grew a list, and `§6.1` is one of the
- * references this exists to catch.
+ * a rule that "any numbered list under a section defines sub-sections" would make `§6.1` legal
+ * the moment §6 grew a list, and `§6.1` is one of the references this exists to catch.
  *
  * refs:on
  */
@@ -56,9 +40,8 @@ export interface DocumentShape {
   /** Path relative to the repository root. */
   readonly path: string;
   /**
-   * The one section whose top-level numbered list items are themselves
-   * addressable, as `<section>.<item>` — `ARCHITECTURE.md` §14's invariants are
-   * cited as `§14.11`. Absent for documents where no list is addressable.
+   * The one section whose top-level numbered list items are addressable as `<section>.<item>` —
+   * `ARCHITECTURE.md` §14's invariants are cited as `§14.11`. Absent where no list is addressable.
    */
   readonly numberedListIn?: string;
 }
@@ -72,9 +55,8 @@ const NUMBERED = /^(\d+[a-z]?)\.[ \t]/u;
 const LIST_ITEM = /^(\d+)\.[ \t]+\*\*/gmu;
 
 /**
- * The section ids a document defines. Both the headings and, for the one
- * document that has an addressable list, `<section>.<item>` for each of its
- * items.
+ * The section ids a document defines: headings, plus `<section>.<item>` for the one document
+ * with an addressable list.
  */
 export function sectionIds(
   body: string,
@@ -82,9 +64,8 @@ export function sectionIds(
 ): Set<string> {
   const found = new Set<string>();
 
-  // Every heading, numbered or not, because the *un*numbered ones are what
-  // bound a section: §14 ends at the next heading of its level or above, and
-  // the invariants list is what lies between.
+  // Unnumbered headings matter too: they bound a section (§14 ends at the next heading of its
+  // level or above), and the invariants list is what lies between.
   const headings = [...body.matchAll(HEADING)].map((match) => ({
     level: (match[1] ?? "").length,
     text: match[2] ?? "",
@@ -113,23 +94,19 @@ export function sectionIds(
 }
 
 /**
- * A marker is a line that is *only* a marker, once comment punctuation is
- * stripped: `<!-- refs:off -->`, `// refs:off`, ` * refs:off`.
+ * A marker is a line that is *only* a marker, once comment punctuation is stripped:
+ * `<!-- refs:off -->`, `// refs:off`, ` * refs:off`.
  *
- * Deliberately not a substring search. This file has to document its own
- * markers, and a substring rule would let the sentence explaining them open
- * and close regions — which it did, on the first run: the prose at the top
- * naming both tokens closed the region that was hiding the examples above it.
- * Requiring the marker to be the whole line means writing about it is free.
+ * Deliberately not a substring search — this file documents its own markers, so a substring
+ * rule would let the sentence naming both tokens open and close a region by itself.
  */
 const MARKER = /^[\s*/]*(?:<!--)?\s*refs:(off|on)\s*(?:-->)?\s*(?:\*\/)?\s*$/u;
 
 /**
- * Blanks out `refs:off` regions line by line, which keeps every line number
- * after them true. An unterminated region runs to the end of the file rather
- * than being ignored: forgetting the closing marker then silences the rest of
- * the document, which someone notices, where the alternative silences nothing
- * and reads identically in the diff.
+ * Blanks out `refs:off` regions line by line, keeping every line number after them true.
+ *
+ * An unterminated region runs to the end of the file rather than being ignored — a forgotten
+ * closing marker is noticed that way, where silently ignoring it reads identically in the diff.
  */
 export function maskDisabled(body: string): string {
   let masked = false;
@@ -163,9 +140,8 @@ export function referencesIn(file: string, body: string): SectionRef[] {
 }
 
 /**
- * The references naming a section no document defines. Deliberately not
- * "references whose target document disagrees" — see the header; that is a
- * question this cannot answer.
+ * The references naming a section no document defines — deliberately not "references whose
+ * target document disagrees," which this cannot answer. See the header.
  */
 export function unresolved(
   refs: readonly SectionRef[],

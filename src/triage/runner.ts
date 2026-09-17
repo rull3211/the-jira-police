@@ -1,48 +1,16 @@
 /**
  * Runs the intake-triage skill headlessly and parses the result.
  *
- * This is the ANALYST half of the pipeline, and it never writes to Jira. It
- * reads the issue, decides, and returns the verdict together with the exact
- * mutation that verdict implies. Posting that mutation is `poster.ts`, and only
- * after `gate.ts` has agreed the verdict is coherent.
+ * The ANALYST half of the pipeline: it never writes to Jira. It reads the issue, decides, and
+ * returns the verdict with the mutation that verdict implies; `poster.ts` applies that mutation,
+ * and only after `gate.ts` has agreed the verdict is coherent. There is deliberately no write path
+ * here and no `--yes` — a second way to post would be a second way to post unchecked.
  *
- * The split exists because of a defect this service shipped: the skill posts
- * its comment mid-run, but `structured_output` — the only thing we can check —
- * arrives with the final result event. Checking afterwards is not checking; on
- * SSX-3822 a contradictory verdict was already on the board by the time we
- * could see it. With the write moved out, the check happens between the two
- * halves, where refusing still means nothing was sent.
- *
- * So there is deliberately no write path here any more, and no `--yes`. A
- * second way to post would be a second way to post unchecked.
- *
- * Invocation shape, with every flag verified against the local arg parser
- * rather than assumed:
- *
- *   storecode -p "/intake-triage SSX-1234 --no-write --no-html"
- *             --output-format stream-json --verbose
- *             --permission-mode dontAsk
- *             --allowedTools <explicit list>
- *             --add-dir <vault>
- *             --json-schema '<inline draft-07>'
- *
- * with `INSURANCE_VAULT=<vault>` in the child's environment.
- *
- * Three non-obvious decisions:
- *
- * 1. `dontAsk` rather than `acceptEdits`. acceptEdits does not auto-approve MCP
- *    tool calls, so a run would stall waiting for input that never comes.
- *    bypassPermissions would also work but disables the safety hooks, which is
- *    not a trade worth making for a background job.
- *
- * 2. The MCP connection is checked explicitly. If the Atlassian OAuth session
- *    has expired, the run still exits 0 — it simply reports that it could not
- *    read the issue. That failure is silent, indistinguishable from a real
- *    verdict downstream, and is the single most likely production bug in this
- *    service. The init event carries per-server status, so we fail loudly.
- *
- * 3. The vault reaches the skill as an environment variable and an extra
- *    working directory, never as its `--vault` flag. See `vaultPath` below.
+ * Three non-obvious choices: `dontAsk` rather than `acceptEdits` (which stalls on MCP tool calls)
+ * or `bypassPermissions` (which disables safety hooks); the MCP connection is checked explicitly,
+ * since an expired Atlassian session still exits 0 and silently reports that it could not read the
+ * issue; and the vault reaches the skill as an environment variable plus `--add-dir`, never as its
+ * `--vault` flag (see `vaultPath` below).
  */
 
 import { logger } from "../logger.ts";
@@ -50,9 +18,8 @@ import type { Verdict } from "../output/sink.ts";
 import { TRIAGE_SCHEMA, TRIAGE_SCHEMA_JSON } from "./schema.ts";
 import { DENIED_BUILTIN_TOOLS, runSession } from "./session.ts";
 
-// Re-exported so callers and tests that reason about a triage run keep a single
-// import. The machinery moved to `session.ts` when the poster began sharing it;
-// where it lives is an implementation detail of running a subprocess.
+// Re-exported so callers reasoning about a triage run keep a single import; the
+// machinery lives in `session.ts` because the poster shares it.
 export {
   McpUnavailableError,
   SessionTimeoutError as TriageTimeoutError,
@@ -62,9 +29,9 @@ export {
 /**
  * Tools the skill legitimately needs, pre-approved so the run never stalls.
  *
- * This list does NOT restrict anything — omission from it is not denial. See
- * `DENIED_BUILTIN_TOOLS` in `session.ts` for the probe that established that,
- * and `ANALYST_DENIED_TOOLS` below for the list that does the restricting.
+ * This list does NOT restrict anything — omission from it is not denial. See `DENIED_BUILTIN_TOOLS`
+ * in `session.ts` for the probe that established that, and `ANALYST_DENIED_TOOLS` below for the
+ * list that does the restricting.
  */
 export const ALLOWED_TOOLS: readonly string[] = [
   "mcp__atlassian__getJiraIssue",
@@ -72,12 +39,8 @@ export const ALLOWED_TOOLS: readonly string[] = [
   "mcp__atlassian__search",
   "mcp__atlassian__getConfluencePage",
   "mcp__atlassian__searchConfluenceUsingCql",
-  // Denying this one is not free. A live run reported it: "Component
-  // create-metadata could not be fetched (getAccessibleAtlassianResources
-  // denied); SSX Advisor was validated against the copy live on the issue,
-  // which does not re-confirm that all four policy streams still exist." That
-  // was a caveat in a preview; with WRITE_BACK on, the component is a real
-  // mutation, so the run needs to be able to check the name before setting it.
+  // Needed to validate a component name before setting it: with WRITE_BACK on, the component is a
+  // real mutation, and the copy live on the issue does not confirm the name still exists.
   "mcp__atlassian__getAccessibleAtlassianResources",
   "Read",
   "Grep",
@@ -85,37 +48,23 @@ export const ALLOWED_TOOLS: readonly string[] = [
 ];
 
 /**
- * Tools withheld from the analyst.
+ * Tools withheld from the analyst. `--allowedTools` enforces nothing by itself, so "never writes to
+ * Jira" rests on this list, not on omission from `ALLOWED_TOOLS` above.
  *
- * The header says this half "never writes to Jira" and that there is
- * "deliberately no write path here any more". Until 2026-09-04 both sentences
- * rested on `--allowedTools`, which enforces nothing; they now rest on this.
- *
- * The four built-ins named by that probe are verified withheld. `WebFetch`,
- * `WebSearch` and `Task` rest on the same mechanism and were not in it — a
- * built-in named to `--disallowedTools` is removed from the model's list, and
- * nothing distinguishes these three from the four that were measured, but the
- * measurement is the four. The Atlassian mutators are listed
- * on the same principle but are NOT verified: a bare `storecode -p` run has no
- * MCP server connected, so the probe that would distinguish "denied" from
- * "absent" returned `edit=NO get=NO` and proved nothing either way. Listing
- * them cannot hurt — an unrecognised name is inert — but nobody should read
- * this list as evidence that the analyst is mechanically unable to edit a Jira
- * issue. What keeps it from doing so today is still `--no-write` in the prompt
- * plus the fact that `gate.ts` sits between it and the poster.
+ * The Atlassian mutators are listed on the same principle but are NOT verified withheld — a bare
+ * probe run has no MCP server connected, so nothing distinguishes "denied" from "absent" here.
+ * Nobody should read this list as proof the analyst is mechanically unable to edit a Jira issue;
+ * what keeps it from doing so today is `--no-write` in the prompt plus `gate.ts` sitting between it
+ * and the poster.
  */
 export const ANALYST_DENIED_TOOLS: readonly string[] = [
   ...DENIED_BUILTIN_TOOLS,
-  // This is the session staged images reach, and a picture is untrusted text
-  // that `sanitiseUntrusted` cannot see. With no network tool there is no
-  // in-session route from an instruction painted into a screenshot to a request
-  // leaving this machine.
+  // A picture is untrusted text `sanitiseUntrusted` cannot see; with no network tool there is no
+  // in-session route from an instruction painted into a screenshot to a request leaving this machine.
   "WebFetch",
   "WebSearch",
-  // The two above are worth nothing while a subagent can be spawned with a tool
-  // surface that is not this list and is not verified to inherit from it. The
-  // triage skill already treats subagents as unusable headlessly, so the run
-  // loses nothing it was using.
+  // Worth nothing while a subagent can be spawned with an unverified tool surface, but the triage
+  // skill already treats subagents as unusable headlessly, so the run loses nothing it was using.
   "Task",
   "mcp__atlassian__editJiraIssue",
   "mcp__atlassian__addCommentToJiraIssue",
@@ -141,28 +90,17 @@ export interface TriageRunOptions {
   readonly maxRunMs: number;
   readonly deep: boolean;
   /**
-   * Absolute path to the insurance-knowledge-vault clone.
-   *
-   * Passed two ways, because one is not enough. As `$INSURANCE_VAULT`, which is
-   * the skill's own second resolution step, so it never reaches the "STOP and
-   * ask the user" branch that a headless run cannot answer. And as `--add-dir`,
-   * because the vault is a sibling of this repo rather than inside it, and
-   * without that the Read tool has no business being there.
-   *
-   * Deliberately not passed as the skill's `--vault` flag: that value would
-   * have to survive the model parsing it out of a prompt string, and an
-   * environment variable does not.
+   * Absolute path to the insurance-knowledge-vault clone. Passed two ways: as `$INSURANCE_VAULT`,
+   * the skill's own resolution step, so it never reaches the "STOP and ask the user" branch a
+   * headless run cannot answer; and as `--add-dir`, since the vault is a sibling of this repo, not
+   * inside it. Never passed as `--vault` — that value would have to survive the model parsing it
+   * out of a prompt string, and an environment variable does not.
    */
   readonly vaultPath?: string;
   /**
-   * Suppresses the HTML roll-up dashboard the skill otherwise writes after
-   * every run. This service has a sink of its own, and `Write` is withheld by
-   * `ANALYST_DENIED_TOOLS` — so left on, it ends every run with a denied call.
-   *
-   * Note that until 2026-09-04 `Write` was *not* in fact withheld, only absent
-   * from the allowlist, which denied nothing. Every run made with `noHtml`
-   * unset could have written that dashboard to disk and, as far as this service
-   * can tell after the fact, some of them did.
+   * Suppresses the HTML roll-up dashboard the skill otherwise writes after every run. This service
+   * has a sink of its own, and `Write` is withheld by `ANALYST_DENIED_TOOLS` — left on, it ends
+   * every run with a denied call.
    */
   readonly noHtml?: boolean;
   /**
@@ -177,13 +115,10 @@ export interface TriageRunOptions {
 }
 
 /**
- * Staged images as the two things a run needs to know about them.
- *
- * A block and a directory rather than the `ImageStageResult` itself, so this
- * module never learns how staging works: it appends text and widens a
- * workspace. `directory` is null whenever nothing was written, which includes
- * the refusal — a `--add-dir` naming a path that does not exist is a startup
- * failure on a run that should have degraded to reading the text.
+ * Staged images as the two things a run needs to know: a block and a directory, rather than
+ * `ImageStageResult` itself, so this module never learns how staging works. `directory` is null
+ * whenever nothing was written, including on refusal — a `--add-dir` naming a path that does not
+ * exist is a startup failure on a run that should have degraded to reading the text.
  */
 export interface StagedImagePrompt {
   readonly block: string;
@@ -200,11 +135,9 @@ export interface IssueLink {
 /**
  * The §11 mutation payload, as data rather than as printed text.
  *
- * A label DELTA rather than a final set, deliberately. §11 requires the write
- * to union against the labels live on the issue and forbids "a bare replacement
- * array"; if the analyst returned a finished set, a human who edited labels
- * between analysis and post would have their edit silently reverted. The delta
- * survives that gap because it is applied, not imposed.
+ * `labelsAdd`/`labelsRemove` are a delta, not a final set, since §11 requires the write to union
+ * against the labels live on the issue: a finished set would silently revert a human's edit made
+ * between analysis and post.
  */
 export interface Mutation {
   readonly commentBody: string;
@@ -221,31 +154,17 @@ export type Confidence = "low" | "med" | "high";
 /**
  * Whether a coding agent could be trusted to fix this ticket unattended.
  *
- * An estimate, and a weak one by construction: the analyst has no `--deep`, no
- * `Task`, and no checkout of the repo it is naming, so the call is made from the
- * ticket plus the knowledge vault. It is a candidate signal — the thing that
- * decides a ticket is *worth* looking at — not a warrant. Whatever eventually
- * acts on it reads the code first and is expected to disagree sometimes.
- *
- * The one field with teeth is `solvable`, and it fails closed: absent means
- * false. See the schema for why the whole object is optional.
+ * A weak estimate by construction: the analyst has no `--deep`, `Task`, or checkout of the repo it
+ * names, so it's a candidate signal for "worth looking at," not a warrant — whatever acts on it
+ * reads the code first. `solvable` is the field with teeth and fails closed: absent means false.
  */
 export interface AgentFitness {
   readonly solvable: boolean;
   /**
-   * Not solvable today, but would be if `blockers` were filled in.
-   *
-   * A second field rather than a third value of the first, and the gate keeps
-   * them mutually exclusive. `solvable` cannot carry this signal because it is
-   * forced false whenever the verdict is not `ready-ish`, which is every ticket
-   * this one is about — so the two are alternatives that happen to be spelled
-   * as booleans, and a payload with both true is a contradiction rather than a
-   * strong opinion.
-   *
-   * Fails closed the same way `solvable` does, for a weaker but real reason: a
-   * wrong `true` here does not authorise a code change, it authorises a
-   * *recurring charge*. The ticket goes on a watch list, and every edit somebody
-   * makes to it buys another triage run.
+   * Not solvable today, but would be if `blockers` were filled in. The gate keeps this mutually
+   * exclusive with `solvable` — a payload with both true is a contradiction. Fails closed for a
+   * weaker reason than `solvable`: a wrong `true` puts the ticket on a watch list, authorising a
+   * recurring triage run rather than a code change.
    */
   readonly plausible: boolean;
   readonly confidence: Confidence;
@@ -257,12 +176,8 @@ export interface AgentFitness {
 }
 
 /**
- * An unfilled fill-in placeholder, and the DoR row it stands in for.
- *
- * `row` is what decides whether the placeholder is evidence of a contradiction
- * or merely of a nudge, now that rows 8 and 9 cannot fail an item. See
- * `BLOCKING_DOR_ROWS` for which rows are which, and why an unattributed
- * placeholder is treated as blocking rather than waved through.
+ * An unfilled fill-in placeholder, and the DoR row it stands in for. `row` decides whether the
+ * placeholder is evidence of a contradiction or merely a nudge — see `BLOCKING_DOR_ROWS`.
  */
 export interface DorPlaceholder {
   /** The placeholder verbatim, as it appears in the ticket. */
@@ -272,26 +187,16 @@ export interface DorPlaceholder {
 }
 
 /**
- * The DoR rows a leftover placeholder can still fail an item on.
- *
- * Rows 1-3 are the ones that describe whether the ticket is *understood* —
- * problem and segment, value and why-now, testable acceptance criteria. Rows 4-7
- * are auto-filled from research rather than from the ticket body, so a
- * placeholder never stands in for one. Rows 8 and 9 are advisory and block
- * nothing; row 10 is the human Trio gate.
+ * The DoR rows a leftover placeholder can still fail an item on. Rows 1-3 describe whether the
+ * ticket is understood; rows 4-7 are auto-filled from research, so a placeholder never stands in
+ * for one; rows 8 and 9 are advisory and block nothing; row 10 is the human Trio gate.
  */
 const BLOCKING_DOR_ROWS: ReadonlySet<number> = new Set([1, 2, 3]);
 
 /**
- * The row of a placeholder the model did not attribute, or attributed to a row
- * that does not exist.
- *
- * Treated as **blocking**, which is the one place this change deliberately fails
- * closed. "There is an unfilled placeholder here and I cannot say which row it
- * belongs to" is the exact shape of SSX-3822 — the evidence present, the step
- * from evidence to label missing — and that is the payload this guard exists to
- * refuse. The escape is free and requires only honesty: a model that believes
- * the placeholder is the row 9 baseline says `row: 9` and the item passes.
+ * The row of a placeholder the model did not attribute, or attributed to a row that does not
+ * exist. Treated as blocking, deliberately: the escape is free and requires only honesty — a model
+ * that believes the placeholder is the row 9 baseline says `row: 9` and the item passes.
  */
 export const UNATTRIBUTED_DOR_ROW = 0;
 
@@ -311,35 +216,14 @@ export interface TriagePayload {
 export class TriageError extends Error {}
 
 /**
- * The structured verdict contradicts the evidence in the same payload.
+ * The structured verdict contradicts the evidence in the same payload: a payload may not assert a
+ * pass while its own evidence names a blocking row (`BLOCKING_DOR_ROWS`) as unmet.
  *
- * Raised for the failure this service has now seen twice: a report whose prose
- * is accurate and whose machine-readable field is not. On SSX-3814 the enum
- * offered no honest option and the model said so; on SSX-3822 it wrote
- * "baseline [N] left unfilled" into its own scorecard, flagged the row green,
- * and emitted `dor:pass` + `ready-ish`. Nothing was fabricated either time —
- * the step from evidence to label is what broke, and the label is the only part
- * downstream reads.
- *
- * Re-aimed when DoR rows 8 and 9 became advisory. Both incidents were row 9,
- * and row 9 can no longer fail an item — so the original rule ("any placeholder
- * contradicts a pass") now condemns payloads that are simply correct. What
- * survives the demotion is the rule underneath it: a payload may not assert a
- * pass while its own evidence names a *blocking* row as unmet. So the check now
- * reads the row each placeholder is attributed to, and fires on `BLOCKING_DOR_ROWS`
- * only. The literal SSX-3822 payload — a `[N]` standing in for the baseline
- * metric — is legal today, deliberately: under the advisory rule it is no longer
- * a contradiction.
- *
- * IMPORTANT — this is detection, not prevention. The skill posts its comment
- * mid-run via `addCommentToJiraIssue`; `structured_output` only arrives with
- * the final result event. By the time this throws, a write-enabled run has
- * already commented on the ticket. What it does buy: the contradiction is
- * refused rather than compounded into the local report, the operator is told,
- * and — because the poller does not record a failed key as seen — the next
- * cycle retries. The skill's comment is idempotent on its footer sentinel, so
- * a retry that gets it right updates the comment in place rather than stacking
- * a second one.
+ * This is detection, not prevention — the skill posts its comment mid-run, before
+ * `structured_output` arrives, so a write-enabled run has already commented by the time this
+ * throws. What it buys: the contradiction is refused rather than compounded into the local report,
+ * and since the poller does not record a failed key as seen, the next cycle retries; the comment is
+ * idempotent on its footer sentinel, so a retry that gets it right updates in place.
  */
 export class TriageContradictionError extends TriageError {
   readonly issueKey: string;
@@ -368,31 +252,18 @@ export class TriageContradictionError extends TriageError {
 }
 
 /**
- * Variables withheld from the triage subprocess.
- *
- * The two halves of this service authenticate to Jira by different means and
- * deliberately so: the poller uses a REST credential to discover *which*
- * tickets are new, and the skill uses the Atlassian MCP session to read what
- * is *in* them. The skill therefore never needs the REST credential, so it
- * does not get it. Inheriting the whole environment would hand it over for no
- * reason, and least privilege is cheap here.
+ * Variables withheld from the triage subprocess. The poller authenticates to Jira with a REST
+ * credential to discover which tickets are new; the skill uses the Atlassian MCP session to read
+ * what is in them and never needs the REST credential, so it does not get it.
  */
 const WITHHELD_FROM_CHILD = /^JIRA_/;
 
 /**
- * Undocumented switch that this service must never be the one to set.
- *
- * It appears in neither the environment-variable reference nor the hooks
- * reference, and the two plausible readings disagree about the value we were
- * using: if it is a presence check, `CLAUDE_SKIP_HOOKS=0` means "skip hooks";
- * if it is a value check, it means "do not skip". This file previously set it
- * to "0" under the comment "safety hooks must stay active" — which, on the
- * first reading, silently disabled the hooks in every triage subprocess and
- * would have made any future PreToolUse guard a no-op that looked installed.
- *
- * Removing it from the child's environment is correct under both readings, so
- * the ambiguity does not need resolving. Hooks are turned off deliberately via
- * the documented `disableAllHooks` setting, not by an inherited variable.
+ * Undocumented switch that this service must never be the one to set. It appears in neither the
+ * environment-variable nor the hooks reference, and the two plausible readings disagree about
+ * `CLAUDE_SKIP_HOOKS=0`: a presence check reads it as "skip hooks," a value check as "do not skip."
+ * Removing it from the child's environment is correct under both readings; hooks are turned off
+ * deliberately via the documented `disableAllHooks` setting, never by an inherited variable.
  */
 const HOOK_KILL_SWITCH = "CLAUDE_SKIP_HOOKS";
 
@@ -421,16 +292,9 @@ export function childEnv(
 }
 
 /**
- * `--no-write` is unconditional, and is the whole point of this half.
- *
- * It is a "pure dry-run" in the skill's own words: it still renders the full
- * §11 mutation payload, which the schema now collects, but it never offers to
- * write. The analyst therefore produces everything needed to post without being
- * able to post any of it.
- *
- * Any staged-image block follows the command on its own lines. It goes in the
- * prompt rather than an attachment argument because the skill takes a slash
- * command and this service has no other channel into the session.
+ * `--no-write` is unconditional — a pure dry-run that still renders the full §11 mutation payload
+ * but never offers to write it. Any staged-image block follows the command on its own lines,
+ * because the skill takes a slash command and this service has no other channel into the session.
  */
 export function buildPrompt(options: TriageRunOptions): string {
   const flags = [
@@ -446,13 +310,8 @@ export function buildPrompt(options: TriageRunOptions): string {
 }
 
 /**
- * The tools pre-approved for a run.
- *
- * The metaphor this comment used to reach for was belt and braces: the prompt
- * says `--no-write`, and the permission check catches the model misreading it.
- * The braces were not attached. Omitting a write tool from this list never
- * denied it — that is `ANALYST_DENIED_TOOLS`, passed alongside as
- * `--disallowedTools`, and it is the reason the sentence is safe to make now.
+ * The tools pre-approved for a run. Omitting a write tool from this list never denies it — that's
+ * `ANALYST_DENIED_TOOLS`, passed alongside as `--disallowedTools`.
  */
 export function toolsFor(options: TriageRunOptions): readonly string[] {
   return options.allowedTools ?? ALLOWED_TOOLS;
@@ -471,15 +330,12 @@ export function buildArgs(options: TriageRunOptions): string[] {
     "dontAsk",
     "--allowedTools",
     toolsFor(options).join(","),
-    // Not a duplicate of the line above. The allowlist pre-approves; only this
-    // withholds. See DENIED_BUILTIN_TOOLS for the probe.
+    // Not a duplicate of the line above: the allowlist pre-approves, only this withholds.
     "--disallowedTools",
     ANALYST_DENIED_TOOLS.join(","),
     ...(vaultPath === "" ? [] : ["--add-dir", vaultPath]),
-    // Declared intent, not a grant: a probe with these flags read an absolute
-    // path outside the working directory, so the session could open a staged
-    // file whether or not it is named here. Naming it keeps the transcript
-    // honest about which directories a run was meant to touch.
+    // Declared intent, not a grant — a probe showed the session can open a staged file whether or
+    // not it's named here, so this keeps the transcript honest about intended directories.
     ...(imageDir === null ? [] : ["--add-dir", imageDir]),
     "--json-schema",
     TRIAGE_SCHEMA_JSON,
@@ -487,11 +343,8 @@ export function buildArgs(options: TriageRunOptions): string[] {
 }
 
 /**
- * The accepted verdicts, read off the schema the model was given.
- *
- * Deriving them rather than restating them means the check and the contract
- * cannot disagree — and the annotation makes it a compile error for the schema
- * to offer a verdict `Verdict` has no name for.
+ * The accepted verdicts, read off the schema the model was given, so the check and the contract
+ * cannot disagree.
  */
 const VERDICTS: readonly Verdict[] = TRIAGE_SCHEMA.properties.verdict.enum;
 
@@ -500,14 +353,9 @@ function isVerdict(value: unknown): value is Verdict {
 }
 
 /**
- * Refuses a payload whose verdict contradicts its own evidence.
- *
- * Checks both the label and the verdict, deliberately. The label is what the
- * skill's own rule is written about; the verdict is what this service actually
- * consumes — it sets the emoji, the sink's heading and anything routed later.
- * Guarding only the label would leave the field that matters unguarded.
- *
- * Exported for testing: the point is not that it exists but that it fires.
+ * `assertDorCoherent` below checks both the label and the verdict deliberately: the label is what
+ * the skill's own rule is written about, but the verdict is what this service actually consumes.
+ * Exported for testing — the point is not that it exists but that it fires.
  */
 export function blockingPlaceholders(
   placeholders: readonly DorPlaceholder[],
@@ -537,11 +385,9 @@ export function assertDorCoherent(payload: TriagePayload, issueKey: string): voi
 }
 
 /**
- * Turns the run's structured output into a payload, or refuses it.
- *
- * Exported because testing `assertDorCoherent` in isolation proved nothing: a
- * mutation that deleted the call from here left the whole suite green. The
- * check has to be exercised through the path the run actually takes.
+ * Turns the run's structured output into a payload, or refuses it. Calls `assertDorCoherent` here
+ * rather than only testing it in isolation, since the check has to be exercised through the path
+ * the run actually takes.
  */
 export function parsePayload(value: unknown, issueKey: string): TriagePayload {
   if (typeof value !== "object" || value === null) {
@@ -568,13 +414,8 @@ export function parsePayload(value: unknown, issueKey: string): TriagePayload {
 }
 
 /**
- * Reads the mutation leniently, because the gate reads it strictly.
- *
- * Nothing here throws on a missing field: an absent comment body becomes `""`,
- * which `assertPostable` then refuses by name. Rejecting twice, in two places,
- * with two different messages would only make the failure harder to read — and
- * a payload that cannot be posted is still worth keeping, since the local
- * report is written either way.
+ * Reads the mutation leniently, because the gate reads it strictly: an absent comment body becomes
+ * `""`, which `assertPostable` then refuses by name, rather than throwing twice in two places.
  */
 function parseMutation(value: unknown): Mutation {
   const source =
@@ -594,24 +435,13 @@ const CONFIDENCES: readonly Confidence[] =
   TRIAGE_SCHEMA.properties.agentFitness.properties.confidence.enum;
 
 /**
- * Reads the fitness object, defaulting every way out to "no".
- *
- * Three separate paths lead to `solvable: false` here: the object is missing,
- * the object is malformed, or `solvable` is anything other than the literal
- * `true`. That is not defensiveness for its own sake — this field is the first
- * one in the service whose `true` eventually authorises a subprocess to edit
- * source, and the asymmetry between a wrong `false` (a human triages the ticket,
- * as they do today) and a wrong `true` (a bot opens a pull request nobody asked
- * for) is not close. Every ambiguity resolves to the cheap mistake.
- *
- * `confidence` falls back to `low` rather than to the model's string, so an
- * unrecognised level cannot be read downstream as a strong one.
- *
- * `plausible` takes the identical `=== true` treatment and is not required by
- * the schema, so an older skill that has never heard of it reads as "not
- * watching this ticket" rather than as a parse failure. That is the whole reason
- * it can be added to a live schema at all: the field is new, every payload
- * currently in flight omits it, and omission has to be the safe answer.
+ * Reads the fitness object, defaulting every way out (missing, malformed, or `solvable` not
+ * literally `true`) to `false`: this field's `true` eventually authorises a subprocess to edit
+ * source, and a wrong `false` (a human triages instead) is far cheaper than a wrong `true`.
+ * `confidence` falls back to `low` rather than the model's raw string, so an unrecognised level
+ * cannot be read downstream as a strong one. `plausible` gets the same `=== true` treatment but
+ * isn't schema-required, so an older skill that has never heard of it reads as "not watching this
+ * ticket" rather than a parse failure — the reason the field could be added to a live schema at all.
  */
 export function parseAgentFitness(value: unknown): AgentFitness {
   const source =
@@ -628,12 +458,9 @@ export function parseAgentFitness(value: unknown): AgentFitness {
 }
 
 /**
- * Unknown link types are dropped rather than coerced.
- *
- * The two §11 types differ in consequence — `duplicates` is the one that
- * invites a human to close a ticket — so guessing which was meant is worse than
- * creating no link at all. A dropped link costs a re-run; a wrong one costs
- * somebody's ticket.
+ * Unknown link types are dropped rather than coerced: the two §11 types differ in consequence —
+ * `duplicates` invites a human to close a ticket — so guessing which was meant is worse than
+ * creating no link at all.
  */
 function parseLinks(value: unknown): readonly IssueLink[] {
   if (!Array.isArray(value)) {
@@ -665,15 +492,10 @@ function strings(value: unknown): readonly string[] {
 }
 
 /**
- * Reads the placeholder list, tolerating a model that answers in the old shape.
- *
- * A bare string was the whole field until rows 8 and 9 went advisory, and the
- * skill is prose the model interprets rather than code that is deployed with
- * this file — so a run mid-rollout can still return `["[N]"]`. That parses to an
- * `UNATTRIBUTED_DOR_ROW`, which `blockingPlaceholders` treats as blocking. The
- * old shape therefore keeps the old behaviour exactly, which is the property
- * worth having: the failure mode of a stale skill is the guard being too strict,
- * never it silently switching off.
+ * Reads the placeholder list, tolerating a model that answers in the old bare-string shape (the
+ * skill is prose the model interprets, not code deployed with this file, so a stale skill can still
+ * return one). A bare string parses to `UNATTRIBUTED_DOR_ROW`, which `blockingPlaceholders` treats
+ * as blocking — so a stale skill fails the guard too strictly rather than silently switching it off.
  */
 function dorPlaceholders(value: unknown): readonly DorPlaceholder[] {
   if (!Array.isArray(value)) {
