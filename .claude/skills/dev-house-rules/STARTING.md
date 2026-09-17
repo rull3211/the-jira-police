@@ -62,20 +62,20 @@ gives the run something to refute.
 The budget goes here, and so do the confident mistakes: the failure is rarely _not finding_
 something but **finding something adjacent and believing it**.
 
-### ARCHITECTURE.md is the map, and this section is only how to read one
+### architecture/*.md is the map, and this section is only how to read one
 
-**Structural facts — the module map, the entry points, the composition — belong in
-`ARCHITECTURE.md` and are cited from here, never restated here.** A count or a filename copied into
+**Structural facts — the module map, the entry points, the composition — belong in the module's
+own `architecture/*.md` file, cited from here, never restated.** A count or a filename copied into
 a second document is a fact with **two homes and one maintainer**, and rule 3 says how that ends.
 The narrow exception is a number `pnpm docs:check` verifies everywhere it appears, which can no
 longer drift silently; cite-don't-copy is a rule about facts nothing checks. So it runs both ways,
 and the second half is the one that decays quietly:
 
-- **Check a structural claim against the map before acting on it**, including a claim in this file.
-  If they disagree, one of them is stale and finding out which is the work.
-- **When implementation moves, the map moves in the same commit** — a module added, renamed, split
-  or deleted, a new entry point, a changed composition. It is only ever skipped once per document
-  before nobody trusts it again.
+- **Check a structural claim against the module's file before acting on it**, including a claim in
+  this one. If they disagree, one of them is stale and finding out which is the work.
+- **The file moves with the implementation, in the same commit, always** — not only when something
+  added, renamed, split or deleted a module; finishing the module is reason enough on its own.
+  Skipped once, and nobody trusts it again.
 
 ### Technique
 
@@ -172,7 +172,7 @@ Each of those first three steps is
 which makes the ordering enforceable rather than aspirational.
 
 **One branch per privilege, never `main`; a human always merges.** Both have guards, argued in
-`CLAUDE.md` and `ARCHITECTURE.md` §16; neither rule is less binding when nothing is watching.
+`CLAUDE.md` and `architecture/guardrails.md` §16; neither rule is less binding when nothing is watching.
 
 **Do not stack branches deeply** — each unmerged branch gates the ones above it. When the stack
 grows, ask for the base to be merged rather than building another floor on it, and delete the local
