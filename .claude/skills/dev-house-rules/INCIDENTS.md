@@ -1575,3 +1575,34 @@ verdict — not by the `grep` the plan specified.
 cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code): a
 single-string match is a check on phrasing, not on whether the picture was read, and the gap between
 the two is exactly this file's recurring shape.
+
+## 2026-09-18
+
+### The branches that could never merge, because they had already been rewritten
+
+`branch-stack.sh` reported three branches stacked, with zero open pull requests behind any of them.
+Two, `backup/pre-msg-rewrite` and `backup/pre-renumber`, had had their commit messages rewritten
+after their content already reached `main`. `unmergedBranches` (`.claude/hooks/lib.sh`) reads `git
+branch --no-merged`, which compares commits by SHA — a rewritten commit can never match the one it
+replaced, so the branch reports as unmerged forever, independent of how current `origin/main` is
+kept. `git cherry origin/main <branch>` showed every commit on both as already applied, confirmed
+against matching tree hashes under different commit SHAs — the check that told a rewritten branch
+apart from a third one the hook also reported, `feat/recon-reads-images`, which was genuinely
+unmerged work.
+
+`BUILDING.md` already claimed merged branches "drop out by construction" — true for an ordinary
+merge, and silently false for this shape. The detector was the stale artifact, one layer under the
+stale branch the existing rule already names.
+
+**Found by** running `git cherry` by hand against the three branches the hook reported, after a
+`git fetch` alone did not clear the count — reported by the operator as branches tripping the guard
+with no open pull requests behind them.
+
+The fix, in the same commit: `unmergedBranches` now also requires `git cherry <base> <branch>` to
+show an unapplied commit before counting a candidate, which is what makes [the same rule applies to
+branches](BUILDING.md#the-same-rule-applies-to-branches-and-they-are-the-copy-everyone-forgets)'s
+claim true again rather than needing correction.
+
+**No rule yet** — a squash-merged pull request would defeat the same fix the same way, since its
+combined diff does not patch-match its pre-squash commits; this repository has not merged one yet to
+show whether the shape recurs, and 2026-09-18.

@@ -53,14 +53,29 @@ stackBase() {
 # number can never reach zero, and a threshold that cannot be satisfied is a
 # prompt people learn to dismiss.
 unmergedBranches() {
-  local repo="$1" base="$2" head
+  local repo="$1" base="$2" head candidate
   head="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')"
 
   git -C "$repo" branch --no-merged "$base" --format='%(refname:short)' 2>/dev/null |
     grep -ve '^$' |
     grep -vxF "${base#origin/}" |
-    grep -vxF "$head" ||
+    grep -vxF "$head" |
+    while IFS= read -r candidate; do
+      if branchHasUnappliedCommit "$repo" "$base" "$candidate"; then
+        printf '%s\n' "$candidate"
+      fi
+    done ||
     true
+}
+
+# `--no-merged` compares commits by SHA, so a branch whose history was
+# rewritten — a message edit, a rebase, a squash-merged pull request — keeps
+# showing as unmerged after its content already landed under a different
+# hash. `git cherry` compares patch content instead, so it clears once the
+# patches are on the base, not only once the exact commits are.
+branchHasUnappliedCommit() {
+  local repo="$1" base="$2" branch="$3"
+  git -C "$repo" cherry "$base" "$branch" 2>/dev/null | grep -q '^+'
 }
 
 countLines() {
