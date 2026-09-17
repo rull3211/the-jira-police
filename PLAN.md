@@ -425,11 +425,13 @@ not a plan item. What is left below is only what is still missing.
   "seven quotes appear above this line" is a check with one site and a bespoke parser — but the
   gap is real and the alternative is to stop writing such sentences, which is the cheaper fix and
   is not currently a rule.
-- **Cost figures are facts with many homes.** `$0.94`, `$0.11`, `$3.99` and `$4.50` occupy 17
+- **Cost figures are facts with many homes.** `$0.94`, `$0.11`, `$3.99` and `$4.50` occupy 18
   file-homes between them, outside the `docs:check` exemption rule 3 grants. The figures themselves
   are history and stay unchecked; the total is derived, so the class spreading further goes red —
   this bullet said "three" of `$4.50` while it was already in four, which is the drift it describes,
-  happening to it.
+  happening to it. It rose again, 17 to 18, the day `ARCHITECTURE.md` split into `architecture/*.md`:
+  `$0.11` had one home because §10 and §13 shared a file, and now has two because they don't.
+  Splitting a file can grow this count on its own, with no new figure and no new claim.
 - **A citation to a document outside the tree cannot be checked, and does not look different.**
   `docs:check` can only resolve what it can open, so an out-of-tree quotation is exempt by nature
   while reading exactly like a verifiable one — which is how two of them were misattributed to
@@ -775,6 +777,45 @@ improvement if the reviewer can tell the difference; a pull request that omits p
 while reading as finished is worse than none — the same reasoning that has plan entries deleted
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
+
+### 37. `ARCHITECTURE.md` split into a directory, and the map no longer fits a session budget
+
+**Branch:** `refactor/architecture-split`
+
+**What is being attempted.** `ARCHITECTURE.md` reached 3160 lines / 16 top-level sections — reading
+it in full to touch one module now costs most of a context window. It moves to an `architecture/`
+directory, one file per module or cross-cutting concern (`overview.md`, `module-map.md`,
+`triage.md`, `solve.md`, `configuration.md`, `invariants.md`, `not-built.md`, `guardrails.md`), with
+section numbers **carried over unchanged** — every `§N` citation in `src/` and the other three
+source documents names no file today (`section-refs.ts`'s own header explains why), so the split
+must not renumber a single heading. The root `ARCHITECTURE.md` becomes a quickindex: the existing
+front-matter (the flow diagram, the test count, the pointer sentence) plus a table routing a task to
+the file that answers it. `docs-check.ts`'s `NUMBERED_DOCUMENTS` array gets one entry per new file
+instead of one for the whole document, and the `HISTORICAL` entries pinned to `ARCHITECTURE.md:264`,
+`:21` and `:4562` move to whichever file now holds that sentence. After the split: a citation-repoint
+pass over every place that names `ARCHITECTURE.md` and a section number together (README, PLAN,
+CLAUDE.md, five skill files, eight `src/` comments — none of them checked, all of them found by
+`grep`) so each names the file the content actually lives in now; then a deep verify pass over every
+new file's claims against the current tree, since a document this size has not been read end to end
+in one sitting in a long time; then `dev-house-rules` gets a rule that finishing work on a module
+means checking that module's `architecture/*.md` file against what changed, not the whole document.
+
+**Why now.** The four-document contract (`STARTING.md`) already requires `ARCHITECTURE.md` to move
+in the same commit as the module it describes; a file too large to read is a file that rule quietly
+stops applying to, because nobody rereads 3160 lines to check one paragraph. Splitting by module
+makes "check the map" cost proportional to the change again.
+
+**What it would let the service do that it cannot do today.** Nothing — this is prose, not code.
+What it buys is a document the existing rule can actually be followed against, and a lower cost for
+every future session that has to decide whether the map still matches the tree.
+
+**What would make it the wrong idea.** If the split cannot be kept mechanically lossless — if
+`pnpm docs:check`'s dangling-reference count (`KNOWN_DANGLING`, currently 39) or either `tests in
+<N> files` citation site moves as a side effect of moving text rather than a deliberate, explained
+change — the split has silently repointed or dropped a fact the same way `PLAN.md` §14 describes,
+and is the wrong shape until that stops being true. If the module boundaries turn out to cut through
+a section that two modules both depend on (the subprocess contract, `§6`, is the likely case), a file
+per concern rather than strictly per module is the fallback, not a reason to abandon the split.
 
 ---
 
