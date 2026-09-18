@@ -8,8 +8,8 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 54
-entries below are cited that way, and the other nine each say in their own text that no rule has
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 55
+entries below are cited that way, and the other ten each say in their own text that no rule has
 been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
 reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
 so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
@@ -1611,6 +1611,39 @@ claim true again rather than needing correction.
 **No rule yet** — a squash-merged pull request would defeat the same fix the same way, since its
 combined diff does not patch-match its pre-squash commits; this repository has not merged one yet to
 show whether the shape recurs, and 2026-09-18.
+
+### The guard that judged a branch nobody was writing to
+
+`branch-guard.sh` enforces the first of the two non-advisory rules, and in a worktree it enforces it
+against the wrong checkout. `repo="${CLAUDE_PROJECT_DIR:-$PWD}"` (`:17`) is resolved to a branch once
+(`:34`), and the protected-branch refusal at `:302` tests that one name. Nothing in the script reads
+`tool_input.file_path`, so **which file is being written is not an input to the decision** — only
+which branch the project directory happens to be standing on.
+
+Probed with the same `Write` payload twice, differing only in `CLAUDE_PROJECT_DIR`: pointed at a
+worktree checked out on `main`, the guard denied; pointed at a feature worktree while the payload
+still named a file inside that `main` worktree, it allowed. The push and `gh pr merge` refusals are
+unaffected — both match command text, so they do not depend on where HEAD is.
+
+`:127` shows the inverse was already considered and accepted: `git -C /some/other/repo commit`
+refused while HEAD here is protected, an over-refusal in the safe direction. The under-refusal is
+the same blindness read the other way round, and `pnpm test:hooks` cannot see it — the suite feeds a
+payload and checks what the script emits for a given HEAD, which is the very thing that is being
+resolved from the wrong place.
+
+**Found by** a different hook getting it visibly wrong first: `commit-brief.sh` announced a commit
+on `fix/section-scoped-resolver` while the commit was being made on `feat/daemon-log-tui` in another
+worktree. `commit-brief.sh:44`, `branch-stack.sh:22` and `branch-guard.sh:17` are the same line, so
+the cosmetic one is the tell for the load-bearing one. Turned up while opening a worktree for
+unrelated work, not by an audit of the guards.
+
+`CLAUDE.md` already says to assume your own compliance is the whole of the enforcement, which is the
+rule that covers this and is why the probe was run at all. What has no rule is narrower: a guard
+whose decision is scoped to a directory has to be exercised from every worktree the agent can reach,
+and this repository routinely has three open at once.
+
+**No rule yet** — the fix is not written and neither is the `test:hooks` case that would fail
+without it, and 2026-09-18.
 
 ### The `§N` checker that resolved a citation against any document that happened to define it
 

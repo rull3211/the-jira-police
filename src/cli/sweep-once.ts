@@ -29,11 +29,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { numeric, readSettings, withConfigErrors } from "../settings.ts";
 import { runSweep } from "../sweep.ts";
 import { attachStagingRoot, worktreeRoot } from "../wiring.ts";
 import { formatReport } from "./sweep-once-report.ts";
+
+const log = createLogger("sweep-once");
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -63,7 +65,7 @@ async function main(): Promise<void> {
   await writeFile(reportPath, reportText, "utf8");
   process.stdout.write(`\nreport: ${reportPath}\n`);
 
-  logger.info("sweep-once.done", { write, removed, maxAgeMs });
+  log.info("sweep-once.done", { write, removed, maxAgeMs });
 }
 
 await withConfigErrors(main);

@@ -10,7 +10,9 @@
 
 import { type IssueDetail, type JiraAttachment, isInlineable } from "../jira/client.ts";
 import { renderAdf } from "../jira/adf.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
+
+const log = createLogger("solve");
 
 /** Reads an attachment's bytes. The half of `JiraClient` this module needs. */
 export interface AttachmentReader {
@@ -124,7 +126,7 @@ export async function renderTicket(
       text = await reader.fetchAttachmentText(attachment.id, options.maxAttachmentBytes);
     } catch (error) {
       // One unreadable attachment must not fail the solve; the solver is told it exists and could not be read.
-      logger.warn("solve.attachment_unreadable", {
+      log.warn("solve.attachment_unreadable", {
         issueKey: detail.key,
         filename: attachment.filename,
         reason: (error as Error).message,
@@ -157,7 +159,7 @@ export async function renderTicket(
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd()}\n`;
 
-  logger.debug("solve.ticket_rendered", {
+  log.debug("solve.ticket_rendered", {
     issueKey: detail.key,
     characters: text.length,
     comments: detail.comments.length,

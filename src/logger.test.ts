@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { NEWS_MARK, QUIET_MARK, logger } from "./logger.ts";
+import { NEWS_MARK, QUIET_MARK, createLogger } from "./logger.ts";
 
 /** Captures the raw written string rather than spying on `emit`, since JSON shape and stream choice aren't observable from inside. */
 function capture(): {
@@ -27,6 +27,8 @@ function onlyLine(lines: readonly string[]): Record<string, unknown> {
 }
 
 describe("logger", () => {
+  const log = createLogger("solve");
+
   const savedLevel = process.env["LOG_LEVEL"];
 
   beforeEach(() => {
@@ -47,7 +49,7 @@ describe("logger", () => {
     // disappears into the noise pile at once.
     const { out } = capture();
 
-    logger.info("solve.pr.opened", { number: 2663 });
+    log.info("solve.pr.opened", { number: 2663 });
 
     expect(onlyLine(out)["q"]).toBe(NEWS_MARK);
   });
@@ -55,7 +57,7 @@ describe("logger", () => {
   it("marks a line quiet only when the call site asks", () => {
     const { out } = capture();
 
-    logger.info("review.cycle", { watched: 5 }, { quiet: true });
+    log.info("review.cycle", { watched: 5 }, { quiet: true });
 
     expect(onlyLine(out)["q"]).toBe(QUIET_MARK);
   });
@@ -64,7 +66,7 @@ describe("logger", () => {
     // `false` must not be read as "unspecified" by a future truthiness check on the key.
     const { out } = capture();
 
-    logger.info("review.cycle", { watched: 5 }, { quiet: false });
+    log.info("review.cycle", { watched: 5 }, { quiet: false });
 
     expect(onlyLine(out)["q"]).toBe(NEWS_MARK);
   });
@@ -73,16 +75,44 @@ describe("logger", () => {
     // Must stay first: after `ts` it would land at a column that moves with the timestamp's length.
     const { out } = capture();
 
-    logger.info("poll.done", { triaged: 1 });
+    log.info("poll.done", { triaged: 1 });
 
-    expect(Object.keys(onlyLine(out))).toEqual(["q", "ts", "level", "message", "triaged"]);
+    expect(Object.keys(onlyLine(out))).toEqual(["q", "ts", "level", "src", "message", "triaged"]);
+  });
+
+  it("names the source it was created with, before the message", () => {
+    // `src` is what the viewer's source filter reads; ahead of `message` so both sit in fixed columns.
+    const { out } = capture();
+
+    createLogger("watch").info("watch.sweep.done", { watched: 5 });
+
+    expect(onlyLine(out)["src"]).toBe("watch");
+  });
+
+  it("returns the same instance for a source, so a spy catches what a module holds", () => {
+    // Modules call `createLogger` at import time; a fresh object per call would make every
+    // existing `vi.spyOn(createLogger(…), …)` silently observe nothing.
+    expect(createLogger("solve")).toBe(createLogger("solve"));
+    expect(createLogger("solve")).not.toBe(createLogger("watch"));
+  });
+
+  it("keeps the source when a field is called `src`, and keeps the field too", () => {
+    // Same shape as the `q` collision below. A spread field overwriting `src` would make the
+    // viewer's filter hide the line under a source that never emitted it.
+    const { out } = capture();
+
+    log.info("solve.pr.opened", { src: "elsewhere" });
+
+    const line = onlyLine(out);
+    expect(line["src"]).toBe("solve");
+    expect(line["_src"]).toBe("elsewhere");
   });
 
   it("stays valid JSON with the emoji in it", () => {
     // The mark must cost the machine nothing: still valid, `jq`-selectable JSON.
     const { out } = capture();
 
-    logger.info("review.cycle", { watched: 5 }, { quiet: true });
+    log.info("review.cycle", { watched: 5 }, { quiet: true });
 
     const line = out[0] ?? "";
     expect(line.endsWith("\n")).toBe(true);
@@ -95,7 +125,7 @@ describe("logger", () => {
     // wholesale into fields, colliding with the marker's own key.
     const { out } = capture();
 
-    logger.info("watch.cycle.done", { q: 3 }, { quiet: true });
+    log.info("watch.cycle.done", { q: 3 }, { quiet: true });
 
     const line = onlyLine(out);
     expect(line["q"]).toBe(QUIET_MARK);
@@ -106,7 +136,7 @@ describe("logger", () => {
     // If a warning seems to need `{ quiet: true }`, delete the warning instead.
     const { err } = capture();
 
-    logger.warn("poll.interrupted", { abandoned: 2 });
+    log.warn("poll.interrupted", { abandoned: 2 });
 
     expect(onlyLine(err)["q"]).toBe(NEWS_MARK);
   });
@@ -115,7 +145,7 @@ describe("logger", () => {
     // The mark is about attention, the stream is about severity — a quiet error still goes to stderr.
     const { out, err } = capture();
 
-    logger.error("poll.issue_failed", {}, { quiet: true });
+    log.error("poll.issue_failed", {}, { quiet: true });
 
     expect(out).toHaveLength(0);
     expect(onlyLine(err)["q"]).toBe(QUIET_MARK);
@@ -125,7 +155,7 @@ describe("logger", () => {
     process.env["LOG_LEVEL"] = "warn";
     const { out } = capture();
 
-    logger.info("solve.query", { jql: "project = SSX" });
+    log.info("solve.query", { jql: "project = SSX" });
 
     expect(out).toHaveLength(0);
   });
@@ -133,7 +163,7 @@ describe("logger", () => {
   it("still serialises an `error` field, which the mark must not have displaced", () => {
     const { err } = capture();
 
-    logger.error("solve.claim.failed", { error: new Error("nope") });
+    log.error("solve.claim.failed", { error: new Error("nope") });
 
     expect(onlyLine(err)["error"]).toMatchObject({ name: "Error", message: "nope" });
   });

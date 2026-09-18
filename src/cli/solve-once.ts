@@ -26,13 +26,15 @@
  * window, so running it twice is expected to report the same tickets both times.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { describeSettings, readSettings, solveMode, withConfigErrors } from "../settings.ts";
 import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
 import { USAGE, parseSolveArgs, unavailable, writes } from "./solve-args.ts";
 import { runAdvance, runWatch, runWriteRungs } from "./solve-run.ts";
+
+const log = createLogger("solve-once");
 
 async function main(): Promise<void> {
   const args = parseSolveArgs(process.argv.slice(2));
@@ -51,14 +53,14 @@ async function main(): Promise<void> {
     const missing = unavailable("pr", settings);
     if (missing !== null) {
       process.stderr.write(`refusing --advance: ${missing}\n`);
-      logger.warn("solve-once.refused", { mode: "advance", issueKey, reason: missing });
+      log.warn("solve-once.refused", { mode: "advance", issueKey, reason: missing });
       process.exitCode = 3;
       return;
     }
 
-    logger.info("solve-once.settings", { ...describeSettings(settings), mode: "advance" });
+    log.info("solve-once.settings", { ...describeSettings(settings), mode: "advance" });
     await runAdvance(settings, createJiraClient(settings), issueKey);
-    logger.info("solve-once.done", { mode: "advance", issueKey });
+    log.info("solve-once.done", { mode: "advance", issueKey });
     return;
   }
 
@@ -71,14 +73,14 @@ async function main(): Promise<void> {
     const missing = unavailable("pr", settings);
     if (missing !== null) {
       process.stderr.write(`refusing --watch: ${missing}\n`);
-      logger.warn("solve-once.refused", { mode: "watch", issueKey, reason: missing });
+      log.warn("solve-once.refused", { mode: "watch", issueKey, reason: missing });
       process.exitCode = 3;
       return;
     }
 
-    logger.info("solve-once.settings", { ...describeSettings(settings), mode: "watch" });
+    log.info("solve-once.settings", { ...describeSettings(settings), mode: "watch" });
     await runWatch(settings, createJiraClient(settings), issueKey);
-    logger.info("solve-once.done", { mode: "watch", issueKey });
+    log.info("solve-once.done", { mode: "watch", issueKey });
     return;
   }
 
@@ -89,12 +91,12 @@ async function main(): Promise<void> {
   const missing = unavailable(phase, settings);
   if (missing !== null) {
     process.stderr.write(`refusing --${phase}: ${missing}\n`);
-    logger.warn("solve-once.refused", { phase, issueKey, reason: missing });
+    log.warn("solve-once.refused", { phase, issueKey, reason: missing });
     process.exitCode = 3;
     return;
   }
 
-  logger.info("solve-once.settings", { ...describeSettings(settings), phase });
+  log.info("solve-once.settings", { ...describeSettings(settings), phase });
 
   const client = createJiraClient(settings);
   const deps = createSolveDeps(settings, client);
@@ -125,7 +127,7 @@ async function main(): Promise<void> {
   // Named `cycleDryRun`, not `dryRun`: it's true of the planning pass only, and every write this
   // command makes happens afterward, in `runWriteRungs` — the shorter name once read as a claim
   // about the whole command.
-  logger.info("solve-once.done", {
+  log.info("solve-once.done", {
     phase,
     issueKey,
     cycleDryRun: outcome.dryRun,

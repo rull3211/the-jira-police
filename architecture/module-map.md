@@ -10,26 +10,28 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-91 production modules, 80 test files. Grouped by what they belong to rather than alphabetically,
+103 production modules, 92 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
 
-| Path                    | Role                                                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/index.ts`          | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                                     |
-| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                               |
-| `src/poller.ts`         | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                     |
-| `src/review-loop.ts`    | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                    |
-| `src/watch-loop.ts`     | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                    |
-| `src/wiring.ts`         | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                     |
-| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                                                                             |
-| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did                                                                      |
-| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                                |
-| `src/text.ts`           | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows                   |
-| `src/read-only-tree.ts` | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair       |
-| `src/staging-sweep.ts`  | Which directory names under `worktreeRoot`/`attachStagingRoot` are a skill root or a staged-image directory, and whether one is old enough to remove. Pure — no fs |
-| `src/sweep.ts`          | Walking those two parent directories and, with `write`, removing what `staging-sweep.ts` marks. Shared by `sweep-once.ts`; nothing automatic calls it              |
+| Path                       | Role                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`             | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                                     |
+| `src/loop.ts`              | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                               |
+| `src/poller.ts`            | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                     |
+| `src/review-loop.ts`       | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                    |
+| `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                    |
+| `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                     |
+| `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                             |
+| `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger             |
+| `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide     |
+| `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                                |
+| `src/broken-pipe.ts`       | `EPIPE` on stdout is a shutdown request, not a crash — quitting `pnpm start`'s viewer closes the daemon's pipe, and the default death skips the claim release      |
+| `src/text.ts`              | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows                   |
+| `src/read-only-tree.ts`    | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair       |
+| `src/staging-sweep.ts`     | Which directory names under `worktreeRoot`/`attachStagingRoot` are a skill root or a staged-image directory, and whether one is old enough to remove. Pure — no fs |
+| `src/sweep.ts`             | Walking those two parent directories and, with `write`, removing what `staging-sweep.ts` marks. Shared by `sweep-once.ts`; nothing automatic calls it              |
 
 **Jira**
 
@@ -163,6 +165,21 @@ inheritance.
 | `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                                     |
 | `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                                              |
 
+**The log viewer — the only consumer of this service's own log**
+
+| Path                    | Role                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/logs.ts`       | `pnpm logs`. The impure half: `/dev/tty`, raw mode, the alternate screen, and restoring all three on every exit path                                    |
+| `src/logs/feed.ts`      | Where lines come from, behind an interface. `createStreamFeed` is the stdin implementation; `send` is the slot a daemon socket would fill               |
+| `src/logs/preflight.ts` | What has to be true before the screen is taken over. Decided here so the refusal is printed while stderr is still a surface the operator can read       |
+| `src/logs/line.ts`      | One line to an entry. Anything it cannot classify becomes a `raw` entry rather than being dropped — `↳` report lines and stack traces share this stream |
+| `src/logs/filter.ts`    | The three axes and how they AND. An empty axis means "no opinion", and a `raw` entry passes every filter                                                |
+| `src/logs/glyphs.ts`    | The glyphs, and the check that each is a single two-column code point. The reason a warning cannot shear the table                                      |
+| `src/logs/keys.ts`      | Which key toggles which source, and the pool that cannot collide with a command key                                                                     |
+| `src/logs/state.ts`     | The whole viewer as one reducer over `line` / `key` / `resize` / `end`. Everything decidable is here, which is why it is all testable                   |
+| `src/logs/input.ts`     | Bytes from a terminal to key names — CSI sequences, the `~` forms, a lone escape                                                                        |
+| `src/logs/render.ts`    | A state to the exact rows of a window. Width-stable chips, so toggling a filter never moves the row below it                                            |
+
 **Output**
 
 | Path                 | Role                                             |
@@ -184,7 +201,11 @@ that module — but it composes no deps object, runs no pass, and its whole outp
 is still the number of entry points that could diverge from one another in production.
 `attach-stage-report.ts` is a library and not an entry point either, split off for the reason
 `watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
-check the report or the exit code would run the command instead.
+check the report or the exit code would run the command instead. **`logs.ts` is the fourth kind**,
+and it is the one the paragraph above predicted: a `src/cli/` file with a `pnpm` command that reads
+no settings, holds no credential, opens no network connection, and takes a pipe rather than a queue.
+It is listed with `src/logs/*` above rather than with the commands, because what it belongs to is
+the viewer.
 
 **It did exactly that, twice, and the second time nobody noticed for four modules.** The sentence
 here used to say `docs-check.ts` and `section-refs.ts` were "the seventh and eighth files in that

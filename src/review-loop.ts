@@ -8,12 +8,14 @@
 
 import { runReviewSweep, runSolveClaims } from "./cli/solve-run.ts";
 import type { JiraClient } from "./jira/client.ts";
-import { logger } from "./logger.ts";
+import { createLogger } from "./logger.ts";
 import type { LoopOptions } from "./loop.ts";
 import type { AttemptLedger } from "./solve/attempts.ts";
 import { REVIEW_ROUND_USD } from "./solve/review-cycle.ts";
 import { type Settings, flag, numeric } from "./settings.ts";
 import { createSolveDeps, createSolveRunDeps, reviewIntervalMs } from "./wiring.ts";
+
+const log = createLogger("review");
 
 /**
  * The review loop's schedule, or `null` if the solve side is switched off.
@@ -32,7 +34,7 @@ export function createReviewLoop(
   ledger: AttemptLedger,
 ): LoopOptions | null {
   if (!flag(settings, "SOLVE_ENABLED")) {
-    logger.info("review.loop.disabled", {
+    log.info("review.loop.disabled", {
       note: "SOLVE_ENABLED is off; no pull request is looked at and no round is run",
     });
     return null;
@@ -47,7 +49,7 @@ export function createReviewLoop(
 
   // Logged because the operator is the only bound on what this costs, and can't act on a number
   // never shown.
-  logger.info("review.loop.start", {
+  log.info("review.loop.start", {
     intervalMs,
     maxRoundsPerTick: maxRounds,
     worstCasePerTickUsd: Number((maxRounds * REVIEW_ROUND_USD).toFixed(2)),

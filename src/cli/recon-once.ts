@@ -19,7 +19,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { readSettings, withConfigErrors, type Settings } from "../settings.ts";
 import { runReconOnly, type ReconOnlyOutcome, type SolveRequest } from "../solve/orchestrator.ts";
 import {
@@ -32,6 +32,8 @@ import {
 } from "../wiring.ts";
 import type { IssueDetail } from "../jira/client.ts";
 import { exitCodeFor, formatReport } from "./recon-once-report.ts";
+
+const log = createLogger("recon-once");
 
 /**
  * The solve request, or `null` after saying why there is not one.
@@ -92,7 +94,7 @@ async function main(): Promise<void> {
   await writeFile(reportPath, formatReport(detail.key, outcome, new Date()), "utf8");
   process.stdout.write(`report: ${reportPath}\n`);
 
-  logger.info("recon-once.done", { issueKey, outcome: outcome.kind });
+  log.info("recon-once.done", { issueKey, outcome: outcome.kind });
   process.exitCode = exitCodeFor(outcome);
 }
 

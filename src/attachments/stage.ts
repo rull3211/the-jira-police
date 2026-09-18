@@ -14,10 +14,12 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { assertAttachmentId, type JiraAttachment } from "../jira/client.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { lockDown, removeReadOnlyTree } from "../read-only-tree.ts";
 import { oneLine, shorten } from "../text.ts";
 import { isStageableImage, sniffImage } from "./images.ts";
+
+const log = createLogger("attachments");
 
 /** The half of `JiraClient` this module needs; a test double may accept ids the real method refuses, so every precondition it enforces must be enforced here too. */
 export interface AttachmentByteReader {
@@ -144,7 +146,7 @@ export async function stageImages(
         assertAttachmentId(attachment.id);
         bytes = await reader.fetchAttachmentBytes(attachment.id, options.maxImageBytes);
       } catch (error) {
-        logger.warn("attachments.image_unreadable", {
+        log.warn("attachments.image_unreadable", {
           issueKey,
           id: attachment.id,
           reason: describeError(error),
@@ -161,7 +163,7 @@ export async function stageImages(
       const kind = sniffImage(bytes);
       if (kind === null) {
         // Declared an image by the upload and not one on the wire.
-        logger.warn("attachments.image_signature_mismatch", {
+        log.warn("attachments.image_signature_mismatch", {
           issueKey,
           id: attachment.id,
           declared: attachment.mimeType,
@@ -182,7 +184,7 @@ export async function stageImages(
         bytes: bytes.byteLength,
         sha256,
       });
-      logger.info("attachments.image_staged", {
+      log.info("attachments.image_staged", {
         issueKey,
         id: attachment.id,
         filename: name,

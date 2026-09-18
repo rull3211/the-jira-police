@@ -7,7 +7,7 @@
  * when to look again. Nothing here merges; a human merges, always.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import {
   type BotIdentity,
   type ReviewComment,
@@ -49,6 +49,8 @@ import {
 import type { CommitMessage, ThreadAnswer } from "./runner.ts";
 import { quietFor } from "./silence.ts";
 import type { Worktree } from "./worktree.ts";
+
+const log = createLogger("solve");
 
 export interface PublishRequest {
   readonly worktree: Worktree;
@@ -137,7 +139,7 @@ export async function publish(
     return { kind: "failed", stage: "pull-request", reason: created.reason };
   }
   const { number, url } = created;
-  logger.info("solve.pr.created", { issueKey: worktree.issueKey, number, url });
+  log.info("solve.pr.created", { issueKey: worktree.issueKey, number, url });
 
   const requested = await requestReview(commands, {
     worktreePath: worktree.path,
@@ -147,7 +149,7 @@ export async function publish(
     timeoutMs,
   });
   if (requested.outcome === "failed") {
-    logger.warn("solve.pr.reviewer_not_requested", { number, reason: requested.reason });
+    log.warn("solve.pr.reviewer_not_requested", { number, reason: requested.reason });
     return { kind: "published-unreviewed", number, url, reason: requested.reason };
   }
 
@@ -538,14 +540,14 @@ export async function recordFailedStart(
     ...(pending.markerId === null ? {} : { commentId: pending.markerId }),
   });
   if (written.outcome === "failed") {
-    logger.warn("solve.review.failed_start_unrecorded", {
+    log.warn("solve.review.failed_start_unrecorded", {
       issueKey: request.issueKey,
       number: request.number,
       attempts,
       reason: written.reason,
     });
   } else {
-    logger.warn("solve.review.failed_start", {
+    log.warn("solve.review.failed_start", {
       issueKey: request.issueKey,
       number: request.number,
       attempts,
@@ -680,7 +682,7 @@ export async function surveyReview(
   if (round >= maxTotalRounds) {
     // Checked before the reviewer's own cap: it counts human rounds too, since a brake
     // a person's comment could step past is not a brake.
-    logger.error("solve.review.capped", { issueKey, number, rounds: round });
+    log.error("solve.review.capped", { issueKey, number, rounds: round });
     return settled({ kind: "capped", rounds: round, unresolved: unresolved() });
   }
 
@@ -694,7 +696,7 @@ export async function surveyReview(
   if (!humanRound && reviewerRound >= maxRounds) {
     // Checked only when the batch is reviewer-only; a human comment arriving after this
     // still runs a round as normal.
-    logger.warn("solve.review.reviewer_exhausted", {
+    log.warn("solve.review.reviewer_exhausted", {
       issueKey,
       number,
       rounds: round,
@@ -709,7 +711,7 @@ export async function surveyReview(
   // better reason, so checking earlier would report a stall on ticks that were never
   // going to attach.
   if (failedStarts >= maxFailedStarts) {
-    logger.error("solve.review.stalled", {
+    log.error("solve.review.stalled", {
       issueKey,
       number,
       attempts: failedStarts,
@@ -830,7 +832,7 @@ export async function runMergeRound(
       return synced(resolved.behind, []);
     }
     case "resolved": {
-      logger.info("solve.review.merged", {
+      log.info("solve.review.merged", {
         issueKey,
         number,
         round: round + 1,
@@ -888,7 +890,7 @@ export async function runRound(
       ...(request.reviewer === undefined ? {} : { reviewer: request.reviewer }),
     });
     if (asked.outcome === "failed") {
-      logger.warn("solve.review.rerequest_failed", {
+      log.warn("solve.review.rerequest_failed", {
         issueKey,
         number,
         round,

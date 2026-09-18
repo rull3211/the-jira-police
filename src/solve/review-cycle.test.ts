@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { AdvanceOutcome, PendingRound } from "./delivery.ts";
 import {
   type ReviewCycleDeps,
@@ -310,7 +310,7 @@ describe("runReviewCycle", () => {
 /** Every `review.cycle` payload the run emitted, in order. */
 function captureCycleLines(): Record<string, unknown>[] {
   const lines: Record<string, unknown>[] = [];
-  vi.spyOn(logger, "info").mockImplementation((message, fields = {}) => {
+  vi.spyOn(createLogger("review"), "info").mockImplementation((message, fields = {}) => {
     if (message === "review.cycle") {
       lines.push(fields);
     }
@@ -518,11 +518,13 @@ describe("isQuietCycle", () => {
 /** Every `review.cycle` mark the run emitted, in order. */
 function captureCycleMarks(): (boolean | undefined)[] {
   const marks: (boolean | undefined)[] = [];
-  vi.spyOn(logger, "info").mockImplementation((message, _fields = {}, options = {}) => {
-    if (message === "review.cycle") {
-      marks.push(options.quiet);
-    }
-  });
+  vi.spyOn(createLogger("review"), "info").mockImplementation(
+    (message, _fields = {}, options = {}) => {
+      if (message === "review.cycle") {
+        marks.push(options.quiet);
+      }
+    },
+  );
   return marks;
 }
 

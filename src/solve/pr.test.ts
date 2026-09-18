@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 
 import {
   type CommitRequest,
@@ -1266,11 +1266,13 @@ describe("readReviewThreads", () => {
   /** The `quiet` option on the one `solve.pr.threads_read` line a read emits. */
   async function markFor(nodes: readonly unknown[]): Promise<boolean | undefined> {
     let mark: boolean | undefined;
-    vi.spyOn(logger, "info").mockImplementation((message, _fields = {}, options = {}) => {
-      if (message === "solve.pr.threads_read") {
-        mark = options.quiet;
-      }
-    });
+    vi.spyOn(createLogger("solve"), "info").mockImplementation(
+      (message, _fields = {}, options = {}) => {
+        if (message === "solve.pr.threads_read") {
+          mark = options.quiet;
+        }
+      },
+    );
     await readReviewThreads(fakeRunner(graphql(threadsPayload(nodes))), reviewRequest());
     return mark;
   }

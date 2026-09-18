@@ -19,7 +19,7 @@
  * there's nothing left for the issue-type filter to protect.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { FileSink } from "../output/sink.ts";
 import { type Settings, readSettings, withConfigErrors } from "../settings.ts";
 import { syntheticTicket, toTriageResult } from "../triage/single.ts";
@@ -28,6 +28,8 @@ import { buildTriageOptions, createGroom, createJiraClient } from "../wiring.ts"
 import { USAGE, parseBotArgs } from "./bot-args.ts";
 import { type SolvePhase, unavailable, writes } from "./solve-args.ts";
 import { runWriteRungs } from "./solve-run.ts";
+
+const log = createLogger("bot-once");
 
 /** `WRITE_BACK` is set both ways, not just turned on, so a daemon-shaped `.env` can't leak into the free rung. */
 export function resolveSettings(phase: SolvePhase, base: Settings): Settings {
@@ -66,13 +68,13 @@ async function main(): Promise<void> {
   const missing = unavailable(phase, settings);
   if (missing !== null) {
     process.stderr.write(`refusing --${phase}: ${missing}\n`);
-    logger.warn("bot-once.refused", { phase, issueKey, reason: missing });
+    log.warn("bot-once.refused", { phase, issueKey, reason: missing });
     process.exitCode = 3;
     return;
   }
 
   const options = buildTriageOptions(settings, issueKey);
-  logger.info("bot-once.settings", {
+  log.info("bot-once.settings", {
     phase,
     issueKey,
     skill: options.skillName,
@@ -99,7 +101,7 @@ async function main(): Promise<void> {
   const refusal = fitnessRefusal(fitness);
   if (refusal !== null) {
     process.stdout.write(`\n${refusal}\n\nStopping before the claim.\n`);
-    logger.info("bot-once.not-solvable", { issueKey, confidence: fitness.confidence });
+    log.info("bot-once.not-solvable", { issueKey, confidence: fitness.confidence });
     process.exitCode = 3;
     return;
   }

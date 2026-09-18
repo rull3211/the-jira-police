@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "preinstall": "npx only-allow pnpm",
-    "start": "node --env-file-if-exists=.env src/index.ts",
+    "start": "sh -c 'node --env-file-if-exists=.env src/index.ts \"$@\" </dev/null 2>&1 | node src/cli/logs.ts' --",
+    "start:daemon": "node --env-file-if-exists=.env src/index.ts",
     "dev": "node --watch --env-file-if-exists=.env src/index.ts",
     "poll:once": "node --env-file-if-exists=.env src/cli/poll-once.ts",
     "triage:once": "node --env-file-if-exists=.env src/cli/triage-once.ts",
@@ -17,6 +18,7 @@
     "attach:stage": "node --env-file-if-exists=.env src/cli/attach-stage.ts",
     "sweep:once": "node --env-file-if-exists=.env src/cli/sweep-once.ts",
     "daemon:status": "node src/cli/daemon-status.ts",
+    "logs": "node src/cli/logs.ts",
     "check-types": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",

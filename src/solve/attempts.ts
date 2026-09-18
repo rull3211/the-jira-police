@@ -6,7 +6,9 @@
  * extra attempt, not a double claim.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
+
+const log = createLogger("solve");
 
 export interface AttemptLedger {
   /**
@@ -34,7 +36,7 @@ export function createAttemptLedger(max: number): AttemptLedger {
       attempts.set(key, now);
       if (now >= max) {
         // Logged once, at the attempt that reaches the cap, not on every skip after.
-        logger.warn("solve.attempts.exhausted", {
+        log.warn("solve.attempts.exhausted", {
           key,
           attempts: now,
           max,

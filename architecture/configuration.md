@@ -68,9 +68,12 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 Commands:
 
 ```bash
-pnpm start --interval 20s          # the daemon — grooming, plus review+claim if SOLVE_ENABLED,
-                                   #   plus the sendback watch if WATCH_ENABLED
-pnpm dev                           # daemon, --watch
+pnpm start --interval 20s          # the daemon and the log viewer together — grooming, plus
+                                   #   review+claim if SOLVE_ENABLED, plus the sendback watch
+                                   #   if WATCH_ENABLED. Needs a terminal
+pnpm start:daemon                  # the same daemon, headless — the form cron and CI want
+pnpm logs < run.ndjson             # the viewer alone, replaying a captured run
+pnpm dev                           # daemon, --watch, headless
 pnpm poll:once --dry-run           # discovery only; free, and the fastest config check
 pnpm poll:once                     # one full cycle
 pnpm triage:once SSX-1234 [--write]

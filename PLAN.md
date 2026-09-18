@@ -3,10 +3,10 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2683 tests in 80
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2811 tests in 92
 > files**, no build step.
 >
-> **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
+> **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and the review loop advances _and then_ claims in one tick
 > (`review-loop.ts:114`), gated only on `SOLVE_ENABLED`. Earlier revisions of this header said the
 > solve half was "still a person typing a command" and that "nothing loops". Both were false, and
@@ -43,14 +43,14 @@ Default posture is **manual**: nothing is solved until a human adds a label.
 **The numbers are identifiers, not an ordering, so they are never reused and the sequence has
 holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion would silently
 repoint every one of them — the failure §14 exists about. A missing number almost always means that
-entry shipped and was deleted. **One of them did not ship**, and it is named with the holes below
+entry shipped and was deleted. **Two of them did not ship**, and they are named with the holes below
 rather than here, because the qualifier is worth nothing without the case: a hole list that flattens
 "built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `architecture/guardrails.md` §16,
 every file that cited them has been repointed there, and what is still open from them is §17.
 
 <!-- refs:off -->
 
-**The holes are §4, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32 and §36, and this line names them rather than
+**The holes are §4, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37 and §40, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -76,7 +76,8 @@ clause and the status allowlist that narrowed it, and each is a hole one commit 
 absent from that list and is not a hole** — it was skipped rather than spent, for the reason recorded
 in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an unrelated edit
 repaired nothing." §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
-inside the branch that built it. **§29 is the exception the paragraph above flags** — the handed-off
+inside the branch that built it. **§29 is the first of the two exceptions the paragraph above
+flags** — the handed-off
 unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
 (unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
 parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
@@ -87,8 +88,15 @@ staged images and §22 the age-based sweep its own last phase deferred; both shi
 built `sweep-once` and `staging-sweep.ts`, walking the skill-root and image-staging parents alike
 rather than leaving the sweep narrowed to the one §22 was opened for. §36 was `branch-stack.sh`
 counting commit identity instead of commit content, opened and deleted inside the branch that built
-it — the story is `INCIDENTS.md`'s 2026-09-18 entry. The triage-selection entries are now all
-closed, so the next entry is §37.
+it — the story is `INCIDENTS.md`'s 2026-09-18 entry. §37 was the log viewer, shipped as `pnpm logs`
+and deleted inside the branch that built it; what it left unbuilt is §39, which is a new entry
+rather than a survival of the old one. **§40 is the second exception, and the worst-documented hole
+here**: it planned a supervisor process to run the daemon and the viewer together, and it was
+abandoned mid-branch when the operator chose a `package.json` pipeline instead — but it was written
+into a working tree and deleted from one, so no commit ever held it and there is nothing to recover.
+What it would have argued for is in `feat/daemon-log-tui`'s pull request; the sentence is here
+because a hole with no entry behind it sends the next reader through a history that does not contain
+one. The triage-selection entries are now all closed, so the next entry is §41.
 
 <!-- refs:on -->
 
@@ -254,6 +262,13 @@ environment cannot answer a question about CI's.**
 
 ### 10. Still unobserved
 
+- **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
+  headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
+  property the layout rests on is that six code points render two columns wide, and
+  `logs/glyphs.ts` asserts that against a hard-coded table rather than against any terminal. A
+  terminal disagreeing about one of them shears every column to its right, and no test here can
+  see it. **What would show it:** one real run in iTerm, Terminal.app and a Linux console, looking
+  only at whether the filter rows and the message column stay aligned.
 - **The mixed-batch rule.** No round has yet read a human and a reviewer comment in the same batch.
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
@@ -636,8 +651,9 @@ a startup sweep, or a reconciliation of "a pull request exists" against "the tic
 solving".
 
 **Why it is owed.** `architecture/invariants.md` invariant 14 rests entirely on a `finally`, which every
-stack-skipping exit misses: `process.exit(130)` on a second signal (`src/index.ts:104`),
-`process.exit(1)` on an uncaught exception (`:156`), `SIGKILL`, a slept laptop. There is no TTL,
+stack-skipping exit misses: `process.exit(130)` on a second signal (`createShutdown` in
+`src/index.ts`), `process.exit(1)` on an uncaught exception (`logUnexpectedExits` there), `SIGKILL`,
+a slept laptop. There is no TTL,
 lease or reaper in `src/`. With `MAX_CONCURRENT_SOLVES=1` one stranded claim halts the solve half
 indefinitely, and the repair is a human editing the label field by hand — the exact operation
 invariant 11 exists to have eliminated. A second, narrower window has the same shape: `runPublish`
@@ -685,7 +701,78 @@ while reading as finished is worse than none — the same reasoning that has pla
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
 
+### 38. `branch-guard.sh` resolves one branch, and it is not the one being written to
+
+**Branch:** none yet. Not this one — hook code with its own suite does not belong in a diff about
+terminal rendering.
+
+**What is not built.** Any connection between the file a write names and the branch the write is
+judged against. `branch-guard.sh:17` takes `CLAUDE_PROJECT_DIR`, `:34` resolves it to one branch
+name, and `:302` refuses if that name is protected. `tool_input.file_path` is never read.
+`commit-brief.sh:44` and `branch-stack.sh:22` are the same line with the same consequence, cosmetic
+in their case.
+
+**Why it is owed.** Probed on 2026-09-18 with one `Write` payload sent twice, differing only in
+`CLAUDE_PROJECT_DIR`: aimed at a worktree on `main` it denied, and aimed at a feature worktree — the
+payload still naming a file inside the `main` worktree — it allowed. This is the enforcement of the
+first of the two rules `CLAUDE.md` calls non-advisory, and it is off by one checkout whenever work
+happens in a worktree, which is now the normal way work happens here. `INCIDENTS.md`'s 2026-09-18
+entry has the transcript and how it surfaced.
+
+The likely fix is to resolve the branch from the target's own worktree — `git -C "$(dirname
+"$file_path")" rev-parse --abbrev-ref HEAD` — and to keep the existing project-directory check as
+well rather than replacing it, since `:127` records that the over-refusal it produces was a
+deliberate choice.
+
+**What would make it the wrong idea.** Two branch resolutions mean two ways to be wrong, and a path
+that does not exist yet, is relative, or sits outside any repository has to resolve to a refusal
+rather than to `unknown` falling through — the failure mode being fixed, reintroduced one layer
+down. The guard also runs on every write, so a second `git` invocation per call is a cost worth
+measuring before it ships. And the suite cannot referee any of this: `pnpm test:hooks` proves the
+script emits, so the case that fails when this is unplugged has to construct a real second worktree,
+which no existing hook test does.
+
 ---
+
+### 39. Nothing keeps the log after the run that wrote it, and nothing can attach to a daemon already running
+
+**Branch:** none yet.
+
+**What is not built.** A sink. `logger.ts` writes to stdout and stderr and nothing else: no file, no
+rotation, no `LOG_FILE`. `pnpm logs` reads the stream it is handed, so reading a run afterwards
+means having thought to capture it — `pnpm start:daemon > run.ndjson 2>&1` — before it started. A
+daemon somebody started without that redirect cannot be observed at all beyond `daemon:status`,
+which reads `ps`, and `pnpm start`'s viewer keeps nothing once it closes.
+
+**Why it is owed, and why it was not done alongside the viewer.** These are one question asked
+twice: both are answered by the daemon holding a descriptor somebody else can open later — a file,
+or a socket. The socket is the larger of the two and the one with privilege in it, because a socket
+a viewer can read is a socket a viewer can eventually write, which is what `feed.ts`'s unused
+`send` slot is shaped for. That is a phase with its own blast radius and does not belong behind a
+read-only viewer.
+
+**Half of this was closed on the way to `pnpm start`, and the half that is left is the sink.** Two
+fixes were possible here and they were never the same: an `EPIPE` handler makes losing the log
+survivable, and a sink makes the log outlive the run. The first shipped as `src/broken-pipe.ts`,
+because making the viewer the default reader turned "the daemon dies when its reader quits" from an
+opt-in trap into the standard path — measured first: with the pipe closed under a reader that left,
+the `finally` releasing `agent:solving` did not run. So the service no longer dies because nobody is
+listening. **It still keeps nothing**, which is what this entry is now only about: quit the viewer
+and the run is gone.
+
+**What would make it the wrong idea:**
+
+- **The file sink may be the whole feature, and the socket a thing nobody asks for.** The entry this
+  one replaces predicted the opposite — that live filtering was the need and replay the hedge — and
+  the way to find out is which of `README.md`'s two forms gets used: `pnpm start`, which shows the
+  run and keeps nothing, or `pnpm start:daemon > run.ndjson 2>&1`, which keeps it and shows nothing.
+  If it is the redirected one, build the sink and stop.
+- **A log file is an artifact with a lifetime**, and nothing here has ever had to rotate, expire or
+  bound one. The service writes JSON lines at a cycle's rate into a directory nobody sweeps; the
+  first unattended week is what would find that out, and `state/` is the only precedent.
+- **A control socket is a second way in.** Every privilege this service holds is reached through one
+  composition today. A socket that accepts a command is a second, and it would need its refusals
+  worked out before its conveniences, not after.
 
 ## Verification
 

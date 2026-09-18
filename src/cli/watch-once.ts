@@ -24,7 +24,7 @@
  */
 
 import { buildSendbackWatchJql } from "../jira/jql.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { Settings } from "../settings.ts";
 import { describeSettings, list, numeric, readSettings, withConfigErrors } from "../settings.ts";
 import { assertIssueKey } from "../jira/client.ts";
@@ -39,6 +39,8 @@ import { createWatchMemo } from "../watch/memo.ts";
 import type { RetriageDeps } from "../watch/retriage.ts";
 import { runWatchSweep, type WatchActing } from "../watch/sweep.ts";
 import { watchKey, watchWrites } from "./watch-args.ts";
+
+const log = createLogger("watch-once");
 
 /**
  * The same settings, with the re-triage's comment turned on.
@@ -56,7 +58,7 @@ async function main(): Promise<void> {
   const writes = watchWrites(process.argv.slice(2));
 
   const settings = readSettings();
-  logger.info("watch-once.settings", describeSettings(settings));
+  log.info("watch-once.settings", describeSettings(settings));
 
   const client = createJiraClient(settings);
   const maxRetriage = numeric(settings, "MAX_RETRIAGE_PER_TICKET");
@@ -67,7 +69,7 @@ async function main(): Promise<void> {
       project: settings.JIRA_PROJECT,
       components: list(settings, "JIRA_COMPONENTS"),
     });
-    logger.info("watch-once.query", { jql });
+    log.info("watch-once.query", { jql });
     keys = (await client.search(jql)).map((ticket) => ticket.key);
   } else {
     // Validated here as well as inside `fetchActivity`, so a typo is refused
@@ -107,7 +109,7 @@ async function main(): Promise<void> {
     keys,
   );
 
-  logger.info("watch-once.done", {
+  log.info("watch-once.done", {
     ...outcome,
     maxRetriage,
     writing: writes,

@@ -10,7 +10,7 @@
 
 import type { JiraClient } from "./jira/client.ts";
 import { buildSendbackWatchJql } from "./jira/jql.ts";
-import { logger } from "./logger.ts";
+import { createLogger } from "./logger.ts";
 import type { LoopOptions } from "./loop.ts";
 import { FileSink } from "./output/sink.ts";
 import { type Settings, flag, list, numeric } from "./settings.ts";
@@ -23,6 +23,8 @@ import {
   createWatchChecker,
   watchIntervalMs,
 } from "./wiring.ts";
+
+const log = createLogger("watch");
 
 /**
  * The same settings with the re-triage's comment turned on.
@@ -49,7 +51,7 @@ export function createWatchLoop(
   memo: WatchMemo,
 ): LoopOptions | null {
   if (!flag(settings, "WATCH_ENABLED")) {
-    logger.info("watch.loop.disabled", {
+    log.info("watch.loop.disabled", {
       note: "WATCH_ENABLED is off; no sent-back ticket is looked at and no re-triage is run",
     });
     return null;
@@ -77,7 +79,7 @@ export function createWatchLoop(
 
   // Cadence and per-ticket cap are both logged because the worst case is their product;
   // neither alone says it.
-  logger.info("watch.loop.start", {
+  log.info("watch.loop.start", {
     intervalMs,
     maxRetriagePerTicket: maxRetriage,
     jql,
@@ -88,7 +90,7 @@ export function createWatchLoop(
     runCycle: async () => {
       const keys = (await client.search(jql)).map((ticket) => ticket.key);
       const outcome = await runWatchSweep({ client, maxRetriage, memo, acting, report }, keys);
-      logger.info(
+      log.info(
         "watch.cycle.done",
         { ...outcome, remembered: memo.size() },
         // `outcome.quiet` is deliberately not read here: it counts tickets nobody touched, not
@@ -104,5 +106,5 @@ export function createWatchLoop(
 
 /** Logged rather than written to stdout, which is frequently nothing for a daemon. */
 function report(line: string): void {
-  logger.info("watch.cycle.ticket", { line: line.trim() });
+  log.info("watch.cycle.ticket", { line: line.trim() });
 }

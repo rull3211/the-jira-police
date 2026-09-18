@@ -4,7 +4,7 @@
  * `beginMerge` hands a resolver an in-progress merge owed a `commitMerge` or `abortMerge`.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { isWorkBranch } from "./branch.ts";
 import type { BotIdentity } from "./pr.ts";
 import { attachWorktree, BASE_REF, failed, why } from "./worktree.ts";
@@ -16,6 +16,8 @@ import type {
   Worktree,
   WorktreeResult,
 } from "./worktree.ts";
+
+const log = createLogger("solve");
 
 export interface BaseSyncRequest {
   readonly issueKey: string;
@@ -101,7 +103,7 @@ export async function abortMerge(
     timeoutMs,
   });
   if (failed(aborted)) {
-    logger.error("solve.base.abort_failed", { worktreePath, reason: why(aborted) });
+    log.error("solve.base.abort_failed", { worktreePath, reason: why(aborted) });
     return false;
   }
   return true;
@@ -143,7 +145,7 @@ export async function pushBranch(
 
   const undone = await runner.run(gitIn(worktreePath, "reset", "--hard", "ORIG_HEAD"), opts);
   if (failed(undone)) {
-    logger.error("solve.base.undo_failed", { issueKey, branch, reason: why(undone) });
+    log.error("solve.base.undo_failed", { issueKey, branch, reason: why(undone) });
   }
   return {
     outcome: "refused",
@@ -305,7 +307,7 @@ export async function beginMerge(
     await abortMerge(runner, worktreePath, timeoutMs);
     return refuse(`could not merge ${baseRef} into ${branch} (${why(merged)})`);
   }
-  logger.warn("solve.base.conflicted", { issueKey, branch, baseRef, behind, files });
+  log.warn("solve.base.conflicted", { issueKey, branch, baseRef, behind, files });
   return { outcome: "conflicted", behind, files };
 }
 
@@ -331,7 +333,7 @@ export async function syncWithBase(
     return refuse(pushed.reason);
   }
 
-  logger.info("solve.base.merged", { issueKey, branch, baseRef, behind: started.behind });
+  log.info("solve.base.merged", { issueKey, branch, baseRef, behind: started.behind });
   return started;
 }
 

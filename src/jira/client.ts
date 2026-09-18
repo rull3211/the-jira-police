@@ -12,8 +12,10 @@
  * acts on.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { type JiraIssue, type JiraSearchResponse, type TicketRef, toTicketRef } from "./types.ts";
+
+const log = createLogger("jira");
 
 /**
  * Issue keys and attachment ids are interpolated into a URL path, so they are validated rather than
@@ -288,12 +290,12 @@ export class JiraClient {
       page += 1;
 
       if (page >= MAX_PAGES && nextPageToken !== undefined) {
-        logger.warn("jira.pagination_truncated", { pages: page, jql });
+        log.warn("jira.pagination_truncated", { pages: page, jql });
         break;
       }
     } while (nextPageToken !== undefined);
 
-    logger.debug("jira.search_complete", { found: collected.length, pages: page });
+    log.debug("jira.search_complete", { found: collected.length, pages: page });
     return collected;
   }
 
@@ -324,7 +326,7 @@ export class JiraClient {
       size: raw.size ?? 0,
     }));
 
-    logger.debug("jira.detail_fetched", {
+    log.debug("jira.detail_fetched", {
       key,
       comments: comments.length,
       attachments: attachments.length,
@@ -381,7 +383,7 @@ export class JiraClient {
       "changelog",
     );
 
-    logger.debug("jira.activity_fetched", {
+    log.debug("jira.activity_fetched", {
       key,
       statusCategory: categoryKey,
       comments: comments.length,
@@ -481,7 +483,7 @@ export class JiraClient {
         ],
       },
     });
-    logger.info("jira.labels_updated", { key, add, remove });
+    log.info("jira.labels_updated", { key, add, remove });
   }
 
   /** One attachment decoded as text, or `null` if too large; `null` rather than a truncated string, since half an SVG is a broken one. */
@@ -502,13 +504,13 @@ export class JiraClient {
 
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxBytes) {
-      logger.warn("jira.attachment_too_large", { id, declared, maxBytes });
+      log.warn("jira.attachment_too_large", { id, declared, maxBytes });
       return null;
     }
 
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.byteLength > maxBytes) {
-      logger.warn("jira.attachment_too_large", { id, bytes: bytes.byteLength, maxBytes });
+      log.warn("jira.attachment_too_large", { id, bytes: bytes.byteLength, maxBytes });
       return null;
     }
     return bytes;

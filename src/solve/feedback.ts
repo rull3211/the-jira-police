@@ -17,10 +17,12 @@
 import { mkdir, appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { oneLine, shorten } from "../text.ts";
 import { FOOTER_SENTINEL } from "../triage/gate.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
+
+const log = createLogger("solve");
 
 /** Append-only, and named so no issue key can collide with it. */
 export const DEV_LENS_FILE = "dev-lens.md";
@@ -330,7 +332,7 @@ export async function reportOutcome(
   const comment = renderSolveComment(issueKey, outcome);
   const lens = lensOf(outcome);
 
-  logger.info("solve.feedback", {
+  log.info("solve.feedback", {
     issueKey,
     outcome: outcomeLabel(outcome),
     devLensAccurate: lens?.accurate ?? null,
@@ -350,7 +352,7 @@ export async function reportOutcome(
     return { recordPath, comment, posted: true };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    logger.warn("solve.feedback.not_posted", { issueKey, reason });
+    log.warn("solve.feedback.not_posted", { issueKey, reason });
     return { recordPath, comment, posted: false, reason };
   }
 }
