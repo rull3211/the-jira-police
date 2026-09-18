@@ -6,6 +6,11 @@
  * separately or the viewer would have no way to be typed at. They must also be two different
  * devices, which is why `logs/preflight.ts` refuses a run with stdin left on the terminal.
  *
+ * The producer upstream must also keep the terminal off *its* stdin — Node restores the saved
+ * termios when a process with a tty on fd 0 exits, which silently undoes this viewer's raw mode and
+ * loses every keystroke after it. `package.json`'s `start` redirects the daemon's stdin for that
+ * reason alone; it has no other purpose and looks removable.
+ *
  * Everything decidable lives in `logs/*.ts`; this file is the part a test cannot reach — raw mode,
  * the alternate screen and cursor visibility are process-global state, and a run that exits without
  * putting them back hands the operator a shell with no cursor and no echo. `restore` is therefore
@@ -51,10 +56,12 @@ function openTerminal(): number {
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     process.stderr.write(
-      `pnpm logs needs a terminal to draw on, and there is none here: ${reason}\n` +
-        "It reads log lines from stdin and keystrokes from /dev/tty, so it has to be run from a\n" +
-        "shell rather than from cron, CI or a detached process. To read a captured run instead,\n" +
-        "open a terminal and use: pnpm logs < run.ndjson\n",
+      `The log viewer needs a terminal to draw on, and there is none here: ${reason}\n` +
+        "It reads keystrokes from /dev/tty, so it cannot run under cron, CI or a detached\n" +
+        "process. pnpm start includes the viewer, which is why it fails here too; the headless\n" +
+        "daemon those places want is pnpm start:daemon:\n" +
+        "  pnpm start:daemon --for 10m > run.ndjson 2>&1\n" +
+        "  pnpm logs < run.ndjson        # later, from a terminal\n",
     );
     process.exit(2);
   }

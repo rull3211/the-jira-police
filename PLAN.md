@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2722 tests in 85
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2727 tests in 86
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -84,7 +84,7 @@ with itself on PR #548 — same shape, opened and deleted inside its own branch.
 branch that built it — the story is `INCIDENTS.md`'s 2026-09-18 entry. §37 was the log viewer,
 shipped as `pnpm logs` and deleted inside the branch that built it; what it left unbuilt is §39,
 which is a new entry rather than a survival of the old one. The triage-selection entries are now all
-closed, so the next entry is §40.
+closed, so the next entry is §41.
 
 <!-- refs:on -->
 
@@ -826,8 +826,9 @@ which no existing hook test does.
 
 **What is not built.** A sink. `logger.ts` writes to stdout and stderr and nothing else: no file, no
 rotation, no `LOG_FILE`. `pnpm logs` reads the stream it is handed, so reading a run afterwards
-means having thought to capture it — `2>&1 | tee run.ndjson` — before it started. A daemon somebody
-started without that pipe cannot be observed at all beyond `daemon:status`, which reads `ps`.
+means having thought to capture it — `pnpm start:daemon > run.ndjson 2>&1` — before it started. A
+daemon somebody started without that redirect cannot be observed at all beyond `daemon:status`,
+which reads `ps`, and `pnpm start`'s viewer keeps nothing once it closes.
 
 **Why it is owed, and why it was not done alongside the viewer.** These are one question asked
 twice: both are answered by the daemon holding a descriptor somebody else can open later — a file,
@@ -836,15 +837,14 @@ a viewer can read is a socket a viewer can eventually write, which is what `feed
 `send` slot is shaped for. That is a phase with its own blast radius and does not belong behind a
 read-only viewer.
 
-**And there is a live consequence, measured while writing the viewer's handover.** Because the log
-path is a pipe and nothing else, **the service's life is coupled to whoever is reading its stdout**:
-the next line written after the reader quits raises `EPIPE`, unhandled, and the process dies on an
-uncaught exception rather than on a signal — so a mid-solve daemon skips the `finally` that releases
-`agent:solving` and strands the claim. `README.md` works around it by telling the operator to
-redirect to a file, which is the sink this entry is about, built by hand each time. Two fixes are
-possible and they are not the same: a sink makes fd 1 a file, and an `EPIPE` handler makes losing
-the log survivable. The second is the smaller one and is what a daemon should do regardless — a
-service should not die because nobody is listening — and it has never been true here.
+**Half of this was closed on the way to `pnpm start`, and the half that is left is the sink.** Two
+fixes were possible here and they were never the same: an `EPIPE` handler makes losing the log
+survivable, and a sink makes the log outlive the run. The first shipped as `src/broken-pipe.ts`,
+because making the viewer the default reader turned "the daemon dies when its reader quits" from an
+opt-in trap into the standard path — measured first: with the pipe closed under a reader that left,
+the `finally` releasing `agent:solving` did not run. So the service no longer dies because nobody is
+listening. **It still keeps nothing**, which is what this entry is now only about: quit the viewer
+and the run is gone.
 
 **What would make it the wrong idea:**
 
@@ -858,37 +858,3 @@ service should not die because nobody is listening — and it has never been tru
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
-
-## Verification
-
-Unit and integration, following existing patterns, plus the house rule: **a guard is not shipped
-until a test fails when it is unplugged.** Guards worth naming, because each protects against a
-recurring charge rather than a wrong answer:
-
-- **cursor** — unplug the high-water mark and the same comment is resolved twice.
-- **marker parsing** — three mutations, failing in three directions: an unparseable marker reading
-  as zero; the reservation written after the pass; "our own comments" keyed on the author again.
-- **the operator's comment is not ours** — a human comment from the same GitHub account the bot
-  posts through must be treated as feedback and must never be the comment we edit. This is the one
-  whose failure destroys somebody's words rather than costing money.
-- **terminal** — a `MERGED` or `CLOSED` pull request must not produce another round.
-- **label pairing** — moving `agent:done` without making `agent:reviewing` replace `agent:solving`
-  must fail a test, and so must the reverse. Two mutations, because the half-changes fail in
-  opposite directions and one test will only catch one.
-- **sendback self-trigger** — the bot's own comment must not qualify as "the ticket changed".
-  Invisible in review and obvious on the invoice.
-
-## Out of scope
-
-Auto-merge. Multi-repo. Cross-repo _changes_ — reads landed 2026-09-07 and the two are not the same
-grant: a pass may read every checkout on the machine and may write to one worktree, which is now
-watched rather than merely asserted. Reopening `agent:done` tickets. Bot-noise tickets
-(CVE/GHSA/SNYK/dependency bumps) — currently discarded at intake, and the most agent-fixable class
-there is, so worth revisiting once the pilot has a track record.
-
-## Open, deliberately
-
-`bugFastPath` (default OFF) is the existing hook for bug-specific behaviour and is in direct
-tension with this feature: it short-circuits a `Feil` to a one-line note with no scorecard — and
-therefore no dev lens and no fitness call. If it is ever switched on, these two need reconciling.
-Flagged, not solved.

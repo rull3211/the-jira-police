@@ -21,13 +21,32 @@ describe("refusal", () => {
     expect(refusal({ stdinIsTerminal: true })).toContain("pnpm logs < run.ndjson");
   });
 
-  it("warns off the direct pipe in the same breath, since that is the next thing tried", () => {
-    // `pnpm start | pnpm logs` is the obvious repair for "nothing is piped in", and it kills the
-    // daemon on EPIPE the moment the viewer quits.
+  it("sends a reader after a live daemon to pnpm start, not to a pipe they assemble themselves", () => {
+    // Hand-assembling `<daemon> | pnpm logs` is the obvious repair for "nothing is piped in", and
+    // getting it right needs two redirections most people would not guess: `2>&1` so warnings and
+    // errors are not printed over the screen, and stdin off the terminal so the daemon's exit does
+    // not reset the termios and kill the keyboard. `pnpm start` is that pipeline, already correct.
     const said = refusal({ stdinIsTerminal: true }) ?? "";
 
-    expect(said).toContain("tail -f run.ndjson | pnpm logs");
-    expect(said).toContain("kills the daemon");
+    expect(said).toContain("pnpm start runs the daemon and");
+    expect(said).toContain("pnpm start:daemon --for 10m > run.ndjson 2>&1");
+  });
+
+  it("names capture commands that exist", () => {
+    // The recipe named `pnpm poll:once`, then `pnpm start`; both were true when written and one
+    // stopped being a headless daemon without the string noticing. Check each suggestion against
+    // package.json rather than trusting it.
+    const said = refusal({ stdinIsTerminal: true }) ?? "";
+    const manifest: { readonly scripts: Record<string, string> } = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+    ) as { readonly scripts: Record<string, string> };
+
+    const suggested = [...said.matchAll(/pnpm ([\w:]+)/g)].map((match) => match[1]);
+
+    expect(suggested.length).toBeGreaterThan(0);
+    for (const script of suggested) {
+      expect(Object.keys(manifest.scripts)).toContain(script);
+    }
   });
 
   it("is asked by the shell, and asked before the terminal is opened", () => {

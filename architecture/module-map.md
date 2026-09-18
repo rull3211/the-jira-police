@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-96 production modules, 85 test files. Grouped by what they belong to rather than alphabetically,
+97 production modules, 86 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -27,6 +27,7 @@ because the grouping is the architecture.
 | `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger         |
 | `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide |
 | `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                            |
+| `src/broken-pipe.ts`       | `EPIPE` on stdout is a shutdown request, not a crash — quitting `pnpm start`'s viewer closes the daemon's pipe, and the default death skips the claim release  |
 | `src/text.ts`              | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows               |
 | `src/read-only-tree.ts`    | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair   |
 

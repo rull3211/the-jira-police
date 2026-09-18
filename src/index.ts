@@ -5,6 +5,7 @@
  * another. See architecture/overview.md §2.
  */
 
+import { stopOnBrokenPipe } from "./broken-pipe.ts";
 import { parseDuration } from "./duration.ts";
 import { createLogger } from "./logger.ts";
 import { runLoop } from "./loop.ts";
@@ -46,7 +47,7 @@ function applyOverrides(settings: Settings, argv: readonly string[]): Settings {
   };
 }
 
-/** Wires shutdown to signals and, optionally, a deadline, so a timed smoke test stops like a real shutdown rather than being killed mid-triage. */
+/** Wires shutdown to signals, a closed output pipe and, optionally, a deadline, so a timed smoke test stops like a real shutdown rather than being killed mid-triage. */
 function createShutdown(runForMs: number | undefined): AbortController {
   const controller = new AbortController();
   let requested = false;
@@ -67,6 +68,9 @@ function createShutdown(runForMs: number | undefined): AbortController {
   // Node's default action for SIGHUP is immediate termination, so left unhandled it
   // kills the service mid-cycle instead of shutting down gracefully.
   process.on("SIGHUP", () => stop("SIGHUP"));
+
+  // Not `stop`: there is nowhere left to write the shutdown line, so this aborts in silence.
+  stopOnBrokenPipe([process.stdout, process.stderr], () => controller.abort());
 
   if (runForMs !== undefined) {
     // Unref'd: the deadline should not by itself keep the process alive.

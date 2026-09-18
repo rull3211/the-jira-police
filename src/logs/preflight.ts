@@ -14,14 +14,13 @@ export interface Surroundings {
 const NO_INPUT = [
   "pnpm logs reads log lines from stdin, and nothing is being piped into it.",
   "",
-  "Capture a run first, then read it as many times as you like:",
-  "  pnpm poll:once --dry-run > run.ndjson 2>&1",
-  "  pnpm logs < run.ndjson",
+  "To watch a live daemon there is nothing to pipe by hand: pnpm start runs the daemon and",
+  "this viewer together.",
   "",
-  "To watch a daemon, let it write a file and follow the file. A direct pipe from pnpm start",
-  "kills the daemon when you quit the viewer:",
-  "  pnpm start --interval 30s --for 10m > run.ndjson 2>&1 &",
-  "  tail -f run.ndjson | pnpm logs",
+  "To read a captured run, record one with the headless daemon and replay it as many times",
+  "as you like:",
+  "  pnpm start:daemon --for 10m > run.ndjson 2>&1",
+  "  pnpm logs < run.ndjson",
   "",
 ].join("\n");
 
