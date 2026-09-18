@@ -35,10 +35,31 @@ const DEFAULT_COLUMNS = 100;
 /** Repaint budget, about one frame at 60Hz. Short enough that a keystroke still feels immediate. */
 const FRAME_MS = 16;
 
+/**
+ * The terminal to draw on, or a sentence saying why there is not one.
+ *
+ * `openSync` throws `ENXIO` wherever no controlling terminal exists — cron, CI, a detached process —
+ * and the bare stack names `node:fs` rather than the thing the operator did wrong.
+ */
+function openTerminal(): number {
+  try {
+    // `r+` rather than two opens: one descriptor keeps the read and write halves on the same
+    // terminal even when stdout has been redirected somewhere else.
+    return openSync("/dev/tty", "r+");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `pnpm logs needs a terminal to draw on, and there is none here: ${reason}\n` +
+        "It reads log lines from stdin and keystrokes from /dev/tty, so it has to be run from a\n" +
+        "shell rather than from cron, CI or a detached process. To read a captured run instead,\n" +
+        "open a terminal and use: pnpm logs < run.ndjson\n",
+    );
+    process.exit(2);
+  }
+}
+
 function main(): void {
-  // `r+` rather than two opens: one descriptor keeps the read and write halves on the same terminal
-  // even when stdout has been redirected somewhere else.
-  const fd = openSync("/dev/tty", "r+");
+  const fd = openTerminal();
   const keyboard = new ReadStream(fd);
   const screen = new WriteStream(fd);
 
