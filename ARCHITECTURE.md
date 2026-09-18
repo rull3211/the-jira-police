@@ -68,20 +68,23 @@ did** — headings were moved whole, never renumbered — so a bare `§7` in a c
 that is; it does not restate what is in it, for the reason `STARTING.md` gives about a fact with two
 homes.
 
-| working on…                                                    | read                                                       | sections |
-| ---------------------------------------------------------------- | ----------------------------------------------------------- | -------- |
-| the three loops, state/correctness, the subprocess contract, refusals, the failure model, or the testing rule — anything that is not one module's | [`architecture/overview.md`](architecture/overview.md) | §1, §2, §5, §6, §8, §9, §11 |
-| **which file owns which module**, or adding/renaming/splitting/deleting one | [`architecture/module-map.md`](architecture/module-map.md) | §7 |
-| triage: analyse/gate/post, the discovery queries, or the upstream `intake-triage` divergence | [`architecture/triage.md`](architecture/triage.md) | §3, §4, §12 |
-| solve: the worktree, the model passes, the diff gate, verification, delivery, or the review round-trip | [`architecture/solve.md`](architecture/solve.md) | §15 |
-| a setting, a flag, or the `bot:once` ladder | [`architecture/configuration.md`](architecture/configuration.md) | §10 |
-| whether a change holds a property the whole system depends on | [`architecture/invariants.md`](architecture/invariants.md) | §14 |
-| what the built system deliberately does not do | [`architecture/not-built.md`](architecture/not-built.md) | §13 |
-| a hook, a branch guard, or what the guard suite does and does not prove | [`architecture/guardrails.md`](architecture/guardrails.md) | §16 |
+| working on…                                                                                                                                       | read                                                             | sections                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------- |
+| the three loops, state/correctness, the subprocess contract, refusals, the failure model, or the testing rule — anything that is not one module's | [`architecture/overview.md`](architecture/overview.md)           | §1, §2, §5, §6, §8, §9, §11 |
+| **which file owns which module**, or adding/renaming/splitting/deleting one                                                                       | [`architecture/module-map.md`](architecture/module-map.md)       | §7                          |
+| triage: analyse/gate/post, the discovery queries, or the upstream `intake-triage` divergence                                                      | [`architecture/triage.md`](architecture/triage.md)               | §3, §4, §12                 |
+| solve: the worktree, the model passes, the diff gate, verification, delivery, or the review round-trip                                            | [`architecture/solve.md`](architecture/solve.md)                 | §15                         |
+| a setting, a flag, or the `bot:once` ladder                                                                                                       | [`architecture/configuration.md`](architecture/configuration.md) | §10                         |
+| whether a change holds a property the whole system depends on                                                                                     | [`architecture/invariants.md`](architecture/invariants.md)       | §14                         |
+| what the built system deliberately does not do                                                                                                    | [`architecture/not-built.md`](architecture/not-built.md)         | §13                         |
+| a hook, a branch guard, or what the guard suite does and does not prove                                                                           | [`architecture/guardrails.md`](architecture/guardrails.md)       | §16                         |
 
 **Structural facts still live in exactly one of the eight files above, cited from everywhere else —
-never restated.** `pnpm docs:check` verifies every `§N` resolves against some section-numbered
-document; it cannot tell you which file that document is, which is what the table above is for.
+never restated.** `pnpm docs:check` resolves every `§N` against the document that owns it — the one it
+names, or failing that its own citing document, or failing that the one other document that defines
+it — and flags a citation naming none of those as either dangling or, if more than one document
+defines the id with nothing saying which, ambiguous. A resolved citation still doesn't say which file
+that is; the table above is for that.
 
 **When implementation moves, the file describing it moves in the same commit** — the rule did not
 change, only its unit. A module added, renamed, split or deleted moves `module-map.md`. A changed
