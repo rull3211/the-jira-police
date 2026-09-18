@@ -445,13 +445,7 @@ const HISTORICAL: readonly HistoricalFigure[] = [
     file: "PLAN.md",
     value: 4562,
     noun: "tests",
-    why: "the same foreign suite, cited where the base-check cost is argued",
-  },
-  {
-    file: "PLAN.md",
-    value: 4562,
-    noun: "tests",
-    why: "and again in the dev-lens calibration item; two homes for one foreign number, which is exactly the drift this file is about and still not ours to derive",
+    why: "the same foreign suite, quoted in PLAN.md §13 to tell what a duplicate blessing costs. PLAN.md carried this figure once and this list carried it twice, and the copy was invisible because staleness is keyed by value rather than by identity",
   },
 ];
 
