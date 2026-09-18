@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
 #
 # PreToolUse guard for rules 1 and 2 of CLAUDE.md: the agent never writes on a
-# protected branch or pushes to one, and never merges anything.
-#
-# Rule 3 — work in a worktree — has no mechanical enforcement anywhere, and this
-# script is not it. What it does instead is stay out of the way of the remedy:
-# `worktree add -b` is allowed off a protected branch, and a write is judged
-# against the worktree it lands in rather than the one the session started in.
+# protected branch or pushes to one, and never merges anything. Rule 3 (work in
+# a worktree) has no mechanical enforcement; this guard only stays out of its way.
 #
 # This exists because the rules it enforces are the ones whose violation cannot
 # be undone by the person who notices. Everything else in the house rules is a
@@ -38,14 +34,10 @@ deny() {
 
 branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 
-# The branch the *target file* is on, which is not always the one above. Rule 3
-# makes a worktree the ordinary place work happens, so the project directory and
-# the file being written routinely sit on different branches — and before this,
-# only the project directory was ever consulted, so a write into the `main`
-# worktree was allowed whenever the project directory stood on a feature branch.
-#
-# Walks up to the nearest directory that exists, because a `Write` creating a
-# file names a path that does not.
+# The branch the *target file* is on, which is not always the branch above:
+# rule 3 makes a worktree the ordinary place work happens, so the two routinely
+# differ. Walks up to the nearest existing directory, since a `Write` creating
+# a file names a path that does not.
 targetBranch() {
   local path="$1" dir
   # A relative path has no worktree we can name: the tool's cwd is not in the
@@ -68,10 +60,9 @@ targetBranch() {
 # stated dependency. A parse failure yields an empty string and the guard falls
 # through to the branch check, which is the safe direction.
 #
-# Two fields come back, path first and command second, because a command may
-# contain newlines and a path we would act on may not — any newline in the path
-# is flattened to a space, which makes it fail the absolute-path test below and
-# so fail closed.
+# Two fields come back, path then command, because a command may contain
+# newlines and a path may not — a newline in the path is flattened to a space,
+# so it fails the absolute-path test below and fails closed.
 parsed="$(
   printf '%s' "$payload" | node -e '
     let s = "";
@@ -87,11 +78,10 @@ parsed="$(
     });
   ' 2>/dev/null || true
 )"
-# Split on the *first* newline, and only if there is one. `$(...)` strips
-# trailing newlines, so a payload with a path and no command arrives as a single
-# line — and `${parsed#*$'\n'}` on a string with no newline returns the string
-# unchanged, which silently made `command_text` the file path. It then parsed as
-# a non-git command, `mutates` went to `no`, and every write was allowed.
+# Split on the *first* newline, and only if there is one: `$(...)` strips
+# trailing newlines, so a path with no command arrives as a single line, and
+# `${parsed#*$'\n'}` on a string with no newline returns it unchanged — reading
+# the path as the command, which fails open on every write.
 case "$parsed" in
   *$'\n'*)
     target_path="${parsed%%$'\n'*}"
@@ -103,16 +93,13 @@ case "$parsed" in
     ;;
 esac
 
-# Precedence, not a second opinion: where the payload names a file inside a
-# worktree, that worktree is what the write lands on and the project directory
-# is irrelevant to it. Anything less specific — a `Bash` call, an unresolvable
-# path, a file under no repository at all — falls back to the project directory,
-# so the over-refusal recorded below is kept for exactly the cases that still
-# cannot name their target.
+# Precedence, not a second opinion: a file inside a worktree is judged against
+# that worktree; anything less specific (a `Bash` call, an unresolvable path, no
+# repository at all) falls back to the project directory.
 #
-# Ordering is load-bearing and was got wrong once: this reads `target_path`, so
-# it has to sit below the parse. Above it, `set -u` killed the script before any
-# refusal was printed, and a guard that prints nothing is read as "allow".
+# Ordering is load-bearing: this reads `target_path`, so it must sit below the
+# parse — above it, `set -u` kills the script before any refusal prints, and a
+# guard that prints nothing is read as "allow".
 target_branch=""
 if [ -n "$target_path" ]; then
   target_branch="$(targetBranch "$target_path" || true)"
@@ -208,8 +195,8 @@ fi
 # `sh -c '...'`, so dropping it would have opened a hole while closing thirty.
 # The two are a union: either one is enough to call the command a write.
 
-# One list. A name refused by one hatch and accepted by another is the hole this
-# guard exists to close, and there were three copies of it before this.
+# One list: a name refused by one hatch and accepted by another is the hole
+# this guard exists to close.
 isProtected() {
   case "$1" in
     main | master | develop | release/*) return 0 ;;
@@ -217,15 +204,10 @@ isProtected() {
   return 1
 }
 
-# Every escape hatch is an allow carved into a deny, so what matters is its
-# width, not its spelling. `-B` and `-C` *reset* an existing branch, so
-# `checkout -B main <start>` and `switch -C main <start>` move `main` from a
-# standing start — rule 1 spelled as its own remedy. Refused for every hatch
-# that can name a branch, separated (`-B main`) and attached (`-Bmain`) alike.
-#
-# `-b`/`-c` naming a protected branch is refused too. It would fail anyway
-# because the branch exists, and a hatch whose safety depends on what git
-# happens to reject is one bad day from being a hole.
+# Every escape hatch is an allow carved into a deny, so width matters more than
+# spelling: `-B`/`-C` *reset* an existing branch, so `checkout -B main` moves
+# `main` from a standing start. `-b`/`-c` naming a protected branch are refused
+# too, rather than relying on git to reject the name itself.
 hatchNamesProtected() {
   local name
 
@@ -251,18 +233,11 @@ hatchNamesProtected() {
   return 1
 }
 
-# `git worktree add -b <branch>` is the escape hatch in its fourth spelling, and
-# rule 3 makes it the one work normally starts with — so refusing it from a
-# protected branch traps the agent exactly the way refusing `switch -c` would,
-# with the added sting that the denial text names it as the remedy.
-#
-# Fail closed on everything else the subcommand can do. `-B` resets an existing
-# branch and can therefore move `main`; a protected `-b` name is the same act
-# spelled forwards; `add` with no `-b` checks out an existing branch, which may
-# be the protected one; and an option this function does not recognise is
-# treated as a write, so a future flag is refused on the day it ships rather
-# than allowed. The path and commit-ish arguments are not examined — `origin/main`
-# as a *base* is what every worktree here is cut from.
+# `worktree add -b` is rule 3's remedy, so refusing it from a protected branch
+# would trap the agent the way refusing `switch -c` does. Everything else the
+# subcommand can do fails closed: `-B` resets an existing branch, `add` with no
+# `-b` checks out one that may be protected, and an unrecognised option is
+# treated as a write so a future flag is refused by default.
 worktreeAddIsEscape() {
   local sawB=no name=""
 
