@@ -713,39 +713,6 @@ while reading as finished is worse than none — the same reasoning that has pla
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
 
-### 38. `branch-guard.sh` resolves one branch, and it is not the one being written to
-
-**Branch:** none yet. Not this one — hook code with its own suite does not belong in a diff about
-terminal rendering.
-
-**What is not built.** Any connection between the file a write names and the branch the write is
-judged against. `branch-guard.sh:17` takes `CLAUDE_PROJECT_DIR`, `:34` resolves it to one branch
-name, and `:302` refuses if that name is protected. `tool_input.file_path` is never read.
-`commit-brief.sh:44` and `branch-stack.sh:22` are the same line with the same consequence, cosmetic
-in their case.
-
-**Why it is owed.** Probed on 2026-09-18 with one `Write` payload sent twice, differing only in
-`CLAUDE_PROJECT_DIR`: aimed at a worktree on `main` it denied, and aimed at a feature worktree — the
-payload still naming a file inside the `main` worktree — it allowed. This is the enforcement of the
-first of the two rules `CLAUDE.md` calls non-advisory, and it is off by one checkout whenever work
-happens in a worktree, which is now the normal way work happens here. `INCIDENTS.md`'s 2026-09-18
-entry has the transcript and how it surfaced.
-
-The likely fix is to resolve the branch from the target's own worktree — `git -C "$(dirname
-"$file_path")" rev-parse --abbrev-ref HEAD` — and to keep the existing project-directory check as
-well rather than replacing it, since `:127` records that the over-refusal it produces was a
-deliberate choice.
-
-**What would make it the wrong idea.** Two branch resolutions mean two ways to be wrong, and a path
-that does not exist yet, is relative, or sits outside any repository has to resolve to a refusal
-rather than to `unknown` falling through — the failure mode being fixed, reintroduced one layer
-down. The guard also runs on every write, so a second `git` invocation per call is a cost worth
-measuring before it ships. And the suite cannot referee any of this: `pnpm test:hooks` proves the
-script emits, so the case that fails when this is unplugged has to construct a real second worktree,
-which no existing hook test does.
-
----
-
 ### 39. Nothing keeps the log after the run that wrote it, and nothing can attach to a daemon already running
 
 **Branch:** none yet.
@@ -785,51 +752,6 @@ and the run is gone.
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
-
-### 40. The worktree is the normal path, and nothing says so while the guard refuses to cut one
-
-**Branch:** `fix/worktree-rule-and-guard-scope`. Carries §38 with it, because the rule and the guard
-fail as a pair: promoting the worktree is what makes §38 load-bearing rather than occasional.
-
-**What is being attempted.** A third numbered rule in `CLAUDE.md` — agent work happens in its own
-worktree, cut from `origin/main`, one per branch, unless a human says otherwise — and the two
-`branch-guard.sh` defects that stand between the rule and anyone following it.
-
-**Why now.** The hazard is already written down and guarded only by a question. `pnpm dev` is `node
---watch src/index.ts` and there is no build step, so the primary checkout **is** the running
-daemon's program text; the only thing between an agent and that today is the `Before the first edit`
-item asking whether the daemon is up, whose incident is titled _the daemon that was only ever
-guarded by the operator saying so_ and whose `Found by` reads "Nothing in the tree fired, because
-nothing in the tree could". A worktree removes the hazard structurally instead of asking about it.
-
-**What it would let us do that we cannot today.** Follow the rule at all. Probed on 2026-09-18 from
-this branch: with the primary checkout on `main`, `git worktree add -b fix/<slug> ../<dir>
-origin/main` is **denied** — `branch-guard.sh:223` treats every `worktree` subcommand except `list`
-as a write, so the one command that leaves a protected branch is refused from it. `:197-200` already
-names that trap for `switch` — "a guard that refuses the remedy it names traps the agent on the
-protected branch" — and `worktree add -b` is the same escape hatch, missed. §38 is the other half:
-the branch is resolved from `CLAUDE_PROJECT_DIR` and never from the file being written, so a primary
-parked on `main` would deny every edit inside the worktree as well. Each alone is friction; together
-they make the rule unfollowable.
-
-**What would make it the wrong idea.**
-
-- **The rule costs a `pnpm install` and a copied `.env` per worktree**, both gitignored, on a
-  repository with no build step where the marginal change is a one-line doc fix. If the tax is paid
-  mostly by changes that could never have touched the daemon, the exemption is the rule and the rule
-  is the exemption.
-- **Widening the guard is the wrong direction to be wrong in.** `worktree add` is being moved off
-  the refusal list on a protected branch, and the `-b` target it creates is attacker-chosen text;
-  `add` without `-b`, or with a protected name, must still be refused, or rule 1 has a hole shaped
-  like its own remedy.
-- **Two branch resolutions mean two ways to be wrong** (§38's own caveat): a path that is relative,
-  absent, or outside any repository has to resolve to a refusal rather than to `unknown` falling
-  through — the failure being fixed, reintroduced one layer down.
-- **`pnpm test:hooks` cannot referee any of it.** The suite proves each script _emits_ a refusal for
-  a given HEAD, which is the very thing resolved from the wrong place; the case that fails when this
-  is unplugged has to build a real second worktree, and no hook test does that today.
-
----
 
 ## Verification
 
