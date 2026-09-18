@@ -753,6 +753,37 @@ and the run is gone.
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
 
+### 41. This file's own coordinates rotted, and its hole list stopped being complete
+
+**Branch:** `docs/plan-audit`, stacked on `fix/worktree-rule-and-guard-scope` (PR #59).
+
+**What is being attempted.** A verification pass over every claim in this file, and a repair of what
+it found: the hole list is missing §34, §35 and §38; §40 was issued twice; roughly twenty `file:line`
+citations point at lines that moved or no longer exist; four counts drifted; and §14's site table —
+the artifact that section exists to avoid regenerating — was invalidated wholesale when
+`ARCHITECTURE.md` split into `architecture/*.md`.
+
+**Why now.** §38's omission is one commit old (`803d2f4`, 78 deletions and no insertions, so it never
+touched the hole line), which makes this the cheapest it will ever be to fix, and the §40 collision
+is on an open pull request rather than in history. The rest is the arrears behind them.
+
+**What it would let the service do that it cannot do today.** Nothing — this is a document change.
+What it buys is that a reader who follows a citation lands on the thing it names, and that the hole
+list can be trusted as the answer to "did §34 ship or was it abandoned", which is the one question it
+exists to answer.
+
+**What would make it the wrong idea.** Three things, and the first is the serious one:
+
+- **Regenerating §14's table re-runs the audit whose cost the section was written to avoid**, and a
+  batch pass by an agent is exactly how forty confident references to nothing got there. Every row
+  must come from the checker rather than from a search, and the count must stay pinned at 40 with
+  `docs:check` green either side, or the regeneration has quietly become a fix.
+- **Rewriting a stale line number is worth less than deleting the citation.** Where a coordinate has
+  rotted twice, the honest repair may be to name the symbol and drop the line — a number that rots on
+  every refactor is rule 3's own example, and re-pinning it just restarts the clock.
+- **Stacking on #59 means this cannot merge until that does**, and a document branch is a poor reason
+  to add a floor. If #59 stalls, the §38/§40 half should be moved onto it and the rest rebased.
+
 ## Verification
 
 Unit and integration, following existing patterns, plus the house rule: **a guard is not shipped
