@@ -82,7 +82,7 @@ inside the branch that built it, and §32 was the untagged thread reply that let
 with itself on PR #548 — same shape, opened and deleted inside its own branch. §36 was
 `branch-stack.sh` counting commit identity instead of commit content, opened and deleted inside the
 branch that built it — the story is `INCIDENTS.md`'s 2026-09-18 entry. The triage-selection entries
-are now all closed, so the next entry is §38.
+are now all closed, so the next entry is §39.
 
 <!-- refs:on -->
 
@@ -839,6 +839,37 @@ terminal reader with the two filters built in — the status mark and which part
 - **The viewer must survive lines that are not its own.** `watch/sweep.ts` writes `↳` report lines
   through `deps.report` onto the same file descriptor, interleaved with the JSON. A parser that
   drops what it cannot parse would silently eat them, and would eat a crash trace the same way.
+
+### 38. `branch-guard.sh` resolves one branch, and it is not the one being written to
+
+**Branch:** none yet. Not this one — hook code with its own suite does not belong in a diff about
+terminal rendering.
+
+**What is not built.** Any connection between the file a write names and the branch the write is
+judged against. `branch-guard.sh:17` takes `CLAUDE_PROJECT_DIR`, `:34` resolves it to one branch
+name, and `:302` refuses if that name is protected. `tool_input.file_path` is never read.
+`commit-brief.sh:44` and `branch-stack.sh:22` are the same line with the same consequence, cosmetic
+in their case.
+
+**Why it is owed.** Probed on 2026-09-18 with one `Write` payload sent twice, differing only in
+`CLAUDE_PROJECT_DIR`: aimed at a worktree on `main` it denied, and aimed at a feature worktree — the
+payload still naming a file inside the `main` worktree — it allowed. This is the enforcement of the
+first of the two rules `CLAUDE.md` calls non-advisory, and it is off by one checkout whenever work
+happens in a worktree, which is now the normal way work happens here. `INCIDENTS.md`'s 2026-09-18
+entry has the transcript and how it surfaced.
+
+The likely fix is to resolve the branch from the target's own worktree — `git -C "$(dirname
+"$file_path")" rev-parse --abbrev-ref HEAD` — and to keep the existing project-directory check as
+well rather than replacing it, since `:127` records that the over-refusal it produces was a
+deliberate choice.
+
+**What would make it the wrong idea.** Two branch resolutions mean two ways to be wrong, and a path
+that does not exist yet, is relative, or sits outside any repository has to resolve to a refusal
+rather than to `unknown` falling through — the failure mode being fixed, reintroduced one layer
+down. The guard also runs on every write, so a second `git` invocation per call is a cost worth
+measuring before it ships. And the suite cannot referee any of this: `pnpm test:hooks` proves the
+script emits, so the case that fails when this is unplugged has to construct a real second worktree,
+which no existing hook test does.
 
 ---
 
