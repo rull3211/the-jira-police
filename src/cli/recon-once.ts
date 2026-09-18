@@ -3,13 +3,13 @@
  *
  *   node src/cli/recon-once.ts SSX-1234
  *
- * The driver `PLAN.md` §4 says is owed before the setting: nothing in this
- * service has ever run recon outside the full solve pipeline, so nothing has
- * exercised it apart from a write-capable run that happened to bail early.
- * This fetches one real ticket, cuts a real worktree from `SOLVE_REPO_ROOT`,
- * runs recon in it, and always discards the worktree afterwards — recon
- * holds no `Write` and no `Edit`, so there is nothing in there to keep, the
- * same reasoning `orchestrator.ts`'s own recon-bail cleanup gives.
+ * The only way to run recon without also granting `solve-once.ts`'s
+ * write-capable rungs: any other path to exercising recon means starting a
+ * run that happens to bail early. This fetches one real ticket, cuts a real
+ * worktree from `SOLVE_REPO_ROOT`, runs recon in it, and always discards the
+ * worktree afterwards — recon holds no `Write` and no `Edit`, so there is
+ * nothing in there to keep, the same reasoning `orchestrator.ts`'s own
+ * recon-bail cleanup gives.
  *
  * `--claim`, `--pr` and every other write rung `solve-once.ts` has are absent
  * on purpose: this command's whole job is to be safe to run against a ticket

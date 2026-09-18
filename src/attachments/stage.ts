@@ -37,8 +37,7 @@
  * transcript records a filename and a digest rather than what the model was
  * shown. That is why the bytes go to the passes that hold no `Write`, and why
  * what the fix pass learns arrives as recon's brief instead. `ARCHITECTURE.md`
- * §13 holds the decision and §14.11 the bounds; `PLAN.md` §4 is the recon half,
- * still unbuilt, and what would make it the wrong idea.
+ * §13 holds the decision and §14.11 the bounds.
  */
 
 import { createHash } from "node:crypto";

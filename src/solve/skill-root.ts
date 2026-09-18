@@ -119,10 +119,11 @@ export type SkillRootResult =
  * `SIGKILL` between staging and the caller's `finally` now leaks one directory
  * per kill instead of overwriting one per issue. That is survivable only by
  * default, where `parentDirectory` is under `tmpdir()` (`wiring.ts`); an
- * operator who configures it elsewhere gets unbounded growth. An age-based
- * sweep is the obvious answer and is deliberately not here — it is a
- * time-dependent behaviour that needs its own tests, and smuggling it into a
- * collision fix would leave both half-proven. `PLAN.md` §22 holds it.
+ * operator who configures it elsewhere gets unbounded growth. `sweep-once`
+ * (`cli/sweep-once.ts`) is the age-based sweep that answers this, built
+ * separately once the collision fix above had its own tests — a hard kill
+ * now leaks a directory until an operator runs `sweep-once --write`, rather
+ * than forever.
  */
 export async function prepareSkillRoot(
   parentDirectory: string,

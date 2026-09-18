@@ -254,6 +254,12 @@ export const SETTINGS = [
     // today's answer into a string would break the first machine that disagrees.
   },
   {
+    name: "STAGING_SWEEP_MAX_AGE_MS",
+    description:
+      "How old a skill root or a staged-image directory must be before `sweep-once --write` will remove it. Sized well clear of the slowest legitimate run rather than the typical one: a single pass can spend SOLVE_INSTALL_TIMEOUT_MS (900000, cold install only) plus several SOLVE_STEP_TIMEOUT_MS (600000 each) plus a handful of SOLVE_GIT_TIMEOUT_MS (120000) calls, and a skill root outlives the whole pipeline — recon, fix and simplify share one before it is removed in a single `finally`. All of those budgets are sleep-excluded, which is the reason none of them bounds this on its own: SOLVE_TIMEOUT_MS's own description records a run on SSX-3831 killed by a wall-clock deadline that kept counting while the machine slept, so a legitimately still-running pass can be far older in wall-clock time than its nominal budget implies. 86400000 (24 hours) is well clear of the computed ceiling above while still reclaiming disk within a day; nobody has measured a real slow pass against it, so treat it as a starting point rather than a derived number.",
+    fallback: "86400000",
+  },
+  {
     name: "SOLVE_BOT_NAME",
     description:
       "Author name on commits the solver makes. Says a machine wrote it, in the one place every reader of the repository already looks: git blame, the PR author line, and whatever CODEOWNERS automation reads the log. Defaulted rather than required because a missing value here would block a run over a cosmetic field, and unlike the repository settings a wrong name widens nothing.",

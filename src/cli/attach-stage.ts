@@ -22,13 +22,12 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describeStagedImages, removeStagedImages, stageImages } from "../attachments/stage.ts";
 import { logger } from "../logger.ts";
 import { readSettings } from "../settings.ts";
-import { createJiraClient, imageStageOptions } from "../wiring.ts";
+import { attachStagingRoot, createJiraClient, imageStageOptions } from "../wiring.ts";
 import { EXIT, exitCodeFor, formatReport } from "./attach-stage-report.ts";
 
 function usage(): never {
@@ -66,7 +65,7 @@ async function main(): Promise<number> {
   }
   process.stdout.write("\n");
 
-  const parent = join(tmpdir(), "jira-police-attach");
+  const parent = attachStagingRoot();
   const result = await stageImages(
     client,
     detail.attachments,
@@ -105,7 +104,7 @@ async function main(): Promise<number> {
     // removal fails. Saying "remove it yourself" without saying how is how the
     // one on this machine survived a week.
     process.stdout.write(
-      "Nothing sweeps this directory, and the tree is read-only, so remove it with:\n" +
+      `sweep-once --write removes this once it is past STAGING_SWEEP_MAX_AGE_MS. To remove it now:\n` +
         `  chmod -R u+w ${keptAt} && rm -r ${keptAt}\n`,
     );
   } else if (staged !== null) {

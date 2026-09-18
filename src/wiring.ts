@@ -290,6 +290,18 @@ export function shouldPost(settings: Settings): boolean {
 }
 
 /**
+ * The parent directory `stageForTriage` and `stageForRecon` stage a ticket's
+ * images under, and the second of the two directories `sweep-once` walks.
+ *
+ * A plain constant rather than something resolved and created like
+ * `worktreeRoot`: nothing here derives a worktree path from it, so there is
+ * no symlink-versus-resolved-path mismatch for this one to guard against.
+ */
+export function attachStagingRoot(): string {
+  return join(tmpdir(), "jira-police-attach");
+}
+
+/**
  * The staging caps read from settings, shared by every caller of `stageImages`.
  *
  * `MAX_STAGED_IMAGES` is the only cap made editable — see the setting's own
@@ -318,13 +330,7 @@ async function stageForTriage(
 ): Promise<ImageStageResult | null> {
   try {
     const detail = await client.fetchDetail(issueKey);
-    return await stageImages(
-      client,
-      detail.attachments,
-      join(tmpdir(), "jira-police-attach"),
-      issueKey,
-      options,
-    );
+    return await stageImages(client, detail.attachments, attachStagingRoot(), issueKey, options);
   } catch (error) {
     logger.warn("triage.image_staging_failed", {
       issueKey,
@@ -352,13 +358,7 @@ async function stageForRecon(
 ): Promise<ImageStageResult | null> {
   try {
     const detail = await client.fetchDetail(issueKey);
-    return await stageImages(
-      client,
-      detail.attachments,
-      join(tmpdir(), "jira-police-attach"),
-      issueKey,
-      options,
-    );
+    return await stageImages(client, detail.attachments, attachStagingRoot(), issueKey, options);
   } catch (error) {
     logger.warn("solve.image_staging_failed", {
       issueKey,
@@ -871,7 +871,7 @@ export class NotSolvableError extends Error {}
  * exactly today's behaviour, and refusing to build a request over a directory
  * git is about to create would be a new way to fail at something that works.
  */
-function worktreeRoot(settings: Settings): string {
+export function worktreeRoot(settings: Settings): string {
   const configured = settings.SOLVE_WORKTREE_ROOT;
   const root = configured === "" ? join(tmpdir(), "jira-police-solve") : configured;
   try {
