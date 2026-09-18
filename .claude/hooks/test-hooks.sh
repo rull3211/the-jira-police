@@ -349,6 +349,31 @@ for w in "git worktree add -b main ../d" "git worktree add -b release/1 ../d" \
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
+# The older spellings of the same hatch, which were left at the old standard
+# when `worktree add -b` was written to the new one. An escape hatch is an allow
+# carved into a deny, so what decides it is the hatch's *width*: `-B` and `-C`
+# reset an existing branch, so both of the first two moved `main` from a
+# standing start while HEAD was on it, and neither was refused.
+#
+# Found by an independent reading of this branch's own diff, which asked why the
+# argument written into `worktreeAddIsEscape` had not been applied to the hatches
+# already in the file. It had not, and the answer took a probe rather than a
+# reading to establish.
+for w in "git checkout -B main" "git checkout -B main origin/x" "git checkout -Bmain" \
+  "git switch -C main" "git switch -C release/1" "git switch -Cmain" \
+  "git checkout -b main" "git switch -c develop"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The other half of every hatch assertion: the remedy the denial text names has
+# to still work, or the guard traps the agent on the branch it is refusing.
+for w in "git switch -c fix/x" "git checkout -b fix/x" "git checkout -B fix/x" \
+  "git switch -" "git switch fix/ordinary"; do
+  expect "on main allows: $w" SILENT \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
 # Which checkout a write is judged against. Every assertion above feeds a payload
 # with no `file_path` and reads the branch of the project directory, which is the
 # one thing that was resolved from the wrong place — so none of them could see

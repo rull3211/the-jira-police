@@ -1657,13 +1657,43 @@ resolution was first written _above_ the parse feeding it, so `set -u` killed th
 printed anything, and a hook that prints nothing is read as "allow". Then splitting the parser's two
 fields with `${parsed#*$'\n'}` returned the string unchanged when there was no newline — command
 substitution having stripped the trailing one — so on a payload with a path and no command,
-`command_text` became the file path, parsed as a non-git command, and every write was allowed. The
-suite was green for the first and would have passed the second; a by-hand probe across two real
-worktrees caught both.
+`command_text` became the file path, parsed as a non-git command, and every write was allowed.
+
+**The first draft of this entry claimed the suite could not see either one, and that was wrong** —
+measured, after an independent read of the diff disputed it: reintroducing them fails 75 and 2
+assertions of the suite as it stood _before_ this branch. A by-hand probe caught both only because
+it ran first. The lesson is not that the suite is blind here; it is that a fix for a guard that
+failed open failed open twice more, and that what found it both times was running something.
 
 **No rule yet** — the fix and its `test:hooks` case are written, so what is left unwritten is the
 narrower lesson: "exercise a directory-scoped guard from every worktree the agent can reach" has
 one instance, which makes it a hypothesis rather than a rule, and 2026-09-18.
+
+### The escape hatch audited on the arm being added, while its two siblings stayed wide
+
+Widening `branch-guard.sh` to allow `git worktree add -b` from a protected branch — rule 3's remedy,
+which rule 1's guard was refusing — came with the reasoning written into the script: a hatch is an
+allow carved into a deny, so `-B` is refused because it _resets_ an existing branch and
+`git worktree add -Bmain ../d` would be rule 1 spelled as its own remedy. That argument was applied
+to the arm being added and to no other. `checkout -b`/`-B` and `switch` had been carved out of the
+same deny earlier, on the older standard of "creating a branch is the escape hatch", and so
+`git checkout -B main` and `git switch -C main` were **allowed from a protected branch** — the exact
+act the new code had just refused, one verb over.
+
+**Found by** an independent read of the diff that asked what else the sibling spellings could do,
+then confirmed by probe before anything was changed: both commands returned an allow with HEAD on
+`main`. The suite had thirteen assertions on the new hatch and none on the old ones.
+
+Fixed in the same commit that opened the hatch: one `isProtected` replacing three copies of the
+protected-name list, and `hatchNamesProtected` reading `-b`/`-B`/`-c`/`-C` in both the separated and
+attached spellings, so a name refused by one hatch cannot be accepted by another. Thirteen
+assertions and five mutations cover it; the mutation that matters is "reset flags treated as create
+flags", which the old suite could not have caught because it never asked.
+
+The rule is written: [the fourth guard-failure
+direction](BUILDING.md#fail-closed-except-guards-which-fail-open) — audit a hatch's
+_width_, and re-run that audit over the hatches already there rather than only the one you are
+adding.
 
 ### The `§N` checker that resolved a citation against any document that happened to define it
 

@@ -207,6 +207,50 @@ fi
 # one non-obvious decision here. Command-position analysis cannot see inside
 # `sh -c '...'`, so dropping it would have opened a hole while closing thirty.
 # The two are a union: either one is enough to call the command a write.
+
+# One list. A name refused by one hatch and accepted by another is the hole this
+# guard exists to close, and there were three copies of it before this.
+isProtected() {
+  case "$1" in
+    main | master | develop | release/*) return 0 ;;
+  esac
+  return 1
+}
+
+# Every escape hatch is an allow carved into a deny, so what matters is its
+# width, not its spelling. `-B` and `-C` *reset* an existing branch, so
+# `checkout -B main <start>` and `switch -C main <start>` move `main` from a
+# standing start — rule 1 spelled as its own remedy. Refused for every hatch
+# that can name a branch, separated (`-B main`) and attached (`-Bmain`) alike.
+#
+# `-b`/`-c` naming a protected branch is refused too. It would fail anyway
+# because the branch exists, and a hatch whose safety depends on what git
+# happens to reject is one bad day from being a hole.
+hatchNamesProtected() {
+  local name
+
+  set -f
+  # shellcheck disable=SC2086
+  set -- $1
+  set +f
+
+  while [ $# -gt 0 ]; do
+    name=""
+    case "$1" in
+      -b | -B | -c | -C)
+        shift
+        [ $# -gt 0 ] || return 1
+        name="$1"
+        ;;
+      -b?* | -B?* | -c?* | -C?*) name="${1#-?}" ;;
+    esac
+    isProtected "$name" && return 0
+    shift
+  done
+
+  return 1
+}
+
 # `git worktree add -b <branch>` is the escape hatch in its fourth spelling, and
 # rule 3 makes it the one work normally starts with — so refusing it from a
 # protected branch traps the agent exactly the way refusing `switch -c` would,
@@ -255,9 +299,7 @@ worktreeAddIsEscape() {
 
   [ "$sawB" = yes ] || return 1
 
-  case "$name" in
-    main | master | develop | release/*) return 1 ;;
-  esac
+  isProtected "$name" && return 1
 
   return 0
 }
@@ -324,14 +366,14 @@ gitSegmentWrites() {
     # denial text tells the agent to run `git switch -c`, and a guard that
     # refuses the remedy it names traps the agent on the protected branch with
     # no way off it but working around the guard or asking a human to type.
-    switch) return 1 ;;
+    switch) hatchNamesProtected "$rest" || return 1 ;;
 
     # `checkout` is two commands wearing one name: `-b` is the escape hatch in
     # the spelling most fingers already know, and everything else is the
     # destructive worktree write that `restore` was split out of.
     checkout)
       case " $rest " in
-        *" -b "* | *" -B "*) return 1 ;;
+        *" -b "* | *" -B "*) hatchNamesProtected "$rest" || return 1 ;;
       esac
       ;;
 
@@ -428,18 +470,14 @@ EOF
   fi
 fi
 
-if [ "$mutates" = yes ]; then
-  case "$effective_branch" in
-    main | master | develop | release/*)
-      # Two refusals because they are two different mistakes, and the remedy
-      # differs: one is standing in the wrong place, the other is reaching into
-      # it from a worktree that is perfectly fine.
-      if [ -n "$target_branch" ] && [ "$target_branch" != "$branch" ]; then
-        deny "This writes into a checkout that is on protected branch '$target_branch' ($target_path), even though this session's project directory is on '$branch'. The checkout the write lands in is the one that counts, not the one you are standing in. Write inside a worktree that is on an implementation branch instead. See CLAUDE.md."
-      fi
-      deny "On protected branch '$effective_branch', where this repository never accepts agent work. Cut a worktree and work there, which is rule 3: git worktree add -b fix/<slug> ../<dir> origin/main (or feat/, chore/, docs/, refactor/). To move this checkout instead: git switch -c fix/<slug>. Do not work around this guard — if branching is genuinely wrong here, ask. See CLAUDE.md."
-      ;;
-  esac
+if [ "$mutates" = yes ] && isProtected "$effective_branch"; then
+  # Two refusals because they are two different mistakes, and the remedy
+  # differs: one is standing in the wrong place, the other is reaching into
+  # it from a worktree that is perfectly fine.
+  if [ -n "$target_branch" ] && [ "$target_branch" != "$branch" ]; then
+    deny "This writes into a checkout that is on protected branch '$target_branch' ($target_path), even though this session's project directory is on '$branch'. The checkout the write lands in is the one that counts, not the one you are standing in. Write inside a worktree that is on an implementation branch instead. See CLAUDE.md."
+  fi
+  deny "On protected branch '$effective_branch', where this repository never accepts agent work. Cut a worktree and work there, which is rule 3: git worktree add -b fix/<slug> ../<dir> origin/main (or feat/, chore/, docs/, refactor/). To move this checkout instead: git switch -c fix/<slug>. Do not work around this guard — if branching is genuinely wrong here, ask. See CLAUDE.md."
 fi
 
 exit 0
