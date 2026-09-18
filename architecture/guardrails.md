@@ -70,8 +70,11 @@ human adding one line to the read list.
 Two properties of that inversion are worth naming because they are not obvious from the diff:
 
 - **A guard's denial must not block the remedy it names.** Refusing every command on a protected
-  branch traps the agent there, so `switch` stays allowed in full and `checkout -b`/`-B` stays allowed
-  as the spelling most fingers already know, while plain `checkout` — the destructive one — does not.
+  branch traps the agent there, so `switch` and `checkout -b`/`-B` stay allowed — the spellings most
+  fingers already know — while plain `checkout`, the destructive one, does not. **The hatch is
+  allowed for the name it creates, not for the flag**: `-B`/`-C` reset an existing branch, so
+  `checkout -B main` from a protected branch is the very act rule 1 names, and `hatchNamesProtected`
+  refuses any of the four flags pointed at a protected name.
 - **Mis-parsing can only over-refuse**, which is why the loop consuming git's global options has no
   write fixture that can see it break: with the options unconsumed, `-C` lands where the verb goes and
   is refused as an unrecognised write. Its only observable job is _not_ refusing a read that carries a
@@ -121,7 +124,9 @@ other spelling: `add` without `-b` checks out a branch that already exists, and 
 so `git worktree add -Bmain ../d` would be rule 1 spelled as its own remedy. That last form is the
 reason the suite asserts the attached spellings (`-bmain`, `-Bmain`) and not just the separated
 ones: widening the hatch from `-b?*` to `-[bB]?*` is a one-character edit, and until those
-assertions existed it broke nothing the suite could see.
+assertions existed it broke nothing the suite could see. **The same audit was owed to the hatches
+already there and was paid late** — `checkout -B main` and `switch -C main` were allowed from a
+protected branch until `hatchNamesProtected` closed them.
 
 **One consequence is left unfixed because it over-asks rather than under-refuses.**
 `unmergedBranches` (`lib.sh:62`) drops the project directory's own HEAD from the stack count, which
