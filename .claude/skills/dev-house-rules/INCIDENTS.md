@@ -8,8 +8,8 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 41 of the 48
-entries below are cited that way, and the other seven each say in their own text that no rule has
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 44 of the 52
+entries below are cited that way, and the other eight each say in their own text that no rule has
 been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
 reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
 so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
