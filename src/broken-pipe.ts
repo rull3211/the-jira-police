@@ -3,8 +3,8 @@
  *
  * `pnpm start` runs the daemon into the viewer, so quitting the viewer closes the daemon's stdout.
  * Left alone that is fatal: the next write raises an unhandled `error` event, Node exits 1, and the
- * `finally` that releases an `agent:solving` claim never runs — measured, not assumed. Treating it
- * as a shutdown request instead lets the current cycle unwind normally.
+ * `finally` that releases an `agent:solving` claim never runs. Treating it as a shutdown request
+ * instead lets the current cycle unwind normally.
  */
 
 /** Narrowed to what this needs, so a test can pass a plain `EventEmitter`. */

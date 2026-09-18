@@ -3,10 +3,10 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2727 tests in 86
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2733 tests in 87
 > files**, no build step.
 >
-> **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
+> **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and the review loop advances _and then_ claims in one tick
 > (`review-loop.ts:114`), gated only on `SOLVE_ENABLED`. Earlier revisions of this header said the
 > solve half was "still a person typing a command" and that "nothing loops". Both were false, and
@@ -43,14 +43,14 @@ Default posture is **manual**: nothing is solved until a human adds a label.
 **The numbers are identifiers, not an ordering, so they are never reused and the sequence has
 holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion would silently
 repoint every one of them — the failure §14 exists about. A missing number almost always means that
-entry shipped and was deleted. **One of them did not ship**, and it is named with the holes below
+entry shipped and was deleted. **Two of them did not ship**, and they are named with the holes below
 rather than here, because the qualifier is worth nothing without the case: a hole list that flattens
 "built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `architecture/guardrails.md` §16,
 every file that cited them has been repointed there, and what is still open from them is §17.
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30, §32, §36 and §37, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37 and §40, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -73,7 +73,8 @@ clause and the status allowlist that narrowed it, and each is a hole one commit 
 — opened and deleted inside the branch that built it, which is what the rule now asks for. **§24 is
 absent from that list and is not a hole** — it was skipped rather than spent, for the reason §19
 gives. §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
-inside the branch that built it. **§29 is the exception the paragraph above flags** — the handed-off
+inside the branch that built it. **§29 is the first of the two exceptions the paragraph above
+flags** — the handed-off
 unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
 (unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
 parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
@@ -83,8 +84,13 @@ with itself on PR #548 — same shape, opened and deleted inside its own branch.
 `branch-stack.sh` counting commit identity instead of commit content, opened and deleted inside the
 branch that built it — the story is `INCIDENTS.md`'s 2026-09-18 entry. §37 was the log viewer,
 shipped as `pnpm logs` and deleted inside the branch that built it; what it left unbuilt is §39,
-which is a new entry rather than a survival of the old one. The triage-selection entries are now all
-closed, so the next entry is §41.
+which is a new entry rather than a survival of the old one. **§40 is the second exception, and the
+worst-documented hole here**: it planned a supervisor process to run the daemon and the viewer
+together, and it was abandoned mid-branch when the operator chose a `package.json` pipeline instead
+— but it was written into a working tree and deleted from one, so no commit ever held it and there
+is nothing to recover. What it would have argued for is in `feat/daemon-log-tui`'s pull request; the
+sentence is here because a hole with no entry behind it sends the next reader through a history that
+does not contain one. The triage-selection entries are now all closed, so the next entry is §41.
 
 <!-- refs:on -->
 
@@ -738,8 +744,9 @@ a startup sweep, or a reconciliation of "a pull request exists" against "the tic
 solving".
 
 **Why it is owed.** `architecture/invariants.md` invariant 14 rests entirely on a `finally`, which every
-stack-skipping exit misses: `process.exit(130)` on a second signal (`src/index.ts:104`),
-`process.exit(1)` on an uncaught exception (`:156`), `SIGKILL`, a slept laptop. There is no TTL,
+stack-skipping exit misses: `process.exit(130)` on a second signal (`createShutdown` in
+`src/index.ts`), `process.exit(1)` on an uncaught exception (`logUnexpectedExits` there), `SIGKILL`,
+a slept laptop. There is no TTL,
 lease or reaper in `src/`. With `MAX_CONCURRENT_SOLVES=1` one stranded claim halts the solve half
 indefinitely, and the repair is a human editing the label field by hand — the exact operation
 invariant 11 exists to have eliminated. A second, narrower window has the same shape: `runPublish`
@@ -850,11 +857,46 @@ and the run is gone.
 
 - **The file sink may be the whole feature, and the socket a thing nobody asks for.** The entry this
   one replaces predicted the opposite — that live filtering was the need and replay the hedge — and
-  the way to find out is which of the two forms in `README.md` gets used. If it is the `tee` one,
-  build the sink and stop.
+  the way to find out is which of `README.md`'s two forms gets used: `pnpm start`, which shows the
+  run and keeps nothing, or `pnpm start:daemon > run.ndjson 2>&1`, which keeps it and shows nothing.
+  If it is the redirected one, build the sink and stop.
 - **A log file is an artifact with a lifetime**, and nothing here has ever had to rotate, expire or
   bound one. The service writes JSON lines at a cycle's rate into a directory nobody sweeps; the
   first unattended week is what would find that out, and `state/` is the only precedent.
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
+
+## Verification
+
+Unit and integration, following existing patterns, plus the house rule: **a guard is not shipped
+until a test fails when it is unplugged.** Guards worth naming, because each protects against a
+recurring charge rather than a wrong answer:
+
+- **cursor** — unplug the high-water mark and the same comment is resolved twice.
+- **marker parsing** — three mutations, failing in three directions: an unparseable marker reading
+  as zero; the reservation written after the pass; "our own comments" keyed on the author again.
+- **the operator's comment is not ours** — a human comment from the same GitHub account the bot
+  posts through must be treated as feedback and must never be the comment we edit. This is the one
+  whose failure destroys somebody's words rather than costing money.
+- **terminal** — a `MERGED` or `CLOSED` pull request must not produce another round.
+- **label pairing** — moving `agent:done` without making `agent:reviewing` replace `agent:solving`
+  must fail a test, and so must the reverse. Two mutations, because the half-changes fail in
+  opposite directions and one test will only catch one.
+- **sendback self-trigger** — the bot's own comment must not qualify as "the ticket changed".
+  Invisible in review and obvious on the invoice.
+
+## Out of scope
+
+Auto-merge. Multi-repo. Cross-repo _changes_ — reads landed 2026-09-07 and the two are not the same
+grant: a pass may read every checkout on the machine and may write to one worktree, which is now
+watched rather than merely asserted. Reopening `agent:done` tickets. Bot-noise tickets
+(CVE/GHSA/SNYK/dependency bumps) — currently discarded at intake, and the most agent-fixable class
+there is, so worth revisiting once the pilot has a track record.
+
+## Open, deliberately
+
+`bugFastPath` (default OFF) is the existing hook for bug-specific behaviour and is in direct
+tension with this feature: it short-circuits a `Feil` to a one-line note with no scorecard — and
+therefore no dev lens and no fitness call. If it is ever switched on, these two need reconciling.
+Flagged, not solved.

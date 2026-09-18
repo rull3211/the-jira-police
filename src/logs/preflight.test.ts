@@ -41,7 +41,8 @@ describe("refusal", () => {
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
     ) as { readonly scripts: Record<string, string> };
 
-    const suggested = [...said.matchAll(/pnpm ([\w:]+)/g)].map((match) => match[1]);
+    // Ends on a word character, or a name at the end of a sentence takes the full stop with it.
+    const suggested = [...said.matchAll(/pnpm ([\w:]*\w)/g)].map((match) => match[1]);
 
     expect(suggested.length).toBeGreaterThan(0);
     for (const script of suggested) {

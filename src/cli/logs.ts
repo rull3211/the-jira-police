@@ -9,7 +9,7 @@
  * The producer upstream must also keep the terminal off *its* stdin — Node restores the saved
  * termios when a process with a tty on fd 0 exits, which silently undoes this viewer's raw mode and
  * loses every keystroke after it. `package.json`'s `start` redirects the daemon's stdin for that
- * reason alone; it has no other purpose and looks removable.
+ * reason alone, which makes it look removable; `start-script.test.ts` is what stops it being removed.
  *
  * Everything decidable lives in `logs/*.ts`; this file is the part a test cannot reach — raw mode,
  * the alternate screen and cursor visibility are process-global state, and a run that exits without
