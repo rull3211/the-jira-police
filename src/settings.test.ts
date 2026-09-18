@@ -239,3 +239,22 @@ describe("the solve settings", () => {
     expect(numeric(settings, "MAX_REVIEW_ITERATIONS")).toBe(3);
   });
 });
+
+describe("RECON_IMAGES", () => {
+  it("is off unless somebody turned it on", () => {
+    // The picture reaches a live pass, not a dry run, so this fails closed the
+    // same way TRIAGE_IMAGES and WRITE_BACK do.
+    expect(flag(readSettings(MINIMAL), "RECON_IMAGES")).toBe(false);
+  });
+
+  it.each(["", "  ", "yes", "1", "on", "ture", "false"])(
+    "reads %j as off, because only true may arm it",
+    (value) => {
+      expect(flag(readSettings({ ...MINIMAL, RECON_IMAGES: value }), "RECON_IMAGES")).toBe(false);
+    },
+  );
+
+  it("arms only on an explicit true", () => {
+    expect(flag(readSettings({ ...MINIMAL, RECON_IMAGES: "true" }), "RECON_IMAGES")).toBe(true);
+  });
+});

@@ -58,11 +58,14 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
   the write-holding passes: a screenshot is what most tickets here actually contain, and what the
   fix pass needs out of one reaches it as recon's brief rather than as pixels.
 
-  **What is built reaches triage and nothing else.** `attachments/stage.ts` writes a ticket's
-  images read-only under a derived name, `attach:stage` prints the block a pass would be given, and
-  `createGroom` hands both to the analyst when `TRIAGE_IMAGES` is on — which took `WebFetch`,
-  `WebSearch` and `Task` off that session first. No solve pass constructs either; recon behind a
-  typed setting is still owed. **The bound that
+  **What is built now reaches triage and recon, and nothing past them.** `attachments/stage.ts`
+  writes a ticket's images read-only under a derived name, `attach:stage` prints the block a pass
+  would be given, `createGroom` hands both to the analyst when `TRIAGE_IMAGES` is on, and
+  `attachReconImages` (`wiring.ts:294`) does the same for the recon pass when `RECON_IMAGES` is on —
+  both took `WebFetch`, `WebSearch` and `Task` off their sessions first, and neither setting is on
+  by default. `buildSolvePrompt` and `buildSolveArgs` (`solve/runner.ts`) gate the block and its
+  `--add-dir` to the recon pass by name, so `fix`, `simplify`, `review` and `merge` never see it even
+  though they are built from the same `SolveRunOptions` object recon just ran with. **The bound that
   does not exist is a text control over a picture** — `sanitiseUntrusted` sees a path, and an
   instruction painted into a screenshot reaches the model unread by anything else.
 
@@ -87,7 +90,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
   in two places (§7's failure table, which records the check firing for real on 2026-09-03, and
   `README.md`'s smoke-test description). The precondition is enforced: `assertMcpReady`
   (`triage/session.ts:140`) throws `McpUnavailableError` on the init event for any required server
-  not reporting `connected`, and `["atlassian"]` reaches it from `wiring.ts:145`, `poster.ts:244`
+  not reporting `connected`, and `["atlassian"]` reaches it from `wiring.ts:151`, `poster.ts:244`
   and `commenter.ts:181`.
 
   So what died was a **module-level constant superseded by a per-call option**, which is a
@@ -106,7 +109,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 49 settings are read**, and there are no orphan files.
+  the same sweep: **all 52 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

@@ -24,6 +24,7 @@ import {
 } from "./jira/jql.ts";
 import {
   DEFAULT_IMAGE_STAGE_OPTIONS,
+  type ImageStageOptions,
   type ImageStageResult,
   describeStagedImages,
   removeStagedImages,
@@ -60,7 +61,12 @@ import { UnpostableError, assertPostable } from "./triage/gate.ts";
 import { createTicketCommenter } from "./solve/commenter.ts";
 import type { TicketCommenter } from "./solve/feedback.ts";
 import { runPost } from "./triage/poster.ts";
-import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
+import {
+  type StagedImagePrompt,
+  type TriagePayload,
+  type TriageRunOptions,
+  runTriage,
+} from "./triage/runner.ts";
 import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
 const pollLog = createLogger("poll");
@@ -200,6 +206,31 @@ export function shouldPost(settings: Settings): boolean {
 }
 
 /**
+ * The parent directory `stageForTriage` and `stageForRecon` stage a ticket's
+ * images under, and the second of the two directories `sweep-once` walks.
+ *
+ * A plain constant rather than something resolved and created like
+ * `worktreeRoot`: nothing here derives a worktree path from it, so there is
+ * no symlink-versus-resolved-path mismatch for this one to guard against.
+ */
+export function attachStagingRoot(): string {
+  return join(tmpdir(), "jira-police-attach");
+}
+
+/**
+ * The staging caps read from settings, shared by every caller of `stageImages`.
+ *
+ * `MAX_STAGED_IMAGES` is the only cap made editable — see the setting's own
+ * description for why the count moved and the byte ceiling did not.
+ */
+export function imageStageOptions(settings: Settings): ImageStageOptions {
+  return {
+    ...DEFAULT_IMAGE_STAGE_OPTIONS,
+    maxImages: numeric(settings, "MAX_STAGED_IMAGES", 1),
+  };
+}
+
+/**
  * The ticket's images on disk, or nothing, for the analyst to read.
  *
  * A staging failure degrades the run to text rather than failing it, and returns nothing rather
@@ -208,16 +239,11 @@ export function shouldPost(settings: Settings): boolean {
 async function stageForTriage(
   client: JiraClient,
   issueKey: string,
+  options: ImageStageOptions,
 ): Promise<ImageStageResult | null> {
   try {
     const detail = await client.fetchDetail(issueKey);
-    return await stageImages(
-      client,
-      detail.attachments,
-      join(tmpdir(), "jira-police-attach"),
-      issueKey,
-      DEFAULT_IMAGE_STAGE_OPTIONS,
-    );
+    return await stageImages(client, detail.attachments, attachStagingRoot(), issueKey, options);
   } catch (error) {
     triageLog.warn("triage.image_staging_failed", {
       issueKey,
@@ -225,6 +251,77 @@ async function stageForTriage(
     });
     return null;
   }
+}
+
+/**
+ * The ticket's images on disk, or nothing, for the recon pass to read.
+ *
+ * A near-duplicate of `stageForTriage` rather than a shared helper behind it:
+ * the two callers already log different event names for a staging failure
+ * (`triage.image_staging_failed` here becomes `solve.image_staging_failed`),
+ * and a caller ever needing to log something else about only one of them is
+ * one `if` away from an "is this the triage kind or the solve kind" parameter
+ * threaded through a function neither caller otherwise wants. Two independent
+ * five-line functions cost less to read than a shared one bent to fit both.
+ */
+async function stageForRecon(
+  client: JiraClient,
+  issueKey: string,
+  options: ImageStageOptions,
+): Promise<ImageStageResult | null> {
+  try {
+    const detail = await client.fetchDetail(issueKey);
+    return await stageImages(client, detail.attachments, attachStagingRoot(), issueKey, options);
+  } catch (error) {
+    solveLog.warn("solve.image_staging_failed", {
+      issueKey,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/** `attachReconImages`'s result: the request recon should run with, and its cleanup. */
+export interface StagedRecon {
+  readonly request: SolveRequest;
+  readonly cleanup: () => Promise<void>;
+}
+
+/**
+ * Stages a ticket's images for the recon pass when `RECON_IMAGES` is on, and
+ * returns the request to run recon with plus the cleanup that removes them.
+ *
+ * The setting off, or staging failing, both return `request` unchanged and a
+ * no-op cleanup — recon then runs exactly as it did before this existed,
+ * which is the same degrade-to-text choice `stageForTriage` makes for the
+ * analyst.
+ */
+export async function attachReconImages(
+  settings: Settings,
+  client: JiraClient,
+  request: SolveRequest,
+): Promise<StagedRecon> {
+  if (!flag(settings, "RECON_IMAGES")) {
+    return { request, cleanup: async () => {} };
+  }
+  const staged = await stageForRecon(client, request.issueKey, imageStageOptions(settings));
+  if (staged === null) {
+    return { request, cleanup: async () => {} };
+  }
+  const images: StagedImagePrompt = {
+    block: describeStagedImages(staged),
+    directory: staged.outcome === "staged" ? staged.directory : null,
+  };
+  return {
+    request: { ...request, images },
+    // In a `finally` at the call site, same as `createGroom`: the directory
+    // must not outlive the one session it was staged for.
+    cleanup: async () => {
+      if (staged.outcome === "staged") {
+        await removeStagedImages(staged.directory);
+      }
+    },
+  };
 }
 
 export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<TriagePayload> {
@@ -235,10 +332,12 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
   // Null is the off switch, so the extra detail fetch cannot happen by accident:
   // there is no client to make it with.
   const imageClient = flag(settings, "TRIAGE_IMAGES") ? createJiraClient(settings) : null;
+  const imageOptions = imageStageOptions(settings);
 
   return async (ticket: TicketRef) => {
     // Only the key crosses over; the skill reads everything else over its own session.
-    const staged = imageClient === null ? null : await stageForTriage(imageClient, ticket.key);
+    const staged =
+      imageClient === null ? null : await stageForTriage(imageClient, ticket.key, imageOptions);
     let analysed: TriagePayload;
     try {
       analysed = await runTriage({
@@ -571,7 +670,7 @@ export class NotSolvableError extends Error {}
  * directory to exist; both are wrapped, falling back to the unresolved path on failure so a
  * resolution error can't make this worse than today's behaviour.
  */
-function worktreeRoot(settings: Settings): string {
+export function worktreeRoot(settings: Settings): string {
   const configured = settings.SOLVE_WORKTREE_ROOT;
   const root = configured === "" ? join(tmpdir(), "jira-police-solve") : configured;
   try {

@@ -15,6 +15,7 @@ import type { SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
 import type { WorktreeResult } from "./solve/worktree.ts";
 import {
   NotSolvableError,
+  attachReconImages,
   baseBranchOf,
   buildAdvanceRequest,
   buildFindPrRequest,
@@ -27,6 +28,7 @@ import {
   createSolveDeps,
   createSolveRunDeps,
   githubRepoFor,
+  imageStageOptions,
   pollIntervalMs,
   reviewIntervalMs,
   shouldPost,
@@ -37,6 +39,15 @@ const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
 
 function settingsWith(overrides: Partial<Record<string, string>>): Settings {
   return readSettings({ ...ENV, ...overrides });
+}
+
+/** Never called: proves the off switch skips the extra Jira fetch entirely. */
+function unreachableClient(): JiraClient {
+  return {
+    fetchDetail: async () => {
+      throw new Error("fetchDetail must not be called when RECON_IMAGES is off");
+    },
+  } as unknown as JiraClient;
 }
 
 describe("buildTriageOptions", () => {
@@ -159,6 +170,82 @@ describe("pollIntervalMs", () => {
     expect(() => pollIntervalMs(settingsWith({ POLL_INTERVAL_MS: "-1" }))).toThrow(
       /POLL_INTERVAL_MS must be at least 1/,
     );
+  });
+});
+
+describe("imageStageOptions", () => {
+  it("defaults the count cap to 10", () => {
+    expect(imageStageOptions(settingsWith({})).maxImages).toBe(10);
+  });
+
+  it("reads an operator-raised cap", () => {
+    expect(imageStageOptions(settingsWith({ MAX_STAGED_IMAGES: "25" })).maxImages).toBe(25);
+  });
+
+  it("refuses a zero cap rather than silently staging nothing", () => {
+    // Zero reads as "no limit" and would behave as "already exhausted" —
+    // the same shape `numeric`'s floor exists to catch elsewhere in this file.
+    expect(() => imageStageOptions(settingsWith({ MAX_STAGED_IMAGES: "0" }))).toThrow(
+      /MAX_STAGED_IMAGES must be at least 1/,
+    );
+  });
+
+  it("leaves the byte ceiling alone, since only the count is a setting", () => {
+    expect(imageStageOptions(settingsWith({ MAX_STAGED_IMAGES: "25" })).maxImageBytes).toBe(
+      4 * 1024 * 1024,
+    );
+  });
+});
+
+describe("attachReconImages", () => {
+  const request: SolveRequest = {
+    issueKey: "SSX-3822",
+    ticket: "ticket text",
+    summary: "Distinct favicon",
+    repoPath: "/repos/buy-insurance-advisor-web",
+    parentDirectory: "/repos",
+    baseRef: "origin/main",
+    gitTimeoutMs: 1000,
+    stepTimeoutMs: 1000,
+    installTimeoutMs: 1000,
+  };
+
+  it("does nothing when RECON_IMAGES is off", async () => {
+    const staged = await attachReconImages(settingsWith({}), unreachableClient(), request);
+
+    expect(staged.request).toBe(request);
+    await expect(staged.cleanup()).resolves.toBeUndefined();
+  });
+
+  it("degrades to the unstaged request when the Jira fetch fails", async () => {
+    // Matches `stageForTriage`: a staging failure must not fail the run, only
+    // drop back to text.
+    const failingClient = {
+      fetchDetail: async () => {
+        throw new Error("network unreachable");
+      },
+    } as unknown as JiraClient;
+
+    const staged = await attachReconImages(
+      settingsWith({ RECON_IMAGES: "true" }),
+      failingClient,
+      request,
+    );
+
+    expect(staged.request).toBe(request);
+    await expect(staged.cleanup()).resolves.toBeUndefined();
+  });
+
+  it("attaches nothing, and says so honestly, when the ticket has no images", async () => {
+    const client = {
+      fetchDetail: async () => ({ attachments: [] }),
+    } as unknown as JiraClient;
+
+    const staged = await attachReconImages(settingsWith({ RECON_IMAGES: "true" }), client, request);
+
+    expect(staged.request).not.toBe(request);
+    expect(staged.request.images?.directory).toBeNull();
+    await expect(staged.cleanup()).resolves.toBeUndefined();
   });
 });
 

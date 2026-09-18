@@ -478,6 +478,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                           | `groomed/<KEY>.md`          |
 | `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                            | `groomed/solve-cycle.md`    |
 | `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                        | Jira **and** GitHub         |
+| `pnpm recon:once <KEY>`                                | Recon alone against one real ticket: proceed or bail, no fix, no diff, no PR                           | a report + `tmpdir()`       |
 | `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                      | no                          |
 | `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                               | Jira                        |
 | `pnpm start`                                           | The daemon **and** the live log viewer, together. Takes `--skill`, `--interval`, `--for`               | only with `WRITE_BACK=true` |
@@ -485,6 +486,8 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm dev`                                             | The **headless** daemon with `--watch`; same flags. A restart would tear the viewer down anyway        | as above                    |
 | `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind | a report + `tmpdir()`       |
 | `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                            | no                          |
+| `pnpm sweep:once`                                      | Report stale skill roots and staged-image directories past `STAGING_SWEEP_MAX_AGE_MS`                  | a report                    |
+| `pnpm sweep:once --write`                              | …and remove them. Never a live git worktree — see below                                                | filesystem (`tmpdir()`)     |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira  | no                          |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s               | no                          |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                               | no                          |
@@ -498,6 +501,20 @@ judged from a real ticket before any pass is wired to it. It downloads, writes t
 read-only directory under `tmpdir()` and the report to `<OUTPUT_DIR>/<KEY>.attachments.md`, and posts
 nothing. Exit 1 means the ticket has images and none of them is staged, which is the case a pass has
 to bail on. [`architecture/not-built.md` §13](architecture/not-built.md) has the decision behind it.
+
+**`recon:once` is the only way to run recon outside the full solve pipeline.** It cuts a real
+worktree from `SOLVE_REPO_ROOT`, runs recon in it, and always discards the worktree afterwards,
+whether recon proceeds or bails — there is nothing in there to lose, since recon holds no `Write`
+and no `Edit`. `--claim`, `--pr` and every other write rung `solve:once` has are absent on purpose:
+this command's whole job is to be safe to run against a ticket nobody has decided is solvable yet.
+Its report lands at `<OUTPUT_DIR>/<KEY>.recon.md`.
+
+**`sweep:once` never removes a live git worktree, whatever its age.** A worktree sits at the bare
+path `<root>/<KEY>`, while every directory this command may remove carries a `-skill-` or `-img-`
+segment that `ISSUE_KEY` (`src/solve/worktree.ts`) cannot produce — so the classifier in
+`src/staging-sweep.ts` never matches one, and a name it does not recognise is left alone and left
+unreported rather than swept. Dry by default, same shape as `triage:once`; nothing in `index.ts` or
+`review-loop.ts` calls it, so a stale directory only goes away when someone runs it.
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch. Three unrelated meanings of one word, and the
@@ -701,6 +718,7 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write        |
 | `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it    |
 | `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory             |
+| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it    |
 | `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built        |
 | `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days     |
 | `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend     |

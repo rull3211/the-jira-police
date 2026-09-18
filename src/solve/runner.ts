@@ -27,6 +27,7 @@
  */
 
 import { DENIED_BUILTIN_TOOLS } from "../triage/session.ts";
+import type { StagedImagePrompt } from "../triage/runner.ts";
 import { describeReadScope } from "./read-scope.ts";
 import {
   FIX_SCHEMA_JSON,
@@ -102,6 +103,13 @@ export interface SolveRunOptions {
   readonly vaultPath?: string;
   /** Directory holding `.claude/skills/agent-solve/`; without it the prompt's opening `/agent-solve` line resolves to nothing, since the worktree has no skills in it. */
   readonly skillRootPath?: string;
+  /**
+   * The ticket's images, already on disk. Recon only — see `buildSolvePrompt`
+   * and `buildSolveArgs`, which read this field solely on the recon pass even
+   * though `fix`, `simplify`, `review` and `merge` all share the same options
+   * object it was built on.
+   */
+  readonly images?: StagedImagePrompt;
 }
 
 /** Anything a model would plausibly read as the end of a data block: three or more dashes, either keyword, either block name, tolerant of spacing and case. */
@@ -211,6 +219,15 @@ export function buildSolvePrompt(pass: Pass, options: SolveRunOptions): string {
   const scope = describeReadScope(options.readDirs ?? []);
   const reads = scope === "" ? "" : `\n${scope}\n`;
 
+  // Recon only, even though `fix`, `simplify`, `review` and `merge` may share
+  // this same options object — `orchestrator.ts` builds one `base` and reuses
+  // it across passes, so the gate has to be on `pass`, not on whether the
+  // caller happened to omit `images`.
+  const images =
+    pass === "recon" && options.images !== undefined && options.images.block !== ""
+      ? `\n\n${options.images.block}`
+      : "";
+
   return [
     `/agent-solve ${options.issueKey} --${pass}`,
     "",
@@ -230,6 +247,7 @@ export function buildSolvePrompt(pass: Pass, options: SolveRunOptions): string {
     diff,
     review,
     conflict,
+    images,
   ].join("\n");
 }
 
@@ -251,6 +269,9 @@ export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
   const vaultPath = options.vaultPath ?? "";
   const skillRootPath = options.skillRootPath ?? "";
   const readDirs = options.readDirs ?? [];
+  // Recon only, for the same reason `buildSolvePrompt` gates on `pass` rather
+  // than on the field's presence: `base` is one object shared across passes.
+  const imageDir = pass === "recon" ? (options.images?.directory ?? null) : null;
 
   return [
     "-p",
@@ -268,6 +289,8 @@ export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
     ...(vaultPath === "" ? [] : ["--add-dir", vaultPath]),
     // Read-only pass only: `--add-dir` widens the workspace for every tool the pass holds, so on a write pass it would grant an edit, not just a read.
     ...(writes ? [] : readDirs.flatMap((dir) => ["--add-dir", dir])),
+    // Declared intent, not a grant — see the identical comment in `triage/runner.ts`'s `buildArgs`.
+    ...(imageDir === null ? [] : ["--add-dir", imageDir]),
     // Not optional in practice: the prompt's `/agent-solve …` line resolves to nothing without it, since the worktree has no skills.
     ...(skillRootPath === "" ? [] : ["--add-dir", skillRootPath]),
     "--json-schema",

@@ -5,8 +5,8 @@
  * actually arrived, since a chunked response has no `content-length` to trust. The staged filename is
  * `<attachment id>.<sniffed extension>`, never the attacker-controlled uploaded filename. An instruction
  * painted into a screenshot is invisible to this service's text defenses, which is why these bytes are
- * only ever handed to passes with no `Write`. See `architecture/not-built.md` §13 and `architecture/invariants.md` §14.11; `PLAN.md` §4 is the
- * still-unbuilt recon half.
+ * only ever handed to the passes that hold no `Write` — triage's analyst and recon. See
+ * `architecture/not-built.md` §13 and `architecture/invariants.md` §14.11.
  */
 
 import { createHash } from "node:crypto";
@@ -36,10 +36,15 @@ export interface ImageStageOptions {
   readonly maxImages: number;
 }
 
+/**
+ * The fallback for a caller that passes no options, kept in step with
+ * `MAX_STAGED_IMAGES`'s own fallback (`settings.ts`) rather than diverging from
+ * it — every real caller reads that setting instead of this constant.
+ */
 export const DEFAULT_IMAGE_STAGE_OPTIONS: ImageStageOptions = {
   // Comfortably above a full-page retina screenshot.
   maxImageBytes: 4 * 1024 * 1024,
-  maxImages: 6,
+  maxImages: 10,
 };
 
 /** How long a filename may be before it is cut, in the report and the prompt. */

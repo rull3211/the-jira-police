@@ -114,6 +114,18 @@ export const SETTINGS = [
     fallback: "false",
   },
   {
+    name: "RECON_IMAGES",
+    description:
+      "Whether the recon pass is handed the ticket's image attachments as staged files, the same way TRIAGE_IMAGES hands them to the analyst. Off by default, for the same reason: a picture is untrusted text sanitiseUntrusted never sees. On, each recon run costs one extra Jira detail fetch plus a download per image. The block and the staged directory reach only the recon pass, never fix, simplify or review — those already hold no Write, and this does not change that; recon's own bailed-or-proceed verdict is the only thing a picture is allowed to influence.",
+    fallback: "false",
+  },
+  {
+    name: "MAX_STAGED_IMAGES",
+    description:
+      "How many of a ticket's image attachments a stager will attempt for one run, shared by TRIAGE_IMAGES and recon's own image reading rather than one value each could drift from. Attempts, not successes: a candidate that fails its download or its signature check still spends one, so a ticket of broken files cannot buy unlimited retries. Ten, raised from a hardcoded six after SSX-3917 dropped its two largest and newest images on Jira's own attachment order — both were far inside the size cap, so the cost of the old number was images a reader would plausibly pick, not oversized ones. Ordering by anything other than Jira's own is still policy nothing has measured; this only buys headroom against the ordering as it stands.",
+    fallback: "10",
+  },
+  {
     name: "STORECODE_PATH",
     description: "Executable used to run the skill.",
     fallback: "storecode",
@@ -210,6 +222,12 @@ export const SETTINGS = [
       "Directory the solver cuts its worktrees into, one per issue key. Defaults to the system temp directory, which is where a temporary checkout belongs — deliberately nowhere near the repository, so a failed run leaves its evidence somewhere obviously not the working copy. Configurable because a run that fails keeps its worktree for a human to read, and on macOS the default lands under /private/var, which some tooling cannot open; pointing this at a readable directory is the difference between a diff that can be reviewed by hand and one that can only be described.",
     fallback: "",
     // Empty means the system temp directory; can't freeze `tmpdir()`'s answer into a literal fallback.
+  },
+  {
+    name: "STAGING_SWEEP_MAX_AGE_MS",
+    description:
+      "How old a skill root or a staged-image directory must be before `sweep-once --write` will remove it. Sized well clear of the slowest legitimate run rather than the typical one: a single pass can spend SOLVE_INSTALL_TIMEOUT_MS (900000, cold install only) plus several SOLVE_STEP_TIMEOUT_MS (600000 each) plus a handful of SOLVE_GIT_TIMEOUT_MS (120000) calls, and a skill root outlives the whole pipeline — recon, fix and simplify share one before it is removed in a single `finally`. All of those budgets are sleep-excluded, which is the reason none of them bounds this on its own: SOLVE_TIMEOUT_MS's own description records a run on SSX-3831 killed by a wall-clock deadline that kept counting while the machine slept, so a legitimately still-running pass can be far older in wall-clock time than its nominal budget implies. 86400000 (24 hours) is well clear of the computed ceiling above while still reclaiming disk within a day; nobody has measured a real slow pass against it, so treat it as a starting point rather than a derived number.",
+    fallback: "86400000",
   },
   {
     name: "SOLVE_BOT_NAME",

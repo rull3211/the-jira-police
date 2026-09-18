@@ -42,8 +42,8 @@ export type SkillRootResult =
  *
  * Residual risk, not closed: the old derived name was self-cleaning across a hard-killed run;
  * unique names leak one directory per `SIGKILL` between staging and the caller's `finally` instead.
- * Survivable only because `parentDirectory` defaults under `tmpdir()` — an operator who configures
- * it elsewhere gets unbounded growth. `PLAN.md` §22 holds the age-based sweep this is waiting on.
+ * `sweep-once` (`cli/sweep-once.ts`) reclaims a leaked root by age, so it lasts until the next
+ * `sweep-once --write` rather than forever.
  */
 export async function prepareSkillRoot(
   parentDirectory: string,

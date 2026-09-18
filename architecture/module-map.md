@@ -10,26 +10,28 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-97 production modules, 87 test files. Grouped by what they belong to rather than alphabetically,
+103 production modules, 92 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
 
-| Path                       | Role                                                                                                                                                           |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`             | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                                 |
-| `src/loop.ts`              | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                           |
-| `src/poller.ts`            | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                 |
-| `src/review-loop.ts`       | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                |
-| `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                |
-| `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all six entry points                                                                   |
-| `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                         |
-| `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger         |
-| `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide |
-| `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                            |
-| `src/broken-pipe.ts`       | `EPIPE` on stdout is a shutdown request, not a crash — quitting `pnpm start`'s viewer closes the daemon's pipe, and the default death skips the claim release  |
-| `src/text.ts`              | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows               |
-| `src/read-only-tree.ts`    | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair   |
+| Path                       | Role                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`             | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                                     |
+| `src/loop.ts`              | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                               |
+| `src/poller.ts`            | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                     |
+| `src/review-loop.ts`       | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                    |
+| `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                    |
+| `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                     |
+| `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                             |
+| `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger             |
+| `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide     |
+| `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                                |
+| `src/broken-pipe.ts`       | `EPIPE` on stdout is a shutdown request, not a crash — quitting `pnpm start`'s viewer closes the daemon's pipe, and the default death skips the claim release      |
+| `src/text.ts`              | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows                   |
+| `src/read-only-tree.ts`    | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair       |
+| `src/staging-sweep.ts`     | Which directory names under `worktreeRoot`/`attachStagingRoot` are a skill root or a staged-image directory, and whether one is old enough to remove. Pure — no fs |
+| `src/sweep.ts`             | Walking those two parent directories and, with `write`, removing what `staging-sweep.ts` marks. Shared by `sweep-once.ts`; nothing automatic calls it              |
 
 **Jira**
 
@@ -41,21 +43,25 @@ because the grouping is the architecture.
 | `src/jira/adf.ts`    | Atlassian Document Format rendered down to plain text. No I/O, so testable against real payloads |
 | `src/state/store.ts` | Cursor + seen keys, atomic write                                                                 |
 
-**Attachments — the image path, and triage is what constructs it**
+**Attachments — the image path, and triage and recon each construct their own staging call**
 
 | Path                        | Role                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `src/attachments/images.ts` | Which types may be staged, and what the leading bytes say the file actually is                          |
 | `src/attachments/stage.ts`  | Images written read-only under a derived name, and the block naming them. `staged` / `none` / `refused` |
 
-`createGroom` (`wiring.ts:225`) stages before the analyst runs and removes the directory in a
+`createGroom` (`wiring.ts:322`) stages before the analyst runs and removes the directory in a
 `finally` after it, whenever `TRIAGE_IMAGES` is on — so the daemon, `poll:once`, `triage:once`,
 `bot:once` and `watch:once` all reach this path through one construction site rather than five.
-It defaults off and the analyst is denied `WebFetch`, `WebSearch` and `Task` before any pixel
-arrives. **No solve pass constructs either module**, by the same decision: the fix pass gets recon's
-brief rather than the picture. `attach:stage` remains the dry run, and the only way to look at a
-staged file, since a pass sweeps its own directory. §13 has the decision that authorised the bytes
-and the recon phase still owed; §14.11 has what the widening cost.
+`attachReconImages` (`wiring.ts:294`) is recon's own construction site, behind `RECON_IMAGES`, used
+by `recon:once` and `solve:once`'s `--solve` rung; both settings default off and the analyst or
+recon session is denied `WebFetch`, `WebSearch` and `Task` before any pixel arrives regardless.
+**No write-holding pass constructs either module** — `buildSolvePrompt` and `buildSolveArgs`
+(`solve/runner.ts`) splice the block and the `--add-dir` in only when the pass is recon, so `fix`,
+`simplify`, `review` and `merge` never see either even though `runPipeline` builds one
+`SolveRunOptions` object and reuses it across every pass. `attach:stage` remains the dry run, and the
+only way to look at a staged file, since a pass sweeps its own directory. §13 has the decision that
+authorised the bytes; §14.11 has what the widening cost.
 
 **The watch check is the attachment consumer that fetches nothing.** `watch/context.ts` copies
 names, types and sizes field by field — never bytes — capped at `MAX_CONTEXT_ATTACHMENTS` (20),
@@ -131,29 +137,33 @@ inheritance.
 
 **Entry points and their argument parsing**
 
-| Path                             | Role                                                                                                                                   |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/cli/poll-once.ts`           | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                            |
-| `src/cli/triage-once.ts`         | One triage against a named key, no discovery. `--write` to post it                                                                     |
-| `src/cli/solve-once.ts`          | The solve ladder. Dry by default; every write is a typed flag                                                                          |
-| `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                   |
-| `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                     |
-| `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                         |
-| `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                            |
-| `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                     |
-| `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                    |
-| `src/cli/watch-args.ts`          | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                    |
-| `src/cli/attach-stage.ts`        | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session |
-| `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                            |
-| `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                |
-| `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                               |
-| `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                          |
-| `src/cli/section-refs.ts`        | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                    |
-| `src/cli/count-phrases.ts`       | Count-noun phrases in tracked markdown: declared fact, or listed history                                                               |
-| `src/cli/pinned-prose.ts`        | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                           |
-| `src/cli/length-budget.ts`       | Word bands for the mandatory-reading path, and the ratchet on raising one                                                              |
-| `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                |
-| `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                         |
+| Path                             | Role                                                                                                                                                        |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/poll-once.ts`           | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                                                 |
+| `src/cli/triage-once.ts`         | One triage against a named key, no discovery. `--write` to post it                                                                                          |
+| `src/cli/solve-once.ts`          | The solve ladder. Dry by default; every write is a typed flag                                                                                               |
+| `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                                        |
+| `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                                          |
+| `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                                              |
+| `src/cli/recon-once.ts`          | Recon alone against one real ticket: a worktree, a skill root, one pass, always discarded. No fix, no diff, no PR                                           |
+| `src/cli/recon-once-report.ts`   | Its report and exit code, split out for the reason `attach-stage-report.ts` gives                                                                           |
+| `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                                                 |
+| `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                                          |
+| `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                                         |
+| `src/cli/watch-args.ts`          | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                                         |
+| `src/cli/attach-stage.ts`        | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session                      |
+| `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                                                 |
+| `src/cli/sweep-once.ts`          | `pnpm sweep:once [--write]`. Reports, and with `--write` removes, stale skill roots and staged-image directories. Dry by default, not on any automatic path |
+| `src/cli/sweep-once-report.ts`   | Its report, kept where a test can import it without running the command                                                                                     |
+| `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                     |
+| `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                    |
+| `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                               |
+| `src/cli/section-refs.ts`        | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                                         |
+| `src/cli/count-phrases.ts`       | Count-noun phrases in tracked markdown: declared fact, or listed history                                                                                    |
+| `src/cli/pinned-prose.ts`        | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                                                |
+| `src/cli/length-budget.ts`       | Word bands for the mandatory-reading path, and the ratchet on raising one                                                                                   |
+| `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                                     |
+| `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                                              |
 
 **The log viewer — the only consumer of this service's own log**
 
@@ -176,19 +186,19 @@ inheritance.
 | -------------------- | ------------------------------------------------ |
 | `src/output/sink.ts` | `FileSink` (reports) and the rejection artifacts |
 
-`wiring.ts` exists because there are six entry points — the daemon, `poll:once`, `triage:once`,
-`solve:once`, `bot:once` and `watch:once` — and a difference in how they wire the same pipeline
-would be a bug
+`wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
+`solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same
+pipeline would be a bug
 that only shows up in production. `docs-check.ts` and the six modules under it are deliberately not
 entry points: they compose nothing, read no settings, and touch neither Jira nor a repository. They
 live here because this is where a file you can run lives, and they are called out rather than left
-to be counted, since "six" above is a claim about the composition and a new CLI file is exactly what
-would quietly falsify it.
+to be counted, since "seven" above is a claim about the composition and a new CLI file is exactly
+what would quietly falsify it.
 
 **`attach:stage` is the third kind and the reason the sentence says "pipeline" rather than
-"wiring.ts".** It does read settings and does call `createJiraClient`, so it is a seventh caller of
-that module — but it composes no deps object, runs no pass, and its whole output is a report. Six is
-still the number of entry points that could diverge from one another in production.
+"wiring.ts".** It does read settings and does call `createJiraClient`, so it is an eighth caller of
+that module — but it composes no deps object, runs no pass, and its whole output is a report. Seven
+is still the number of entry points that could diverge from one another in production.
 `attach-stage-report.ts` is a library and not an entry point either, split off for the reason
 `watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
 check the report or the exit code would run the command instead. **`logs.ts` is the fourth kind**,

@@ -146,7 +146,14 @@ describe("stageImages", () => {
 
   it("keeps the oldest attachments of a real over-cap ticket, and drops the rest unfetched", async () => {
     const read = reader();
-    const { maxImages, maxImageBytes } = DEFAULT_IMAGE_STAGE_OPTIONS;
+    // refs:off
+    // The cap this ticket was actually measured against (PLAN.md §4, SSX-3917),
+    // refs:on
+    // held here rather than read off `DEFAULT_IMAGE_STAGE_OPTIONS` — that default
+    // moved to 10 to give this exact ticket headroom, so the fixture no longer
+    // exceeds it and the over-cap scenario needs its own number to reproduce.
+    const maxImages = 6;
+    const { maxImageBytes } = DEFAULT_IMAGE_STAGE_OPTIONS;
     const kept = SSX_3917.slice(0, maxImages);
     const dropped = SSX_3917.slice(maxImages);
 
@@ -157,7 +164,9 @@ describe("stageImages", () => {
       Math.max(...kept.map((image) => image.size)),
     );
 
-    const result = staged(await stageImages(read, SSX_3917, parent, "SSX-3917"));
+    const result = staged(
+      await stageImages(read, SSX_3917, parent, "SSX-3917", { maxImageBytes, maxImages }),
+    );
 
     expect(result.images.map((image) => image.filename)).toEqual(
       kept.map((image) => image.filename),

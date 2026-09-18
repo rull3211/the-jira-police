@@ -4,22 +4,17 @@
  *   pnpm attach:stage SSX-3917
  *   pnpm attach:stage SSX-3917 --keep
  *
- * Dry run: posts nothing, labels nothing, starts no model session.
+ * Dry run: posts nothing, labels nothing, starts no model session. `--keep` is the only way to
+ * see the staged files by eye, since a pass removes its directory on the way out.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  DEFAULT_IMAGE_STAGE_OPTIONS,
-  describeStagedImages,
-  removeStagedImages,
-  stageImages,
-} from "../attachments/stage.ts";
+import { describeStagedImages, removeStagedImages, stageImages } from "../attachments/stage.ts";
 import { createLogger } from "../logger.ts";
 import { readSettings } from "../settings.ts";
-import { createJiraClient } from "../wiring.ts";
+import { attachStagingRoot, createJiraClient, imageStageOptions } from "../wiring.ts";
 import { EXIT, exitCodeFor, formatReport } from "./attach-stage-report.ts";
 
 const log = createLogger("attach-stage");
@@ -59,13 +54,13 @@ async function main(): Promise<number> {
   }
   process.stdout.write("\n");
 
-  const parent = join(tmpdir(), "jira-police-attach");
+  const parent = attachStagingRoot();
   const result = await stageImages(
     client,
     detail.attachments,
     parent,
     detail.key,
-    DEFAULT_IMAGE_STAGE_OPTIONS,
+    imageStageOptions(settings),
   );
 
   process.stdout.write(`outcome: ${result.outcome}\n`);
@@ -92,7 +87,7 @@ async function main(): Promise<number> {
   if (keptAt !== null) {
     process.stdout.write(`kept: ${keptAt}\n`);
     process.stdout.write(
-      "Nothing sweeps this directory, and the tree is read-only, so remove it with:\n" +
+      `sweep-once --write removes this once it is past STAGING_SWEEP_MAX_AGE_MS. To remove it now:\n` +
         `  chmod -R u+w ${keptAt} && rm -r ${keptAt}\n`,
     );
   } else if (staged !== null) {

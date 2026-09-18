@@ -1442,8 +1442,9 @@ signal, and `src/index.ts:104` answers it with `process.exit(130)`, which skips 
 the service. Three things follow and none is visible afterwards: the `agent:solving` claim is never
 released, and no TTL, lease or reaper exists anywhere in `src/` to reclaim it, so at
 `MAX_CONCURRENT_SOLVES=1` the solve half stops until somebody edits the label by hand; one skill root
-leaks at mode `0o555`, so even `rm -rf` on it fails — `PLAN.md` §22 calls that "a hard kill", where
-it is really any exit that skips a `finally`; and the model subprocess is spawned with neither
+leaks at mode `0o555`, so even `rm -rf` on it fails — the closed `PLAN.md` entry that named this "a
+hard kill" is really any exit that skips a `finally`, and `sweep-once` (`src/cli/sweep-once.ts`) is
+the age-based sweep that now reclaims it; and the model subprocess is spawned with neither
 `detached` nor a `signal`, so it keeps running and keeps billing. A clean restart is not free either:
 the attempt ledger and the watch memo are per-process by design, so every save re-grants a solve
 attempt on a failing ticket.
@@ -1553,6 +1554,8 @@ already makes the point next to it.
 
 ### The fail-first prediction that named the wrong string
 
+<!-- refs:off -->
+
 `PLAN.md` §4 predicted that a triage run reading a staged image of SSX-3918 would produce a verdict
 containing `Nyt selskab` — the one field name in the image that also appears nowhere in the ticket's
 text — and staked the whole capability on that single string: "the run either produces that string or
@@ -1562,6 +1565,8 @@ ticket's own text and just as impossible without reading the image. The field th
 third line of a three-line crop, cut off before its value ever appears; the model had it in view and
 judged it irrelevant to the question the ticket asks, so it never reached the quote a `grep` was
 written to look for.
+
+<!-- refs:on -->
 
 A prediction naming one exact string treats the model's output as deterministic when the capability
 under test — reading an image and choosing what from it is worth reporting — has real freedom in what
