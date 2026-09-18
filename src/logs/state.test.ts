@@ -138,6 +138,35 @@ describe("following and scrolling", () => {
     expect(state.follow).toBe(true);
   });
 
+  it("holds the view on f, and an arriving line does not hand the tail back", () => {
+    // The buffer here is shorter than the window, so the offset stays clamped at 0 — which is the
+    // case that used to release the hold, because 0 was read as "the reader is back at the tail".
+    const held = run([...feed(line({ message: "poll.first" })), ...press("f")]);
+    const later = reduce(held, { kind: "line", text: line({ message: "poll.later" }) });
+
+    expect(held.follow).toBe(false);
+    expect(later.follow).toBe(false);
+  });
+
+  it("goes back to the tail on a second f, rather than needing G as well", () => {
+    const state = run([
+      ...feed(...Array.from({ length: 40 }, () => line())),
+      ...press("f", "k", "k", "f"),
+    ]);
+
+    expect(state.follow).toBe(true);
+    expect(state.scroll).toBe(0);
+  });
+
+  it("keeps the hold through a resize, which is not the reader asking to be moved", () => {
+    // `movedTo` resumes following on reaching the bottom. A hold taken at the tail sits at offset
+    // 0, so routing a resize through it would hand the tail back without a keystroke.
+    const held = run([...feed(line()), ...press("f")]);
+    const resized = reduce(held, { kind: "resize", rows: 40, columns: 120 });
+
+    expect(resized.follow).toBe(false);
+  });
+
   it("cannot scroll past the first line", () => {
     const state = run([...feed(line(), line()), ...press("g", "k", "k", "k")]);
 

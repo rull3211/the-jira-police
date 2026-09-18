@@ -553,10 +553,11 @@ Three filters, all off until you press something, all ANDed:
 | `5` `6`  | The `q` mark: ⏳ nothing happened, 🔧 something did                       |
 | a letter | One source — `poll`, `solve`, `jira`, … The key is shown beside each name |
 
-`f` follows the tail, `j`/`k` and the arrows scroll, `g`/`G` jump to either end, `c` clears every
-filter, `q` quits. A filter that is on is drawn in brackets and one that is off in spaces, so the
-state survives a terminal with no colour; the two forms are the same width, so nothing on the row
-moves when you toggle one.
+`f` holds the view where it is, and a second `f` returns to the tail — the one key you want when
+something interesting scrolls past mid-cycle. `j`/`k` and the arrows scroll, `g`/`G` jump to either
+end, `c` clears every filter, and `q` or escape quits. A filter that is on is drawn in brackets and
+one that is off in spaces, so the state survives a terminal with no colour; the two forms are the
+same width, so nothing on the row moves when you toggle one.
 
 **What would falsify it:** the header counts shown against arrived (`12/480 lines`). If narrowing
 to one source drops the total rather than the shown count, the filter is eating lines instead of

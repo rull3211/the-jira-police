@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2712 tests in 84
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2717 tests in 84
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -292,6 +292,13 @@ environment cannot answer a question about CI's.**
 
 ### 10. Still unobserved
 
+- **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
+  headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
+  property the layout rests on is that six code points render two columns wide, and
+  `logs/glyphs.ts` asserts that against a hard-coded table rather than against any terminal. A
+  terminal disagreeing about one of them shears every column to its right, and no test here can
+  see it. **What would show it:** one real run in iTerm, Terminal.app and a Linux console, looking
+  only at whether the filter rows and the message column stay aligned.
 - **The mixed-batch rule.** No round has yet read a human and a reviewer comment in the same batch.
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.

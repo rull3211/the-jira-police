@@ -99,7 +99,9 @@ function sourceRow(state: ViewerState): string {
     .join("");
 }
 
-const FOOTER = "q quit · f follow · c clear · j/k scroll · g/G top/bottom · digits+letters filter";
+// `f` toggles, and on a fresh viewer the first press holds rather than follows — a bare "f follow"
+// reads as the opposite. Kept to 80 columns so the whole row survives the narrowest terminal.
+const FOOTER = "q quit · f hold/follow · c clear · j/k scroll · g/G ends · digits+letters filter";
 
 /** Every line of the screen, chrome included, clipped to the window. */
 export function render(state: ViewerState): string[] {

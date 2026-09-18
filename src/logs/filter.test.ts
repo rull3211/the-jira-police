@@ -34,12 +34,26 @@ describe("passes", () => {
     expect(passes(filter, log({ mark: QUIET_MARK }))).toBe(false);
   });
 
-  it("always shows a line it could not parse, whatever the filter says", () => {
-    // The whole point of keeping raw lines: narrowing to one source must not hide a stack trace,
-    // which has no source to be narrowed to.
-    const filter = { ...NO_FILTER, sources: new Set(["solve"]) };
+  it("always shows a line it could not parse, on every axis separately", () => {
+    // The whole point of keeping raw lines: a stack trace has no source, no level and no mark, so
+    // every axis would exclude it by default. One axis per assertion rather than one filter with
+    // all three set — a filter that only consulted `sources` would pass that version of the test,
+    // and the level axis is the one an operator reaches for first.
+    const trace: Entry = { kind: "raw", text: "    at main ()" };
 
-    expect(passes(filter, { kind: "raw", text: "    at main ()" })).toBe(true);
+    expect(passes({ ...NO_FILTER, sources: new Set(["solve"]) }, trace)).toBe(true);
+    expect(passes({ ...NO_FILTER, levels: new Set<"error">(["error"]) }, trace)).toBe(true);
+    expect(passes({ ...NO_FILTER, marks: new Set([QUIET_MARK]) }, trace)).toBe(true);
+  });
+
+  it("shows a raw line even when all three axes are narrowed at once", () => {
+    const filter = {
+      marks: new Set([NEWS_MARK]),
+      levels: new Set<"info">(["info"]),
+      sources: new Set(["poll"]),
+    };
+
+    expect(passes(filter, { kind: "raw", text: "  ↳ SSX-1 sent back, no answer yet" })).toBe(true);
   });
 });
 

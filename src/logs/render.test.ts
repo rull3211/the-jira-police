@@ -182,6 +182,14 @@ describe("render", () => {
     expect(plain(render(state)[0] ?? "")).toContain("feed closed");
   });
 
+  it("keeps the whole key list on screen at 80 columns, the narrowest terminal worth having", () => {
+    // The row is clipped rather than wrapped, so a footer one character too long loses the last
+    // key silently — and the key it loses is the filter hint, which is the row's whole purpose.
+    const footer = plain(render(initialState(10, 80)).at(-1) ?? "");
+
+    expect(footer).toContain("digits+letters filter");
+  });
+
   it("shows the newest line while following", () => {
     const texts = Array.from({ length: 40 }, (_, i) => line({ message: `poll.n${String(i)}` }));
     const screen = render(stateWith(texts, 12, 100))

@@ -73,10 +73,28 @@ function maxScroll(state: ViewerState): number {
   return Math.max(0, visibleEntries(state).length - bodyRows(state));
 }
 
-function scrolledTo(state: ViewerState, scroll: number): ViewerState {
-  const clamped = Math.max(0, Math.min(scroll, maxScroll(state)));
-  // Arriving at the bottom resumes following, so the common case needs no second keystroke.
+function clampScroll(state: ViewerState, scroll: number): number {
+  return Math.max(0, Math.min(scroll, maxScroll(state)));
+}
+
+/**
+ * The reader moved the view, so where they landed decides whether the tail is being tracked.
+ *
+ * Arriving at the bottom resumes following, which is what makes the common case one keystroke.
+ */
+function movedTo(state: ViewerState, scroll: number): ViewerState {
+  const clamped = clampScroll(state, scroll);
   return { ...state, scroll: clamped, follow: clamped === 0 };
+}
+
+/**
+ * The view moved without the reader asking — a line arrived, or the window changed shape.
+ *
+ * `follow` is left exactly as it was, because deriving it from the offset here silently releases a
+ * hold: a buffer shorter than the window clamps to 0, and 0 would read as "back at the tail".
+ */
+function repositioned(state: ViewerState, scroll: number): ViewerState {
+  return { ...state, scroll: clampScroll(state, scroll) };
 }
 
 function withLine(state: ViewerState, text: string): ViewerState {
@@ -94,7 +112,7 @@ function withLine(state: ViewerState, text: string): ViewerState {
 
   // While following, the newest line stays on screen. While not, `scroll` rises with the buffer so
   // the line the reader stopped at stays under their eye instead of sliding upward.
-  return state.follow ? { ...grown, scroll: 0 } : scrolledTo(grown, grown.scroll + 1);
+  return state.follow ? { ...grown, scroll: 0 } : repositioned(grown, grown.scroll + 1);
 }
 
 function withKey(state: ViewerState, key: string): ViewerState {
@@ -103,23 +121,23 @@ function withKey(state: ViewerState, key: string): ViewerState {
     case "escape":
       return { ...state, quit: true };
     case "f":
-      return state.follow ? { ...state, follow: false } : scrolledTo(state, 0);
+      return state.follow ? { ...state, follow: false } : movedTo(state, 0);
     case "c":
       return { ...state, filter: NO_FILTER };
     case "j":
     case "down":
-      return scrolledTo(state, state.scroll - 1);
+      return movedTo(state, state.scroll - 1);
     case "k":
     case "up":
-      return scrolledTo(state, state.scroll + 1);
+      return movedTo(state, state.scroll + 1);
     case "pagedown":
-      return scrolledTo(state, state.scroll - bodyRows(state));
+      return movedTo(state, state.scroll - bodyRows(state));
     case "pageup":
-      return scrolledTo(state, state.scroll + bodyRows(state));
+      return movedTo(state, state.scroll + bodyRows(state));
     case "G":
-      return scrolledTo(state, 0);
+      return movedTo(state, 0);
     case "g":
-      return scrolledTo(state, maxScroll(state));
+      return movedTo(state, maxScroll(state));
     default:
       break;
   }
@@ -163,7 +181,7 @@ export function reduce(state: ViewerState, action: Action): ViewerState {
       return withKey(state, action.key);
     case "resize":
       // Clamped against the new height, or a shorter window leaves `scroll` past the first line.
-      return scrolledTo({ ...state, rows: action.rows, columns: action.columns }, state.scroll);
+      return repositioned({ ...state, rows: action.rows, columns: action.columns }, state.scroll);
     case "end":
       return { ...state, ended: true };
   }

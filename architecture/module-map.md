@@ -189,14 +189,11 @@ that module — but it composes no deps object, runs no pass, and its whole outp
 still the number of entry points that could diverge from one another in production.
 `attach-stage-report.ts` is a library and not an entry point either, split off for the reason
 `watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
-check the report or the exit code would run the command instead.
-
-**`logs.ts` is the fourth kind, and it is the one the sentence above predicted.** It is a `src/cli/`
-file with a `pnpm` command that is not an entry point, is not `docs-check.ts`'s tooling, and is not
-`attach:stage`: it reads no settings, holds no credential, opens no network connection, and its
-input is a pipe rather than a queue. It is listed with `src/logs/*` above rather than with the
-commands, because what it belongs to is the viewer. Six is still the number of entry points that
-could diverge from one another in production.
+check the report or the exit code would run the command instead. **`logs.ts` is the fourth kind**,
+and it is the one the paragraph above predicted: a `src/cli/` file with a `pnpm` command that reads
+no settings, holds no credential, opens no network connection, and takes a pipe rather than a queue.
+It is listed with `src/logs/*` above rather than with the commands, because what it belongs to is
+the viewer.
 
 **It did exactly that, twice, and the second time nobody noticed for four modules.** The sentence
 here used to say `docs-check.ts` and `section-refs.ts` were "the seventh and eighth files in that

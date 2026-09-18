@@ -11,7 +11,7 @@
 /** Keys the viewer reserves. Digits are levels and marks and are never handed to a source. */
 export const COMMAND_KEYS: ReadonlySet<string> = new Set([
   "q", // quit
-  "f", // follow
+  "f", // hold / follow
   "c", // clear every filter
   "j", // down
   "k", // up
