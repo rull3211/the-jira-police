@@ -316,30 +316,18 @@ for r in "git -C . status" "git --no-pager log --oneline" \
     "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
-# `worktree add -b` is the escape hatch in its fourth spelling, and CLAUDE.md
-# rule 3 makes it the one work normally starts with. Refusing it from a protected
-# branch was the same trap the guard already avoids for `switch -c`, with the
-# sting that the denial text names it as the remedy: the rule said "work in a
-# worktree" and the guard refused the only command that makes one.
-#
-# Found by the guard correctly refusing a real attempt to follow rule 3, not by
-# reading the write list.
+# `worktree add -b` is rule 3's escape hatch; refusing it from a protected
+# branch would trap the agent the same way refusing `switch -c` does.
 for w in "git worktree add -b fix/x ../d origin/main" "git worktree add -bfix/x ../d" \
   "pnpm test && git worktree add -b fix/z ../d"; do
   expect "on main allows: $w" SILENT \
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
-# The other side, and it is the one that decides whether widening was safe. Each
-# of these is a way `worktree add` can still touch a protected ref or check one
-# out, so each must survive the hatch being opened. `-B` is the sharp one: it
-# resets an existing branch, so it can move `main` while wearing `-b`'s shape.
-#
-# The attached spellings are here because a mutation survived without them:
-# widening `-b?*` to `-[bB]?*` broke nothing the suite could see, and it is the
-# difference between creating a branch and resetting one. `-Bmain` is the whole
-# hole in one token — `${1#-b}` does not strip an uppercase `-B`, so the name
-# read back is `-Bmain`, which no protected-name check would ever match.
+# The other side: each of these still touches a protected ref or checks one
+# out, so each must be refused even with the hatch open. `-Bmain` matters
+# because `${1#-b}` does not strip an uppercase `-B`, so the name read back
+# would be `-Bmain` — a token no protected-name check would match.
 for w in "git worktree add -b main ../d" "git worktree add -b release/1 ../d" \
   "git worktree add -bmain ../d" "git worktree add -B main ../d" \
   "git worktree add -Bmain ../d" "git worktree add -Bfix/x ../d" \
@@ -349,16 +337,8 @@ for w in "git worktree add -b main ../d" "git worktree add -b release/1 ../d" \
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
-# The older spellings of the same hatch, which were left at the old standard
-# when `worktree add -b` was written to the new one. An escape hatch is an allow
-# carved into a deny, so what decides it is the hatch's *width*: `-B` and `-C`
-# reset an existing branch, so both of the first two moved `main` from a
-# standing start while HEAD was on it, and neither was refused.
-#
-# Found by an independent reading of this branch's own diff, which asked why the
-# argument written into `worktreeAddIsEscape` had not been applied to the hatches
-# already in the file. It had not, and the answer took a probe rather than a
-# reading to establish.
+# The older hatches: `checkout -B`/`switch -C` reset an existing branch, so
+# they can move `main` from a standing start the same way `worktree add -B` can.
 for w in "git checkout -B main" "git checkout -B main origin/x" "git checkout -Bmain" \
   "git switch -C main" "git switch -C release/1" "git switch -Cmain" \
   "git checkout -b main" "git switch -c develop"; do
@@ -374,16 +354,9 @@ for w in "git switch -c fix/x" "git checkout -b fix/x" "git checkout -B fix/x" \
     "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
-# Which checkout a write is judged against. Every assertion above feeds a payload
-# with no `file_path` and reads the branch of the project directory, which is the
-# one thing that was resolved from the wrong place — so none of them could see
-# this, and that is why it needed a fixture with two worktrees rather than another
-# payload.
-#
-# Probed by hand first, with one payload sent twice differing only in
-# CLAUDE_PROJECT_DIR: aimed at a worktree on main it denied, and aimed at a
-# feature worktree while the payload still named a file inside the main worktree,
-# it allowed.
+# Which checkout a write is judged against, rather than the project directory —
+# needs a real second worktree, since every `Bash` payload above has no
+# `file_path` to resolve one from.
 write_payload() {
   node -e '
     process.stdout.write(
@@ -399,9 +372,9 @@ git -C "$pair_main" worktree add -q -b feat/elsewhere "$pair_feat" HEAD
 expect "a write into the main worktree is refused from a feature one" DENY \
   "$(write_payload "$pair_main/f.txt" | CLAUDE_PROJECT_DIR="$pair_feat" "$HOOKS/branch-guard.sh" | decision)"
 
-# The converse, and the reason the fix is not simply "check both": rule 3 parks
-# the primary checkout on main and does the work in a worktree, so refusing this
-# would refuse the normal path.
+# The converse: rule 3 parks the primary checkout on main and works in a
+# worktree, so refusing a write into a feature worktree would refuse the normal
+# path.
 expect "a write into a feature worktree is allowed from main" SILENT \
   "$(write_payload "$pair_feat/f.txt" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
 
@@ -424,9 +397,9 @@ nb_payload() {
 expect "notebook_path is resolved the same way" DENY \
   "$(nb_payload "$pair_main/n.ipynb" | CLAUDE_PROJECT_DIR="$pair_feat" "$HOOKS/branch-guard.sh" | decision)"
 
-# Fail closed on anything that cannot name a worktree: the payload's cwd is not
-# in it, so a relative path is a guess, and a guess is what was being fixed. Both
-# fall back to the project directory rather than to "allow".
+# Fail closed on anything that cannot name a worktree: a relative path is a
+# guess (the payload's cwd is not in it), so both this and a path under no
+# repository fall back to the project directory rather than to "allow".
 expect "a relative path falls back to the project directory" DENY \
   "$(write_payload "f.txt" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
 
