@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2626 tests in 77
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2654 tests in 77
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -163,59 +163,57 @@ round takes the blame for it. Recorded, not fixed.
 
 Triage reads them already, behind `TRIAGE_IMAGES`; `ARCHITECTURE.md` §7 has what constructs the
 stager, §13 the operator's 2026-09-16 decision and the phases it covered, and §14.11 the bounds the
-widening bought and the one it did not. **Recon is the remainder of that authorisation, and nothing
-drives it.** The pixels stop at the passes holding no `Write` by the same decision, so the fix pass
-is not owed this and is not waiting for it.
+widening bought and the one it did not. **Recon now reads them too, behind its own `RECON_IMAGES`.**
+The pixels still stop at the passes holding no `Write` by the same decision, so the fix pass is not
+owed this and is not waiting for it.
 
 Behind a setting that must be typed and defaults off, with the bail wording for the case the
 capability exists to serve: the evidence is a picture, the picture could not be staged, and the
 honest answer is to say so rather than to reconstruct a lookalike from the description's adjective,
 which is the SSX-3822 failure (§9) this whole path exists to close.
 
-**This is the phase that builds the sweep §22 named and deferred.** Nothing removes a staged
-directory except the caller that made it, and an unattended caller dying between `mkdtemp` and the
-removal leaks one per kill. Recon reading images is a second caller shaped exactly like triage's, so
-the leak §22 recorded for `skill-root.ts` gets a second instance in `attachments/stage.ts` the moment
-this ships — and triage's own `finally` has never been observed against an empty staging root, so it
-is not evidence a second caller can lean on either. The sweep built here is age-based and walks both
-parent directories rather than one, closing §22 rather than leaving it narrowed to skill roots.
+**Phase 4 is the sweep §22 named and deferred, and it is the only part of this section still
+unbuilt.** Nothing removes a staged directory except the caller that made it, and an unattended
+caller dying between `mkdtemp` and the removal leaks one per kill. Recon reading images is a second
+caller shaped exactly like triage's, and it has now shipped — the leak §22 recorded for
+`skill-root.ts` has a second, live instance in `attachments/stage.ts`, both callers sharing the same
+`join(tmpdir(), "jira-police-attach")` parent, and triage's own `finally` has never been observed
+against an empty staging root, so it is not evidence a second caller can lean on either. Phase 4's
+sweep is age-based and must walk both parent directories rather than one — `skill-root.ts`'s and this
+one — closing §22 rather than leaving it narrowed to skill roots.
 
-No command drove a recon pass on its own before this branch, and wiring a consumer no test
-exercises is how §10 grew. Whatever builds this owes a driver before it owes the setting: `recon:once`
-is that driver, built first on this branch; the `RECON_IMAGES` setting and the image read itself are
-the remainder of this section, still unbuilt.
-
-**Wiring notes for the still-unbuilt half, so the next session does not re-derive the shape of
-`TRIAGE_IMAGES` from scratch:**
+**Phases 1 through 3 are built and committed.** `recon:once` (Phase 2, `c1551bf`) is the driver that
+let this be exercised by hand before anything depended on it; `MAX_STAGED_IMAGES` (Phase 1,
+`e515e9c`) raised the cap and made it a shared setting; Phase 3 is the setting and the image read
+itself, wired as follows:
 
 - `RECON_IMAGES` mirrors `TRIAGE_IMAGES` in `settings.ts` exactly — boolean, defaults off, same
   reasoning about untrusted bytes `sanitiseUntrusted` never sees.
-- The block-and-directory pair is `StagedImagePrompt` (`triage/runner.ts:188`), reused rather than
-  redefined — `solve/runner.ts` would import the type from there the way it already imports
-  `DENIED_BUILTIN_TOOLS` from `triage/session.ts`. `SolveRunOptions` (`solve/runner.ts:187`) gets an
-  `images?: StagedImagePrompt` field.
-- `buildSolvePrompt` (`solve/runner.ts:318`) splices the block in only when `pass === "recon"` —
-  not by trusting the caller to omit `images` on other passes, since `orchestrator.ts` builds one
-  `base: SolveRunOptions` object and reuses it across passes (`runPipeline` at line ~859,
-  `runReconOnly` at line ~755; `fix` spreads `{...base, brief}` from the same object at line ~909).
-  Gating on `pass` is the same pattern `buildSolveArgs` already uses for `writes` before adding
-  `readDirs` as `--add-dir`.
-- `buildSolveArgs` (`solve/runner.ts:428`) adds the staged directory as `--add-dir` the same way,
-  gated to the recon pass — mirrors `buildArgs`'s `imageDir` handling in `triage/runner.ts:463,483`.
-  `RECON_DENIED_TOOLS` already withholds `Write`/`Edit` by inheriting `DENIED_BUILTIN_TOOLS`, so no
-  change is owed there.
-- The staging call itself: `wiring.ts`'s `stageForTriage` (`wiring.ts:309`) is the pattern to
-  generalise or duplicate for recon — same `client.fetchDetail` + `stageImages` shape, called from
-  wherever `runPipeline`/`runReconOnly` build `base`, using `imageStageOptions(settings)` (already
-  built in Phase 1). Decide there whether one shared `stageForPass` helper is worth it or whether a
-  second near-identical function is the honest cost of two callers with different failure logging
-  (`triage.image_staging_failed` vs. a `solve.*` equivalent).
-- Needs its own `finally`-cleanup call to `removeStagedImages`, same as `createGroom` does. This is
-  exactly the second caller the age-based sweep is meant to backstop — but that sweep is Phase 4,
-  **still unbuilt as of this note** (only Phases 1 and 2 are committed, `e515e9c` and `c1551bf`), so
-  until it lands this caller's own `finally` is the only thing standing between a kill and a leaked
-  directory. Not a reason to defer the `finally`; if anything a reason to do Phase 4 before or
-  alongside this rather than after.
+- The block-and-directory pair is the existing `StagedImagePrompt` (`triage/runner.ts:188`), reused
+  rather than redefined — `solve/runner.ts` imports the type from there the way it already imports
+  `DENIED_BUILTIN_TOOLS` from `triage/session.ts`. `SolveRunOptions` (`solve/runner.ts`) carries an
+  `images?: StagedImagePrompt` field, and `SolveRequest` (`solve/orchestrator.ts`) carries the same
+  field one layer up, so a caller with a Jira client is the only thing that has to know staging
+  happened.
+- `buildSolvePrompt` and `buildSolveArgs` (`solve/runner.ts`) splice the block and its `--add-dir` in
+  only when `pass === "recon"` — not by trusting the caller to omit `images` on other passes, since
+  `orchestrator.ts` builds one `base: SolveRunOptions` object and reuses it across every pass
+  (`runPipeline` and `runReconOnly` both populate `base.images` from `request.images`; `fix` still
+  spreads `{...base, brief}` from that same object). Gating on `pass` is the same pattern
+  `buildSolveArgs` already used for `writes` before adding `readDirs` as `--add-dir`, mirroring
+  `buildArgs`'s `imageDir` handling in `triage/runner.ts`.
+- The staging call: `wiring.ts` got a second, near-duplicate function, `stageForRecon`, rather than a
+  shared `stageForPass` helper behind `stageForTriage`. The two already log different event names on
+  a staging failure (`triage.image_staging_failed` vs. `solve.image_staging_failed`), so this is not
+  BUILDING.md's "two mechanisms for one job" — it is two callers doing two different jobs that happen
+  to look alike today, and a shared helper bent to carry that difference through a discriminator
+  parameter was judged more expensive to read than two independent five-line functions.
+  `attachReconImages` wraps `stageForRecon` with the `RECON_IMAGES` check and returns
+  `{ request, cleanup }`; both `recon:once` and `solve:once`'s `--solve` rung call it and clean up
+  in a `finally`, same as `createGroom` does for triage.
+- The parent directory is the same one triage already uses, `join(tmpdir(), "jira-police-attach")`
+  — not a third directory. Phase 4's sweep needs to know this: there are exactly two parents to walk,
+  `skill-root.ts`'s and this one, never three.
 
 **The count cap moves to 10 and becomes a setting rather than a constant.** Two images out of eight
 on SSX-3917 were dropped by the old cap of six, and they were the two largest and newest — both far
@@ -361,9 +359,10 @@ environment cannot answer a question about CI's.**
   mechanical evidence the run was written to produce — by a different string than the one predicted,
   which
   [`INCIDENTS.md`, 2026-09-17](.claude/skills/dev-house-rules/INCIDENTS.md#the-fail-first-prediction-that-named-the-wrong-string)
-  records as a false dichotomy. `refused`, the byte cap and the unbuilt recon path (§4) still have no
-  real ticket behind them. **A run leaves its only durable record in
-  `groomed/`, which is gitignored, and in whatever the operator's own Jira account posted** — this
+  records as a false dichotomy. `refused`, the byte cap and the recon image path (§4, built but
+  not yet run against a real ticket) still have no real ticket behind them. **A run leaves its only
+  durable record in `groomed/`, which is gitignored, and in whatever the operator's own Jira
+  account posted** — this
   entry was corrected only because both were checked by hand against the live ticket and the staged
   file itself, which is exactly the check that caught this entry claiming a first run that was
   actually the third, the last time this bullet was wrong. A session starting fresh still cannot see

@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2626 tests in 77 files, no build step, no
+Status: running end to end against production Jira. 2654 tests in 77 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -758,21 +758,25 @@ because the grouping is the architecture.
 | `src/jira/adf.ts`    | Atlassian Document Format rendered down to plain text. No I/O, so testable against real payloads |
 | `src/state/store.ts` | Cursor + seen keys, atomic write                                                                 |
 
-**Attachments — the image path, and triage is what constructs it**
+**Attachments — the image path, and triage and recon each construct their own staging call**
 
 | Path                        | Role                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `src/attachments/images.ts` | Which types may be staged, and what the leading bytes say the file actually is                          |
 | `src/attachments/stage.ts`  | Images written read-only under a derived name, and the block naming them. `staged` / `none` / `refused` |
 
-`createGroom` (`wiring.ts:332`) stages before the analyst runs and removes the directory in a
+`createGroom` (`wiring.ts:414`) stages before the analyst runs and removes the directory in a
 `finally` after it, whenever `TRIAGE_IMAGES` is on — so the daemon, `poll:once`, `triage:once`,
 `bot:once` and `watch:once` all reach this path through one construction site rather than five.
-It defaults off and the analyst is denied `WebFetch`, `WebSearch` and `Task` before any pixel
-arrives. **No solve pass constructs either module**, by the same decision: the fix pass gets recon's
-brief rather than the picture. `attach:stage` remains the dry run, and the only way to look at a
-staged file, since a pass sweeps its own directory. §13 has the decision that authorised the bytes
-and the recon phase still owed; §14.11 has what the widening cost.
+`attachReconImages` (`wiring.ts:386`) is recon's own construction site, behind `RECON_IMAGES`, used
+by `recon:once` and `solve:once`'s `--solve` rung; both settings default off and the analyst or
+recon session is denied `WebFetch`, `WebSearch` and `Task` before any pixel arrives regardless.
+**No write-holding pass constructs either module** — `buildSolvePrompt` and `buildSolveArgs`
+(`solve/runner.ts`) splice the block and the `--add-dir` in only when the pass is recon, so `fix`,
+`simplify`, `review` and `merge` never see either even though `runPipeline` builds one
+`SolveRunOptions` object and reuses it across every pass. `attach:stage` remains the dry run, and the
+only way to look at a staged file, since a pass sweeps its own directory. §13 has the decision that
+authorised the bytes; §14.11 has what the widening cost.
 
 **The watch check is the attachment consumer that fetches nothing.** `watch/context.ts` copies
 names, types and sizes field by field — never bytes — capped at `MAX_CONTEXT_ATTACHMENTS` (20),
@@ -1455,11 +1459,14 @@ being widened or dropped:
   the write-holding passes: a screenshot is what most tickets here actually contain, and what the
   fix pass needs out of one reaches it as recon's brief rather than as pixels.
 
-  **What is built reaches triage and nothing else.** `attachments/stage.ts` writes a ticket's
-  images read-only under a derived name, `attach:stage` prints the block a pass would be given, and
-  `createGroom` hands both to the analyst when `TRIAGE_IMAGES` is on — which took `WebFetch`,
-  `WebSearch` and `Task` off that session first. No solve pass constructs either; recon behind a
-  typed setting is still owed. **The bound that
+  **What is built now reaches triage and recon, and nothing past them.** `attachments/stage.ts`
+  writes a ticket's images read-only under a derived name, `attach:stage` prints the block a pass
+  would be given, `createGroom` hands both to the analyst when `TRIAGE_IMAGES` is on, and
+  `attachReconImages` (`wiring.ts:386`) does the same for the recon pass when `RECON_IMAGES` is on —
+  both took `WebFetch`, `WebSearch` and `Task` off their sessions first, and neither setting is on
+  by default. `buildSolvePrompt` and `buildSolveArgs` (`solve/runner.ts`) gate the block and its
+  `--add-dir` to the recon pass by name, so `fix`, `simplify`, `review` and `merge` never see it even
+  though they are built from the same `SolveRunOptions` object recon just ran with. **The bound that
   does not exist is a text control over a picture** — `sanitiseUntrusted` sees a path, and an
   instruction painted into a screenshot reaches the model unread by anything else.
 
@@ -1503,7 +1510,7 @@ being widened or dropped:
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 50 settings are read**, and there are no orphan files.
+  the same sweep: **all 51 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

@@ -294,6 +294,20 @@ describe("solveTicket, on the happy path", () => {
     ]);
   });
 
+  it("puts staged images on every pass's options, since they share one base", async () => {
+    // Deliberate, not an oversight: `runner.ts`'s `buildSolvePrompt` and
+    // `buildSolveArgs` are what withhold the block and the `--add-dir` from
+    // `fix` and `simplify`, gated on the pass name — this only proves that
+    // `runPipeline` builds one `base` and does not also filter it, which is
+    // the wiring notes' own reason the gate could not live here instead.
+    const { h } = harness(FULL);
+    const images = { block: "This ticket has 1 image(s).", directory: "/tmp/img" };
+
+    await solveTicket(h.deps, { ...request, images });
+
+    expect(h.seen.map((entry) => entry.options.images)).toEqual([images, images, images]);
+  });
+
   it("reads the diff for the gate after simplify has finished", async () => {
     // The bound is on what is on disk, not on what the last model said it did.
     // Reading it before simplify would leave that pass's edits unbounded.
@@ -1952,6 +1966,26 @@ describe("runReconOnly", () => {
     await runReconOnly(h.deps, request);
 
     expect(h.calls.some((argv) => argv[0] === "pnpm")).toBe(false);
+  });
+
+  it("carries staged images onto the recon pass's own options", async () => {
+    // `runner.ts`'s own gate does the withholding from other passes; this only
+    // proves the plumbing that gets `images` from the request onto `base` at
+    // all, which is the half a wiring test can actually see.
+    const { h } = harness({ recon: recon() });
+    const images = { block: "This ticket has 1 image(s).", directory: "/tmp/img" };
+
+    await runReconOnly(h.deps, { ...request, images });
+
+    expect(h.seen[0]?.options.images).toEqual(images);
+  });
+
+  it("leaves recon's options without an images field when none was staged", async () => {
+    const { h } = harness({ recon: recon() });
+
+    await runReconOnly(h.deps, request);
+
+    expect(h.seen[0]?.options.images).toBeUndefined();
   });
 
   it("refuses a protected branch prefix before any pass starts", async () => {

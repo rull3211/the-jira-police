@@ -15,6 +15,7 @@ import type { SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
 import type { WorktreeResult } from "./solve/worktree.ts";
 import {
   NotSolvableError,
+  attachReconImages,
   baseBranchOf,
   buildAdvanceRequest,
   buildFindPrRequest,
@@ -38,6 +39,15 @@ const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
 
 function settingsWith(overrides: Partial<Record<string, string>>): Settings {
   return readSettings({ ...ENV, ...overrides });
+}
+
+/** Never called: proves the off switch skips the extra Jira fetch entirely. */
+function unreachableClient(): JiraClient {
+  return {
+    fetchDetail: async () => {
+      throw new Error("fetchDetail must not be called when RECON_IMAGES is off");
+    },
+  } as unknown as JiraClient;
 }
 
 describe("buildTriageOptions", () => {
@@ -193,6 +203,62 @@ describe("imageStageOptions", () => {
     expect(imageStageOptions(settingsWith({ MAX_STAGED_IMAGES: "25" })).maxImageBytes).toBe(
       4 * 1024 * 1024,
     );
+  });
+});
+
+describe("attachReconImages", () => {
+  const request: SolveRequest = {
+    issueKey: "SSX-3822",
+    ticket: "ticket text",
+    summary: "Distinct favicon",
+    repoPath: "/repos/buy-insurance-advisor-web",
+    parentDirectory: "/repos",
+    baseRef: "origin/main",
+    gitTimeoutMs: 1000,
+    stepTimeoutMs: 1000,
+    installTimeoutMs: 1000,
+  };
+
+  it("does nothing when RECON_IMAGES is off", async () => {
+    const staged = await attachReconImages(settingsWith({}), unreachableClient(), request);
+
+    expect(staged.request).toBe(request);
+    await expect(staged.cleanup()).resolves.toBeUndefined();
+  });
+
+  it("degrades to the unstaged request when the Jira fetch fails", async () => {
+    // Matches `stageForTriage`: a staging failure must not fail the run, only
+    // drop back to text.
+    const failingClient = {
+      fetchDetail: async () => {
+        throw new Error("network unreachable");
+      },
+    } as unknown as JiraClient;
+
+    const staged = await attachReconImages(
+      settingsWith({ RECON_IMAGES: "true" }),
+      failingClient,
+      request,
+    );
+
+    expect(staged.request).toBe(request);
+    await expect(staged.cleanup()).resolves.toBeUndefined();
+  });
+
+  it("attaches nothing, and says so honestly, when the ticket has no images", async () => {
+    const client = {
+      fetchDetail: async () => ({ attachments: [] }),
+    } as unknown as JiraClient;
+
+    const staged = await attachReconImages(
+      settingsWith({ RECON_IMAGES: "true" }),
+      client,
+      request,
+    );
+
+    expect(staged.request).not.toBe(request);
+    expect(staged.request.images?.directory).toBeNull();
+    await expect(staged.cleanup()).resolves.toBeUndefined();
   });
 });
 

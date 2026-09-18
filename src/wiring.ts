@@ -96,7 +96,12 @@ import { UnpostableError, assertPostable } from "./triage/gate.ts";
 import { createTicketCommenter } from "./solve/commenter.ts";
 import type { TicketCommenter } from "./solve/feedback.ts";
 import { runPost } from "./triage/poster.ts";
-import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
+import {
+  type StagedImagePrompt,
+  type TriagePayload,
+  type TriageRunOptions,
+  runTriage,
+} from "./triage/runner.ts";
 import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
 /** Skill that reads nothing, so it must not be made to wait on Atlassian. */
@@ -327,6 +332,83 @@ async function stageForTriage(
     });
     return null;
   }
+}
+
+/**
+ * The ticket's images on disk, or nothing, for the recon pass to read.
+ *
+ * A near-duplicate of `stageForTriage` rather than a shared helper behind it:
+ * the two callers already log different event names for a staging failure
+ * (`triage.image_staging_failed` here becomes `solve.image_staging_failed`),
+ * and a caller ever needing to log something else about only one of them is
+ * one `if` away from an "is this the triage kind or the solve kind" parameter
+ * threaded through a function neither caller otherwise wants. Two independent
+ * five-line functions cost less to read than a shared one bent to fit both.
+ */
+async function stageForRecon(
+  client: JiraClient,
+  issueKey: string,
+  options: ImageStageOptions,
+): Promise<ImageStageResult | null> {
+  try {
+    const detail = await client.fetchDetail(issueKey);
+    return await stageImages(
+      client,
+      detail.attachments,
+      join(tmpdir(), "jira-police-attach"),
+      issueKey,
+      options,
+    );
+  } catch (error) {
+    logger.warn("solve.image_staging_failed", {
+      issueKey,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/** `attachReconImages`'s result: the request recon should run with, and its cleanup. */
+export interface StagedRecon {
+  readonly request: SolveRequest;
+  readonly cleanup: () => Promise<void>;
+}
+
+/**
+ * Stages a ticket's images for the recon pass when `RECON_IMAGES` is on, and
+ * returns the request to run recon with plus the cleanup that removes them.
+ *
+ * The setting off, or staging failing, both return `request` unchanged and a
+ * no-op cleanup — recon then runs exactly as it did before this existed,
+ * which is the same degrade-to-text choice `stageForTriage` makes for the
+ * analyst.
+ */
+export async function attachReconImages(
+  settings: Settings,
+  client: JiraClient,
+  request: SolveRequest,
+): Promise<StagedRecon> {
+  if (!flag(settings, "RECON_IMAGES")) {
+    return { request, cleanup: async () => {} };
+  }
+  const staged = await stageForRecon(client, request.issueKey, imageStageOptions(settings));
+  if (staged === null) {
+    return { request, cleanup: async () => {} };
+  }
+  const images: StagedImagePrompt = {
+    block: describeStagedImages(staged),
+    directory: staged.outcome === "staged" ? staged.directory : null,
+  };
+  return {
+    request: { ...request, images },
+    // In a `finally` at the call site, same as `createGroom`: the directory
+    // must not outlive the one session it was staged for.
+    cleanup: async () => {
+      if (staged.outcome === "staged") {
+        await removeStagedImages(staged.directory);
+      }
+    },
+  };
 }
 
 export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<TriagePayload> {

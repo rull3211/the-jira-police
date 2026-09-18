@@ -21,9 +21,10 @@ import { join } from "node:path";
 
 import { logger } from "../logger.ts";
 import { readSettings, withConfigErrors, type Settings } from "../settings.ts";
-import { runReconOnly, type SolveRequest } from "../solve/orchestrator.ts";
+import { runReconOnly, type ReconOnlyOutcome, type SolveRequest } from "../solve/orchestrator.ts";
 import {
   NotSolvableError,
+  attachReconImages,
   buildSolveRequest,
   createJiraClient,
   createSolveRunDeps,
@@ -77,7 +78,13 @@ async function main(): Promise<void> {
 
   process.stdout.write(`Repository: ${request.repoPath} @ ${request.baseRef}\n\n`);
 
-  const outcome = await runReconOnly(createSolveRunDeps(settings), request);
+  const staged = await attachReconImages(settings, client, request);
+  let outcome: ReconOnlyOutcome;
+  try {
+    outcome = await runReconOnly(createSolveRunDeps(settings), staged.request);
+  } finally {
+    await staged.cleanup();
+  }
   process.stdout.write(`outcome: ${outcome.kind}\n`);
 
   await mkdir(settings.OUTPUT_DIR, { recursive: true });

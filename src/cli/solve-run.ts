@@ -65,6 +65,7 @@ import {
   reviewTransition,
 } from "../solve/labels.ts";
 import {
+  type SolveAttempts,
   type SolveDependencies,
   type SolveOutcome,
   type SolveRequest,
@@ -83,6 +84,7 @@ import { type SyncedAttachResult, attachSynced } from "../solve/base-sync.ts";
 import { type Worktree, branchNameFor, removeWorktree } from "../solve/worktree.ts";
 import {
   NotSolvableError,
+  attachReconImages,
   buildAdvanceRequest,
   buildFindPrRequest,
   buildPublishRequest,
@@ -206,10 +208,14 @@ export async function runSolver(
   // one outcome: a fix pass stopped by the *machine* rather than by the code
   // gets one clean rerun. Everything else is passed through untouched, so this
   // is the same command it was on every other path.
-  const { outcome, attempts, retryBlocked } = await solveWithRetry(
-    createSolveRunDeps(settings),
-    request,
-  );
+  const staged = await attachReconImages(settings, client, request);
+  let result: SolveAttempts;
+  try {
+    result = await solveWithRetry(createSolveRunDeps(settings), staged.request);
+  } finally {
+    await staged.cleanup();
+  }
+  const { outcome, attempts, retryBlocked } = result;
   process.stdout.write(`\n${describeSolveOutcome(outcome)}\n`);
   if (attempts > 1) {
     process.stdout.write(

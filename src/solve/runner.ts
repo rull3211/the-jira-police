@@ -72,6 +72,7 @@
  */
 
 import { DENIED_BUILTIN_TOOLS } from "../triage/session.ts";
+import type { StagedImagePrompt } from "../triage/runner.ts";
 import { describeReadScope } from "./read-scope.ts";
 import {
   FIX_SCHEMA_JSON,
@@ -243,6 +244,13 @@ export interface SolveRunOptions {
    * a real run without it is the bug being fixed, not a supported mode.
    */
   readonly skillRootPath?: string;
+  /**
+   * The ticket's images, already on disk. Recon only — see `buildSolvePrompt`
+   * and `buildSolveArgs`, which read this field solely on the recon pass even
+   * though `fix`, `simplify`, `review` and `merge` all share the same options
+   * object it was built on.
+   */
+  readonly images?: StagedImagePrompt;
 }
 
 /**
@@ -394,6 +402,15 @@ export function buildSolvePrompt(pass: Pass, options: SolveRunOptions): string {
   const scope = describeReadScope(options.readDirs ?? []);
   const reads = scope === "" ? "" : `\n${scope}\n`;
 
+  // Recon only, even though `fix`, `simplify`, `review` and `merge` may share
+  // this same options object — `orchestrator.ts` builds one `base` and reuses
+  // it across passes, so the gate has to be on `pass`, not on whether the
+  // caller happened to omit `images`.
+  const images =
+    pass === "recon" && options.images !== undefined && options.images.block !== ""
+      ? `\n\n${options.images.block}`
+      : "";
+
   return [
     `/agent-solve ${options.issueKey} --${pass}`,
     "",
@@ -413,6 +430,7 @@ export function buildSolvePrompt(pass: Pass, options: SolveRunOptions): string {
     diff,
     review,
     conflict,
+    images,
   ].join("\n");
 }
 
@@ -437,6 +455,9 @@ export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
   const vaultPath = options.vaultPath ?? "";
   const skillRootPath = options.skillRootPath ?? "";
   const readDirs = options.readDirs ?? [];
+  // Recon only, for the same reason `buildSolvePrompt` gates on `pass` rather
+  // than on the field's presence: `base` is one object shared across passes.
+  const imageDir = pass === "recon" ? (options.images?.directory ?? null) : null;
 
   return [
     "-p",
@@ -461,6 +482,10 @@ export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
     // does enforce a workspace, and it fails in the safe direction: such a CLI
     // would deny the fix pass these reads, costing it context, never a write.
     ...(writes ? [] : readDirs.flatMap((dir) => ["--add-dir", dir])),
+    // Declared intent, not a grant — see the identical comment in
+    // `triage/runner.ts`'s `buildArgs`. Gated on the pass rather than the
+    // field's presence for the reason above `imageDir`.
+    ...(imageDir === null ? [] : ["--add-dir", imageDir]),
     // Not optional in practice: the prompt's first line is `/agent-solve …`,
     // and the worktree this session runs in contains no skills. See
     // `skill-root.ts` for why this is a staged copy and not this repository.

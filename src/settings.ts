@@ -125,6 +125,12 @@ export const SETTINGS = [
     fallback: "false",
   },
   {
+    name: "RECON_IMAGES",
+    description:
+      "Whether the recon pass is handed the ticket's image attachments as staged files, the same way TRIAGE_IMAGES hands them to the analyst. Off by default, for the same reason: a picture is untrusted text sanitiseUntrusted never sees. On, each recon run costs one extra Jira detail fetch plus a download per image. The block and the staged directory reach only the recon pass, never fix, simplify or review — those already hold no Write, and this does not change that; recon's own bailed-or-proceed verdict is the only thing a picture is allowed to influence.",
+    fallback: "false",
+  },
+  {
     name: "MAX_STAGED_IMAGES",
     description:
       "How many of a ticket's image attachments a stager will attempt for one run, shared by TRIAGE_IMAGES and recon's own image reading rather than one value each could drift from. Attempts, not successes: a candidate that fails its download or its signature check still spends one, so a ticket of broken files cannot buy unlimited retries. Ten, raised from a hardcoded six after SSX-3917 dropped its two largest and newest images on Jira's own attachment order — both were far inside the size cap, so the cost of the old number was images a reader would plausibly pick, not oversized ones. Ordering by anything other than Jira's own is still policy nothing has measured; this only buys headroom against the ordering as it stands.",

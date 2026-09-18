@@ -50,6 +50,7 @@
  */
 
 import { logger } from "../logger.ts";
+import type { StagedImagePrompt } from "../triage/runner.ts";
 import {
   abortMerge,
   acceptResolution,
@@ -156,6 +157,13 @@ export interface SolveRequest {
   readonly gitTimeoutMs: number;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
+  /**
+   * The ticket's images, already staged. Reaches only the recon pass — see
+   * `buildSolvePrompt` and `buildSolveArgs` in `runner.ts`, which read this
+   * field solely when `pass === "recon"` even though `fix`, `simplify`,
+   * `review` and `merge` are all built from the same `base` this populates.
+   */
+  readonly images?: StagedImagePrompt;
 }
 
 /**
@@ -759,6 +767,7 @@ export async function runReconOnly(
       skillRootPath: staged.path,
       ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
       ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
+      ...(request.images === undefined ? {} : { images: request.images }),
     };
     const reconRun = await runPass(deps.passes, "recon", base, (output) =>
       parseRecon(output, issueKey),
@@ -863,6 +872,7 @@ async function runPipeline(
     skillRootPath,
     ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
     ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
+    ...(request.images === undefined ? {} : { images: request.images }),
   };
 
   // ---- recon -------------------------------------------------------------

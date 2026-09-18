@@ -229,6 +229,37 @@ describe("buildSolveArgs", () => {
   it("says nothing about other checkouts when none are configured", () => {
     expect(buildSolvePrompt("recon", options)).not.toContain("readable for context");
   });
+
+  const withStagedImages: SolveRunOptions = {
+    ...options,
+    images: { block: "This ticket has 1 image(s).", directory: "/tmp/jira-police-attach/img" },
+  };
+
+  it("adds the staged-image directory on the recon pass", () => {
+    expect(flags(buildSolveArgs("recon", withStagedImages), "--add-dir")).toContain(
+      "/tmp/jira-police-attach/img",
+    );
+  });
+
+  // Mutation: drop the `pass === "recon"` condition on `imageDir`. `--add-dir`
+  // widens the workspace for every tool the pass holds, so on a write pass this
+  // would offer to edit the staged directory rather than merely read it — the
+  // same asymmetry `readDirs` is gated on above.
+  it.each([...PASSES].filter((pass) => pass !== "recon"))(
+    "does not add the staged-image directory on the %s pass, which can write",
+    (pass) => {
+      expect(flags(buildSolveArgs(pass, withStagedImages), "--add-dir")).not.toContain(
+        "/tmp/jira-police-attach/img",
+      );
+    },
+  );
+
+  it("adds no directory when nothing was staged", () => {
+    expect(flags(buildSolveArgs("recon", options), "--add-dir")).toEqual([]);
+    expect(
+      flags(buildSolveArgs("recon", { ...options, images: { block: "", directory: null } }), "--add-dir"),
+    ).toEqual([]);
+  });
 });
 
 describe("buildSolvePrompt", () => {
@@ -329,6 +360,38 @@ describe("buildSolvePrompt", () => {
 
     const review = buildSolvePrompt("review", { ...options, reviewFeedback: hostile });
     expect(review).not.toContain("END DIFF DATA");
+  });
+
+  const withImages: SolveRunOptions = {
+    ...options,
+    images: { block: "This ticket has 2 image(s), staged at /tmp/img.", directory: "/tmp/img" },
+  };
+
+  it("gives the recon pass the staged-image block", () => {
+    expect(buildSolvePrompt("recon", withImages)).toContain("staged at /tmp/img");
+  });
+
+  // Mutation: drop the `pass === "recon"` condition and gate on the field's
+  // presence alone. `orchestrator.ts` builds one `base` and reuses it across
+  // passes, so `fix`, `simplify`, `review` and `merge` all carry `images` on
+  // the same object recon just ran with — the gate has to be the pass name.
+  it.each([...PASSES].filter((pass) => pass !== "recon"))(
+    "keeps the staged-image block out of the %s pass, which shares the same options",
+    (pass) => {
+      expect(buildSolvePrompt(pass, withImages)).not.toContain("staged at /tmp/img");
+    },
+  );
+
+  it("says nothing about images when none were staged", () => {
+    expect(buildSolvePrompt("recon", options)).not.toContain("staged at");
+  });
+
+  it("says nothing when the images field is present but the block is empty", () => {
+    // `outcome: "none"` staging still produces a `StagedImagePrompt` — an empty
+    // block, not an absent field.
+    expect(
+      buildSolvePrompt("recon", { ...options, images: { block: "", directory: null } }),
+    ).not.toContain("undefined");
   });
 });
 
