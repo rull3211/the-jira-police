@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2654 tests in 77 files, no build step, no
+Status: running end to end against production Jira. 2673 tests in 80 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -729,24 +729,26 @@ ticket. A dropped link costs a re-run; a wrong one costs somebody's ticket.
 
 ## 7. Module map
 
-87 production modules, 77 test files. Grouped by what they belong to rather than alphabetically,
+91 production modules, 80 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
 
-| Path                    | Role                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/index.ts`          | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                               |
-| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                         |
-| `src/poller.ts`         | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                               |
-| `src/review-loop.ts`    | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                              |
-| `src/watch-loop.ts`     | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                              |
-| `src/wiring.ts`         | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                               |
-| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                                                                       |
-| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did                                                                |
-| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                          |
-| `src/text.ts`           | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows             |
-| `src/read-only-tree.ts` | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair |
+| Path                    | Role                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`          | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                                     |
+| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                               |
+| `src/poller.ts`         | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                     |
+| `src/review-loop.ts`    | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                    |
+| `src/watch-loop.ts`     | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                    |
+| `src/wiring.ts`         | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                     |
+| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                                                                             |
+| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did                                                                      |
+| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                                |
+| `src/text.ts`           | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows                   |
+| `src/read-only-tree.ts` | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair       |
+| `src/staging-sweep.ts`  | Which directory names under `worktreeRoot`/`attachStagingRoot` are a skill root or a staged-image directory, and whether one is old enough to remove. Pure — no fs |
+| `src/sweep.ts`          | Walking those two parent directories and, with `write`, removing what `staging-sweep.ts` marks. Shared by `sweep-once.ts`; nothing automatic calls it              |
 
 **Jira**
 
@@ -852,31 +854,33 @@ inheritance.
 
 **Entry points and their argument parsing**
 
-| Path                             | Role                                                                                                                                   |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/cli/poll-once.ts`           | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                            |
-| `src/cli/triage-once.ts`         | One triage against a named key, no discovery. `--write` to post it                                                                     |
-| `src/cli/solve-once.ts`          | The solve ladder. Dry by default; every write is a typed flag                                                                          |
-| `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                   |
-| `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                     |
-| `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                         |
-| `src/cli/recon-once.ts`          | Recon alone against one real ticket: a worktree, a skill root, one pass, always discarded. No fix, no diff, no PR                      |
-| `src/cli/recon-once-report.ts`   | Its report and exit code, split out for the reason `attach-stage-report.ts` gives                                                      |
-| `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                            |
-| `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                     |
-| `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                    |
-| `src/cli/watch-args.ts`          | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                    |
-| `src/cli/attach-stage.ts`        | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session |
-| `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                            |
-| `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                |
-| `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                               |
-| `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                          |
-| `src/cli/section-refs.ts`        | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                    |
-| `src/cli/count-phrases.ts`       | Count-noun phrases in tracked markdown: declared fact, or listed history                                                               |
-| `src/cli/pinned-prose.ts`        | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                           |
-| `src/cli/length-budget.ts`       | Word bands for the mandatory-reading path, and the ratchet on raising one                                                              |
-| `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                |
-| `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                         |
+| Path                             | Role                                                                                                                                                        |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/poll-once.ts`           | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                                                 |
+| `src/cli/triage-once.ts`         | One triage against a named key, no discovery. `--write` to post it                                                                                          |
+| `src/cli/solve-once.ts`          | The solve ladder. Dry by default; every write is a typed flag                                                                                               |
+| `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                                        |
+| `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                                          |
+| `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                                              |
+| `src/cli/recon-once.ts`          | Recon alone against one real ticket: a worktree, a skill root, one pass, always discarded. No fix, no diff, no PR                                           |
+| `src/cli/recon-once-report.ts`   | Its report and exit code, split out for the reason `attach-stage-report.ts` gives                                                                           |
+| `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                                                 |
+| `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                                          |
+| `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                                         |
+| `src/cli/watch-args.ts`          | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                                         |
+| `src/cli/attach-stage.ts`        | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session                      |
+| `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                                                 |
+| `src/cli/sweep-once.ts`          | `pnpm sweep:once [--write]`. Reports, and with `--write` removes, stale skill roots and staged-image directories. Dry by default, not on any automatic path |
+| `src/cli/sweep-once-report.ts`   | Its report, kept where a test can import it without running the command                                                                                     |
+| `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                     |
+| `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                    |
+| `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                               |
+| `src/cli/section-refs.ts`        | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                                         |
+| `src/cli/count-phrases.ts`       | Count-noun phrases in tracked markdown: declared fact, or listed history                                                                                    |
+| `src/cli/pinned-prose.ts`        | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                                                |
+| `src/cli/length-budget.ts`       | Word bands for the mandatory-reading path, and the ratchet on raising one                                                                                   |
+| `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                                     |
+| `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                                              |
 
 **Output**
 
@@ -1080,6 +1084,7 @@ loop, because backoff makes an expired token look exactly like a Jira outage.
 | `MAX_REVIEW_ITERATIONS`         | `3`                                    | Counts **reviewer rounds only**, from the marker's third line, which is appended after the high-water mark so markers written before the split still parse. A person's request is the outside information the cap exists to protect against the absence of, so it is exempt; a mixed batch counts as human. Reaching it undrafts and keeps listening                                                                                                                                                                                                                |
 | `MAX_PR_ROUNDS_TOTAL`           | `20`                                   | The absolute per-pull-request stop, deliberately **not** the same number as above. One is a policy, this is a brake, and conflating them lets a policy change disable a safety stop. Hitting it does not undraft                                                                                                                                                                                                                                                                                                                                                    |
 | `SOLVE_WORKTREE_ROOT`           | — (blank means the temp dir)           | Grants nothing. Exists because macOS `tmpdir()` lands under `/private/var`, and the by-hand diff review phase C depends on needs a path a person can open. `worktreeRoot` (`wiring.ts`) creates it and **resolves it** before anything derives a worktree path from it: `worktree.ts` decides whether its own debris is in the way by string-comparing against `git worktree list --porcelain`, which prints resolved paths, so an unresolved root silently disables every salvage                                                                                  |
+| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000` (24h)                       | Grants nothing; read only by `sweep-once.ts`. How old a skill root or staged-image directory must be before `--write` removes it — sized clear of a cold pass's summed timeouts (`SOLVE_INSTALL_TIMEOUT_MS` + several `SOLVE_STEP_TIMEOUT_MS` + a handful of `SOLVE_GIT_TIMEOUT_MS`), all of which are sleep-excluded, so a still-running pass can be older in wall-clock time than its nominal budget implies                                                                                                                                                      |
 | `SOLVE_GITHUB_OWNER`            | — (**no fallback**)                    | The account a pull request is opened against. No default for the same reason as `SOLVE_REPOS`, plus one of its own: an owner inferred from the checkout's remote is right until somebody adds a fork as `origin`                                                                                                                                                                                                                                                                                                                                                    |
 | `SOLVE_BOT_NAME`                | `jira-police`                          | Commit author. Widens nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `SOLVE_BOT_EMAIL`               | `jira-police@users.noreply.github.com` | Commit author                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -1510,7 +1515,7 @@ being widened or dropped:
   wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
   fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
   proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 51 settings are read**, and there are no orphan files.
+  the same sweep: **all 52 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 
