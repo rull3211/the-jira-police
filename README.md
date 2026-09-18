@@ -541,9 +541,13 @@ for the commands that cannot write, which is `poll:once --dry-run` and a `mock-t
 
 It reads lines from **stdin** and keys from `/dev/tty`, so the pipe and the keyboard are two
 different descriptors and both work at once. It posts nothing, reads no settings and holds no
-credential — the safe thing to try it on is a `--dry-run` you have already captured. Run it from a
-shell: with no controlling terminal — cron, CI, a detached process — it exits **2** and says so,
-rather than drawing anywhere.
+credential — the safe thing to try it on is a `--dry-run` you have already captured.
+
+**It exits 2 rather than drawing, in both directions.** With no controlling terminal — cron, CI, a
+detached process — there is nothing to draw on. With nothing piped in, there is nothing to draw:
+stdin would be the terminal, so no line could ever arrive, and the line reader and the key reader
+would be racing for the same bytes with `q` as likely to be eaten as anything else. Both cases say
+what to run instead.
 
 Three filters, all off until you press something, all ANDed:
 

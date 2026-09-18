@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-95 production modules, 84 test files. Grouped by what they belong to rather than alphabetically,
+96 production modules, 85 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -156,17 +156,18 @@ inheritance.
 
 **The log viewer — the only consumer of this service's own log**
 
-| Path                 | Role                                                                                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/cli/logs.ts`    | `pnpm logs`. The impure half: `/dev/tty`, raw mode, the alternate screen, and restoring all three on every exit path                                    |
-| `src/logs/feed.ts`   | Where lines come from, behind an interface. `createStreamFeed` is the stdin implementation; `send` is the slot a daemon socket would fill               |
-| `src/logs/line.ts`   | One line to an entry. Anything it cannot classify becomes a `raw` entry rather than being dropped — `↳` report lines and stack traces share this stream |
-| `src/logs/filter.ts` | The three axes and how they AND. An empty axis means "no opinion", and a `raw` entry passes every filter                                                |
-| `src/logs/glyphs.ts` | The glyphs, and the check that each is a single two-column code point. The reason a warning cannot shear the table                                      |
-| `src/logs/keys.ts`   | Which key toggles which source, and the pool that cannot collide with a command key                                                                     |
-| `src/logs/state.ts`  | The whole viewer as one reducer over `line` / `key` / `resize` / `end`. Everything decidable is here, which is why it is all testable                   |
-| `src/logs/input.ts`  | Bytes from a terminal to key names — CSI sequences, the `~` forms, a lone escape                                                                        |
-| `src/logs/render.ts` | A state to the exact rows of a window. Width-stable chips, so toggling a filter never moves the row below it                                            |
+| Path                    | Role                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/logs.ts`       | `pnpm logs`. The impure half: `/dev/tty`, raw mode, the alternate screen, and restoring all three on every exit path                                    |
+| `src/logs/feed.ts`      | Where lines come from, behind an interface. `createStreamFeed` is the stdin implementation; `send` is the slot a daemon socket would fill               |
+| `src/logs/preflight.ts` | What has to be true before the screen is taken over. Decided here so the refusal is printed while stderr is still a surface the operator can read       |
+| `src/logs/line.ts`      | One line to an entry. Anything it cannot classify becomes a `raw` entry rather than being dropped — `↳` report lines and stack traces share this stream |
+| `src/logs/filter.ts`    | The three axes and how they AND. An empty axis means "no opinion", and a `raw` entry passes every filter                                                |
+| `src/logs/glyphs.ts`    | The glyphs, and the check that each is a single two-column code point. The reason a warning cannot shear the table                                      |
+| `src/logs/keys.ts`      | Which key toggles which source, and the pool that cannot collide with a command key                                                                     |
+| `src/logs/state.ts`     | The whole viewer as one reducer over `line` / `key` / `resize` / `end`. Everything decidable is here, which is why it is all testable                   |
+| `src/logs/input.ts`     | Bytes from a terminal to key names — CSI sequences, the `~` forms, a lone escape                                                                        |
+| `src/logs/render.ts`    | A state to the exact rows of a window. Width-stable chips, so toggling a filter never moves the row below it                                            |
 
 **Output**
 

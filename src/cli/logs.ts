@@ -3,7 +3,8 @@
  *
  * Lines arrive on stdin, keystrokes come from `/dev/tty`. Those are two descriptors on purpose:
  * stdin is already the pipe carrying the daemon's output, so the terminal has to be opened
- * separately or the viewer would have no way to be typed at.
+ * separately or the viewer would have no way to be typed at. They must also be two different
+ * devices, which is why `logs/preflight.ts` refuses a run with stdin left on the terminal.
  *
  * Everything decidable lives in `logs/*.ts`; this file is the part a test cannot reach — raw mode,
  * the alternate screen and cursor visibility are process-global state, and a run that exits without
@@ -16,6 +17,7 @@ import { ReadStream, WriteStream } from "node:tty";
 
 import { createStreamFeed } from "../logs/feed.ts";
 import { decodeKeys } from "../logs/input.ts";
+import { refusal } from "../logs/preflight.ts";
 import { render } from "../logs/render.ts";
 import type { Action, ViewerState } from "../logs/state.ts";
 import { initialState, reduce } from "../logs/state.ts";
@@ -59,6 +61,12 @@ function openTerminal(): number {
 }
 
 function main(): void {
+  const complaint = refusal({ stdinIsTerminal: process.stdin.isTTY === true });
+  if (complaint !== undefined) {
+    process.stderr.write(complaint);
+    process.exit(2);
+  }
+
   const fd = openTerminal();
   const keyboard = new ReadStream(fd);
   const screen = new WriteStream(fd);
