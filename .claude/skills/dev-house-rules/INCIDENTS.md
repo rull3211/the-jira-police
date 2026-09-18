@@ -8,8 +8,8 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 53
-entries below are cited that way, and the other eight each say in their own text that no rule has
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 54
+entries below are cited that way, and the other nine each say in their own text that no rule has
 been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
 reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
 so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
@@ -1636,3 +1636,35 @@ picking one of them.
 
 **The rule** — [name the document a `§N` citation
 means](BUILDING.md#name-the-document-a-n-citation-means).
+
+### The dangling count that fell because an unrelated edit repaired nothing
+
+<!-- refs:off -->
+
+Found 2026-09-10, while opening what became `§25` of this file's plan. Numbering a new `PLAN.md`
+entry `§24` — the next free number, chosen without a thought — repaired `ARCHITECTURE.md`'s
+dangling `§24` by coincidence: `docs:check`'s dangling count fell by one and asked for
+`KNOWN_DANGLING` to be lowered to match. Nothing about the citation had improved. It was still a
+self-reference in a file whose sections stop at 16, and `§14`'s own table still named `§15` as its
+intended target.
+
+<!-- refs:on -->
+
+**The count is sensitive to edits in files that have nothing to do with the defect it measures**,
+so a routine plan entry can turn the check green about a citation it never touched — and lowering
+the ratchet to match would have made the next unrelated commit that broke it point at neither the
+entry nor the real cause.
+
+<!-- refs:off -->
+
+The entry was renumbered to `§25` instead and `§24` left unused.
+
+<!-- refs:on -->
+
+**A number skipped on purpose is not a hole.**
+
+**Found by** noticing the predicted `KNOWN_DANGLING` drop did not match the measured one, while
+adding an unrelated plan entry.
+
+**No rule yet** — a ratchet moving for a reason unrelated to what it measures is a shape this file
+has not yet seen a second instance of, and `unrelated-repair` at 2.

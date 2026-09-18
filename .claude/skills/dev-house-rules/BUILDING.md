@@ -46,7 +46,7 @@ picked whichever the pool found, for as long as at least one document defined it
 
 <!-- refs:on -->
 
-Measured against the real tree: 119 references resolve this way today, a citation naming none of
+Measured against the real tree: 118 references resolve this way today, a citation naming none of
 what it means at all.
 
 **Name the document, immediately before the token, wherever it is not the one the citation sits

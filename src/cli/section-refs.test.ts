@@ -175,9 +175,9 @@ describe("resolveReference", () => {
     expect(resolveReference(ref, "a.md", definedByDocument)).toEqual({ kind: "dangling" });
   });
 
-  // Regression guard: this is the pooling defect §19 exists to close. Pooling would have picked
-  // b.md's §12 for a citation sitting inside a.md, silently, because it never asked which document
-  // a.md's own author meant.
+  // Regression guard: this is the pooling defect the per-document resolver exists to close.
+  // Pooling would have picked b.md's §12 for a citation sitting inside a.md, silently, because it
+  // never asked which document a.md's own author meant.
   it("prefers the citing document's own section over another document sharing the number", () => {
     const definedByDocument = new Map([
       ["a.md", new Set(["12"])],
