@@ -19,7 +19,7 @@ sent-back ticket → watch queue →  did somebody else edit it?  →  re-triage
 The AI step is not ours. `/intake-triage` is Jacob Biørn's skill; a human normally invokes it by
 hand. This service automates the trigger, checks the result, and applies it.
 
-Status: running end to end against production Jira. 2733 tests in 87 files, no build step, no
+Status: running end to end against production Jira. 2743 tests in 87 files, no build step, no
 deployment target yet.
 
 A **second queue** exists alongside grooming: tickets a triage assessment marked
@@ -80,8 +80,11 @@ homes.
 | a hook, a branch guard, or what the guard suite does and does not prove                                                                           | [`architecture/guardrails.md`](architecture/guardrails.md)       | §16                         |
 
 **Structural facts still live in exactly one of the eight files above, cited from everywhere else —
-never restated.** `pnpm docs:check` verifies every `§N` resolves against some section-numbered
-document; it cannot tell you which file that document is, which is what the table above is for.
+never restated.** `pnpm docs:check` resolves every `§N` against the document that owns it — the one it
+names, or failing that its own citing document, or failing that the one other document that defines
+it — and flags a citation naming none of those as either dangling or, if more than one document
+defines the id with nothing saying which, ambiguous. A resolved citation still doesn't say which file
+that is; the table above is for that.
 
 **When implementation moves, the file describing it moves in the same commit** — the rule did not
 change, only its unit. A module added, renamed, split or deleted moves `module-map.md`. A changed

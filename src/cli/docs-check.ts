@@ -17,7 +17,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { checkDiff, FORBIDDEN_PATHS, VERIFICATION_PATHS } from "../solve/diff-gate.ts";
 import { SETTINGS } from "../settings.ts";
@@ -54,9 +54,11 @@ import {
 import {
   type DocumentShape,
   maskDisabled,
+  qualifierOf,
   referencesIn,
+  resolveReference,
+  type SectionRef,
   sectionIds,
-  unresolved,
 } from "./section-refs.ts";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -604,12 +606,16 @@ const NUMBERED_DOCUMENTS: readonly DocumentShape[] = [
   { path: ".claude/skills/agent-solve/SOLVE_INSTRUCTIONS.md" },
 ];
 
-const defined = new Set<string>();
+const definedByDocument = new Map<string, ReadonlySet<string>>();
 for (const document of NUMBERED_DOCUMENTS) {
   const body = readFileSync(join(ROOT, document.path), "utf8");
-  for (const id of sectionIds(body, document)) {
-    defined.add(id);
-  }
+  definedByDocument.set(document.path, sectionIds(body, document));
+}
+
+/** basename -> document path, so a citation naming a file relatively still resolves. */
+const byBasename = new Map<string, string>();
+for (const document of NUMBERED_DOCUMENTS) {
+  byBasename.set(basename(document.path), document.path);
 }
 
 /**
@@ -619,12 +625,35 @@ for (const document of NUMBERED_DOCUMENTS) {
  * means a new one arrived, and both are worth stopping for. One number for the whole tree, so it
  * cannot quietly grow to fit, and it names no file, so nothing is permanently blessed.
  */
-const KNOWN_DANGLING = 39;
+const KNOWN_DANGLING = 40;
 
-const refs = [...files, ...typescriptFiles(ROOT)].flatMap((file) =>
-  referencesIn(relative(ROOT, file), readFileSync(file, "utf8")),
+/**
+ * References that resolve in more than one document with no name saying which, being fixed under
+ * `PLAN.md` §14. Compared exactly, the same as `KNOWN_DANGLING` and for the same reason.
+ */
+const KNOWN_AMBIGUOUS = 118;
+
+const refFiles = [...files, ...typescriptFiles(ROOT)];
+const refBodies = new Map(
+  refFiles.map((file) => [relative(ROOT, file), readFileSync(file, "utf8")]),
 );
-const dangling = unresolved(refs, defined);
+const refs = refFiles.flatMap((file) =>
+  referencesIn(relative(ROOT, file), refBodies.get(relative(ROOT, file)) ?? ""),
+);
+
+const dangling: SectionRef[] = [];
+const ambiguous: { ref: SectionRef; candidates: readonly string[] }[] = [];
+for (const ref of refs) {
+  const body = refBodies.get(ref.file) ?? "";
+  const line = body.split("\n")[ref.line - 1] ?? "";
+  const qualifiedDoc = qualifierOf(line, ref, byBasename);
+  const resolution = resolveReference(ref, qualifiedDoc, definedByDocument);
+  if (resolution.kind === "dangling") {
+    dangling.push(ref);
+  } else if (resolution.kind === "ambiguous") {
+    ambiguous.push({ ref, candidates: resolution.candidates });
+  }
+}
 
 if (dangling.length !== KNOWN_DANGLING) {
   for (const ref of dangling) {
@@ -640,14 +669,31 @@ if (dangling.length !== KNOWN_DANGLING) {
   );
 }
 
+if (ambiguous.length !== KNOWN_AMBIGUOUS) {
+  for (const { ref, candidates } of ambiguous) {
+    problems.push(
+      `${ref.file}:${ref.line} cites §${ref.id}, which is a section in more than one document: ` +
+        `${candidates.join(", ")}.\n` +
+        `  Name the document it means — "${candidates[0]} §${ref.id}" — rather than leaving it to guess.`,
+    );
+  }
+  problems.push(
+    `section references: ${ambiguous.length} resolve in more than one document, and KNOWN_AMBIGUOUS says ${KNOWN_AMBIGUOUS}.\n` +
+      `  ${ambiguous.length > KNOWN_AMBIGUOUS ? "A new one arrived — qualify it rather than raising the number." : "Some were qualified: lower KNOWN_AMBIGUOUS in src/cli/docs-check.ts to match."}`,
+  );
+}
+
 record({
-  ok: dangling.length === KNOWN_DANGLING,
+  ok: dangling.length === KNOWN_DANGLING && ambiguous.length === KNOWN_AMBIGUOUS,
   what: "section references",
   // "held at", not "owed": a line reading like a shrinking debt is how this number sat still for years.
-  measured: `${refs.length} checked against ${defined.size} sections, ${dangling.length} resolving to nothing and held at KNOWN_DANGLING`,
+  measured:
+    `${refs.length} checked against ${definedByDocument.size} documents, ` +
+    `${dangling.length} resolving to nothing (held at KNOWN_DANGLING) and ` +
+    `${ambiguous.length} resolving to more than one document (held at KNOWN_AMBIGUOUS)`,
   unchecked:
-    `those ${dangling.length}. They are counted, not fixed, and nothing here makes the ` +
-    "number fall — it has been 39 since the day it was written",
+    `those ${dangling.length + ambiguous.length}. They are counted, not fixed, and nothing here ` +
+    "makes either number fall on its own",
 });
 
 /**

@@ -2,14 +2,14 @@
 
 **The evidence base for the house rules.** Nothing in those rules was designed against a theory;
 every entry here is something that got through, and the rules that cite one are the generalisation
-of it. Not every rule cites one — 42 of the 71 bold paragraphs in the four phase files name no
+of it. Not every rule cites one — 42 of the 72 bold paragraphs in the four phase files name no
 incident, and a good share of those are section prose rather than rules — so the honest claim is the
 narrow one: where a rule names its evidence, the evidence is here, and `pnpm docs:check` fails if the
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 44 of the 53
-entries below are cited that way, and the other nine each say in their own text that no rule has
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 55
+entries below are cited that way, and the other ten each say in their own text that no rule has
 been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
 reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
 so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
@@ -1639,3 +1639,65 @@ and this repository routinely has three open at once.
 
 **No rule yet** — the fix is not written and neither is the `test:hooks` case that would fail
 without it, and 2026-09-18.
+
+### The `§N` checker that resolved a citation against any document that happened to define it
+
+<!-- refs:off -->
+
+`pnpm docs:check`'s cross-reference check pooled every numbered document's headings into one set
+and asked only whether the referenced id existed anywhere in it — never which document. A bare
+`§12` sitting in `PLAN.md`, meaning nothing there, resolved silently against
+`architecture/triage.md`'s own unrelated `§12`, because the pool cannot represent "which
+document" at all.
+
+<!-- refs:on -->
+
+The 39-dangling-citations audit
+([above](#thirty-nine-citations-to-sections-that-were-never-written)) had already measured the
+citations that resolve to nothing; it had not asked whether the ones that resolve, resolve to the
+right place. Reflecting on that gap and remeasuring: **119** references resolve to a document
+other than the one their own author meant, more than double the 41 that resolve to nothing.
+
+Fixed with a three-tier scheme in `section-refs.ts`: `qualifierOf` reads the `.md` name written
+immediately before a `§N` on the same line; `resolveReference` trusts that name first, falls back
+to the citing document's own sections, and only then searches every other document — flagging
+two-or-more candidates as `ambiguous`, a state the pooled check could not represent, rather than
+picking one of them.
+
+**Found by** re-measuring the same audit with a sharper question — not "does this resolve" but
+"resolves against what" — after noticing the first measurement had only ever asked the first one.
+
+**The rule** — [name the document a `§N` citation
+means](BUILDING.md#name-the-document-a-n-citation-means).
+
+### The dangling count that fell because an unrelated edit repaired nothing
+
+<!-- refs:off -->
+
+Found 2026-09-10, while opening what became `§25` of this file's plan. Numbering a new `PLAN.md`
+entry `§24` — the next free number, chosen without a thought — repaired `ARCHITECTURE.md`'s
+dangling `§24` by coincidence: `docs:check`'s dangling count fell by one and asked for
+`KNOWN_DANGLING` to be lowered to match. Nothing about the citation had improved. It was still a
+self-reference in a file whose sections stop at 16, and `§14`'s own table still named `§15` as its
+intended target.
+
+<!-- refs:on -->
+
+**The count is sensitive to edits in files that have nothing to do with the defect it measures**,
+so a routine plan entry can turn the check green about a citation it never touched — and lowering
+the ratchet to match would have made the next unrelated commit that broke it point at neither the
+entry nor the real cause.
+
+<!-- refs:off -->
+
+The entry was renumbered to `§25` instead and `§24` left unused.
+
+<!-- refs:on -->
+
+**A number skipped on purpose is not a hole.**
+
+**Found by** noticing the predicted `KNOWN_DANGLING` drop did not match the measured one, while
+adding an unrelated plan entry.
+
+**No rule yet** — a ratchet moving for a reason unrelated to what it measures is a shape this file
+has not yet seen a second instance of, and `unrelated-repair` at 2.
