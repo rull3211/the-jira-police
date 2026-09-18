@@ -1,16 +1,19 @@
 # the-jira-police — bug-squashing agents
 
-> **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
+> **Progress, 2026-09-18.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2824 tests in 92
-> files**, no build step.
+> ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
+> and staged images its own abandoned runs left behind, and renders its log to a reader.
+> **2824 tests in 92 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
-> review and watch — and the review loop advances _and then_ claims in one tick
-> (`review-loop.ts:114`), gated only on `SOLVE_ENABLED`. Earlier revisions of this header said the
+> review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
+> gated only on `SOLVE_ENABLED`. Earlier revisions of this header said the
 > solve half was "still a person typing a command" and that "nothing loops". Both were false, and
-> they were the two most important facts in the file.
+> they were the two most important facts in the file. A third revision cited `review-loop.ts:114` in
+> a file 77 lines long — the same sentence, wrong a third way, which is why it now names the function
+> instead.
 >
 > **A human always merges. The bot has no merge path.**
 >
@@ -50,7 +53,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37, §40, §42, §43 and §44, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §42, §43 and §44, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -96,20 +99,35 @@ rather than leaving the sweep narrowed to the one §22 was opened for. §36 was 
 counting commit identity instead of commit content, opened and deleted inside the branch that built
 it — the story is `INCIDENTS.md`'s 2026-09-18 entry. §37 was the log viewer, shipped as `pnpm logs`
 and deleted inside the branch that built it; what it left unbuilt is §39, which is a new entry
-rather than a survival of the old one. **§40 is the second exception, and the worst-documented hole
-here**: it planned a supervisor process to run the daemon and the viewer together, and it was
-abandoned mid-branch when the operator chose a `package.json` pipeline instead — but it was written
+rather than a survival of the old one. §34 was the sweep that cut every prose comment in `src/` to a
+line or two, opened in `b7faa73` and deleted in `849591a` that shipped it; §35 was the catch-up that
+brought `CLAUDE.md`, `STARTING.md` and `FINISHING.md` to the standard §34 had just imposed on the
+code, opened in `5d42002` and deleted in `24341f6` — both the ordinary shape. §38 was
+`branch-guard.sh` resolving the session's project directory rather than the worktree the write
+lands in, shipped as `targetBranch` in `0cf4c10`.
+
+**§40 was issued twice, which this file says never happens, and the second issue is how all three of
+§34, §35 and §38 came to be missing from the line above.** Its first use is the second of the two
+exceptions the paragraph above flags: a supervisor process to run the daemon and the viewer
+together, abandoned mid-branch when the operator chose a `package.json` pipeline instead — written
 into a working tree and deleted from one, so no commit ever held it and there is nothing to recover.
 What it would have argued for is in `feat/daemon-log-tui`'s pull request; the sentence is here
 because a hole with no entry behind it sends the next reader through a history that does not contain
-one. §42 was every non-`verified`, non-`escaped` solve outcome — `unusable-base`, `refused`,
-`crashed`, `no-worktree` and an environment `abandoned`, alongside the `failed` §7 already
-handled — routed to `agent:failed` so a ticket that cannot currently be judged stops looping
-silently and a human has to clear it, opened and closed inside the branch that built it. §41 does
-not appear in this branch's own history at all: an unmerged sibling (`docs/plan-audit`) opened and
-closed it first, for an unrelated topic, discovered only by checking `git log --all` before
-picking a number here — this document's own "next entry" pointer is a per-branch guess, good only
-until whichever of two concurrently open branches merges second finds it already wrong. §43 was
+one. **§40's number was reused**, which is the one hole here that records a defect rather than a
+feature: it was opened in `2fb66e7` against a hole line that _already named §40_, and closed in
+`82d6079`. That closing commit is 78 deletions and no insertions — it removed the §38 and §40
+entries without touching the list that was supposed to gain them, and its message reasoned that
+"nothing else in the tree cited either number", which was true of every other file and not of the
+paragraph it was editing. **A deletion-only commit cannot update a list, and nothing here checks
+that it did**; both numbers were picked by reading the last heading rather than this line, which is
+how one of them came to be issued twice. §41 was the audit that found it — this branch — opened in
+`d57d087` and closed in `4549b8a`; a concurrently open sibling reached for §41 as well before
+checking `git log --all`, so this document's own "next entry" pointer is a per-branch guess, good
+only until whichever of two open branches merges second finds it already wrong. §42 was every
+non-`verified`, non-`escaped` solve outcome — `unusable-base`, `refused`, `crashed`, `no-worktree`
+and an environment `abandoned`, alongside the `failed` §7 already handled — routed to `agent:failed`
+so a ticket that cannot currently be judged stops looping silently and a human has to clear it,
+opened and closed inside the branch that built it. §43 was
 `.git/info/exclude` listing `.claude/` and `.storecode/` for every worktree cut from a repository,
 so a stray write to either (SSX-3954) is never untracked and never reaches the diff gate to be
 refused there alongside the real work beside it — opened and closed inside the branch that built
@@ -125,11 +143,16 @@ The triage-selection entries are now all closed, so the next entry is §45.
 ### 1. Which model runs which task, and nothing chooses today
 
 Requested 2026-09-06, and **the first fact is that there is no setting to change.** `--model`
-appears nowhere in this tree. Six task kinds spawn a subprocess — the triage analyst and the poster
-(`triage/runner.ts`, `triage/poster.ts`), the solve passes (`solve/runner.ts`), and the ticket
-commenter (`solve/commenter.ts`) — and every one of them inherits whatever `storecode` happens to
-default to. Three argument builders, one flag each: the mechanism is trivial and the policy is the
-whole of the work.
+appears nowhere in this tree. **Nine task kinds spawn a subprocess**, across five files and five
+argument builders: the triage analyst and the poster (`triage/runner.ts`, `triage/poster.ts`), the
+five solve passes — `recon`, `fix`, `simplify`, `review`, `merge`, all of them through the one
+`runSession` in `solve/passes.ts` (`solve/runner.ts`) — the ticket commenter (`solve/commenter.ts`),
+and the sendback-watch relevance check (`watch/relevance.ts`). Every one of them inherits whatever
+`storecode` happens to default to. Five argument builders, one flag each: the mechanism is trivial
+and the policy is the whole of the work. **This sentence counted six kinds, four files and three
+builders until 2026-09-18**, having never been recounted after `simplify`, `merge` and the relevance
+check were added — the unnamed one is the hazard, since a per-task setting that forgets a task
+silently leaves it on the default.
 
 **Two changes, and only the second is the feature.** _Recording_ which model a pass ran under costs
 nothing and should not wait for the choosing. Every cost figure in this file — triage $1.56, poster
@@ -189,36 +212,47 @@ than active ones; and a formatted approval costs one terminal round per pull req
 
 ### 3. The review round has no `verifyBase`
 
-`verifyBase` is called from `solveTicket` and nowhere else, so `resolveReview`'s `failed` is not
-relative to a base anyone proved green. On the solve path a red build before the change is
-`unusable-base` and says so; on a review round the same redness is attributed to the round. Now
-that the base is merged in every round, a base that is broken upstream lands in the branch and the
-round takes the blame for it. Recorded, not fixed.
+`verifyBase` has exactly one call site outside its own tests — `runPipeline`, reached only from
+`solveTicket` — so `resolveReview`'s `failed` is not relative to a base anyone proved green. On the
+solve path a red build before the change is `unusable-base` and says so; on a review round the same
+redness is attributed to the round. Now that the base is merged in every round, a base that is
+broken upstream lands in the branch and the round takes the blame for it. Recorded, not fixed.
 
-### 5. The wiring that has no test, now with three callers waiting on it
+**The conflict round has the same hole and this entry did not say so**: `runConflictRound` reaches
+the plain `verify` by the same path `runReviewRound` does, and neither checks the base first.
+`runReconOnly` also skips it, but deliberately and with a comment saying why, so that one is not a
+gap — which is the distinction to preserve if this is ever fixed by making the check unconditional.
+
+### 5. The wiring that has no test, now down to two callers and an empty queue
 
 Measured, not assumed: putting the wrong predicate back at `runWriteRungs`'s call site leaves the
-whole suite green, because nothing constructs its dependencies. **`runWatch`, `runReviewSweep` and
-the two halves it builds are in the same position**, and the gap now covers a refusal rather than
-only a predicate: the `SOLVE_ENABLED` guard that stops `--watch` reporting an empty watched set as
-_nothing is under review_ has no test that fails when it is unplugged. Everything decidable was
-pushed into pure functions that do — `describeReviewSweep`, `endedState`, `completionLabelFor`, the
-parser, `createReviewCycleDeps` — which narrows the untested part to the wiring and does not close
-it.
+whole suite green, because nothing constructs its dependencies. `runWatch` is in the same position —
+one caller, `solve-once.ts`, and no test naming it. The gap also covers a refusal rather than only a
+predicate: the `SOLVE_ENABLED` guard that stops `--watch` reporting an empty watched set as
+_nothing is under review_ has no test that fails when it is unplugged, and neither does the exit
+code it sets. Everything decidable was pushed into pure functions that do — `describeReviewSweep`,
+`endedState`, `completionLabelFor`, the parser, `createReviewCycleDeps` — which narrows the untested
+part to the wiring and does not close it.
 
-**The daemon's own wiring took the same treatment rather than joining the gap**, 2026-09-06: every
-decision E adds lives in `createReviewLoop`, which is a module and not `index.ts`, so all six of
-them have tests that fail when unplugged. What is still untested is `runReviewSweep`'s new `signal`
-parameter — nothing constructs its dependencies, which is this bullet, one level down.
+**Two of the four callers this entry named have since been closed, and the entry did not notice for
+ten days.** `review-loop.test.ts` mocks nothing at all: it builds `createReviewLoop` against a fake
+`JiraClient` and awaits `runCycle`, so the real `runReviewSweep` and the real `runSolveClaims` both
+execute, and unplugging either fails on the order of the two JQL searches. The `runRetriage`-versus-
+`endWatch` choice is no longer in `watch-once.ts`'s top-level `await` either — it moved into
+`runWatchSweep` in `watch/sweep.ts`, which has four tests, including that one ticket's throw does
+not end the sweep. What is left in `watch-once.ts` is only its dependency construction.
 
-Two more callers sit on the same hole. `watch-once.ts` ends in a top-level `await`, so the loop
-that chooses `runRetriage` over `endWatch` has no test; everything either side of it is covered —
-`describeRetriage` in `watch-args.test.ts`, the engine in `retriage.test.ts` — and the wiring
-between them is not. And `runSolveClaims`'s own body — that the ledger is read before the claim
-rather than after the outcome, that a thrown ticket does not abandon the queue, that the exit code
-is restored — is covered by argument and by the ledger's unit tests, not by a test of the call
-site. D4e measured this hole and called it _"the clearest argument yet for a test harness before
-E"_. E is here and it did not grow one.
+**What the remaining coverage does not reach is the loop body, because the fake client returns an
+empty queue.** `runSolveClaims` is entered and asserted on, but `for (const candidate of
+cycle.planned)` never iterates, so the three facts this entry cares about — that the ledger is read
+before the claim rather than after the outcome, that a thrown ticket does not abandon the queue,
+that the exit code is restored — are still covered by argument and by the ledger's unit tests rather
+than by an executed line. The same is true of `runReviewSweep`'s `signal`: it is forwarded, and
+nothing aborts one through it, so deleting the parameter at the `createReviewCycleDeps` call leaves
+the suite green. **A test that calls a function is not a test that exercises it**, and the cheap fix
+here is one non-empty queue rather than a harness. D4e called this hole _"the clearest argument yet
+for a test harness before E"_; E is here, it did not grow one, and half the hole closed anyway as a
+side effect of moving decisions into modules.
 
 ### 6. The second gate has no consumer
 
@@ -240,25 +274,32 @@ right comment. And it cannot see the quieter half at all — a hook that **allow
 which is how a `Grep` came back useless on SSX-3832, leaves no structural signal, because both
 denial-bearing fields are gated on the call not executing.
 
-**What is still owed is a consumer**, and `sessionDenials` at `triage/session.ts:357` currently has
-none. A fix pass that abandons for `judgement` while the harness watched its `Write` be vetoed is
-reporting `environment`, whatever it says, and wiring that means widening `PassRunner.run`.
+**What is still owed is a consumer**, and `sessionDenials` in `triage/session.ts` currently has
+none: its only reader is the `session.denied` warn a few lines below it. A fix pass that abandons
+for `judgement` while the harness watched its `Write` be vetoed is reporting `environment`, whatever
+it says, and wiring that means widening `PassRunner.run`, which still returns only the parsed
+structured output.
 
 ### 8. Four findings from the SSX-3834 run, three of them still open
 
-- **`poller.ts:340` logs `"dry run — no label was written"` immediately before writing labels.** True
-  while `solve:once` was the only caller; false the moment `runSolveClaims` became the second, which
-  is every daemon claim. This file's subject, in this repository's own poller, found by reading the
-  log of the run that first made it false.
-- **Branch slugs drop `ø` and `å` rather than transliterating.** "Beløp på" became `bel-p-p-`
-  (`worktree.ts:150-158`). On a Norwegian board that is every branch the bot will ever cut.
+- **`src/solve/poller.ts` logs `"dry run — no label was written"` immediately before writing
+  labels.** True while `solve:once` was the only caller; false the moment `runSolveClaims` became the
+  second, which is every daemon claim. This file's subject, in this repository's own poller, found by
+  reading the log of the run that first made it false.
+- **Branch slugs drop `ø` and `å` rather than transliterating.** `slugify` in `worktree.ts` maps
+  every non-`[a-z0-9]` run to `-`, so run against real Norwegian summaries it gives
+  `Beløp på` → `bel-p-p` and `Feil i årsavslutning` → `feil-i-rsavslutning`. On a Norwegian board
+  that is every branch the bot will ever cut. **This bullet said `bel-p-p-` until it was run**; the
+  trailing hyphen is stripped, twice, and the tests carry no non-ASCII case to have shown it.
 - **The review tick re-reads every open bot pull request.** Four here; three (`#2660`, `#1413`,
   `#2661`) returned `threads: 0` and exist only because nobody has merged them. Per-tick work scales
   with _unmerged_ pull requests, not active ones — an argument for merging promptly, and a second
   input to the cost number.
 - **A formatted approval costs one terminal round per pull request.** Copilot's approval is a
   non-empty body with review `state: "COMMENTED"`, never `"APPROVED"`, so the general discriminator
-  is unusable for this reviewer. `delivery.ts:858` reads a non-empty comment list as actionable,
+  is unusable for this reviewer. `delivery.ts` reads a non-empty comment list as actionable — the
+  only way out is the `comments.length === 0 && threads.length === 0` early return, and no approval
+  discriminator exists anywhere in the file — so it
   reserves a round, and pays for a pass whose input is "looks good". It is bounded — the round
   changes nothing, so the no-change rule undrafts. The cheap fix is unavailable for the reason the
   `Suppressed comments` block was left unparsed: an approval and a summary-only review carrying real
@@ -267,10 +308,16 @@ reporting `environment`, whatever it says, and wiring that means widening `PassR
 
 ### 9. The fail-first check cannot answer a question about CI
 
-The probe is cut on the machine the harness runs on and inherits its environment. A test whose
+The probe is cut on the machine the harness runs on. A test whose
 vacuity is environment-dependent — one reading `ZoneId.systemDefault()`, say — gets opposite
-verdicts on a UTC runner and a developer's laptop. **A probe that inherits the operator's
+verdicts on a UTC runner and a developer's laptop. **A probe that runs in the operator's
 environment cannot answer a question about CI's.**
+
+**"Inherits" was the wrong word and the right conclusion**, which is worth the correction because it
+narrows the fix. `childEnv` is an allowlist of fifteen names, and it already forces `CI=1` and
+`NO_COLOR=1` — so a test branching on `CI` is answered correctly today. `TZ` is not on the list and
+nothing sets it, so the child resolves the _machine's_ zone, which is exactly the
+`ZoneId.systemDefault()` case. The gap is one unset variable in a list, not a missing sandbox.
 
 ### 10. Still unobserved
 
@@ -298,7 +345,7 @@ environment cannot answer a question about CI's.**
   confirmed from a session's own vantage point (`architecture/guardrails.md` §16). It accepts both `trigger`
   and `source` for that reason.
 - **The analyst's denial list is a list of strings, and only four of its names have ever been
-  measured** (`runner.ts:103`). The probe that measured them named four other built-ins; `WebFetch`,
+  measured** (`ANALYST_DENIED_TOOLS` in `triage/runner.ts`). The probe that measured them named four other built-ins; `WebFetch`,
   `WebSearch` and `Task` rest on the same mechanism and were not in it, and the effect of the list
   on MCP names is unverified. A test asserts the three reach `--disallowedTools`, which is a claim
   about this service's command line and not about what the subprocess does with it. If a future MCP
@@ -324,8 +371,11 @@ environment cannot answer a question about CI's.**
 
 ### 11. Loose ends recorded in no other file
 
-Five things that exist in neither `ARCHITECTURE.md`, `README.md` nor the source, and were being kept
-alive only by being carried forward in conversation.
+Four things that exist in neither `architecture/*.md`, `README.md` nor the source, and were being kept
+alive only by being carried forward in conversation. A fifth — the `dev-lens.md` calibration row
+scoring the SSX-3801 fix as failed — is closed: the row carries a dated annotation naming the
+`git-commit-id` harness failure and pointing at the `verified` re-run beneath it, and the file now
+states the rule that produced that shape, which is that a recorded verdict is never edited.
 
 - **A post-merge vacuous-test sweep.** Two shipped tests guard nothing: #1413's timezone test and
   #2661's run-date block. `checkFailFirst` is a one-shot at solve time and misses both, for two
@@ -339,27 +389,33 @@ alive only by being carried forward in conversation.
   than minutes, and money spent with nobody having asked. So it hangs off F's schedule as its own
   sweep, gated on the cost work in §2, since it buys an install and a test run per pull request
   revisited.
-- **The triage poster has the commenter's read-tool defect, and has had it longer.** Its header says
-  it is not given the vault, Confluence, `Grep`, `Glob` or `search`, and that it has "no filesystem".
+- **The triage poster has the commenter's read-tool defect, and has had it longer.**
+  `architecture/triage.md` says it is "not given the research tools — no vault, no Confluence, no
+  `Grep`/`Glob`, no `search`", and `poster.ts`'s own header says "given no skill, vault or search".
   `POSTER_DENIED_TOOLS` is `DENIED_BUILTIN_TOOLS` plus two Atlassian mutators — **no `Read`, no
   `Grep`, no `Glob`, no `Task`**. Both sentences describe `POSTER_TOOLS`, which the 2026-09-04 probe
-  established denies nothing. The fix is the one applied to the commenter, and it is _more_ urgent by
-  exposure: the poster runs on every triage, the commenter only on a terminal outcome. **The analyst
+  established denies nothing. The fix is the one applied to the commenter, whose deny list names
+  `Read`, `Grep`, `Glob`, `WebFetch`, `WebSearch` and `Task` explicitly — including `Task`, because a
+  subagent's tool surface is not the parent's list — and it is _more_ urgent by
+  exposure: the poster runs on every triage, the commenter only on a terminal outcome. **`poster.test.ts`
+  pins the defect in place**: it asserts only that the allowlist omits those names, which is the
+  assertion that passes while nothing is denied, where `commenter.test.ts` asserts the deny list
+  contains them. **The analyst
   cannot take the same fix** — reading the vault is its job — so its own header should be checked
   against the same question rather than assumed clean.
-- **`dev-lens.md` holds a calibration row scoring the SSX-3801 fix as failed.** That fix passed 4562
-  tests; the build never compiled it, for the `git-commit-id` reason since fixed. The row is bad
-  evidence feeding the fitness assessment and should be corrected, not deleted.
 - **Stale Jira comments that no MCP tool can delete.** One stale triage comment on SSX-3822, plus the
   two Automation for Jira comments that caused the wrong fitness call in §9's story. `addCommentToJiraIssue`
   takes a `commentId` and updates in place, so _our own_ comment can be rewritten — but deletion is
   unavailable, and the automation comments are not ours. A board this service can be blocked by and
   cannot unblock is a fact about the tool surface that the daemon should be known to have.
 - **`sectionReferences()` may be an orphan, and this is rehomed from an entry that shipped.** It
-  counts `§N` tokens across `src/`, and the section resolver that landed in PR #21 resolves the same
-  tokens rather than counting them. Leaving it costs a `docs:check` fact that moves whenever test
-  fixtures do — it already jumped 106 → 141 on fixtures alone, which is a number in prose that
-  churns for reasons unrelated to the thing it claims to measure. **Propose before deleting**: an
+  counts `§N` tokens across the tree's TypeScript, and the section resolver that landed in PR #21
+  resolves the same
+  tokens rather than counting them. Its single caller is the `FACT` table in the same file.
+  **The churn half of this bullet is closed**: the function now masks `refs:off` regions, so the
+  "106 → 141 on fixtures alone" failure cannot recur, and what is left is only the question of
+  whether a count nobody reads earns its `docs:check` line beside a resolver that checks the same
+  tokens. **Propose before deleting**: an
   unreferenced-looking function here has twice turned out to be load-bearing, so trace the guarantee
   to a caller rather than trusting the name (`PROVING.md`, "an unreferenced declaration is evidence
   about a name").
@@ -380,17 +436,29 @@ not a plan item. What is left below is only what is still missing.
   is what took the population from 539 shape-matches to something small enough that every entry
   carries a reason, and the alternative found nothing better; but the check cannot report the phrase
   it was never taught to see, so growing that list stays a human act. Adding a noun is one line.
-- **`docs-check.ts`'s own logic is still mostly untested.** Two of its checks were extracted so they
-  could be — `pinned-prose.ts` and `count-phrases.ts`, because importing `docs-check.ts` from a test
+- **`docs-check.ts`'s own logic is still mostly untested.** **Six** of its checks have now been
+  extracted so they could be — `pinned-prose.ts`, `count-phrases.ts`, `length-budget.ts`,
+  `rule-citations.ts`, `scope-bounds.ts` and `section-refs.ts`, because importing `docs-check.ts`
+  from a test
   runs `vitest list`, which spawns vitest inside vitest. What is left in the file itself is the part
   with no test: the `FACT` table's derivation of each count from the tree, the `expectSites` logic,
-  and the link walker. The extraction is the pattern for closing the rest — take the pure decision
+  the `HISTORICAL` table, and the link walker. There is still no `docs-check.test.ts`. The
+  extraction is the pattern for closing the rest — take the pure decision
   out, leave the I/O behind — and nothing forces it, so it will happen the next time one of those
-  three is edited or not at all.
+  three is edited or not at all. **Note what stayed behind**: `KNOWN_DANGLING` and `KNOWN_AMBIGUOUS`
+  live in the untested file even though the resolver they gate was extracted into the tested one.
+- **A duplicate `HISTORICAL` blessing is never reported as stale, and one sat here unnoticed.**
+  `staleHistorical` asks whether each entry's `(file, value, noun)` key is present in the tree, so
+  two identical entries are both satisfied by one phrase. `PLAN.md` carried a single "4562 tests" and
+  `HISTORICAL` carried two blessings for it; the second was dead on arrival and stayed invisible
+  until the phrase was deleted outright, at which point both reported at once. **The exemption list
+  is the one place a silent duplicate is most expensive** — the bullet above says an outlived
+  exemption is a hole a new count could fall into, and this is that hole, held open by a copy.
+  Keying staleness by identity rather than by value would close it; nothing does today.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **108 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **109 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that have never existed** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost
@@ -402,10 +470,12 @@ not a plan item. What is left below is only what is still missing.
   system is now derived by `docs:check`; whether any of it resolves is still not.
 - **An incident unreachable from a rule now fails `docs:check`; the reverse direction does not.**
   Closed by `rule-citations.ts`: every `###` entry in `INCIDENTS.md` must be cited from one of the
-  six documents in `CITING_FILES`, or carry a `**No rule yet**` line that parses. 54 entries, 45
-  cited, 9 declared. What is still missing is the direction this bullet used to claim was the one
-  that mattered — **42 of the 72 rule paragraphs cite no incident**, and that number is printed in
-  the summary and failed on by nobody. It is not a debt to pay down blind: 18 of the 42 are file
+  six documents in `CITING_FILES`, or carry a `**No rule yet**` line that parses. 56 entries, 46
+  cited, 10 declared. What is still missing is the direction this bullet used to claim was the one
+  that mattered — **42 of the 74 rule paragraphs cite no incident**, and that number is printed in
+  the summary and failed on by nobody. **Both figures in this bullet drifted while the guarded ones
+  either side of them did not**, which is the bullet's own thesis arriving as evidence: a number
+  `docs:check` prints but never fails on is a number that rots. It is not a debt to pay down blind: 18 of the 42 are file
   openers, reading pointers and section labels rather than rules, so the honest fix is a citation
   convention for rule paragraphs, which does not exist yet.
 - **`docs:check` bounds one property of the prose — how long it is — and verifies no count stated
@@ -474,7 +544,7 @@ its test: it is the only item whose absence has already produced two shipped con
 
 **Every `§N` in this section is quoted, not cited**, which is why the whole section sits in a
 `refs:off` region rather than just its table. The resolver reads this document; a section that names
-ten tokens in order to say they resolve to nothing would otherwise report itself as forty-odd
+eleven tokens in order to say they resolve to nothing would otherwise report itself as forty-odd
 defects. That is the write-up perturbing the count it reports — a failure this file has now paid for
 twice, and the reason the exemption is a marked region rather than a file-level opt-out.
 
@@ -482,17 +552,25 @@ twice, and the reason the exemption is a marked region rather than a file-level 
 now parses the headings of the eleven section-numbered documents and resolves every `§N` in markdown
 _and_ in `.ts` per document, against a name where one is given, so "roughly 39" is **exactly
 40**, held by `KNOWN_DANGLING` and compared with `!==` — fixing some fails the check as loudly as
-adding one, because a ceiling would let the debt be paid down silently and then quietly regrow. The
-list below still cost a full-tree audit plus a `git log --all` check, and it is kept because
-regenerating it is the expensive part. **Branch:** `fix/section-resolver` shipped the check;
+adding one, because a ceiling would let the debt be paid down silently and then quietly regrow.
+**Branch:** `fix/section-resolver` shipped the check;
 `fix/section-scoped-resolver` made it per-document and added one more (below), and shipped and
 deleted the entry that added a second — the fixes still need a branch of their own, off `main`.
 
-**39 dangling `§N` citations** in shipped source, plus one more the per-document resolver surfaced.
+**Regenerating the list is no longer the expensive part, and this entry was wrong to say it was.**
+The table below used to be the residue of a subagent sweep plus a `git log --all` check, kept because
+re-deriving it cost a full-tree audit. It does not: lowering `KNOWN_DANGLING` by hand makes
+`docs:check` print every dangling site, file and line, from the resolver that already walks them —
+one command, no judgement. The table is now a convenience for reading, not an artifact worth
+protecting, and **the cheaper fix than maintaining it is a flag on `docs:check` that prints the list
+without requiring the constant to be falsified first.** That flag is not built.
+
+**40 dangling `§N` citations**, regenerated from the checker on 2026-09-18 rather than searched for.
 The first diagnosis — that a renumbering stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c`
 appear in **no revision of `PLAN.md` that `git log --all` can reach**, in any form. They were never
-written down. `ARCHITECTURE.md:619` says "See PLAN.md §5b", the one citation naming its target, and
-it resolves to nothing; `ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 16.
+written down. `architecture/overview.md:200` says "See PLAN.md §5b", the one citation naming its
+target, and it resolves to nothing; `architecture/overview.md:356` cites `§24` in a document whose
+own headings stop well short of it.
 The extra one is a different shape:
 [an incident](.claude/skills/dev-house-rules/INCIDENTS.md#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent)
 writes "`PLAN.md` §12" to illustrate a citation that used to name a real section — the pooled
@@ -502,14 +580,16 @@ name, `PLAN.md` has no `§12` since it shipped and was deleted, and it is now co
 second instance of the same shape, in the resolver's own retired write-up, went with it when that
 entry was deleted on shipping.
 
-**The quieter half was worse, and the per-document resolver is what stopped it being silent.** Some references are in
-range and repointed: six files say "§1 refuses on-disk state", but that rule moved to
-`architecture/overview.md §5`. A dangling number failed when checked; a repointed one used to read
-correctly forever, because the pooled resolver had no way to ask which document `§1` meant. Now it
-does: those six are flagged `ambiguous` rather than passing, held by `KNOWN_AMBIGUOUS` alongside 118
-others. Flagged is not fixed — the six still cite the wrong section until a human names
-`architecture/overview.md` — but a defect a check cannot see is worse than one it reports and nobody
-has gotten to yet.
+**The quieter half was worse, and the per-document resolver is what stopped it being silent.** Some
+references are in range and repointed: five sites cite "§1's rule against state on disk", and a
+dangling number failed when checked while a repointed one read correctly forever, because the pooled
+resolver had no way to ask which document `§1` meant. Now it does: they are flagged `ambiguous`
+rather than passing, held by `KNOWN_AMBIGUOUS` at 118. Flagged is not fixed, and **this entry's own
+account of where to repoint them was wrong** — it said the rule "moved to `architecture/overview.md
+§5`", which is the section describing `state/poll.json`, the on-disk state the service _does_ keep.
+The rule those five cite has no numbered home anywhere in the tree, which is why nobody has repointed
+them: there is nothing to repoint them to. `architecture/overview.md:315` is itself one of the five.
+A defect a check cannot see is still worse than one it reports and nobody has gotten to yet.
 
 **The root cause is structural.** `PLAN.md` numbers its sections and rule 2 deletes entries when
 they ship, so every `§N` there named a slot guaranteed to be reused. **Half of that is now fixed by
@@ -531,14 +611,15 @@ partly instanced rather than only recommended.
 Three fixes were named; the first is done, the third matters most and has its first real instance:
 
 1. ~~A resolver in `docs:check`.~~ Shipped. It needed the predicted exemption for references that
-   are _quoted_ rather than made — this very entry names ten dangling tokens in order to be useful —
+   are _quoted_ rather than made — this very entry names eleven dangling tokens in order to be useful —
    and that arrived as `refs:off` / `refs:on` markers rather than a file-level opt-out, so exempting
    a paragraph never quietly exempts the document around it. A guard that fires on its own
    documentation gets switched off.
 2. Fix the 40. Most need a human: the intended target is often unrecoverable, and deleting a comment
    that cites nothing sometimes destroys the only record of a decision.
-3. **Stop citing `PLAN.md` by number from code.** Cite `ARCHITECTURE.md`, whose sections are stable,
-   or quote the reasoning where it is used. **First instance done:** the guardrail argument moved out
+3. **Stop citing `PLAN.md` by number from code.** Cite `architecture/*.md`, whose section numbers are
+   stable and survived the split out of `ARCHITECTURE.md` unchanged — §1–16 are now spread across
+   eight files, each keeping the number it had — or quote the reasoning where it is used. **First instance done:** the guardrail argument moved out
    of `PLAN.md` §12 into `architecture/guardrails.md` §16 precisely because five files were citing a plan entry
    as though it were a permanent home. The general form of the rule is that an argument other
    documents cite does not belong in the document whose entries are deleted on purpose.
@@ -556,51 +637,76 @@ judgement in it, and a batch pass by an agent is how 40 confident references to 
 the answer to a dangling `§7b` turns out to be "delete the citation", then 40 comments get shorter
 and nothing gets more correct. Read three of them before fixing any.
 
-#### The sites, so nobody pays for the audit twice
+#### The sites, regenerated 2026-09-18
 
-**Provenance, because it decides how far to trust each row.** The list came from a subagent sweep;
-the totals and line numbers are its work and are **unverified in bulk**. Verified by hand: that
-`ARCHITECTURE.md:619` and `:1095` say what they are quoted as saying, that three sampled `src/`
-lines match verbatim, and — against every revision of `PLAN.md` that `git log --all` reaches — that
-`§3a`, `§5b`, `§7b` and `§6.1c` have never existed there in any form. Re-check a row before editing
-it.
+**Provenance, because it decides how far to trust each row.** Every row below came out of
+`docs:check` itself, not out of a sweep: the resolver already visits each site to decide it dangles,
+so lowering `KNOWN_DANGLING` makes it print them. The paths and lines are therefore the checker's,
+generated the same way twice. Verified by hand afterwards: twelve sampled lines read as quoted, the
+two `architecture/overview.md` rows say what they are quoted as saying, and — against every revision
+of `PLAN.md` that `git log --all` reaches — `§3a`, `§5b`, `§7b` and `§6.1c` have never existed there
+in any form. **Every path and line in the previous version of this table was wrong**, because the
+table was written against `ARCHITECTURE.md` before it was split into `architecture/*.md` and against
+`src/` before the comments above these citations were rewritten; nothing failed when it rotted,
+which is the argument for not keeping it by hand.
 
 Dangling, grouped by the token they cite. None of these tokens has ever been a heading anywhere:
 
-| token   | sites                                                                                                                                                                    |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `§7b`   | `watch-loop.ts:71`, `cli/watch-once.ts:25`, `watch/counter.ts:5`, `watch/decide.ts:232,314,329`, `watch/decide.test.ts:219`, `watch/memo.ts:13`, `watch/relevance.ts:35` |
-| `§6.1c` | `solve/pr.ts:438,1706`, `solve/commenter.ts:10`, `solve/delivery.ts:302,317`, `cli/solve-outcome.ts:324,485`, `cli/solve-outcome.test.ts:598`                            |
-| `§6.1`  | `ARCHITECTURE.md:426`, `cli/solve-outcome.ts:314`, `cli/solve-run.ts:569,1013`, `jira/jql.ts:208`                                                                        |
-| `§3a`   | `ARCHITECTURE.md:880`, `solve/attempts.ts:38`, `solve/commenter.ts:29`, `solve/commenter.test.ts:63`                                                                     |
-| `§6.3`  | `solve/delivery.ts:1417`, `watch/counter.ts:14`, `watch/retriage.ts:23`, `watch/retriage.test.ts:141`                                                                    |
-| `§7c`   | `jira/jql.ts:266`, `watch/retriage.ts:32`, `triage/gate.test.ts:532`                                                                                                     |
-| `§3c`   | `cli/solve-outcome.ts:522,533`, `jira/jql.ts:221`                                                                                                                        |
-| `§6.2`  | `solve/delivery.ts:1045`                                                                                                                                                 |
-| `§5b`   | `ARCHITECTURE.md:619` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                              |
-| `§24`   | `ARCHITECTURE.md:1095` — self-reference in a file whose sections stop at 16; intended target is almost certainly §15, "The solve pipeline"                               |
+| token   | sites                                                                                                                                                                                  |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `§7b`   | `watch-loop.ts:33`, `cli/watch-once.ts:14`, `watch/counter.ts:4`, `watch/decide.ts:134,190,203`, `watch/decide.test.ts:183`, `watch/memo.ts:6`, `watch/relevance.ts:12`                |
+| `§6.1c` | `solve/pr.ts:213,1235`, `solve/commenter.ts:3`, `solve/delivery.ts:215,221`, `cli/solve-outcome.ts:177,296`, `cli/solve-outcome.test.ts:552`                                           |
+| `§6.1`  | `architecture/triage.md:321`, `cli/solve-outcome.ts:174`, `cli/solve-run.ts:476,816`, `jira/jql.ts:169`                                                                                |
+| `§3a`   | `architecture/overview.md:319`, `solve/attempts.ts:5`, `solve/commenter.ts:7`, `solve/commenter.test.ts:51`                                                                            |
+| `§6.3`  | `solve/delivery.ts:955`, `watch/counter.ts:8`, `watch/retriage.ts:6`, `watch/retriage.test.ts:138`                                                                                     |
+| `§7c`   | `jira/jql.ts:198`, `watch/retriage.ts:9`, `triage/gate.test.ts:508`                                                                                                                    |
+| `§3c`   | `cli/solve-outcome.ts:322,326`, `jira/jql.ts:172`                                                                                                                                      |
+| `§6.2`  | `solve/delivery.ts:666`                                                                                                                                                                |
+| `§5b`   | `architecture/overview.md:200` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                                   |
+| `§24`   | `architecture/overview.md:356` — `` `agent-solve` (§24) ``, in a document whose own headings are 1, 2, 5, 6, 8, 9, 11; intended target is almost certainly `architecture/solve.md` §15 |
+| `§12`   | `.claude/skills/dev-house-rules/INCIDENTS.md:1058` — the quoted `` `PLAN.md` §12 `` above                                                                                              |
+
+**`§24`'s row carries an in-range defect the checker cannot report.** The same sentence reads
+`` `intake-triage` (§12) and `agent-solve` (§24) ``, and that `§12` resolves — to
+`architecture/triage.md` §12, "Local divergence from upstream", which has nothing to do with the
+skill it is labelling. One half of one sentence is loud and the other half is silent, for the reason
+the deletion case above gives.
 
 **In range and repointed — flagged `ambiguous` by the per-document resolver, not yet fixed:**
 
-- "§1 refuses on-disk state" — `solve/attempts.ts:31`, `watch/relevance.ts:40`, `watch/memo.ts:21,26`,
-  `solve/review-cycle.ts:24,26`. That rule is now `architecture/overview.md §5`; `PLAN.md §1` is the model
-  question.
-- "§6's rule is _advance, then claim_" — `index.ts:44`, `review-loop.ts:97`, `review-loop.test.ts:150`.
-  Now `architecture/overview.md §2` (L143); `PLAN.md §6` is the second gate.
+- "§1's rule against state on disk" — `solve/attempts.ts:5`, `solve/review-cycle.ts:11`,
+  `watch/relevance.ts:12`, `watch/memo.ts:9`, `architecture/overview.md:315`. `PLAN.md §1` is the
+  model question and `architecture/overview.md §1` is the credential split; **the rule itself is in
+  neither**, so these five have no correct target to be given.
+- "§6: advance, then claim" — `review-loop.ts:64`, `review-loop.test.ts:126`. Now
+  `architecture/overview.md §2`, at L98; `PLAN.md §6` is the second gate. A third site, `index.ts:44`,
+  is gone — the entry named it and nothing noticed it had left.
 
-**Clean, and worth knowing so the resolver is not written to re-check them:** all 7 `invariant N`
-references (`README.md:447`, `ARCHITECTURE.md:1511,1635,1726,1735,1750`, `solve/claim.ts:26`) cite
-invariants 5, 11 and 13 and are correct; every `§14.N` sub-reference resolves, uniquely, since only
-`architecture/invariants.md` defines them. The ~57 bare `§11` citations from `src/triage/*` into
-`INTAKE_INSTRUCTIONS.md` are in range but, under the per-document resolver, no longer "clean": none
-names its target, `§11` is also a heading in `architecture/overview.md` and `PLAN.md`, and all ~57 are
-now flagged `ambiguous` rather than passing silently — the same is true of the `SOLVE_INSTRUCTIONS.md`
-ones.
+**Clean, and worth knowing so the resolver is not written to re-check them:** every `§14.N`
+sub-reference resolves, uniquely, since only `architecture/invariants.md` defines them, and it
+defines 14.1 through 14.17. The bare `invariant N` prose references are **not** part of the
+resolver's vocabulary at all — it reads `§N`, not the word — so the previous claim that "all 7" of
+them are correct was never something `docs:check` was checking, and six of the seven coordinates it
+gave have since stopped existing. There are nine such phrases today, citing invariants 11, 13 and
+14; they are prose, and only a reader checks them.
 
-**The legal vocabulary, which the resolver now parses rather than being told:** `ARCHITECTURE.md`
-§1–16 plus its §14 invariants 1–17; `PLAN.md` §1–36 less the numbers it has retired;
-`INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
-`SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten cited tokens are in none of them.
+**The bare `§11` citations are the bulk of the ambiguous 118 and are worth a count, not a tilde.**
+There are **28** of them in `src/triage/*`, pointing at
+`.claude/skills/intake-triage/INTAKE_INSTRUCTIONS.md` §11; none names its target, `§11` is also a
+heading in `architecture/overview.md` and in this file, and all 28 are flagged `ambiguous` rather
+than passing silently. The same is true of the `SOLVE_INSTRUCTIONS.md` ones. **This entry said
+"~57" and the tilde is why it survived the drift** — an approximate number cannot be falsified by a
+recount, which is exactly what `STARTING.md` item 3 means by letting the dated list be the count.
+
+**The legal vocabulary, which the resolver parses rather than being told, as of 2026-09-18:**
+`architecture/overview.md` §1, 2, 5, 6, 8, 9, 11; `architecture/module-map.md` §7;
+`architecture/triage.md` §3, 4, 12; `architecture/solve.md` §15; `architecture/configuration.md` §10;
+`architecture/invariants.md` §14 plus §14.1–14.17; `architecture/not-built.md` §13;
+`architecture/guardrails.md` §16 — §1 through §16 exactly once each, across eight files. Then
+`PLAN.md` §1–41 less the numbers it has retired; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
+`SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten of the eleven dangling tokens are in none
+of them; `§12` is the exception, and the shape worth remembering — it exists, in
+`architecture/triage.md`, and dangles only because the citation names `PLAN.md`.
 
 <!-- refs:on -->
 
@@ -642,13 +748,32 @@ lower-churn version — a hook that only prompts under a condition needs the con
 check to command position, with a comment explaining that this is "the difference between guarding
 the act and censoring the words". The push check three lines below has no such anchor: it matches
 `git push` anywhere in the text and then a protected branch name anywhere in the text, so a commit
-message that merely _discusses_ pushing to `main` is refused as though it were one. Measured twice
-in one week, once on this repository's own commits.
+message that merely _discusses_ pushing to `main` is refused as though it were one. Measured three
+times now, twice on this repository's own commits and again on 2026-09-18 — `git commit -m "docs:
+explain why git push to main is refused"` is still denied by the running script.
+
+**Two rewrites of this hook have landed since and neither touched it**, which is the part worth
+recording: `0cf4c10` put 146 lines into `branch-guard.sh` and `88caf5f` another 55, both in the
+adjacent blocks, and the four-line push check sat between them unchanged. A defect survives edits to
+the file it lives in when nothing fails.
+
+**It has a second half, found on 2026-09-18 and worse than the first.** `88caf5f` introduced
+`isProtected` to end exactly this class — its comment says "One list. A name refused by one hatch and
+accepted by another is the hole this guard exists to close, and there were three copies of it before
+this." **There were four.** The push check keeps its own inline `(main|master|develop)`, and
+`isProtected` also protects `release/*`, so `git push origin release/1.2` is allowed — measured,
+silent, from a feature branch. The false positive is embarrassing; this one is a hole, and it is in
+the check whose comment claims the holes are closed.
 
 **Why it is a defect and not a rough edge.** `BUILDING.md` has the rule: a false positive is how a
 guard earns the contempt that gets it turned off, and this one fires precisely when somebody is
-writing about the guard. The fix is the anchor that already exists eleven lines up, plus assertions
-for both directions — a real push refused, a commit message naming it allowed.
+writing about the guard. The fix is both halves at once — the `gh_at_command_position` anchor the
+`gh pr merge` check already uses, and `isProtected` in place of the inline list — plus assertions in
+both directions. **Half of that pair already exists for the other check and not for this one:**
+`test-hooks.sh` asserts `git commit -m 'docs: explain why gh pr merge is refused'` is SILENT, and has
+no such case for a commit message naming a push, nor any push case naming `release/*`. The merge
+check is anchored _and_ pinned in the prose direction; the push check is neither, and the missing
+tests are why neither half has ever been missed.
 
 **What would make it the wrong change:** anchoring narrows the guard, and rule 2 is the one rule
 where narrowing is the expensive direction. `git push` inside `sh -c '...'` is the case to hold
@@ -668,10 +793,13 @@ stack-skipping exit misses: `process.exit(130)` on a second signal (`createShutd
 a slept laptop. There is no TTL,
 lease or reaper in `src/`. With `MAX_CONCURRENT_SOLVES=1` one stranded claim halts the solve half
 indefinitely, and the repair is a human editing the label field by hand — the exact operation
-invariant 11 exists to have eliminated. A second, narrower window has the same shape: `runPublish`
-returns at `src/cli/solve-run.ts:1168` and the label moves at `:1181`, so a death between them
-leaves an open pull request on a ticket marked `agent:solving`, which neither the solve queue nor
-the review queue selects.
+invariant 11 exists to have eliminated. A second, narrower window has the same shape, in
+`src/cli/solve-run.ts`: `keepClaim = await runPublish(...)` returns, and `moveLabels(client,
+issueKey, reviewTransition)` on the next branch is what hands the claim to the review queue, so a
+death between them leaves an open pull request on a ticket marked `agent:solving`, which neither the
+solve queue nor the review queue selects. **This pair was cited as `:1168` and `:1181` in a file 1072
+lines long** — the two coordinates rotted together, which is the failure mode that makes naming the
+calls the cheaper form even when the line is right on the day.
 
 **Why it was not done here.** Found while establishing the mechanism behind the daemon check in
 `STARTING.md`, on a branch whose whole diff is prose and one read-only command. A reaper writes to Jira on a schedule, which is a new
@@ -755,6 +883,8 @@ and the run is gone.
 
 ### 41. This file's own coordinates rotted, and its hole list stopped being complete
 
+<!-- refs:off -->
+
 **Branch:** `docs/plan-audit`, stacked on `fix/worktree-rule-and-guard-scope` (PR #59).
 
 **What is being attempted.** A verification pass over every claim in this file, and a repair of what
@@ -783,6 +913,21 @@ exists to answer.
   every refactor is rule 3's own example, and re-pinning it just restarts the clock.
 - **Stacking on #59 means this cannot merge until that does**, and a document branch is a poor reason
   to add a floor. If #59 stalls, the §38/§40 half should be moved onto it and the rest rebased.
+
+**Refuted on the first run.** This entry was written outside a `refs:off` region and immediately
+added nine dangling citations of its own, taking the run from 40 to 49 — the same
+write-up-perturbs-its-own-count failure §14 is built around, committed by the entry proposing to fix
+it. The region below is the remedy §14 already documents.
+
+**The serious risk above was refuted too, in the cheapest possible way.** Regenerating §14's table
+did not re-run the audit: lowering `KNOWN_DANGLING` makes `docs:check` print all forty sites from the
+resolver that already walks them, so the table came from the checker in one command and was
+spot-checked at twelve lines rather than rebuilt by search. The count stayed at 40 either side. What
+that refutes is not the caution but the premise underneath it — §14 said regenerating was the
+expensive half, and it had been false since the resolver shipped, which is the more useful finding
+than any row in the table.
+
+<!-- refs:on -->
 
 ## Verification
 
