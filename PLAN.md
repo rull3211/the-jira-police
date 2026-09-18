@@ -706,7 +706,7 @@ eager to call something dangling.
   unique-other-document tiers cover.
 
 **The result, held by `KNOWN_DANGLING` and the new `KNOWN_AMBIGUOUS`, both compared with `!==` for the
-reason `§14` gives.** 314 references (109 in `.ts`, live-checked; the rest markdown): 41 dangling, two
+reason `§14` gives.** 323 references (109 in `.ts`, live-checked; the rest markdown): 41 dangling, two
 more than the 39 already named in `§14` — the pair above, qualified and previously invisible because
 pooling never checked the name. 119 resolve in more than one document with no name saying which — the
 ambiguity `§19` existed to surface, now a checked, countable debt instead of an invisible one. Neither
