@@ -13,20 +13,23 @@ These guard the people and agents working **on** this repository. They are not p
 and never reach a model it runs: `prepareSkillRoot` (§7) copies only `agent-solve` into a skill root
 that must contain nothing else, so a solve pass cannot see them.
 
-They exist because the two rules in `CLAUDE.md` that are not advisory — never work on a protected
-branch, and a human merges — had nothing behind them but the agent's own compliance. The rules lived
+They exist because the rules in `CLAUDE.md` that are not advisory had nothing behind them but the
+agent's own compliance. Two of the three have a script here — never work on a protected branch, and
+a human merges. **The third, work in a worktree, has nothing and is not scheduled to**: what
+`branch-guard.sh` does for it is get out of its way, by allowing `worktree add -b` off a protected
+branch and by judging a write against the worktree it lands in. Neither of those enforces it. The rules lived
 in a **model-invoked** skill, so whether they were read depended on whether the model chose to read
 them, and the case where that is least likely — a narrow prompt late in a long session, or one just
 after a compaction — is the case where they matter most.
 
 ### What is built
 
-| script             | fires on                                                | what it does                                                                                                                                                             |
-| ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `branch-guard.sh`  | `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit` | refuses a write on a protected branch (`main`, `master`, `develop`, `release/*`), refuses a push naming one from any branch, and refuses `gh pr merge` from every branch |
-| `branch-stack.sh`  | `PreToolUse` on `Bash`                                  | returns `ask` when a new branch would take the stack past `BRANCH_STACK_MAX` (default 3)                                                                                 |
-| `session-brief.sh` | `SessionStart`                                          | prints the contract; on `trigger=compact` it also inlines the two rules and `FINISHING.md`'s four questions                                                              |
-| `commit-brief.sh`  | `PreToolUse` on `Bash`                                  | prints `FINISHING.md`'s four questions when the command is a `git commit`; carries no permission decision at all                                                         |
+| script             | fires on                                                | what it does                                                                                                                                                                                                                                                                                          |
+| ------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `branch-guard.sh`  | `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit` | refuses a write on a protected branch (`main`, `master`, `develop`, `release/*`) — judged against the worktree the target file sits in, falling back to the project directory when the payload names no path — refuses a push naming one from any branch, and refuses `gh pr merge` from every branch |
+| `branch-stack.sh`  | `PreToolUse` on `Bash`                                  | returns `ask` when a new branch would take the stack past `BRANCH_STACK_MAX` (default 3)                                                                                                                                                                                                              |
+| `session-brief.sh` | `SessionStart`                                          | prints the contract; on `trigger=compact` it also inlines the three rules and `FINISHING.md`'s four questions                                                                                                                                                                                         |
+| `commit-brief.sh`  | `PreToolUse` on `Bash`                                  | prints `FINISHING.md`'s four questions when the command is a `git commit`; carries no permission decision at all                                                                                                                                                                                      |
 
 `lib.sh` holds what they share. `test-hooks.sh` is the suite, behind `pnpm test:hooks`, which you run
 if you change a script; `pnpm hooks:brief` and `pnpm hooks:commit-brief` render the two briefs on
@@ -93,6 +96,40 @@ found, as the third instance of `lib.sh`'s `jsonEscape` defect.
 check matches only at command position, so prose and commit messages may discuss it freely. The push
 check does not, and that is a known defect rather than a design choice — `PLAN.md` carries it.
 
+### Rule 3 has no guard, so what is written here is the mechanism
+
+`STARTING.md` says the branch gets its own worktree and cites this section for how. Nothing below
+is enforced; it is the procedure the rule names, kept in one place so neither budgeted document has
+to carry it.
+
+```
+git worktree add -b fix/<slug> ../the-jira-police-<slug> origin/main
+```
+
+- **Cut from `origin/main`, not from `HEAD`.** Omitting the last argument stacks the new worktree on
+  whatever branch you were standing on, silently, which is the stacking `branch-stack.sh` counts.
+- **It is not a working checkout yet.** `.env` and `node_modules/` are gitignored, so copy the first
+  and `pnpm install` the second, or the suite fails for a reason unrelated to the change.
+- **Remove it in the same breath as the branch.** `git worktree remove` never deletes a branch and
+  `git branch -d` never removes a worktree, so each one left behind orphans the other.
+- **A human can waive the rule.** Nothing mechanical can, and nothing mechanical will notice.
+
+**`branch-guard.sh` allows exactly the first line above from a protected branch, and nothing
+adjacent to it** — the remedy-must-not-be-blocked property, applied to a rule the same script does
+not enforce. The hatch requires a `-b`, refuses a `-b` naming a protected branch, and refuses every
+other spelling: `add` without `-b` checks out a branch that already exists, and `-B` _resets_ one,
+so `git worktree add -Bmain ../d` would be rule 1 spelled as its own remedy. That last form is the
+reason the suite asserts the attached spellings (`-bmain`, `-Bmain`) and not just the separated
+ones: widening the hatch from `-b?*` to `-[bB]?*` is a one-character edit, and until those
+assertions existed it broke nothing the suite could see.
+
+**One consequence is left unfixed because it over-asks rather than under-refuses.**
+`unmergedBranches` (`lib.sh:62`) drops the project directory's own HEAD from the stack count, which
+assumed the agent stands on the branch it is working on. With the primary checkout parked on `main`
+that exclusion matches nothing, so the branch you are working on is counted in its own depth and
+`branch-stack.sh` asks one branch earlier than `BRANCH_STACK_MAX` says. Fixing it means unioning
+every worktree's HEAD, and an `ask` that arrives early is not worth widening this branch for.
+
 ### The hook configuration: three routes, and they do not agree
 
 The settings file that registers these hooks is a tracked file in this tree, and what an agent may do
@@ -126,8 +163,8 @@ stops it is what stops any bad change: it must be made on a branch, it lands in 
 reads, and CI runs the hook suite against it. **Review is the protection.** The write ban protects the
 wiring, not the wire.
 
-So the standing instruction is to behave as though none of this is registered. The two rules bind on
-their own authority, never on a guard's.
+So the standing instruction is to behave as though none of this is registered. The three rules bind
+on their own authority, never on a guard's — and rule 3 has no guard to mistake for one.
 
 ### What the suite proves, and five things it does not
 

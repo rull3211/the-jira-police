@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 #
-# PreToolUse guard for both of CLAUDE.md's non-advisory rules: the agent never
-# writes on a protected branch or pushes to one, and never merges anything.
+# PreToolUse guard for rules 1 and 2 of CLAUDE.md: the agent never writes on a
+# protected branch or pushes to one, and never merges anything.
+#
+# Rule 3 — work in a worktree — has no mechanical enforcement anywhere, and this
+# script is not it. What it does instead is stay out of the way of the remedy:
+# `worktree add -b` is allowed off a protected branch, and a write is judged
+# against the worktree it lands in rather than the one the session started in.
 #
 # This exists because the rules it enforces are the ones whose violation cannot
 # be undone by the person who notices. Everything else in the house rules is a
@@ -33,22 +38,89 @@ deny() {
 
 branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 
+# The branch the *target file* is on, which is not always the one above. Rule 3
+# makes a worktree the ordinary place work happens, so the project directory and
+# the file being written routinely sit on different branches — and before this,
+# only the project directory was ever consulted, so a write into the `main`
+# worktree was allowed whenever the project directory stood on a feature branch.
+#
+# Walks up to the nearest directory that exists, because a `Write` creating a
+# file names a path that does not.
+targetBranch() {
+  local path="$1" dir
+  # A relative path has no worktree we can name: the tool's cwd is not in the
+  # payload, so resolving it against `$repo` would be a guess. Refuse instead.
+  case "$path" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  dir="$(dirname "$path")"
+  while [ ! -d "$dir" ]; do
+    case "$dir" in
+      / | .) return 1 ;;
+    esac
+    dir="$(dirname "$dir")"
+  done
+  git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null
+}
+
 # `node` rather than `jq`: this project already requires Node, and jq is not a
 # stated dependency. A parse failure yields an empty string and the guard falls
 # through to the branch check, which is the safe direction.
-command_text="$(
+#
+# Two fields come back, path first and command second, because a command may
+# contain newlines and a path we would act on may not — any newline in the path
+# is flattened to a space, which makes it fail the absolute-path test below and
+# so fail closed.
+parsed="$(
   printf '%s' "$payload" | node -e '
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
       try {
         const j = JSON.parse(s);
-        process.stdout.write(String((j.tool_input && j.tool_input.command) || ""));
+        const ti = j.tool_input || {};
+        const p = String(ti.file_path || ti.notebook_path || "").replace(/[\r\n]/gu, " ");
+        process.stdout.write(p + "\n" + String(ti.command || ""));
       } catch {
-        process.stdout.write("");
+        process.stdout.write("\n");
       }
     });
   ' 2>/dev/null || true
 )"
+# Split on the *first* newline, and only if there is one. `$(...)` strips
+# trailing newlines, so a payload with a path and no command arrives as a single
+# line — and `${parsed#*$'\n'}` on a string with no newline returns the string
+# unchanged, which silently made `command_text` the file path. It then parsed as
+# a non-git command, `mutates` went to `no`, and every write was allowed.
+case "$parsed" in
+  *$'\n'*)
+    target_path="${parsed%%$'\n'*}"
+    command_text="${parsed#*$'\n'}"
+    ;;
+  *)
+    target_path="$parsed"
+    command_text=""
+    ;;
+esac
+
+# Precedence, not a second opinion: where the payload names a file inside a
+# worktree, that worktree is what the write lands on and the project directory
+# is irrelevant to it. Anything less specific — a `Bash` call, an unresolvable
+# path, a file under no repository at all — falls back to the project directory,
+# so the over-refusal recorded below is kept for exactly the cases that still
+# cannot name their target.
+#
+# Ordering is load-bearing and was got wrong once: this reads `target_path`, so
+# it has to sit below the parse. Above it, `set -u` killed the script before any
+# refusal was printed, and a guard that prints nothing is read as "allow".
+target_branch=""
+if [ -n "$target_path" ]; then
+  target_branch="$(targetBranch "$target_path" || true)"
+fi
+effective_branch="$branch"
+if [ -n "$target_branch" ]; then
+  effective_branch="$target_branch"
+fi
 
 # Rule 2, and it is not a question about which branch you are standing on: this
 # repository has no merge path and neither does the agent. Checked before the
@@ -135,6 +207,61 @@ fi
 # one non-obvious decision here. Command-position analysis cannot see inside
 # `sh -c '...'`, so dropping it would have opened a hole while closing thirty.
 # The two are a union: either one is enough to call the command a write.
+# `git worktree add -b <branch>` is the escape hatch in its fourth spelling, and
+# rule 3 makes it the one work normally starts with — so refusing it from a
+# protected branch traps the agent exactly the way refusing `switch -c` would,
+# with the added sting that the denial text names it as the remedy.
+#
+# Fail closed on everything else the subcommand can do. `-B` resets an existing
+# branch and can therefore move `main`; a protected `-b` name is the same act
+# spelled forwards; `add` with no `-b` checks out an existing branch, which may
+# be the protected one; and an option this function does not recognise is
+# treated as a write, so a future flag is refused on the day it ships rather
+# than allowed. The path and commit-ish arguments are not examined — `origin/main`
+# as a *base* is what every worktree here is cut from.
+worktreeAddIsEscape() {
+  local sawB=no name=""
+
+  set -f
+  # shellcheck disable=SC2086
+  set -- $1
+  set +f
+
+  shift # `add`, matched by the caller
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -b)
+        shift
+        [ $# -gt 0 ] || return 1
+        name="$1"
+        sawB=yes
+        ;;
+      -b?*)
+        name="${1#-b}"
+        sawB=yes
+        ;;
+      --reason)
+        shift
+        [ $# -gt 0 ] || return 1
+        ;;
+      -f | --force | -q | --quiet | --checkout | --no-checkout | --track | --no-track | \
+        --guess-remote | --no-guess-remote | --relative-paths | --no-relative-paths) ;;
+      -*) return 1 ;;
+      *) ;;
+    esac
+    shift
+  done
+
+  [ "$sawB" = yes ] || return 1
+
+  case "$name" in
+    main | master | develop | release/*) return 1 ;;
+  esac
+
+  return 0
+}
+
 gitSegmentWrites() {
   local verb rest
 
@@ -220,7 +347,12 @@ gitSegmentWrites() {
     stash) case "$rest" in list* | show*) return 1 ;; esac ;;
     reflog) case "$rest" in "" | show*) return 1 ;; esac ;;
     tag) case "$rest" in "" | -l* | --list* | -n*) return 1 ;; esac ;;
-    worktree) case "$rest" in list*) return 1 ;; esac ;;
+    worktree)
+      case "$rest" in
+        list*) return 1 ;;
+        add | add\ *) worktreeAddIsEscape "$rest" && return 1 ;;
+      esac
+      ;;
     notes) case "$rest" in list* | show*) return 1 ;; esac ;;
     submodule) case "$rest" in status* | summary* | foreach*) return 1 ;; esac ;;
     bisect) case "$rest" in log* | view* | visualize*) return 1 ;; esac ;;
@@ -297,9 +429,15 @@ EOF
 fi
 
 if [ "$mutates" = yes ]; then
-  case "$branch" in
+  case "$effective_branch" in
     main | master | develop | release/*)
-      deny "On protected branch '$branch', where this repository never accepts agent work. Create an implementation branch and retry: git switch -c feat/<slug> (or fix/, chore/, docs/, refactor/). Do not work around this guard — if branching is genuinely wrong here, ask. See CLAUDE.md."
+      # Two refusals because they are two different mistakes, and the remedy
+      # differs: one is standing in the wrong place, the other is reaching into
+      # it from a worktree that is perfectly fine.
+      if [ -n "$target_branch" ] && [ "$target_branch" != "$branch" ]; then
+        deny "This writes into a checkout that is on protected branch '$target_branch' ($target_path), even though this session's project directory is on '$branch'. The checkout the write lands in is the one that counts, not the one you are standing in. Write inside a worktree that is on an implementation branch instead. See CLAUDE.md."
+      fi
+      deny "On protected branch '$effective_branch', where this repository never accepts agent work. Cut a worktree and work there, which is rule 3: git worktree add -b fix/<slug> ../<dir> origin/main (or feat/, chore/, docs/, refactor/). To move this checkout instead: git switch -c fix/<slug>. Do not work around this guard — if branching is genuinely wrong here, ask. See CLAUDE.md."
       ;;
   esac
 fi

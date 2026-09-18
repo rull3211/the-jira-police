@@ -125,7 +125,7 @@ if [ "$trigger" = "compact" ]; then
   # with the line that opened it. Matching only the first line of each looked
   # right in the file and cut every sentence in half on the way out — found by
   # running it, which is the only way this class of defect is ever found.
-  rules="$(awk '/^## Two rules that are not advisory/{f=1;next} f&&/^## /{exit}
+  rules="$(awk '/^## Three rules that are not advisory/{f=1;next} f&&/^## /{exit}
                 f&&/^[0-9]+\. /{p=1} f&&p&&/^$/{p=0} f&&p{print}' \
     "$repo/CLAUDE.md" 2>/dev/null || true)"
   checklist="$(awk '/^## The checklist/{f=1;next} f&&/^\*\*And the rules/{exit}
@@ -139,7 +139,7 @@ if [ "$trigger" = "compact" ]; then
 
   if [ -n "$rules" ]; then
     echo
-    echo "The two that are not advisory, from CLAUDE.md:"
+    echo "The three that are not advisory, from CLAUDE.md:"
     printf '%s\n' "$rules"
   fi
 
