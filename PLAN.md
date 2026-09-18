@@ -53,7 +53,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §42, §43 and §44, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43 and §44, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -120,10 +120,13 @@ entries without touching the list that was supposed to gain them, and its messag
 "nothing else in the tree cited either number", which was true of every other file and not of the
 paragraph it was editing. **A deletion-only commit cannot update a list, and nothing here checks
 that it did**; both numbers were picked by reading the last heading rather than this line, which is
-how one of them came to be issued twice. §41 was the audit that found it — this branch — opened in
-`d57d087` and closed in `4549b8a`; a concurrently open sibling reached for §41 as well before
-checking `git log --all`, so this document's own "next entry" pointer is a per-branch guess, good
-only until whichever of two open branches merges second finds it already wrong. §42 was every
+how one of them came to be issued twice. §41 was the audit that found it and repaired this list,
+opened and closed inside the branch that ran it — the shape §26, §27, §28, §30 and §32 have. Its own
+commits are deliberately not cited by hash: a stacked branch is rebased whenever its base moves, and
+a hash it wrote about itself is dangling the moment that happens. A concurrently open sibling reached
+for §41 as well before checking `git log --all`, so this document's own "next entry" pointer is a
+per-branch guess, good only until whichever of two open branches merges second finds it already
+wrong. §42 was every
 non-`verified`, non-`escaped` solve outcome — `unusable-base`, `refused`, `crashed`, `no-worktree`
 and an environment `abandoned`, alongside the `failed` §7 already handled — routed to `agent:failed`
 so a ticket that cannot currently be judged stops looping silently and a human has to clear it,
@@ -880,54 +883,6 @@ and the run is gone.
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
-
-### 41. This file's own coordinates rotted, and its hole list stopped being complete
-
-<!-- refs:off -->
-
-**Branch:** `docs/plan-audit`, stacked on `fix/worktree-rule-and-guard-scope` (PR #59).
-
-**What is being attempted.** A verification pass over every claim in this file, and a repair of what
-it found: the hole list is missing §34, §35 and §38; §40 was issued twice; roughly twenty `file:line`
-citations point at lines that moved or no longer exist; four counts drifted; and §14's site table —
-the artifact that section exists to avoid regenerating — was invalidated wholesale when
-`ARCHITECTURE.md` split into `architecture/*.md`.
-
-**Why now.** §38's omission is one commit old (`803d2f4`, 78 deletions and no insertions, so it never
-touched the hole line), which makes this the cheapest it will ever be to fix, and the §40 collision
-is on an open pull request rather than in history. The rest is the arrears behind them.
-
-**What it would let the service do that it cannot do today.** Nothing — this is a document change.
-What it buys is that a reader who follows a citation lands on the thing it names, and that the hole
-list can be trusted as the answer to "did §34 ship or was it abandoned", which is the one question it
-exists to answer.
-
-**What would make it the wrong idea.** Three things, and the first is the serious one:
-
-- **Regenerating §14's table re-runs the audit whose cost the section was written to avoid**, and a
-  batch pass by an agent is exactly how forty confident references to nothing got there. Every row
-  must come from the checker rather than from a search, and the count must stay pinned at 40 with
-  `docs:check` green either side, or the regeneration has quietly become a fix.
-- **Rewriting a stale line number is worth less than deleting the citation.** Where a coordinate has
-  rotted twice, the honest repair may be to name the symbol and drop the line — a number that rots on
-  every refactor is rule 3's own example, and re-pinning it just restarts the clock.
-- **Stacking on #59 means this cannot merge until that does**, and a document branch is a poor reason
-  to add a floor. If #59 stalls, the §38/§40 half should be moved onto it and the rest rebased.
-
-**Refuted on the first run.** This entry was written outside a `refs:off` region and immediately
-added nine dangling citations of its own, taking the run from 40 to 49 — the same
-write-up-perturbs-its-own-count failure §14 is built around, committed by the entry proposing to fix
-it. The region below is the remedy §14 already documents.
-
-**The serious risk above was refuted too, in the cheapest possible way.** Regenerating §14's table
-did not re-run the audit: lowering `KNOWN_DANGLING` makes `docs:check` print all forty sites from the
-resolver that already walks them, so the table came from the checker in one command and was
-spot-checked at twelve lines rather than rebuilt by search. The count stayed at 40 either side. What
-that refutes is not the caution but the premise underneath it — §14 said regenerating was the
-expensive half, and it had been false since the resolver shipped, which is the more useful finding
-than any row in the table.
-
-<!-- refs:on -->
 
 ## Verification
 
