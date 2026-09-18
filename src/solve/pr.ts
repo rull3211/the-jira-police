@@ -7,11 +7,13 @@
  * non-work branch.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { assertWorkBranch, isProtectedRef } from "./branch.ts";
 import { BOT_PREFIX, isOurs } from "./marker.ts";
 import { newestInstant } from "./silence.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
+
+const log = createLogger("solve");
 
 /** `@copilot`, GitHub's own review bot; the loop assumes a reviewer that answers without paging a human. */
 export const COPILOT_REVIEWER = "@copilot";
@@ -355,7 +357,7 @@ export async function commitAll(
     // exiting non-zero.
     const output = committed.stdout.toLowerCase();
     if (!committed.timedOut && NOTHING_TO_COMMIT.some((phrase) => output.includes(phrase))) {
-      logger.info("solve.pr.nothing_to_commit", { worktreePath });
+      log.info("solve.pr.nothing_to_commit", { worktreePath });
       return { outcome: "nothing-to-commit" };
     }
     return { outcome: "failed", reason: `could not commit (${why(committed)})` };
@@ -379,7 +381,7 @@ export async function commitAll(
     };
   }
 
-  logger.info("solve.pr.committed", { worktreePath, sha });
+  log.info("solve.pr.committed", { worktreePath, sha });
   return { outcome: "committed", sha };
 }
 
@@ -407,7 +409,7 @@ export async function push(runner: CommandRunner, request: PushRequest): Promise
     };
   }
 
-  logger.info("solve.pr.pushed", { branch });
+  log.info("solve.pr.pushed", { branch });
   return { outcome: "pushed" };
 }
 
@@ -471,7 +473,7 @@ export async function createDraftPr(
     };
   }
 
-  logger.info("solve.pr.created", { repo, branch, number: parsed.number });
+  log.info("solve.pr.created", { repo, branch, number: parsed.number });
   return { outcome: "created", number: parsed.number, url: parsed.url };
 }
 
@@ -526,7 +528,7 @@ export async function requestReview(
     };
   }
 
-  logger.info("solve.pr.review_requested", { repo, number, reviewer });
+  log.info("solve.pr.review_requested", { repo, number, reviewer });
   return { outcome: "requested" };
 }
 
@@ -1105,7 +1107,7 @@ export async function readReviewThreads(
   }
 
   const open = threads.filter((thread) => !thread.isResolved).length;
-  logger.info(
+  log.info(
     "solve.pr.threads_read",
     { repo, number, threads: threads.length, open },
     // `open`, not `threads.length`: keying on the total would mark a pull
@@ -1218,7 +1220,7 @@ export async function replyToThread(
     };
   }
 
-  logger.info("solve.pr.thread_replied", { threadId, url });
+  log.info("solve.pr.thread_replied", { threadId, url });
   return { outcome: "replied", reply: { threadId, commentUrl: url } };
 }
 
@@ -1271,7 +1273,7 @@ export async function resolveThread(
     };
   }
 
-  logger.info("solve.pr.thread_resolved", { threadId: reply.threadId, reply: reply.commentUrl });
+  log.info("solve.pr.thread_resolved", { threadId: reply.threadId, reply: reply.commentUrl });
   return { outcome: "resolved" };
 }
 
@@ -1375,7 +1377,7 @@ export async function postComment(
     };
   }
 
-  logger.info("solve.pr.commented", { repo, number, commentId: id });
+  log.info("solve.pr.commented", { repo, number, commentId: id });
   return { outcome: "written", commentId: id };
 }
 
@@ -1420,7 +1422,7 @@ export async function editComment(
     };
   }
 
-  logger.info("solve.pr.comment_edited", { commentId: id });
+  log.info("solve.pr.comment_edited", { commentId: id });
   return { outcome: "written", commentId: id };
 }
 
@@ -1446,7 +1448,7 @@ export async function markReady(
     };
   }
 
-  logger.info("solve.pr.ready", { repo, number });
+  log.info("solve.pr.ready", { repo, number });
   return { outcome: "ready" };
 }
 

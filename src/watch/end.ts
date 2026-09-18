@@ -5,10 +5,12 @@
  */
 
 import type { IssueActivity, JiraClient } from "../jira/client.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { TicketCommenter } from "../solve/feedback.ts";
 import type { UnsubscribeReason } from "./decide.ts";
 import { unsubscribeEdit, unsubscribeNote } from "./unsubscribe.ts";
+
+const log = createLogger("watch");
 
 export interface EndWatchDeps {
   readonly client: Pick<JiraClient, "updateLabels">;
@@ -31,20 +33,20 @@ export async function endWatch(
 ): Promise<"unsubscribed" | "not-watched"> {
   const edit = unsubscribeEdit(activity.labels);
   if (edit === null) {
-    logger.info("watch.unsubscribe.skipped", { key, reason, why: "not watched" });
+    log.info("watch.unsubscribe.skipped", { key, reason, why: "not watched" });
     return "not-watched";
   }
 
   await deps.client.updateLabels(key, edit);
-  logger.info("watch.unsubscribed", { key, reason });
+  log.info("watch.unsubscribed", { key, reason });
 
   const note = unsubscribeNote(reason);
   if (note !== null) {
     try {
       await deps.commenter.comment(key, note);
-      logger.info("watch.unsubscribe.commented", { key });
+      log.info("watch.unsubscribe.commented", { key });
     } catch (error) {
-      logger.warn("watch.unsubscribe.comment_failed", {
+      log.warn("watch.unsubscribe.comment_failed", {
         key,
         error: error instanceof Error ? error.message : String(error),
       });

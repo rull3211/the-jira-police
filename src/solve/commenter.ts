@@ -16,10 +16,12 @@
  * prompt and the instruction not to alter it is given twice.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { TicketCommenter } from "./feedback.ts";
 import { childEnv } from "../triage/runner.ts";
 import { DENIED_BUILTIN_TOOLS, runSession } from "../triage/session.ts";
+
+const log = createLogger("solve");
 
 /**
  * One write tool, and the one read that write cannot be called without.
@@ -168,7 +170,7 @@ export function parseCommentReceipt(value: unknown): {
 export function createTicketCommenter(options: CommenterOptions): TicketCommenter {
   return {
     comment: async (issueKey: string, body: string): Promise<void> => {
-      logger.info("solve.comment.start", { issueKey, bytes: body.length });
+      log.info("solve.comment.start", { issueKey, bytes: body.length });
 
       const receipt = await runSession(
         {
@@ -193,9 +195,9 @@ export function createTicketCommenter(options: CommenterOptions): TicketCommente
       }
 
       if (receipt.problems.length > 0) {
-        logger.warn("solve.comment.notes", { issueKey, problems: receipt.problems });
+        log.warn("solve.comment.notes", { issueKey, problems: receipt.problems });
       }
-      logger.info("solve.comment.posted", { issueKey });
+      log.info("solve.comment.posted", { issueKey });
     },
   };
 }

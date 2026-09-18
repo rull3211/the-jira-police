@@ -7,10 +7,12 @@
  * (`getJiraIssue`, `atlassianUserInfo`) so the label union and comment idempotency can be checked.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { childEnv } from "./runner.ts";
 import type { Mutation } from "./runner.ts";
 import { DENIED_BUILTIN_TOOLS, runSession } from "./session.ts";
+
+const log = createLogger("post");
 
 /**
  * Read tools the write genuinely needs. `getJiraIssue` supplies current labels/comments to match
@@ -228,7 +230,7 @@ export function findLabelDiscrepancies(
  * error line on an otherwise clean run trains a team to ignore error lines.
  */
 export async function runPost(options: PostOptions): Promise<PostReceipt> {
-  logger.info("post.start", {
+  log.info("post.start", {
     issueKey: options.issueKey,
     commentAction: options.mutation.commentAction,
   });
@@ -250,13 +252,13 @@ export async function runPost(options: PostOptions): Promise<PostReceipt> {
   const discrepancies = findLabelDiscrepancies(options.mutation, receipt);
 
   if (discrepancies.length > 0) {
-    logger.error("post.incomplete", {
+    log.error("post.incomplete", {
       issueKey: options.issueKey,
       discrepancies,
       problems: receipt.problems,
     });
   } else if (receipt.problems.length > 0) {
-    logger.warn("post.notes", { issueKey: options.issueKey, problems: receipt.problems });
+    log.warn("post.notes", { issueKey: options.issueKey, problems: receipt.problems });
   }
 
   if (receipt.commentAction === "skipped") {
@@ -267,7 +269,7 @@ export async function runPost(options: PostOptions): Promise<PostReceipt> {
     );
   }
 
-  logger.info("post.done", {
+  log.info("post.done", {
     issueKey: options.issueKey,
     commentAction: receipt.commentAction,
     labels: receipt.labelsWritten.length,

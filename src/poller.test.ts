@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { logger } from "./logger.ts";
+import { createLogger } from "./logger.ts";
 import { type PollDeps, runPollCycle } from "./poller.ts";
 import type { OutputSink, TriageResult } from "./output/sink.ts";
 import type { TicketRef } from "./jira/types.ts";
@@ -480,7 +480,7 @@ describe("runPollCycle", () => {
     const NEW = ticket("SSX-3", "2026-09-02T10:10:00Z");
 
     it("reports the queue when an order is configured", async () => {
-      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+      const info = vi.spyOn(createLogger("poll"), "info").mockImplementation(() => {});
 
       await runPollCycle(
         EMPTY_STATE,
@@ -500,7 +500,7 @@ describe("runPollCycle", () => {
 
     /** Must stay silent, not merely correct — no line to read on every cycle that says nothing. */
     it("says nothing at all when no order is configured", async () => {
-      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+      const info = vi.spyOn(createLogger("poll"), "info").mockImplementation(() => {});
 
       await runPollCycle(EMPTY_STATE, deps({ fetchCandidates: async () => [OLD, NEW] }));
 
@@ -514,7 +514,7 @@ describe("runPollCycle", () => {
       const many = Array.from({ length: 12 }, (_, index) =>
         ticket(`SSX-${index + 10}`, `2026-09-02T10:${String(index).padStart(2, "0")}:00Z`),
       );
-      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+      const info = vi.spyOn(createLogger("poll"), "info").mockImplementation(() => {});
 
       await runPollCycle(
         EMPTY_STATE,
@@ -532,7 +532,7 @@ describe("runPollCycle", () => {
     /** Jira can omit the status name; printing an empty string there would be unreadable exactly when something's wrong. */
     it("falls back to the status id when the name is empty", async () => {
       const nameless: TicketRef = { ...OLD, statusId: "10165", statusName: "" };
-      const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+      const info = vi.spyOn(createLogger("poll"), "info").mockImplementation(() => {});
 
       await runPollCycle(
         EMPTY_STATE,

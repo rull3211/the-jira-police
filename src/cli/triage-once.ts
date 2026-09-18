@@ -13,11 +13,13 @@
  * flag never posts to a shared ticket regardless of the daemon's own configuration.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { FileSink } from "../output/sink.ts";
 import { type Settings, readSettings, withConfigErrors } from "../settings.ts";
 import { syntheticTicket, toTriageResult } from "../triage/single.ts";
 import { buildTriageOptions, createGroom, shouldPost } from "../wiring.ts";
+
+const log = createLogger("triage-once");
 
 function flagValue(argv: readonly string[], name: string): string | undefined {
   const index = argv.indexOf(name);
@@ -67,7 +69,7 @@ async function main(): Promise<void> {
   const sink = new FileSink(settings.OUTPUT_DIR);
   await sink.write(result);
 
-  logger.info("triage-once.written", {
+  log.info("triage-once.written", {
     issueKey,
     verdict: result.verdict,
     path: `${settings.OUTPUT_DIR}/${issueKey}.md`,

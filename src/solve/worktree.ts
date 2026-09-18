@@ -3,8 +3,10 @@
  * Every git command is an argv array handed to an injected runner, never a shell string, since a Jira summary is attacker-controlled.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { isWorkBranch, WORK_BRANCH_PREFIXES } from "./branch.ts";
+
+const log = createLogger("solve");
 
 export interface CommandResult {
   readonly exitCode: number;
@@ -200,7 +202,7 @@ export async function createWorktree(
     return refuse(`could not create the worktree (${why(added)})`);
   }
 
-  logger.info("solve.worktree.created", { issueKey, path, branch, baseRef });
+  log.info("solve.worktree.created", { issueKey, path, branch, baseRef });
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
 }
 
@@ -286,7 +288,7 @@ export async function attachWorktree(
     );
   }
 
-  logger.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: false });
+  log.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: false });
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
 }
 
@@ -396,7 +398,7 @@ async function reuseWorktree(
     }
   }
 
-  logger.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: true, behind });
+  log.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: true, behind });
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
 }
 
@@ -455,7 +457,7 @@ async function salvageWorktree(
     }
   }
 
-  logger.warn("solve.worktree.salvaged", { issueKey, path, salvagePath, branch, reason });
+  log.warn("solve.worktree.salvaged", { issueKey, path, salvagePath, branch, reason });
   return null;
 }
 
@@ -480,7 +482,7 @@ export async function removeWorktree(
   timeoutMs: number,
 ): Promise<RemoveResult> {
   if (disposition === "keep-as-evidence") {
-    logger.info("solve.worktree.kept", { issueKey: worktree.issueKey, path: worktree.path });
+    log.info("solve.worktree.kept", { issueKey: worktree.issueKey, path: worktree.path });
     return {
       outcome: "kept",
       path: worktree.path,
@@ -500,7 +502,7 @@ export async function removeWorktree(
     };
   }
 
-  logger.info("solve.worktree.removed", { issueKey: worktree.issueKey, path: worktree.path });
+  log.info("solve.worktree.removed", { issueKey: worktree.issueKey, path: worktree.path });
 
   const branch = await deleteBranch(runner, worktree, timeoutMs);
   return { outcome: "removed", path: worktree.path, branch };
@@ -522,7 +524,7 @@ async function deleteBranch(
     { cwd: worktree.repoPath, timeoutMs },
   );
   if (failed(deleted)) {
-    logger.info("solve.branch.kept", {
+    log.info("solve.branch.kept", {
       issueKey: worktree.issueKey,
       branch: worktree.branch,
       reason: why(deleted),
@@ -530,6 +532,6 @@ async function deleteBranch(
     return { outcome: "kept", reason: `git would not delete it (${why(deleted)})` };
   }
 
-  logger.info("solve.branch.deleted", { issueKey: worktree.issueKey, branch: worktree.branch });
+  log.info("solve.branch.deleted", { issueKey: worktree.issueKey, branch: worktree.branch });
   return { outcome: "deleted" };
 }

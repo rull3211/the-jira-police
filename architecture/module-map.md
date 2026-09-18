@@ -10,24 +10,25 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-85 production modules, 75 test files. Grouped by what they belong to rather than alphabetically,
+86 production modules, 76 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
 
-| Path                    | Role                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/index.ts`          | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                               |
-| `src/loop.ts`           | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                         |
-| `src/poller.ts`         | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                               |
-| `src/review-loop.ts`    | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                              |
-| `src/watch-loop.ts`     | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                              |
-| `src/wiring.ts`         | **The composition.** Every `create*Deps` and every `build*Request`, for all six entry points                                                                 |
-| `src/settings.ts`       | Declarative settings table + generic reader, with a `sensitive` marker                                                                                       |
-| `src/logger.ts`         | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did                                                                |
-| `src/duration.ts`       | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                          |
-| `src/text.ts`           | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows             |
-| `src/read-only-tree.ts` | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair |
+| Path                       | Role                                                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`             | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                                 |
+| `src/loop.ts`              | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                           |
+| `src/poller.ts`            | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                 |
+| `src/review-loop.ts`       | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                |
+| `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                |
+| `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all six entry points                                                                   |
+| `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                         |
+| `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger         |
+| `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide |
+| `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                            |
+| `src/text.ts`              | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows               |
+| `src/read-only-tree.ts`    | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair   |
 
 **Jira**
 

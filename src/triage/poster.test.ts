@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { ALLOWED_TOOLS, type Mutation } from "./runner.ts";
 
 // Stubs the subprocess, so nothing here can reach storecode or Jira.
@@ -345,8 +345,8 @@ describe("findLabelDiscrepancies", () => {
 describe("post logging severity", () => {
   it("does NOT log an error when the write completed and the notes are advisory", async () => {
     // An error line on a successful run is how a team learns to ignore error lines.
-    const error = vi.spyOn(logger, "error").mockImplementation(() => {});
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(createLogger("post"), "error").mockImplementation(() => {});
+    const warn = vi.spyOn(createLogger("post"), "warn").mockImplementation(() => {});
 
     runSession.mockResolvedValueOnce(
       receipt({
@@ -366,7 +366,7 @@ describe("post logging severity", () => {
 
   it("DOES log an error when the labels that landed are not the ones requested", async () => {
     // Severity is decided against the receipt's structured fields, never the model's own prose.
-    const error = vi.spyOn(logger, "error").mockImplementation(() => {});
+    const error = vi.spyOn(createLogger("post"), "error").mockImplementation(() => {});
 
     runSession.mockResolvedValueOnce(
       receipt({ commentAction: "updated", labelsWritten: [], problems: [] }),
@@ -379,8 +379,8 @@ describe("post logging severity", () => {
   });
 
   it("logs nothing at all on a clean write", async () => {
-    const error = vi.spyOn(logger, "error").mockImplementation(() => {});
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(createLogger("post"), "error").mockImplementation(() => {});
+    const warn = vi.spyOn(createLogger("post"), "warn").mockImplementation(() => {});
 
     runSession.mockResolvedValueOnce(receipt({ labelsWritten: ["dor:pass"] }));
     await runPost(options({ labelsAdd: ["dor:pass"] }));

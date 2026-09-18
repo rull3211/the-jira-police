@@ -6,7 +6,7 @@
  */
 
 import { parseDuration } from "./duration.ts";
-import { logger } from "./logger.ts";
+import { createLogger } from "./logger.ts";
 import { runLoop } from "./loop.ts";
 import { runPollCycle } from "./poller.ts";
 import { createReviewLoop } from "./review-loop.ts";
@@ -22,6 +22,10 @@ import { loadState } from "./state/store.ts";
 import { createWatchLoop } from "./watch-loop.ts";
 import { createWatchMemo } from "./watch/memo.ts";
 import { createJiraClient, createPollDeps, pollIntervalMs } from "./wiring.ts";
+
+const cycleLog = createLogger("cycle");
+const serviceLog = createLogger("service");
+const shutdownLog = createLogger("shutdown");
 
 /** Backoff ceiling. Long enough to stop hammering, short enough to recover unattended. */
 const BACKOFF_CAP_MS = 15 * 60 * 1000;
@@ -49,11 +53,11 @@ function createShutdown(runForMs: number | undefined): AbortController {
 
   const stop = (reason: string): void => {
     if (requested) {
-      logger.warn("shutdown.forced", { reason });
+      shutdownLog.warn("shutdown.forced", { reason });
       process.exit(130);
     }
     requested = true;
-    logger.info("shutdown.requested", { reason, note: "finishing the current cycle" });
+    shutdownLog.info("shutdown.requested", { reason, note: "finishing the current cycle" });
     controller.abort();
   };
 
@@ -75,12 +79,12 @@ function createShutdown(runForMs: number | undefined): AbortController {
 /** Logs unhandled rejections and exceptions before exiting; anything reaching here bypassed `runLoop`'s own catch and would otherwise be lost silently. */
 function logUnexpectedExits(): void {
   process.on("unhandledRejection", (reason) => {
-    logger.error("service.unhandled_rejection", { error: reason });
+    serviceLog.error("service.unhandled_rejection", { error: reason });
     process.exitCode = 1;
   });
 
   process.on("uncaughtException", (error) => {
-    logger.error("service.uncaught_exception", { error });
+    serviceLog.error("service.uncaught_exception", { error });
     process.exit(1);
   });
 }
@@ -95,7 +99,7 @@ async function main(): Promise<void> {
   const runForMs = runForRaw === undefined ? undefined : parseDuration(runForRaw);
   const intervalMs = pollIntervalMs(settings);
 
-  logger.info("service.start", {
+  serviceLog.info("service.start", {
     ...describeSettings(settings),
     runForMs: runForMs ?? "unbounded",
     pid: process.pid,
@@ -131,7 +135,7 @@ async function main(): Promise<void> {
     runCycle: async () => {
       const state = await loadState(settings.STATE_PATH);
       const outcome = await runPollCycle(state, deps);
-      logger.info(
+      cycleLog.info(
         "cycle.done",
         {
           found: outcome.found,
@@ -161,7 +165,7 @@ async function main(): Promise<void> {
     watch === null ? Promise.resolve(null) : runLoop(watch),
   ]);
 
-  logger.info("service.stopped", {
+  serviceLog.info("service.stopped", {
     cycles: groomed.cycles,
     failures: groomed.failures,
     reviewCycles: reviewed?.cycles ?? "off",
