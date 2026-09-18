@@ -14,7 +14,7 @@ import {
   solveTicket,
   solveWithRetry,
 } from "./orchestrator.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
 
 /** The escape, not the byte, so this file stays greppable. See `verify.ts`. */
@@ -551,7 +551,7 @@ describe("solveTicket, and what each pass is given", () => {
     // an opinion — and the reason was returned to a caller that prints a
     // one-word outcome. Both real bails so far were diagnosed by reading a
     // stack trace, because the sentence explaining them reached nobody.
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const info = vi.spyOn(createLogger("solve"), "info").mockImplementation(() => {});
     const { h } = harness(script);
 
     await solveTicket(h.deps, request);
@@ -567,7 +567,7 @@ describe("solveTicket, and what each pass is given", () => {
     // Changes what a human does next: debris in the worktree needs looking at,
     // a clean bail does not. Only representable at all since the coherence rule
     // forbidding "abandoned and changed" was corrected — see `parseFix`.
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const info = vi.spyOn(createLogger("solve"), "info").mockImplementation(() => {});
     const { h } = harness({
       ...FULL,
       fix: fix({
@@ -587,7 +587,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("logs that the write pass ran, since it is the one that spends the privilege", async () => {
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const info = vi.spyOn(createLogger("solve"), "info").mockImplementation(() => {});
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
@@ -601,7 +601,7 @@ describe("solveTicket, and what each pass is given", () => {
 
   it("keeps model-claimed file paths out of the fix log", async () => {
     // `filesTouched` is model-authored text from an editable ticket; the log carries only the count, and the gate keeps the paths.
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const info = vi.spyOn(createLogger("solve"), "info").mockImplementation(() => {});
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);

@@ -8,7 +8,7 @@
  * `SOLVE_REPOS` picks it up next tick with no reset.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { SolveMode } from "../settings.ts";
 import {
   type LabelEdit,
@@ -17,6 +17,8 @@ import {
   eligibility,
   repoFromLabels,
 } from "./labels.ts";
+
+const log = createLogger("solve");
 
 /** A ticket from the solve queue; not `TicketRef` because this queue selects on `labels`, not `created`. */
 export interface SolveCandidate {
@@ -110,14 +112,14 @@ function instant(candidate: SolveCandidate): number {
 /** How many new claims there is room for; any unreadable input reads as zero, never "unlimited". */
 function capacityFor(maxConcurrent: number, inFlight: number): number {
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
-    logger.error("solve.bad_concurrency_limit", {
+    log.error("solve.bad_concurrency_limit", {
       maxConcurrent,
       note: "claiming nothing until MAX_CONCURRENT_SOLVES is a positive integer",
     });
     return 0;
   }
   if (!Number.isInteger(inFlight) || inFlight < 0) {
-    logger.error("solve.bad_in_flight_count", { inFlight, note: "claiming nothing this cycle" });
+    log.error("solve.bad_in_flight_count", { inFlight, note: "claiming nothing this cycle" });
     return 0;
   }
   return Math.max(0, maxConcurrent - inFlight);
@@ -164,7 +166,7 @@ function checkRepo(candidate: SolveCandidate, allowed: ReadonlySet<string>): Rep
 export async function runSolveCycle(deps: SolveDeps): Promise<SolveCycleOutcome> {
   if (!deps.enabled) {
     // Logged, not silent: an operator expecting the queue to run needs to see why it didn't.
-    logger.info("solve.disabled", { note: "SOLVE_ENABLED is off; the queue was not read" });
+    log.info("solve.disabled", { note: "SOLVE_ENABLED is off; the queue was not read" });
     return NOTHING;
   }
 
@@ -211,7 +213,7 @@ export async function runSolveCycle(deps: SolveDeps): Promise<SolveCycleOutcome>
     });
   }
 
-  logger.info("solve.dry_run", {
+  log.info("solve.dry_run", {
     found: candidates.length,
     inFlight,
     capacity,

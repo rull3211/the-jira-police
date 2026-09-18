@@ -9,23 +9,25 @@
  * way to judge `TRIAGE_STATUS_PRIORITY` against a real backlog without paying for a model run.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { runPollCycle } from "../poller.ts";
 import { describeSettings, list, readSettings, withConfigErrors } from "../settings.ts";
 import { isUnseen, loadState } from "../state/store.ts";
 import { byStatusPriority } from "../triage/order.ts";
 import { createDiscover, createJiraClient, createPollDeps } from "../wiring.ts";
 
+const log = createLogger("poll-once");
+
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
 
   const settings = readSettings();
 
-  logger.info("poll-once.settings", describeSettings(settings));
+  log.info("poll-once.settings", describeSettings(settings));
 
   const client = createJiraClient(settings);
   const state = await loadState(settings.STATE_PATH);
-  logger.info("poll-once.state", { cursor: state.cursor, seen: state.seenKeys.length });
+  log.info("poll-once.state", { cursor: state.cursor, seen: state.seenKeys.length });
 
   if (dryRun) {
     const candidates = await createDiscover(settings, client)(state.cursor);
@@ -44,7 +46,7 @@ async function main(): Promise<void> {
       );
     }
 
-    logger.info("poll-once.dry_run", {
+    log.info("poll-once.dry_run", {
       found: candidates.length,
       alreadySeen: candidates.length - fresh.length,
       wouldTriage: fresh.length,
@@ -56,7 +58,7 @@ async function main(): Promise<void> {
 
   const outcome = await runPollCycle(state, createPollDeps(settings, client));
 
-  logger.info("poll-once.done", {
+  log.info("poll-once.done", {
     found: outcome.found,
     skipped: outcome.skipped,
     triaged: outcome.triaged,

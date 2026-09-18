@@ -7,7 +7,7 @@
  * eligibility can still have changed underneath the queue's stale snapshot.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import {
   AGENT_LABELS,
   type ClaimAuthority,
@@ -17,6 +17,8 @@ import {
   eligibility,
   labelEdit,
 } from "./labels.ts";
+
+const log = createLogger("solve");
 
 /**
  * Deliberately not `getJiraIssue`/`editJiraIssue` — an implementation of this cannot transition,
@@ -262,7 +264,7 @@ export async function claimTicket(
     return unverifiedClaim(issueKey, labelsBefore, expected, observed, diff);
   }
 
-  logger.info("solve.claim.written", {
+  log.info("solve.claim.written", {
     issueKey,
     labelsBefore,
     labelsAfter: observed,
@@ -355,7 +357,7 @@ export async function releaseClaim(
     return unverifiedRelease(issueKey, expected, observed, diff);
   }
 
-  logger.info("solve.claim.released", {
+  log.info("solve.claim.released", {
     issueKey,
     labels: observed,
     note: "released and verified — the ticket reads exactly as it did before the claim",
@@ -396,12 +398,12 @@ async function verifiableRead(
 }
 
 function refusedClaim(issueKey: string, reason: string): ClaimResult {
-  logger.info("solve.claim.refused", { issueKey, reason, note: "nothing was written" });
+  log.info("solve.claim.refused", { issueKey, reason, note: "nothing was written" });
   return { outcome: "refused", issueKey, reason };
 }
 
 function refusedRelease(issueKey: string, reason: string): ReleaseResult {
-  logger.info("solve.release.refused", { issueKey, reason, note: "nothing was written" });
+  log.info("solve.release.refused", { issueKey, reason, note: "nothing was written" });
   return { outcome: "refused", issueKey, reason };
 }
 
@@ -415,7 +417,7 @@ function unverifiedClaim(
   const reason = `${issueKey}: the claim write landed but the ticket does not read back as claimed — ${mismatchNotes(
     diff,
   ).join("; ")}. The claim FAILED even though the write succeeded.`;
-  logger.error("solve.claim.unverified", {
+  log.error("solve.claim.unverified", {
     issueKey,
     expected,
     observed,
@@ -445,7 +447,7 @@ function unverifiedRelease(
   const reason = `${issueKey}: the release write landed but the ticket does not read back as it did before the claim — ${mismatchNotes(
     diff,
   ).join("; ")}. The release FAILED even though the write succeeded.`;
-  logger.error("solve.release.unverified", {
+  log.error("solve.release.unverified", {
     issueKey,
     expected,
     observed,

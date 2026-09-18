@@ -8,7 +8,7 @@
  */
 
 import type { IssueActivity, JiraClient } from "../jira/client.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { OutputSink } from "../output/sink.ts";
 import { toTriageResult } from "../triage/single.ts";
 import { describeDecision, describeRetriage } from "../cli/watch-args.ts";
@@ -18,6 +18,8 @@ import { endWatch } from "./end.ts";
 import type { WatchMemo } from "./memo.ts";
 import { type RetriageDeps, runRetriage } from "./retriage.ts";
 import { toWatchSignals } from "./signals.ts";
+
+const log = createLogger("watch");
 
 /** Everything needed to act on a decision. Absent on a dry run, entirely. */
 export interface WatchActing {
@@ -66,7 +68,7 @@ async function look(
   const signals = toWatchSignals(activity);
   const decision = decideWatch(signals, maxRetriage);
 
-  logger.debug("watch.looked", {
+  log.debug("watch.looked", {
     key,
     closed: signals.closed,
     comments: signals.comments.length,
@@ -142,7 +144,7 @@ export async function runWatchSweep(
         failed += 1;
         const message = error instanceof Error ? error.message : String(error);
         deps.report(`          ↳ re-triage failed: ${message}`);
-        logger.warn("watch.sweep.retriage_failed", { key, error: message });
+        log.warn("watch.sweep.retriage_failed", { key, error: message });
       }
     }
   }

@@ -9,7 +9,9 @@
 
 import { spawn } from "node:child_process";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
+
+const log = createLogger("session");
 
 /**
  * Tools withheld from every run this service starts, by name.
@@ -303,7 +305,7 @@ export async function runSession<T>(
         sleptMs += drift;
         // The child was frozen, not quiet; charging this gap to the silence budget would be wrong.
         lastActivityAt += drift;
-        logger.warn("session.slept", {
+        log.warn("session.slept", {
           label: options.label,
           sleptMs: drift,
           totalSleptMs: sleptMs,
@@ -333,7 +335,7 @@ export async function runSession<T>(
           sessionId = id;
           // Logged rather than stored: the only handle to resume a killed pass by hand, and it
           // exists nowhere else once the child is gone.
-          logger.info("session.started", { label: options.label, sessionId });
+          log.info("session.started", { label: options.label, sessionId });
         }
         const servers = Array.isArray(event["mcp_servers"])
           ? (event["mcp_servers"] as McpServerStatus[])
@@ -351,14 +353,14 @@ export async function runSession<T>(
       if (event["type"] === "result") {
         // Before the success check, deliberately: a failed or timed-out run has already been
         // paid for and would otherwise never be counted.
-        logger.info("session.cost", { label: options.label, ...sessionCost(event) });
+        log.info("session.cost", { label: options.label, ...sessionCost(event) });
 
         // Also before the success check: a run stopped by a hook still reports `success`, so
         // these denials are the ones most worth having. `warn` rather than `info` since this
         // means the harness's own model of the session's tool surface was wrong for this run.
         const denials = sessionDenials(event);
         if (denials.length > 0) {
-          logger.warn("session.denied", {
+          log.warn("session.denied", {
             label: options.label,
             count: denials.length,
             // Deduplicated for reading, counted above for arithmetic.
@@ -395,7 +397,7 @@ export async function runSession<T>(
         try {
           handleEvent(JSON.parse(trimmed) as Record<string, unknown>);
         } catch {
-          logger.debug("session.unparsed_line", { line: trimmed.slice(0, 200) });
+          log.debug("session.unparsed_line", { line: trimmed.slice(0, 200) });
         }
       }
     });

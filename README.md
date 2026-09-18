@@ -297,8 +297,10 @@ The next section is how to work up to that.
 
 ## Running the daemon for real
 
-`pnpm start` polls, triages and repeats until told to stop. Three flags override settings **for a
-single run**, so a smoke test needs no edit to `.env` and leaves nothing behind in it:
+`pnpm start` polls, triages and repeats until told to stop, drawing its log in the live viewer as it
+goes; `pnpm start:daemon` is the same loop with no viewer, for a redirect or a service manager.
+Three flags override settings **for a single run**, so a smoke test needs no edit to `.env` and
+leaves nothing behind in it:
 
 | Flag                    | Overrides                      | Example                     |
 | ----------------------- | ------------------------------ | --------------------------- |
@@ -318,8 +320,9 @@ write access from a shell history entry.
 
 ### Work up to it in four steps
 
-Each step turns on one more real thing. Run each for a bounded `--for` and read the log before
-going on.
+Each step turns on one more real thing. Run each for a bounded `--for` and read the log before going
+on: `pnpm start` shows it live in [the viewer](#reading-the-log). To read the same run twice, capture
+it with `pnpm start:daemon … > run.ndjson 2>&1` and replay it with `pnpm logs < run.ndjson`.
 
 **1 — the loop itself. Free, no Atlassian, no model.**
 
@@ -331,7 +334,8 @@ pnpm start --skill mock-triage --interval 10s --for 1m
 cursor, the state file, backoff and graceful shutdown, and costs nothing. If something is wrong
 with the _service_, it is wrong here.
 
-Expect one `cycle.done` per interval and a clean stop:
+Expect one `cycle.done` per interval and a clean stop. The viewer renders these a line at a time;
+below is the raw form, which is what `pnpm start:daemon` writes to a file:
 
 ```
 {"message":"service.start", …}
@@ -465,26 +469,28 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 
 ## Commands
 
-| Command                                                | What it does                                                                                              | Writes?                     |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                                                      | no                          |
-| `pnpm poll:once`                                       | One full grooming cycle                                                                                   | only with `WRITE_BACK=true` |
-| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                                                     | `groomed/<KEY>.md`          |
-| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                                                    | Jira                        |
-| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                              | `groomed/<KEY>.md`          |
-| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                               | `groomed/solve-cycle.md`    |
-| `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                           | Jira **and** GitHub         |
-| `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                         | no                          |
-| `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                  | Jira                        |
-| `pnpm start`                                           | The daemon — grooming, plus solve and watch if their flags are on. Takes `--skill`, `--interval`, `--for` | only with `WRITE_BACK=true` |
-| `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                    |
-| `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind    | a report + `tmpdir()`       |
-| `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                               | no                          |
-| `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                  | no                          |
-| `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                          |
-| `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                          |
-| `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                             | no                          |
-| `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                                                            | no                          |
+| Command                                                | What it does                                                                                           | Writes?                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | --------------------------- |
+| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                                                   | no                          |
+| `pnpm poll:once`                                       | One full grooming cycle                                                                                | only with `WRITE_BACK=true` |
+| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                                                  | `groomed/<KEY>.md`          |
+| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                                                 | Jira                        |
+| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                           | `groomed/<KEY>.md`          |
+| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                            | `groomed/solve-cycle.md`    |
+| `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                        | Jira **and** GitHub         |
+| `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                      | no                          |
+| `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                               | Jira                        |
+| `pnpm start`                                           | The daemon **and** the live log viewer, together. Takes `--skill`, `--interval`, `--for`               | only with `WRITE_BACK=true` |
+| `pnpm start:daemon`                                    | The same daemon, headless — what a redirect, cron or CI wants. Same flags                              | as above                    |
+| `pnpm dev`                                             | The **headless** daemon with `--watch`; same flags. A restart would tear the viewer down anyway        | as above                    |
+| `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind | a report + `tmpdir()`       |
+| `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                            | no                          |
+| `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira  | no                          |
+| `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s               | no                          |
+| `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                               | no                          |
+| `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                         | no                          |
+| `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                          | no                          |
+| `pnpm check-types && pnpm lint && pnpm test`           | The full check                                                                                         | no                          |
 
 **`attach:stage` is the only thing that stages an image, and nothing reads what it stages.** Triage
 and solve still see attachments as text or not at all; the command exists so the capability can be
@@ -505,7 +511,89 @@ reclaims that label on its own — with `MAX_CONCURRENT_SOLVES=1` the solve half
 until you remove it by hand. Same applies to editing a file under `pnpm dev`, which is a restart:
 `pnpm daemon:status` says whether one is running.
 
+Pressing `q` under `pnpm start` is a graceful stop, not a detach: the viewer leaves, and the shell
+then waits on the daemon while it drains the cycle in flight. An unresponsive prompt straight after
+`q` is that wait, so give it the same patience as Ctrl-C.
+
 The typecheck script is **`check-types`**, not `typecheck`.
+
+### Reading the log
+
+Every line the service writes is a JSON object, which is exact and unreadable at the rate a cycle
+produces it. `pnpm logs` is the reader. Pipe a run into it, or replay a file:
+
+```bash
+pnpm poll:once --dry-run 2>&1 | tee run.ndjson   # capture something first, free
+pnpm logs < run.ndjson                           # then read it, as many times as you like
+```
+
+**Redirect stderr, or you will never see a warning.** `warn` and `error` go to stderr and everything
+else to stdout, so a bare `|` hands the viewer everything except the two levels you were probably
+looking for, and silently drops 🟠 and 🔴. Nothing in the viewer can detect this — the missing lines
+were never written to the pipe.
+
+**To watch a live daemon there is nothing to assemble: `pnpm start` is that pipeline.** It runs the
+daemon into the viewer. The headless daemon — for files, cron and CI — is `pnpm start:daemon`:
+
+```bash
+pnpm start --interval 30s --for 10m                            # daemon plus viewer, one command
+pnpm start:daemon --interval 30s --for 10m > run.ndjson 2>&1   # headless, writes a file
+```
+
+Two things that pipeline gets right that a hand-written one usually does not. `2>&1`, for the reason
+above. And **the daemon's stdin is redirected away from the terminal**: Node restores the saved
+termios when a process holding a tty on fd 0 exits, so the daemon exiting silently puts the terminal
+back into cooked mode and the viewer stops receiving keystrokes. Measured under a pty — `q` was
+echoed to the screen instead of quitting, and nothing on either side reported a problem.
+
+Quitting the viewer closes the daemon's stdout, and the daemon treats that as a shutdown request:
+it unwinds the current cycle, so the `finally` releasing `agent:solving` runs. Left unhandled that
+write is an `EPIPE` raised as an unhandled `error` event, which exits 1 and strands the claim — the
+same stranded label as pressing Ctrl-C twice, reached by pressing `q` in what looks like a read-only
+window. `src/broken-pipe.ts` is the handler, and the `finally`-was-skipped half was measured before
+it was written.
+
+It reads lines from **stdin** and keys from `/dev/tty`, so the pipe and the keyboard are two
+different descriptors and both work at once. It posts nothing, reads no settings and holds no
+credential — the safe thing to try it on is a `--dry-run` you have already captured.
+
+**It exits 2 rather than drawing, in both directions.** With no controlling terminal — cron, CI, a
+detached process — there is nothing to draw on, which is also why `pnpm start` fails there and
+`pnpm start:daemon` is what those places want. With nothing piped in, there is nothing to draw:
+stdin would be the terminal, so no line could ever arrive, and the line reader and the key reader
+would be racing for the same bytes with `q` as likely to be eaten as anything else. Both cases say
+what to run instead.
+
+Three filters, all off until you press something, all ANDed:
+
+| Keys     | Filters by                                                                |
+| -------- | ------------------------------------------------------------------------- |
+| `1`–`4`  | Level: 🔍 debug, 🔵 info, 🟠 warn, 🔴 error                               |
+| `5` `6`  | The `q` mark: ⏳ nothing happened, 🔧 something did                       |
+| a letter | One source — `poll`, `solve`, `jira`, … The key is shown beside each name |
+
+**`1` filters an empty set unless you asked for debug.** `LOG_LEVEL` defaults to `info`
+([`architecture/configuration.md`](architecture/configuration.md)), so 🔍 lines are never written
+and the chip has nothing to show — which looks exactly like a broken filter. `LOG_LEVEL=debug pnpm
+start …` is the run that fills it in.
+
+`f` holds the view where it is, and a second `f` returns to the tail — the one key you want when
+something interesting scrolls past mid-cycle. `j`/`k` and the arrows scroll, `g`/`G` jump to either
+end, `c` clears every filter, and `q` or escape quits. A filter that is on is drawn in brackets and
+one that is off in spaces, so the state survives a terminal with no colour; the two forms are the
+same width, so nothing on the row moves when you toggle one.
+
+**What would falsify it:** the header counts shown against arrived (`12/480 lines`). If narrowing
+to one source drops the total rather than the shown count, the filter is eating lines instead of
+hiding them. A line the parser cannot read — the `↳` report lines the sendback watch writes, or a
+stack trace — is shown verbatim and passes every filter; if one of those disappears when you press
+a key, that is the bug worth reporting. Quitting with `q` must give the cursor back: if the shell
+afterwards has no cursor or no echo, the restore path did not run, and `reset` fixes the terminal.
+
+**What it has never done:** attach to a daemon that is already running. There is no socket and the
+daemon listens on nothing — `pnpm logs` sees only what is piped into it, so a daemon started without
+the pipe cannot be watched after the fact. `feed.ts` is an interface with a `send` slot for that
+later, and nothing implements it.
 
 ### The escalation ladder
 

@@ -205,8 +205,9 @@ Things that look like details and are not:
 
     **The guarantee is exactly as strong as the `finally`, which is weaker than the sentence
     above reads.** It holds for anything that throws. It does not hold for an exit that skips
-    the stack: `process.exit(130)` on a second `SIGINT`/`SIGTERM` (`src/index.ts:53`),
-    `process.exit(1)` on an uncaught exception (`:84`), a `SIGKILL`, or a laptop that slept. In
+    the stack: `process.exit(130)` on a second `SIGINT`/`SIGTERM` (`createShutdown` in
+    `src/index.ts`), `process.exit(1)` on an uncaught exception (`logUnexpectedExits` there), a
+    `SIGKILL`, or a laptop that slept. In
     every one of those the claim survives the process, and **nothing reclaims it** — there is no
     TTL, no lease and no reaper in `src/`, so at `MAX_CONCURRENT_SOLVES=1` a single stranded
     `agent:solving` halts the solve half until a human clears the label, which is the manual

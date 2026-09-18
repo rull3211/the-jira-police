@@ -25,8 +25,10 @@
  * work cannot be interrupted by a new claim mid-cycle.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { AdvanceOutcome, PendingRound } from "./delivery.ts";
+
+const log = createLogger("review");
 
 /** A ticket carrying `agent:reviewing` or `agent:review-done`; kept distinct from `SolveCandidate` so neither type carries a field the other must never read. */
 export interface WatchedTicket {
@@ -201,7 +203,7 @@ function stopRequested(signal: AbortSignal | undefined): boolean {
   if (signal?.aborted !== true) {
     return false;
   }
-  logger.info("review.cycle.stopped", { note: "abort requested; the rest of the set waits" });
+  log.info("review.cycle.stopped", { note: "abort requested; the rest of the set waits" });
   return true;
 }
 
@@ -212,7 +214,7 @@ function reasonOf(error: unknown): string {
 
 export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycleOutcome> {
   if (!deps.enabled) {
-    logger.info("review.disabled", {
+    log.info("review.disabled", {
       note: "SOLVE_ENABLED is off; the watched set was not read",
     });
     return NOTHING;
@@ -282,7 +284,7 @@ export async function runReviewCycle(deps: ReviewCycleDeps): Promise<ReviewCycle
     deferred,
   };
 
-  logger.info(
+  log.info(
     "review.cycle",
     {
       watched: outcome.watched,

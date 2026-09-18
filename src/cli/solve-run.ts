@@ -15,7 +15,7 @@
  */
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { type Settings, flag, numeric } from "../settings.ts";
 import type { AttemptLedger } from "../solve/attempts.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
@@ -89,6 +89,10 @@ import {
   reviewStageAfter,
   terminalLabelAfter,
 } from "./solve-outcome.ts";
+
+const labelsLog = createLogger("labels");
+const reviewLog = createLogger("review");
+const solveLog = createLogger("solve");
 
 /**
  * What the queue thinks of this ticket, or that there was no queue to ask.
@@ -255,7 +259,7 @@ async function moveLabels(
     change = plan(await capabilities.readLabels(issueKey));
   } catch (error) {
     if (error instanceof LabelStateError) {
-      logger.info("labels.left_alone", { issueKey, reason: error.message });
+      labelsLog.info("labels.left_alone", { issueKey, reason: error.message });
       return;
     }
     throw error;
@@ -269,7 +273,7 @@ async function moveLabels(
   try {
     await capabilities.applyLabels(issueKey, change);
   } catch (error) {
-    logger.error("labels.write_failed", {
+    labelsLog.error("labels.write_failed", {
       issueKey,
       wanted,
       error,
@@ -282,7 +286,7 @@ async function moveLabels(
   const missing = change.add.filter((label) => !after.includes(label));
   const lingering = change.remove.filter((label) => after.includes(label));
   if (missing.length > 0 || lingering.length > 0) {
-    logger.error("labels.read_back_mismatch", {
+    labelsLog.error("labels.read_back_mismatch", {
       issueKey,
       wanted,
       labels: after,
@@ -291,7 +295,7 @@ async function moveLabels(
     return;
   }
 
-  logger.info("labels.moved", { issueKey, labels: after });
+  labelsLog.info("labels.moved", { issueKey, labels: after });
 }
 
 /** The label half of a finished round: mirror the pull request's draft flag. */
@@ -599,7 +603,7 @@ export async function runReviewChain(
       );
       // A chain ending on silence is warned rather than informed — the one ending nobody asked
       // for. Not an error exit: a quiet reviewer is not a malfunction.
-      const record = decision.silent ? logger.warn : logger.info;
+      const record = decision.silent ? solveLog.warn : solveLog.info;
       record("solve.chain.finished", {
         issueKey,
         rounds,
@@ -723,7 +727,7 @@ export function createReviewAct(
 
     // Logged rather than printed: this function has two callers and one is a daemon whose stdout
     // is the log, and the watch sees it as JSON among the pass's own JSON.
-    logger.info("review.round.started", { issueKey: ticket.key, number });
+    reviewLog.info("review.round.started", { issueKey: ticket.key, number });
 
     const attached = await target.request.attach();
     if (attached.outcome === "refused") {
@@ -852,7 +856,7 @@ export async function runWatch(
     );
     // Logged as well as printed: the caller logs `solve-once.done` whatever happened, so the
     // exit code is the only other trace of a refusal.
-    logger.warn("solve.watch.refused", { reason: "SOLVE_ENABLED is off" });
+    solveLog.warn("solve.watch.refused", { reason: "SOLVE_ENABLED is off" });
     process.exitCode = 3;
     return;
   }
@@ -1023,7 +1027,7 @@ export async function runSolveClaims(
     } catch (error) {
       // One ticket's failure is not the tick's — `runWriteRungs` releases in a `finally`, so the
       // claim is already back; abandoning the rest of the queue here would hide them behind it.
-      logger.error("solve.claim.failed", {
+      solveLog.error("solve.claim.failed", {
         key,
         attempt: ledger.countFor(key),
         error: error instanceof Error ? error.message : String(error),
@@ -1032,7 +1036,7 @@ export async function runSolveClaims(
       const code = process.exitCode;
       process.exitCode = before;
       if (code !== before) {
-        logger.info("solve.claim.exit_code", {
+        solveLog.info("solve.claim.exit_code", {
           key,
           code,
           note: "the rungs' code, recorded rather than adopted: it is a command's answer, not a service's",
@@ -1041,7 +1045,7 @@ export async function runSolveClaims(
     }
   }
 
-  logger.info(
+  solveLog.info(
     "solve.claims.done",
     {
       found: cycle.found,

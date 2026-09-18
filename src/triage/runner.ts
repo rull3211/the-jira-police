@@ -13,10 +13,12 @@
  * `--vault` flag (see `vaultPath` below).
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { Verdict } from "../output/sink.ts";
 import { TRIAGE_SCHEMA, TRIAGE_SCHEMA_JSON } from "./schema.ts";
 import { DENIED_BUILTIN_TOOLS, runSession } from "./session.ts";
+
+const log = createLogger("triage");
 
 // Re-exported so callers reasoning about a triage run keep a single import; the
 // machinery lives in `session.ts` because the poster shares it.
@@ -523,7 +525,7 @@ function dorPlaceholders(value: unknown): readonly DorPlaceholder[] {
 }
 
 export async function runTriage(options: TriageRunOptions): Promise<TriagePayload> {
-  logger.info("triage.start", { issueKey: options.issueKey });
+  log.info("triage.start", { issueKey: options.issueKey });
 
   const payload = await runSession(
     {
@@ -539,6 +541,6 @@ export async function runTriage(options: TriageRunOptions): Promise<TriagePayloa
     (structuredOutput) => parsePayload(structuredOutput, options.issueKey),
   );
 
-  logger.info("triage.done", { issueKey: options.issueKey, verdict: payload.verdict });
+  log.info("triage.done", { issueKey: options.issueKey, verdict: payload.verdict });
   return payload;
 }

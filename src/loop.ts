@@ -7,7 +7,9 @@
 
 import { setTimeout as delay } from "node:timers/promises";
 
-import { logger } from "./logger.ts";
+import { createLogger } from "./logger.ts";
+
+const log = createLogger("loop");
 
 export interface LoopOptions {
   /** One poll cycle. Expected to handle its own per-issue failures. */
@@ -63,7 +65,7 @@ export async function runLoop(options: LoopOptions): Promise<LoopSummary> {
     } catch (error) {
       failures += 1;
       consecutiveFailures += 1;
-      logger.error("loop.cycle_failed", { error, consecutiveFailures });
+      log.error("loop.cycle_failed", { error, consecutiveFailures });
     }
 
     // Re-checked: shutdown requested during a long cycle must not be followed by a sleep.
@@ -72,7 +74,7 @@ export async function runLoop(options: LoopOptions): Promise<LoopSummary> {
     }
 
     const waitMs = nextDelayMs(consecutiveFailures, options.intervalMs, options.backoffCapMs);
-    logger.debug("loop.sleeping", { waitMs, consecutiveFailures });
+    log.debug("loop.sleeping", { waitMs, consecutiveFailures });
     await sleep(waitMs, options.signal);
   }
 

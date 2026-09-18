@@ -12,8 +12,10 @@
 
 import { spawn } from "node:child_process";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { CommandOptions, CommandResult, CommandRunner } from "./worktree.ts";
+
+const log = createLogger("exec");
 
 /**
  * Programs this service may start. This list and `PACKAGE_MANAGERS` in `verify.ts` must not
@@ -175,7 +177,7 @@ export function createCommandRunner(options: RunnerOptions = {}): CommandRunner 
           settle(() => {
             // A signalled death has no exit code; reporting 0 would read as success, so it maps to a non-zero value and `timedOut` carries the reason.
             const exitCode = code ?? (signal === null ? 1 : 128);
-            logger.debug("exec.finished", {
+            log.debug("exec.finished", {
               program,
               exitCode,
               timedOut,

@@ -44,8 +44,9 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 - **`--max-budget-usd` / `--max-turns` / per-job `--session-id`.** Now actionable: `session.cost`
   supplies the number a cap would be set from.
-- **Deployment.** No launchd job, no container, no metrics. `pnpm start` in a terminal is the
-  current answer.
+- **Deployment.** No launchd job, no container, no metrics. `pnpm start:daemon` is the current
+  answer; `pnpm start` is not, because it pipes into a viewer that needs a terminal and refuses
+  without one.
 - **Concurrency.** Issues are triaged sequentially. Fine at 4–5/day.
 - **Unproven paths.** REST pagination and REST error handling (401/429/5xx) are unit-tested only;
   the live board has returned a single clean page every time.

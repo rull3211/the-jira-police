@@ -13,9 +13,11 @@
  * has no loop to run away.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { childEnv } from "../triage/runner.ts";
 import { DENIED_BUILTIN_TOOLS, runSession } from "../triage/session.ts";
+
+const log = createLogger("watch");
 
 /** Everything the judgement is made from, all of it already fetched. */
 export interface RelevanceInput {
@@ -211,7 +213,7 @@ export function parseRelevance(value: unknown): Relevance {
 export function createRelevanceChecker(options: RelevanceOptions): RelevanceChecker {
   return {
     check: async (input: RelevanceInput): Promise<Relevance> => {
-      logger.info("watch.relevance.start", {
+      log.info("watch.relevance.start", {
         key: input.key,
         comments: input.comments.length,
         fields: input.fields.map((field) => field.name),
@@ -233,7 +235,7 @@ export function createRelevanceChecker(options: RelevanceOptions): RelevanceChec
         parseRelevance,
       );
 
-      logger.info("watch.relevance.done", { key: input.key, ...verdict });
+      log.info("watch.relevance.done", { key: input.key, ...verdict });
       return verdict;
     },
   };

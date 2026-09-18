@@ -16,13 +16,15 @@
 
 import type { JiraClient } from "../jira/client.ts";
 import type { TicketRef } from "../jira/types.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import type { TriagePayload } from "../triage/runner.ts";
 import { syntheticTicket } from "../triage/single.ts";
 import { retriageContext } from "./context.ts";
 import { reserveRetriage } from "./counter.ts";
 import type { WatchSignals } from "./decide.ts";
 import type { RelevanceChecker } from "./relevance.ts";
+
+const log = createLogger("watch");
 
 export interface RetriageDeps {
   readonly client: Pick<JiraClient, "updateLabels">;
@@ -68,7 +70,7 @@ export async function runRetriage(
 
   const context = retriageContext(signals);
   if (context === null) {
-    logger.info("watch.retriage.refused", { key, why: "no comment of ours to measure from" });
+    log.info("watch.retriage.refused", { key, why: "no comment of ours to measure from" });
     return { kind: "no-mark" };
   }
 
@@ -76,13 +78,13 @@ export async function runRetriage(
   // check; a readable one is held unwritten until the check says it's worth it.
   const reservation = reserveRetriage(signals.labels);
   if (reservation === null) {
-    logger.warn("watch.retriage.refused", { key, why: "the re-triage counter will not read" });
+    log.warn("watch.retriage.refused", { key, why: "the re-triage counter will not read" });
     return { kind: "uncountable" };
   }
 
   const relevance = await deps.checker.check(context);
   if (!relevance.answers) {
-    logger.info("watch.retriage.declined", { key, reason: relevance.reason });
+    log.info("watch.retriage.declined", { key, reason: relevance.reason });
     return { kind: "irrelevant", reason: relevance.reason };
   }
 
@@ -90,14 +92,14 @@ export async function runRetriage(
     await deps.client.updateLabels(key, reservation);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.warn("watch.retriage.unreserved", { key, error: message });
+    log.warn("watch.retriage.unreserved", { key, error: message });
     return { kind: "unreserved", error: message };
   }
-  logger.info("watch.retriage.reserved", { key, count: reservation.count });
+  log.info("watch.retriage.reserved", { key, count: reservation.count });
 
   const ticket = syntheticTicket(key, deps.baseUrl);
   const payload = await deps.groom(ticket);
-  logger.info("watch.retriaged", {
+  log.info("watch.retriaged", {
     key,
     count: reservation.count,
     verdict: payload.verdict,

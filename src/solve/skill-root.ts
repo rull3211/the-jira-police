@@ -15,8 +15,10 @@
 import { cp, mkdir, mkdtemp, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { lockDown, removeReadOnlyTree } from "../read-only-tree.ts";
+
+const log = createLogger("solve");
 
 /** The only skill a solve pass is given. */
 export const SKILL_NAME = "agent-solve";
@@ -88,7 +90,7 @@ export async function prepareSkillRoot(
     };
   }
 
-  logger.info("solve.skillRoot.prepared", { issueKey, path: root });
+  log.info("solve.skillRoot.prepared", { issueKey, path: root });
   return { outcome: "prepared", path: root };
 }
 

@@ -7,7 +7,9 @@
  * stack overflow and quadratic blowup from a reference cycle.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
+
+const log = createLogger("adf");
 
 /** How deep the walk follows `content` before giving up on a subtree; real ADF nests only a handful of levels. */
 const MAX_DEPTH = 100;
@@ -319,7 +321,7 @@ export function renderAdf(node: unknown): string {
   try {
     return tidy(renderNode(node, 0));
   } catch (error) {
-    logger.warn("adf.render_failed", { error });
+    log.warn("adf.render_failed", { error });
     return "";
   }
 }
@@ -364,7 +366,7 @@ export function referencedAttachments(node: unknown): readonly string[] {
     collectAttachments(node, 0, found);
   } catch (error) {
     // Partial results are kept: whatever was collected before the walk failed is still valid.
-    logger.warn("adf.attachment_scan_failed", { error });
+    log.warn("adf.attachment_scan_failed", { error });
   }
   return [...new Set(found)];
 }

@@ -12,7 +12,9 @@
  * The set never expires; it is bounded by tickets carrying the watch label.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
+
+const log = createLogger("watch");
 
 export interface WatchMemo {
   /** True when this exact activity has already been paid for and declined; `NaN` is never seen as such. */
@@ -40,7 +42,7 @@ export function createWatchMemo(): WatchMemo {
       if (Number.isNaN(at)) {
         // Logged rather than silent: an undatable trigger reaching a paid
         // decline means the check will re-run every sweep.
-        logger.warn("watch.memo.undatable", {
+        log.warn("watch.memo.undatable", {
           key,
           note: "declined activity could not be dated, so the check will run again next sweep",
         });

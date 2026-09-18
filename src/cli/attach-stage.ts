@@ -17,10 +17,12 @@ import {
   removeStagedImages,
   stageImages,
 } from "../attachments/stage.ts";
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { readSettings } from "../settings.ts";
 import { createJiraClient } from "../wiring.ts";
 import { EXIT, exitCodeFor, formatReport } from "./attach-stage-report.ts";
+
+const log = createLogger("attach-stage");
 
 function usage(): never {
   process.stderr.write(
@@ -103,7 +105,7 @@ async function main(): Promise<number> {
 try {
   process.exitCode = await main();
 } catch (error) {
-  logger.error("attach-stage.failed", {
+  log.error("attach-stage.failed", {
     reason: error instanceof Error ? error.message : String(error),
   });
   process.exitCode = EXIT.failed;

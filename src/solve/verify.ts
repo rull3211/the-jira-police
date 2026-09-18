@@ -7,9 +7,11 @@
  * see architecture/solve.md §15 for why a base declaring both `package.json` and `pom.xml` is also refused.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import { VERIFICATION_PATHS } from "./diff-gate.ts";
 import type { CommandRunner } from "./worktree.ts";
+
+const log = createLogger("solve");
 
 /** An allowlist: treating the manifest's `packageManager` name unchecked would make "what do we execute" a property of a file. */
 const PACKAGE_MANAGERS: Record<string, readonly string[]> = {
@@ -464,7 +466,7 @@ export async function verify(
       output: tail(result),
     });
     if (!passed) {
-      logger.info("solve.verify.failed", { step: step.name, timedOut: result.timedOut });
+      log.info("solve.verify.failed", { step: step.name, timedOut: result.timedOut });
       return {
         outcome: "failed",
         steps: results,
@@ -476,7 +478,7 @@ export async function verify(
     }
   }
 
-  logger.info("solve.verify.passed", { steps: results.map((step) => step.name) });
+  log.info("solve.verify.passed", { steps: results.map((step) => step.name) });
   return { outcome: "passed", steps: results };
 }
 
@@ -619,7 +621,7 @@ export async function checkFailFirst(
     });
     // A timeout counts as red, matching `verify` — the conservative direction, since it produces `guarded`, the verdict this function is not trusted on.
     const passed = !ran.timedOut && ran.exitCode === 0;
-    logger.info("solve.fail_first", { outcome: passed ? "vacuous" : "guarded", tests });
+    log.info("solve.fail_first", { outcome: passed ? "vacuous" : "guarded", tests });
     return passed ? { outcome: "vacuous", tests } : { outcome: "guarded", tests };
   } finally {
     const removed = await runner.run(
@@ -628,7 +630,7 @@ export async function checkFailFirst(
     );
     if (removed.timedOut || removed.exitCode !== 0) {
       // Logged and not returned: the finding is about the change, a leftover directory is about this machine.
-      logger.warn("solve.fail_first.probe_left", { probePath, output: tail(removed) });
+      log.warn("solve.fail_first.probe_left", { probePath, output: tail(removed) });
     }
   }
 }

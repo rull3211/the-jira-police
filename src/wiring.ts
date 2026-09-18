@@ -30,7 +30,7 @@ import {
   stageImages,
 } from "./attachments/stage.ts";
 import type { TicketRef } from "./jira/types.ts";
-import { logger } from "./logger.ts";
+import { createLogger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
 import {
@@ -63,6 +63,11 @@ import { runPost } from "./triage/poster.ts";
 import { type TriagePayload, type TriageRunOptions, runTriage } from "./triage/runner.ts";
 import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
+const pollLog = createLogger("poll");
+const reviewLog = createLogger("review");
+const solveLog = createLogger("solve");
+const triageLog = createLogger("triage");
+
 /** Skill that reads nothing, so it must not be made to wait on Atlassian. */
 const MOCK_SKILL = "mock-triage";
 
@@ -90,7 +95,7 @@ export function createDiscover(
   // entries are an unverified claim rather than a pinned id — a status name that fails to
   // resolve would otherwise match nothing and leave the service looking healthy while triaging
   // zero tickets.
-  logger.info("poll.status_filter", {
+  pollLog.info("poll.status_filter", {
     statuses,
     restricted: statuses.length > 0,
     named: statuses.filter((entry) => !/^[0-9]+$/.test(entry.trim())),
@@ -110,7 +115,7 @@ export function createDiscover(
     });
     // `debug`, not `info`: this JQL is the same every tick apart from a timestamp and says
     // nothing about what happened. Ask for it with `LOG_LEVEL=debug` when the queue surprises.
-    logger.debug("poll.query", { jql });
+    pollLog.debug("poll.query", { jql });
     return await client.search(jql);
   };
 }
@@ -214,7 +219,7 @@ async function stageForTriage(
       DEFAULT_IMAGE_STAGE_OPTIONS,
     );
   } catch (error) {
-    logger.warn("triage.image_staging_failed", {
+    triageLog.warn("triage.image_staging_failed", {
       issueKey,
       reason: error instanceof Error ? error.message : String(error),
     });
@@ -322,7 +327,7 @@ export function createPollDeps(
   // Logged once at wiring, like `poll.status_filter`: an ordering nobody can see is one nobody
   // can judge. Unlike that one, a status matching nothing here isn't silent — `poll.order`
   // shows it every cycle.
-  logger.info("poll.status_priority", { priority, ordered: priority.length > 0 });
+  pollLog.info("poll.status_priority", { priority, ordered: priority.length > 0 });
 
   return {
     fetchCandidates: createDiscover(settings, client),
@@ -427,11 +432,11 @@ export function createSolveDeps(
     inFlightJql,
     fetchQueue: async () => {
       // `debug`, for the reason given at `poll.query`; also handed to the cycle report verbatim.
-      logger.debug("solve.query", { jql: queueJql });
+      solveLog.debug("solve.query", { jql: queueJql });
       return (await client.search(queueJql)).map(toSolveCandidate);
     },
     countInFlight: async () => {
-      logger.debug("solve.in_flight_query", { jql: inFlightJql });
+      solveLog.debug("solve.in_flight_query", { jql: inFlightJql });
       return (await client.search(inFlightJql)).length;
     },
     ...(signal === undefined ? {} : { signal }),
@@ -468,7 +473,7 @@ export function createReviewCycleDeps(
     maxRounds: numeric(settings, "MAX_REVIEW_ROUNDS_PER_TICK", 0),
     fetchWatched: async () => {
       // `debug`, for the reason given at `poll.query`.
-      logger.debug("review.query", { jql: watchJql });
+      reviewLog.debug("review.query", { jql: watchJql });
       return (await client.search(watchJql)).map(toWatchedTicket);
     },
     look,
@@ -606,7 +611,7 @@ export function buildSolveRequest(
   // be silent either.
   const scope = readScope(settings.SOLVE_REPO_ROOT, list(settings, "SOLVE_READ_DIRS"), repo);
   if (scope.rejected.length > 0) {
-    logger.warn("solve.read_dirs_rejected", { issueKey: detail.key, names: scope.rejected });
+    solveLog.warn("solve.read_dirs_rejected", { issueKey: detail.key, names: scope.rejected });
   }
 
   return {
@@ -760,7 +765,7 @@ export function createTicketReader(
     if (rendered.omitted.length > 0) {
       // Logged rather than swallowed: an asset the ticket pointed to but never shown to the
       // solver otherwise surfaces as a baffling diff.
-      logger.warn("solve.ticket_attachments_omitted", { issueKey, omitted: rendered.omitted });
+      solveLog.warn("solve.ticket_attachments_omitted", { issueKey, omitted: rendered.omitted });
     }
     return { ...rendered, detail };
   };

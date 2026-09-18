@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import {
   SessionError,
   SessionTimeoutError,
@@ -292,7 +292,7 @@ describe("runSession budgets", () => {
     const realNow = Date.now.bind(Date);
     let offset = 0;
     const now = vi.spyOn(Date, "now").mockImplementation(() => realNow() + offset);
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const warn = vi.spyOn(createLogger("session"), "warn").mockImplementation(() => {});
     const jump = setTimeout(() => {
       offset = 3_600_000;
     }, 500);
@@ -327,7 +327,7 @@ describe("runSession budgets", () => {
 
 describe("runSession cost reporting", () => {
   it("reports what the run cost", async () => {
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const info = vi.spyOn(createLogger("session"), "info").mockImplementation(() => {});
 
     await expect(
       runSession(fakeSession([{ ...RESULT, structured_output: { ok: true } }]), () => "parsed"),
@@ -343,7 +343,7 @@ describe("runSession cost reporting", () => {
   // The log line sits above the success check: a failed run has already been paid for, and
   // silently omitting failures would make the total look best on the worst days.
   it("still reports the cost of a run that failed", async () => {
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const info = vi.spyOn(createLogger("session"), "info").mockImplementation(() => {});
 
     await expect(
       runSession(
@@ -367,7 +367,7 @@ describe("runSession denial reporting", () => {
   // material but not fatal (a run can be denied a tool, route around it, and still succeed); and
   // the denial is warned, since the event's own `subtype: "success"` would otherwise hide it.
   it("records a refused tool on a run that otherwise succeeded", async () => {
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const warn = vi.spyOn(createLogger("session"), "warn").mockImplementation(() => {});
 
     await expect(
       runSession(
@@ -396,7 +396,7 @@ describe("runSession denial reporting", () => {
 
   // `session.denied` is warn-level and meant to be read, so an empty array must say nothing.
   it("says nothing about a run that had no tool refused", async () => {
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const warn = vi.spyOn(createLogger("session"), "warn").mockImplementation(() => {});
 
     await expect(
       runSession(fakeSession([{ ...RESULT, structured_output: { ok: true } }]), () => "parsed"),
@@ -409,7 +409,7 @@ describe("runSession denial reporting", () => {
   // Same placement argument as the cost line: a denial is most interesting on the run it stopped,
   // and that run reaches the result event with a failing `subtype`.
   it("still reports the denial on a run that then failed", async () => {
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const warn = vi.spyOn(createLogger("session"), "warn").mockImplementation(() => {});
 
     await expect(
       runSession(

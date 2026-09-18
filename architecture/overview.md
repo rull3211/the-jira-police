@@ -68,7 +68,8 @@ failure rather than an empty success.
 
 ### Three loops, and the separation is the safety property
 
-`pnpm start` awaits three `runLoop`s in one `Promise.all`:
+The daemon — `pnpm start:daemon`, or the daemon half of `pnpm start` — awaits three `runLoop`s in
+one `Promise.all`:
 
 | Loop         | Module           | Cadence            | Switch          | What a tick can spend                         |
 | ------------ | ---------------- | ------------------ | --------------- | --------------------------------------------- |

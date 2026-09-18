@@ -8,12 +8,14 @@
  * crash mid-cycle repays at most one triage twice.
  */
 
-import { logger } from "./logger.ts";
+import { createLogger } from "./logger.ts";
 import type { OutputSink, TriageResult } from "./output/sink.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { type PollState, isUnseen, recordSeen, saveState } from "./state/store.ts";
 import { byCreatedAscending, settledCursor } from "./triage/order.ts";
 import type { TriagePayload } from "./triage/runner.ts";
+
+const log = createLogger("poll");
 
 export interface PollDeps {
   /** Issues created since the cursor, in any order. */
@@ -75,18 +77,18 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
   const skipped = candidates.length - fresh.length;
 
   if (fresh.length === 0) {
-    logger.debug("poll.nothing_new", { found: candidates.length, skipped });
+    log.debug("poll.nothing_new", { found: candidates.length, skipped });
     return { found: candidates.length, skipped, triaged: 0, failed: 0, abandoned: 0, state };
   }
 
-  logger.info("poll.candidates", { found: candidates.length, skipped, fresh: fresh.length });
+  log.info("poll.candidates", { found: candidates.length, skipped, fresh: fresh.length });
 
   if (deps.order !== undefined) {
     // Whether `TRIAGE_STATUS_PRIORITY` starves moving tickets can only be judged from the
     // queue it actually produced, so it's logged only when an operator opted into an order.
     // Truncated because a backlog has no upper bound; total is reported separately so a
     // truncated list doesn't read as the whole queue.
-    logger.info("poll.order", {
+    log.info("poll.order", {
       total: queue.length,
       head: queue.slice(0, ORDER_LOG_LIMIT).map((ticket) => ({
         key: ticket.key,
@@ -119,7 +121,7 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
     } catch (error) {
       failed += 1;
       // Nothing to do to the cursor: `settledCursor` already stops at any issue not in `succeeded`.
-      logger.error("poll.issue_failed", { issueKey: ticket.key, error });
+      log.error("poll.issue_failed", { issueKey: ticket.key, error });
     }
   }
 
@@ -127,10 +129,10 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
   if (abandoned > 0) {
     // Not an error: still unseen, so the next run picks them up. Logged so fewer results
     // than found doesn't read as tickets going missing.
-    logger.warn("poll.interrupted", { abandoned, note: "left for the next cycle" });
+    log.warn("poll.interrupted", { abandoned, note: "left for the next cycle" });
   }
 
-  logger.info("poll.done", { triaged, failed, abandoned });
+  log.info("poll.done", { triaged, failed, abandoned });
 
   return {
     found: candidates.length,

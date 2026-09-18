@@ -28,7 +28,7 @@
  * failure: a failed worktree is kept so a human can read the diff.
  */
 
-import { logger } from "../logger.ts";
+import { createLogger } from "../logger.ts";
 import {
   abortMerge,
   acceptResolution,
@@ -76,6 +76,8 @@ import {
   type Worktree,
   type WorktreeRequest,
 } from "./worktree.ts";
+
+const log = createLogger("solve");
 
 /** One model pass, run to completion, parsed. Injected so the pipeline is testable without starting a model. */
 export interface PassRunner {
@@ -352,7 +354,7 @@ type PassResult<T> =
 
 /** The outcome for a dead pass, logged on the way out, so a solve that died mid-pass is distinguishable from one never started. */
 function crashed(issueKey: string, pass: Pass, reason: string, worktree: Worktree): SolveOutcome {
-  logger.info("solve.crashed", { issueKey, pass, reason, worktreePath: worktree.path });
+  log.info("solve.crashed", { issueKey, pass, reason, worktreePath: worktree.path });
   return { kind: "crashed", pass, reason, worktree };
 }
 
@@ -421,7 +423,7 @@ function escapeVerdict(
   if (paths.length === 0) {
     return outcome;
   }
-  logger.info("solve.escape", { issueKey, paths, would: outcome.kind });
+  log.info("solve.escape", { issueKey, paths, would: outcome.kind });
   if (outcome.kind === "no-worktree") {
     return outcome;
   }
@@ -464,7 +466,7 @@ export async function solveWithRetry(
   }
 
   const blocked = (retryBlocked: string): SolveAttempts => {
-    logger.info("solve.retry.blocked", { issueKey: request.issueKey, reason: retryBlocked });
+    log.info("solve.retry.blocked", { issueKey: request.issueKey, reason: retryBlocked });
     return { outcome: first, attempts: 1, retryBlocked };
   };
 
@@ -481,7 +483,7 @@ export async function solveWithRetry(
     return blocked(`the first attempt's branch is still there: ${cleanup.branch.reason}`);
   }
 
-  logger.info("solve.retry", {
+  log.info("solve.retry", {
     issueKey: request.issueKey,
     cause: "environment",
     reason: first.reason,
@@ -530,7 +532,7 @@ async function runPipeline(
   // Before any pass: `verify`'s `failed` means "the change is bad", which is only true if these steps would have passed without it.
   const baseCheck = await verifyBase(deps.commands, verifyRequestOf(request, worktree));
   if (baseCheck.outcome === "unusable") {
-    logger.info("solve.base.unusable", {
+    log.info("solve.base.unusable", {
       issueKey,
       verification: baseCheck.verification.outcome,
     });
@@ -558,14 +560,14 @@ async function runPipeline(
   }
   const recon = reconRun.value;
   const devLens = lensOf(recon);
-  logger.info("solve.recon", {
+  log.info("solve.recon", {
     issueKey,
     proceed: recon.proceed,
     confidence: recon.confidence,
     devLensAccurate: recon.devLensAccurate,
   });
   if (!recon.proceed) {
-    logger.info("solve.abandoned", {
+    log.info("solve.abandoned", {
       issueKey,
       pass: "recon",
       reason: recon.bailReason,
@@ -591,7 +593,7 @@ async function runPipeline(
     // `leftFiles` matters because an abandoned run may still have touched the worktree.
     // `parseFix` already rejects `none` on an abandoned run; this cast documents that check rather than performing one.
     const cause = fix.abandonedCause as Exclude<AbandonCause, "none">;
-    logger.info("solve.abandoned", {
+    log.info("solve.abandoned", {
       issueKey,
       pass: "fix",
       cause,
@@ -604,7 +606,7 @@ async function runPipeline(
 
   // Counts and flags only, not the paths themselves: `filesTouched` is model-authored text from an editable ticket,
   // and logging it invites trusting the claim instead of the diff gate's check against git's own account below.
-  logger.info("solve.fix", {
+  log.info("solve.fix", {
     issueKey,
     changed: fix.changed,
     files: fix.filesTouched.length,
@@ -628,7 +630,7 @@ async function runPipeline(
     return crashed(issueKey, "simplify", simplifyRun.reason, worktree);
   }
   const simplify = simplifyRun.value;
-  logger.info("solve.simplify", { issueKey, changed: simplify.changed });
+  log.info("solve.simplify", { issueKey, changed: simplify.changed });
 
   // ---- the diff gate -----------------------------------------------------
   // Read fresh, after simplify, against what git says happened rather than either model's own account.
@@ -650,7 +652,7 @@ async function runPipeline(
   const changes = parseNumstat(finalDiff);
   const verdict = checkDiff(changes);
   if (!verdict.ok) {
-    logger.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
+    log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
   }
 
@@ -685,7 +687,7 @@ async function runPipeline(
           installTimeoutMs: request.installTimeoutMs,
         });
 
-  logger.info("solve.verified", {
+  log.info("solve.verified", {
     issueKey,
     branch: worktree.branch,
     files: verdict.files,
@@ -834,7 +836,7 @@ async function runConflictRound(
     (output) => parseMerge(output, issueKey),
   );
   if (!mergeRun.ok) {
-    logger.info("solve.crashed", {
+    log.info("solve.crashed", {
       issueKey,
       pass: "merge",
       reason: mergeRun.reason,
@@ -845,7 +847,7 @@ async function runConflictRound(
   const report = mergeRun.value;
 
   if (!report.resolved) {
-    logger.info("solve.abandoned", {
+    log.info("solve.abandoned", {
       issueKey,
       pass: "merge",
       reason: report.abandoned,
@@ -896,7 +898,7 @@ async function runConflictRound(
     return { kind: "refused", reason: pushed.reason };
   }
 
-  logger.info("solve.base.resolved", {
+  log.info("solve.base.resolved", {
     issueKey,
     branch: worktree.branch,
     baseRef: request.baseRef,
@@ -960,7 +962,7 @@ export async function resolveReview(
     if (escaped.length === 0) {
       return outcome;
     }
-    logger.info("solve.escape", {
+    log.info("solve.escape", {
       issueKey: request.issueKey,
       paths: escaped,
       would: outcome.kind,
@@ -995,7 +997,7 @@ async function runReviewRound(
   );
   if (!reviewRun.ok) {
     // `abandoned` rather than its own kind: unlike the passes in solveTicket, a pull request already exists to carry the reason.
-    logger.info("solve.crashed", {
+    log.info("solve.crashed", {
       issueKey,
       pass: "review",
       reason: reviewRun.reason,
@@ -1006,7 +1008,7 @@ async function runReviewRound(
   const report = reviewRun.value;
 
   if (report.abandoned.trim() !== "") {
-    logger.info("solve.abandoned", {
+    log.info("solve.abandoned", {
       issueKey,
       pass: "review",
       reason: report.abandoned,
