@@ -572,6 +572,11 @@ Three filters, all off until you press something, all ANDed:
 | `5` `6`  | The `q` mark: ⏳ nothing happened, 🔧 something did                       |
 | a letter | One source — `poll`, `solve`, `jira`, … The key is shown beside each name |
 
+**`1` filters an empty set unless you asked for debug.** `LOG_LEVEL` defaults to `info`
+([`architecture/configuration.md`](architecture/configuration.md)), so 🔍 lines are never written
+and the chip has nothing to show — which looks exactly like a broken filter. `LOG_LEVEL=debug pnpm
+start …` is the run that fills it in.
+
 `f` holds the view where it is, and a second `f` returns to the tail — the one key you want when
 something interesting scrolls past mid-cycle. `j`/`k` and the arrows scroll, `g`/`G` jump to either
 end, `c` clears every filter, and `q` or escape quits. A filter that is on is drawn in brackets and
