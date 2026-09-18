@@ -17,7 +17,7 @@ is highest **after a compaction**, in a context holding a confident account of r
 [→](INCIDENTS.md#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them)
 
 **Two hooks now inline these four questions**: `session-brief.sh` on `trigger=compact`, and
-`commit-brief.sh` on the `git commit` about to run (`ARCHITECTURE.md` §16 for both). Neither refuses
+`commit-brief.sh` on the `git commit` about to run (`architecture/guardrails.md` §16 for both). Neither refuses
 anything and neither carries the reasoning, so treat an injected copy as a prompt, not a substitute.
 The rate at which compaction actually lands here is not known — one attempt measured four-for-four
 against a transcript reading one-for-four.

@@ -18,7 +18,7 @@ proves only that each script _emits_ the right refusal, never that the runtime _
 [`claude-validation-work`'s step 0](.claude/skills/claude-validation-work/SKILL.md#step-0--is-branch-guardsh-actually-firing-right-now)
 settles that in one turn. You may `Read` the `.claude/settings.json` registering them; _writing_ it
 is refused, as is any shell command that merely names the path, and that ban is not to be worked
-around. [`ARCHITECTURE.md` §16](ARCHITECTURE.md) has each guard, what the suite misses, and why the residual
+around. [`architecture/guardrails.md` §16](architecture/guardrails.md) has each guard, what the suite misses, and why the residual
 risk is `.claude/hooks/*.sh` rather than the settings file.
 
 **Do not stack branches deeply** — three stacked here once turned an incremental plan into a
@@ -62,17 +62,17 @@ full. Ask them before every commit.
 **If you cannot remember reading `FINISHING.md` in this session, you have not read it.** `pnpm
 hooks:brief` prints these four in full, the two rules above, and your branch and stack depth;
 `commit-brief.sh` prints them at a `git commit`, if the operator registered it — watched by hand,
-never by the suite ([§16](ARCHITECTURE.md)). Both remind; neither can check. Read the four here.
+never by the suite ([§16](architecture/guardrails.md)). Both remind; neither can check. Read the four here.
 
 ## Where the truth lives
 
 - [README.md](README.md) — how to run it
-- [ARCHITECTURE.md](ARCHITECTURE.md) — how it works, the map
+- [ARCHITECTURE.md](ARCHITECTURE.md) — how it works, the index
 - [PLAN.md](PLAN.md) — what is **not** built; never lessons
 - [dev-house-rules](.claude/skills/dev-house-rules/SKILL.md) — how we work
 
 **All four are treated as source.** Prose falsified by a change is rewritten in the same commit, not
-the next. Structural facts live in `ARCHITECTURE.md`, cited rather than copied — grep for the
+the next. Structural facts live in `architecture/*.md`, cited rather than copied — grep for the
 symbol; `pnpm docs:check` enforces the mechanical part.
 
 ## Before you start
@@ -85,7 +85,7 @@ last commit before you push**, not at merge: the reviewer is the one misled. The
 ## Code comments
 
 A comment holds a constraint or a non-obvious warning, one line, at most two. The argument and
-measurement belong in the commit, `PLAN.md`, or `ARCHITECTURE.md`/`INCIDENTS.md` — never the comment.
+measurement belong in the commit, `PLAN.md`, or `architecture/*.md`/`INCIDENTS.md` — never the comment.
 
 ## Working style
 

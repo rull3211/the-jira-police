@@ -135,7 +135,7 @@ State in one line whether each still holds, then move past it.
   the file-reading tool. Three documents once got this wrong in the same direction, generalising
   from two blocked routes to a third nobody had tried.
 - `pnpm test:hooks` proves each script _emits_ a decision, never that the runtime acts on one.
-  Which decision shapes have been watched honoured lives in `ARCHITECTURE.md` §16, not here.
+  Which decision shapes have been watched honoured lives in `architecture/guardrails.md` §16, not here.
   `ask` is the one nobody has seen, and a class of fail-open guards rests on it — `PLAN.md` §17.
 - `PLAN.md` §19: the section resolver pools ids across documents, so `KNOWN_DANGLING` and the
   reference cleanup are both measuring a smaller population than anyone thinks. Open, unfixed.

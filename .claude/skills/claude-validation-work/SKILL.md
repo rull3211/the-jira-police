@@ -1,6 +1,6 @@
 ---
 name: claude-validation-work
-description: Runbook for checking whether this repository's Claude Code hooks are actually enforced. Step 0 is two zero-risk probes an agent runs on itself in one turn; steps 1-4 need a human. Use before trusting any claim that a guard fires. The argument is ARCHITECTURE.md §16.
+description: Runbook for checking whether this repository's Claude Code hooks are actually enforced. Step 0 is two zero-risk probes an agent runs on itself in one turn; steps 1-4 need a human. Use before trusting any claim that a guard fires. The argument is architecture/guardrails.md §16.
 ---
 
 # Validating the guardrails
@@ -9,9 +9,9 @@ description: Runbook for checking whether this repository's Claude Code hooks ar
 
 **Registration takes effect immediately — no session restart is needed to see it**, watched on
 2026-09-09. Whether an _edited_ hook definition is re-read within a session is untested, because the
-agent cannot write that file. Both are [`ARCHITECTURE.md` §16](../../../ARCHITECTURE.md), item 3.
+agent cannot write that file. Both are [`architecture/guardrails.md` §16](../../../architecture/guardrails.md), item 3.
 
-**Read [`ARCHITECTURE.md` §16](../../../ARCHITECTURE.md) first.** It holds the reasoning: what each
+**Read [`architecture/guardrails.md` §16](../../../architecture/guardrails.md) first.** It holds the reasoning: what each
 guard is, what the suite proves, where the residual risk sits, and the numbered list of what the
 suite does _not_ prove. This file is the runbook; §16 is the argument. If they disagree, §16 is the
 source and this file is stale. The open questions live in `PLAN.md` §17.
@@ -82,7 +82,7 @@ the `Edit|Write|NotebookEdit` entry are separate registrations and either can be
 on stdout is honoured.
 
 **Say what it does not cover, because that is this file's own habit.** It proves `deny` — which,
-like `additionalContext`, has been watched honoured here. `ARCHITECTURE.md` §16 item 5 keeps the
+like `additionalContext`, has been watched honoured here. `architecture/guardrails.md` §16 item 5 keeps the
 dated log of those sightings; a new one is appended there, and no figure is restated here. It
 says nothing about `ask` — see step 3, which is still open — and nothing about `gh pr merge`, which
 shares `branch-guard.sh` with the cases above and is therefore covered by inference rather than by
@@ -210,7 +210,7 @@ you are in.
    the agent can edit every script the settings file points at, and `CLAUDE.md` expects it to
    (`pnpm test:hooks`, "which you run if you change one"). Neutering `branch-guard.sh` is a
    one-line diff, and review is what stops it. Argued at
-   [`ARCHITECTURE.md` §16](../../../ARCHITECTURE.md).
+   [`architecture/guardrails.md` §16](../../../architecture/guardrails.md).
 3. **The mutate list is an allowlist of reads, not a denylist of write verbs**
    ([the story](../dev-house-rules/INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs)).
    What the runbook owes is the consequence: an unlisted **read** is a refusal a human fixes in a

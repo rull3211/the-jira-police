@@ -5,7 +5,7 @@
  * actually arrived, since a chunked response has no `content-length` to trust. The staged filename is
  * `<attachment id>.<sniffed extension>`, never the attacker-controlled uploaded filename. An instruction
  * painted into a screenshot is invisible to this service's text defenses, which is why these bytes are
- * only ever handed to passes with no `Write`. See `ARCHITECTURE.md` §13 and §14.11; `PLAN.md` §4 is the
+ * only ever handed to passes with no `Write`. See `architecture/not-built.md` §13 and `architecture/invariants.md` §14.11; `PLAN.md` §4 is the
  * still-unbuilt recon half.
  */
 

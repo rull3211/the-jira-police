@@ -1055,7 +1055,7 @@ failing one, needs a second probe to have done it, and `wrong-case-probe` at 2.
 
 ### A permission granted to a human, read as a permission granted to the agent
 
-`PLAN.md` §12 — the guardrail entry, since retired into `ARCHITECTURE.md` §16, which is where every
+`PLAN.md` §12 — the guardrail entry, since retired into `architecture/guardrails.md` §16, which is where every
 `§12` below now resolves — had said that hook configuration "belongs to the operator, lives outside
 this tree, and is deliberately neither readable nor writable from here." The operator checked with
 the storecode team and reported back: **developers can add settings.** True, and taken to mean the

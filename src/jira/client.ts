@@ -346,7 +346,7 @@ export class JiraClient {
   /**
    * The activity on one watched ticket: has it closed, who has said what, and which fields have
    * moved — a read-only amendment to the discovery-only rule, narrower than `fetchDetail`, recorded
-   * in `ARCHITECTURE.md` §12 beside `updateLabels`.
+   * in `architecture/triage.md` §12 beside `updateLabels`.
    *
    * Both lists (`comment`, `changelog`) are paged to completion and a cap is a refusal, not a
    * truncation: `expand=changelog`/`fields=comment` in one request would let Jira silently cap the

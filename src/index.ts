@@ -2,7 +2,7 @@
  * The service: poll, triage, repeat — plus sweeping PRs under review and tickets sent back for an answer.
  *
  * The three loops share only a Jira client and a shutdown signal, so a failure in one cannot stop
- * another. See ARCHITECTURE.md §6.
+ * another. See architecture/overview.md §2.
  */
 
 import { parseDuration } from "./duration.ts";

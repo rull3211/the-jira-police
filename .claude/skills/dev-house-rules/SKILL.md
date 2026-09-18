@@ -34,7 +34,7 @@ is the only rule here whose absence is invisible — skip it and everything stil
 ## The two that are not advisory
 
 Everything else is recoverable if you get it wrong. These are not: assume your own compliance is the
-whole of the enforcement, whatever the guards are doing (`ARCHITECTURE.md` §16, and step 0 of
+whole of the enforcement, whatever the guards are doing (`architecture/guardrails.md` §16, and step 0 of
 [`claude-validation-work`](../claude-validation-work/SKILL.md#step-0--is-branch-guardsh-actually-firing-right-now)
 if you need the answer today):
 

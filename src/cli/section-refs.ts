@@ -9,7 +9,7 @@
  * Almost no citation names its target document — `§7b` in `src/watch/decide.ts` says nothing
  * about where §7b would live — so the strongest rule available is that the token is a heading in
  * **some** section-numbered document. A clean run does not mean the cross-references are right:
- * six sites say "§1 refuses on-disk state" when that rule is `ARCHITECTURE.md` §5, and those need
+ * six sites say "§1 refuses on-disk state" when that rule is `architecture/overview.md` §5, and those need
  * a human.
  *
  * refs:on
@@ -41,7 +41,7 @@ export interface DocumentShape {
   readonly path: string;
   /**
    * The one section whose top-level numbered list items are addressable as `<section>.<item>` —
-   * `ARCHITECTURE.md` §14's invariants are cited as `§14.11`. Absent where no list is addressable.
+   * `architecture/invariants.md` §14's invariants are cited as `§14.11`. Absent where no list is addressable.
    */
   readonly numberedListIn?: string;
 }

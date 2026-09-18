@@ -2,7 +2,7 @@
  * The solve pipeline's only way to comment on a ticket (this service's best output used to
  * go to a scrollback instead — the third time that pattern showed up, after §6.1c).
  * Runs as a separate Atlassian MCP session rather than plain HTTP: the REST credential's
- * one write is `updateLabels`, labels only (`ARCHITECTURE.md` §12), so a comment must land
+ * one write is `updateLabels`, labels only (`architecture/triage.md` §12), so a comment must land
  * as a real Jira user instead; `childEnv` withholds that credential from the subprocess.
  * No `editJiraIssue`: its `fields` object is whole-set write semantics, the hazard §3a
  * describes for labels, and a commenter has no need of it.

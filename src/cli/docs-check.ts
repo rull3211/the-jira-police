@@ -416,19 +416,19 @@ const HISTORICAL: readonly HistoricalFigure[] = [
     why: "the unreferenced-guard incident, cited from the rule it produced",
   },
   {
-    file: "ARCHITECTURE.md",
+    file: "architecture/overview.md",
     value: 264,
     noun: "tests",
     why: "the suite size on the day deleting assertPostable left it green. The number is the argument: that many tests, and none of them noticed",
   },
   {
-    file: "ARCHITECTURE.md",
+    file: "architecture/not-built.md",
     value: 21,
     noun: "assertions",
     why: "the isEligible finding, stated twice in one passage because the second use contradicts the first",
   },
   {
-    file: "ARCHITECTURE.md",
+    file: "architecture/solve.md",
     value: 4562,
     noun: "tests",
     why: "insurance-commerce-rest-api's suite, not ours. Another repository's count can never be derived from this tree",
@@ -591,7 +591,14 @@ record({
  * why inferring "has a numbered list" from a document loses the check.
  */
 const NUMBERED_DOCUMENTS: readonly DocumentShape[] = [
-  { path: "ARCHITECTURE.md", numberedListIn: "14" },
+  { path: "architecture/overview.md" },
+  { path: "architecture/module-map.md" },
+  { path: "architecture/triage.md" },
+  { path: "architecture/solve.md" },
+  { path: "architecture/configuration.md" },
+  { path: "architecture/invariants.md", numberedListIn: "14" },
+  { path: "architecture/not-built.md" },
+  { path: "architecture/guardrails.md" },
   { path: "PLAN.md" },
   { path: ".claude/skills/intake-triage/INTAKE_INSTRUCTIONS.md" },
   { path: ".claude/skills/agent-solve/SOLVE_INSTRUCTIONS.md" },
