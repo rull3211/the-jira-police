@@ -82,7 +82,7 @@ inside the branch that built it, and §32 was the untagged thread reply that let
 with itself on PR #548 — same shape, opened and deleted inside its own branch. §36 was
 `branch-stack.sh` counting commit identity instead of commit content, opened and deleted inside the
 branch that built it — the story is `INCIDENTS.md`'s 2026-09-18 entry. The triage-selection entries
-are now all closed, so the next entry is §37.
+are now all closed, so the next entry is §38.
 
 <!-- refs:on -->
 
@@ -777,6 +777,68 @@ improvement if the reviewer can tell the difference; a pull request that omits p
 while reading as finished is worse than none — the same reasoning that has plan entries deleted
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
+
+### 37. Nothing reads the log back, so a filter is a `jq` invocation nobody writes
+
+**Branch:** `feat/daemon-log-tui`.
+
+**What is not built.** Any consumer of this service's own log. `logger.ts` writes JSON lines to
+stdout and stderr and that is the end of the path: no file, no rotation, no parser, no
+pretty-printer, no `LOG_FILE`. `README.md`'s four-step ramp says "read the log before going on" and
+prints raw JSON lines as the expected output, with no pipe beside them. `daemon-status.ts` is the
+only tooling that observes a running daemon and it reads `ps`, not a line of log.
+`architecture/triage.md` names the consequence in passing — `groomed/solve-cycle.md` exists because
+"judging needs something that outlives stdout" — which is a second artifact written to work around
+the first one being unreadable.
+
+**Why it is owed.** The operator's question is almost always a filter: _what did the solve half do_,
+or _show me only what changed something_. `q` (⏳/🔧) was added so the second question has an answer,
+and answering it still costs a hand-written `jq` selector against a stream that is scrolling. A
+terminal reader with the two filters built in — the status mark and which part of the service spoke
+— turns both into a keystroke.
+
+**Two commits, and the first is the one with the blast radius.**
+
+1. **`src` on every line.** `createLogger(source)` replaces the bare `logger` export, so a call site
+   must name what it is speaking as, and the type checker — not a reviewer — finds the ones that
+   did not. Every logging module in the tree is touched. Source names are the message namespaces
+   that already exist (`solve`, `watch`, `triage`, `poll`, `jira`, `session`, `service`, …), so the invariant is
+   `message` starts with `${src}.`, a test can check it across the tree, and **no message string
+   changes** — `README.md`'s samples, and every test asserting on a message, stay true. Grouping
+   the namespaces into a handful of buckets is the viewer's job, not the logger's: that keeps the
+   logger stating facts, and leaves the grouping free to move without touching every logging
+   module again.
+2. **`pnpm logs`.** Reads those lines from stdin and renders them, keys from `/dev/tty`. The
+   transport is an interface with stdin as its first implementation, because attaching to a daemon
+   already running — and eventually sending it a command — is a socket the daemon would have to
+   listen on, and that is a privilege with its own phasing, not a thing to smuggle in behind a
+   viewer. Reading a saved file is the same code path (`pnpm logs < run.ndjson`), which is what
+   makes the filter testable against output a real daemon produced.
+
+**What would make it the wrong idea, in the order I expect to find out:**
+
+- **The real complaint may be that stdout does not outlive the run, not that it cannot be
+  filtered.** A file sink plus `grep` is a tenth of this and would answer "what happened an hour
+  ago", which a live tail with a filter still cannot. If that is the actual pain, this builds the
+  wrong thing well. The replay path is the hedge and also the tell: if it gets all the use, the
+  file sink was the feature.
+- **A hand-rolled TUI at zero dependencies is terminal-handling code, and it fails on the
+  operator's terminal, not on mine.** Raw mode, the alternate screen and cursor visibility are
+  process-global state that an unclean exit leaves behind — a crash that skips the restore hands
+  back a terminal with no cursor and no echo. Restore has to be on `exit`, on the signals, and on
+  `uncaughtException`, and none of that is exercised by a green suite.
+- **Emoji are not one column wide and the terminals disagree about which.** The marks in use (⏳ 🔧)
+  are wide; `ℹ️` and `⚠️` are a base character plus a variation selector and render at either width
+  depending on the terminal. Any level glyph has to come from the wide set or the whole table
+  shears on the first warning.
+- **`src` widens every line of a documented format for one consumer.** A field every call site must
+  now supply, read by one command that did not exist last week, is a cost paid by everyone reading
+  raw output for a benefit only the viewer collects.
+- **A mechanical edit across every logging module is where a real change hides.** The diff is import
+  lines and a receiver rename, which is exactly the shape a reviewer skims.
+- **The viewer must survive lines that are not its own.** `watch/sweep.ts` writes `↳` report lines
+  through `deps.report` onto the same file descriptor, interleaved with the JSON. A parser that
+  drops what it cannot parse would silently eat them, and would eat a crash trace the same way.
 
 ---
 
