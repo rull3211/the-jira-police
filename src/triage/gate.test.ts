@@ -79,9 +79,7 @@ describe("assertPostable", () => {
   });
 
   it("still enforces the DoR coherence rule", () => {
-    // The gate is documented as the last thing before a write, so it re-checks
-    // rather than assuming the parser did. This is also the check that exists
-    // because of SSX-3822.
+    // Re-checks rather than assuming the parser did, since the gate is the last thing before a write.
     expect(() =>
       assertPostable(
         payload({
@@ -103,14 +101,11 @@ describe("the comment body", () => {
   });
 
   it("says only that, so the real problem is not buried", () => {
-    // A blank body also fails the sentinel check and the issue-key check. Three
-    // complaints about one cause is worse reading than one.
+    // A blank body also fails the sentinel and issue-key checks; one complaint reads better than three.
     expect(violations(payload({ mutation: mutation({ commentBody: "" }) }))).toHaveLength(1);
   });
 
   it("refuses a body missing the idempotency sentinel", () => {
-    // Without it the skill cannot recognise its own prior comment, so every
-    // re-run stacks another copy instead of refreshing the last one.
     const body = "## Triage of SSX-1234\n\nLooks fine.";
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
@@ -125,12 +120,7 @@ describe("the comment body", () => {
   });
 
   it("refuses a body carrying two agent-fitness blocks", () => {
-    // `withFitnessNote` strips before it splices, so this is unreachable
-    // unless the strip missed a paraphrase of the marker it keys on — which
-    // is how the defect looked on four real tickets. It has to fail loudly:
-    // two blocks are two accounts of one call, both looking equally official,
-    // and the whole reason the block is rendered rather than written is that
-    // prose and the structured field must not be able to disagree.
+    // Unreachable unless `withFitnessNote`'s strip missed a paraphrase of the marker it keys on.
     const body = [
       "## Triage of SSX-1234",
       "",
@@ -153,16 +143,14 @@ describe("the comment body", () => {
   });
 
   it("does not count the phrase where the report merely mentions it", () => {
-    // Anchoring at column zero is what separates the region the renderer owns
-    // from the report discussing fitness in an evidence blockquote.
+    // Column-zero anchoring separates the region the renderer owns from a mere mention.
     const body = `## SSX-1234\n\n> the 🤖 **Agent fitness** call was withdrawn\n\n${FOOTER_SENTINEL}`;
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
   });
 
   it("refuses a body that mentions a different issue", () => {
-    // The poster is handed text it did not write. This is the only place the
-    // pairing of body to key is ever checked.
+    // The only place body-to-key pairing is checked.
     const body = `## Triage of SSX-9999\n\nLooks fine.\n\n${FOOTER_SENTINEL}`;
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
@@ -171,19 +159,8 @@ describe("the comment body", () => {
   });
 
   it("allows a send-back that names dor:pass in order to reverse it", () => {
-    // REGRESSION, from the live SSX-3822 run of 2026-09-03.
-    //
-    // An earlier check refused any body containing the string "dor:pass" while
-    // placeholders remained. It rejected this comment — a correct send-back,
-    // verdict needs-info, whose whole purpose was to undo a `dor:pass` a prior
-    // run had wrongly stamped. Repudiating a label requires naming it, so the
-    // check fired hardest on the runs that were fixing things. The rule now
-    // reads the delta instead, where applying and reversing are distinct.
-    //
-    // The placeholder is on row 3 rather than the row 9 of the original
-    // incident, because row 9 no longer justifies a send-back at all — a
-    // fixture reversing `dor:pass` over an advisory row would be teaching the
-    // opposite of the current rule while testing something unrelated to it.
+    // Repudiating a label requires naming it, so the rule must read the delta, not the prose,
+    // to tell applying `dor:pass` apart from reversing it.
     const body = [
       "# ↩ SEND BACK → needs info · SSX-1234",
       "",
@@ -214,8 +191,7 @@ describe("the comment body", () => {
   });
 
   it("refuses a delta that APPLIES dor:pass while placeholders remain", () => {
-    // The surviving half of the SSX-3822 rule. Verdict and labels are honest,
-    // so assertDorCoherent sees nothing wrong; only the delta claims the pass.
+    // Verdict and labels are honest here, so assertDorCoherent sees nothing wrong; only the delta claims the pass.
     const input = payload({
       verdict: "needs-info",
       labels: ["dor:gaps"],
@@ -227,8 +203,7 @@ describe("the comment body", () => {
   });
 
   it("allows a body that merely quotes the placeholder", () => {
-    // Reporting "baseline [N] left unfilled" is the correct behaviour, and
-    // punishing it would push the model towards saying less.
+    // Punishing this would push the model towards saying less.
     const body = `## SSX-1234\n\nDoR: gaps — baseline is still "[N]".\n\n${FOOTER_SENTINEL}`;
 
     expect(
@@ -251,12 +226,7 @@ describe("labels", () => {
   );
 
   it("clears a stale next:* while applying its replacement", () => {
-    // REGRESSION, from the live SSX-3822 run of 2026-09-03. §11 originally
-    // omitted `next:*` from the removal allow-list while the skill set it on
-    // every verdict, so a verdict change could not retire the previous routing
-    // label — leaving `next:to-trio` on a ticket alongside the
-    // `next:to-reporter` that contradicts it. Refusing the removal refused the
-    // whole mutation, so the correction could never post at all.
+    // §11 must allow retiring a previous next:* label when a verdict change replaces it.
     expect(
       violations(
         payload({
@@ -273,8 +243,7 @@ describe("labels", () => {
   });
 
   it("refuses removing comp:advisor, which no part of the skill sets", () => {
-    // Looks like one of the skill's namespaces and is not one. The allow-list
-    // tracks §11 exactly; anything else is somebody's label until §11 says so.
+    // Looks like one of the skill's namespaces; the allow-list tracks §11 exactly, not a superset.
     expect(
       violations(payload({ mutation: mutation({ labelsRemove: ["comp:advisor"] }) })).join(" "),
     ).toContain("not in a namespace the skill owns");
@@ -283,8 +252,7 @@ describe("labels", () => {
   it.each(["blocked", "customer-escalation", "q3-roadmap"])(
     "refuses to remove the human label %o",
     (label) => {
-      // §11: "never touch a human label". This is the one field in the payload
-      // whose misuse destroys somebody else's information.
+      // §11: "never touch a human label".
       expect(
         violations(payload({ mutation: mutation({ labelsRemove: [label] }) })).join(" "),
       ).toContain(`"${label}"`);
@@ -292,8 +260,6 @@ describe("labels", () => {
   );
 
   it("refuses to add a label the verdict never suggested", () => {
-    // The delta and the label list are two renderings of one decision, made by
-    // one run. Disagreement between them means something has come apart.
     const input = payload({
       labels: ["dor:gaps"],
       mutation: mutation({ labelsAdd: ["dor:pass"] }),
@@ -303,7 +269,6 @@ describe("labels", () => {
   });
 
   it("allows adding a subset of the suggested labels", () => {
-    // The rest are presumably already on the issue, which is what a delta means.
     const input = payload({
       labels: ["dor:gaps", "route:ours"],
       mutation: mutation({ labelsAdd: ["route:ours"] }),
@@ -336,17 +301,13 @@ describe("the taxonomy namespaces, revisable only as a swap", () => {
   it.each(["team:advisor", "jira:ssx", "domain:pricing", "svc:old-web", "value:low", "effort:L"])(
     "refuses to remove %s with nothing taking its place",
     (label) => {
-      // The whole point of the tier. These labels are facts about the ticket, and
-      // a fact this skill deletes is one no later re-triage will notice is gone —
-      // the ticket just reads as one that was never triaged.
+      // A fact deleted here is one no later re-triage will notice is gone.
       expect(violations(swap([label], [])).join(" ")).toContain("not emptying it");
     },
   );
 
   it("refuses a removal whose replacement is in a different namespace", () => {
-    // The near miss: something *is* being added, so a rule that only counted
-    // `labelsAdd.length` would pass this. The ticket still ends up with no
-    // `svc:` label, and `repoFromLabels` still answers `null`.
+    // The near miss: a rule counting only `labelsAdd.length` would pass this despite the ticket ending up with no `svc:` label.
     expect(violations(swap(["svc:old-web"], ["team:partner"])).join(" ")).toContain(
       "adds no other svc: label",
     );
@@ -357,24 +318,19 @@ describe("the taxonomy namespaces, revisable only as a swap", () => {
   });
 
   it("allows one owner becoming two", () => {
-    // `team:` is multi-valued on dual-owned repos, so the rule is "at least one
-    // add in the namespace" rather than a 1:1 exchange. A stricter rule would
-    // have blocked the honest case of a repo gaining a second owning squad.
+    // `team:` is multi-valued on dual-owned repos, so the rule is "at least one add", not 1:1.
     expect(violations(swap(["team:advisor"], ["team:advisor-core", "team:partner"]))).toEqual([]);
   });
 
   it("still refuses a bare human label that merely sits beside a swap", () => {
-    // The swap does not buy amnesty for the rest of the removals: each is judged
-    // on its own namespace, and `blocked` belongs to a person.
+    // A swap buys no amnesty for the rest of the removals; each is judged on its own namespace.
     expect(violations(swap(["team:advisor", "blocked"], ["team:partner"])).join(" ")).toContain(
       "not in a namespace the skill owns",
     );
   });
 
   it("keeps impl-uncertain unremovable, having no namespace to swap within", () => {
-    // Recorded as a limitation rather than an oversight: it is a bare label, so
-    // there is no namespace for a replacement to arrive in and nothing for the
-    // swap rule to check. See REVISABLE_LABEL_NAMESPACES.
+    // A bare label, so there's no namespace for a replacement to arrive in. See REVISABLE_LABEL_NAMESPACES.
     expect(
       violations(swap(["impl-uncertain"], ["svc:buy-insurance-advisor-web"])).join(" "),
     ).toContain("not in a namespace the skill owns");
@@ -389,10 +345,7 @@ describe("the agent: namespace, which triage only partly owns", () => {
   });
 
   it("refuses to grant agent:start, which is a human's authorisation", () => {
-    // The one that matters. The analyst's whole input is a Jira ticket, and a
-    // ticket is written by whoever felt like writing one. If the skill could
-    // emit `agent:start`, a ticket body could ask it to — and the human
-    // approval step in manual mode would be one the bot performs for itself.
+    // A ticket body could ask the skill to emit `agent:start`, since a ticket is data, not instruction.
     const input = payload({
       labels: ["dor:gaps", "route:ours", "agent:start"],
       mutation: mutation({ labelsAdd: ["agent:start"] }),
@@ -404,9 +357,7 @@ describe("the agent: namespace, which triage only partly owns", () => {
   it.each(["agent:solving", "agent:done", "agent:failed"])(
     "refuses to remove the solver's own %s",
     (label) => {
-      // The solve queue has no local cursor: its idempotency rests entirely on
-      // these labels being written once, by one writer. A re-triage that
-      // cleared `agent:solving` would unclaim a fix already in flight.
+      // A re-triage that cleared `agent:solving` would unclaim a fix already in flight.
       expect(
         violations(payload({ mutation: mutation({ labelsRemove: [label] }) })).join(" "),
       ).toContain(`"${label}"`);
@@ -414,12 +365,7 @@ describe("the agent: namespace, which triage only partly owns", () => {
   );
 
   it("refuses to touch the watch's re-triage counter, in either direction", () => {
-    // **The whole reason the counter can live in a label.** It is a reservation
-    // written before the run it authorises, and the run it authorises is a
-    // re-triage — which §11 otherwise lets clear `agent:*`. A run that could
-    // clear its own counter is a brake wired to the thing it is braking, so the
-    // protection has to be mechanical and it has to be here. Add the counter
-    // namespace to `TRIAGE_OWNED_AGENT_LABELS` and this fails.
+    // A run that could clear its own re-triage counter is a brake wired to the thing it brakes.
     const counter = `${RETRIAGE_LABEL_PREFIX}2`;
 
     expect(
@@ -452,11 +398,8 @@ describe("agent fitness", () => {
   });
 
   it("does not fire on a re-run that leaves the label out of the delta", () => {
-    // The check reads `labels`, never `labelsAdd`, and this is why. §11's delta
-    // holds only labels NOT already on the issue, so the second run over a
-    // ticket already marked solvable legitimately omits it. A gate keyed on the
-    // delta would fire hardest on the runs least deserving of it — the same
-    // false-positive shape that got the old prose check withdrawn.
+    // The check reads `labels`, never `labelsAdd`: §11's delta holds only labels not already on
+    // the issue, so a re-run over a ticket already marked solvable legitimately omits it.
     expect(
       violations(ok({ mutation: mutation({ labelsAdd: [], commentAction: "update" }) })),
     ).toEqual([]);
@@ -465,8 +408,6 @@ describe("agent fitness", () => {
   it.each(["needs-info", "duplicate", "not-our-team", "out-of-scope"] as const)(
     "refuses solvable on a %s verdict",
     (verdict) => {
-      // Only ready-ish has passed DoR, and without DoR there are no acceptance
-      // criteria concrete enough for an agent to check its own work against.
       expect(violations(ok({ verdict })).join(" ")).toContain(
         "only a ready-ish ticket has passed DoR",
       );
@@ -494,17 +435,14 @@ describe("agent fitness", () => {
   });
 
   it("refuses a label the assessment does not stand behind", () => {
-    // The other direction, and the SSX-3822 shape exactly: prose and structured
-    // field each defensible alone, disagreeing with each other. Here the label
-    // would authorise work the assessment declined.
+    // The other direction: the label would authorise work the assessment declined.
     expect(violations(ok({ agentFitness: fitness() })).join(" ")).toContain(
       "would authorise work the assessment declined",
     );
   });
 
   it("says nothing about a payload that simply declines", () => {
-    // The common case by far, and it must stay free. Every default in
-    // `parseAgentFitness` lands here.
+    // The common case; every default in `parseAgentFitness` lands here.
     expect(violations(payload())).toEqual([]);
   });
 });
@@ -525,18 +463,11 @@ describe("plausible, the send-back watch", () => {
   });
 
   it("allows a watch on a verdict other than needs-info", () => {
-    // Deliberately NOT gated on the verdict the way `solvable` is. `solvable`
-    // needs ready-ish because it needs acceptance criteria to check work
-    // against; a watch needs only a gap somebody can fill, and an out-of-scope
-    // ticket can acquire one. Pinned so the two rules cannot be tidied into
-    // looking alike.
+    // Deliberately not gated on the verdict the way `solvable` is: a watch needs only a gap, not DoR.
     expect(violations(watched({ verdict: "out-of-scope" }))).toEqual([]);
   });
 
   it("refuses a payload that claims both", () => {
-    // Two answers, not a strong opinion. Left unchecked the cheap field drifts
-    // into being a hedge on the expensive one, and the ticket ends up both
-    // queued for a solve and subscribed to a watch.
     const both = payload({
       verdict: "ready-ish",
       labels: ["dor:pass", "route:ours", "agent:solvable", "agent:watching"],
@@ -547,8 +478,7 @@ describe("plausible, the send-back watch", () => {
   });
 
   it("refuses a watch with no blockers", () => {
-    // The blockers are the exit condition, not the explanation. Without them
-    // there is nothing a reporter could do to end the subscription.
+    // The blockers are the exit condition, not the explanation.
     expect(
       violations(watched({ agentFitness: fitness({ plausible: true, blockers: [] }) })).join(" "),
     ).toContain("no condition that could ever clear it");
@@ -561,26 +491,21 @@ describe("plausible, the send-back watch", () => {
   });
 
   it("refuses the label without the field behind it", () => {
-    // The direction that costs money: a ticket body talking the skill into a
-    // recurring re-triage charge nobody asked for.
+    // A ticket body talking the skill into a recurring re-triage charge nobody asked for.
     expect(violations(watched({ agentFitness: fitness() })).join(" ")).toContain(
       "a paid watch list the assessment did not ask for",
     );
   });
 
   it("reads labels rather than the delta, like every other label check here", () => {
-    // Same reason as `agent:solvable`: §11's delta holds only labels not
-    // already on the issue, so the second run over a watched ticket omits it
-    // legitimately. A gate keyed on the delta would fire hardest on the runs
-    // least deserving of it.
+    // Same reason as `agent:solvable`: §11's delta legitimately omits a label already on the issue.
     expect(
       violations(watched({ mutation: mutation({ labelsAdd: [], commentAction: "update" }) })),
     ).toEqual([]);
   });
 
   it("lets triage retire its own agent:watching", () => {
-    // The unsubscribe half of §7c, and the reason `agent:watching` had to join
-    // TRIAGE_OWNED_AGENT_LABELS rather than only be writable.
+    // The unsubscribe half of §7c.
     expect(
       violations(payload({ mutation: mutation({ labelsRemove: ["agent:watching"] }) })),
     ).toEqual([]);
@@ -608,8 +533,7 @@ describe("component", () => {
 
 describe("the refusal itself", () => {
   it("collects every violation rather than stopping at the first", () => {
-    // A run costs real money. Sending the operator round the loop once per
-    // problem would be miserly with the wrong resource.
+    // A run costs real money; sending the operator round the loop once per problem is wasteful.
     const input = payload({
       labels: ["dor:gaps"],
       mutation: mutation({

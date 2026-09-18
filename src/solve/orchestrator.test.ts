@@ -3,10 +3,6 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-// `SolveParseError` used to be imported here so a test could assert
-// `solveTicket` rejected with it. It does not reject any more — a parser
-// refusing the model's output is a `crashed` outcome now — and the import going
-// unused is the small, real sign of that change.
 import type { Pass, SolveRunOptions } from "./runner.ts";
 import {
   type ConflictRoundRequest,
@@ -33,14 +29,7 @@ const MANIFEST = JSON.stringify({
 const FILES = ["src/app/head.tsx", "src/app/head.test.tsx"];
 const NUMSTAT = [`12\t3\t${FILES[0] ?? ""}`, `9\t0\t${FILES[1] ?? ""}`, ""].join(NUL);
 
-/**
- * A real unified patch, which is a different thing from `NUMSTAT`.
- *
- * The gate reads counts; a pass reads code. Keeping the two fixtures visibly
- * unalike is what lets a test tell which read a call site made — when one
- * function served both, no assertion in this file could distinguish them, and
- * the one at "gives simplify the diff" asserted the wrong one and passed.
- */
+/** A real unified patch, kept visibly unlike `NUMSTAT` so a test can tell which read a call site made. */
 const PATCH = [
   `diff --git a/${FILES[0] ?? ""} b/${FILES[0] ?? ""}`,
   "@@ -1,3 +1,4 @@",
@@ -50,16 +39,7 @@ const PATCH = [
   "",
 ].join("\n");
 
-/**
- * A diff the gate refuses — one ordinary file and one lockfile.
- *
- * This was six files, back when the gate capped file count. The caps went on
- * 2026-09-06 and a wide diff is now accepted, so every test below that wanted
- * "a refused diff" needed a reason that still is one. A lockfile is the right
- * replacement rather than the convenient one: these tests are about what
- * `solveTicket` does *around* a refusal, and a forbidden path is the family the
- * gate is most certain about.
- */
+/** A diff the gate refuses — a forbidden path (the lockfile), not a size cap, since these tests are about behavior around a refusal. */
 const REFUSED_DIFF = ["1\t0\tsrc/app.ts", "8\t2\tpnpm-lock.yaml", ""].join(NUL);
 
 const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -119,15 +99,7 @@ interface Rule {
   readonly match: (argv: readonly string[]) => boolean;
   /** Omitted when `throws` is set — the command never gets as far as answering. */
   readonly reply?: Partial<CommandResult>;
-  /**
-   * The command *rejects*, rather than answering with a non-zero exit code.
-   *
-   * Those are different failures and only this one escapes `runPipeline`. A
-   * non-zero exit is a result the pipeline inspects and turns into an outcome;
-   * a rejection is the shell layer itself coming apart, and since pass failures
-   * are now caught by `runPass` it is the only kind of throw left that can
-   * reach `solveTicket`'s `finally`. Which makes it the only way to test it.
-   */
+  /** The command rejects rather than exiting non-zero — the only kind of throw that escapes `runPipeline` and reaches `solveTicket`'s `finally`. */
   readonly throws?: string;
 }
 
@@ -143,17 +115,7 @@ const saw =
 const SHOWS_POM = (argv: readonly string[]): boolean =>
   argv.includes("show") && argv.some((arg) => arg.endsWith(":pom.xml"));
 
-/**
- * The same match, ignored the first time it fires.
- *
- * Verification now runs twice with byte-identical argv — once against the
- * pristine base, once against the change — and a stateless rule cannot tell
- * those apart. Every test below that wants a *verdict about the change* wants
- * the second run to fail and the first to pass; a rule failing both says the
- * repository was already broken, which is a different outcome and now has its
- * own kind. So the distinction the fake has to model is exactly the one the
- * production code was missing.
- */
+/** The same match, ignored the first time it fires — lets a rule fail only the post-fix verification run, not the base check too. */
 function afterBase(match: (argv: readonly string[]) => boolean) {
   let seenOnce = false;
   return (argv: readonly string[]): boolean => {
@@ -173,13 +135,7 @@ interface Harness {
   /** Passes and commands interleaved, so ordering assertions are about order. */
   readonly timeline: readonly string[];
   readonly calls: readonly (readonly string[])[];
-  /**
-   * How many passes had run when `calls[i]` was made.
-   *
-   * Only the base check runs commands at zero, so this is how the staging
-   * tests exclude it: staging bounds what a *pass* wrote, and there is nothing
-   * to bound before the first one.
-   */
+  /** How many passes had run when `calls[i]` was made; lets staging tests exclude the base check, since it runs at zero. */
   readonly passesBefore: readonly number[];
   readonly seen: readonly { readonly pass: Pass; readonly options: SolveRunOptions }[];
 }
@@ -187,20 +143,14 @@ interface Harness {
 /**
  * A whole pipeline with no model and no shell.
  *
- * A pass with no scripted output **throws**. That is the assertion mechanism
- * for every "and then it stops" test in this file: proving the fix pass never
- * ran after a bail is worth more than proving the returned object says bailed,
- * because only the first one is about privilege.
+ * A pass with no scripted output throws — the assertion mechanism for every
+ * "and then it stops" test, since proving a pass never ran is about privilege
+ * in a way that proving the outcome says so is not.
  */
 function harness(
   script: Partial<Record<Pass, unknown>>,
   rules: readonly Rule[] = [],
-  /**
-   * Passes whose `run` rejects, which is what a `SOLVE_TIMEOUT_MS` expiry looks
-   * like from here. Distinct from an unscripted pass — that also throws, but
-   * out of the harness rather than out of the runner, and it means "this test
-   * says the pass must not have run" rather than "the pass ran and died".
-   */
+  /** Passes whose `run` rejects, i.e. a `SOLVE_TIMEOUT_MS` expiry — distinct from an unscripted pass, which means "must not have run" rather than "ran and died". */
   dies: Partial<Record<Pass, string>> = {},
 ): { readonly h: Harness } {
   const timeline: string[] = [];
@@ -209,15 +159,12 @@ function harness(
   const seen: { pass: Pass; options: SolveRunOptions }[] = [];
 
   const defaults: readonly Rule[] = [
-    // The pilot repo is a Node one, so `pom.xml` is not in its base tree.
-    // Answering every `git show` with the manifest would put both toolchains in
-    // the base and `verify` would refuse before running a step.
+    // The pilot repo is a Node one; answering every `git show` with the manifest would put both toolchains in the base.
     { match: SHOWS_POM, reply: { exitCode: 128 } },
     { match: saw("show"), reply: { stdout: MANIFEST } },
     { match: saw("--name-only"), reply: { stdout: "" } },
     { match: saw("--numstat"), reply: { stdout: NUMSTAT } },
-    // `git diff` without `--numstat` is the patch read, and it must answer
-    // differently from the one above or the two are indistinguishable here.
+    // The patch read; must answer differently from the numstat rule above or the two are indistinguishable here.
     {
       match: (argv) => argv.includes("diff") && !argv.includes("--numstat"),
       reply: { stdout: PATCH },
@@ -397,10 +344,7 @@ describe("solveTicket, when recon declines", () => {
   });
 
   it("removes the worktree, because recon cannot have written to it", async () => {
-    // The only outcome that cleans up. Recon holds no `Write` and no `Edit`, so
-    // the checkout is pristine; and a bail is the *expected* result whenever
-    // triage's blind fitness call was optimistic, which makes this the leak
-    // that would have grown fastest.
+    // The only outcome that cleans up: recon has no Write/Edit, so the checkout is pristine.
     const { h } = harness(bailed);
 
     const outcome = await solveTicket(h.deps, request);
@@ -414,10 +358,7 @@ describe("solveTicket, when recon declines", () => {
   });
 
   it("never forces the removal", async () => {
-    // `--force` would turn "tidy up after a read-only pass" into "delete
-    // whatever is in there". The whole safety of removing on this path rests on
-    // git refusing when the assumption is wrong, and `--force` removes exactly
-    // that backstop.
+    // `--force` would remove the backstop this path relies on: git refusing when the pristine-checkout assumption is wrong.
     const { h } = harness(bailed);
 
     await solveTicket(h.deps, request);
@@ -429,8 +370,6 @@ describe("solveTicket, when recon declines", () => {
   });
 
   it("keeps the worktree, and says why, when git refuses to remove it", async () => {
-    // If recon ever gains a write, or something else dirties the checkout, git
-    // declines and the reason has to reach the operator rather than a log.
     const { h } = harness(bailed, [
       {
         match: (argv) => argv.includes("worktree") && argv.includes("remove"),
@@ -528,16 +467,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("gives simplify a real patch and withholds the brief", async () => {
-    // Showing it the requirement would invite it to reconsider the change
-    // rather than the way the change is written.
-    //
-    // REGRESSION, 2026-09-04. This test used to assert `toBe(NUMSTAT)` — the
-    // gate's format, a table of line counts — under a name that said "the
-    // diff", and it passed for as long as one function served both reads. The
-    // first real solve crashed here, because the numstat is `-z` separated and
-    // `spawn` refuses a NUL in argv. The crash was the lucky outcome: without
-    // the `-z` the pass would have run, been shown a count table, found nothing
-    // to simplify, and looked like it was working.
+    // Guards against sending simplify the gate's `--numstat -z` format instead of a real patch, which once crashed on a NUL in argv.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
@@ -549,11 +479,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("never puts a NUL in front of a pass", async () => {
-    // THE GUARD, stated as the property rather than as one call site. Anything
-    // handed to a pass becomes part of a single argv element, so a NUL anywhere
-    // in it fails the run before the model is reached. Checked across every
-    // string every pass received, so a future field added to `SolveRunOptions`
-    // and wired to a `-z` read is caught here rather than in production.
+    // Checked across every field every pass received, so a future field wired to a `-z` read is caught here rather than in production.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
@@ -569,23 +495,12 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("makes files the pass created visible before reading any diff", async () => {
-    // THE GUARD, and it closes a hole rather than tidying one. `git diff <base>`
-    // reports tracked files only, so a pass that *creates* a file did not appear
-    // in it at all. Measured on the first real solve: the gate passed a
-    // five-file change having read two files and four lines — the whole
-    // implementation, its test and a new asset were invisible to it.
-    //
-    // Every categorical refusal the gate makes names a path that must not be
-    // touched, and each was evadable by writing a new file instead of editing
-    // one. A fresh `.github/workflows/*.yml` would have passed and then run.
+    // `git diff <base>` reports tracked files only, so a pass that creates a file was invisible to every categorical refusal the gate makes.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
 
-    // The base check diffs too — that is how it notices a changed manifest —
-    // but it runs before any pass, so there is nothing it could have created
-    // and nothing to stage. `passesBefore` excludes it without excluding any
-    // diff this guard is about.
+    // `passesBefore` excludes the base check's own diff, since it runs before any pass and has nothing to stage.
     const staged = h.calls.findIndex((argv) => argv.includes("--intent-to-add"));
     const firstDiff = h.calls.findIndex(
       (argv, index) => argv.includes("diff") && (h.passesBefore[index] ?? 0) > 0,
@@ -596,8 +511,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("stages before every diff, not only the first", async () => {
-    // A pass can create a file after an earlier read. Staging once at the top
-    // would bound the fix pass's new files and miss simplify's.
+    // A pass can create a file after an earlier read; staging once at the top would miss simplify's new files.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
@@ -615,9 +529,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("refuses when it cannot stage, rather than reading a partial diff", async () => {
-    // Falling back to the tracked-only diff would report "nothing else changed"
-    // about a change it could not see, which is the failure being fixed. An
-    // unbounded diff has to stop the run.
+    // Falling back would report "nothing else changed" about a change it could not see.
     const { h } = harness(FULL, [{ match: saw("--intent-to-add"), reply: { exitCode: 128 } }]);
 
     const outcome = await solveTicket(h.deps, request);
@@ -690,10 +602,6 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("logs that the write pass ran, since it is the one that spends the privilege", async () => {
-    // Recon, simplify and verify all logged; `fix` did not, which left the only
-    // pass holding `Write` and `Edit` as the single step with no record it had
-    // run. On the first verified run that showed up as a six-minute hole in the
-    // log between two lines, with no way to tell a slow fix from a hung one.
     const info = vi.spyOn(logger, "info").mockImplementation(() => {});
     const { h } = harness(FULL);
 
@@ -707,11 +615,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("keeps model-claimed file paths out of the fix log", async () => {
-    // `filesTouched` is model-authored, derived from a ticket anyone with a
-    // Jira account can edit, and the diff gate is what checks it against git's
-    // own account. Printing the claim into a log a human skims invites reading
-    // the claim as the finding — so the log carries the count and the gate
-    // keeps the paths.
+    // `filesTouched` is model-authored text from an editable ticket; the log carries only the count, and the gate keeps the paths.
     const info = vi.spyOn(logger, "info").mockImplementation(() => {});
     const { h } = harness(FULL);
 
@@ -723,9 +627,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("still reads the numstat for the gate, not the patch", async () => {
-    // The other half of the split. Feeding the gate a unified patch would make
-    // `parseNumstat` return nothing, and an empty file list passes every cap —
-    // the gate would report ok on a diff it never read.
+    // A unified patch would make `parseNumstat` return nothing, and an empty file list passes every cap.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
@@ -749,12 +651,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("refuses a simplify pass that strayed outside the fix's files", async () => {
-    // Becomes an outcome rather than propagating. It used to reject, which read
-    // as principled — a broken contract is not a ticket that did not work — but
-    // the caller is a long-running job holding a worktree, and the practical
-    // effect of the throw was that the process died and the worktree leaked.
-    // The contract is still refused; what changed is that the refusal is
-    // something the caller can act on.
+    // Becomes an outcome rather than a throw, since the caller holds a worktree and an uncaught throw would leak it.
     const { h } = harness({
       ...FULL,
       simplify: simplify({
@@ -769,16 +666,11 @@ describe("solveTicket, and what each pass is given", () => {
 
     expect(outcome.kind).toBe("crashed");
     expect(outcome.kind === "crashed" ? outcome.pass : null).toBe("simplify");
-    // The parser's complaint survives into the reason rather than being
-    // flattened to "a pass died".
+    // The parser's complaint survives rather than being flattened to "a pass died".
     expect(outcome.kind === "crashed" ? outcome.reason : "").toContain("unrelated.ts");
   });
 
   it("turns a pass that times out into an outcome, not a throw", async () => {
-    // The case this was built for. `SOLVE_TIMEOUT_MS` fires inside `passes.run`,
-    // and until `runPass` existed that rejection went straight past every
-    // caller — `solve:once` printed a stack trace and the daemon that Phase E
-    // adds would have taken the whole loop down with it.
     const { h } = harness({}, [], { recon: "pass timed out after 900000ms" });
 
     const outcome = await solveTicket(h.deps, request);
@@ -789,12 +681,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("does not run the fix pass after recon dies", async () => {
-    // The privilege claim, and the reason this is a separate test from the one
-    // above. `crashed` means no verdict was reached; if the write pass ran
-    // anyway then a run that reports having reached no verdict has still edited
-    // the worktree, which is the one way this outcome could lie.
-    // `fix` is scripted, so a pipeline that wrongly continued would still
-    // satisfy every assertion in the test above and only fail this one.
+    // `crashed` means no verdict was reached; if fix ran anyway the worktree would be edited despite that claim.
     const { h } = harness({ fix: fix() }, [], { recon: "pass timed out after 900000ms" });
 
     await solveTicket(h.deps, request);
@@ -803,9 +690,7 @@ describe("solveTicket, and what each pass is given", () => {
   });
 
   it("carries no dev lens off a crashed run", async () => {
-    // Recon is what produces the lens, so a run that lost recon has no reading
-    // to report. Reporting one anyway would feed the fitness assessment
-    // evidence nobody gathered — see `lensOf` in `feedback.ts`.
+    // Recon produces the lens, so a run that lost recon has no reading to report.
     const { h } = harness({}, [], { recon: "pass timed out" });
 
     const outcome = await solveTicket(h.deps, request);
@@ -824,10 +709,7 @@ describe("solveTicket, at the diff gate", () => {
   });
 
   it("does not report an unreadable diff as an empty one", async () => {
-    // Both refuse, so asserting only `kind` passes either way — which is how a
-    // mutation returning "" instead of null from `realDiff` first survived.
-    // The distinction is the whole point: "the agent changed nothing" is a
-    // statement about the agent, and git having failed does not license it.
+    // Both refuse, so asserting only `kind` would pass either way; "the agent changed nothing" needs git to actually say so.
     const unreadable = harness(FULL, [{ match: saw("--numstat"), reply: { exitCode: 128 } }]).h;
     const empty = harness(FULL, [{ match: saw("--numstat"), reply: { stdout: "" } }]).h;
 
@@ -852,9 +734,7 @@ describe("solveTicket, at the diff gate", () => {
   });
 
   it("does not refuse a wide diff, which is the cap's absence seen from here", async () => {
-    // The gate's own test proves `checkDiff` accepts it. This proves the
-    // pipeline agrees — that nothing between here and there reintroduced a
-    // bound of its own, which `SolveRequest.limits` was until 2026-09-06.
+    // `checkDiff` accepts this; this proves nothing between here and there reintroduced a bound of its own.
     const wide = [
       ...Array.from({ length: 30 }, (_unused, index) => `50\t50\tsrc/f${String(index)}.ts`),
       "",
@@ -880,10 +760,7 @@ describe("solveTicket, at the diff gate", () => {
 
 describe("solveTicket, at the base check", () => {
   it("stops before any pass when the repository's own build is red", async () => {
-    // The harness throws on an unscripted pass, so passing `{}` is the
-    // assertion: if recon ran, this test fails with that error instead. That
-    // matters more than the returned kind — the base check exists to spend
-    // nothing on a repository that cannot answer the question.
+    // The harness throws on an unscripted pass, so passing `{}` asserts recon never ran.
     const { h } = harness({}, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
@@ -893,9 +770,7 @@ describe("solveTicket, at the base check", () => {
   });
 
   it("keeps the worktree, because the worktree is the difference", async () => {
-    // Unlike a bail, this is not cleaned up. The failure mode it was built for
-    // is a build that passes in a normal checkout and fails in a linked one, so
-    // the only place it reproduces is the directory a tidy-up would delete.
+    // Unlike a bail, not cleaned up: the failure only reproduces in the linked checkout a tidy-up would delete.
     const { h } = harness({}, [{ match: saw("run", "test"), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
@@ -907,8 +782,6 @@ describe("solveTicket, at the base check", () => {
   });
 
   it("runs before the fix, not after it", async () => {
-    // Ordering is the whole value. A base check after the model has written is
-    // no longer a base check, and would cost exactly what this saves.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, request);
@@ -924,8 +797,7 @@ describe("solveTicket, at the base check", () => {
 
 describe("solveTicket, at verification", () => {
   it("returns failed — a fact about the code — when a step does not pass", async () => {
-    // `afterBase`, so the base's test run passes. Without that premise this is
-    // not a fact about the code — see the `unusable-base` tests below.
+    // `afterBase`, so the base's own test run passes — otherwise this is not a fact about the code.
     const { h } = harness(FULL, [{ match: afterBase(saw("run", "test")), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
@@ -934,8 +806,7 @@ describe("solveTicket, at verification", () => {
   });
 
   it("returns refused — not failed — when the harness could not form a verdict", async () => {
-    // Install dying verifies nothing. Reporting it as `failed` would blame the
-    // change for evidence that was never gathered.
+    // Install dying verifies nothing; `failed` would blame the change for evidence never gathered.
     const { h } = harness(FULL, [{ match: afterBase(saw("install")), reply: { exitCode: 1 } }]);
 
     const outcome = await solveTicket(h.deps, request);
@@ -945,8 +816,7 @@ describe("solveTicket, at verification", () => {
 
   it("keeps a manifest edit a refusal, not a failure", async () => {
     const { h } = harness(FULL, [
-      // Nothing is edited at base time, so the manifest only looks touched on
-      // the second read — which is also what really happens.
+      // Manifest only looks touched on the second read, matching what really happens.
       { match: afterBase(saw("--name-only")), reply: { stdout: `package.json${NUL}` } },
     ]);
 
@@ -1004,9 +874,7 @@ const probeCalls = (calls: readonly (readonly string[])[]) =>
 
 describe("solveTicket, and the fail-first experiment", () => {
   it("runs it by default, because nobody has to remember to ask for it", async () => {
-    // The opposite default from every other switch on a solve. It grants no
-    // privilege and writes nothing, and the failure mode of it being off is
-    // precisely the defect it is here to find.
+    // The opposite default from every other switch on a solve, since this grants no privilege and writes nothing.
     const { h } = harness(FULL);
 
     const outcome = await solveTicket(h.deps, request);
@@ -1016,8 +884,6 @@ describe("solveTicket, and the fail-first experiment", () => {
   });
 
   it("spends nothing at all when it is switched off", async () => {
-    // The reason the setting exists is cost, so the off position has to cost
-    // nothing — not run the experiment and discard it.
     const { h } = harness(FULL);
 
     const outcome = await solveTicket(h.deps, { ...request, failFirstCheck: false });
@@ -1030,8 +896,7 @@ describe("solveTicket, and the fail-first experiment", () => {
   });
 
   it("still publishes when the experiment cannot run", async () => {
-    // A report, never a refusal. A fix does not become wrong because the
-    // harness could not take its tests apart.
+    // A report, never a refusal: a fix does not become wrong because the harness could not take its tests apart.
     const { h } = harness(FULL);
 
     const outcome = await solveTicket(h.deps, request);
@@ -1040,13 +905,7 @@ describe("solveTicket, and the fail-first experiment", () => {
   });
 });
 
-/**
- * The escape guard's own read, and nothing else in the run.
- *
- * Keyed on `-uall` rather than on `status`, because `worktree.ts` asks a
- * different question with the first two words of the same command and a test
- * that counted both would pass while measuring the wrong one.
- */
+/** The escape guard's own read, keyed on `-uall` rather than `status` since `worktree.ts` asks a different question with the same command prefix. */
 const snapshots = (calls: readonly (readonly string[])[]) =>
   calls.filter((argv) => argv.includes("status") && argv.includes("-uall"));
 
@@ -1065,11 +924,7 @@ const watchedRequest: SolveRequest = {
 
 describe("solveTicket, and the write-escape guard", () => {
   it("reads every watched checkout before the run and again after it", async () => {
-    // Two snapshots per directory, and the vault named twice in the request
-    // yields one entry: it is `--add-dir`'d on every pass including the write
-    // ones, so it is the checkout most likely to be written to and the least
-    // likely to be listed in SOLVE_READ_DIRS as well. Counting it twice would
-    // double every comparison against it for no gain.
+    // The vault yields one entry even though it's implicitly `--add-dir`'d on every pass; counting it twice would double every comparison for no gain.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, watchedRequest);
@@ -1079,9 +934,7 @@ describe("solveTicket, and the write-escape guard", () => {
   });
 
   it("does not watch the worktree it is there to bound", async () => {
-    // The worktree is where the run is supposed to write. Snapshotting it would
-    // report every solve as an escape, which is the failure mode that gets a
-    // guard switched off rather than fixed.
+    // Snapshotting the worktree would report every solve as an escape.
     const { h } = harness(FULL);
 
     await solveTicket(h.deps, watchedRequest);
@@ -1090,9 +943,7 @@ describe("solveTicket, and the write-escape guard", () => {
   });
 
   it("withholds a verified change when a watched checkout moved under it", async () => {
-    // The one that matters. `diff-gate` reads `git diff` inside the worktree,
-    // so a write to a sibling checkout is not refused by it — it is invisible
-    // to it. Without this the run publishes.
+    // `diff-gate` only reads inside the worktree, so a write to a sibling checkout is invisible to it without this guard.
     const { h } = harness(FULL, [
       {
         match: afterBase((argv) => argv.includes("-uall") && argv.includes(READ_DIRS[0] ?? "")),
@@ -1110,9 +961,7 @@ describe("solveTicket, and the write-escape guard", () => {
   });
 
   it("keeps the withheld verdict rather than replacing it with silence", async () => {
-    // `would` is what stops the escape from erasing the run. A refusal that
-    // arrives as "something moved" and nothing else sends an operator looking
-    // for a fault in the harness instead of in their own editor.
+    // `would` stops the escape from erasing the run; without it a bare "something moved" sends an operator looking in the wrong place.
     const { h } = harness(
       {
         recon: recon({
@@ -1141,9 +990,7 @@ describe("solveTicket, and the write-escape guard", () => {
   });
 
   it("does not override an outcome that has no worktree to report", async () => {
-    // `escaped` carries a worktree, and `no-worktree` is the one kind with
-    // none. Converting it would either invent one or hand every consumer of
-    // `outcome.worktree` an undefined on the unhappiest path there is.
+    // `escaped` carries a worktree; `no-worktree` is the one kind with none, so converting it would have to invent one.
     const { h } = harness({}, [
       {
         match: afterBase((argv) => argv.includes("-uall")),
@@ -1165,10 +1012,7 @@ describe("solveTicket, and the write-escape guard", () => {
   });
 
   it("reads a checkout it cannot read as changed, not as clean", async () => {
-    // A `git status` that fails is the guard losing its evidence, and the two
-    // ways it can fail are exactly the two an escape would cause: a directory
-    // deleted, and a repository left mid-operation. Reading either as "no
-    // change" is the guard reporting success because it went blind.
+    // A failed `git status` is the guard going blind; reading that as "no change" would report success on exactly the failures an escape causes.
     const { h } = harness(FULL, [
       {
         match: afterBase((argv) => argv.includes("-uall") && argv.includes(READ_DIRS[0] ?? "")),
@@ -1200,8 +1044,7 @@ describe("resolveReview", () => {
   });
 
   it("runs no simplify pass — the reviewer is the second opinion", async () => {
-    // A simplify pass here would edit the diff between the comment and the
-    // re-read, so the reviewer would no longer be reviewing what they saw.
+    // A simplify pass here would edit the diff between the comment and the re-read, so the reviewer would no longer be reviewing what they saw.
     const { h } = harness({ review: review() });
 
     await resolveReview(h.deps, reviewRequest);
@@ -1239,12 +1082,7 @@ describe("resolveReview", () => {
   });
 
   it("abandons the round rather than crashing when the review pass dies", async () => {
-    // The one place a dead pass is deliberately *not* `crashed`. By here a pull
-    // request exists, so there is a human on the other end and somewhere to put
-    // the reason; a new outcome kind would only make every caller of
-    // `resolveReview` handle a case that reduces to "this round produced
-    // nothing". The reason still has to survive, or the PR sits there with no
-    // explanation of why the bot stopped answering.
+    // The one place a dead pass is deliberately not `crashed`: a pull request already exists, so the reason must survive as a reply rather than a log line.
     const { h } = harness({}, [], { review: "pass timed out after 900000ms" });
 
     const outcome = await resolveReview(h.deps, reviewRequest);
@@ -1254,14 +1092,7 @@ describe("resolveReview", () => {
   });
 
   it("gates the whole cumulative diff, not just the round's increment", async () => {
-    // The reviewer is looking at the cumulative diff, so that is what has to be
-    // clean: a lockfile anywhere in it is a problem whichever round put it
-    // there, and a round that merely fails to remove one has not fixed it.
-    //
-    // The cumulative reading was half the argument for deleting the size caps —
-    // it meant a round touching one new file was refused for the four already
-    // on the branch. It is the right reading for the path families and was the
-    // wrong one for a cap, which is the distinction that survived the delete.
+    // The reviewer is looking at the cumulative diff, so that is what must be clean: a lockfile anywhere in it is a problem whichever round put it there.
     const { h } = harness({ review: review() }, [
       { match: saw("--numstat"), reply: { stdout: REFUSED_DIFF } },
     ]);
@@ -1296,10 +1127,7 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, reviewRequest);
 
     expect(outcome).toMatchObject({ kind: "abandoned" });
-    // The escape guard's two reads are excluded rather than tolerated: they are
-    // of other checkouts, never of the worktree, which is the property this
-    // test is about. Comparing against the raw call list would have made the
-    // test fail for a guard doing exactly what it is for.
+    // Excludes the escape guard's own reads of other checkouts, never of the worktree, which is the property under test.
     expect(h.calls.filter((argv) => !argv.includes("-uall"))).toEqual([]);
   });
 
@@ -1318,8 +1146,7 @@ describe("resolveReview", () => {
   });
 
   it("carries the reviewer's unresolved note into the commit body", async () => {
-    // `residualRisk` in the fix pass, `unresolved` here; both end up as the
-    // thing a human reading `git log` needs to know was left open.
+    // `residualRisk` in the fix pass, `unresolved` here — both end up in `git log` as what was left open.
     const { h } = harness({
       review: review({ unresolved: "comment 3 needs a product decision" }),
     });
@@ -1330,10 +1157,7 @@ describe("resolveReview", () => {
   });
 
   it("refuses the round when a watched checkout moved under it", async () => {
-    // The review pass is a write pass and had no guard at all until this. It is
-    // the more exposed of the two paths: the round's output goes onto a pull
-    // request a human is already reading, so an escape here is one step from a
-    // merge, where an escaped solve has shown nobody anything.
+    // A review round's output goes straight onto a pull request a human is already reading, so an escape here is one step from a merge.
     const { h } = harness({ review: review() }, [
       {
         match: afterBase((argv) => argv.includes("-uall") && argv.includes(READ_DIRS[0] ?? "")),
@@ -1363,12 +1187,7 @@ describe("resolveReview", () => {
 /**
  * The guards on a round that resolves a merge conflict.
  *
- * The subject here is not whether the model resolves anything well — nothing in
- * this file can know that. It is that **the harness believes git and not the
- * report**, and that every way this round can end badly leaves the checkout
- * exactly as it was found. A conflicted tree left on disk is not a mess, it is
- * the state the next tick's reuse check moves aside and rebuilds, which is how
- * one wedged pull request made fifteen salvaged worktrees.
+ * The harness believes git's own state, never the pass's report, and every way this round can end badly leaves the checkout exactly as it was found.
  */
 const CONFLICTED_FILE = "src/utils/DateUtils.ts";
 
@@ -1402,17 +1221,13 @@ function once(match: (argv: readonly string[]) => boolean) {
 /**
  * A branch seven commits behind, conflicting in one file, resolved by the pass.
  *
- * The `--diff-filter=U` read answers twice and differently on purpose: once
- * before the pass, where it is the conflict, and once after, where an empty
- * answer is what *resolved* means. A fake that answered the same both times
- * would make the second read untestable, and that read is the whole gate.
+ * The `--diff-filter=U` read answers twice on purpose: the conflict before the pass, empty (resolved) after — a fake answering the same both times would make the gate untestable.
  */
 const conflicting = (): readonly Rule[] => [
   { match: saw("rev-list", "--count"), reply: { stdout: "7\n" } },
   { match: saw("merge", "--no-edit"), reply: { exitCode: 1, stderr: "CONFLICT (content)" } },
   { match: once(saw("--diff-filter=U")), reply: { stdout: `${CONFLICTED_FILE}\n` } },
-  // `git grep` exits 1 when it finds nothing, which is the answer being hoped
-  // for. Left to the fake's default of exit 0 it would read as *markers found*.
+  // `git grep` exits 1 for "nothing found"; the fake's default of exit 0 would read as markers found.
   { match: saw("grep"), reply: { exitCode: 1 } },
 ];
 
@@ -1435,9 +1250,7 @@ describe("resolveConflict", () => {
     expect(outcome).toMatchObject({ kind: "resolved", behind: 7 });
     const lines = ranAll(h);
     const at = (match: string): number => lines.findIndex((line) => line.includes(match));
-    // The push is last and the verification is before the commit: a merge
-    // commit that does not build is worse on a branch under review than the
-    // conflict it replaced, because the conflict is at least visible.
+    // A merge commit that does not build is worse under review than the conflict it replaced.
     expect(at("run test")).toBeLessThan(at("commit --no-edit"));
     expect(at("commit --no-edit")).toBeLessThan(at(`push origin ${worktree.branch}`));
   });
@@ -1450,9 +1263,7 @@ describe("resolveConflict", () => {
     const options = h.seen[0]?.options;
     expect(options?.conflict).toContain(CONFLICTED_FILE);
     expect(options?.conflict).toContain("origin/main");
-    // A merge is a fact about two histories, not about the review. Handing this
-    // pass the reviewer's comments would invite it to fix the ticket here, in a
-    // commit whose message says only that it merged.
+    // A merge is a fact about two histories, not the review; handing it the reviewer's comments would invite it to fix the ticket in a commit that only claims to have merged.
     expect(options?.reviewFeedback).toBeUndefined();
     expect(options?.brief).toBeUndefined();
   });
@@ -1518,36 +1329,28 @@ describe("resolveConflict", () => {
 
     expect(outcome).toMatchObject({ kind: "refused" });
     expect(outcome.kind === "refused" ? outcome.reason : "").toContain("src/secrets.ts");
-    // Nothing was staged, because the report describes a situation that is not
-    // the one git reported and there is no reason to believe the rest of it.
+    // Nothing was staged: the report describes a situation git did not, so there is no reason to believe the rest of it.
     expect(ran(h, "add --")).toBe(false);
     expect(ran(h, "merge --abort")).toBe(true);
   });
 
   it("refuses when a conflict marker survives, whatever the report says", async () => {
     const { h } = harness({ merge: merge() }, [
-      // Ahead of `conflicting()`, whose own grep rule answers "nothing found":
-      // the fake takes the first matching rule.
+      // Ahead of `conflicting()`'s own grep rule; the fake takes the first matching rule.
       { match: saw("grep"), reply: { exitCode: 0, stdout: `${CONFLICTED_FILE}:14:<<<<<<< HEAD` } },
       ...conflicting(),
     ]);
 
     const outcome = await resolveConflict(h.deps, conflictRequest);
 
-    // Markers commit perfectly happily, and they fail almost every language's
-    // parser — so verification would usually catch this. *Usually* is not the
-    // standard for a commit that lands on a branch a human is reviewing.
+    // Markers commit fine and fail most parsers, so verification would usually catch this — not the standard for a branch under review.
     expect(outcome).toMatchObject({ kind: "refused" });
     expect(ran(h, "commit --no-edit")).toBe(false);
     expect(ran(h, "merge --abort")).toBe(true);
   });
 
   it("refuses when the marker check could not run at all", async () => {
-    // `git grep` exits 1 for "nothing found" and 0 for "found something", so
-    // anything above 1 is git failing to look rather than an answer. Reading it
-    // as clean would turn every broken grep into a silent yes, which is the one
-    // direction this check must not fail in: the tree it cannot read is a tree
-    // about to be committed onto a branch under review.
+    // `git grep` exits 1 for "nothing found" and 0 for "found something"; anything above 1 is git failing to look, not an answer, and must not read as clean.
     const { h } = harness({ merge: merge() }, [
       { match: saw("grep"), reply: { exitCode: 128, stderr: "fatal: unable to read index" } },
       ...conflicting(),
@@ -1561,8 +1364,7 @@ describe("resolveConflict", () => {
   });
 
   it("refuses when a path is still unmerged after the pass", async () => {
-    // The `--diff-filter=U` read answers the same both times, so the file the
-    // pass claimed to resolve is still conflicted.
+    // The `--diff-filter=U` read answers the same both times: the file the pass claimed to resolve is still conflicted.
     const { h } = harness({ merge: merge() }, [
       { match: saw("rev-list", "--count"), reply: { stdout: "7\n" } },
       { match: saw("merge", "--no-edit"), reply: { exitCode: 1 } },
@@ -1604,8 +1406,7 @@ describe("resolveConflict", () => {
 
     const outcome = await resolveConflict(h.deps, conflictRequest);
 
-    // The same hole the diff gate had: a bound that only reads tracked files
-    // bounds nothing, because writing a new one steps straight past it.
+    // Same hole as the diff gate: a bound reading only tracked files bounds nothing, since writing a new one steps past it.
     expect(outcome).toMatchObject({ kind: "refused" });
     expect(ran(h, "commit --no-edit")).toBe(false);
   });
@@ -1631,9 +1432,7 @@ describe("resolveConflict", () => {
 
     const outcome = await resolveConflict(h.deps, conflictRequest);
 
-    // `merge --abort` cannot help here: the merge is committed, so `ORIG_HEAD`
-    // is the only route back. Without it the checkout is ahead of `origin`,
-    // which is the state the next attach salvages.
+    // `merge --abort` cannot help once the merge is committed; `ORIG_HEAD` is the only route back.
     expect(outcome).toMatchObject({ kind: "refused" });
     expect(ran(h, "reset --hard ORIG_HEAD")).toBe(true);
   });
@@ -1656,12 +1455,7 @@ function entryPoint(root: string): string {
 
 describe("the skill root", () => {
   it("is staged, on disk, before every pass that runs", async () => {
-    // THE ONE THAT MATTERS. Every prompt opens with `/agent-solve <KEY>
-    // --<pass>`, and the session's working directory is the worktree, which
-    // contains no skills. Probed 2026-09-04 from such a directory:
-    // `Unknown command: /agent-solve`. Checking existence *during* the pass
-    // rather than after is the point — it is deleted on the way out, so an
-    // assertion afterwards would prove nothing about what the pass could see.
+    // Every prompt opens with `/agent-solve <KEY> --<pass>`, which the worktree alone cannot resolve. Checked during the pass, not after, since the root is deleted on the way out.
     const { h } = harness(FULL);
     const staged: boolean[] = [];
     const passes: PassRunner = {
@@ -1677,8 +1471,7 @@ describe("the skill root", () => {
   });
 
   it("is the same root for all three passes", async () => {
-    // Restaging per pass would work and would also mean the `fix` pass could be
-    // reading a different copy from the one `recon` read.
+    // Restaging per pass would let `fix` read a different copy than `recon` did.
     const { h } = harness(FULL);
     await solveTicket(h.deps, request);
 
@@ -1696,16 +1489,7 @@ describe("the skill root", () => {
   });
 
   it("is removed even when the run throws", async () => {
-    // The `finally`, and the reason it is one. Unplugging it leaves a
-    // read-only directory per crashed run, which the next run for that ticket
-    // then cannot overwrite — a failure that only shows up after a crash.
-    //
-    // This used to throw by leaving a pass unscripted, which stopped working
-    // when `runPass` started catching those; the run returns `crashed` now and
-    // a `finally` is indistinguishable from a plain trailing statement on a
-    // path that returns. So the throw has to come from the layer `runPass`
-    // does *not* wrap — the shell — and it has to land after a pass has run,
-    // or there is no staged root recorded to go looking for.
+    // Without the `finally`, a crashed run leaves a read-only directory the next run for that ticket cannot overwrite. The throw must come from the shell layer `runPass` does not wrap, after a pass has run, or there is no staged root to check.
     const { h } = harness({ recon: recon(), fix: fix(), simplify: simplify() }, [
       { match: saw("--numstat"), throws: "git died mid-diff" },
     ]);
@@ -1718,9 +1502,7 @@ describe("the skill root", () => {
   });
 
   it("does not hand the pass the repository this service lives in", async () => {
-    // `--add-dir` grants write to a pass that pre-approves `Write` (probed
-    // 2026-09-04). The staged root is what keeps the solver away from its own
-    // denylists and its own diff gate.
+    // `--add-dir` grants write to a pass that pre-approves `Write`; the staged root keeps the solver away from its own denylists and diff gate.
     const { h } = harness(FULL);
     await solveTicket(h.deps, request);
 
@@ -1746,12 +1528,7 @@ describe("the skill root", () => {
 });
 
 describe("solveWithRetry", () => {
-  /**
-   * A pipeline whose script changes between attempts.
-   *
-   * The attempt boundary is the `recon` pass, because that is the first thing
-   * `runPipeline` runs. Everything else about the harness is the one above.
-   */
+  /** A pipeline whose script changes between attempts; the attempt boundary is `recon`, the first pass `runPipeline` runs. */
   function attempts(
     scripts: readonly Partial<Record<Pass, unknown>>[],
     rules: readonly Rule[] = [],
@@ -1810,10 +1587,7 @@ describe("solveWithRetry", () => {
   });
 
   it("reruns a ticket the machine got in the way of", async () => {
-    // Observed 2026-09-04: the host's own safety hook denied a write mid-pass,
-    // twice in eight write-capable sessions, non-deterministically — and the
-    // run that wrote materially identical content to a neighbouring path
-    // succeeded. Nothing about the ticket changed between them.
+    // The host's own safety hook can deny a write mid-pass non-deterministically; nothing about the ticket itself changed between attempts.
     const { deps } = attempts([stopped("environment"), FULL]);
 
     const result = await solveWithRetry(deps, request);
@@ -1823,8 +1597,7 @@ describe("solveWithRetry", () => {
   });
 
   it("stops after one retry, however many times the machine gets in the way", async () => {
-    // An obstacle that survives a clean retry is not transient, and a loop that
-    // keeps paying to find that out turns a blocked host into a bill.
+    // An obstacle surviving a clean retry is not transient; retrying further just turns a blocked host into a bill.
     const { deps } = attempts([stopped("environment"), stopped("environment")]);
 
     const result = await solveWithRetry(deps, request);
@@ -1841,9 +1614,7 @@ describe("solveWithRetry", () => {
     await solveWithRetry(deps, request);
 
     const git = calls.filter((argv) => argv.includes("worktree") || argv.includes("branch"));
-    // Each add is preceded by the list that decides whether anything of ours is
-    // already at the path. Here nothing is — this retry cleans up after itself
-    // explicitly — so the list finds an empty answer twice and no salvage runs.
+    // Each add is preceded by the list deciding whether anything of ours is already at the path; here nothing is, so no salvage runs.
     expect(git.map((argv) => argv.slice(3, 5).join(" "))).toEqual([
       "worktree list",
       "worktree add",

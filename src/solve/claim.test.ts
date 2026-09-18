@@ -13,17 +13,7 @@ import { AGENT_LABELS, type ClaimAuthority, type LabelEdit, applyEdit } from "./
 
 const KEY = "SSX-3822";
 
-/**
- * The labels SSX-3822 actually carries, plus the two the queue selects on.
- *
- * A real set rather than a minimal one on purpose. Every rule in `claim.ts` is
- * about the labels it is *not* interested in, and a fixture of two labels cannot
- * catch a mistake that reaches them. `triaged`, `route:ours` and `dor:pass` are
- * the bystanders. What "a mistake that reaches them" means has changed — it used
- * to be a full-field write destroying them, and is now a delta naming one by
- * accident, or a verification failing over one that was never ours — and the
- * fixture serves both.
- */
+/** A real set, not a minimal one — `triaged`, `route:ours`, `dor:pass` are bystanders a mistake could still reach by naming them in a delta by accident. */
 const APPROVED: readonly string[] = [
   "triaged",
   "route:ours",
@@ -48,14 +38,7 @@ interface Board {
   labels: readonly string[];
   /** Every capability call in order, so the read/write/read bracket can be asserted. */
   readonly calls: string[];
-  /**
-   * The label field after each write, not the payload of each write.
-   *
-   * The payload is now a delta, and a delta read on its own says nothing about
-   * whether the ticket ended up correct — which is the question every assertion
-   * in this file is really asking. `deltas` is kept alongside for the handful
-   * of tests that are about the wire format itself.
-   */
+  /** The label field after each write, not the delta payload — `deltas` below covers the wire format itself. */
   readonly writes: (readonly string[])[];
   readonly deltas: LabelEdit[];
   readonly keys: string[];
@@ -65,28 +48,13 @@ interface Board {
 interface BoardHooks {
   /** Runs while a read is in flight, so a racer's edit can land between two reads. */
   readonly onRead?: (call: number, live: Board) => void;
-  /**
-   * Runs after a read has returned but before the write lands.
-   *
-   * This is the window §14.11 is about, and the only way to exercise it. The
-   * window has not closed — a delta is not a compare-and-swap — but what can go
-   * wrong inside it has narrowed to the two `agent:*` labels.
-   */
+  /** Runs after a read but before the write lands — the window §14.11 is about; a delta narrows what can go wrong inside it to the two `agent:*` labels. */
   readonly onBeforeWrite?: (live: Board) => void;
   /** Runs after the field has been replaced, so a racer can overwrite our claim. */
   readonly onWrite?: (call: number, live: Board) => void;
 }
 
-/**
- * A fake Jira label field with hooks at each of the three moments that matter.
- *
- * **Delta semantics on write**, which is what `update.labels` has and what
- * `editJiraIssue` did not. The field is not replaced: the add list is unioned
- * in and the remove list subtracted, against whatever is live at the moment the
- * write arrives. That distinction is the entire point of the change this fake
- * was rewritten for — a fake that still replaced the field would keep passing
- * the tests that document a clobber the service can no longer commit.
- */
+/** A fake Jira label field with hooks at the three moments that matter. Delta semantics on write — add unioned in, remove subtracted, against whatever's live — not a field replace. */
 function board(initial: readonly string[], hooks: BoardHooks = {}): Board {
   let reads = 0;
 
@@ -168,11 +136,7 @@ function request(authority: ClaimAuthority = "manual"): {
   return { issueKey: KEY, authority };
 }
 
-// `diffLabels` had two unit tests here and is gone with it — the comparison is
-// now `diffEdit`, which is not exported, and is covered through `claimTicket`
-// and `releaseClaim` where its answers actually decide something. Its
-// order-insensitivity, the property those two tests existed for, is asserted by
-// "does not treat a reordered read-back as a failure" below.
+// `diffLabels`'s order-insensitivity is now asserted by "does not treat a reordered read-back as a failure" below, via `diffEdit`.
 
 describe("claimTicket", () => {
   describe("the write itself", () => {
@@ -181,10 +145,7 @@ describe("claimTicket", () => {
 
       await claimTicket(jira.capabilities, request());
 
-      // The bystanders are the assertion, and they used to be carried through by
-      // hand because the write replaced the field. They are now untouched
-      // because the write cannot reach them — same expectation, opposite reason,
-      // and the test is kept precisely because both readings must hold.
+      // Bystanders are the assertion: untouched because the delta write cannot reach them.
       expect(jira.writes).toEqual([CLAIMED]);
     });
 
@@ -195,9 +156,7 @@ describe("claimTicket", () => {
     });
 
     it("reads, writes, then reads again, and makes no other call", async () => {
-      // The bracket is the whole mitigation: anything inserted between the first
-      // read and the write widens the window in which a colleague's label edit
-      // is lost, so the call sequence is asserted rather than assumed.
+      // The bracket is the mitigation, so the call sequence is asserted rather than assumed.
       const jira = board(APPROVED);
 
       await claimTicket(jira.capabilities, request());
@@ -212,10 +171,7 @@ describe("claimTicket", () => {
     });
 
     it("is not confused by a duplicate in the read", async () => {
-      // Jira labels are a set, so a repeat is transport noise. It used to matter
-      // because the deduplicated set was written straight back; now nothing is
-      // written back, and what it must not do is fail *verification* over a
-      // repeat that means nothing.
+      // A repeat is transport noise; verification must not fail over it.
       const jira = board([...APPROVED, "dor:pass"]);
 
       const result = await claimTicket(jira.capabilities, request());
@@ -225,8 +181,7 @@ describe("claimTicket", () => {
     });
 
     it("returns a receipt carrying the exact pre-claim set", async () => {
-      // Nothing on the board holds this set once the claim is written, so if the
-      // receipt does not carry it, release has nothing to restore.
+      // Nothing on the board holds this set once written; release needs the receipt to restore it.
       const jira = board(APPROVED);
 
       const receipt = receiptOf(await claimTicket(jira.capabilities, request()));
@@ -235,21 +190,15 @@ describe("claimTicket", () => {
     });
   });
 
-  /**
-   * The re-read is the mitigation, so these tests are about what it catches. The
-   * queue's snapshot is old by the time a claim runs — a whole cycle of sorting,
-   * allowlist checks and capacity arithmetic happens in between.
-   */
+  /** The re-read is the mitigation; the queue's snapshot is stale by the time a claim runs. */
   describe("re-reading immediately before the write", () => {
     it("takes no label snapshot from its caller at all", () => {
-      // A type-level guarantee, asserted here so that adding a `labels` field to
-      // `ClaimRequest` — the obvious "optimisation" — trips something.
+      // A type-level guarantee: adding a `labels` field to `ClaimRequest` should trip this.
       expect(Object.keys(request())).toEqual(["issueKey", "authority"]);
     });
 
     it("writes the labels it just read, not the ones the queue saw", async () => {
-      // A PM adds next:to-trio after the queue fetched the ticket. It survives
-      // the claim only if the write derives from this read.
+      // A PM adds next:to-trio after the queue fetched the ticket; it survives only if the write derives from this read.
       const jira = board(APPROVED, {
         onRead: (call, live) => {
           if (call === 1) {
@@ -264,8 +213,7 @@ describe("claimTicket", () => {
     });
 
     it("refuses a ticket a racer claimed after the queue looked at it", async () => {
-      // There is no compare-and-swap available, so this read is the only thing
-      // standing between two instances and a double claim.
+      // No compare-and-swap exists, so this read is the only thing standing between two instances and a double claim.
       const jira = board(APPROVED, {
         onRead: (call, live) => {
           if (call === 1) {
@@ -295,20 +243,7 @@ describe("claimTicket", () => {
       expect(jira.writes).toEqual([]);
     });
 
-    /**
-     * This test used to assert the opposite, and the inversion is the change.
-     *
-     * It read: *"cannot detect an edit it clobbered, and reports success
-     * anyway"* — a label added between the read and the write was absent from
-     * the set we sent *and* from the set we read back, so it agreed perfectly
-     * and was gone. That was true of a full-field write and is false of a
-     * delta: Jira applies `remove: agent:start` and `add: agent:solving` to
-     * whatever is live when the request lands, and a label this service never
-     * mentioned is a label it cannot destroy.
-     *
-     * Left in place, inverted, rather than deleted. A test that says "and this
-     * is the bit that used to be broken" is the only durable record that it was.
-     */
+    // A delta applies `remove`/`add` to whatever is live when the request lands, so a label this service never mentioned cannot be destroyed.
     it("cannot clobber an edit that lands inside the write window", async () => {
       const jira = board(APPROVED, {
         onBeforeWrite: (live) => {
@@ -324,9 +259,7 @@ describe("claimTicket", () => {
     });
 
     it("names only its own two labels on the wire, whatever else is on the ticket", async () => {
-      // The mechanism behind the test above, asserted directly: the payload is
-      // a delta over `agent:*` and mentions nothing else, so there is no
-      // arithmetic for a bystander label to be lost in.
+      // The payload is a delta over `agent:*` and mentions nothing else.
       const jira = board(APPROVED);
 
       await claimTicket(jira.capabilities, request());
@@ -335,11 +268,7 @@ describe("claimTicket", () => {
     });
   });
 
-  /**
-   * Every refusal asserts that nothing was written. The reason string matters
-   * less than the absence of the write — a refusal that wrote anyway would be
-   * the worst outcome in the module.
-   */
+  /** Every refusal asserts nothing was written — a refusal that wrote anyway would be the worst outcome here. */
   describe("refusing before the write", () => {
     it("refuses a ticket triage never marked solvable", async () => {
       const jira = board([AGENT_LABELS.start, "triaged"]);
@@ -369,8 +298,7 @@ describe("claimTicket", () => {
     });
 
     it("treats an unrecognised mode as manual, never as auto", async () => {
-      // Fail closed: the privilege `auto` grants is running without a human, so
-      // only the exact value that grants it may.
+      // Fail closed: only the exact value that grants the `auto` privilege may.
       const jira = board([AGENT_LABELS.solvable, "triaged"]);
 
       const result = await claimTicket(jira.capabilities, request("AUTO" as ClaimAuthority));
@@ -401,10 +329,7 @@ describe("claimTicket", () => {
     });
   });
 
-  /**
-   * The read is about to be written straight back, so an unreadable one is not a
-   * display problem — it is a set of labels about to be deleted. Fail closed.
-   */
+  /** The read is written straight back, so an unreadable one is a set of labels about to be deleted, not a display problem. */
   describe("an unreadable label field", () => {
     it("refuses a read containing a non-string, rather than writing round it", async () => {
       const jira = unreadableBoard([AGENT_LABELS.solvable, AGENT_LABELS.start, 7]);
@@ -434,11 +359,7 @@ describe("claimTicket", () => {
     });
   });
 
-  /**
-   * `editJiraIssue` returning success says the request was accepted, not that the
-   * ticket ended up as asked. Since two racers both succeed, the read-back is the
-   * only thing that can say which of them the board kept.
-   */
+  /** Success from the write means "accepted," not "landed as asked" — the read-back is the only way to know which of two racers the board kept. */
   describe("verifying the write", () => {
     it("reports failure when agent:solving is not there afterwards", async () => {
       // A second instance wrote its own full field a moment later, without ours.
@@ -468,14 +389,7 @@ describe("claimTicket", () => {
       expect(result.reason).toContain("authorisation was not consumed");
     });
 
-    // The two tests below used to assert the opposite, and they were right to
-    // when the write replaced the whole field: any label that moved between the
-    // read and the read-back either was destroyed by us or would be by the next
-    // write, so all of it was ours to answer for. The write is a delta now
-    // (`updateLabels`), and the service no longer predicts what the rest of the
-    // ticket says. A colleague's label arriving mid-claim is a colleague
-    // working. Reporting it as `unverified` would fire this check on innocent
-    // events several times a week, which is how a check ends up switched off.
+    // A colleague's label arriving mid-claim is a colleague working, not a failed verification.
     it("does not fail the claim when a bystander label appears mid-write", async () => {
       const jira = board(APPROVED, {
         onWrite: (_call, live) => {
@@ -497,16 +411,13 @@ describe("claimTicket", () => {
 
       const result = await claimTicket(jira.capabilities, request());
 
-      // And `dor:pass` is genuinely gone, rather than restored by our write —
-      // which is the whole point of sending a delta instead of a field.
+      // Genuinely gone, not restored by our write — the point of a delta over a field.
       expect(result.outcome).toBe("claimed");
       expect(jira.labels).not.toContain("dor:pass");
     });
 
     it("carries no receipt, so an unverified claim cannot be released mechanically", async () => {
-      // The shape is the guard. A caller cannot reach `labelsAfter`, cannot pass
-      // this to `releaseClaim`, and cannot narrow to the success branch without
-      // writing the literal "claimed".
+      // The shape is the guard: no `labelsAfter`, can't pass to `releaseClaim`, can't narrow without the literal "claimed".
       const jira = board(APPROVED, {
         onWrite: (_call, live) => {
           live.labels = live.labels.filter((label) => label !== AGENT_LABELS.solving);
@@ -519,11 +430,7 @@ describe("claimTicket", () => {
       expect(unverifiedClaim(result).labelsBefore).toEqual(APPROVED);
     });
 
-    // The *verdict* narrowed to the two labels this service asked for; the
-    // *report* did not. A human reading "the claim did not take" needs the rest
-    // of the ticket to work out who else was writing, so both whole sets are
-    // still carried — including the bystander that is deliberately no longer
-    // grounds for the failure.
+    // The verdict narrowed to the two labels asked for; the report still carries whole sets, so a human can see who else was writing.
     it("reports the whole set that was sent and the whole set that came back", async () => {
       const jira = board(APPROVED, {
         onWrite: (_call, live) => {
@@ -564,11 +471,7 @@ describe("claimTicket", () => {
     });
   });
 
-  /**
-   * A refusal is a normal outcome and returns. A fault leaves the ticket in a
-   * state this function cannot describe, and throws — an exception being the one
-   * return value nobody ignores by accident.
-   */
+  /** A refusal is a normal outcome and returns; a fault leaves an indescribable state and throws instead. */
   describe("faults", () => {
     it("throws when the write fails, carrying the restore point", async () => {
       const capabilities: ClaimCapabilities = {
@@ -605,9 +508,7 @@ describe("claimTicket", () => {
     });
 
     it("throws when the read-back is unreadable, rather than calling it a mismatch", async () => {
-      // "Verification could not run" is not the same event as "verification ran
-      // and disagreed", and an unverified result with an empty diff would be a
-      // third meaning smuggled into the second.
+      // "Could not run" is not the same event as "ran and disagreed".
       let reads = 0;
       const capabilities: ClaimCapabilities = {
         readLabels: async () => {
@@ -674,11 +575,7 @@ describe("releaseClaim", () => {
     expect(jira.calls).toEqual(["read", "write", "read"]);
   });
 
-  /**
-   * The Phase B2 verification experiment, run against a fake: claim one ticket,
-   * confirm a second pass picks nothing up, release it, confirm the ticket ends
-   * exactly where it started.
-   */
+  /** Claims a ticket against a fake, confirms a second pass is refused, releases it, and confirms the ticket lands back where it started. */
   it("survives claim → a second attempt picks nothing up → release → unchanged", async () => {
     const jira = board(APPROVED);
     const start = [...jira.labels];
@@ -707,13 +604,7 @@ describe("releaseClaim", () => {
       expect(jira.writes).toEqual([]);
     });
 
-    // Both of these asserted a refusal until the write became a delta, and were
-    // right to: restoring the pre-claim field would have undone the colleague's
-    // edit in order to undo ours. A release that names only `agent:start` and
-    // `agent:solving` cannot reach their label, so refusing would strand
-    // `agent:solving` on the board over an edit that is none of its business —
-    // and a human would have to clear it by hand every time a PM touched a
-    // ticket mid-solve.
+    // A release naming only `agent:start`/`agent:solving` cannot reach a bystander label, so it need not refuse over one.
     it("releases even though somebody added a label while the ticket was claimed", async () => {
       const jira = board(APPROVED);
       const receipt = await claimFirst(jira);
@@ -739,16 +630,12 @@ describe("releaseClaim", () => {
       const result = await releaseClaim(jira.capabilities, receipt);
 
       expect(result.outcome).toBe("released");
-      // Not resurrected. The release restores its own two labels, not the
-      // ticket, and "puts it back exactly as it was found" now means the part of
-      // it this service moved.
+      // Not resurrected: the release restores its own two labels, not the whole ticket.
       expect(jira.labels).not.toContain("dor:pass");
     });
 
     it("refuses when the claim it describes has already been undone", async () => {
-      // Somebody put `agent:start` back by hand. The receipt still says this
-      // service consumed it, so undoing the claim would remove a label a person
-      // has since re-added deliberately.
+      // The receipt says this service consumed `agent:start`; undoing the claim would remove a label a person re-added deliberately.
       const jira = board(APPROVED);
       const receipt = await claimFirst(jira);
       jira.labels = [...jira.labels, AGENT_LABELS.start];
@@ -761,8 +648,7 @@ describe("releaseClaim", () => {
     });
 
     it("refuses a receipt whose restore point would leave the ticket claimed", async () => {
-      // No real claim produces such a receipt; a hand-built one easily does, and
-      // hand-building one is the documented way to recover an unverified claim.
+      // No real claim produces such a receipt; recovering an unverified claim by hand-building one does.
       const jira = board(CLAIMED);
 
       const result = await releaseClaim(jira.capabilities, {

@@ -34,21 +34,7 @@ const POM = `<?xml version="1.0"?><project><artifactId>insurance-commerce-rest-a
 /** `git show` of a path that is not in the tree. */
 const ABSENT: CommandResult = { ...OK, exitCode: 128, stderr: "fatal: path does not exist" };
 
-/**
- * Replies by matching on the command, not by position.
- *
- * Position-keyed fakes were tried first and made the tests lie: a mutation that
- * removed a step shifted every later reply onto the wrong command, so tests
- * failed for the wrong reason and the mutation looked caught when it was not.
- *
- * The default world is a Node repository: `package.json` is in the base tree
- * and `pom.xml` is not. That default is what makes the Maven tests below mean
- * something — a fake that answered every `git show` identically would put both
- * manifests in every base, so every test would take the both-toolchains
- * refusal and no Node assertion would ever be reached. Keys match a substring
- * of the joined argv, so a test picks a toolchain by keying on the manifest it
- * wants: `"package.json"` or `"pom.xml"`.
- */
+/** Replies by matching on the command, not by position, so removing a step can't silently shift a reply onto the wrong one. */
 function fakeRunner(replies: Record<string, CommandResult> = {}): CommandRunner & {
   calls: string[][];
 } {
@@ -95,35 +81,26 @@ describe("packageManagerOf", () => {
   });
 
   it("defaults when nothing is declared, and says the version is unknown", () => {
-    // `null` and not a guessed version. The absence has to survive to the plan,
-    // because it is what `versionNote` reports and what makes an install
-    // refusal on a CI-green repository diagnosable.
+    // `null`, not a guessed version — `versionNote` reports the absence, which is what makes an install refusal diagnosable.
     expect(packageManagerOf(`{"scripts":{}}`)).toEqual({ name: "pnpm", version: null });
   });
 
   it("refuses a manager it was never given", () => {
-    // Valid semver throughout, so the *name* allowlist is the only thing that
-    // can reject these. With `1` as the version the version pattern would
-    // refuse them too and this test would pass with the allowlist unplugged.
+    // Valid semver throughout, so the name allowlist is the only thing that can reject these.
     expect(packageManagerOf(`{"packageManager":"bun@1.0.0"}`)).toBeNull();
     expect(packageManagerOf(`{"packageManager":"../../evil@1.0.0"}`)).toBeNull();
     expect(packageManagerOf(`{"packageManager":42}`)).toBeNull();
   });
 
   it("does not accept an inherited property as an allowlisted name", () => {
-    // `"constructor" in PACKAGE_MANAGERS` is true, so an allowlist checked with
-    // `in` silently admits every name on Object.prototype — and this value
-    // decides which binary gets executed.
+    // `"constructor" in PACKAGE_MANAGERS` is true, so an `in` check would admit every name on Object.prototype.
     for (const inherited of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
       expect(packageManagerOf(`{"packageManager":"${inherited}@1.0.0"}`)).toBeNull();
     }
   });
 
   it("refuses anything corepack would treat as a location rather than a version", () => {
-    // The one that matters: corepack accepts a URL here and will download and
-    // execute it. The manifest belongs to the repository being verified, so
-    // this is the path from "a file in someone's repo" to "arbitrary code on
-    // this machine".
+    // The one that matters: corepack accepts a URL here and will download and execute it.
     for (const hostile of [
       "https://example.com/evil.tgz",
       "file:///tmp/evil",
@@ -153,11 +130,7 @@ describe("packageManagerOf", () => {
   });
 
   it("refuses a second @ whichever half it lands in", () => {
-    // Note this does *not* prove the first-`@` split is load-bearing: with the
-    // name allowlist in place `lastIndexOf` refuses these too, because the
-    // disagreeing half always contains an `@` and no allowed name does. The
-    // split is a backstop and `verify.ts` says so. What this test does pin is
-    // that neither reading lets one through.
+    // Doesn't prove the first-`@` split is load-bearing (the name allowlist refuses these too), only that neither reading lets one through.
     expect(packageManagerOf(`{"packageManager":"pnpm@9.15.9@https://evil"}`)).toBeNull();
     expect(packageManagerOf(`{"packageManager":"pnpm@evil@9.15.9"}`)).toBeNull();
     expect(packageManagerOf(`{"packageManager":"pnpm@@9.15.9"}`)).toBeNull();
@@ -174,9 +147,7 @@ describe("invocationOf", () => {
   });
 
   it("only ever names an executable the runner allows", () => {
-    // The two lists are coupled by nothing but this assertion: `exec.ts`
-    // refuses argv[0] outside its allowlist, so a plan built here that names
-    // something else would refuse at execution rather than at discovery.
+    // Coupled only by this assertion: `exec.ts` refuses argv[0] outside its allowlist, so a mismatch here would refuse at execution instead of discovery.
     for (const manager of ["pnpm", "npm", "yarn"]) {
       for (const version of [null, "9.15.9"]) {
         const argv0 = invocationOf({ name: manager, version })[0] ?? "";
@@ -221,8 +192,7 @@ describe("discoverPlan", () => {
   it("installs with the lockfile pinned", async () => {
     const result = await discoverPlan(fakeRunner(), request());
 
-    // A run that edited the lockfile fails install rather than resolving to
-    // whatever it asked for.
+    // A run that edited the lockfile fails install rather than resolving to whatever it asked for.
     expect(result.outcome === "planned" ? result.plan.install : []).toEqual([
       "corepack",
       "pnpm@11.20.0",
@@ -277,9 +247,7 @@ describe("discoverPlan", () => {
   });
 
   it("refuses when neither manifest is in the base, and names the ref", async () => {
-    // Both manifests absent has two causes this cannot tell apart — an
-    // unrecognised build system, or a base ref that does not exist — so the
-    // refusal has to name the ref rather than assert the first reading.
+    // Both manifests absent has two causes this can't tell apart, so the refusal names the ref rather than asserting one reading.
     const result = await discoverPlan(fakeRunner({ "package.json": bad(128) }), request());
 
     expect(reason(result)).toContain("could not read");
@@ -287,9 +255,7 @@ describe("discoverPlan", () => {
   });
 
   it("keeps a read that timed out apart from a manifest that is not there", async () => {
-    // Same outcome, deliberately different reason. A timed-out `git show` is
-    // this machine failing, and reporting it as "no manifest here" would send
-    // the reader to the repository to look for a build system it already has.
+    // Same outcome, deliberately different reason: a timed-out `git show` is this machine failing, not a missing manifest.
     const result = await discoverPlan(fakeRunner({ "package.json": TIMEOUT }), request());
 
     expect(reason(result)).toContain("timed out");
@@ -297,9 +263,7 @@ describe("discoverPlan", () => {
   });
 
   it("refuses a base manifest declaring a manager it will not execute", async () => {
-    // Distinct from the `packageManagerOf` test above, which only proves the
-    // parser says null. This proves the caller acts on it — without which the
-    // plan is built with `null` as the command and the refusal is decorative.
+    // Distinct from the `packageManagerOf` test above: this proves the caller acts on the null, not just that the parser returns it.
     const runner = fakeRunner({
       "package.json": out(`{"packageManager":"bun@1","scripts":{"test":"vitest"}}`),
     });
@@ -311,8 +275,7 @@ describe("discoverPlan", () => {
   });
 
   it("never takes a script name out of the manifest", async () => {
-    // The keys of `scripts` are attacker-adjacent; the arguments must come from
-    // this module's own table. A manifest full of hostile keys yields nothing.
+    // The keys of `scripts` are attacker-adjacent; the arguments must come from this module's own table.
     const runner = fakeRunner({
       "package.json": out(
         JSON.stringify({ scripts: { test: "vitest", "--version": "x", "; rm -rf /": "x" } }),
@@ -340,9 +303,7 @@ describe("unverifiableChanges", () => {
   });
 
   it("splits on NUL, so a filename containing a newline stays one entry", async () => {
-    // Split on newlines instead and this one path becomes two, the second of
-    // which is named by whoever wrote the file — which is how a run smuggles a
-    // second entry past a check that only looks at whole paths.
+    // Split on newlines instead and this one path becomes two, the second named by whoever wrote the file.
     const runner = fakeRunner({ diff: out(`src/we\nird.ts${NUL}package.json${NUL}`) });
 
     expect(await unverifiableChanges(runner, request())).toEqual(["package.json"]);
@@ -350,8 +311,7 @@ describe("unverifiableChanges", () => {
   });
 
   it("reports inability to tell, rather than an empty list", async () => {
-    // An empty list means "nothing was tainted". A failed diff means "unknown",
-    // and the caller must not read the second as the first.
+    // An empty list means "nothing was tainted"; a failed diff means "unknown" and must not be read as the former.
     expect(await unverifiableChanges(fakeRunner({ diff: bad() }), request())).toBeNull();
     expect(await unverifiableChanges(fakeRunner({ diff: TIMEOUT }), request())).toBeNull();
   });
@@ -376,9 +336,7 @@ describe("verify", () => {
   });
 
   it("refuses before running anything if the run edited the definition of passing", async () => {
-    // The heart of it. Discovery from the base is not enough on its own: the
-    // package manager reads the manifest on disk, so a run that edited it would
-    // otherwise be graded by rules it wrote.
+    // Discovery from the base isn't enough alone: the package manager reads the manifest on disk, so an edited one would grade the run by rules it wrote.
     const runner = fakeRunner({ diff: out(`package.json${NUL}`) });
 
     const result = await verify(runner, request());
@@ -437,8 +395,7 @@ describe("verify", () => {
   });
 
   it("treats a broken install as no verdict rather than a failed one", async () => {
-    // Nothing was verified, so there is nothing to have failed. Calling this
-    // `failed` would blame the solver for the network.
+    // Nothing was verified, so there is nothing to have failed; calling this `failed` would blame the solver for the network.
     const runner = fakeRunner({ diff: out(""), install: bad() });
 
     const result = await verify(runner, request());
@@ -448,11 +405,8 @@ describe("verify", () => {
   });
 
   it("quotes what the install actually said", async () => {
-    // REGRESSION, 2026-09-04. A live run refused with `exit 1` and a note about
-    // the unpinned `packageManager` — a hypothesis. The install had printed
-    // `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`, which is the answer, and this branch
-    // returned before anyone could read it. The output was captured into
-    // `results` and then discarded by the early return.
+    // The install's own output is quoted here rather than left only in `results`, which this
+    // branch's early return would otherwise discard.
     const runner = fakeRunner({
       diff: out(""),
       install: { ...bad(), stderr: "ERR_PNPM_LOCKFILE_CONFIG_MISMATCH: overrides do not match" },
@@ -498,7 +452,7 @@ describe("verify", () => {
 
     await verify(runner, request({ installTimeoutMs: 999, stepTimeoutMs: 111 }));
 
-    // diff, two manifest reads, install, then the three warm steps.
+    // diff, two manifest reads, install, then three warm steps.
     expect(seen.slice(0, 4)).toEqual([111, 111, 111, 999]);
     expect(seen.slice(4)).toEqual([111, 111, 111]);
   });
@@ -514,14 +468,7 @@ describe("verify", () => {
   });
 });
 
-/**
- * A base whose only manifest is a POM.
- *
- * `package.json` is answered as absent explicitly rather than left to the
- * default, because the default is the Node world and a Maven test that quietly
- * inherited it would take the both-toolchains refusal instead of the branch it
- * is about.
- */
+/** A base whose only manifest is a POM; `package.json` is answered absent explicitly since the default world is Node. */
 const mavenRunner = (replies: Record<string, CommandResult> = {}): ReturnType<typeof fakeRunner> =>
   fakeRunner({ "package.json": ABSENT, "pom.xml": out(POM), ...replies });
 
@@ -530,9 +477,7 @@ describe("the Maven toolchain", () => {
     const result = await discoverPlan(mavenRunner(), request());
 
     expect(result.outcome === "planned" ? result.plan : null).toEqual({
-      // No install phase at all, rather than an install that does nothing:
-      // `mvn test` resolves its own dependencies, so a separate step would
-      // either be a no-op line in the report or a second full download.
+      // No install phase at all: `mvn test` resolves its own dependencies.
       install: null,
       steps: [
         { name: "test", argv: ["mvn", "-B", "-Dmaven.gitcommitid.skip=true", "test"], cold: true },
@@ -543,11 +488,7 @@ describe("the Maven toolchain", () => {
   });
 
   it("skips git stamping, which cannot read a worktree", async () => {
-    // THE GUARD. `git-commit-id-plugin` binds to `initialize`, so without this
-    // the build dies before compiling anything and the run is booked as a
-    // failed fix of code that was never built. Measured on
-    // insurance-commerce-rest-api: `Could not get HEAD Ref` in a worktree,
-    // green in an ordinary checkout of the same commit.
+    // `git-commit-id-plugin` binds to `initialize`, so without this the build dies before compiling anything.
     const result = await discoverPlan(mavenRunner(), request());
     const argv = result.outcome === "planned" ? (result.plan.steps[0]?.argv ?? []) : [];
 
@@ -555,11 +496,7 @@ describe("the Maven toolchain", () => {
   });
 
   it("passes it as a property, never as a flag", async () => {
-    // The distinction the whole workaround rests on. Maven ignores a user
-    // property no plugin claims, so this is inert on a repository without the
-    // plugin; an unrecognised *flag* would exit non-zero on the test step and
-    // be reported as `failed` — a harness mistake printed as a verdict about
-    // the model's code. Anything here not starting `-D` is that mistake.
+    // Maven ignores a user property no plugin claims; an unrecognised flag would instead exit non-zero and be reported as `failed`.
     const result = await discoverPlan(mavenRunner(), request());
     const argv = result.outcome === "planned" ? (result.plan.steps[0]?.argv ?? []) : [];
 
@@ -569,19 +506,14 @@ describe("the Maven toolchain", () => {
   });
 
   it("says in the reason that it did not run the repository's own build", async () => {
-    // The accepted cost, made visible where it is acted on. A reviewer decides
-    // whether to trust a red Maven run partly on whether it was the real build,
-    // and this is the only place that question gets answered.
+    // The accepted cost, made visible where it's acted on — a reviewer trusting a red Maven run needs to know it wasn't the real build.
     const result = await verify(mavenRunner({ diff: out(""), "-B": bad(1) }), request());
 
     expect(reason(result)).toContain("-Dmaven.gitcommitid.skip=true");
   });
 
   it("does not claim a wrapper was skipped as though one existed", async () => {
-    // The repository this was built for has no `mvnw` and no `.mvn/wrapper`.
-    // The note used to assert the wrapper "is deliberately not executed",
-    // sending an operator to look for a file that is not there — the
-    // prose/behaviour divergence this project exists to catch, in our own text.
+    // A repository with no `mvnw` must not be told one "is deliberately not executed" — that sends an operator looking for a file that isn't there.
     const result = await discoverPlan(mavenRunner(), request());
     const note = result.outcome === "planned" ? result.plan.note : "";
 
@@ -600,8 +532,7 @@ describe("the Maven toolchain", () => {
   });
 
   it("never runs a Maven command against a Node base", async () => {
-    // The mirror of the test above, and the one that would catch a toolchain
-    // dispatch that fell through to Maven on an unrecognised manifest.
+    // Mirrors the test above; catches a toolchain dispatch that fell through to Maven on an unrecognised manifest.
     const runner = fakeRunner({ diff: out("") });
 
     await verify(runner, request());
@@ -610,9 +541,7 @@ describe("the Maven toolchain", () => {
   });
 
   it("charges the cold step the install budget, not the step budget", async () => {
-    // A first Java build downloads the world. On the step budget it times out
-    // and is reported as `failed` — the machine's cold cache printed as a
-    // verdict about the change.
+    // A first Java build downloads the world; on the step budget it would time out and print the machine's cold cache as a verdict on the change.
     const seen: number[] = [];
     const inner = mavenRunner({ diff: out("") });
     const runner: CommandRunner = {
@@ -628,9 +557,7 @@ describe("the Maven toolchain", () => {
   });
 
   it("refuses when there is no working mvn, rather than failing the change", async () => {
-    // The distinction this probe exists for. Without it the missing tool makes
-    // `mvn -B test` exit non-zero, and a harness with no Java installed reports
-    // every Java fix as broken.
+    // Without this probe, a missing tool makes `mvn -B test` exit non-zero and a harness with no Java installed reports every Java fix as broken.
     const result = await discoverPlan(mavenRunner({ "mvn -v": bad(127) }), request());
 
     expect(result.outcome).toBe("refused");
@@ -652,9 +579,7 @@ describe("the Maven toolchain", () => {
   });
 
   it("refuses a base carrying both manifests instead of picking one", async () => {
-    // Two build systems disagree about what passing means here. Resolving that
-    // into a choice would make the verdict a property of which file this
-    // function happens to read first.
+    // Two build systems disagree about what passing means; resolving that into a choice would make the verdict a property of read order.
     const runner = fakeRunner({ "pom.xml": out(POM) });
 
     const result = await discoverPlan(runner, request());
@@ -665,9 +590,7 @@ describe("the Maven toolchain", () => {
   });
 
   it("carries the wrapper note into a failed Maven run", async () => {
-    // The cold step is also the install, so there is no install refusal to hang
-    // the note on. Without this the "mvnw was not executed" hint — the first
-    // thing to check on a version mismatch — could never be printed.
+    // The cold step is also the install, so there's no install refusal to hang the "mvnw was not executed" hint on otherwise.
     const result = await verify(
       mavenRunner({ diff: out(""), "skip=true test": bad(1) }),
       request(),
@@ -693,36 +616,26 @@ describe("verifyBase", () => {
   });
 
   it("calls a red base unusable rather than letting it become a failed fix", async () => {
-    // THE GUARD. `verify`'s `failed` means "the change is bad", and that is only
-    // true if these same steps pass without the change. Measured on SSX-3801:
-    // a Maven plugin could not read a linked worktree's `.git`, the build died
-    // before compiling anything, and the run was booked as a failed fix of a
-    // fix that was never built.
+    // `verify`'s `failed` means "the change is bad", true only if these same steps pass without the change.
     const check = await verifyBase(fakeRunner({ diff: out(""), "run test": bad(1) }), request());
 
     expect(check.outcome).toBe("unusable");
   });
 
   it("blames the repository, not the fix, in the reason it gives", async () => {
-    // The wording is the point. This reason is posted to a Jira ticket, and a
-    // reader who takes it as a verdict on their bug goes looking for a defect
-    // that was never reported.
+    // The wording is the point: this reason is posted to a Jira ticket, and a reader taking it as a verdict on their bug goes looking for nothing.
     const check = await verifyBase(fakeRunner({ diff: out(""), "run test": bad(1) }), request());
     const said = check.outcome === "unusable" ? check.reason : "";
 
     expect(said).toContain("the repository's own build");
     expect(said).toContain("before anything was changed");
     expect(said).toContain("not about any fix");
-    // The subject has to be the repository. Swapping in "the change" leaves
-    // every phrase above intact and reverses what the sentence says, which is
-    // the one mutation this test exists to catch.
+    // The subject has to be the repository — swapping in "the change" leaves every phrase above intact but reverses what the sentence says.
     expect(said).not.toContain("the change");
   });
 
   it("keeps a refusal apart from a red base", async () => {
-    // Both are unusable, but they are different repairs: one is a build to fix,
-    // the other is a harness that could not run one. Collapsing them sends the
-    // operator to the wrong place.
+    // Both are unusable but different repairs: one is a build to fix, the other a harness that couldn't run one.
     const check = await verifyBase(fakeRunner({ show: ABSENT }), request());
     const said = check.outcome === "unusable" ? check.reason : "";
 
@@ -731,17 +644,14 @@ describe("verifyBase", () => {
   });
 
   it("hands the whole verification back, not just a sentence", async () => {
-    // The caller logs which outcome it was and a human needs the step that
-    // died. Reducing this to a string here would discard it at the only point
-    // it exists.
+    // A human needs the step that died; reducing this to a string here would discard it at the only point it exists.
     const check = await verifyBase(fakeRunner({ diff: out(""), "run lint": bad(1) }), request());
 
     expect(check.outcome === "unusable" ? check.verification.outcome : "").toBe("failed");
   });
 
   it("runs the same steps the real check will", async () => {
-    // If the base were verified with a cheaper plan, its green would not
-    // license anything. Pinned by comparing the two command lists directly.
+    // If the base were verified with a cheaper plan, its green wouldn't license anything.
     const baseRunner = fakeRunner({ diff: out("") });
     const laterRunner = fakeRunner({ diff: out("") });
 
@@ -752,16 +662,7 @@ describe("verifyBase", () => {
   });
 });
 
-/**
- * The fail-first experiment.
- *
- * Two properties carry most of the weight here and neither is about the
- * verdict. The first is that the solve worktree is read and never written to,
- * because at the point this runs it holds a verified, uncommitted fix and the
- * whole design was chosen to keep it out of harm's way. The second is that the
- * probe checkout is always removed, including on the paths that give up part
- * way through, since those are the ones a happy-path test never reaches.
- */
+/** The fail-first experiment: the solve worktree is read and never written to, and the probe checkout is always removed. */
 const TREE = "b".repeat(40);
 
 const ff = (overrides: Partial<FailFirstRequest> = {}): FailFirstRequest => ({
@@ -787,9 +688,7 @@ describe("checkFailFirst", () => {
       expect(isTestPath("src/__tests__/x.ts")).toBe(true);
       expect(isTestPath("src/test/java/com/x/XTest.java")).toBe(true);
       expect(isTestPath("src/utils/DateUtils.ts")).toBe(false);
-      // Not a test despite the word: the extension rule is anchored on a dot,
-      // so a file merely mentioning testing is left with the fix where it
-      // belongs.
+      // Not a test despite the word: the extension rule is anchored on a dot.
       expect(isTestPath("src/latest.ts")).toBe(false);
     });
   });
@@ -799,8 +698,7 @@ describe("checkFailFirst", () => {
     const result = await checkFailFirst(runner, ff({ changedPaths: ["src/utils/DateUtils.ts"] }));
 
     expect(result.outcome).toBe("skipped");
-    // And it gave up before spending anything. A skipped experiment that still
-    // cuts a checkout and installs into it is the cost without the finding.
+    // And it gave up before spending anything — a skipped experiment that still cuts a checkout is the cost without the finding.
     expect(runner.calls).toEqual([]);
   });
 
@@ -831,18 +729,14 @@ describe("checkFailFirst", () => {
   });
 
   it("reads a timed-out suite as red rather than as green", async () => {
-    // The conservative direction, and the same reading `verify` gives the same
-    // event. Treating a timeout as a pass would print "vacuous" — the one
-    // verdict this function is trusted on — off the back of no result at all.
+    // The same reading `verify` gives the same event; treating a timeout as a pass would print "vacuous" off the back of no result at all.
     const result = await checkFailFirst(world({ "run test": TIMEOUT }), ff());
 
     expect(result.outcome).toBe("guarded");
   });
 
   it("lays only the tests onto the base, never the fix", async () => {
-    // The experiment is the fix being absent. Checking the source files out
-    // too would make every run report `vacuous`, which is the mutation that
-    // turns this feature into a permanent false alarm.
+    // The experiment is the fix being absent; checking the source files out too would make every run report `vacuous`.
     const runner = world();
     await checkFailFirst(runner, ff());
 
@@ -852,9 +746,7 @@ describe("checkFailFirst", () => {
   });
 
   it("never writes to the solve worktree", async () => {
-    // The property the second-worktree design exists for. At this point in a
-    // run the solve worktree holds a verified, uncommitted change, so the only
-    // things allowed to touch it are the two reads that take a save point.
+    // At this point the solve worktree holds a verified, uncommitted change, so only the two reads that take a save point may touch it.
     const runner = world();
     await checkFailFirst(runner, ff());
 
@@ -874,10 +766,7 @@ describe("checkFailFirst", () => {
   });
 
   it("refuses a tree that is not an object id", async () => {
-    // `write-tree`'s output becomes an argument to `git checkout`. Anything
-    // that is not a whole object id is a ref-ish string reaching a command that
-    // resolves ref-ish strings, so it is checked as a whole rather than found
-    // inside the output.
+    // `write-tree`'s output becomes an argument to `git checkout`, so it's checked as a whole object id rather than merely found inside the output.
     const result = await checkFailFirst(world({ "write-tree": out("HEAD\n") }), ff());
 
     expect(result.outcome).toBe("inconclusive");
@@ -902,9 +791,7 @@ describe("checkFailFirst", () => {
   });
 
   it("is inconclusive rather than vacuous when the tests will not lay down", async () => {
-    // A deleted test file lands here: it is not in the tree, so the checkout
-    // refuses. Running the base suite anyway would pass — it is the base — and
-    // print `vacuous` about tests that were never there.
+    // A deleted test file lands here: it's not in the tree, so the checkout refuses; running the base suite anyway would print `vacuous` falsely.
     const runner = world({ checkout: bad(1) });
     const result = await checkFailFirst(runner, ff());
 
@@ -919,9 +806,7 @@ describe("checkFailFirst", () => {
   });
 
   it("removes the probe checkout on every path that created one", async () => {
-    // Including the ones that gave up. A leaked worktree is a registered entry
-    // in the repository, so the next run of the same ticket collides with it —
-    // and the give-up paths are exactly the ones a happy-path test misses.
+    // Including the ones that gave up: a leaked worktree collides with the next run of the same ticket.
     for (const replies of [
       {},
       { "run test": OK },
@@ -938,9 +823,7 @@ describe("checkFailFirst", () => {
   });
 
   it("does not let a failed cleanup swallow the finding", async () => {
-    // The finding is about the change; a directory left behind is about this
-    // machine. Reporting the second by discarding the first is the wrong trade,
-    // and a `finally` that returns is how it happens by accident.
+    // The finding is about the change, a leftover directory is about this machine — a `finally` that returns would trade one for the other by accident.
     const result = await checkFailFirst(world({ "run test": OK, "worktree remove": bad(1) }), ff());
 
     expect(result.outcome).toBe("vacuous");

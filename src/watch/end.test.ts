@@ -45,10 +45,8 @@ describe("endWatch", () => {
   });
 
   it("writes the label before it posts the comment", async () => {
-    // The mutation: swap these two. Then a failed label write leaves a ticket
-    // that has been told nobody is watching it and is still on the watch list,
-    // so it is told again every sweep — a bot repeating a goodbye on somebody's
-    // bug, forever, with each repeat costing a session.
+    // Reversed, a failed label write leaves a ticket that claims nobody is
+    // watching it while still on the watch list, told again every sweep.
     const { deps: d, order } = deps();
 
     await endWatch(d, "SSX-1234", activity([AGENT_LABELS.watching]), "exhausted");
@@ -67,8 +65,7 @@ describe("endWatch", () => {
   });
 
   it("writes nothing at all when the ticket was never watched", async () => {
-    // Reachable: `watch:once <KEY>` accepts an unlabelled ticket on purpose, and
-    // a closed one among those decides `unsubscribe`.
+    // Reachable: `watch:once <KEY>` accepts an unlabelled ticket on purpose.
     const { deps: d } = deps();
 
     const result = await endWatch(d, "SSX-1234", activity(["triaged"]), "closed");
@@ -79,9 +76,8 @@ describe("endWatch", () => {
   });
 
   it("still reports success when only the comment failed", async () => {
-    // The watch is already off and there is nothing left to retry, so throwing
-    // would report the unsubscribe as not having happened when the half that
-    // matters did — and would abandon the rest of a sweep over a courtesy.
+    // The watch is already off with nothing left to retry, so throwing would
+    // report the unsubscribe as not having happened.
     const { deps: d } = deps({ commentFails: true });
 
     await expect(

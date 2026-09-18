@@ -12,11 +12,8 @@ const WRITE_ENABLED = {
 
 describe("resolveSettings", () => {
   it("refuses to post without --write, even when .env says otherwise", () => {
-    // REGRESSION. This previously only *added* WRITE_BACK when the flag was
-    // present, so `WRITE_BACK=true` in .env — the ordinary state once the
-    // daemon is live — meant a bare `triage:once SSX-1234` commented on a
-    // shared production ticket. The flag whose whole purpose is to make that
-    // deliberate was decorative in the only case where it mattered.
+    // `WRITE_BACK=true` in `.env` is the ordinary state once the daemon is live — without this,
+    // a bare `triage:once SSX-1234` would comment on a shared production ticket.
     const settings = resolveSettings(["SSX-3822"], WRITE_ENABLED);
 
     expect(settings.WRITE_BACK).toBe("false");

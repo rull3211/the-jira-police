@@ -22,15 +22,7 @@ function mediaNode(alt: string): unknown {
   return { type: "media", attrs: { type: "file", id: "a-media-uuid", alt, collection: "" } };
 }
 
-/**
- * A comment as it actually came off the board, copied rather than invented.
- *
- * Written out longhand instead of through the helpers above, because the point
- * of this fixture is to be the payload Jira sent — a helper could agree with
- * the renderer while both disagreed with Atlassian. Note `attrs.id`: a Media
- * Services UUID that appears nowhere in the issue's `attachment` array, which
- * is the whole reason `alt` is what gets rendered.
- */
+/** A comment as it actually came off the board, written out longhand rather than through the helpers above. */
 const OBSERVED_COMMENT = {
   type: "doc",
   version: 1,
@@ -66,9 +58,7 @@ describe("renderAdf, on the comment the board actually carries", () => {
   });
 
   it("names the attachment by its filename and never by its media id", () => {
-    // The trap this module exists to document. `attrs.id` is a Media Services
-    // UUID; it does not appear in the issue's `attachment` array, so a reader
-    // handed the id has been handed something it cannot look anything up with.
+    // `attrs.id` is a Media Services UUID and does not appear in the issue's `attachment` array.
     const rendered = renderAdf(OBSERVED_COMMENT);
     expect(rendered).toContain("svgtest.svg");
     expect(rendered).not.toContain("fd700241");
@@ -76,8 +66,7 @@ describe("renderAdf, on the comment the board actually carries", () => {
   });
 
   it("sees through mediaSingle to the media node it wraps", () => {
-    // Every image on this board arrives inside a mediaSingle. If the wrapper
-    // were opaque, every image on this board would render as nothing.
+    // Every image on this board arrives inside a mediaSingle.
     expect(renderAdf(OBSERVED_COMMENT)).toContain("[attachment:");
   });
 });
@@ -90,8 +79,7 @@ describe("renderAdf, blocks and whitespace", () => {
   });
 
   it("concatenates inline runs within a paragraph without separators", () => {
-    // A mark change splits one sentence into several text nodes; anything but a
-    // bare concatenation here inserts punctuation the author never wrote.
+    // A mark change splits one sentence into several text nodes.
     expect(
       renderAdf(paragraph(text("this "), text("costs", { type: "strong" }), text(" us"))),
     ).toBe("this **costs** us");
@@ -104,8 +92,7 @@ describe("renderAdf, blocks and whitespace", () => {
   });
 
   it("collapses three or more newlines down to a blank line", () => {
-    // Reachable without trying: a paragraph ending in two hard breaks, meeting
-    // the blank line that separates it from the next block.
+    // Reachable without trying: a paragraph ending in two hard breaks, meeting the next block's blank line.
     const trailing = paragraph(text("a"), { type: "hardBreak" }, { type: "hardBreak" });
     expect(renderAdf(doc(trailing, paragraph(text("b"))))).toBe("a\n\nb");
   });
@@ -159,8 +146,7 @@ describe("renderAdf, marks", () => {
   });
 
   it("nests marks with the first one innermost, so a bold link is a link", () => {
-    // `[**text**](href)` is a link that is bold. `**[text](href)**` is not
-    // markdown anyone means to write, and is what the reverse order produces.
+    // The reverse order produces `**[text](href)**`, which is not markdown anyone means to write.
     const marks = [{ type: "strong" }, { type: "link", attrs: { href: "https://example.test" } }];
     expect(renderAdf(paragraph(text("read this", ...marks)))).toBe(
       "[**read this**](https://example.test)",
@@ -175,16 +161,14 @@ describe("renderAdf, marks", () => {
   });
 
   it("passes text through an unknown mark unchanged", () => {
-    // Same rule as unknown nodes: the mark is decoration, the text is the
-    // message, and Atlassian adds marks without asking.
+    // Same rule as unknown nodes: the mark is decoration, not the message.
     expect(
       renderAdf(paragraph(text("plain", { type: "textColor", attrs: { color: "#ff0000" } }))),
     ).toBe("plain");
   });
 
   it("does not decorate whitespace-only text", () => {
-    // The space between two bolded words arrives as its own text node, and
-    // `** **` is a rendering artefact rather than emphasis.
+    // The space between two bolded words arrives as its own text node.
     const rendered = renderAdf(
       paragraph(text("a", { type: "strong" }), text(" ", { type: "strong" }), text("b")),
     );
@@ -265,8 +249,7 @@ describe("renderAdf, lists", () => {
   });
 
   it("keeps an item's own blocks on adjacent lines rather than spaced apart", () => {
-    // A blank line between an item and what follows it inside the item is what
-    // markdown reads as a loose list; it looks broken when shown to a human.
+    // A blank line here is what markdown reads as a loose list.
     const list = {
       type: "bulletList",
       content: [listItem(paragraph(text("intro")), paragraph(text("more")))],
@@ -283,8 +266,7 @@ describe("renderAdf, lists", () => {
   });
 
   it("keeps a marker for an empty item, so later items keep their numbers", () => {
-    // Dropping the empty item would renumber everything after it, and "step 3"
-    // in the output would no longer be step 3 on the ticket.
+    // Dropping it would renumber everything after it.
     const list = {
       type: "orderedList",
       content: [
@@ -310,8 +292,7 @@ describe("renderAdf, media", () => {
   });
 
   it("still announces a media node whose alt is missing or blank", () => {
-    // "There is a file here and I cannot name it" is information; a comment
-    // that says "see the screenshot" must not render as if it referenced none.
+    // A comment that says "see the screenshot" must not render as if it referenced nothing.
     expect(renderAdf({ type: "media", attrs: { type: "file", id: "u" } })).toBe("[attachment]");
     expect(renderAdf({ type: "media", attrs: { alt: "   " } })).toBe("[attachment]");
     expect(renderAdf({ type: "media" })).toBe("[attachment]");
@@ -381,8 +362,7 @@ describe("renderAdf, headings, code and quotes", () => {
   });
 
   it("does not apply marks inside a code block", () => {
-    // The sample must be the code the reporter ran. Rendering a mark would put
-    // asterisks into a command line that never had any.
+    // The sample must be the code the reporter ran.
     const code = {
       type: "codeBlock",
       content: [{ type: "text", text: "a ** b", marks: [{ type: "strong" }] }],
@@ -396,8 +376,7 @@ describe("renderAdf, headings, code and quotes", () => {
   });
 
   it("keeps a multi-paragraph blockquote contiguous", () => {
-    // A bare blank line ends a quote, so the second paragraph would silently
-    // stop being quoted.
+    // A bare blank line ends a quote.
     const quote = {
       type: "blockquote",
       content: [paragraph(text("first")), paragraph(text("second"))],
@@ -406,9 +385,7 @@ describe("renderAdf, headings, code and quotes", () => {
   });
 
   it("does not quote a blank line for an empty paragraph inside a quote", () => {
-    // The one place the empty-block filter is visible: tidy() cannot clean this
-    // up afterwards, because the blank lines are no longer blank once every
-    // line has been prefixed with a marker.
+    // tidy() cannot clean this up afterwards: the lines are no longer blank once prefixed with a marker.
     const quote = {
       type: "blockquote",
       content: [paragraph(text("first")), paragraph(), paragraph(text("second"))],
@@ -462,8 +439,7 @@ describe("renderAdf, tables", () => {
   });
 
   it("drops a row with nothing in it instead of breaking the table in two", () => {
-    // An empty line in the middle of a table reads as the end of the table and
-    // the start of a paragraph.
+    // An empty line mid-table reads as the end of the table and the start of a paragraph.
     const table = {
       type: "table",
       content: [
@@ -476,8 +452,7 @@ describe("renderAdf, tables", () => {
   });
 
   it("flattens a multi-block cell onto one line", () => {
-    // A newline inside a cell breaks the row: everything after it reads as a
-    // new row with a different number of columns.
+    // A newline inside a cell breaks the row into a bogus new one.
     const table = {
       type: "table",
       content: [
@@ -530,9 +505,7 @@ describe("renderAdf, inline atoms", () => {
 
 describe("renderAdf, unknown node types", () => {
   it("recurses into an unknown wrapper rather than dropping what is inside it", () => {
-    // The property this default exists for. Atlassian adds node types without
-    // telling anyone, and losing a paragraph of a bug report to a wrapper
-    // nobody has heard of is worse than rendering it without its formatting.
+    // Atlassian adds node types without telling anyone.
     const wrapped = { type: "someNodeAtlassianAddedLater", content: [paragraph(text("the bug"))] };
     expect(renderAdf(doc(wrapped))).toBe("the bug");
   });
@@ -544,8 +517,7 @@ describe("renderAdf, unknown node types", () => {
   });
 
   it("keeps an unknown wrapper's inline children in one sentence", () => {
-    // Block-joining these would put a blank line between two halves of a
-    // sentence merely because a mark change split the run in two.
+    // Block-joining these would put a blank line between two halves of one sentence.
     const caption = { type: "caption", content: [text("part one "), text("part two")] };
     expect(renderAdf(caption)).toBe("part one part two");
   });
@@ -582,8 +554,7 @@ describe("renderAdf, totality", () => {
   });
 
   it("returns the empty string when content is not an array", () => {
-    // The likeliest malformed payload there is, and one that would throw on any
-    // implementation that trusted `content.map`.
+    // The likeliest malformed payload there is.
     expect(renderAdf({ type: "doc", content: "not an array" })).toBe("");
     expect(renderAdf({ type: "paragraph", content: { type: "text", text: "x" } })).toBe("");
     expect(renderAdf({ type: "bulletList", content: 3 })).toBe("");
@@ -606,9 +577,7 @@ describe("renderAdf, totality", () => {
   });
 
   it("truncates a document nested past the depth cap", () => {
-    // Five hundred is past the cap and nowhere near the stack limit, which is
-    // what makes this an assertion about the cap rather than about the catch.
-    // Nothing below the cap is rendered, so the whole thing comes back empty.
+    // Five hundred is past the cap and nowhere near the stack limit — an assertion about the cap, not the catch.
     let nested: unknown = paragraph(text("bottom"));
     for (let i = 0; i < 500; i += 1) {
       nested = { type: "blockquote", content: [nested] };
@@ -618,9 +587,7 @@ describe("renderAdf, totality", () => {
   });
 
   it("does not throw on a document deep enough to overflow the stack", () => {
-    // The catch is the backstop under the cap. Both have to hold: remove the
-    // cap and this input still costs tens of megabytes of "> " prefixes,
-    // built quadratically out of a few kilobytes of JSON.
+    // The catch is the backstop under the cap; both have to hold.
     let nested: unknown = paragraph(text("bottom"));
     for (let i = 0; i < 50_000; i += 1) {
       nested = { type: "blockquote", content: [nested] };
@@ -631,7 +598,6 @@ describe("renderAdf, totality", () => {
   });
 
   it("still renders a document nested as deeply as a human would nest one", () => {
-    // The cap must not be so eager that it truncates real content.
     let nested: unknown = paragraph(text("bottom"));
     for (let i = 0; i < 8; i += 1) {
       nested = { type: "blockquote", content: [nested] };
@@ -664,7 +630,6 @@ describe("referencedAttachments", () => {
   });
 
   it("returns filenames rather than media ids", () => {
-    // Matching against `attachment[].filename` is the only join that works.
     // The UUID in attrs.id matches nothing in the issue payload at all.
     expect(referencedAttachments(OBSERVED_COMMENT)).not.toContain(
       "fd700241-3f0b-4c2c-8a3a-9d0f5b21c7ae",
@@ -696,7 +661,6 @@ describe("referencedAttachments", () => {
   });
 
   it("omits media nodes with no usable filename", () => {
-    // A blank entry here would become a lookup that silently matches nothing.
     const document = doc(
       { type: "mediaSingle", content: [{ type: "media", attrs: { id: "uuid-only" } }] },
       { type: "mediaSingle", content: [{ type: "media", attrs: { alt: "   " } }] },

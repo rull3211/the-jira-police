@@ -37,17 +37,8 @@ import type { CommandResult, CommandRunner } from "./worktree.ts";
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
 
 /**
- * Records every argv it is handed and replies from a table.
- *
- * `calls` holds the argv arrays themselves and is never joined. That is the
- * whole point of the interface under test: a test that compared
- * `calls[0].join(" ")` against a string would pass just as happily if two
- * arguments had been concatenated into one element, which is precisely the bug
- * argv arrays exist to make impossible.
- *
- * Replies are looked up by substring of the joined command, and that joining is
- * confined to this function — it is a convenience for saying "the commit
- * fails", not an assertion mechanism.
+ * Records every argv it is handed, unjoined, and replies from a table keyed
+ * by substring of the joined command.
  */
 function fakeRunner(
   replies: Readonly<Record<string, Partial<CommandResult>>> = {},
@@ -126,9 +117,6 @@ function payload(overrides: Record<string, unknown> = {}): string {
     comments: [],
     state: "OPEN",
     isDraft: true,
-    // The pull request's own creation instant. Present unless a test removes
-    // it, because the refusal without it is its own test — a payload missing
-    // this has no floor under the silence clock.
     createdAt: "2026-09-05T08:00:00Z",
     ...overrides,
   });
@@ -136,29 +124,13 @@ function payload(overrides: Record<string, unknown> = {}): string {
 
 const HEAD_SHA = "9f1c2ab3d4e5f60718293a4b5c6d7e8f90a1b2c3";
 
-/**
- * A review that said something, so the chrome tests have something to keep.
- *
- * The 🟡 heading and not the 🟢 one, which this fixture used to carry: a green
- * light is now dropped from `comments` in its own right, so the chrome tests
- * would have passed on a body that never reached them and stopped testing
- * chrome the day the green-light rule landed.
- */
+/** The 🟡 heading, not 🟢 — a green-light body is dropped from `comments` before chrome-stripping ever sees it. */
 const SUBSTANTIVE = "### 🟡 Changes recommended\n\nOne thing below.";
 
-/**
- * Copilot's approval heading, copied rather than paraphrased.
- *
- * The `###` is part of it: what arrives is a markdown heading, and a matcher
- * written against a bare phrase would pass a fixture and miss the real thing.
- */
+/** Copilot's approval heading, copied verbatim including the `###` — a bare-phrase matcher would miss the real thing. */
 const GREEN_LIGHT = "### 🟢 Approval recommended\n\nThe change is narrowly scoped.";
 
-/**
- * Copilot's trailing promotional block, copied from PR #1413 rather than
- * paraphrased — a fixture that invented its own wording would pass against a
- * rule that never matched the real thing.
- */
+/** Copilot's trailing promotional block, copied verbatim — an invented wording would pass against a rule that never matched the real thing. */
 const PROMO =
   '\n\n---\n\n💡 <a href="/o/r/new/main?filename=.github/skills/code-review/SKILL.md">Add a `code-review` agent skill</a>' +
   ' or configure MCP servers for context-aware, tailored reviews. <a href="https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui">Learn more in the docs.</a>';
@@ -194,9 +166,7 @@ describe("commitAll", () => {
 
     await commitAll(runner, commitRequest());
 
-    // The whole array, in order. `-c` must precede `-C` because those are git's
-    // own options, and the identity must be here at all so the commit does not
-    // inherit whoever owns the ~/.gitconfig on this machine.
+    // `-c` must precede `-C`; git reads its own options before the subcommand's.
     expect(runner.calls[1]).toEqual([
       "git",
       "-c",
@@ -230,8 +200,6 @@ describe("commitAll", () => {
 
     const argv = runner.calls[1] ?? [];
     expect(argv.filter((element) => element === "-m")).toHaveLength(2);
-    // A subject and body glued together with a blank line would still commit,
-    // and would put git's message-formatting rule in the wrong module.
     expect(argv.some((element) => element.includes("\n\n"))).toBe(false);
   });
 
@@ -243,9 +211,7 @@ describe("commitAll", () => {
     const argv = runner.calls[1] ?? [];
     expect(argv).toContain(NASTY);
     expect(argv).toContain("$(id) && `whoami`");
-    // Unchanged: not escaped, not quoted, not split. There is no shell, so
-    // there is nothing to escape it for, and an escaper here would be a bug
-    // waiting to be written.
+    // No shell runs this, so nothing here should escape or split it.
     expect(argv.filter((element) => element === NASTY)).toHaveLength(1);
   });
 
@@ -301,11 +267,6 @@ describe("commitAll", () => {
   });
 
   it("keeps the end of a long failure, where the verdict is", async () => {
-    // REGRESSION, 2026-09-04. The first live `--pr` run was rejected by the
-    // target repo's commit-msg hook, and the log said nothing useful: commitlint
-    // echoes the message it was handed *before* printing its verdict, so a
-    // head-only truncation kept 300 characters of our own commit body and cut
-    // the rule name — the one part that says what to change.
     const echo = `⧗   input: fix(advisor): add a favicon\n\n${"padding ".repeat(60)}`;
     const runner = fakeRunner({
       commit: { exitCode: 1, stdout: `${echo}\n✖   body's lines must not be longer than 100` },
@@ -317,8 +278,6 @@ describe("commitAll", () => {
   });
 
   it("keeps the start of a long failure too, and marks what it dropped", async () => {
-    // Tail-only would be the same mistake facing the other way: a tool that
-    // fails on step three of five names the step at the top.
     const runner = fakeRunner({
       commit: { exitCode: 1, stderr: `step 3 of 5 failed\n${"x".repeat(900)}\ntrailing detail` },
     });
@@ -340,8 +299,6 @@ describe("commitAll", () => {
   });
 
   it("treats a timed-out commit as a failure even though the exit code is zero", async () => {
-    // The runner reports a killed command as exit 0 plus `timedOut`, and it
-    // could plausibly have printed "nothing to commit" before it hung.
     const runner = fakeRunner({
       commit: { timedOut: true, stdout: "nothing to commit, working tree clean" },
     });
@@ -408,8 +365,6 @@ describe("push", () => {
 
       await push(runner, pushRequest());
 
-      // A force-push in an automated loop destroys commits that exist nowhere
-      // else. This assertion is the reason the flag stays out.
       expect(runner.calls[0]).not.toContain(flag);
     },
   );
@@ -429,9 +384,7 @@ describe("push", () => {
     await expect(push(runner, pushRequest({ branch }))).rejects.toThrow(
       /not an implementation branch/u,
     );
-    // Throwing rather than returning `failed` is deliberate: `failed` is a
-    // value the orchestrator may retry, and "you tried to push to main" must
-    // never be retryable.
+    // A thrown error, unlike `failed`, is never retried by the orchestrator.
     expect(runner.calls).toEqual([]);
   });
 
@@ -507,8 +460,6 @@ describe("createDraftPr", () => {
     const argv = runner.calls[0] ?? [];
     expect(argv[argv.indexOf("--title") + 1]).toBe(NASTY);
     expect(argv[argv.indexOf("--body") + 1]).toBe(`line one\n${NASTY}`);
-    // Even a body with a newline in it is one argument. Nothing splits it,
-    // because nothing between here and execvp looks at whitespace.
     expect(argv).toHaveLength(14);
   });
 
@@ -599,8 +550,6 @@ describe("parsePrUrl", () => {
   });
 
   it("returns null for a number too large to survive parsing", () => {
-    // 30 digits round-trips through `Number` having already lost information,
-    // so the value compared here is not the value on the line.
     expect(parsePrUrl("https://github.com/o/r/pull/123456789012345678901234567890")).toBeNull();
   });
 });
@@ -676,18 +625,14 @@ describe("readReview", () => {
         state: "OPEN",
         isDraft: true,
         createdAt: "2026-09-05T08:00:00Z",
-        // Nothing has happened, so the silence clock has only the pull
-        // request's own creation to run from — which is the floor, not a gap.
+        // The PR's own creation is the floor under the silence clock, not a gap.
         newestAt: "",
       },
     });
   });
 
   it("collects a Copilot review and its comments", async () => {
-    // The two lists name the same fact differently and this fixture says so:
-    // a review dates itself with `submittedAt`, an issue comment with
-    // `createdAt`. Probed against PR #2658 — a review has no `createdAt` at
-    // all, and asking for one returns null.
+    // A review dates itself with `submittedAt`; an issue comment with `createdAt`.
     const runner = fakeRunner(
       view(
         payload({
@@ -740,10 +685,8 @@ describe("readReview", () => {
   });
 
   it("dates a review even though a review has no createdAt", async () => {
-    // The mutation this pins: read only `createdAt` and every review comes
-    // back undated, an undated comment is treated as new, and the cursor
-    // degrades into "everything is new" — which is the runaway it exists to
-    // prevent, arriving through a field name rather than a missing feature.
+    // Reading only `createdAt` here would leave every review undated, and an
+    // undated entry counts as new — the runaway `dateOf` exists to prevent.
     const runner = fakeRunner(
       view(
         payload({
@@ -776,17 +719,12 @@ describe("readReview", () => {
     expect(result.outcome === "read" ? result.review.comments[0]?.createdAt : null).toBe("");
   });
 
-  // The exact body GitHub posted on PR #2657, 2026-09-04. The Copilot app was
-  // requested, ran, and could not read the pull request — its installation
-  // lacked `pull_requests: read` on that repository — and reported that as an
-  // ordinary COMMENTED review.
+  /** The reviewer's real error text, posted as an ordinary COMMENTED review body. */
   const COPILOT_ERROR =
     "Copilot encountered an error and was unable to review this pull request. " +
     "You can try again by re-requesting a review.";
 
   it("does not read a reviewer's own error as feedback to act on", async () => {
-    // Feeding this to a review round spends a paid pass asking a model to
-    // address an error message.
     const runner = fakeRunner(
       view(payload({ reviews: [{ author: { login: "copilot" }, body: COPILOT_ERROR }] })),
     );
@@ -797,9 +735,8 @@ describe("readReview", () => {
   });
 
   it("does not read a reviewer's own error as a clean review either", async () => {
-    // The worse of the two. An empty comment list plus `anyoneResponded` is
-    // indistinguishable from an approval, so the loop would undraft and mark
-    // the ticket done on the strength of a review that never happened.
+    // An empty comment list plus `anyoneResponded` reads as an approval, which
+    // would undraft the PR on the strength of a review that never happened.
     const runner = fakeRunner(
       view(payload({ reviews: [{ author: { login: "copilot" }, body: COPILOT_ERROR }] })),
     );
@@ -810,9 +747,8 @@ describe("readReview", () => {
   });
 
   it("still counts the error as the reviewer having responded", async () => {
-    // It did respond. What it said was that it could not review, and those are
-    // two different facts — collapsing them would make the loop wait forever
-    // for a reviewer that has already answered.
+    // "could not review" and "no response" are different facts; collapsing
+    // them would make the loop wait forever for a reviewer that already answered.
     const runner = fakeRunner(
       view(payload({ reviews: [{ author: { login: "copilot" }, body: COPILOT_ERROR }] })),
     );
@@ -823,8 +759,6 @@ describe("readReview", () => {
   });
 
   it("does not mistake a review that discusses an error for a failed review", async () => {
-    // Both phrases must appear. "encountered an error" alone is ordinary
-    // review prose about the code under review.
     const runner = fakeRunner(
       view(
         payload({
@@ -854,9 +788,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.reviewerErrored : null).toBe(false);
-    // And it is kept as a comment. A person quoting the failure is asking for
-    // something; deleting their message because a bot used the same words would
-    // be the recogniser reaching past what it knows.
+    // A human quoting the failure text is still kept as a real comment.
     expect(result.outcome === "read" ? result.review.comments : []).toEqual([
       { author: "a-human", body: COPILOT_ERROR, createdAt: "", id: "", origin: "human" },
     ]);
@@ -869,9 +801,6 @@ describe("readReview", () => {
     "copilot-pull-request-reviewer[bot]",
     "copilot-pull-request-reviewer",
   ])("recognises %j as the reviewer it asked for", async (login) => {
-    // The handle requested is `@copilot`; the login that answers is longer and
-    // has changed shape before. An exact comparison would fail closed in the
-    // worst direction — the loop would wait forever for a review it already has.
     const runner = fakeRunner(view(payload({ reviews: [{ author: { login }, body: "ok" }] })));
 
     const result = await readReview(runner, reviewRequest());
@@ -886,19 +815,12 @@ describe("readReview", () => {
 
       const result = await readReview(runner, reviewRequest());
 
-      // Not the reviewer, so `human` — and `origin` is what exempts a round from
-      // `MAX_REVIEW_ITERATIONS`, so a login misread as the reviewer here spends a
-      // person's request out of a budget that was never meant to bound them.
       expect(result.outcome === "read" ? result.review.comments[0]?.origin : null).toBe("human");
-      // And the loop still wakes for it. The gate asks whether anyone actionable
-      // spoke, not whether the requested reviewer did.
       expect(result.outcome === "read" && result.review.anyoneResponded).toBe(true);
     },
   );
 
   it("counts an approval with no body as a response", async () => {
-    // An approving review carries an empty body. Reading that as silence would
-    // stall the loop on a reviewer that has already finished.
     const runner = fakeRunner(
       view(payload({ reviews: [{ author: { login: "copilot" }, body: "" }] })),
     );
@@ -933,10 +855,6 @@ describe("readReview", () => {
   });
 
   it("drops the reviewer's promotional footer, which was never review", async () => {
-    // Observed on PR #1413: the pass was handed this block, read it as a
-    // request, and declined it in `responses` — which by then were posted
-    // publicly, so a timezone bugfix carried a paragraph about not adding a
-    // SKILL.md.
     const runner = fakeRunner(
       view(payload({ reviews: [{ author: { login: "copilot" }, body: SUBSTANTIVE + PROMO }] })),
     );
@@ -947,9 +865,7 @@ describe("readReview", () => {
   });
 
   it("leaves the same footer alone when a human quotes it", async () => {
-    // Scoped to the reviewer on exactly the grounds the error-notice drop is:
-    // a person quoting the block is a person saying something, and matching on
-    // text alone would silently edit their message.
+    // Matching on text alone, unscoped to the reviewer, would edit a human's message.
     const runner = fakeRunner(
       view(
         payload({ comments: [{ author: { login: "some-human" }, body: "what is this?" + PROMO }] }),
@@ -964,9 +880,6 @@ describe("readReview", () => {
   });
 
   it("keeps a reviewer's trailing section when it is not the vendor's chrome", async () => {
-    // A rule is not enough on its own, and neither is the 💡. Reviewers use
-    // both when making a real suggestion, and swallowing one is the failure
-    // direction nobody recovers from by noticing.
     const body = "Looks fine.\n\n---\n\n💡 Consider extracting the helper.";
     const runner = fakeRunner(view(payload({ reviews: [{ author: { login: "copilot" }, body }] })));
 
@@ -987,13 +900,9 @@ describe("readReview", () => {
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([]);
   });
 
-  // Copied from PR #2663, where two of these cost rounds 7 and 9.
   const DEPLOY_NOTICE = ":rocket: Application Deployed\n\nhttps://pr-2663.example.dev";
 
   it("does not spend a round answering a deployment notice", async () => {
-    // The notice classified as `human`, and human rounds are exempt from
-    // `MAX_REVIEW_ITERATIONS`, so continuous integration was the one input to
-    // this loop that could spend without a cap.
     const runner = fakeRunner(
       view(payload({ comments: [{ author: { login: "github-actions" }, body: DEPLOY_NOTICE }] })),
     );
@@ -1004,10 +913,8 @@ describe("readReview", () => {
   });
 
   it("does not let a deployment notice stand in for a reviewer having responded", async () => {
-    // Filter automation out of `comments` alone and this is what is left: an
-    // empty inbox plus somebody having spoken, which is exactly the shape
-    // `advance` undrafts on. A draft pull request would be handed to a human on
-    // the strength of a robot saying a URL exists.
+    // Filtering automation from `comments` alone would leave this looking like
+    // "empty inbox plus somebody spoke" — the shape `advance` undrafts on.
     const runner = fakeRunner(
       view(payload({ comments: [{ author: { login: "github-actions" }, body: DEPLOY_NOTICE }] })),
     );
@@ -1018,9 +925,6 @@ describe("readReview", () => {
   });
 
   it("does not let a deployment notice reset the silence clock", async () => {
-    // The notice is triggered by our own push, so counting it would let the
-    // loop restart its own clock every round and never notice a reviewer that
-    // has gone away.
     const runner = fakeRunner(
       view(
         payload({
@@ -1043,9 +947,7 @@ describe("readReview", () => {
   it.each(["github-actions", "github-actions[bot]"])(
     "recognises the automation account spelled %j",
     async (login) => {
-      // `gh pr view --json` returned the bare name on #2663; GraphQL and the
-      // events API say `[bot]`. Keying on one spelling works until the comment
-      // arrives over the other transport.
+      // Different transports spell the automation login with and without `[bot]`.
       const runner = fakeRunner(view(payload({ comments: [{ author: { login } }] })));
 
       const result = await readReview(runner, reviewRequest());
@@ -1084,8 +986,6 @@ describe("readReview", () => {
   });
 
   it("does not spend a round acknowledging the reviewer's approval", async () => {
-    // #2661's `bot: round 1` and #2663's `round 6` are both paid passes whose
-    // entire published output was a sentence noting that the reviewer approved.
     const runner = fakeRunner(
       view(payload({ reviews: [{ author: { login: "copilot" }, body: GREEN_LIGHT }] })),
     );
@@ -1096,12 +996,7 @@ describe("readReview", () => {
   });
 
   it("still counts the approval as the reviewer having responded, so the PR can undraft", async () => {
-    // **The mutation this exists for.** Drop the green light from
-    // `anyoneResponded` as well as from `comments` and a pull request whose
-    // only response is an approval never undrafts: `advance` returns `waiting`
-    // on every tick and it sits in draft until the silence brake gives up. Two
-    // drops at deliberately different depths — automation is not an event, an
-    // approval is an event with nothing in it.
+    // Drop the green light from `anyoneResponded` too, and an approval-only PR never undrafts.
     const runner = fakeRunner(
       view(payload({ reviews: [{ author: { login: "copilot" }, body: GREEN_LIGHT }] })),
     );
@@ -1132,9 +1027,6 @@ describe("readReview", () => {
   });
 
   it("keeps the same words when they come from somebody who is not the reviewer", async () => {
-    // Scoped to the reviewer on exactly the grounds the error-notice drop is. A
-    // person writing "approval recommended" is a person approving, and a person
-    // approving in a comment often asks for something in the next sentence.
     const runner = fakeRunner(
       view(payload({ comments: [{ author: { login: "a-human" }, body: GREEN_LIGHT }] })),
     );
@@ -1145,9 +1037,6 @@ describe("readReview", () => {
   });
 
   it("reads a review that only quotes the approval heading", async () => {
-    // Match anywhere in the body rather than on the verdict line and this
-    // review disappears — a dropped review is a request nobody answers, and
-    // nothing says so.
     const body =
       "### 🔵 Needs a closer look\n\nThe earlier `### 🟢 Approval recommended` was premature.";
     const runner = fakeRunner(view(payload({ reviews: [{ author: { login: "copilot" }, body }] })));
@@ -1161,9 +1050,6 @@ describe("readReview", () => {
     ["the marker without the phrase", "### 🟢 Looks good\n\nOne nit below."],
     ["the phrase without the marker", "Approval recommended, but read the note first."],
   ])("keeps a verdict line carrying %s", async (_case, body) => {
-    // Both fragments are required, exactly as `REVIEWER_ERROR` needs two: the
-    // phrase alone is something a reviewer plausibly writes on the way to
-    // asking for a change, and the marker alone is a green circle.
     const runner = fakeRunner(view(payload({ reviews: [{ author: { login: "copilot" }, body }] })));
 
     const result = await readReview(runner, reviewRequest());
@@ -1213,12 +1099,8 @@ describe("readReview", () => {
   });
 
   it("dates an approving empty review, which the comment list drops", async () => {
-    // `newestAt` is computed before the filtering and this is why. The
-    // commonest thing a reviewer does that leaves no comment is approve, and
-    // `comments` drops it — an empty body is nothing to act on. But it is
-    // something that *happened*, so the silence clock has to see it. Compute
-    // the field after the filter and an approved pull request looks abandoned,
-    // which is the one state a person is most likely to be waiting on.
+    // `newestAt` is computed before the filter, so an approval `comments` drops
+    // still moves the silence clock instead of making the PR look abandoned.
     const runner = fakeRunner(
       view(
         payload({
@@ -1236,11 +1118,8 @@ describe("readReview", () => {
   });
 
   it("refuses a payload with no creation instant on the pull request", async () => {
-    // Rather than defaulting it to nothing, which is the tempting shape because
-    // every other missing field here reads as empty. It cannot: the creation
-    // instant is the floor under the silence clock, so a default disables the
-    // bound on exactly the pull requests the bound exists for — the ones where
-    // nothing has happened and nothing carries a date.
+    // Unlike every other missing field here: a default would disable the
+    // silence bound on exactly the pull requests it exists for.
     const runner = fakeRunner(
       view(JSON.stringify({ state: "OPEN", isDraft: true, reviews: [], comments: [] })),
     );
@@ -1274,8 +1153,6 @@ describe("readReview", () => {
     ["a non-string state", payload({ state: 7 })],
     ["a non-boolean isDraft", payload({ isDraft: "true" })],
   ])("fails when the payload is missing %s", async (_label, stdout) => {
-    // These two decide whether `gh pr ready` is allowed to run. A default here
-    // would be a guess made immediately before an irreversible action.
     const runner = fakeRunner(view(stdout));
 
     const result = await readReview(runner, reviewRequest());
@@ -1313,10 +1190,8 @@ describe("readReview", () => {
   });
 
   it("calls everyone the reviewer when the reviewer name is empty", async () => {
-    // The blank setting cannot tell anybody apart, and the two directions are not
-    // symmetric: reading everyone as `human` would exempt every comment on every
-    // pull request from `MAX_REVIEW_ITERATIONS` at once, on a typo in `.env`.
-    // Reading everyone as `reviewer` only spends the cap sooner than it need be.
+    // A blank setting reading everyone as `human` would exempt every comment
+    // on every pull request from `MAX_REVIEW_ITERATIONS` at once, on a typo.
     const runner = fakeRunner(view(payload({ comments: [{ author: { login: "x" }, body: "y" }] })));
 
     const result = await readReview(runner, reviewRequest({ reviewer: "@" }));
@@ -1406,10 +1281,7 @@ describe("readReviewThreads", () => {
     });
 
     it("is quiet when nothing is open, however many threads there are", async () => {
-      // The mutation: key on `threads.length` instead of `open`. A pull request
-      // whose two threads are both resolved is read on every tick for as long as
-      // it stays open, and would then be marked as news forever — which is the
-      // line the operator pasted when asking for the mark in the first place.
+      // Keying on `threads.length` instead of `open` would mark an all-resolved PR as news forever.
       expect(await markFor([thread({ isResolved: true }), thread({ isResolved: true })])).toBe(
         true,
       );
@@ -1433,8 +1305,6 @@ describe("readReviewThreads", () => {
     expect(argv).toContain("owner=sparebank1");
     expect(argv).toContain("name=buy-insurance-advisor-web");
     expect(argv).toContain("number=42");
-    // The query is one element. Split across two it is not a query at all, and
-    // the argv form is what keeps the caller from having to escape anything.
     expect(argv.filter((part) => part.startsWith("query=")).length).toBe(1);
   });
 
@@ -1444,8 +1314,6 @@ describe("readReviewThreads", () => {
     await readReviewThreads(runner, reviewRequest());
 
     const argv = runner.calls[0] ?? [];
-    // gh's typed `-F` reads a value beginning with `@` out of a file. Only the
-    // number, which cannot begin with one, is passed that way.
     expect(argv[argv.indexOf("owner=sparebank1") - 1]).toBe("-f");
     expect(argv[argv.indexOf("name=buy-insurance-advisor-web") - 1]).toBe("-f");
     expect(argv[argv.indexOf("number=42") - 1]).toBe("-F");
@@ -1488,7 +1356,6 @@ describe("readReviewThreads", () => {
   });
 
   it("fails on a partly-failed query rather than reading the half it got", async () => {
-    // GraphQL answers with data *and* errors, and the data half looks complete.
     const runner = fakeRunner(
       graphql(
         JSON.stringify({
@@ -1538,9 +1405,8 @@ describe("readReviewThreads", () => {
   });
 
   it("refuses the whole read when one thread is missing a field", async () => {
-    // Deliberately unlike `entriesOf`, which skips a bad entry. A skipped thread
-    // is a comment the round does not answer while reporting that it answered
-    // everything, so one bad node fails the read.
+    // Unlike `entriesOf`, which skips a bad entry — a skipped thread here would
+    // be a comment reported as answered when it wasn't.
     const runner = fakeRunner(graphql(threadsPayload([thread(), thread({ isResolved: "no" })])));
 
     const result = await readReviewThreads(runner, reviewRequest());
@@ -1605,12 +1471,7 @@ describe("readReviewThreads", () => {
     const result = await readReviewThreads(runner, reviewRequest());
 
     expect(result.outcome === "read" && result.threads[0]?.comments[0]?.author).toBe("unknown");
-    // And an author it could not read is not the reviewer. `human` exempts a
-    // round from the reviewer's cap, so the guess has to go the other way from
-    // the safe direction elsewhere in this file: a login nobody can identify
-    // must not be handed the reviewer's budget, and must not be handed the
-    // exemption either. It is only ever the *first* comment on a thread that
-    // decides a round, and an unreadable one there is not a reviewer speaking.
+    // An unreadable login must not be handed the reviewer's `MAX_REVIEW_ITERATIONS` exemption.
     expect(result.outcome === "read" && result.threads[0]?.comments[0]?.origin).toBe("human");
   });
 
@@ -1693,10 +1554,6 @@ describe("replyToThread", () => {
   });
 
   it("marks the reply as ours, because the caller cannot be relied on to", async () => {
-    // The loop on PR #548: `answerThreads` sent the body through unprefixed, so
-    // `unansweredThreads` read every reply back as a reviewer's and answered it
-    // again. Tagging here rather than at the call site is what makes an
-    // untagged reply unreachable instead of merely absent from today's caller.
     const runner = fakeRunner(replied());
 
     await replyToThread(runner, {
@@ -1716,16 +1573,11 @@ describe("replyToThread", () => {
     await replyToThread(runner, {
       cwd: WORKTREE,
       threadId: THREAD_ID,
-      // A reply body is model-written from a ticket anyone with a board account
-      // can edit. gh's typed `-F` would read this out of a file.
       body: "@copilot this is the argument",
       timeoutMs: 60_000,
     });
 
-    // The prefix now sits in front of the `@`, which would defeat `-F` by
-    // accident. Asserting on the flag rather than on the leading character
-    // keeps this a claim about the flag, so it still fails if `-f` becomes
-    // `-F` and still fails if the prefix is later dropped.
+    // Asserts on the flag, not the leading character, so this still fails if `-f` becomes `-F`.
     const argv = runner.calls[0] ?? [];
     expect(argv[argv.indexOf(`body=${BOT_PREFIX}@copilot this is the argument`) - 1]).toBe("-f");
   });
@@ -1806,7 +1658,6 @@ describe("replyToThread", () => {
       timeoutMs: 60_000,
     });
 
-    // No URL, no receipt, and therefore nothing that can resolve the thread.
     expect(result.outcome).toBe("failed");
     expect(reason(result)).toContain("nothing proves it posted");
   });
@@ -1834,8 +1685,6 @@ describe("resolveThread", () => {
 
     const result = await resolveThread(runner, { cwd: WORKTREE, reply, timeoutMs: 60_000 });
 
-    // The type already makes a bare thread id unusable here. This is the same
-    // rule at runtime, for a caller that hand-built the receipt to get around it.
     expect(result.outcome).toBe("failed");
     expect(reason(result)).toContain("with an answer attached");
     expect(runner.calls).toEqual([]);
@@ -1884,9 +1733,6 @@ describe("postComment", () => {
   const request = { cwd: WORKTREE, repo: REPO, number: 42, body: MARKER_BODY, timeoutMs: 60_000 };
 
   it("reads the pull request's node id and hands back the comment's", async () => {
-    // The returned id is the point of using addComment over `gh pr comment`:
-    // without it, the next round has to find the marker again by prefix, and a
-    // round that cannot find what it just wrote posts a second one.
     const runner = fakeRunner(posts());
 
     const result = await postComment(runner, request);
@@ -1895,9 +1741,6 @@ describe("postComment", () => {
   });
 
   it("passes the number typed and the body raw", async () => {
-    // `-F` turns 42 into an Int, which the query's `Int!` requires. It also
-    // reads a value beginning with `@` out of a file, so a body nobody here
-    // wrote never goes through it.
     const runner = fakeRunner(posts());
 
     await postComment(runner, request);
@@ -1970,9 +1813,7 @@ describe("editComment", () => {
   });
 
   it("never reaches for --edit-last", async () => {
-    // That flag edits the last comment of the *current user*, and the current
-    // user is the operator. A round running after a human commented would
-    // overwrite that person's words with machine state.
+    // That flag edits the last comment of the *current user* — the operator, not the bot.
     const runner = fakeRunner(edits());
 
     await editComment(runner, request);
@@ -2053,8 +1894,6 @@ describe("formatReviewFeedback", () => {
 
     const block = formatReviewFeedback(long);
 
-    // The notice is inside the budget rather than added to it — a cap the
-    // truncation notice can push you past is not a cap.
     expect(block.length).toBeLessThanOrEqual(MAX_FEEDBACK_CHARS);
     expect(block).toContain("truncated");
     expect(block).toContain(String(MAX_FEEDBACK_CHARS));
@@ -2086,9 +1925,6 @@ describe("formatThreads", () => {
   });
 
   it("quotes the id the answer has to name back", () => {
-    // The id is how a reply reaches the thread. Rendered anywhere it can be
-    // paraphrased or abbreviated, the round answers a conversation that does
-    // not exist and the reviewer sees nothing at all.
     expect(formatThreads([inlineThread()])).toContain("id PRRT_1");
   });
 
@@ -2097,8 +1933,6 @@ describe("formatThreads", () => {
   });
 
   it("says the diff moved rather than inventing a line", () => {
-    // `null` is what GitHub returns once the lines under a thread change.
-    // Rendering it as a number would point the round at line zero of a file.
     const block = formatThreads([inlineThread({ line: null, isOutdated: true })]);
 
     expect(block).toContain("the diff has moved; no line");
@@ -2106,9 +1940,7 @@ describe("formatThreads", () => {
   });
 
   it("includes our own earlier replies, not only the reviewer's words", () => {
-    // Deliberate, and the opposite of what `reviewerComments` does to the issue
-    // comments. Seeing its own answer is how a round knows the point is already
-    // made in public and declines to make it twice.
+    // Seeing its own answer is how a round knows the point was already made and declines to repeat it.
     const block = formatThreads([
       inlineThread({
         comments: [
@@ -2170,9 +2002,7 @@ describe("findPullRequest", () => {
     const argv = runner.calls[0] ?? [];
     expect(argv).toContain("--head");
     expect(argv).toContain(BRANCH);
-    // `--state all` is the load-bearing one. Restricted to open pull requests,
-    // a merged one comes back as "none" and the caller reads that as "nothing
-    // published yet" at the exact moment the loop is meant to stop.
+    // Restricted to open pull requests, a merged one would read as "none" right when the loop should stop.
     expect(argv.join(" ")).toContain("--state all");
   });
 
@@ -2193,9 +2023,7 @@ describe("findPullRequest", () => {
   });
 
   it("prefers the open one when a closed attempt shares the branch", async () => {
-    // The ordinary shape of a reused branch: someone closed the first attempt.
-    // Both orderings, because gh does not document the order it returns rows in
-    // and a rule that depends on it would pass here and fail in production.
+    // Both row orderings: gh does not document which order it returns rows in.
     for (const rows of [
       [
         { number: 9, state: "CLOSED", isDraft: false },
@@ -2232,8 +2060,6 @@ describe("findPullRequest", () => {
     ]);
 
     expect(result).toMatchObject({ outcome: "failed" });
-    // Both numbers named: the recovery is a person looking, so the message has
-    // to be enough to look with.
     expect(result.outcome === "failed" ? result.reason : "").toContain("#12, #13");
   });
 
@@ -2242,8 +2068,7 @@ describe("findPullRequest", () => {
   });
 
   it("fails rather than reading an unreadable row as an absence", async () => {
-    // A dropped row is how a merged pull request turns into "none", which is
-    // the one wrong answer that lets the loop start work it should not.
+    // A dropped row is how a merged pull request turns into "none".
     for (const rows of [[{ number: 12 }], [{ state: "OPEN", isDraft: false }], [null], ["12"]]) {
       expect(await find(rows)).toMatchObject({ outcome: "failed" });
     }
@@ -2291,13 +2116,8 @@ describe("reviewOrigin", () => {
   it.each(["", "@", "   ", "@ "])(
     "calls everyone the reviewer when the reviewer setting is %j",
     (reviewer) => {
-      // The one asymmetry in this function, and the reason it is written as an
-      // early return rather than falling through to `matchesReviewer`. Nothing
-      // matches an empty name, so the natural reading makes every comment
-      // `human` — and `human` is the exemption from `MAX_REVIEW_ITERATIONS`, so
-      // a blank setting would lift the spend cap on every open pull request at
-      // once. The exemption is something a reviewer name grants; never
-      // something its absence does.
+      // The early return: falling through to `matchesReviewer` would make an
+      // empty name match nobody, which would exempt every comment from `MAX_REVIEW_ITERATIONS`.
       expect(reviewOrigin("a-colleague", reviewer)).toBe("reviewer");
     },
   );

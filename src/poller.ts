@@ -1,31 +1,11 @@
 /**
  * One poll cycle: find candidate issues, triage the unseen ones, persist state.
  *
- * The Jira query is injected rather than built here, so the ordering, dedupe
- * and failure-isolation rules below can be tested without a live board.
- *
- * Two correctness rules drive the shape of this file:
- *
- * 1. An issue is recorded as seen only after its report is safely written.
- *    Marking it earlier means a transient failure silently drops a ticket for
- *    good — the cursor moves past it and nothing ever looks at it again.
- *
- * 2. The cursor advances only across an unbroken run of successes from the
- *    oldest issue forward. If issue #3 fails but #4 succeeds, moving the cursor
- *    to #4 would strand #3 outside the next query window. Stopping at the gap
- *    costs a little rework and loses nothing.
- *
- *    **This is a fact about `created` order, not about loop order**, and it
- *    used to be both. The cursor was a flag carried down a loop that happened
- *    to run oldest-first, so the two were indistinguishable until something
- *    wanted to work in a different order. `settledCursor` in `triage/order.ts`
- *    now derives it from created-ascending order and the set of successes, so
- *    the loop below is free to spend in whatever order is worth spending in.
- *
- * 3. State is persisted after every issue rather than once at the end. Each
- *    triage is a paid model run, so losing the record of one to an ill-timed
- *    kill means paying for it twice. Per-cycle saving made the cost of a crash
- *    proportional to the size of the backlog; per-issue saving caps it at one.
+ * An issue is marked seen only after its report is durably written, so a transient failure can't
+ * silently drop it. The cursor only advances across an unbroken run of successes from the oldest
+ * issue forward — `settledCursor` derives this from created order and the success set, independent
+ * of the order triage actually runs in. State saves after every issue, not once at the end, so a
+ * crash mid-cycle repays at most one triage twice.
  */
 
 import { logger } from "./logger.ts";
@@ -44,22 +24,15 @@ export interface PollDeps {
   /**
    * The order to triage in, when it should not be oldest-first.
    *
-   * Injected as a comparator rather than as the status list itself, so this
-   * module never learns what a status is and the ordering can be tested
-   * without one. Omitted means created-ascending — which is what
-   * `byStatusPriority` also returns for an unset `TRIAGE_STATUS_PRIORITY`, so
-   * the default is the same behaviour arrived at by two routes rather than a
-   * second policy.
+   * Injected as a comparator so this module never learns what a status is. Omitted means
+   * created-ascending, the same default `byStatusPriority` returns for an unset priority.
    */
   readonly order?: (a: TicketRef, b: TicketRef) => number;
   /**
    * Aborted to request a graceful stop.
    *
-   * Checked between issues rather than only between cycles. A cycle with a
-   * backlog runs one paid subprocess per issue, sequentially, so "finish the
-   * current cycle" can mean several more minutes and several more model runs
-   * after the operator has already asked it to stop — which reads as a hang.
-   * Stopping between issues keeps shutdown bounded by a single triage.
+   * Checked between issues, not only between cycles, so shutdown is bounded by a single triage
+   * rather than by the rest of a sequential, one-subprocess-per-issue backlog.
    */
   readonly signal?: AbortSignal;
 }
@@ -94,13 +67,9 @@ export function toTriageResult(ticket: TicketRef, payload: TriagePayload): Triag
 export async function runPollCycle(state: PollState, deps: PollDeps): Promise<PollOutcome> {
   const candidates = (await deps.fetchCandidates(state.cursor)).toSorted(byCreatedAscending);
 
-  // Two orderings of the same issues, and the cycle needs both at once.
-  // `fresh` stays created-ascending because that is the only order the cursor
-  // may be reasoned about in; `queue` is the order model runs are spent in.
-  // Sorting `candidates` above rather than sorting `fresh` keeps the
-  // unparseable-timestamp check on every issue found, including ones already
-  // seen — a corrupt timestamp should stop the cycle whether or not it happens
-  // to land on work we were going to do.
+  // `fresh` stays created-ascending, the only order the cursor can be reasoned about in;
+  // `queue` is the order triage actually spends in. Sorting `candidates` (not `fresh`) up
+  // front runs the unparseable-timestamp check on already-seen issues too.
   const fresh = candidates.filter((ticket) => isUnseen(state, ticket.key));
   const queue = deps.order === undefined ? fresh : fresh.toSorted(deps.order);
   const skipped = candidates.length - fresh.length;
@@ -113,15 +82,10 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
   logger.info("poll.candidates", { found: candidates.length, skipped, fresh: fresh.length });
 
   if (deps.order !== undefined) {
-    // The instrument for the question `TRIAGE_STATUS_PRIORITY` cannot answer on
-    // its own: whether working by column starves the tickets that were moving.
-    // Nobody can judge that from the setting, only from the order it actually
-    // produced against a real backlog — so the order is printed, at `info`,
-    // and only when an operator has opted in by configuring one.
-    //
-    // Truncated because this is a log line and a backlog has no upper bound.
-    // The count is reported separately so a truncated list still says how much
-    // it is hiding, rather than looking like the whole queue.
+    // Whether `TRIAGE_STATUS_PRIORITY` starves moving tickets can only be judged from the
+    // queue it actually produced, so it's logged only when an operator opted into an order.
+    // Truncated because a backlog has no upper bound; total is reported separately so a
+    // truncated list doesn't read as the whole queue.
     logger.info("poll.order", {
       total: queue.length,
       head: queue.slice(0, ORDER_LOG_LIMIT).map((ticket) => ({
@@ -146,31 +110,23 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
       await deps.sink.write(toTriageResult(ticket, payload));
       succeeded.add(ticket.key);
 
-      // Saved here, not after the loop. The report is already on disk and the
-      // model run is already paid for; leaving the key unrecorded until the
-      // cycle ends means a kill in between buys the same verdict twice.
-      //
-      // The cursor is recomputed from `fresh` rather than tracked along this
-      // loop, because this loop is no longer in created order. Recomputing is
-      // O(n) over a set that is a handful of tickets, and the alternative —
-      // remembering how far the created-ascending prefix had got — is the
-      // coupling this change removes, reintroduced as an optimisation.
+      // Saved here, not after the loop, so a kill mid-cycle doesn't buy the same paid triage
+      // twice. Cursor is recomputed from `fresh` rather than tracked along this loop, because
+      // the loop is no longer in created order.
       current = recordSeen(current, [ticket.key], settledCursor(fresh, succeeded));
       await saveState(deps.statePath, current);
       triaged += 1;
     } catch (error) {
       failed += 1;
-      // Nothing to do to the cursor: `settledCursor` stops at any issue not in
-      // `succeeded`, so this one already blocks it without being told to.
+      // Nothing to do to the cursor: `settledCursor` already stops at any issue not in `succeeded`.
       logger.error("poll.issue_failed", { issueKey: ticket.key, error });
     }
   }
 
   const abandoned = fresh.length - triaged - failed;
   if (abandoned > 0) {
-    // Not an error: these are simply still unseen, so the next run picks them
-    // up. Logged because a cycle reporting fewer results than it found would
-    // otherwise look like tickets going missing.
+    // Not an error: still unseen, so the next run picks them up. Logged so fewer results
+    // than found doesn't read as tickets going missing.
     logger.warn("poll.interrupted", { abandoned, note: "left for the next cycle" });
   }
 

@@ -19,9 +19,8 @@ function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
     closed: false,
     comments: [ourComment("2026-09-01T10:00:00.000+0200")],
     changes: [],
-    // Empty rather than absent, and spelled out in each fixture that needs it:
-    // `tsc` fails every one of them if `WatchContent` grows a field, which is
-    // what keeps four literals in step where a hand-copied *list* could not be.
+    // Spelled out per fixture rather than shared, so tsc fails every one if
+    // `WatchContent` grows a field.
     content: { summary: "", description: "", environment: "", attachments: [] },
     ...overrides,
   };
@@ -44,8 +43,7 @@ describe("what the check is shown", () => {
   });
 
   it("takes the sendback from our NEWEST comment", () => {
-    // The older one is the conversation that produced the newer one. Judging an
-    // answer against a superseded ask is a question nobody wanted answered.
+    // The older comment is the conversation that produced the newer one.
     const context = retriageContext(
       signals({
         comments: [
@@ -61,9 +59,8 @@ describe("what the check is shown", () => {
   });
 
   it("never shows the check our own comments as somebody else's", () => {
-    // The self-trigger guard again, one layer along: our own sendback arriving
-    // in the answers section is a session asked whether we answered ourselves,
-    // and the honest answer to that is yes.
+    // Our own sendback must never appear as a foreign answer, or the check is
+    // asked whether we answered ourselves.
     const context = retriageContext(
       signals({
         comments: [
@@ -77,12 +74,8 @@ describe("what the check is shown", () => {
   });
 
   it("still finds the sendback after the poster has rewritten it in place", () => {
-    // A re-triage edits our existing comment rather than adding one, so on any
-    // ticket that has been round the loop once `created` names the first triage
-    // and `updated` names the ask that is actually outstanding. Looking the
-    // sendback up by `created` would find nothing here and hand the check an
-    // empty ask — a paid session asked whether an unstated question was
-    // answered, which it can only answer wrongly.
+    // A re-triage rewrites our existing comment, so `updated` (not `created`)
+    // names the ask actually outstanding.
     const context = retriageContext(
       signals({
         comments: [
@@ -101,10 +94,8 @@ describe("what the check is shown", () => {
   });
 
   it("dates the ticket where the decision dates it, so an edited comment is seen once", () => {
-    // The two functions must slice at the same instant. With the mark at the
-    // rewrite, a comment written before it was already in front of the triage
-    // that produced the current ask, and showing it again is asking the check
-    // to judge an answer the sendback was written in response to.
+    // The decision and this function must slice at the same instant, or a
+    // comment already seen before the current ask gets shown again.
     const context = retriageContext(
       signals({
         comments: [
@@ -123,10 +114,8 @@ describe("what the check is shown", () => {
   });
 
   it("shows an old comment that was edited into an answer after we spoke", () => {
-    // The mirror of the decision's own rule, and it has to be here too or the
-    // two disagree in the expensive direction: the edit triggers the look and
-    // then the comment carrying the answer is the one comment the check is not
-    // shown. Ordering follows the same clock, so the amended comment is newest.
+    // Mirrors the decision's own rule: the edit that triggers the look must
+    // also make the comment appear in the prompt, ordered by the same clock.
     const context = retriageContext(
       signals({
         comments: [
@@ -156,7 +145,7 @@ describe("what the check is shown", () => {
 
   it("counts a tie as new, exactly as the decision does", () => {
     // If the two disagreed, a comment could trigger the look and then not
-    // appear in the prompt — a paid session asked to explain an empty page.
+    // appear in the prompt.
     const context = retriageContext(
       signals({
         comments: [
@@ -187,9 +176,8 @@ describe("what the check is shown", () => {
 
 describe("the bound on the prompt", () => {
   it("keeps the newest comments and says how many it dropped", () => {
-    // Every one of these is attacker-controlled text going into a prompt, so
-    // the count is bounded. The newest are kept because an answer to a sendback
-    // is the thing somebody wrote most recently.
+    // Attacker-controlled text going into a prompt is bounded; the newest are
+    // kept since an answer to a sendback is written most recently.
     const many = Array.from({ length: MAX_CONTEXT_COMMENTS + 3 }, (_, index) =>
       theirComment(`2026-09-0${index < 8 ? 2 : 3}T0${index % 8}:00:00.000+0200`, `c${index}`),
     );
@@ -216,9 +204,8 @@ describe("the fields, which are filtered where the debug log is not", () => {
   });
 
   it("drops board grooming rather than offering it as evidence", () => {
-    // An unfiltered list would hand the check a sprint assignment and a rank
-    // drag as signs that the reporter responded. The calibration lesson cuts
-    // the other way only for the debug log, which must not filter.
+    // An unfiltered list would offer a sprint assignment or rank drag as
+    // evidence the reporter responded; only the debug log skips this filter.
     const context = retriageContext(
       signals({
         changes: [
@@ -271,21 +258,15 @@ describe("what a moved field is shown as saying", () => {
   }
 
   it("carries the field's current text, which is the whole point of the change", () => {
-    // THE ONE THAT MATTERS. Before this, a description edit reached the check
-    // as the word "description" and nothing else, so the check correctly
-    // refused to certify content it had not seen — on the commonest way a
-    // reporter answers a sendback. Unplug the content and every one of those
-    // becomes a well-argued no.
+    // The check needs the field's actual content, not just its name, or it
+    // correctly refuses to certify content it never saw.
     const context = edited({ description: "Observed baseline: 42% of carts." });
 
     expect(context?.fields[0]?.content).toBe("Observed baseline: 42% of carts.");
   });
 
   it("shows content only for the fields that actually moved", () => {
-    // The ticket's whole state is on the signals and handing all of it over
-    // would be cheaper to write and worse to answer: a description unchanged
-    // since triage is not evidence anybody responded, and a check shown it will
-    // find the sendback's own words in it and say yes.
+    // A description unchanged since triage is not evidence anybody responded.
     const context = edited({ description: "the new answer", summary: "untouched summary" }, [
       "description",
     ]);
@@ -295,8 +276,8 @@ describe("what a moved field is shown as saying", () => {
   });
 
   it("names an attachment without offering its bytes", () => {
-    // "Attach the HAR" is an ordinary sendback and a filename answers it.
-    // Fetching contents would be a new untrusted-bytes path into a prompt.
+    // A filename answers "attach the HAR"; fetching contents would be a new
+    // untrusted-bytes path into a prompt.
     const context = edited(
       {
         attachments: [{ filename: "network.har", mimeType: "application/json", size: 20480 }],
@@ -308,10 +289,8 @@ describe("what a moved field is shown as saying", () => {
   });
 
   it("keeps an entry for a field that was emptied", () => {
-    // A reporter who cleared the description moved it. Dropping the section
-    // would leave the check reading a ticket where nothing appeared to change —
-    // the same blindness, arriving through an omission instead of a missing
-    // fetch.
+    // A cleared description still moved; dropping the entry would look like
+    // nothing changed.
     const context = edited({ description: "" });
 
     expect(context?.fields).toHaveLength(1);
@@ -319,10 +298,8 @@ describe("what a moved field is shown as saying", () => {
   });
 
   it("caps a long field and says that it capped it", () => {
-    // Attacker-controlled text going into a prompt, so "however long the
-    // reporter made it" is not a bound. The flag is separate from the content
-    // because the prompt has to say so outside the fence, where a hostile
-    // description cannot imitate the notice.
+    // The truncation flag is separate from content so the notice sits outside
+    // the fence, where a hostile description can't imitate it.
     const context = edited({ description: "x".repeat(MAX_FIELD_CHARS + 500) });
 
     expect(context?.fields[0]?.truncated).toBe(true);
@@ -330,8 +307,7 @@ describe("what a moved field is shown as saying", () => {
   });
 
   it("does not flag a field that fitted", () => {
-    // An off-by-one here puts "this was cut" on a complete description, which
-    // tells the check to distrust an answer that is all there.
+    // An off-by-one here would tell the check to distrust a complete answer.
     const context = edited({ description: "x".repeat(MAX_FIELD_CHARS) });
 
     expect(context?.fields[0]?.truncated).toBe(false);
@@ -341,8 +317,7 @@ describe("what a moved field is shown as saying", () => {
 describe("when there is nothing to slice at", () => {
   it("refuses a ticket with no comment of ours", () => {
     // Same condition the decision unsubscribes on: with no high-water mark
-    // everything reads as new, and the check would be judging the sendback
-    // against the conversation that produced it.
+    // everything reads as new.
     expect(
       retriageContext(signals({ comments: [theirComment("2026-09-02T08:00:00.000+0200")] })),
     ).toBeNull();

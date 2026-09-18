@@ -56,8 +56,7 @@ function payload(overrides: Partial<TriagePayload> = {}): TriagePayload {
 
 describe("buildFitnessNote", () => {
   it("lists the blockers as the things to resolve", () => {
-    // The point of putting this on the ticket at all: the blockers are a
-    // to-do list, and a human can often clear one cheaply.
+    // The blockers are a to-do list a human can often clear cheaply.
     const note = buildFitnessNote("ready-ish", fitness());
 
     expect(note).toContain("not yet");
@@ -80,16 +79,13 @@ describe("buildFitnessNote", () => {
   it.each(["needs-info", "duplicate", "not-our-team", "out-of-scope"] as const)(
     "stays off a %s ticket entirely",
     (verdict) => {
-      // Below ready-ish the answer is trivially "the ticket is not ready",
-      // which the verdict already says — so the block would be pure noise on a
-      // comment a colleague reads.
+      // Below ready-ish the verdict already says "not ready"; the block would be noise.
       expect(buildFitnessNote(verdict, fitness())).toBeNull();
     },
   );
 
   it("promises nothing when the call is positive", () => {
-    // Nothing consumes the label yet, and manual mode keeps a human in the
-    // loop even once something does.
+    // Nothing consumes the label yet, and manual mode keeps a human in the loop regardless.
     const note = buildFitnessNote("ready-ish", fitness({ solvable: true, blockers: [] })) ?? "";
 
     expect(note).toContain("looks automatable");
@@ -98,11 +94,7 @@ describe("buildFitnessNote", () => {
   });
 
   it("carries the deciding factor on a yes, not only the caveat", () => {
-    // The branch used to emit a fixed sentence and drop `rationale` — the one
-    // ticket-specific thing the payload holds, required by the schema and
-    // already printed to the local report by `sink.ts`. The block said less
-    // than the data behind it, and on four re-runs the model restored the
-    // difference by hand, which is where the duplicate came from.
+    // `rationale` is the one ticket-specific fact the payload carries, and the schema requires it.
     const note =
       buildFitnessNote(
         "ready-ish",
@@ -141,8 +133,7 @@ describe("buildFitnessNote", () => {
 
 describe("withFitnessNote", () => {
   it("splices the note above the footer sentinel, never below it", () => {
-    // The poster finds its own previous comment by matching that exact trailing
-    // line. Anything after it breaks update-in-place and posts duplicates.
+    // The poster matches that exact trailing line to find its previous comment.
     const body = withFitnessNote(payload()).mutation.commentBody;
 
     expect(body.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
@@ -188,14 +179,6 @@ describe("withFitnessNote", () => {
 });
 
 describe("the block owns its region, because a re-run hands its own output back", () => {
-  // Measured on the real board before any of this was written: four re-runs,
-  // four duplicates, across both verdicts; two first runs, both correct. The
-  // model rebuilds the comment from its own previous one and carries this
-  // block along as body text, so a splice that does not remove first posts a
-  // second copy of a block whose whole purpose is to be the single account of
-  // the call. The fixture is built by running the real thing twice rather than
-  // by hand, so it cannot stop modelling what the renderer actually emits.
-
   it("posts one block on a re-run, not one per run", () => {
     const first = withFitnessNote(payload());
     const second = withFitnessNote(rerunOf(first));
@@ -205,9 +188,7 @@ describe("the block owns its region, because a re-run hands its own output back"
   });
 
   it("does not ratchet: the fourth run still posts one", () => {
-    // The observed ceiling on the board was two, which reads as harmless. It
-    // is not a property anything guaranteed — it was the model collapsing
-    // whatever it found. Nothing here relies on it.
+    // The observed ceiling was two, but nothing here relies on that — it isn't a guaranteed bound.
     let run = withFitnessNote(payload());
     for (let index = 0; index < 3; index += 1) {
       run = withFitnessNote(rerunOf(run));
@@ -217,10 +198,8 @@ describe("the block owns its region, because a re-run hands its own output back"
   });
 
   it("removes a block whose wording no longer matches what the renderer writes", () => {
-    // The plausible wrong fix is deleting the exact string this run would
-    // render. It fails on every re-run where anything moved — and something
-    // usually has, which is why the ticket was re-triaged. Here the previous
-    // pass called it `not yet`; this one calls it `looks automatable`.
+    // Matching the exact string a run would render breaks on any re-run where the verdict
+    // changed, as it does here.
     const previous = withFitnessNote(payload({ agentFitness: fitness({ solvable: false }) }));
     const now = withFitnessNote(
       rerunOf(previous, { agentFitness: fitness({ solvable: true, blockers: [] }) }),
@@ -233,10 +212,7 @@ describe("the block owns its region, because a re-run hands its own output back"
   });
 
   it("removes a block the model re-typed in its own words", () => {
-    // Observed on SSX-3024, where the model wrote `🤖 **Agent fitness:
-    // solvable**` against the renderer's `🤖 **Agent fitness:** looks
-    // automatable`. Keying the strip on the whole rendered line would have
-    // walked straight past it.
+    // Keying the strip on the marker prefix, not the whole rendered line, catches a paraphrase too.
     const paraphrased = [
       "# ACCEPT · SSX-3822",
       "",
@@ -258,8 +234,7 @@ describe("the block owns its region, because a re-run hands its own output back"
   });
 
   it("collapses a body that already carries two", () => {
-    // The state four tickets were actually in. Stripping only the first
-    // occurrence leaves the ticket exactly as broken as it was.
+    // Stripping only the first occurrence would leave the ticket as broken as before.
     const once = withFitnessNote(payload()).mutation.commentBody;
     const doubled = once.replace(
       FOOTER_SENTINEL,
@@ -274,10 +249,7 @@ describe("the block owns its region, because a re-run hands its own output back"
   });
 
   it("leaves no horizontal rule hanging where the old block was", () => {
-    // Deleting forward from the marker is correct and looks broken: the
-    // renderer opens with `---`, so the report ends under a rule with nothing
-    // beneath it. Exactly one separator should survive — the one introducing
-    // the block this run wrote.
+    // Deleting only forward from the marker leaves a dangling `---`; the backward scan avoids that.
     const body = withFitnessNote(rerunOf(withFitnessNote(payload()))).mutation.commentBody;
 
     expect(body.split("\n").filter((line) => line.trim() === "---")).toHaveLength(1);
@@ -285,9 +257,8 @@ describe("the block owns its region, because a re-run hands its own output back"
   });
 
   it("keeps a mention of the phrase that is not a block", () => {
-    // Anchoring at column zero is the only thing separating the region this
-    // module owns from the report talking about fitness. Match anywhere in the
-    // line and the evidence blockquote goes with it.
+    // Column-zero anchoring is what distinguishes this module's block from a report merely
+    // discussing fitness.
     const quoting = [
       "# ACCEPT · SSX-3822",
       "",
@@ -303,10 +274,7 @@ describe("the block owns its region, because a re-run hands its own output back"
   });
 
   it("clears a watch note the ticket has stopped qualifying for", () => {
-    // `plausible` went false, so nothing is rendered this run. Returning early
-    // on that — the shape this function had — strands the previous run's
-    // blockers on the ticket permanently: a to-do list addressed to a reporter
-    // nobody is waiting on any more.
+    // Returning early when nothing renders would strand the previous run's blockers permanently.
     const watched = withFitnessNote(
       payload({ verdict: "needs-info", agentFitness: fitness({ plausible: true }) }),
     );
@@ -332,12 +300,8 @@ describe("the send-back block, which is the whole of the watch a reporter can se
   });
 
   it("appears on a send-back that is being watched", () => {
-    // **The mutation this exists for.** `plausible` is only ever true below
-    // `ready-ish`, by the gate's own alternatives rule — so the original
-    // verdict guard suppressed the block on exactly the tickets the watch was
-    // built for. Restore the bare `return null` and F becomes a machine that
-    // subscribes to a ticket and never asks the question it is waiting on an
-    // answer to. Silent, paid for, and indistinguishable from working.
+    // `plausible` is only ever true below `ready-ish`, by the gate's own
+    // alternatives rule, so this is the watch's only rendering path.
     const note = buildFitnessNote("needs-info", WATCHED);
 
     expect(note).not.toBeNull();
@@ -346,11 +310,8 @@ describe("the send-back block, which is the whole of the watch a reporter can se
   });
 
   it("says an answer is enough, because nobody will answer a bot that promised nothing", () => {
-    // The `ready-ish` block deliberately promises nothing — a solvable ticket
-    // still waits for a human to opt it in. Here the opposite is true and it is
-    // a fact about the queue rather than a promise: the sweep runs whether or
-    // not the reporter was told. Copy the cautious wording across and the
-    // reporter is left with a to-do list and no reason to do it.
+    // Unlike the `ready-ish` block, which promises nothing, the sweep here
+    // runs whether or not the reporter was told.
     const note = buildFitnessNote("needs-info", WATCHED) ?? "";
 
     expect(note).toContain("looked at again");
@@ -358,17 +319,13 @@ describe("the send-back block, which is the whole of the watch a reporter can se
   });
 
   it("stays quiet on an ordinary send-back", () => {
-    // The original judgement, untouched: below `ready-ish` the fitness answer
-    // is the trivial "the ticket is not ready", which the verdict says louder,
-    // and a second copy of it is noise on a ticket a colleague is reading.
+    // Below `ready-ish` the verdict already says "not ready"; a second copy is noise.
     expect(buildFitnessNote("needs-info", fitness({ plausible: false }))).toBeNull();
   });
 
   it("is spliced above the footer like every other block", () => {
-    // The sentinel is how the poster finds its own last comment to update in
-    // place. A note appended after it starts posting duplicates on every
-    // re-run — and the watch re-runs by design, so this path is the one where
-    // that failure compounds rather than happening once.
+    // The watch re-runs by design, so this is the path where posting after
+    // the sentinel would compound duplicates rather than happening once.
     const posted = withFitnessNote(payload({ verdict: "needs-info", agentFitness: WATCHED }));
     const body = posted.mutation.commentBody;
 

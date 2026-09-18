@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { maskDisabled, referencesIn, sectionIds, unresolved } from "./section-refs.ts";
+import {
+  maskDisabled,
+  qualifierOf,
+  referencesIn,
+  resolveReference,
+  sectionIds,
+} from "./section-refs.ts";
 
-// Every `§N` below is a fixture, so the region is the whole file rather than a
-// paragraph — the one place where that is the honest scope, since a reference
-// this file *makes* rather than tests would be the anomaly. The markers only
-// match a line that is nothing but a marker, which is why the ones appearing
-// inside the fixtures further down do not close this region.
+// Every `§N` below is a fixture, so the region is the whole file. The markers only match a line
+// that is nothing but a marker, so the ones inside the fixtures further down do not close it.
 // refs:off
 
 describe("sectionIds", () => {
@@ -36,9 +39,8 @@ describe("sectionIds", () => {
 
     expect(ids.has("14.1")).toBe(true);
     expect(ids.has("14.2")).toBe(true);
-    // The whole point of declaring it: §6.1 is a reference this check must
-    // catch, and inferring sub-sections from any numbered list would legalise
-    // it the moment §6 grew one.
+    // §6.1 is a reference this check must catch — inferring sub-sections from any numbered list
+    // would legalise it the moment §6 grew one.
     expect(ids.has("6.1")).toBe(false);
   });
 
@@ -90,9 +92,8 @@ describe("maskDisabled", () => {
   });
 
   it("runs an unterminated region to the end of the file", () => {
-    // Fails loudly by silencing the rest of the document. The alternative —
-    // ignoring an unclosed marker — silences nothing and reads identically in
-    // the diff, so the mistake would only ever show up as the check passing.
+    // Fails loudly by silencing the rest of the document — the alternative, ignoring an
+    // unclosed marker, reads identically in the diff and would only show up as a false pass.
     const masked = maskDisabled(["<!-- refs:off -->", "§7b", "§3a"].join("\n"));
 
     expect(masked).not.toContain("§7b");
@@ -125,19 +126,104 @@ describe("referencesIn", () => {
   });
 
   it("does not let a marker mentioned mid-sentence open a region", () => {
-    // This file and its module both have to document the markers. A substring
-    // rule made writing that sentence disable the rest of the document.
+    // A substring rule would let this very sentence, naming both markers, disable the rest of
+    // the document.
     const found = referencesIn("a.md", "Wrap it in `refs:off` and `refs:on`, then cite §3.");
 
     expect(found.map((ref) => ref.id)).toEqual(["3"]);
   });
 });
 
-describe("unresolved", () => {
-  it("keeps only the references no document defines", () => {
-    const refs = referencesIn("a.ts", "§1 §7b §14.11");
+describe("qualifierOf", () => {
+  const byBasename = new Map([["guardrails.md", "architecture/guardrails.md"]]);
 
-    expect(unresolved(refs, new Set(["1", "14.11"])).map((ref) => ref.id)).toEqual(["7b"]);
+  it("finds a document name immediately before the token", () => {
+    const line = "see architecture/guardrails.md §16 for the guard list";
+    expect(qualifierOf(line, { id: "16" }, byBasename)).toBe("architecture/guardrails.md");
+  });
+
+  it("tolerates a closing backtick and a possessive before the token", () => {
+    const line = "`architecture/guardrails.md`'s §16 covers this";
+    expect(qualifierOf(line, { id: "16" }, byBasename)).toBe("architecture/guardrails.md");
+  });
+
+  it("returns null for a bare token with no document name before it", () => {
+    expect(qualifierOf("plain §16 with nothing before it", { id: "16" }, byBasename)).toBe(null);
+  });
+
+  it("returns null when the named document is not one it knows", () => {
+    const line = "see unrelated-notes.md §16";
+    expect(qualifierOf(line, { id: "16" }, byBasename)).toBe(null);
+  });
+});
+
+describe("resolveReference", () => {
+  it("resolves a qualified reference against the named document alone", () => {
+    const definedByDocument = new Map([
+      ["a.md", new Set(["16"])],
+      ["b.md", new Set(["16"])],
+    ]);
+    const ref = { file: "c.md", line: 1, id: "16" };
+
+    expect(resolveReference(ref, "a.md", definedByDocument)).toEqual({ kind: "resolved" });
+  });
+
+  it("reports dangling when the named document doesn't define the id", () => {
+    const definedByDocument = new Map([["a.md", new Set(["1"])]]);
+    const ref = { file: "c.md", line: 1, id: "16" };
+
+    expect(resolveReference(ref, "a.md", definedByDocument)).toEqual({ kind: "dangling" });
+  });
+
+  // Regression guard: this is the pooling defect the per-document resolver exists to close.
+  // Pooling would have picked b.md's §12 for a citation sitting inside a.md, silently, because it
+  // never asked which document a.md's own author meant.
+  it("prefers the citing document's own section over another document sharing the number", () => {
+    const definedByDocument = new Map([
+      ["a.md", new Set(["12"])],
+      ["b.md", new Set(["12"])],
+    ]);
+    const ref = { file: "a.md", line: 1, id: "12" };
+
+    expect(resolveReference(ref, null, definedByDocument)).toEqual({ kind: "resolved" });
+  });
+
+  it("resolves an unqualified reference against the one other document that defines it", () => {
+    const definedByDocument = new Map([
+      ["a.md", new Set(["7"])],
+      ["b.md", new Set([] as string[])],
+    ]);
+    const ref = { file: "b.md", line: 1, id: "7" };
+
+    expect(resolveReference(ref, null, definedByDocument)).toEqual({ kind: "resolved" });
+  });
+
+  it("reports ambiguous, with every candidate, when more than one other document defines it", () => {
+    const definedByDocument = new Map([
+      ["a.md", new Set(["7"])],
+      ["b.md", new Set(["7"])],
+      ["c.md", new Set([] as string[])],
+    ]);
+    const ref = { file: "c.md", line: 1, id: "7" };
+
+    expect(resolveReference(ref, null, definedByDocument)).toEqual({
+      kind: "ambiguous",
+      candidates: ["a.md", "b.md"],
+    });
+  });
+
+  it("reports dangling when no document, local or otherwise, defines the id", () => {
+    const definedByDocument = new Map([["a.md", new Set(["1"])]]);
+    const ref = { file: "b.md", line: 1, id: "9" };
+
+    expect(resolveReference(ref, null, definedByDocument)).toEqual({ kind: "dangling" });
+  });
+
+  it("falls through to the other-document search for a citing file with no local section set", () => {
+    const definedByDocument = new Map([["a.md", new Set(["7"])]]);
+    const ref = { file: "src/watch/decide.ts", line: 1, id: "7" };
+
+    expect(resolveReference(ref, null, definedByDocument)).toEqual({ kind: "resolved" });
   });
 });
 

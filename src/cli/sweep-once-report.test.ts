@@ -14,7 +14,13 @@ describe("formatReport", () => {
     const groups = [
       group({
         verdicts: [
-          { name: "SSX-1-skill-a1b2c3", mtimeMs: 0, kind: "skill-root", ageMs: 90_000_000, sweep: true },
+          {
+            name: "SSX-1-skill-a1b2c3",
+            mtimeMs: 0,
+            kind: "skill-root",
+            ageMs: 90_000_000,
+            sweep: true,
+          },
         ],
       }),
     ];

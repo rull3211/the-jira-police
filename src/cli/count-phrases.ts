@@ -1,51 +1,17 @@
 /**
- * Count-noun phrases in prose, and which of them nothing is watching.
+ * Count-noun phrases in prose, and which of them nothing is watching — catches a citation that was
+ * never declared as a `FACT` at all, not just one that drifted from its declared phrasing.
+ * Scoped to `COUNTED_NOUNS` rather than any `<digits> <word>` shape, because the latter matches
+ * hundreds of phrases nobody cites (a count about a noun not on the list is invisible to this check).
  *
- * `docs-check.ts` checks a number wherever it is *phrased the way a `FACT`
- * expects*. That is the hole: rewrite a checked citation in a form no `FACT`
- * matches and the check reports green forever, having quietly stopped looking.
- * `expectSites` catches that for a phrasing that *was* declared and then moved.
- * It cannot catch a number that was never declared at all — the module map's
- * "65 test files" was wrong in exactly that way, written in the same commit
- * that updated the two declared sites correctly.
- *
- * So this inverts the question. Instead of "does every declared site agree?",
- * it asks **"is every count-noun phrase in the tree either a declared site or
- * an explicitly listed historical figure?"** A count written in a new phrasing
- * then fails on the day it is written, rather than the day somebody greps.
- *
- * **Why it is a list of nouns and not a shape.** Matching `<digits> <word>`
- * finds 539 phrases in this tree, nearly all of them prose that happens to
- * count something nobody cites — "two rules", "four questions", "39 dangling
- * references". A check with 500 entries to bless is a check somebody deletes.
- * Scoped to the nouns this repository actually cites numbers *about*, the
- * population is 23, small enough that every entry carries a reason. The cost is
- * real and is stated rather than hidden: **a count about a noun not on the list
- * is invisible to this check.** Adding a noun is one line, and the list is
- * expected to grow as new facts get cited.
- *
- * **The current-versus-history call is the whole point, and it is forced into
- * the open.** `docs-check.ts`'s header draws that line — a property of the tree
- * today is checkable, a measurement of one past run is not — and until now the
- * call was made silently by whoever chose not to add a `FACT`. Here it has to
- * be written down: a phrase is either checked or it is in `HISTORICAL` with a
- * sentence saying why it is history. Both halves become reviewable, which is
- * the actual defect being fixed.
- *
- * Kept in its own module because `docs-check.ts` cannot be imported from a test
- * — it runs `vitest list` at module scope, so importing it spawns vitest inside
- * vitest. Everything here is a pure function over text, and
- * `count-phrases.test.ts` is what `PLAN.md` §13 asked to arrive with it.
+ * Its own module because `docs-check.ts` runs `vitest list` at module scope, so importing it would
+ * spawn vitest inside vitest; `PLAN.md` §13 asked for `count-phrases.test.ts` to arrive with it.
  */
 
 /**
- * What separates two words of a phrase: a space, unless the formatter wrapped
- * the line there — and if the phrase sits inside a blockquote, the continuation
- * line carries the `> ` marker as well.
- *
- * Shared with `docs-check.ts` rather than copied. Both bugs this guards against
- * were a space that turned out not to be one, and two modules each holding
- * their own idea of "a space" is how the second one would come back.
+ * What separates two words of a phrase: a space, unless the formatter wrapped the line there, or
+ * the phrase sits inside a blockquote whose continuation line carries a `> ` marker instead.
+ * Shared with `docs-check.ts` rather than copied, so the two can't drift on what counts as "a space".
  */
 export const GAP = String.raw`\s+(?:>\s*)?`;
 
@@ -59,35 +25,17 @@ export function citation(...words: readonly string[]): RegExp {
 }
 
 /**
- * The nouns this repository cites numbers about.
- *
- * **Order does not matter here, and the first draft said it did.** That draft
- * ordered the list longest-first and deduplicated matches by start offset, on
- * the theory that "66 test files" would otherwise also be read as "66 files"
- * and reported twice. The mutation written to prove it — reorder the list, watch
- * the behavioural case fail — did not fail, and cannot: every pattern anchors
- * the digits immediately before the noun, and in "66 test files" no number is
- * adjacent to `files`, so the shorter noun never matches at all. The ordering
- * machinery was guarding a case that does not exist. That is `PROVING.md`'s
- * rule doing its job in the direction nobody expects — the guard came out and
- * nothing noticed, so the guard was the thing to delete.
- *
- * What remains is a plain alphabetical list. Two nouns could still collide if
- * one were a whole-word prefix of another (`tests` and `tests in flight`); none
- * are, a test asserts that, and if it ever happens the collision surfaces as a
- * duplicate phrase in the report rather than as silence.
+ * The nouns this repository cites numbers about. Order doesn't matter: each pattern anchors its
+ * digits immediately before the noun, so a shorter noun that's a prefix of a longer one
+ * (`files` inside `test files`) can't falsely match — a test asserts no entry has that shape anyway.
  */
 export const COUNTED_NOUNS: readonly string[] = [
   "assertions",
   "cases",
   "file-homes",
   "files",
-  // Alphabetised case-insensitively, which is why a capital sits mid-list. The
-  // event name is load-bearing rather than decorative: the bare word
-  // `registrations` denotes two different populations in the two sentences that
-  // use it here — one counts every hook in `.claude/settings.json`, the other
-  // counts the `PreToolUse` array alone — and a noun that names two populations
-  // cannot be checked against one number. Qualify the noun or leave it out.
+  // Qualified rather than bare "registrations": the bare word denotes two different populations
+  // elsewhere in this tree, and a noun naming two populations can't be checked against one number.
   "PreToolUse registrations",
   "production modules",
   "section references",
@@ -111,14 +59,9 @@ export interface CountPhrase {
 }
 
 /**
- * A number that is a measurement of one past run rather than a property of the
- * tree, and so is deliberately not checked.
- *
- * Keyed by all three of file, value and noun, which is stricter than it looks:
- * change the number and the entry stops matching, so a war story cannot be
- * quietly edited into a different war story. The `why` is not decoration — it
- * is the record of the current-versus-history call, and a reviewer disagreeing
- * with it is the mechanism working.
+ * A number that is a measurement of one past run rather than a property of the tree, and so is
+ * deliberately not checked. Keyed by file, value and noun together, so editing the number
+ * invalidates the exemption rather than silently carrying it to a new figure.
  */
 export interface HistoricalFigure {
   readonly file: string;
@@ -135,13 +78,8 @@ export interface CheckedSite {
 }
 
 /**
- * A digit run that is part of a larger token rather than a count.
- *
- * `#2661` is a pull request number and this tree writes plenty of them; a naive
- * matcher reads the digits and calls it a count. Currency and version dots go
- * the same way. Checked on the character *before* the match, because the
- * alternative — widening the pattern — makes the pattern the thing that has to
- * be got right twice.
+ * A digit run that's part of a larger token (a PR number, currency, a version) rather than a count.
+ * Checked via the character before the match rather than by widening the citation pattern itself.
  */
 const NOT_A_COUNT_BEFORE = new Set(["#", "$", ".", "-", "/"]);
 
@@ -183,14 +121,9 @@ function siteKey(site: { file: string; line: number; value: number }): string {
 }
 
 /**
- * The phrases nothing is watching: neither a site some `FACT` already checks,
- * nor a declared historical figure.
- *
- * A phrase counts as checked when a `FACT` matched at the same file, line and
- * value. Line rather than offset because that is what `docs-check.ts` already
- * records, and **value** because one line can carry two different counts —
- * "2390 tests in 66 files" is two facts and two phrases, and blessing the line
- * would bless both when only one is declared.
+ * The phrases nothing is watching: neither a site some `FACT` already checks, nor a declared
+ * historical figure. Keyed on file, line *and* value — one line can carry two counts ("2390 tests
+ * in 66 files"), so keying on line alone would bless both when only one is declared.
  */
 export function unaccountedPhrases(
   phrases: readonly CountPhrase[],
@@ -205,14 +138,7 @@ export function unaccountedPhrases(
   );
 }
 
-/**
- * `HISTORICAL` entries that no longer match anything.
- *
- * The same argument as `expectSites` and `KNOWN_DANGLING`, one level along: a
- * blessing that has outlived its phrase is a permanent hole waiting for a new
- * count to fall into it. If somebody rewrites a war story, the entry that
- * excused it should fail rather than sit there excusing whatever lands next.
- */
+/** `HISTORICAL` entries that no longer match anything — an outlived exemption is a hole a new count could fall into. */
 export function staleHistorical(
   phrases: readonly CountPhrase[],
   historical: readonly HistoricalFigure[],

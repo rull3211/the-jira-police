@@ -115,7 +115,7 @@ export function formatReport(issueKey: string, outcome: ReconOnlyOutcome, now: D
     "---",
     "",
     "_Nothing acts on this yet. `recon:once` is the only caller of `runReconOnly`;_",
-    "_see `ARCHITECTURE.md` §13 for the phases that would change that._",
+    "_see `architecture/not-built.md` §13 for the phases that would change that._",
     "",
   );
   return lines.join("\n");

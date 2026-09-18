@@ -2,14 +2,14 @@
 
 **The evidence base for the house rules.** Nothing in those rules was designed against a theory;
 every entry here is something that got through, and the rules that cite one are the generalisation
-of it. Not every rule cites one — 42 of the 71 bold paragraphs in the four phase files name no
+of it. Not every rule cites one — 42 of the 72 bold paragraphs in the four phase files name no
 incident, and a good share of those are section prose rather than rules — so the honest claim is the
 narrow one: where a rule names its evidence, the evidence is here, and `pnpm docs:check` fails if the
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 41 of the 48
-entries below are cited that way, and the other seven each say in their own text that no rule has
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 54
+entries below are cited that way, and the other nine each say in their own text that no rule has
 been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
 reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
 so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
@@ -1055,7 +1055,7 @@ failing one, needs a second probe to have done it, and `wrong-case-probe` at 2.
 
 ### A permission granted to a human, read as a permission granted to the agent
 
-`PLAN.md` §12 — the guardrail entry, since retired into `ARCHITECTURE.md` §16, which is where every
+`PLAN.md` §12 — the guardrail entry, since retired into `architecture/guardrails.md` §16, which is where every
 `§12` below now resolves — had said that hook configuration "belongs to the operator, lives outside
 this tree, and is deliberately neither readable nor writable from here." The operator checked with
 the storecode team and reported back: **developers can add settings.** True, and taken to mean the
@@ -1554,6 +1554,8 @@ already makes the point next to it.
 
 ### The fail-first prediction that named the wrong string
 
+<!-- refs:off -->
+
 `PLAN.md` §4 predicted that a triage run reading a staged image of SSX-3918 would produce a verdict
 containing `Nyt selskab` — the one field name in the image that also appears nowhere in the ticket's
 text — and staked the whole capability on that single string: "the run either produces that string or
@@ -1563,6 +1565,8 @@ ticket's own text and just as impossible without reading the image. The field th
 third line of a three-line crop, cut off before its value ever appears; the model had it in view and
 judged it irrelevant to the question the ticket asks, so it never reached the quote a `grep` was
 written to look for.
+
+<!-- refs:on -->
 
 A prediction naming one exact string treats the model's output as deterministic when the capability
 under test — reading an image and choosing what from it is worth reporting — has real freedom in what
@@ -1576,3 +1580,96 @@ verdict — not by the `grep` the plan specified.
 cover](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code): a
 single-string match is a check on phrasing, not on whether the picture was read, and the gap between
 the two is exactly this file's recurring shape.
+
+## 2026-09-18
+
+### The branches that could never merge, because they had already been rewritten
+
+`branch-stack.sh` reported three branches stacked, with zero open pull requests behind any of them.
+Two, `backup/pre-msg-rewrite` and `backup/pre-renumber`, had had their commit messages rewritten
+after their content already reached `main`. `unmergedBranches` (`.claude/hooks/lib.sh`) reads `git
+branch --no-merged`, which compares commits by SHA — a rewritten commit can never match the one it
+replaced, so the branch reports as unmerged forever, independent of how current `origin/main` is
+kept. `git cherry origin/main <branch>` showed every commit on both as already applied, confirmed
+against matching tree hashes under different commit SHAs — the check that told a rewritten branch
+apart from a third one the hook also reported, `feat/recon-reads-images`, which was genuinely
+unmerged work.
+
+`BUILDING.md` already claimed merged branches "drop out by construction" — true for an ordinary
+merge, and silently false for this shape. The detector was the stale artifact, one layer under the
+stale branch the existing rule already names.
+
+**Found by** running `git cherry` by hand against the three branches the hook reported, after a
+`git fetch` alone did not clear the count — reported by the operator as branches tripping the guard
+with no open pull requests behind them.
+
+The fix, in the same commit: `unmergedBranches` now also requires `git cherry <base> <branch>` to
+show an unapplied commit before counting a candidate, which is what makes [the same rule applies to
+branches](BUILDING.md#the-same-rule-applies-to-branches-and-they-are-the-copy-everyone-forgets)'s
+claim true again rather than needing correction.
+
+**No rule yet** — a squash-merged pull request would defeat the same fix the same way, since its
+combined diff does not patch-match its pre-squash commits; this repository has not merged one yet to
+show whether the shape recurs, and 2026-09-18.
+
+### The `§N` checker that resolved a citation against any document that happened to define it
+
+<!-- refs:off -->
+
+`pnpm docs:check`'s cross-reference check pooled every numbered document's headings into one set
+and asked only whether the referenced id existed anywhere in it — never which document. A bare
+`§12` sitting in `PLAN.md`, meaning nothing there, resolved silently against
+`architecture/triage.md`'s own unrelated `§12`, because the pool cannot represent "which
+document" at all.
+
+<!-- refs:on -->
+
+The 39-dangling-citations audit
+([above](#thirty-nine-citations-to-sections-that-were-never-written)) had already measured the
+citations that resolve to nothing; it had not asked whether the ones that resolve, resolve to the
+right place. Reflecting on that gap and remeasuring: **119** references resolve to a document
+other than the one their own author meant, more than double the 41 that resolve to nothing.
+
+Fixed with a three-tier scheme in `section-refs.ts`: `qualifierOf` reads the `.md` name written
+immediately before a `§N` on the same line; `resolveReference` trusts that name first, falls back
+to the citing document's own sections, and only then searches every other document — flagging
+two-or-more candidates as `ambiguous`, a state the pooled check could not represent, rather than
+picking one of them.
+
+**Found by** re-measuring the same audit with a sharper question — not "does this resolve" but
+"resolves against what" — after noticing the first measurement had only ever asked the first one.
+
+**The rule** — [name the document a `§N` citation
+means](BUILDING.md#name-the-document-a-n-citation-means).
+
+### The dangling count that fell because an unrelated edit repaired nothing
+
+<!-- refs:off -->
+
+Found 2026-09-10, while opening what became `§25` of this file's plan. Numbering a new `PLAN.md`
+entry `§24` — the next free number, chosen without a thought — repaired `ARCHITECTURE.md`'s
+dangling `§24` by coincidence: `docs:check`'s dangling count fell by one and asked for
+`KNOWN_DANGLING` to be lowered to match. Nothing about the citation had improved. It was still a
+self-reference in a file whose sections stop at 16, and `§14`'s own table still named `§15` as its
+intended target.
+
+<!-- refs:on -->
+
+**The count is sensitive to edits in files that have nothing to do with the defect it measures**,
+so a routine plan entry can turn the check green about a citation it never touched — and lowering
+the ratchet to match would have made the next unrelated commit that broke it point at neither the
+entry nor the real cause.
+
+<!-- refs:off -->
+
+The entry was renumbered to `§25` instead and `§24` left unused.
+
+<!-- refs:on -->
+
+**A number skipped on purpose is not a hole.**
+
+**Found by** noticing the predicted `KNOWN_DANGLING` drop did not match the measured one, while
+adding an unrelated plan entry.
+
+**No rule yet** — a ratchet moving for a reason unrelated to what it measures is a shape this file
+has not yet seen a second instance of, and `unrelated-repair` at 2.

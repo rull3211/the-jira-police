@@ -29,14 +29,11 @@ function ticket(key: string, created: string, status = ""): TicketRef {
 const PAYLOAD: TriagePayload = {
   verdict: "ready-ish",
   labels: ["dor:pass"],
-  // A coherent payload: ready-ish and dor:pass are only legitimate when the
-  // ticket has no unfilled placeholders left in it.
+  // ready-ish and dor:pass are only legitimate with no unfilled placeholders left.
   dorPlaceholders: [],
   recommendedNextStep: "Refine it.",
   report: "## report",
-  // The poller never inspects the mutation — grooming decides whether it is
-  // posted, before the poller sees the payload at all — but the type requires
-  // one, and a fixture that lied about its shape would be worse than a dull one.
+  // The poller never inspects the mutation, but the type requires one.
   mutation: {
     commentBody: "## report",
     labelsAdd: ["dor:pass"],
@@ -64,7 +61,7 @@ class RecordingSink implements OutputSink {
   }
 }
 
-/** Newest first: the order that breaks a cursor tracked along the loop. */
+/** Newest first: breaks a cursor that was tracked along the loop instead of by `settledCursor`. */
 const reversed = (a: TicketRef, b: TicketRef) => b.created.localeCompare(a.created);
 
 describe("runPollCycle", () => {
@@ -116,8 +113,8 @@ describe("runPollCycle", () => {
   });
 
   it("skips issues already handled", async () => {
-    // Jira date filters are minute-precision, so the query window deliberately
-    // overlaps and re-returns issues; key dedupe is what prevents rework.
+    // Jira date filters are minute-precision, so the query window re-returns issues;
+    // key dedupe is what prevents rework.
     const seen = { cursor: "2026-09-02T10:00:00Z", seenKeys: ["SSX-1"] };
 
     const outcome = await runPollCycle(
@@ -226,10 +223,7 @@ describe("runPollCycle", () => {
     await expect(loadState(statePath)).resolves.toEqual(EMPTY_STATE);
   });
 
-  /**
-   * Each triage is a paid model run. Deferring the record of one until the
-   * whole cycle finishes means an ill-timed kill buys the same verdict twice.
-   */
+  /** Deferring the record of a paid triage until the cycle ends means a kill in between pays for it twice. */
   describe("durability between issues", () => {
     it("persists after every issue, not once at the end", async () => {
       const seenAtEachStep: (readonly string[])[] = [];
@@ -242,8 +236,7 @@ describe("runPollCycle", () => {
             ticket("SSX-2", "2026-09-02T10:05:00Z"),
             ticket("SSX-3", "2026-09-02T10:10:00Z"),
           ],
-          // Observed from inside the loop: what is already durable on disk by
-          // the time the next issue starts.
+          // Observed from inside the loop: what's already durable on disk when the next issue starts.
           triage: async () => {
             seenAtEachStep.push((await loadState(statePath).catch(() => EMPTY_STATE)).seenKeys);
             return PAYLOAD;
@@ -255,8 +248,7 @@ describe("runPollCycle", () => {
     });
 
     it("has the cursor durable too, not just the key", async () => {
-      // Keys alone would stop the re-triage but leave the window re-scanning
-      // from the old cursor on every subsequent run.
+      // Keys alone would stop re-triage but leave the window re-scanning from the old cursor.
       let midCycle = EMPTY_STATE;
 
       await runPollCycle(
@@ -279,11 +271,7 @@ describe("runPollCycle", () => {
     });
   });
 
-  /**
-   * A cycle runs one paid subprocess per issue, sequentially. Checking for
-   * shutdown only between cycles would mean an operator's stop request is
-   * followed by the rest of the backlog.
-   */
+  /** Checking for shutdown only between cycles would run the rest of the backlog first. */
   describe("shutdown between issues", () => {
     function abortingDeps(controller: AbortController, abortAfter: string) {
       const attempted: string[] = [];
@@ -377,12 +365,7 @@ describe("runPollCycle", () => {
     expect(fetchCandidates).toHaveBeenCalledWith("2026-09-02T09:00:00Z");
   });
 
-  /**
-   * Jira does not return `Z`. It returns the site's local offset —
-   * `2026-09-02T09:55:34.178+0200`, verified against the live SSX board — and
-   * that offset changes at the DST boundary. Ordering these as strings is
-   * wrong, and wrong here means a dropped ticket.
-   */
+  /** Jira returns a local offset, not `Z`, and that offset changes at the DST boundary — ordering these as strings drops a ticket. */
   describe("ordering across a DST change", () => {
     // 2026-10-25 is when Norway falls back from +0200 to +0100.
     const EARLIER = ticket("SSX-2", "2026-10-25T02:30:00.000+0200"); // 00:30Z
@@ -391,8 +374,7 @@ describe("runPollCycle", () => {
     it("orders by instant, not by the printed string", async () => {
       await runPollCycle(EMPTY_STATE, deps({ fetchCandidates: async () => [LATER, EARLIER] }));
 
-      // Lexicographically "02:00…+0100" < "02:30…+0200", so a string sort
-      // would process SSX-1 first. Chronologically SSX-2 comes first.
+      // Lexicographically "02:00…+0100" < "02:30…+0200"; chronologically SSX-2 comes first.
       expect(sink.written.map((r) => r.issueKey)).toEqual(["SSX-2", "SSX-1"]);
     });
 
@@ -422,16 +404,9 @@ describe("runPollCycle", () => {
   });
 
   /**
-   * Triaging out of created order is only safe because the cursor stopped being
-   * a fact about the loop. These are the same guarantees the tests above assert
-   * for oldest-first, re-asserted with the loop deliberately running backwards
-   * — because every one of them used to hold *by construction* and now holds by
-   * `settledCursor`, which is a different claim.
-   *
-   * `order` here reverses created order outright rather than sorting by status.
-   * The comparator is `byStatusPriority`'s business and is tested there; what
-   * the poller has to survive is *any* order, and the reverse is the one that
-   * breaks a cursor tracked along the loop.
+   * Re-asserts the oldest-first guarantees with the loop running backwards, since they now hold
+   * by `settledCursor` rather than by construction. `order` reverses created order outright,
+   * the one shape that breaks a cursor tracked along the loop.
    */
   describe("triaging out of created order", () => {
     const OLD = ticket("SSX-1", "2026-09-02T10:00:00Z");
@@ -456,11 +431,7 @@ describe("runPollCycle", () => {
       expect(outcome.state.cursor).toBe("2026-09-02T10:10:00Z");
     });
 
-    /**
-     * The failure this whole change exists to avoid. The newest ticket is
-     * triaged first and succeeds; the oldest then fails. A cursor that tracked
-     * the loop would sit at the newest and SSX-1 would never be seen again.
-     */
+    /** A cursor that tracked the loop would sit at the newest, and SSX-1 would never be seen again. */
     it("does not strand the oldest issue when a later one succeeded first", async () => {
       const outcome = await runPollCycle(
         EMPTY_STATE,
@@ -480,12 +451,7 @@ describe("runPollCycle", () => {
       expect(outcome.state.seenKeys).toEqual(["SSX-3", "SSX-2"]);
     });
 
-    /**
-     * The same guarantee against a shutdown rather than a failure. Stopping
-     * after the newest leaves two older tickets never attempted, and the cursor
-     * has to stay behind all of them — on disk, not merely in the return value,
-     * because a shutdown is exactly when the return value is not read.
-     */
+    /** Must hold on disk, not just in the return value, since a shutdown is exactly when that's unread. */
     it("leaves the cursor behind the issues a shutdown never reached", async () => {
       const controller = new AbortController();
 
@@ -508,19 +474,7 @@ describe("runPollCycle", () => {
     });
   });
 
-  /**
-   * `poll.order` is the whole argument for shipping `TRIAGE_STATUS_PRIORITY`:
-   * the order cannot be judged from the setting, only from the queue it
-   * produced, so an operator has to be able to read that queue back. An
-   * instrument nobody watches is worth nothing, and this one went out with
-   * nothing asserting it at all.
-   *
-   * A real daemon run on 2026-09-10 emitted it correctly — seven tickets,
-   * `Mottatt` ahead of `On Hold`, statuses by name. These cover what that run
-   * could not: it carried seven tickets against a limit of ten, and every
-   * ticket had a name, so neither the truncation nor the id fallback was
-   * exercised by it.
-   */
+  /** `poll.order` lets an operator judge `TRIAGE_STATUS_PRIORITY` from the queue it actually produced. */
   describe("poll.order", () => {
     const OLD = ticket("SSX-1", "2026-09-02T10:00:00Z");
     const NEW = ticket("SSX-3", "2026-09-02T10:10:00Z");
@@ -544,11 +498,7 @@ describe("runPollCycle", () => {
       info.mockRestore();
     });
 
-    /**
-     * The default has to stay silent, not merely correct. An operator who never
-     * asked for a priority should not have to read a line about ordering on
-     * every cycle to discover it says nothing.
-     */
+    /** Must stay silent, not merely correct — no line to read on every cycle that says nothing. */
     it("says nothing at all when no order is configured", async () => {
       const info = vi.spyOn(logger, "info").mockImplementation(() => {});
 
@@ -559,12 +509,7 @@ describe("runPollCycle", () => {
       info.mockRestore();
     });
 
-    /**
-     * A backlog has no upper bound and this is a log line. The count is
-     * reported separately from the head precisely so a truncated list still
-     * says how much it is hiding — assert both, because a truncation that also
-     * truncated the total would read as a complete queue of ten.
-     */
+    /** Assert both: a truncation that also truncated the total would read as a complete queue of ten. */
     it("truncates the head at ten while still reporting the true total", async () => {
       const many = Array.from({ length: 12 }, (_, index) =>
         ticket(`SSX-${index + 10}`, `2026-09-02T10:${String(index).padStart(2, "0")}:00Z`),
@@ -584,12 +529,7 @@ describe("runPollCycle", () => {
       info.mockRestore();
     });
 
-    /**
-     * Jira can omit the status, which normalises to `""` rather than to a
-     * guess. The id is the only identifying thing left, and printing an empty
-     * string there would make the line unreadable exactly when something is
-     * already wrong.
-     */
+    /** Jira can omit the status name; printing an empty string there would be unreadable exactly when something's wrong. */
     it("falls back to the status id when the name is empty", async () => {
       const nameless: TicketRef = { ...OLD, statusId: "10165", statusName: "" };
       const info = vi.spyOn(logger, "info").mockImplementation(() => {});

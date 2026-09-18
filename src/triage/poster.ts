@@ -1,36 +1,10 @@
 /**
- * The WRITER half: applies an already-decided, already-checked mutation to Jira.
+ * The WRITER half: applies an already-decided, checked mutation via its own Atlassian MCP
+ * session, never the REST credential — except `updateLabels`, which writes `agent:*` over REST
+ * since MCP's `editJiraIssue` has set semantics (`architecture/triage.md` §12).
  *
- * It is a separate storecode run rather than plain HTTP for the reason that
- * governs this whole service — the Jira REST credential does not make *this*
- * mutation, so it goes through an Atlassian MCP session and lands as a real
- * Jira user rather than a service account. `childEnv` withholds the REST
- * credential from this subprocess exactly as it does from the analyst.
- *
- * That reason used to be stated as *"the REST credential is for discovery
- * only"*, and that is no longer true: `updateLabels` writes `agent:*` labels
- * over REST, because MCP's `editJiraIssue` has set semantics and cannot add one
- * label without rewriting all of them (`jira/client.ts`, `ARCHITECTURE.md` §12).
- * The amendment is labels-only and namespace-bound, so it does not reach this
- * path — the verdict comment is ADF, and `triaged`/`dor:*`/`svc:*` are outside
- * the `agent:` namespace `assertOwnedLabel` permits. The split is intact; the
- * sentence that justified it was not.
- *
- * Everything about it is arranged to stop it thinking:
- *
- * - It is not given the skill. The prompt is a direct instruction, so there is
- *   no `/intake-triage` to re-enter and no second opinion to form.
- * - It is not given the vault, Confluence, Grep, Glob or `search`. It could not
- *   redo the duplicate hunt or the DoR assessment if it wanted to.
- * - The comment body arrives verbatim in its prompt and it is told, twice, not
- *   to edit it.
- *
- * What it is NOT is blind. §11 requires the label write to union against
- * whatever is live on the issue, and requires the comment to update in place
- * when one matching both the sentinel and its own authorship already exists.
- * Both are reads, so `getJiraIssue` and `atlassianUserInfo` are granted. The
- * guarantee is therefore not "it cannot see the ticket" but "it has the
- * finished text, and no means of researching an alternative".
+ * Given no skill, vault or search, so it cannot re-analyse; §11 still requires read access
+ * (`getJiraIssue`, `atlassianUserInfo`) so the label union and comment idempotency can be checked.
  */
 
 import { logger } from "../logger.ts";
@@ -39,13 +13,8 @@ import type { Mutation } from "./runner.ts";
 import { DENIED_BUILTIN_TOOLS, runSession } from "./session.ts";
 
 /**
- * Read tools the write genuinely needs, and no others.
- *
- * `getJiraIssue` supplies the current labels to union against and the existing
- * comments to match the sentinel against. `atlassianUserInfo` answers "which
- * comment is mine" — without it the authorship half of the idempotency rule
- * cannot be evaluated and a re-run stacks a second comment instead of
- * refreshing the first.
+ * Read tools the write genuinely needs. `getJiraIssue` supplies current labels/comments to match
+ * against; `atlassianUserInfo` identifies which comment is the poster's own, for update-in-place.
  */
 const POSTER_READ_TOOLS: readonly string[] = [
   "mcp__atlassian__getJiraIssue",
@@ -54,17 +23,9 @@ const POSTER_READ_TOOLS: readonly string[] = [
 ];
 
 /**
- * The write tools, exactly as named in §11.
- *
- * Conspicuously absent: `transitionJiraIssue`. The skill promises never to
- * change status — "not after a `y`, not for a close-as-duplicate" — and this
- * list was described as turning that promise into something the service
- * enforces rather than something it trusts. It did not: absence from
- * `--allowedTools` denies nothing (see `DENIED_BUILTIN_TOOLS`). The name is now
- * also in `POSTER_DENIED_TOOLS`, which is where enforcement would come from if
- * MCP names are honoured there — unverified, so read the promise as trusted,
- * not enforced. Absent too is every tool the analyst uses to form a view: no
- * `search`, no Confluence, no filesystem.
+ * The write tools, exactly as named in §11. `transitionJiraIssue` is absent deliberately, but
+ * absence from `--allowedTools` alone denies nothing — enforcement depends on
+ * `POSTER_DENIED_TOOLS`, and whether MCP names are honoured there is unverified.
  */
 const POSTER_WRITE_TOOLS: readonly string[] = [
   "mcp__atlassian__editJiraIssue",
@@ -75,16 +36,8 @@ const POSTER_WRITE_TOOLS: readonly string[] = [
 export const POSTER_TOOLS: readonly string[] = [...POSTER_READ_TOOLS, ...POSTER_WRITE_TOOLS];
 
 /**
- * Tools withheld from the poster.
- *
- * The poster is the one component that is *supposed* to write, so this is
- * narrower than the analyst's list — but it still has no business touching the
- * filesystem or a shell, and the header's claim that it has "no means of
- * researching an alternative" was resting on an allowlist that denies nothing.
- * `Bash` alone would have given it `curl`, and therefore the whole Jira API.
- *
- * `transitionJiraIssue` and `createJiraIssue` are listed on the same reasoning
- * as the analyst's Atlassian entries, and with the same caveat: unverified.
+ * Tools withheld from the poster. `Bash` alone would give it `curl`, and therefore the whole
+ * Jira API, including the status transition it's told never to make.
  */
 export const POSTER_DENIED_TOOLS: readonly string[] = [
   ...DENIED_BUILTIN_TOOLS,
@@ -93,11 +46,8 @@ export const POSTER_DENIED_TOOLS: readonly string[] = [
 ];
 
 /**
- * What the poster reports back.
- *
- * Small on purpose. Its job has one honest summary — what did you change? —
- * and every extra required field is another way for the run to fail after the
- * writes have already happened.
+ * What the poster reports back, kept small deliberately: every extra required field is another
+ * way for the run to fail after the writes have already happened.
  */
 export const POST_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -148,13 +98,9 @@ export interface PostOptions {
 export class PostError extends Error {}
 
 /**
- * The instruction given to the poster.
- *
- * Written as an imperative checklist rather than a description of a goal.
- * A goal invites judgement, and judgement is the thing that has already been
- * exercised and checked by the time this runs. The one instruction repeated
- * twice is the one whose violation would be hardest to notice afterwards:
- * do not edit the comment text.
+ * The instruction given to the poster: an imperative checklist, not a goal, since judgement was
+ * already exercised and checked upstream. "Do not edit the comment text" is repeated because its
+ * violation would be hardest to notice afterwards.
  */
 export function buildPostPrompt(options: PostOptions): string {
   const { issueKey, mutation } = options;
@@ -255,23 +201,9 @@ function strings(value: unknown): readonly string[] {
 }
 
 /**
- * Whether the labels we asked for are the labels the receipt says it wrote.
- *
- * `problems` is a free-text bucket the model fills in, and it conflates two
- * unlike things: "I could not do what you asked" and "FYI, I noticed
- * something". The first live write produced two entries, both of the second
- * kind — a tool it routed around, and Jira normalising two trailing spaces into
- * four — on a run that succeeded completely.
- *
- * So severity cannot be read off that list. This reads the structured fields
- * instead and asks the only question with a definite answer: did the delta we
- * requested actually appear? It is the same rule the gate learned the hard way
- * — trust the machine-readable field, not the prose next to it — and the same
- * reason the solver is specified to read exit codes rather than ask the model
- * whether the tests passed.
- *
- * `labelsWritten` is the complete post-union array, so every added label must
- * be present in it and every removed label must be absent.
+ * Whether the labels requested match what the receipt says landed. `problems` is free text that
+ * conflates real failures with mere FYIs, so this reads the structured `labelsWritten` array
+ * instead — the same rule the gate learned: trust the machine-readable field, not the prose beside it.
  */
 export function findLabelDiscrepancies(
   mutation: Mutation,
@@ -290,19 +222,10 @@ export function findLabelDiscrepancies(
 }
 
 /**
- * Posts the mutation and returns what the run says it did.
- *
- * A receipt reporting `problems` does NOT throw. The writes are already applied
- * by then, so failing the ticket would send the poller round again to redo work
- * that partly succeeded; the comment sentinel makes a re-run safe, but a partial
- * success is better surfaced than retried blindly. A receipt saying it skipped
- * the comment entirely is a different matter and does throw — that is the run
- * reporting it did nothing.
- *
- * Only a mechanical discrepancy is logged at `error`. Notes on an otherwise
- * complete write are logged at `warn`, because an error line on a wholly
- * successful run is how a team learns to filter out error lines — and this one
- * would have fired on every single write the daemon ever made.
+ * Posts the mutation and returns what the run says it did. A receipt with `problems` does not
+ * throw — the writes already landed — but a `skipped` comment does, since that means nothing
+ * happened. Only a mechanical discrepancy logs at `error`; advisory notes log at `warn`, since an
+ * error line on an otherwise clean run trains a team to ignore error lines.
  */
 export async function runPost(options: PostOptions): Promise<PostReceipt> {
   logger.info("post.start", {

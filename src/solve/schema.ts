@@ -1,24 +1,10 @@
 /**
- * Structured-output contracts for the two `agent-solve` passes.
+ * Structured-output contracts for the `agent-solve` passes, passed to Claude Code via `--json-schema`.
  *
- * Passed to Claude Code via `--json-schema`, which takes inline JSON. Draft-07,
- * matching `src/triage/schema.ts`, and kept deliberately small for the same
- * reason: when a reply does not validate, Claude Code re-prompts and eventually
- * gives up with `error_max_structured_output_retries`, so every extra required
- * field is another way for a run to fail after paying for the work.
- *
- * Two schemas rather than one, because the two passes are not the same
- * question. Recon asks "should this be attempted"; fix asks "what was done".
- * A single schema covering both would have every field optional, and optional
- * is exactly what a gate cannot check.
- *
- * ## What these descriptions are for
- *
- * They are the prompt. The skill file states the procedure, but the field
- * descriptions are what the model reads while filling each value in, so the
- * rules that matter per-field are repeated here on purpose. In particular the
- * prohibition on claiming a result appears in three places, because it is the
- * one a plausible-sounding run is most likely to break.
+ * Kept deliberately small: an unvalidated reply gets re-prompted and eventually fails with
+ * `error_max_structured_output_retries`, so every extra required field is another way to fail after
+ * paying for the work. Each `description` is prompt text the model reads while filling the field in,
+ * not documentation — the rules that matter per-field live there on purpose.
  */
 
 export const RECON_SCHEMA = {
@@ -183,26 +169,10 @@ export const FIX_SCHEMA = {
 } as const;
 
 /**
- * The simplify pass.
- *
- * Runs after `fix` and before the commit, so it has no commit message of its
- * own — the change is still one change and gets one message. That is also the
- * bound on what this pass may do: if simplifying would make the fix's own
- * commit subject wrong, it has changed behaviour and has exceeded its remit.
- *
- * Smaller than `FIX_SCHEMA` on purpose. This pass has the narrowest question
- * in the pipeline — *can this same change be expressed more plainly* — and a
- * schema that invited it to reconsider the change would get it reconsidered.
- *
- * ## "Simpler" means clearer, not shorter
- *
- * Worth stating in the schema and not only in the skill file, because the
- * field descriptions are what the model reads while filling each value in, and
- * this is the instruction most likely to be inverted. The obvious reading of
- * "simplify" is "make smaller", which produces dense one-liners and nested
- * ternaries — objectively fewer lines and worse to read. The intent, taken
- * from the `code-simplifier` agent this pass replaces, is the opposite:
- * *prioritise readable, explicit code over overly compact solutions.*
+ * The simplify pass: runs after `fix` and before the commit, so it shares the fix's commit message
+ * rather than writing its own — changing the commit subject would mean it changed behaviour, which
+ * is outside its remit. "Simpler" means clearer to a human, not fewer lines; the obvious reading
+ * ("make smaller") produces dense one-liners and nested ternaries, which is the opposite intent.
  */
 export const SIMPLIFY_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -238,22 +208,9 @@ export const SIMPLIFY_SCHEMA = {
 /**
  * The review pass: resolving what the reviewer asked for.
  *
- * ## Where this input comes from, and why that matters
- *
- * Everything else in this pipeline reads a Jira ticket, which is
- * attacker-controlled but at least arrives from one known place. Review
- * comments do not. They are written by a reviewer — today GitHub Copilot —
- * that read a pull request body this service generated from a model's summary
- * of a ticket. Text can therefore travel ticket → summary → PR body → reviewer
- * → back into this prompt, which is a loop, and the only reason it is not a
- * self-amplifying one is that every hop is bounded by the same tool denial and
- * the same diff gate.
- *
- * So `injectionNoticed` is required here as it is in recon, and for a sharper
- * reason: a review comment is *shaped* like an instruction. That is what a
- * review is. The distinction the model has to hold is between an instruction
- * about the diff, which is the job, and an instruction about itself, its
- * tools, or its scope, which is not.
+ * Review text travels ticket → summary → PR body → reviewer → back into this prompt, a loop bounded
+ * only by the same tool denial and diff gate as everywhere else — hence `injectionNoticed` here too,
+ * for the sharper reason that a review comment is *shaped* like an instruction by nature.
  */
 export const REVIEW_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -355,33 +312,10 @@ export const REVIEW_SCHEMA = {
 } as const;
 
 /**
- * One merge conflict, resolved — or honestly declined.
- *
- * The narrowest schema here, and that is the design rather than an oversight.
- * A merge resolution has one question in it: *for each conflicted hunk, which
- * of the two authors' intent survives, and why*. It writes no commit subject
- * (git's merge message is not ours to invent, and the pilot repository's
- * commitlint would reject one that was), answers no reviewer, and touches
- * nothing outside the files git marked.
- *
- * ## `took` is required and is not decoration
- *
- * A conflict is two people changing the same lines, and every resolution
- * discards something. Naming which side survived turns that into a sentence a
- * human can check against the diff in one look. It is also the field that makes
- * the failure mode legible: a run that answers `base` for every file has
- * reverted the branch's own work onto itself, which reads as a clean merge and
- * is the single worst thing this pass can do. That is why there is no
- * `strategy` option and no way to say "took whichever git suggested".
- *
- * ## Declining is a first-class answer
- *
- * `abandoned` exists because some conflicts are not textual. Two commits that
- * each rename half of the same concept conflict in a way where both sides apply
- * cleanly to the eye and the result means nothing, and a model that always
- * produces *something* will produce that. Saying so leaves the branch exactly
- * as it was and asks for a person, which is the correct outcome and must be
- * available at no cost to the run.
+ * One merge conflict, resolved — or honestly declined. Writes no commit subject (git's own merge
+ * message is not ours to invent), answers no reviewer, and touches nothing outside the files git
+ * marked. `took` is required rather than decorative: a run that answers `base` for every file has
+ * silently reverted the branch's own work, and naming the surviving side makes that checkable.
  */
 export const MERGE_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",

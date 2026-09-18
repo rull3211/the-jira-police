@@ -57,11 +57,7 @@ describe("planSweep", () => {
   });
 
   it("sweeps a matching entry at least as old as the threshold", () => {
-    const [verdict] = planSweep(
-      [entry("SSX-1234-img-a1b2c3", MAX_AGE_MS)],
-      NOW,
-      MAX_AGE_MS,
-    );
+    const [verdict] = planSweep([entry("SSX-1234-img-a1b2c3", MAX_AGE_MS)], NOW, MAX_AGE_MS);
     expect(verdict?.sweep).toBe(true);
     expect(verdict?.kind).toBe("image-stage");
   });
@@ -72,11 +68,7 @@ describe("planSweep", () => {
       NOW,
       MAX_AGE_MS,
     );
-    const [justOver] = planSweep(
-      [entry("SSX-1234-skill-a1b2c3", MAX_AGE_MS + 1)],
-      NOW,
-      MAX_AGE_MS,
-    );
+    const [justOver] = planSweep([entry("SSX-1234-skill-a1b2c3", MAX_AGE_MS + 1)], NOW, MAX_AGE_MS);
     expect(justUnder?.sweep).toBe(false);
     expect(justOver?.sweep).toBe(true);
   });

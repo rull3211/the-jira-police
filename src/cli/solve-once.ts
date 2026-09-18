@@ -10,58 +10,20 @@
  *   node src/cli/solve-once.ts --watch            keep looking at every ticket under review
  *   node src/cli/solve-once.ts SSX-3822 --watch   the same loop, one ticket
  *
- * The ladder is `solve-args.ts`, including why anything past the first two rungs
- * refuses to run without an issue key. The rungs themselves are `solve-run.ts`,
- * which this file used to contain: they moved out when `bot-once.ts` needed the
- * same four steps, and a module that runs `main()` on import cannot be imported.
- * What is left here is this command's own shape — parse, configure, read the
- * queue, report it, and hand a named ticket to the rungs.
+ * The ladder is `solve-args.ts`. The rungs themselves are `solve-run.ts`, moved out of this file
+ * since a module that runs `main()` on import cannot be imported, and `bot-once.ts` needed the
+ * same steps.
  *
- * ## Every rung is wired, and the ladder is cumulative
+ * Every write run opens with a claim and, unless it reached a pull request, closes by putting
+ * the labels back exactly as found — a ticket the board shows as unclaimed while a solver works
+ * on it is the state the queue exists to prevent. A published pull request keeps the claim,
+ * since there the work is real and ongoing.
  *
- * `--pr` claims the ticket, solves it, and opens the pull request. `--solve`
- * does the first two. `--claim` does the first. What each rung *adds* is one
- * phase's worth of privilege, and the run stops at the rung you named.
+ * A full cycle writes `<OUTPUT_DIR>/solve-cycle.md`; a single-ticket run does not, since a copy
+ * narrowed to one ticket would read as a cycle where only one ticket existed.
  *
- * ## Claim first, release last
- *
- * Every write run opens with the claim and, unless it got as far as a pull
- * request, closes by putting the labels back exactly as it found them. Two
- * reasons, and the second is the one that would have bitten:
- *
- * 1. A ticket the board shows as unclaimed while a solver is working on it is
- *    the state the queue exists to prevent.
- * 2. A hand-driven run is expected to be repeated. Leaving `agent:solving` on a
- *    ticket after a `--claim` rehearsal means the next run finds nothing and the
- *    operator has to unpick labels by hand to try again — which is exactly when
- *    somebody edits the field wholesale and loses a PM's label.
- *
- * A published pull request is the one case that keeps the claim, because there
- * the work is real and ongoing.
- *
- * ## The comments this replaces
- *
- * This file used to state that there was deliberately no `--dry-run` flag and no
- * flag to turn the dry run off, "because a flag would imply the other mode
- * exists; it does not." That was true when the only rung was the first one; it
- * was rewritten once the parser grew the flags, to say the other mode existed in
- * the parser and not in the wiring. Both sentences are now spent. There is still
- * no `--dry-run` flag, because dry is the default and the flag you have to type
- * is the one that escalates — but "this command cannot write" is no longer true
- * of anything except the rung you get for free.
- *
- * ## The artifact, and why naming a ticket suppresses it
- *
- * A full cycle writes `<OUTPUT_DIR>/solve-cycle.md`. A single-ticket run does
- * not: it prints, and says it did not write. The report renders a whole cycle —
- * its header counts everything found, in flight and skipped — and a copy of that
- * file narrowed to one ticket would read as a cycle in which only one ticket
- * existed. Overwriting the shared artifact with that is worse than not writing
- * it, so `solve-cycle.md` always means a full cycle.
- *
- * Unlike `poll:once` this holds no cursor and no state file. The queue is a
- * state, not a window: running it twice in a row is expected to report the same
- * tickets both times, and that repetition is the queue working, not a bug.
+ * Unlike `poll:once` this holds no cursor and no state file — the queue is a state, not a
+ * window, so running it twice is expected to report the same tickets both times.
  */
 
 import { logger } from "../logger.ts";
@@ -82,12 +44,9 @@ async function main(): Promise<void> {
   const settings = readSettings();
 
   if (args.invocation.mode === "advance") {
-    // The whole of the advance mode, and it is short because it shares nothing
-    // with the ladder below: no queue is read, no claim is written, no report is
-    // produced. It acts on a pull request, and the ticket is only how it finds
-    // one. `--pr`'s configuration check still applies — the same GitHub owner
-    // names the repository this talks to — so it is asked for by rung name even
-    // though no rung is being climbed.
+    // Shares nothing with the ladder below: no queue read, no claim written, no report produced
+    // — it acts on a pull request the ticket only identifies. `--pr`'s configuration check still
+    // applies, since the same GitHub owner names the repository this talks to.
     const { issueKey } = args.invocation;
     const missing = unavailable("pr", settings);
     if (missing !== null) {
@@ -104,15 +63,10 @@ async function main(): Promise<void> {
   }
 
   if (args.invocation.mode === "watch") {
-    // Shares the advance mode's configuration check and nothing else. The same
-    // GitHub owner names every repository this will touch, so `--pr`'s check is
-    // the right one; there is no rung being climbed here either.
-    //
-    // **No queue read and no report**, which is the difference from the ladder
-    // below. This command's subject is the pull requests already open, and
-    // `runSolveCycle` answers a question about the tickets that have none — so
-    // running it here would print a cycle report about work this mode will
-    // never do, and overwrite `solve-cycle.md` with it.
+    // Shares the advance mode's configuration check and nothing else: no queue read and no
+    // report, since this command's subject is pull requests already open, not tickets that have
+    // none — running `runSolveCycle` here would overwrite `solve-cycle.md` with a report about
+    // work this mode never does.
     const { issueKey } = args.invocation;
     const missing = unavailable("pr", settings);
     if (missing !== null) {
@@ -130,10 +84,8 @@ async function main(): Promise<void> {
 
   const { issueKey, phase } = args.invocation;
 
-  // Checked before the board is read, and long before anything is written. A
-  // rung that cannot run should not cost a Jira round trip, and above all should
-  // not claim a ticket and solve it on the way to discovering it was never
-  // configured to open the pull request the operator asked for.
+  // Checked before the board is read: a rung that cannot run should not cost a Jira round trip,
+  // let alone claim and solve a ticket before discovering it was never configured to open a pull request.
   const missing = unavailable(phase, settings);
   if (missing !== null) {
     process.stderr.write(`refusing --${phase}: ${missing}\n`);
@@ -163,20 +115,16 @@ async function main(): Promise<void> {
     );
   }
 
-  // `writes` rather than a phase comparison, and the key check is the parser's
-  // rule restated: no rung above the first may run without a named ticket. The
-  // parser already rejects that, so this narrows a type rather than guarding.
+  // `writes` rather than a phase comparison: the key check just restates the parser's own rule,
+  // narrowing a type rather than guarding.
   const attemptedWrites = writes(phase) && issueKey !== null;
   if (attemptedWrites) {
     await runWriteRungs(settings, client, issueKey, phase, outcome, solveMode(settings));
   }
 
-  // `cycleDryRun`, not `dryRun`. The field used to carry the shorter name and it
-  // read as a claim about the whole command — the first live `--pr` run logged
-  // `dryRun: true` on a run that had written the ticket's labels twice. It is
-  // true of the planning pass, which never writes and is the only thing
-  // `runSolveCycle` does; every write this command makes happens after it, in
-  // `runWriteRungs`. So both are reported, and neither pretends to be the other.
+  // Named `cycleDryRun`, not `dryRun`: it's true of the planning pass only, and every write this
+  // command makes happens afterward, in `runWriteRungs` — the shorter name once read as a claim
+  // about the whole command.
   logger.info("solve-once.done", {
     phase,
     issueKey,

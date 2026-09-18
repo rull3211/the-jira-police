@@ -1,17 +1,8 @@
 /**
- * The check that lets `CLAUDE.md` copy `FINISHING.md`'s checklist, and the
- * first test this command has ever had — `docs-check.ts` notes at its own
- * `expectSites` comment that the class fix "arrives with this file's first
- * test", and `PLAN.md` §13 records the gap.
+ * The check that lets `CLAUDE.md` copy `FINISHING.md`'s checklist (`PLAN.md` §13).
  *
- * Every case here is written against a **plausible wrong implementation**
- * rather than against a defect that happened, because this guard has no
- * incident behind it yet. `PROVING.md`'s rule is that a guard is not shipped
- * until a test fails when it is unplugged, and the version that would pass
- * without the guard is named in each case below. Three of them are real
- * candidates rather than straw ones: each is what this module would look like
- * if written the obvious way, and two of the three are mistakes this repository
- * has already made somewhere else.
+ * Each case is written against a plausible wrong implementation, named in the case, rather than a
+ * defect that happened — several are mistakes this repository has already made elsewhere.
  */
 
 import { readFileSync } from "node:fs";
@@ -45,9 +36,7 @@ describe("the tree as it stands", () => {
   });
 
   it("extracts the headline only, not the explanation that follows it", () => {
-    // The fourth question contains a second bold run — "**This is the one that
-    // gets skipped in silence**". A greedy `(.+)\*\*` swallows the sentence
-    // between them, and the copy in CLAUDE.md then cannot possibly match.
+    // The fourth question has a second bold run after it; a greedy `(.+)\*\*` would swallow both.
     const [, , , fourth] = checklistHeadlines(FINISHING);
     expect(fourth).toBe("Did something get through that these rules do not cover?");
   });
@@ -71,10 +60,7 @@ describe("what it catches", () => {
   });
 
   it("reports the extractor going blind when the heading is renamed", () => {
-    // Unplugged: derive the expected count from what was found instead of
-    // declaring it. Renaming the heading then extracts nothing, compares
-    // nothing, finds nothing wrong, and reports green for as long as it exists.
-    // This is the exact failure `docs-check.ts` built `expectSites` against.
+    // Unplugged (deriving the expected count instead of declaring it): renaming the heading extracts nothing and reports green.
     const renamed = FINISHING.replace("## The checklist", "## The last four questions");
     const problems = pinnedProseProblems(renamed, CLAUDE);
 
@@ -96,11 +82,7 @@ describe("what it catches", () => {
 
 describe("what it must not report", () => {
   it("accepts a copy the formatter has reflowed", () => {
-    // Unplugged: compare with a plain `claude.includes(headline)`. `oxfmt`
-    // reflows Markdown prose, so the wrap position in CLAUDE.md is the
-    // formatter's to choose and not a fact about the copy. A literal comparison
-    // turns the next `pnpm format` into a failing docs:check — which is how
-    // this same command lost half its count coverage twice.
+    // Unplugged (a literal `claude.includes(headline)`): the next `pnpm format` would fail docs:check.
     const wrapped = checklistHeadlines(FINISHING).map((headline) => {
       const words = headline.split(" ");
       const half = Math.ceil(words.length / 2);
@@ -117,8 +99,7 @@ describe("what it must not report", () => {
   });
 
   it("pins the words and not the formatting", () => {
-    // Bold and the checkbox are presentation. Pinning them makes the check fail
-    // on changes that are not drift, and a guard that cries wolf gets deleted.
+    // Bold and the checkbox are presentation; pinning them would fail on changes that are not drift.
     const plain = checklistHeadlines(FINISHING);
 
     expect(pinnedProseProblems(FINISHING, claudeCarrying(plain))).toEqual([]);

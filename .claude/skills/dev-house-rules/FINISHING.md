@@ -17,10 +17,10 @@ is highest **after a compaction**, in a context holding a confident account of r
 [→](INCIDENTS.md#four-lessons-written-down-carefully-and-filed-where-nothing-loads-them)
 
 **Two hooks now inline these four questions**: `session-brief.sh` on `trigger=compact`, and
-`commit-brief.sh` on the `git commit` about to run (`ARCHITECTURE.md` §16 for both). Neither refuses
-anything and neither carries the reasoning, so treat an injected copy as a prompt to open this file
-rather than a substitute for it. The rate at which compaction actually lands here is not known — an
-attempt to measure it produced four-for-four from a transcript that says one-for-four.
+`commit-brief.sh` on the `git commit` about to run (`architecture/guardrails.md` §16 for both). Neither refuses
+anything and neither carries the reasoning, so treat an injected copy as a prompt, not a substitute.
+The rate at which compaction actually lands here is not known — one attempt measured four-for-four
+against a transcript reading one-for-four.
 [→](INCIDENTS.md#the-compaction-finding-that-counted-the-string-instead-of-the-call)
 
 **If you compact on purpose, say what to preserve**: the branch and what it is stacked on, the
@@ -76,16 +76,18 @@ restatement of a rule:
 - [ ] The command handed over, safe form first, with what would falsify it
 - [ ] Orphans deleted here — symbol, setting, replaced mechanism
 - [ ] Any merged branch deleted, **including the local ref**
+- [ ] **Comment lines in the diff — over two lines, or prose the trim removed?** No command
+      behind it, same as the four questions
 
 **Commit messages carry the argument, not the summary.** The diff shows what changed; the message is
-the only place _why_ survives, including the reasoning that was wrong on the way.
+the only place _why_ survives — wrong reasoning included.
 
 ---
 
 ## The rules you owe are written down, or they are not owed
 
-The fourth question above has no exit code behind it, and it is skipped in silence — nobody decides
-not to answer it. **So the answer is an artifact.** Every pull request body carries one of:
+The fourth question above has no exit code behind it and is skipped in silence, not decided against.
+**So the answer is an artifact.** Every pull request body carries one of:
 
 ```
 Rules owed: none
@@ -94,8 +96,8 @@ Rules owed: <what, and where it is being written>
 
 **CI fails a pull request whose body has no such line.** That does not make the answer correct; it
 makes it a **claim**, visible to a reviewer, which is the only kind of error this project reliably
-catches. It cannot tell a true `none` from a false one, and it is the only part of this that fires
-without the agent choosing to comply.
+catches. It cannot tell a true `none` from a false one, and it is the only part that fires without
+the agent's compliance.
 
 **Produce the line from a context that did not do the work**: hand a fresh context the diff and the
 rules, ask which rules the change touches and which are unsatisfied, and **prime it with nothing

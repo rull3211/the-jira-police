@@ -39,12 +39,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 type FetchMock = Mock<typeof fetch>;
 
-/**
- * Reads the arguments of a recorded fetch call.
- *
- * Fails loudly when the call was never made, rather than letting an assertion
- * pass vacuously against undefined.
- */
+/** Reads the arguments of a recorded fetch call; fails loudly when the call was never made. */
 function callArgs(mock: FetchMock, index: number): { url: string; init: RequestInit } {
   const call = mock.mock.calls[index];
   if (call === undefined) {
@@ -86,16 +81,6 @@ describe("JiraClient.search", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({ jql: "project = SSX" });
   });
 
-  /**
-   * An absent status normalises to empty, not to a plausible column.
-   *
-   * `TicketRef.statusId`'s own comment makes the promise and this is what holds
-   * it. The risk is not the empty string itself but the repair somebody makes
-   * later: a status field Jira did not return is far more tempting to fill with
-   * a default than `updated` ever was, because the ordering code downstream
-   * reads like it wants one. It does not — `statusRank` sorts an unknown status
-   * last, which is the same place an unlisted one goes.
-   */
   it("leaves the status empty when Jira did not return one", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       jsonResponse({
@@ -111,13 +96,7 @@ describe("JiraClient.search", () => {
     expect(ticket?.statusName).toBe("");
   });
 
-  /**
-   * The solve queue's entire state is in the labels and it orders by `updated`,
-   * so a normaliser that drops either makes that queue unfeedable — which is
-   * exactly what it did until now. `labels` was already being requested from
-   * Jira and thrown away in the mapping, which is the kind of gap that reads as
-   * working code right up until something needs the field.
-   */
+  // The solve queue's entire state is in `labels`, and it orders by `updated`; dropping either makes the queue unfeedable.
   it("carries labels and updated through the normaliser", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       jsonResponse({
@@ -153,8 +132,7 @@ describe("JiraClient.search", () => {
   });
 
   it("normalises absent labels to an empty list, not undefined", async () => {
-    // An unlabelled ticket is ordinary. The solve queue reads this straight into
-    // a Set, and `undefined` there would throw on a perfectly normal issue.
+    // The solve queue reads this straight into a Set, and `undefined` there would throw.
     const fetchMock = vi.fn<typeof fetch>(async () =>
       jsonResponse({
         issues: [
@@ -176,8 +154,7 @@ describe("JiraClient.search", () => {
     const [ticket] = await client().search("project = SSX");
 
     expect(ticket?.labels).toEqual([]);
-    // Empty rather than falling back to `created`: an absent timestamp should
-    // fail loudly downstream, not quietly sort by the wrong instant.
+    // Empty rather than falling back to `created`, so an absent timestamp fails loudly downstream.
     expect(ticket?.updated).toBe("");
   });
 
@@ -299,15 +276,7 @@ describe("JiraClient.search", () => {
   });
 });
 
-/**
- * A ticket payload shaped like the live SSX-3822 response.
- *
- * Built from a real fetch rather than invented, because the two facts these
- * tests most need to be right about — that `description` is ADF rather than a
- * string, and that an attachment's Jira id is not the media id a comment
- * references — are both things a hand-written fixture would get wrong in the
- * comfortable direction.
- */
+/** A ticket payload shaped like the live SSX-3822 response, built from a real fetch rather than invented. */
 function detailPayload(overrides: Record<string, unknown> = {}): unknown {
   return {
     id: "752401",
@@ -349,8 +318,7 @@ describe("JiraClient.fetchDetail", () => {
     await client().fetchDetail("SSX-3822");
 
     const { url, init } = callArgs(fetchMock, 0);
-    // The whole reason this method exists. A regression here is silent: the
-    // solve still runs, on a ticket with no acceptance criteria in it.
+    // The whole reason this method exists; a regression here is silent since the solve still runs.
     expect(url).toContain("description");
     expect(url).toContain("comment");
     expect(url).toContain("attachment");
@@ -403,7 +371,7 @@ describe("JiraClient.fetchDetail", () => {
     ]) {
       await expect(client().fetchDetail(bad)).rejects.toThrow(JiraError);
     }
-    // Not one request was made. The guard is before the fetch, not after it.
+    // The guard runs before the fetch, not after it.
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -429,16 +397,14 @@ describe("JiraClient.fetchAttachmentText", () => {
   });
 
   it("refuses an oversized attachment that declared no length at all", async () => {
-    // The case a content-length-only check would wave through: chunked
-    // responses carry no length, so the cap has to be re-checked on the bytes.
+    // Chunked responses carry no content-length, so the cap must be re-checked on the bytes.
     vi.stubGlobal("fetch", async () => new Response("x".repeat(500)));
 
     expect(await client().fetchAttachmentText("742005", 10)).toBeNull();
   });
 
   it("measures the cap in bytes rather than characters", async () => {
-    // Ten multi-byte characters are thirty bytes. A `.length` check would call
-    // this file small enough and blow the budget it was meant to enforce.
+    // Ten multi-byte characters are thirty bytes; a `.length` check would blow the budget it enforces.
     vi.stubGlobal("fetch", async () => new Response("🙂".repeat(10)));
 
     expect(await client().fetchAttachmentText("742005", 20)).toBeNull();
@@ -456,8 +422,7 @@ describe("JiraClient.fetchAttachmentText", () => {
 });
 
 describe("JiraClient.fetchAttachmentBytes", () => {
-  // A PNG header, which is the case the text method cannot serve: every byte
-  // here is outside what UTF-8 decoding round-trips.
+  // A PNG header: every byte here is outside what UTF-8 decoding round-trips.
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe]);
 
   it("returns the bytes unchanged, whatever they decode to", async () => {
@@ -508,8 +473,7 @@ describe("JiraClient.fetchAttachmentBytes", () => {
 
 describe("isInlineable", () => {
   it("treats SVG as text, because it is", () => {
-    // The case that motivated the function. A `startsWith("image/")` rule would
-    // hide exactly the asset tickets most often attach.
+    // A `startsWith("image/")` rule would hide exactly the asset tickets most often attach.
     expect(isInlineable("image/svg+xml")).toBe(true);
   });
 
@@ -532,19 +496,10 @@ function putMock(status = 204): FetchMock {
   return vi.fn<typeof fetch>(async () => new Response(null, { status }));
 }
 
-/**
- * The one write this credential can make.
- *
- * The standing rule for the Jira REST credential is discovery-only, and this is
- * the single, deliberately-narrow amendment to it. Every test below is about a
- * boundary of that narrowness rather than about labels working — the happy path
- * gets one test, and the refusals get the rest, because the refusals are the
- * reason the amendment was acceptable.
- */
+/** The one write this credential can make, a deliberately-narrow amendment to a discovery-only rule. */
 describe("JiraClient.updateLabels", () => {
   it("sends add and remove as a delta, not as a field", async () => {
-    // The whole point. `fields: { labels: [...] }` would be a full-field write
-    // and would clobber anything a human added between the read and this call.
+    // `fields: { labels: [...] }` would clobber anything a human added between the read and this call.
     const fetchMock = putMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -562,8 +517,7 @@ describe("JiraClient.updateLabels", () => {
   });
 
   it("does not read a body from the 204 an issue edit returns", async () => {
-    // A `.json()` on an empty body throws, and the throw would be reported as a
-    // failed write of a write that in fact landed.
+    // A `.json()` on an empty body throws, misreporting a write that in fact landed.
     vi.stubGlobal("fetch", putMock());
 
     await expect(
@@ -585,9 +539,7 @@ describe("JiraClient.updateLabels", () => {
   });
 
   it("refuses a malformed label inside the namespace", async () => {
-    // `agent:` is necessary and not sufficient. A label carrying a quote, a
-    // space or a newline is the thing that turns a later JQL clause built from
-    // the board's own labels into something else.
+    // `agent:` is necessary but not sufficient: a quote, space or newline could reach a later JQL clause.
     const fetchMock = putMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -599,10 +551,7 @@ describe("JiraClient.updateLabels", () => {
       "agent:sol\nving",
       "agent:1solving",
       "agent:-solving",
-      // 61 after the prefix is the last accepted length, so 62 is the first
-      // rejected one. Testing the boundary rather than a wildly long string:
-      // an off-by-one in the quantifier is the mistake a 500-character fixture
-      // would wave through.
+      // 61 after the prefix is the last accepted length, so 62 is the first rejected one.
       `agent:${"x".repeat(62)}`,
     ]) {
       await expect(client().updateLabels("SSX-3822", { add: [label] })).rejects.toThrow(JiraError);
@@ -611,9 +560,7 @@ describe("JiraClient.updateLabels", () => {
   });
 
   it("refuses to both add and remove the same label", async () => {
-    // Jira applies the operations in order and the result depends on which came
-    // last, so this is a caller bug with a silently plausible outcome. Refusing
-    // is cheaper than working out what Jira decided.
+    // Jira applies the operations in order, so the result depends on which came last; refuse instead.
     const fetchMock = putMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -624,8 +571,7 @@ describe("JiraClient.updateLabels", () => {
   });
 
   it("refuses an issue key that is not an issue key", async () => {
-    // The key goes into the path. A traversal here would aim the one write verb
-    // at an endpoint nobody reviewed.
+    // The key goes into the path; a traversal here aims the one write verb at an unreviewed endpoint.
     const fetchMock = putMock();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -666,13 +612,7 @@ describe("JiraClient.updateLabels", () => {
 
 describe("assertOwnedLabel", () => {
   it("accepts every label the state machine can write", () => {
-    // Read off AGENT_LABELS rather than copied out of it, which is the point.
-    // The hand-written list this replaces held the six labels that existed when
-    // it was written, so D4 could add agent:review-done and agent:closed and
-    // this test would have kept passing while the credential decided at runtime,
-    // on a live board, mid-solve, whether it would write them. A label the
-    // machine can produce and the credential will not accept is a ticket stuck
-    // in a state nothing can clear, and the only place it shows up is Jira.
+    // Read off AGENT_LABELS rather than copied out of it, so a new label here can't silently rot.
     for (const label of Object.values(AGENT_LABELS)) {
       expect(() => {
         assertOwnedLabel(label);
@@ -681,9 +621,7 @@ describe("assertOwnedLabel", () => {
   });
 
   it("says which rule refused, because the two mean different things", () => {
-    // "not ours" is a caller aiming at somebody else's label; "malformed" is a
-    // caller aiming at ours and getting it wrong. Collapsing them would send
-    // whoever reads the message looking in the wrong place.
+    // "not ours" is a caller aiming at somebody else's label; "malformed" is ours, got wrong.
     expect(() => {
       assertOwnedLabel("triaged");
     }).toThrow(/may only touch agent:\*/);

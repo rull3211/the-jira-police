@@ -38,10 +38,7 @@ describe("the ticket a named key stands in for", () => {
   });
 
   it("leaves what discovery would have fetched empty rather than plausible", () => {
-    // `updated` and `labels` are read by the solve queue and by anything that
-    // sorts on recency. A stand-in value here would be indistinguishable from a
-    // fetched one, which is the failure `TicketRef.updated`'s own comment
-    // refuses: an absent value normalises to absent.
+    // A stand-in value here would be indistinguishable from a fetched one to the solve queue.
     const ticket = syntheticTicket("SSX-1234", "https://example.atlassian.net");
 
     expect(ticket.updated).toBe("");
@@ -59,10 +56,7 @@ describe("the ticket a named key stands in for", () => {
 
 describe("the payload as an artifact", () => {
   it("carries the fitness call and not only its conclusion", () => {
-    // The first live run's fitness call existed in memory and nowhere else, so
-    // a wrong one and a right one looked identical on disk. Dropping the field
-    // here would restore that silently, since `labels` would still hold the
-    // label the call produced.
+    // Dropping this field would fail silently: `labels` would still hold the label it produced.
     const ticket = syntheticTicket("SSX-1234", "https://example.atlassian.net");
 
     expect(toTriageResult(ticket, payload()).agentFitness.blockers).toEqual(["no baseline"]);

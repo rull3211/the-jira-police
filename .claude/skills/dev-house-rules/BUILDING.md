@@ -33,6 +33,33 @@ Three forms, hardest last:
 
 ---
 
+## Name the document a `§N` citation means
+
+Almost no citation in this tree names its target — `§16` in a `.ts` comment says nothing about
+where `§16` lives — so `docs:check` used to resolve it by pooling every document's headings into
+one set and asking only whether the number existed anywhere in the pool.
+
+<!-- refs:off -->
+
+`PLAN.md §12` and `architecture/triage.md §12` are different sections; a bare `§12` silently
+picked whichever the pool found, for as long as at least one document defined it.
+
+<!-- refs:on -->
+
+Measured against the real tree: 118 references resolve this way today, a citation naming none of
+what it means at all.
+
+**Name the document, immediately before the token, wherever it is not the one the citation sits
+in** — `architecture/guardrails.md §16`, not `§16`. `docs:check` trusts a qualifier first;
+failing that, a citing document's own sections win over another document sharing the number;
+failing that, exactly one other document defining the id resolves, and two or more is flagged
+`ambiguous` rather than picked for you. A citation inside the document it targets needs no
+qualifier — the second tier already resolves it — so name the document only when pointing
+elsewhere.
+[→](INCIDENTS.md#the-n-checker-that-resolved-a-citation-against-any-document-that-happened-to-define-it)
+
+---
+
 ## Two questions that agree today are still two questions
 
 The most productive rule in the repository, and always tempting to violate because the code looks

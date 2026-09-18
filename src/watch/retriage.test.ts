@@ -30,9 +30,8 @@ function signals(overrides: Partial<WatchSignals> = {}): WatchSignals {
       theirComment("2026-09-02T08:00:00.000+0200"),
     ],
     changes: [],
-    // Empty rather than absent, and spelled out in each fixture that needs it:
-    // `tsc` fails every one of them if `WatchContent` grows a field, which is
-    // what keeps four literals in step where a hand-copied *list* could not be.
+    // Spelled out per fixture rather than shared, so tsc fails every one if
+    // `WatchContent` grows a field.
     content: { summary: "", description: "", environment: "", attachments: [] },
     ...overrides,
   };
@@ -136,10 +135,8 @@ describe("running a re-triage", () => {
   });
 
   it("writes the reservation BEFORE it pays for the triage", async () => {
-    // The mutation: run the groom first and write the count afterwards. Then a
-    // failed write hands back a free run on every sweep, for ever, on the one
-    // loop that spends with nobody having asked — §6.3's receipt-versus-
-    // reservation rule, arriving in a second loop.
+    // Reversed, a failed write hands back a free run every sweep (§6.3's
+    // receipt-versus-reservation rule).
     const { deps: d, order } = deps();
 
     await runRetriage(d, signals());
@@ -194,9 +191,7 @@ describe("the four refusals, which are the point of the ordering", () => {
   });
 
   it("does not run the triage when the reservation will not write", async () => {
-    // The mutation: log the failure and carry on. Then the ticket is triaged on
-    // a counter that never moved, which is the unbounded loop with an extra
-    // step in it.
+    // Carrying on regardless would triage on a counter that never moved.
     const { deps: d, groom } = deps({ labelsFail: true });
 
     const outcome = await runRetriage(d, signals());
@@ -206,9 +201,7 @@ describe("the four refusals, which are the point of the ordering", () => {
   });
 
   it("refuses a counter it cannot read, before paying for the check", async () => {
-    // Refused on pure data, so the malformed label costs nothing at all. The
-    // mutation is treating it as zero, which is how a bounded loop quietly
-    // becomes an unbounded one.
+    // Refused on pure data, so the malformed label costs nothing.
     const { deps: d, check, updateLabels } = deps();
 
     const outcome = await runRetriage(
@@ -222,9 +215,7 @@ describe("the four refusals, which are the point of the ordering", () => {
   });
 
   it("refuses a ticket with no comment of ours", async () => {
-    // Reachable because a named key skips `decideWatch` entirely. Without a
-    // mark the whole history reads as new and the check would be judging the
-    // sendback against the conversation that produced it.
+    // Reachable because a named key skips `decideWatch` entirely.
     const { deps: d, check } = deps();
 
     const outcome = await runRetriage(
@@ -239,9 +230,7 @@ describe("the four refusals, which are the point of the ordering", () => {
 
 describe("when the triage itself fails", () => {
   it("propagates, with the attempt already spent", async () => {
-    // Stated as a test because it is the cost of failing closed and somebody
-    // will eventually be tempted to refund it by moving the write after the
-    // run. That trade is the runaway.
+    // The cost of failing closed; moving the write after the run to "refund" it is the runaway.
     const { deps: d, updateLabels } = deps({ groomFails: true });
 
     await expect(runRetriage(d, signals())).rejects.toThrow("the gate refused the verdict");

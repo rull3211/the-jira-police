@@ -1,108 +1,19 @@
 /**
- * The solve pipeline's one way of saying something on a ticket.
- *
- * `feedback.ts` has had a `TicketCommenter` seam since it was written and
- * nothing ever filled it, so a run's conclusion reached a local file and an
- * operator's terminal and stopped there. On SSX-3831 that lost the best thing
- * the pipeline had produced: recon declined the ticket, named the two
- * acceptance criteria that admit no single implementation, cited the source
- * that proves it, and proposed the split that would make it solvable — to a
- * scrollback. This is the third place that pattern has appeared, after §6.1c's
- * push-back-in-public and D3's dropped `unresolved`, which is enough to call it
- * what it is: **this service keeps producing its best reasoning on the one
- * channel nobody reads.**
- *
- * It is a separate storecode run rather than plain HTTP because a Jira comment
- * is not something the REST credential is permitted to write: that credential's
- * one write is `updateLabels`, labels only and `agent:`-namespaced. So a comment
- * goes through an Atlassian MCP session and lands as a real Jira user, and
- * `childEnv` withholds the REST credential from the subprocess.
- *
- * The older phrasing — *"the REST credential is for discovery only"* — is no
- * longer accurate and is not what makes this a separate run. What does is the
- * shape of the amendment (`jira/client.ts`, `ARCHITECTURE.md` §12): labels only,
- * so there is no comment-shaped hole in it to widen through.
- *
- * ## It is narrower than the triage poster, in two ways that are the point
- *
- * **No `editJiraIssue`.** That is the tool the triage poster uses to write
- * labels, and it takes a whole `fields` object — set semantics. §3a is the
- * record of what that costs: a label write through it must read, merge and
- * send the entire array back, so anything a human added in between is silently
- * lost. Label writes moved off it onto one narrow REST verb that carries `add`
- * and `remove` atomically, and handing this component `editJiraIssue` would
- * reopen exactly that door for the sake of a comment that does not need it.
- * A commenter comments.
- *
- * **No ticket reads, and therefore no idempotency — which is now a real
- * limitation rather than a defended choice.** The poster is granted
- * `getJiraIssue` and `atlassianUserInfo` so it can refresh its comment in place;
- * without them a re-run stacks a second one. (`getAccessibleAtlassianResources`
- * is granted below and does not change this: it names sites, not issues.)
- *
- * That used to be free. A comment was posted in the same breath as
- * `agent:failed`, which takes the ticket out of the queue, so a second one could
- * only follow a human clearing the label — a person asking for another attempt,
- * and two attempts are two events that should not be flattened into one edited
- * comment. `reportsToTicket` ended that: most outcomes now comment and write no
- * label at all, so nothing stops the same ticket being claimed, blocked and
- * commented on again, and the argument above no longer covers the common case.
- *
- * It is survivable only because every run today is a person typing a command.
- * Under E it is not, and the fix is not a read tool here — it is the
- * transient/deterministic split, so a deterministic blocker stops being
- * re-claimed at all, plus a per-ticket attempt count for the rest. Granting this
- * component `getJiraIssue` to dedupe would buy idempotency by widening the
- * narrowest surface in the tree, to paper over a retry loop that should not be
- * running. Recorded here rather than fixed, because the thing doing the
- * retrying does not exist yet.
- *
- * The result is one write tool and one read, and it is still the narrowest MCP
- * surface in the tree — narrow enough that the blast radius is legible from the
- * type without reading the implementation, which is the same standard
- * `ClaimCapabilities` and `TicketCommenter` are held to.
- *
- * The read is not a softening of that standard but a consequence of it: the
- * write's own required parameter has to come from somewhere, and a surface so
- * narrow that its one tool cannot be called is not narrow, it is broken. See
- * `COMMENTER_TOOLS` for what that cost.
- *
- * ## "No read tools" was true of MCP and false of the session
- *
- * The paragraph above shipped claiming this component could not read, and the
- * first live run disproved it in its own `problems` field: *"
- * getAccessibleAtlassianResources was denied by don't-ask mode; worked around
- * it by reading JIRA_BASE_URL from the repo (.env.example, src/settings.ts)."*
- * `DENIED_BUILTIN_TOOLS` is `Bash`, `Write`, `Edit`, `NotebookEdit` — `Read`,
- * `Grep` and `Glob` were never on it, because the analyst needs all three to
- * read the vault and the list is shared. So the sentence described the MCP
- * allowlist and was read, by its own author, as describing the session.
- *
- * That is this project's defect class in the file arguing against it, and the
- * consequence is not cosmetic. `childEnv` keeps this service's secrets out of
- * the subprocess environment, and `workingDirectory` is this repository, where
- * some of them are on disk. Withholding a secret from the environment while
- * granting a tool that opens files is not withholding it. The run went hunting
- * for Jira configuration and happened to stop short of anything sensitive,
- * which is luck rather than a control.
- *
- * The reads are denied below rather than the prose corrected, because this
- * component genuinely has no use for them. A session that finds it wants to
- * read something has misunderstood the job, and the live run shows what it does
- * with the capability: it routed around a denial instead of reporting it, and
- * the report was the thing actually wanted. `problems` is the channel for *"I
- * could not do this"*, and a session able to improvise will not use it.
- *
- * ## The body is prepared, and it is not trusted
- *
- * The text arrives already rendered by `renderSolveComment` and already run
- * through `safeText`, which collapses whitespace so no model-authored sentence
- * can forge a heading. It is still text a model wrote after reading a ticket
- * anyone with a Jira account can edit, so it is fenced between markers in the
- * prompt and the instruction not to edit it is given twice — the poster's
- * arrangement, for the poster's reason: the judgement has already been
- * exercised and checked by the time this runs, and re-exercising it here would
- * be a second opinion nobody asked for and nobody would see.
+ * The solve pipeline's only way to comment on a ticket (this service's best output used to
+ * go to a scrollback instead — the third time that pattern showed up, after §6.1c).
+ * Runs as a separate Atlassian MCP session rather than plain HTTP: the REST credential's
+ * one write is `updateLabels`, labels only (`architecture/triage.md` §12), so a comment must land
+ * as a real Jira user instead; `childEnv` withholds that credential from the subprocess.
+ * No `editJiraIssue`: its `fields` object is whole-set write semantics, the hazard §3a
+ * describes for labels, and a commenter has no need of it.
+ * No ticket reads, so no idempotency — a re-run posts a second comment rather than editing
+ * the first. A read tool would fix that but would also widen the narrowest MCP surface in
+ * the tree to paper over a retry loop that should not exist; not done here for that reason.
+ * `Read`/`Grep`/`Glob` are denied for the same reason: a session that can open files routes
+ * around a denied MCP tool instead of reporting the denial through `problems`.
+ * The body arrives already rendered by `renderSolveComment` and `safeText`, but is still
+ * text a model wrote from a ticket anyone can edit, so it is fenced between markers in the
+ * prompt and the instruction not to alter it is given twice.
  */
 
 import { logger } from "../logger.ts";
@@ -113,41 +24,11 @@ import { DENIED_BUILTIN_TOOLS, runSession } from "../triage/session.ts";
 /**
  * One write tool, and the one read that write cannot be called without.
  *
- * Every absence here is deliberate and argued in the module header; the one
- * worth repeating is `editJiraIssue`, whose set semantics are the reason label
- * writes do not go through MCP at all.
- *
- * ## Why the second entry exists, and what it cost to leave it out
- *
- * `cloudId` is a **required** parameter of `addCommentToJiraIssue`, and nothing
- * in the prompt supplies one. The session has exactly two ways to obtain it:
- * this tool, or `atlassianUserInfo`. The list shipped with neither, and under
- * `--permission-mode dontAsk` the allowlist does gate MCP names — so both were
- * denied and the only granted tool was uncallable.
- *
- * It went unnoticed for a day because the first live run had `Read` and
- * improvised: it went hunting through the repository for Jira configuration and
- * posted anyway. Denying the reads was right, and it removed the workaround
- * without anyone checking whether a supported route existed. **The list was
- * audited three times for what it granted and never once for whether the grant
- * could be exercised.** SSX-3835 and SSX-3836 both reached a verdict, both wrote
- * `agent:failed`, and neither said why on the ticket — which is precisely the
- * dead-end-with-a-name this module was written to prevent.
- *
- * The fix is the narrowest one available. This tool returns the site identifiers
- * the credential can reach and nothing else: no ticket content, no issue data,
- * no secrets. It is the same grant `ALLOWED_TOOLS` makes to the analyst for the
- * same reason, and it does **not** reopen the idempotency question in the
- * header — resolving a site is not reading a ticket, so a re-run still stacks a
- * second comment.
- *
- * Resolving the `cloudId` in the harness and passing it in the prompt would be
- * better still, since a parameter supplied cannot be denied. It is not done here
- * because the harness does not know one either: deriving it means a new endpoint
- * on the REST credential. That credential has been amended twice — `updateLabels`
- * and the changelog read — and both times deliberately and in writing, because a
- * widening is a decision about the rule rather than a plumbing choice. This would
- * be a third, and nobody has asked for it.
+ * `cloudId` is a required parameter of `addCommentToJiraIssue` that nothing in the prompt
+ * supplies; `getAccessibleAtlassianResources` is one of only two ways to obtain it
+ * (`atlassianUserInfo` is the other), so without it the write tool is granted but uncallable.
+ * It returns site identifiers only — no ticket content — so it does not reopen the
+ * idempotency gap the module header describes: resolving a site is not reading a ticket.
  */
 export const COMMENTER_TOOLS: readonly string[] = [
   "mcp__atlassian__addCommentToJiraIssue",
@@ -155,36 +36,21 @@ export const COMMENTER_TOOLS: readonly string[] = [
 ];
 
 /**
- * Tools withheld.
- *
- * The allowlist above pre-approves and denies nothing — that was probed in
- * 2026-09-04 and is why `--disallowedTools` exists on every session this
- * service starts. `Bash` alone would hand over `curl` and with it the whole
- * Jira API, which would make every argument in the header decorative.
- *
- * The Atlassian mutators are named on the same reasoning as the poster's list,
- * and with the same caveat: whether MCP names are honoured by
- * `--disallowedTools` is still unverified, so read these as declared intent
- * that costs nothing rather than as enforcement.
+ * Tools withheld. The allowlist above pre-approves; it does not deny, which is why
+ * `--disallowedTools` is set on every session this service starts.
+ * Whether MCP names are honoured by `--disallowedTools` is unverified, so the Atlassian
+ * entries here are declared intent rather than confirmed enforcement.
  */
 export const COMMENTER_DENIED_TOOLS: readonly string[] = [
   ...DENIED_BUILTIN_TOOLS,
-  // Named here rather than in DENIED_BUILTIN_TOOLS, which the analyst shares and
-  // which cannot lose these — reading the vault is that component's whole job.
-  // This one has nothing to read: the body arrives rendered and the only
-  // permitted act is one tool call. The first live run used a read tool to work
-  // around a denied MCP tool and went hunting through the repository for Jira
-  // configuration, in a working directory that also holds this service's
-  // secrets. `childEnv` keeps those out of the subprocess environment, and that
-  // is not a control if the session can open files.
+  // Denied here rather than in DENIED_BUILTIN_TOOLS: the analyst shares that list and
+  // needs these to read the vault. This component has nothing to read.
   "Read",
   "Grep",
   "Glob",
   "WebFetch",
   "WebSearch",
-  // Task spawns a subagent, and a subagent's tool surface is not this list.
-  // Every entry above is recoverable through it by asking another model to do
-  // the reading, which is the same shape of workaround the live run found.
+  // A subagent's tool surface is not this list, so Task can recover every entry denied above.
   "Task",
   "mcp__atlassian__editJiraIssue",
   "mcp__atlassian__transitionJiraIssue",
@@ -193,12 +59,8 @@ export const COMMENTER_DENIED_TOOLS: readonly string[] = [
 ];
 
 /**
- * What the commenter reports back.
- *
- * Two fields, because it does one thing. `posted` is not inferred from the
- * absence of an error: a session can finish cleanly having decided to skip the
- * write, and a caller told "no exception" would record a comment that does not
- * exist.
+ * `posted` is not inferred from the absence of an error: a session can finish cleanly
+ * having decided to skip the write.
  */
 export const COMMENT_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -229,13 +91,9 @@ export interface CommenterOptions {
 export class CommentError extends Error {}
 
 /**
- * The instruction, as an imperative with one job in it.
- *
- * No goal is described, because a goal invites the judgement that has already
- * been made. The body is fenced rather than interpolated loose so that a
- * sentence inside it reading like an instruction has a visible boundary around
- * it — the text is derived from a Jira ticket, and a ticket is attacker
- * -controlled data rather than a briefing.
+ * No goal is described, only the write step, since a goal invites judgement that has
+ * already been made. The body is fenced so a sentence inside it reading like an
+ * instruction has a visible boundary — a ticket is attacker-controlled data, not a briefing.
  */
 export function buildCommentPrompt(issueKey: string, body: string): string {
   return [
@@ -284,12 +142,8 @@ export function buildCommentArgs(issueKey: string, body: string): string[] {
 }
 
 /**
- * Reads the session's answer without believing the optimistic half of it.
- *
- * A missing or malformed result is `posted: false`. The alternative — treating
- * an unparseable answer as success — would report a comment onto the ticket
- * record on the strength of a session that may not have called the tool at all,
- * and the caller has no way to check afterwards because it has no read tool.
+ * A missing or malformed result is `posted: false`, not assumed success — there is no
+ * read tool here to check afterwards whether the comment actually landed.
  */
 export function parseCommentReceipt(value: unknown): {
   posted: boolean;
@@ -308,10 +162,8 @@ export function parseCommentReceipt(value: unknown): {
 /**
  * A `TicketCommenter` backed by an Atlassian MCP session.
  *
- * Throws when the comment did not post. `reportOutcome` catches it, logs it and
- * records `posted: false`, which is the right division: a reporting failure
- * must not be able to look like a solve failure, and it must not be silent
- * either.
+ * Throws when the comment did not post; `reportOutcome` catches it and records
+ * `posted: false` rather than letting a reporting failure read as a solve failure.
  */
 export function createTicketCommenter(options: CommenterOptions): TicketCommenter {
   return {

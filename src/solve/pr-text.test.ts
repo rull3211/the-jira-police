@@ -5,13 +5,7 @@ import { asProse, composePullRequest, composeTitle, withoutTrailer } from "./pr-
 
 type Verified = Extract<SolveOutcome, { kind: "verified" }>;
 
-/**
- * A `verified` outcome, which is the only kind that reaches this module.
- *
- * Built by hand rather than by running the orchestrator: every field here is
- * something the body renders, so a fixture assembled from a real run would hide
- * which of them the assertions actually depend on.
- */
+/** A `verified` outcome, built by hand so each assertion's dependency on a field stays visible. */
 function verified(overrides: Partial<Verified> = {}): Verified {
   return {
     kind: "verified",
@@ -81,9 +75,7 @@ const CONTEXT = {
 
 describe("asProse", () => {
   it("reflows a paragraph that git wrapped at 72 columns", () => {
-    // The readability half. GitHub renders a single newline in a pull request
-    // body as a line break, so a commit body wrapped for git's sake would
-    // otherwise arrive broken mid-sentence.
+    // GitHub renders a single newline as a line break, so a git-wrapped body would arrive broken.
     expect(
       asProse("The production favicon was served\neverywhere, so test looked\nlike prod."),
     ).toBe("The production favicon was served everywhere, so test looked like prod.");
@@ -98,8 +90,7 @@ describe("asProse", () => {
   });
 
   it("neutralises a heading at the start of a paragraph", () => {
-    // The one that matters. Ticket text is attacker-controlled, and a forged
-    // heading is how a bot-written body starts to read like a harness verdict.
+    // Ticket text is attacker-controlled; a forged heading could read as a harness verdict.
     expect(asProse("## Approved by security")).toBe("\\## Approved by security");
   });
 
@@ -117,8 +108,7 @@ describe("asProse", () => {
   });
 
   it("neutralises a block marker on the second paragraph too", () => {
-    // Not only the first. Escaping just the opening paragraph would let the
-    // forgery move down by one blank line.
+    // Escaping only the opening paragraph would let a forgery move down one blank line.
     expect(asProse("harmless\n\n## Approved")).toBe("harmless\n\n\\## Approved");
   });
 
@@ -143,20 +133,17 @@ describe("asProse", () => {
   });
 
   it("turns a raw tag into an entity rather than a backslash", () => {
-    // Markdown does not escape `<` with a backslash, so this one needs the
-    // entity. A backslash here would render literally and leave the tag live.
+    // Markdown doesn't escape `<` with a backslash; that would render literally and leave the tag live.
     expect(asProse("<img src=x onerror=alert(1)>")).toBe("&lt;img src=x onerror=alert(1)>");
   });
 
   it("escapes a backslash before adding any of its own", () => {
-    // Order matters: text already containing a backslash could otherwise cancel
-    // an escape added after it and reopen the construct being closed.
+    // Order matters: an existing backslash could otherwise cancel a later escape.
     expect(asProse("a \\ b")).toBe("a \\\\ b");
   });
 
   it("leaves emphasis and snake_case alone", () => {
-    // Deliberate. Emphasis is cosmetic — it cannot forge a section, a link or a
-    // table row — and escaping it would mangle every identifier in the text.
+    // Emphasis is cosmetic and can't forge structure; escaping it would mangle every identifier.
     expect(asProse("set **window.env** from setup_favicon_path")).toBe(
       "set **window.env** from setup_favicon_path",
     );
@@ -169,8 +156,6 @@ describe("asProse", () => {
 
 describe("withoutTrailer", () => {
   it("drops the Refs line the harness appended", () => {
-    // The body links the ticket in its first line already. A reader who has to
-    // skip a line learns to skip the block.
     expect(withoutTrailer("why it changed\n\nRefs: SSX-3822")).toBe("why it changed");
   });
 
@@ -187,9 +172,7 @@ describe("withoutTrailer", () => {
 
 describe("composeTitle", () => {
   it("uses the commit subject and appends the key", () => {
-    // The subject is what the fix pass says it did; the ticket summary is what
-    // somebody hoped would be done, and the two part company whenever recon
-    // corrected the brief.
+    // The subject is what was actually done; the summary is what was hoped for.
     expect(composeTitle(verified(), "SSX-3822")).toBe(
       "fix(advisor): distinct favicon outside production (SSX-3822)",
     );
@@ -203,8 +186,6 @@ describe("composePullRequest", () => {
   });
 
   it("says a human merges it, in the same first line as the ticket link", () => {
-    // One line, because a reader who needs three facts before they can judge
-    // the page should not have to read a paragraph to collect them.
     const [first = ""] = composePullRequest(verified(), CONTEXT).body.split("\n\n");
     expect(first).toContain("draft");
     expect(first).toContain("a human reviews and merges");
@@ -221,8 +202,6 @@ describe("composePullRequest", () => {
   });
 
   it("escapes the commit body rather than interpolating it", () => {
-    // The prose descends from ticket text, which anyone with a Jira account can
-    // write. It must not be able to forge a heading.
     const outcome = verified({ commit: { subject: "fix: x", body: "## Approved by security" } });
     const { body } = composePullRequest(outcome, CONTEXT);
     expect(body).toContain("\\## Approved by security");
@@ -245,16 +224,13 @@ describe("composePullRequest", () => {
   });
 
   it("says who read the exit codes", () => {
-    // The claim the whole document rests on. A model asked to summarise its own
-    // work will say the tests passed, and it has no way to know.
     expect(composePullRequest(verified(), CONTEXT).body).toContain(
       "The model was never asked whether they passed",
     );
   });
 
   it("shows the exit code only for a step that failed", () => {
-    // Unreachable from a `verified` outcome today. Written because the renderer
-    // must not present a non-zero exit as a pass if that ever changes.
+    // Unreachable from a `verified` outcome today; guards against ever showing a non-zero exit as a pass.
     const outcome = verified({
       verification: {
         outcome: "passed",
@@ -279,9 +255,6 @@ describe("composePullRequest", () => {
   });
 
   it("says on the page when recon disagreed, and collapses the detail", () => {
-    // The calibration signal. Triage calls a ticket solvable without reading a
-    // line of source; this is the only feedback that call ever gets. That it
-    // happened stays visible; the correction itself is long and goes below.
     const outcome = verified({
       recon: {
         ...verified().recon,
@@ -300,11 +273,7 @@ describe("composePullRequest", () => {
   });
 
   it("suppresses a correction the model left behind after agreeing", () => {
-    // The verdict decides, not the text. A model can set `devLensAccurate: true`
-    // and still fill the correction field, and a section headed "where triage
-    // was wrong" sitting under a tick saying triage was right is a page that
-    // contradicts itself — with no way for the reader to tell which half to
-    // believe.
+    // The verdict field decides, not the text — a model can set devLensAccurate: true and still fill the correction.
     const outcome = verified({
       recon: { ...verified().recon, devLensAccurate: true, devLensCorrection: "left over" },
     });
@@ -319,7 +288,7 @@ describe("composePullRequest", () => {
     });
     const { body } = composePullRequest(outcome, CONTEXT);
     expect(body).toContain("⚠️ **Recon disagreed");
-    // And no empty widget for a correction that was never written.
+    // No empty widget for a correction that was never written.
     expect(body).not.toContain("Where triage was wrong");
   });
 
@@ -330,8 +299,6 @@ describe("composePullRequest", () => {
   });
 
   it("collapses the fix pass's account of itself", () => {
-    // Three blocks of this on the page is what made the first version
-    // unreadable. Each is worth keeping and none is worth reading first.
     const outcome = verified({ fix: { ...verified().fix, summary: "a long account" } });
     const { body } = composePullRequest(outcome, CONTEXT);
     expect(body).toContain("<summary>What the fix pass says it did</summary>");
@@ -339,8 +306,7 @@ describe("composePullRequest", () => {
   });
 
   it("puts a blank line inside the widget so markdown still renders", () => {
-    // GitHub stops parsing markdown inside an HTML block until a blank line
-    // reopens it. Without these the section renders as one run of literal text.
+    // GitHub stops parsing markdown inside an HTML block until a blank line reopens it.
     const { body } = composePullRequest(verified(), CONTEXT);
     expect(body).toContain("</summary>\n\n");
     expect(body).toContain("\n\n</details>");
@@ -353,9 +319,7 @@ describe("composePullRequest", () => {
   });
 
   it("reports a simplify pass that declined, rather than omitting it", () => {
-    // "It looked and left it alone" and "it never ran" are different facts
-    // about a diff a reviewer is about to read, and a missing section conflates
-    // them.
+    // "It looked and left it alone" and "it never ran" are different facts a missing section would conflate.
     const outcome = verified({
       simplify: { changed: false, filesTouched: [], changes: [], declined: "nothing to remove" },
     });
@@ -374,15 +338,10 @@ describe("composePullRequest", () => {
   });
 
   it("omits the risk section entirely when there is no risk to report", () => {
-    // An empty widget invites a click that returns nothing, and teaches the
-    // reader that the widgets on this page are not worth opening.
     expect(composePullRequest(verified(), CONTEXT).body).not.toContain("check by hand");
   });
 
   it("leaves no gap where an omitted section used to be", () => {
-    // Sections drop out — that is the whole point of `details` returning "" —
-    // and a run of blank lines is the seam showing. Cosmetic, but the document
-    // is arguing that it was assembled carefully.
     const { body } = composePullRequest(verified(), CONTEXT);
     expect(body).not.toContain("\n\n\n");
   });
@@ -394,9 +353,7 @@ describe("composePullRequest", () => {
   });
 
   it("says on the page when the new tests pass without the fix, and names them", () => {
-    // The finding this whole check exists to surface, and it goes above the
-    // fold rather than into a collapsed section: a reviewer who reads only the
-    // green ticks would otherwise take a decorative test for a guard.
+    // Above the fold, not collapsed: a reviewer reading only green ticks could mistake a decorative test for a guard.
     const outcome = verified({
       failFirst: { outcome: "vacuous", tests: ["src/utils/tests/DateUtils.test.ts"] },
     });
@@ -406,9 +363,7 @@ describe("composePullRequest", () => {
   });
 
   it("does not call the fix wrong when it says the test is", () => {
-    // The two are separate findings and the wording has to keep them apart. A
-    // vacuous test is a statement about the test; the fix may well be correct,
-    // and a body that implies otherwise argues a reviewer out of a good change.
+    // A vacuous test is a statement about the test, not the fix, which may well be correct.
     const outcome = verified({
       failFirst: { outcome: "vacuous", tests: ["src/x.test.ts"] },
     });
@@ -416,9 +371,7 @@ describe("composePullRequest", () => {
   });
 
   it("says nothing at all when the tests did fail without the fix", () => {
-    // `guarded` is the weak verdict — a new test importing a new helper fails
-    // against the base for the wrong reason — so rendering it beside the
-    // verification ticks would claim more than the experiment established.
+    // `guarded` is the weak verdict; rendering it beside the ticks would claim more than was established.
     const outcome = verified({
       failFirst: { outcome: "guarded", tests: ["src/x.test.ts"] },
     });

@@ -36,12 +36,10 @@ describe("readSettings", () => {
   });
 
   it("treats a blank value as absent, not as a deliberate empty string", () => {
-    // An empty line in a .env file is nearly always an unfilled template entry.
     expect(readSettings({ ...MINIMAL, JIRA_PROJECT: "   " }).JIRA_PROJECT).toBe("SSX");
   });
 
   it("reports every missing required setting at once", () => {
-    // One error listing both beats discovering them one deploy at a time.
     try {
       readSettings({});
       expect.unreachable("should have thrown");
@@ -52,7 +50,6 @@ describe("readSettings", () => {
   });
 
   it("does not fall back to a real skill when unconfigured", () => {
-    // A misconfigured service must not be able to post genuine verdicts.
     expect(readSettings(MINIMAL).SKILL_NAME).toBe("mock-triage");
   });
 
@@ -90,10 +87,7 @@ describe("numeric", () => {
     expect(() => numeric(settings, "POLL_INTERVAL_MS")).toThrow(/must be a number/);
   });
 
-  // A stray minus sign parses as a perfectly finite number, so the NaN check
-  // above never saw it. It matters most for the settings that become a delay:
-  // setTimeout clamps a negative to zero, so the timeout does not vanish, it
-  // fires at once and kills every run before it starts.
+  // A negative delay isn't caught by the NaN check; setTimeout clamps it to zero and fires at once.
   it("rejects a negative value, which is finite and still nonsense", () => {
     const settings = readSettings({ ...MINIMAL, POLL_INTERVAL_MS: "-1" });
     expect(() => numeric(settings, "POLL_INTERVAL_MS")).toThrow(/must be at least 0/);
@@ -106,8 +100,6 @@ describe("numeric", () => {
     );
   });
 
-  // Zero is a real answer for some of these — no cursor overlap, a concurrency
-  // cap of none — so the floor has to be per-setting rather than blanket.
   it("allows zero where zero is a legitimate choice", () => {
     const settings = readSettings({ ...MINIMAL, MAX_CONCURRENT_SOLVES: "0" });
     expect(numeric(settings, "MAX_CONCURRENT_SOLVES")).toBe(0);
@@ -120,10 +112,8 @@ describe("numeric", () => {
 });
 
 describe("shipped fallbacks", () => {
-  // The defaults are what almost every deployment runs on, and nothing else
-  // here reads them through the same floors the wiring applies. A fallback
-  // typed with a stray minus or a stray "ms" would leave this suite green and
-  // break the service on a machine with no .env at all.
+  // Catches a fallback typed with a stray minus or a stray "ms" that would otherwise leave
+  // this suite green and break a deployment with no .env at all.
   it("every default parses and clears the floor its caller uses", () => {
     const settings = readSettings(MINIMAL);
     expect(numeric(settings, "TRIAGE_TIMEOUT_MS", 1)).toBe(1_200_000);
@@ -145,11 +135,7 @@ describe("list", () => {
   });
 });
 
-/**
- * The solve queue's control plane. Every one of these grants some amount of
- * privilege to a thing that will eventually write code, so every one of them
- * has to be safe when nobody has said anything.
- */
+/** The solve queue's control plane; every one of these must be safe when nobody has said anything. */
 describe("the solve settings", () => {
   it("is off unless somebody turned it on", () => {
     expect(flag(readSettings(MINIMAL), "SOLVE_ENABLED")).toBe(false);
@@ -158,8 +144,6 @@ describe("the solve settings", () => {
   it.each(["", "  ", "yes", "1", "on", "ture", "false"])(
     "reads %j as off, because only true may arm it",
     (value) => {
-      // Matches WRITE_BACK: a typo in the setting that eventually starts
-      // unattended code changes has to fail closed.
       expect(flag(readSettings({ ...MINIMAL, SOLVE_ENABLED: value }), "SOLVE_ENABLED")).toBe(false);
     },
   );
@@ -169,18 +153,14 @@ describe("the solve settings", () => {
   });
 
   it("checks fail-first unless somebody turned it off", () => {
-    // The one setting here that is on by default, and the asymmetry is the
-    // point: it grants nothing and writes nothing, so the safe direction is
-    // the opposite of every neighbour's.
+    // On by default: it grants nothing, so the safe direction is the opposite of its neighbours'.
     expect(failFirstCheck(readSettings(MINIMAL))).toBe(true);
   });
 
   it.each(["", "  ", "no", "0", "flase", "off", "true"])(
     "keeps checking on %j, because only false may withdraw it",
     (value) => {
-      // Deliberately not `flag()`. A typo in a setting that arms a privilege
-      // must fail closed; a typo in a setting that removes a guard must not
-      // silently remove it, and those are opposite defaults.
+      // Deliberately not `flag()`: a typo here must not silently withdraw a guard.
       expect(failFirstCheck(readSettings({ ...MINIMAL, FAIL_FIRST_CHECK: value }))).toBe(true);
     },
   );
@@ -200,9 +180,7 @@ describe("the solve settings", () => {
   it.each(["atuo", "AUTOMATIC", "on", "yes", "0", "manual auto"])(
     "refuses %j rather than guessing",
     (value) => {
-      // Not a silent fallback to manual, even though manual is the safe one: a
-      // fallback means the operator is running in a mode they did not choose
-      // and cannot see, in exactly the case where they were changing it.
+      // Not a silent fallback to manual: that would run a mode the operator can't see.
       const settings = readSettings({ ...MINIMAL, SOLVE_MODE: value });
       expect(() => solveMode(settings)).toThrow(SettingsError);
       expect(() => solveMode(settings)).toThrow(/SOLVE_MODE/);
@@ -210,8 +188,6 @@ describe("the solve settings", () => {
   );
 
   it("never resolves an unreadable mode to auto", () => {
-    // The failure that matters. Anything is better than quietly granting the
-    // privilege the operator was trying to describe.
     for (const value of ["atuo", "AUTOMATIC", "on"]) {
       const settings = readSettings({ ...MINIMAL, SOLVE_MODE: value });
       let resolved: string | null = null;
@@ -234,26 +210,19 @@ describe("the solve settings", () => {
   });
 
   it("reports the mode as a configuration problem, so it exits 78 rather than crashing", () => {
-    // `withConfigErrors` keys on SettingsError; anything else reaches the
-    // operator as a stack trace.
+    // `withConfigErrors` keys on SettingsError; anything else reaches the operator as a stack trace.
     expect(() => solveMode(readSettings({ ...MINIMAL, SOLVE_MODE: "atuo" }))).toThrow(
       SettingsError,
     );
   });
 
   it("allows no repository out of the box", () => {
-    // The one solve setting with no fallback, and the reason is that
-    // `readSettings` cannot tell blank from unset. Give this a default and the
-    // privilege it grants survives being deleted from .env: an operator taking
-    // the solver off a repository would have handed it straight back, and the
-    // only way to revoke it would be to edit this file. The pilot repository is
-    // named in .env, where somebody chose it.
+    // No fallback: since `readSettings` can't tell blank from unset, a default would survive
+    // being deleted from .env.
     expect(list(readSettings(MINIMAL), "SOLVE_REPOS")).toEqual([]);
   });
 
   it("reads a blank allowlist as an empty list, which the poller reads as nothing", () => {
-    // Blank means "no repository", not "every repository". The poller is what
-    // enforces that reading; this only checks the list arrives empty.
     expect(list(readSettings({ ...MINIMAL, SOLVE_REPOS: " , " }), "SOLVE_REPOS")).toEqual([]);
     expect(list(readSettings({ ...MINIMAL, SOLVE_REPOS: "" }), "SOLVE_REPOS")).toEqual([]);
   });

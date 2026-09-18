@@ -80,18 +80,15 @@ describe("buildNewIssuesJql", () => {
   });
 
   it("skips closed tickets, which a paid triage has nothing to say about", () => {
-    // SSX-3859 was closed and inside the window, and bought a model run.
     expect(buildNewIssuesJql(BASE)).toContain("statusCategory != Done");
   });
 
   it("filters closed on the category, never on the status name", () => {
-    // Status names are per-board and Norwegian on this one, so `status = "Done"`
-    // is a clause that matches nothing. Same rule as `src/watch/signals.ts`.
+    // Status names are per-board and Norwegian on this one, so `status = "Done"` matches nothing.
     expect(buildNewIssuesJql(BASE)).not.toMatch(/status\s*!?=\s*"?Done"?/);
   });
 
   it("restricts discovery to the configured statuses", () => {
-    // The operator watched triage fire on tickets in code review and in test.
     const jql = buildNewIssuesJql({
       ...BASE,
       statuses: ["Mottatt", "Backlog", "On Hold", "In Progress Concept"],
@@ -100,31 +97,23 @@ describe("buildNewIssuesJql", () => {
   });
 
   it("drops the closed-category clause when an allowlist is set", () => {
-    // Not a saving. Both clauses together would silently defeat an allowlist
-    // naming a closed status — two clauses that agree until someone configures
-    // the setting they exist to configure.
+    // Both clauses together would silently defeat an allowlist naming a closed status.
     const jql = buildNewIssuesJql({ ...BASE, statuses: ["Ferdig"] });
     expect(jql).not.toContain("statusCategory");
   });
 
   it("keeps filtering closed tickets when no allowlist is set", () => {
-    // Blank is "anything not closed", so removing the else branch has to fail.
     expect(buildNewIssuesJql({ ...BASE, statuses: [] })).toContain("statusCategory != Done");
   });
 
   it("cannot be expressed as a status category, which is why it names statuses", () => {
-    // Measured against SSX on 2026-09-10: `In Progress Concept` is
-    // `indeterminate` and is wanted; `Prioritized` is `new` and is not. The
-    // eligible set straddles the taxonomy, so `statusCategory = new` — the
-    // one-clause version this nearly shipped as — is wrong in both directions.
+    // The eligible set straddles the taxonomy, so a one-clause `statusCategory = new` is wrong both ways.
     const jql = buildNewIssuesJql({ ...BASE, statuses: ["Mottatt", "In Progress Concept"] });
     expect(jql).toContain('"In Progress Concept"');
     expect(jql).not.toContain("statusCategory = new");
   });
 
   it("quotes status names but resolves a bare number as an id", () => {
-    // Same rule as components: ids survive a rename, names are legible in a
-    // config file, and the quoting is what decides which Jira looks up.
     const jql = buildNewIssuesJql({ ...BASE, statuses: ["On Hold", "10213"] });
     expect(jql).toContain('status IN ("On Hold", 10213)');
   });
@@ -168,18 +157,12 @@ describe("buildNewIssuesJql", () => {
   });
 });
 
-/**
- * The SSX board is shared by several teams. Without this clause the service
- * triages — and pays for — every other team's tickets.
- */
 describe("jqlValue", () => {
   it("quotes a name, because real component names contain spaces", () => {
     expect(jqlValue("SSX Advisor", "component")).toBe('"SSX Advisor"');
   });
 
   it("leaves an id bare, because Jira looks up quoted values by name", () => {
-    // `component = "12644"` searches for a component *named* 12644 and finds
-    // nothing, so the quoting is what selects id- versus name-lookup.
     expect(jqlValue("12644", "component")).toBe("12644");
   });
 
@@ -219,11 +202,7 @@ describe("buildNewIssuesJql component filter", () => {
   });
 });
 
-/**
- * The second queue. Selects on label state and nothing else — no cursor, no
- * window — because a ticket labelled for solving months after it was triaged
- * still has to be picked up.
- */
+/** Selects on label state alone, no cursor, so a ticket labelled months after triage still gets picked up. */
 describe("buildSolveQueueJql", () => {
   const QUEUE = {
     project: "SSX",
@@ -242,8 +221,7 @@ describe("buildSolveQueueJql", () => {
   });
 
   it("builds the auto-mode query verbatim: no start clause, but an issuetype one", () => {
-    // Auto is not manual-minus-a-check. It trades the human's label for a type
-    // restriction, so the query is the same length and differs in what it asks.
+    // Auto trades the human's label for a type restriction rather than dropping the check entirely.
     expect(buildSolveQueueJql({ ...QUEUE, mode: "auto" })).toBe(
       'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
         'AND labels = "agent:solvable" AND issuetype IN ("Feil") ' +
@@ -257,17 +235,13 @@ describe("buildSolveQueueJql", () => {
   });
 
   it("refuses to build an auto query with no issue-type restriction", () => {
-    // The dangerous reading of an empty list is "every type", and this is the
-    // only path that changes code with nobody watching. Refusing is louder than
-    // allowing nothing, and the silent-no-op is the bug this clause exists for.
+    // The dangerous reading of an empty list is "every type"; refusing is louder than allowing nothing.
     expect(() => buildSolveQueueJql({ ...QUEUE, mode: "auto", autoIssueTypes: [] })).toThrow(
       JqlError,
     );
   });
 
   it("does not restrict issue type in manual mode, even with the list set", () => {
-    // A human typing agent:start on an Epic has said something this list could
-    // only second-guess.
     expect(buildSolveQueueJql(QUEUE)).not.toContain("issuetype");
   });
 
@@ -278,9 +252,6 @@ describe("buildSolveQueueJql", () => {
   });
 
   it("resolves a numeric issue type as an id and a name as a name", () => {
-    // Same rule as components: `issuetype IN (10004)` is an id lookup, while
-    // `issuetype IN ("10004")` searches for a type *named* 10004 and finds
-    // nothing. Ids are what survive a rename of "Feil".
     expect(buildSolveQueueJql({ ...QUEUE, mode: "auto", autoIssueTypes: ["10004"] })).toContain(
       "issuetype IN (10004)",
     );
@@ -300,7 +271,6 @@ describe("buildSolveQueueJql", () => {
   });
 
   it("requires the human go-ahead in manual mode", () => {
-    // The single human step in the whole feature.
     expect(buildSolveQueueJql(QUEUE)).toContain('labels = "agent:start"');
   });
 
@@ -309,17 +279,13 @@ describe("buildSolveQueueJql", () => {
   });
 
   it("treats an unrecognised mode as manual rather than as auto", () => {
-    // `solveMode` is the only validator, and it throws — but nothing stops a
-    // future caller from reading the mode off something else. The clause is
-    // written as "not auto" precisely so that a value which never passed
-    // validation still lands on the side that waits for a person.
+    // Written as "not auto" so a value that never passed validation still waits for a person.
     const rogue = buildSolveQueueJql({ ...QUEUE, mode: "AUTO" as SolveMode });
     expect(rogue).toContain('labels = "agent:start"');
   });
 
   it("excludes every state the machine can be in but the two it starts from", () => {
-    // The exclusion is the entire dedupe mechanism: there is no seenKeys list
-    // and no cursor behind this query.
+    // This exclusion is the entire dedupe mechanism: there is no seenKeys list or cursor behind it.
     expect(buildSolveQueueJql(QUEUE)).toContain(
       'labels NOT IN ("agent:solving", "agent:reviewing", "agent:review-done", ' +
         '"agent:done", "agent:closed", "agent:failed")',
@@ -327,12 +293,7 @@ describe("buildSolveQueueJql", () => {
   });
 
   it("excludes the two states a pull request sits in, which the claim no longer covers", () => {
-    // The mutation this pins is dropping either review label from
-    // SOLVE_QUEUE_EXCLUDED_LABELS. Until D4 a ticket under review still carried
-    // agent:solving and was excluded by that; it does not, so these two are now
-    // the only thing standing between an open pull request and a second solve of
-    // the same ticket. agent:review-done is the one that matters most: it is
-    // where a ticket waits for a human, which is measured in days.
+    // These two are the only thing standing between an open pull request and a second solve of it.
     const jql = buildSolveQueueJql(QUEUE);
     expect(jql).toContain('"agent:reviewing"');
     expect(jql).toContain('"agent:review-done"');
@@ -340,14 +301,11 @@ describe("buildSolveQueueJql", () => {
 
   it("keeps a positive label clause, which is what makes NOT IN safe", () => {
     // `labels NOT IN (...)` also excludes issues whose labels field is empty.
-    // Harmless only while every candidate is guaranteed at least one label.
     const jql = buildSolveQueueJql(QUEUE);
     expect(jql.indexOf('labels = "agent:solvable"')).toBeLessThan(jql.indexOf("labels NOT IN"));
   });
 
   it("has no time or cursor clause at all", () => {
-    // The defining difference from the new-issue query. A relative window here
-    // would drop a ticket a human labels a week after it was triaged.
     const jql = buildSolveQueueJql(QUEUE);
     expect(jql).not.toContain("created");
     expect(jql).not.toMatch(/-\d+m/);
@@ -383,13 +341,7 @@ describe("buildSolveQueueJql", () => {
   });
 });
 
-/**
- * The concurrency bound's other half.
- *
- * Everything here is about one asymmetry: this query may over-count freely and
- * must never under-count, because an undercount is what lets a second claim
- * through a limit of one.
- */
+/** The concurrency bound's other half: this query may over-count freely but must never under-count. */
 describe("buildInFlightJql", () => {
   const SCOPE = { project: "SSX", components: ["SSX Advisor"] };
 
@@ -400,9 +352,7 @@ describe("buildInFlightJql", () => {
   });
 
   it("counts exactly the tickets the solve queue excludes", () => {
-    // The two queries have to disagree on this label and agree on nothing else,
-    // or the bound is computed from the wrong population. A claimed ticket is
-    // absent from the queue and present here; that is the whole mechanism.
+    // A claimed ticket is absent from the queue and present here; that is the whole mechanism.
     expect(buildInFlightJql(SCOPE)).toContain('labels = "agent:solving"');
     expect(
       buildSolveQueueJql({ ...SCOPE, mode: "manual" as SolveMode, autoIssueTypes: ["Feil"] }),
@@ -410,9 +360,7 @@ describe("buildInFlightJql", () => {
   });
 
   it("counts a claimed ticket even after someone closes it", () => {
-    // The deliberate divergence from the queue query. A solve whose ticket was
-    // closed mid-run is still running; filtering it out here would undercount,
-    // and undercounting a limit of one means two agents in the same repository.
+    // Undercounting a limit of one means two agents in the same repository.
     expect(buildInFlightJql(SCOPE)).not.toContain("statusCategory");
   });
 
@@ -421,9 +369,7 @@ describe("buildInFlightJql", () => {
   });
 
   it("stays inside the same scope the queue claims within", () => {
-    // Not widened to the whole project. This poller only ever writes the claim
-    // inside its component scope, so a stray agent:solving elsewhere is not its
-    // work — and blocking on it forever would be a stall with no findable cause.
+    // This poller only ever writes the claim inside its component scope.
     expect(buildInFlightJql(SCOPE)).toContain('component IN ("SSX Advisor")');
   });
 
@@ -442,14 +388,7 @@ describe("buildInFlightJql", () => {
   });
 });
 
-/**
- * The set the review cycle looks at.
- *
- * Every test here is about the same mistake in a different shape: watching one
- * of the two labels, or excluding a ticket that still has an open pull request.
- * Both leave a pull request the loop opened with nothing that will ever look at
- * it again.
- */
+/** The set the review cycle looks at, guarding against a pull request the loop opened losing its watcher. */
 describe("buildReviewQueueJql", () => {
   const SCOPE = { project: "SSX", components: ["SSX Advisor"] };
 
@@ -461,10 +400,7 @@ describe("buildReviewQueueJql", () => {
   });
 
   it("watches an undrafted pull request as well as a drafting one", () => {
-    // The mutation this is here for: drop agent:review-done and undrafting
-    // silently ends the loop. A human review arriving after the handover is
-    // exactly the feedback the loop was extended to hear, and it lands on a
-    // ticket carrying that label and no other.
+    // Dropping agent:review-done would let an undraft silently end the loop.
     const jql = buildReviewQueueJql(SCOPE);
 
     expect(jql).toContain('"agent:reviewing"');
@@ -472,25 +408,17 @@ describe("buildReviewQueueJql", () => {
   });
 
   it("is a disjunction, not a conjunction", () => {
-    // `labels = a AND labels = b` is a ticket carrying both, which no ticket
-    // ever does — the two are mirror images written in one edit. That mutation
-    // yields an always-empty queue, which reads as "nothing to do" rather than
-    // as a malfunction, and is the reason this is checked separately from the
-    // verbatim string.
+    // `labels = a AND labels = b` matches no ticket, since the two labels are mirror images.
     expect(buildReviewQueueJql(SCOPE)).not.toContain("labels =");
   });
 
   it("keeps watching a pull request whose ticket someone closed", () => {
-    // Same direction as the in-flight query and one reason more: the look is
-    // what writes agent:done or agent:closed when the pull request ends, so
-    // filtering the ticket out here strands the label with nothing to clear it.
+    // The look is what writes agent:done or agent:closed when the pull request ends.
     expect(buildReviewQueueJql(SCOPE)).not.toContain("statusCategory");
   });
 
   it("does not restate the terminals as an exclusion", () => {
-    // They are written in the same edit that removes the labels above, so a
-    // ticket carrying one is already outside the positive clause. A second copy
-    // of that rule is a second thing to keep in step.
+    // Terminals are written in the same edit that removes the labels above.
     expect(buildReviewQueueJql(SCOPE)).not.toContain("NOT IN");
   });
 
@@ -518,26 +446,17 @@ describe("buildSendbackWatchJql", () => {
   });
 
   it("returns closed tickets, so that something can unsubscribe them", () => {
-    // The plan asked for `statusCategory != Done` here and also asked that a
-    // closed ticket have its watch label removed. Both cannot hold: a ticket
-    // this query hides is a ticket no loop can clean up, so the label would
-    // outlive the ticket claiming a subscription nothing honours. Including
-    // them is free — a closed ticket is a look that decides "unsubscribe"
-    // without paying for a triage run.
+    // A ticket this query hides is one no loop can ever clean the watch label off.
     expect(buildSendbackWatchJql(SCOPE)).not.toContain("statusCategory");
   });
 
   it("does not restate the terminals as an exclusion", () => {
-    // agent:watching is removed in the same edit that writes whatever replaced
-    // it, so a ticket that moved on is already outside the positive clause.
+    // agent:watching is removed in the same edit that writes whatever replaced it.
     expect(buildSendbackWatchJql(SCOPE)).not.toContain("NOT IN");
   });
 
   it("selects the watch label and nothing broader", () => {
-    // The mutation that matters on the invoice: widen this to the send-back
-    // verdict's own labels — needs-info, dor:gaps — and the watch subscribes to
-    // a set far too large to pay for, which is the reason `plausible` exists as
-    // a separate field at all.
+    // Widening to the send-back verdict's own labels would subscribe the watch to a far larger set.
     const jql = buildSendbackWatchJql(SCOPE);
 
     expect(jql).toContain('labels = "agent:watching"');

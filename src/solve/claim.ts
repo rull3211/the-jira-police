@@ -1,78 +1,10 @@
 /**
- * The claim — the one write that takes a ticket out of the solve queue — and the
- * release that puts it back.
- *
- * `poller.ts` plans this edit and cannot make it. This module makes it, and it
- * lives in its own file because it is the most dangerous write in the service
- * despite being much the smallest: the poster writes a comment nobody else was
- * competing for, this one writes a field the whole board shares.
- *
- * ## Why it is dangerous, and what stopped being dangerous
- *
- * ARCHITECTURE.md §14.11 described this module's central hazard, and the
- * description no longer holds. It is rewritten here rather than left standing,
- * because a comment explaining a risk that has been removed is worse than no
- * comment: it teaches the next reader to design around a constraint that is
- * gone.
- *
- * **What it used to say.** The only write path was MCP `editJiraIssue`, which
- * exposes `fields` — never Jira's own `update.labels.add` / `remove`. So there
- * was no way to touch one label: the whole field was replaced, set semantics,
- * every time. Claiming meant read all N, subtract `agent:start`, add
- * `agent:solving`, write all N back. Anything anybody added between the read and
- * the write was destroyed by the write, and destroyed *silently* — a PM adding
- * `next:to-trio` mid-claim lost the edit with nothing in either history
- * explaining it, because a full-field set is indistinguishable from a deliberate
- * removal. Invariant 5 reads *delta, never a replacement array*, and the claim
- * could not honour it.
- *
- * **What changed.** The constraint was never Jira's — it was the tool's. Jira's
- * REST API has supported `update.labels` with per-label operations all along, so
- * the claim now goes through `JiraClient.updateLabels` and this module sends a
- * `LabelEdit`, not a set. Jira applies the delta server-side. There is no
- * read-modify-write, therefore no window, therefore nothing to clobber. That is
- * an *elimination*, not a narrowing, and it is why `writeLabels` became
- * `applyLabels`: a capability that cannot express a replacement array cannot be
- * used to commit the old mistake.
- *
- * The cost is a documented amendment to the standing rule that the REST
- * credential is discovery-only. It is narrowed three ways at the credential
- * itself — labels only, `agent:` namespace only, comments still on the MCP path,
- * all mechanical — and the reasoning is in `jira/client.ts`.
- *
- * ## What is left, which is not nothing
- *
- * - **Still no compare-and-swap.** Two racers both succeed. The queue's dedupe
- *   is "`agent:solving` is on the ticket", which is a check, not a lock. A delta
- *   write is atomic per label; it is not conditional on the ticket's state.
- *   `MAX_CONCURRENT_SOLVES=1` on one host is what covers this.
- *
- * - **Re-read immediately before deciding.** `SolveCandidate.labels` came off a
- *   JQL search, and a whole cycle of sorting, allowlist checks and capacity
- *   arithmetic happened after it. So this module accepts no label snapshot from
- *   its caller at all: `ClaimRequest` has no labels field, which makes handing it
- *   a stale set a type error rather than a judgement call. This is no longer
- *   about the clobber — the delta does not care what else is on the ticket — but
- *   about *eligibility*: claiming a ticket somebody withdrew is still wrong.
- *
- * - **Re-check eligibility against what was just read.** If `agent:solving` has
- *   appeared since, somebody else claimed it; if `agent:solvable` has gone, the
- *   assessment the claim rests on has been withdrawn. Both answers are "refuse",
- *   and refusing before the write is the only refusal that costs nothing.
- *
- * - **Read back afterwards and verify.** Kept, and it now means what it always
- *   claimed to. The old read-back could not see an edit we had clobbered — the
- *   label was absent from the set we sent *and* from the set we read back, so it
- *   matched perfectly and was gone. With a delta there is no such blind spot:
- *   every difference between the intended state and the observed state is a real
- *   difference, caused by somebody else, and is reported as its own outcome.
- *
- * ## Injection
- *
- * Capabilities arrive the way `SolveDeps` takes them, for the same reason: every
- * rule above is then testable against fakes with no live board and no
- * credentials, including the races, which are otherwise untestable at all.
- * Nothing here imports the REST client; `wiring.ts` supplies the adapter.
+ * The claim and release — the single write that takes a ticket off the solve queue and its
+ * inverse — sent as a label delta (`JiraClient.updateLabels`), not a full-field replace, which
+ * is what closed the clobber hazard architecture/invariants.md §14.11 describes.
+ * Still no compare-and-swap (`MAX_CONCURRENT_SOLVES=1` covers races); re-reads immediately
+ * before writing and verifies the read-back, since a bystander edit is no longer at risk but
+ * eligibility can still have changed underneath the queue's stale snapshot.
  */
 
 import { logger } from "../logger.ts";
@@ -87,19 +19,9 @@ import {
 } from "./labels.ts";
 
 /**
- * The two things a claim needs from the outside world, and no third thing.
- *
- * Deliberately not `getJiraIssue` / `editJiraIssue`. A narrower interface is a
- * narrower privilege: an implementation of this cannot transition the issue,
- * comment on it, or edit any field other than labels, and a reviewer can see
- * that from the type without reading the implementation.
- *
- * `applyLabels` takes a `LabelEdit` and not an array, which is the type doing
- * the safety work. The old `writeLabels(key, labels)` could only ever mean
- * "replace the field with this", so every caller was obliged to compute a whole
- * set and every implementation was obliged to clobber. There is no way to pass
- * a replacement array through this signature, so the mistake is unavailable
- * rather than merely discouraged.
+ * Deliberately not `getJiraIssue`/`editJiraIssue` — an implementation of this cannot transition,
+ * comment, or edit any field but labels. `applyLabels` takes a `LabelEdit`, not an array, so a
+ * caller has no way to pass a replacement set.
  */
 export interface ClaimCapabilities {
   readLabels: (issueKey: string) => Promise<readonly string[]>;
@@ -107,17 +29,8 @@ export interface ClaimCapabilities {
 }
 
 /**
- * What to claim, and on whose authority.
- *
- * Note what is missing: the ticket's labels. They are read here, once, at the
- * last possible moment. A `labels` field would be an invitation to pass the ones
- * the queue fetched, which are exactly the stale ones.
- *
- * The field was called `mode` and held a `SolveMode`, which was accurate while
- * the poller was the only caller. It is `authority` now because a CLI run
- * naming one ticket is not a mode the service is in — nothing is configured, no
- * loop is running, and the value cannot come from settings. Reading `mode:
- * "named"` at a call site would have suggested all three.
+ * What to claim, and on whose authority. No `labels` field on purpose: they're read fresh at
+ * the last moment, so passing the queue's stale snapshot isn't possible.
  */
 export interface ClaimRequest {
   readonly issueKey: string;
@@ -125,17 +38,9 @@ export interface ClaimRequest {
 }
 
 /**
- * Proof that a claim landed, and the means of undoing it.
- *
- * `labelsBefore` is the whole point of this object. Release is not "remove
- * `agent:solving`" — that would leave the ticket missing the `agent:start` the
- * claim consumed, which is a different ticket from the one we found. It is
- * "restore precisely the set that was there", and that set exists nowhere on the
- * board once the claim is written, so it has to be carried.
- *
- * Only produced by a claim that was written *and* verified. An unverified claim
- * yields no receipt at all, which is what stops it being released mechanically —
- * see `ClaimResult`.
+ * Proof a claim landed, and what release needs to undo it. `labelsBefore` is the restore point —
+ * the only surviving record of the pre-claim set once the claim is written.
+ * Produced only by a write that was verified; see `ClaimResult`.
  */
 export interface ClaimReceipt {
   readonly issueKey: string;
@@ -154,28 +59,12 @@ export interface LabelDiff {
 }
 
 /**
- * The outcome of a claim attempt, as three mutually exclusive things.
- *
- * A discriminated union rather than a boolean plus fields, and rather than a
- * throw, because the three outcomes want three different responses and only one
- * of them is an error:
- *
- * - `refused` is a **normal** outcome. The board moved between the queue reading
- *   it and this function reading it, which is precisely the condition the queue
- *   is stateless in order to tolerate. Nothing was written. Throwing here would
- *   make an ordinary race look like a fault.
- * - `unverified` is the dangerous one, and the shape is doing work. It carries no
- *   `ClaimReceipt`, so a caller cannot reach `labelsAfter` on it, cannot pass it
- *   to `releaseClaim`, and cannot narrow to the success branch without writing
- *   the literal `"claimed"`. "Read the result and hope the caller checks" is how
- *   §8's `agentFitness` got dropped on the floor for a run.
- * - `claimed` is the only branch carrying the receipt, and therefore the only one
- *   from which work can proceed.
- *
- * Genuine faults — the write rejecting, the read-back rejecting — throw
- * `ClaimWriteError`, because those leave the ticket in a state this function
- * cannot describe and an exception is the one return value nobody accidentally
- * ignores.
+ * Three mutually exclusive outcomes, not a boolean-plus-fields or a throw: `refused` is a normal
+ * race (nothing written), `unverified` carries no `ClaimReceipt` so a caller can't reach
+ * `labelsAfter` or pass it to `releaseClaim` without narrowing on the literal `"claimed"` —
+ * "read the result and hope the caller checks" is how §8's `agentFitness` got dropped once —
+ * and `claimed` is the only branch work can proceed from.
+ * Genuine faults (write or read-back rejecting) throw `ClaimWriteError` instead.
  */
 export type ClaimResult =
   | { readonly outcome: "claimed"; readonly receipt: ClaimReceipt }
@@ -209,16 +98,9 @@ export type ReleaseResult =
     };
 
 /**
- * A fault, as opposed to a refusal: the ticket is in a state we cannot describe.
- *
- * Carries `restorePoint` — the label set that puts the ticket back where it was
- * found — because that set exists nowhere else once the write has been attempted,
- * and a human reaching for it is reaching for it at the worst possible moment.
- *
- * `phase` separates the two unlike disasters. `"write"` means the edit may or may
- * not have landed; the board is the only oracle. `"verify"` means it did land and
- * we could not check it, which is the same danger as an `unverified` result with
- * none of the detail.
+ * A fault, not a refusal: the ticket is in a state this function cannot describe. Carries
+ * `restorePoint` since that set exists nowhere else once the write is attempted.
+ * `phase` distinguishes "may not have landed" (`write`) from "landed but couldn't be verified" (`verify`).
  */
 export class ClaimWriteError extends Error {
   readonly issueKey: string;
@@ -249,35 +131,11 @@ function agrees(diff: LabelDiff): boolean {
 }
 
 /**
- * Did the delta take? Asked of the delta, not of the whole field.
- *
- * This replaced a full-set comparison, and the reason is worth stating because
- * the full-set version looks stricter and was in fact wrong. Once the write is
- * a delta, the ticket's other labels are not something this service predicted,
- * so a bystander label appearing between the write and the read-back is a
- * colleague working — not a failed claim. Comparing whole sets reported every
- * one of those as `unverified`: a check that fires on innocent events, which is
+ * Did the delta take? Compares only what was requested — every added label present, every
+ * removed label gone — not the whole field: a bystander label appearing mid-write is a
+ * colleague working, not a failed claim, and a whole-set comparison used to flag it, which is
  * how a check ends up switched off (§8).
- *
- * What is actually being verified is the only thing that was actually
- * requested: every label we added is there, and every label we removed is gone.
- *
- * The `LabelDiff` vocabulary survives intact and still means what it says.
- * `vanished` is "we wrote it and it is not there" — the claim did not take.
- * `appeared` is "we removed it and it is still there" — the removal did not
- * take. `mismatchNotes` reads both without knowing which comparison produced
- * them.
- *
- * The full-set comparator it replaced (`diffLabels`) was deleted rather than
- * left exported-but-unused. It read as the stricter of the two and every future
- * check would have been tempted by it, so leaving it in the file would have left
- * the wrong answer sitting next to the right one with nothing to distinguish
- * them but this comment.
- *
- * Order-insensitivity carries over from that one and is still deliberate: Jira
- * makes no promise about the order labels come back in, and a claim reported as
- * failed because two untouched labels swapped places would be a false positive
- * on every single write.
+ * Order- and duplicate-insensitive, since Jira makes no promise about label order.
  */
 function diffEdit(change: LabelEdit, observed: readonly string[]): LabelDiff {
   const live = new Set(observed);
@@ -293,23 +151,11 @@ type LabelRead =
   | { readonly ok: false; readonly reason: string };
 
 /**
- * Validates a label read before anything is decided from it, or written back.
- *
- * The parameter is `unknown` rather than `readonly string[]` because the value
- * crossed a process boundary to get here — in production it is whatever an MCP
- * tool call parsed out of a Jira response — and the declared type of
- * `ClaimCapabilities.readLabels` is a promise the boundary is in no position to
- * keep. Everything that follows treats this array as the ticket's complete truth
- * and writes it straight back, so a garbled read is not a display problem: it is
- * a set of labels about to be deleted.
- *
- * Every unreadable answer refuses. An empty array is *not* unreadable — a ticket
- * genuinely can have no labels — and needs no special case, because eligibility
- * then refuses it for the honest reason that `agent:solvable` is missing.
- *
- * Duplicates are collapsed. Jira labels are a set, so a repeat is noise from the
- * transport rather than information, and sending it back would fail verification
- * for a difference that means nothing.
+ * Validates a label read before it's trusted and written back. Takes `unknown` because the
+ * value crossed a process boundary (an MCP tool's parse of a Jira response) that the declared
+ * return type cannot actually guarantee, and a garbled read here is about to be written straight
+ * back as the ticket's complete truth.
+ * An empty array is valid; duplicates are collapsed as transport noise, not information.
  */
 function readable(raw: unknown, source: string): LabelRead {
   if (!Array.isArray(raw)) {
@@ -342,15 +188,8 @@ function readable(raw: unknown, source: string): LabelRead {
 }
 
 /**
- * Turns a read-back difference into something an operator can act on.
- *
- * Two of the differences get named individually because they mean specific
- * things. `agent:solving` missing is the claim not taking at all — the ticket is
- * back in the queue and whatever we are about to do to it, somebody else may be
- * doing too. `agent:start` reappearing means the human authorisation was not
- * consumed, so the next cycle will treat it as freshly approved. Everything else
- * is printed as the raw diff, because the interesting cases there are the ones
- * nobody predicted.
+ * Turns a read-back difference into something an operator can act on. `agent:solving` missing
+ * means the claim didn't take; `agent:start` reappearing means the authorisation wasn't consumed.
  */
 function mismatchNotes(diff: LabelDiff): readonly string[] {
   const notes: string[] = [];
@@ -374,19 +213,10 @@ function mismatchNotes(diff: LabelDiff): readonly string[] {
 }
 
 /**
- * Claims a ticket: `agent:solving` on, `agent:start` off, in one write.
- *
- * Exactly three capability calls, in exactly this order: read, write, read. The
- * middle one is bracketed as tightly as the interface allows, and the arithmetic
- * between the first two is pure `labels.ts` — the state machine is imported, never
- * restated, so there is one place where the transition is defined and this is not
- * it.
- *
- * `claimTransition` is called even though `eligibility` has just passed, and it
- * re-runs the same check. That is not waste. It is the function that owns the
- * definition of the claim, and letting it re-derive its own precondition means a
- * future edit to the state machine cannot be defeated by this call site holding a
- * stale opinion about when the transition is legal.
+ * Claims a ticket: `agent:solving` on, `agent:start` off, in one write — exactly read, write,
+ * read, with the transition owned by `labels.ts` and never restated here.
+ * `claimTransition` re-runs the eligibility check `eligibility` just passed, so a future state
+ * machine edit can't be defeated by this call site's stale opinion.
  */
 export async function claimTicket(
   capabilities: ClaimCapabilities,
@@ -412,9 +242,7 @@ export async function claimTicket(
   }
 
   const change = claimTransition(labelsBefore, authority);
-  // What the ticket should read afterwards, computed locally and used only to
-  // check the read-back against. It is not what is sent — `change` is — and
-  // conflating the two is the mistake this module used to be built around.
+  // Computed locally to check the read-back against — not what is sent (`change` is).
   const expected = applyEdit(labelsBefore, change);
 
   try {
@@ -448,24 +276,11 @@ export async function claimTicket(
 }
 
 /**
- * Puts a claimed ticket back exactly as it was found.
- *
- * The Phase B2 experiment this exists for is *claim one ticket, confirm a second
- * `solve:once` picks nothing up, release it, confirm the ticket ends where it
- * started* — so "exactly" is the requirement rather than a nicety. A release that
- * merely removed `agent:solving` would leave the ticket without the `agent:start`
- * the claim consumed, and the experiment would end with a ticket that is neither
- * claimed nor approved: the queue would ignore it, and the person who approved it
- * would have to approve it again without being told why.
- *
- * It is the same read-modify-write as the claim and carries the same hazard, so
- * it takes the same shape — read last, arithmetic only, verify after — with one
- * extra refusal on top. Before restoring, the live set must still be the set the
- * claim left behind. If it is not, somebody has edited the ticket while it was
- * claimed, and writing `labelsBefore` over that would destroy their edit to undo
- * ours. Fail closed: refuse, name the drift, and leave the ticket for a person.
- * The cost of refusing is an `agent:solving` a human removes by hand; the cost of
- * proceeding is the silent clobber §14.11 is about, committed deliberately.
+ * Puts a claimed ticket back exactly as it was found — `agent:start` restored, not just
+ * `agent:solving` removed, or the ticket ends up neither claimed nor approved.
+ * Same read-modify-write shape and hazard as the claim, plus one refusal: if the live set no
+ * longer matches what the claim left behind, someone edited the ticket while claimed, and
+ * overwriting that would be the clobber §14.11 is about, done deliberately. Fails closed instead.
  */
 export async function releaseClaim(
   capabilities: ClaimCapabilities,
@@ -473,11 +288,7 @@ export async function releaseClaim(
 ): Promise<ReleaseResult> {
   const { issueKey, labelsBefore, labelsAfter } = receipt;
 
-  // Checked before the read rather than after, because it is a fact about the
-  // receipt and not about the board. A receipt whose restore point still carries
-  // the claim would "release" the ticket into the state of being claimed, which
-  // no sequence of real calls produces and a hand-built receipt easily does —
-  // and hand-building one is the documented way to recover an unverified claim.
+  // Checked before the board read since it's a fact about the receipt: a restore point still carrying the claim would "release" into a claimed state, which only a hand-built receipt can produce.
   const restorePoint = readable(labelsBefore, `the receipt for ${issueKey}`);
   if (!restorePoint.ok) {
     return refusedRelease(
@@ -507,42 +318,13 @@ export async function releaseClaim(
     );
   }
 
-  // The exact inverse of the claim, derived from the receipt — the two label
-  // sets this service itself observed either side of its own write — and not
-  // from `live`.
-  //
-  // Deriving it from `live` reads as the more careful version, and is the
-  // clobber back again by another route: a `next:to-trio` a PM added while the
-  // ticket was claimed is present in `live` and absent from the restore point,
-  // so "remove whatever `live` has that the restore point lacks" would delete
-  // it. The receipt names the two labels this service actually wrote, and those
-  // are the only two it is entitled to undo.
-  //
-  // `labelEdit` refuses a delta that both adds and removes the same label, which
-  // cannot arise here — the two sets are compared by membership — but the
-  // constructor is used anyway so that there is exactly one place in the
-  // codebase where a delta comes into existence unchecked, and it is not this
-  // one.
+  // Derived from the receipt, not `live`: deriving from `live` would delete a bystander label (e.g. a PM's `next:to-trio`) present in `live` but absent from the restore point.
   const change = labelEdit(
     labelsBefore.filter((label) => !labelsAfter.includes(label)),
     labelsAfter.filter((label) => !labelsBefore.includes(label)),
   );
 
-  // Drift, narrowed to the labels the release is about to touch.
-  //
-  // This used to compare the whole field against `labelsAfter`, and had to: the
-  // release wrote the whole field, so *anything* that moved while the ticket was
-  // claimed was about to be overwritten, and refusing was the only safe answer.
-  // A delta cannot overwrite what it does not name, so a colleague's label
-  // arriving mid-solve is no longer a reason to strand `agent:solving` on the
-  // board and make a human clear it.
-  //
-  // What still refuses is the claim's own edit coming undone: `agent:start` back
-  // on, or `agent:solving` off (the explicit check above catches that one first,
-  // with a better sentence). Those two are what the claim asserted, so they are
-  // what the release may assume before undoing it. Checking the inverse of the
-  // inverse looks roundabout written down; it is the claim's edit, recovered
-  // from the only record of it that survives into this function.
+  // Drift narrowed to the labels the release touches: what still refuses is the claim's own edit coming undone (`agent:start` back on, `agent:solving` off), not a bystander label moving.
   const drift = diffEdit(labelEdit(change.remove, change.add), live);
   if (!agrees(drift)) {
     return refusedRelease(
@@ -553,10 +335,7 @@ export async function releaseClaim(
     );
   }
 
-  // What the ticket should read afterwards: the live set with the release
-  // applied, not the pre-claim set. The two differ by exactly the bystander
-  // labels the paragraph above stopped refusing over, and predicting the
-  // pre-claim set would mean reporting every one of them as a mismatch.
+  // Expected is `live` with the release applied, not the pre-claim set — they differ by bystander labels that no longer count as mismatches.
   const expected = applyEdit(live, change);
 
   try {
@@ -586,15 +365,8 @@ export async function releaseClaim(
 }
 
 /**
- * The read-back, with both ways of not getting one collapsed into a fault.
- *
- * A rejected read and an unreadable read differ only in how the transport
- * expressed itself; in both cases the write landed and there is no answer to the
- * question of what it landed as. That is not the same event as a read-back that
- * arrived and disagreed, and keeping them apart is what lets `unverified` mean
- * exactly one thing — *verification ran and the ticket is not what we wrote* —
- * with a populated diff every time. An `unverified` result whose `appeared` and
- * `vanished` were both empty would be a third meaning smuggled into the second.
+ * Collapses a rejected and an unreadable read-back into the same fault — both mean the write
+ * landed with no way to know what it landed as, distinct from a read-back that arrived and disagreed.
  */
 async function verifiableRead(
   capabilities: ClaimCapabilities,

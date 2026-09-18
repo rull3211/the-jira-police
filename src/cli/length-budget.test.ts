@@ -1,20 +1,10 @@
 /**
- * The word budget, and the four properties that separate it from a number
- * somebody wrote down once.
+ * Each case here is written against a plausible wrong implementation, named in the case, rather
+ * than a defect that happened — `KNOWN_DANGLING` in `docs-check.ts` is one such implementation,
+ * written down, one file over.
  *
- * This guard has no incident of its own — it exists because of a *class* of
- * incident, a corpus that tripled while every check stayed green — so, as in
- * `pinned-prose.test.ts`, each case is written against the plausible wrong
- * implementation rather than against a defect that happened, and the version
- * that would pass without the guard is named in the case. The wrong
- * implementation is not hypothetical here: `KNOWN_DANGLING` in `docs-check.ts`
- * is it, written down, one file over.
- *
- * The mechanics are exercised against **synthetic budgets** and only the two
- * standing facts — that the tree is inside its bands, and that the count is
- * `wc -w` — are asserted against the real documents. A test that has to be
- * rewritten every time a sentence is cut is a test that gets rewritten until it
- * asserts nothing.
+ * Exercised against synthetic budgets; only the two standing facts (the tree is inside its bands,
+ * and the count matches `wc -w`) are asserted against the real documents.
  */
 
 import { execFileSync } from "node:child_process";
@@ -50,11 +40,7 @@ function wordsByWc(path: string): number {
   return Number(out.trim().split(/\s+/)[0]);
 }
 
-/**
- * Two documents standing in for the mandatory-reading path, shaped like it:
- * bands of `measured - 120` to `measured + 2%`, and an aggregate floor of the
- * measured total less one band. `one.md` measures 500 and `two.md` 1000.
- */
+/** Two documents standing in for the mandatory-reading path: `one.md` measures 500, `two.md` 1000. */
 const FAKE: readonly Budget[] = [
   { path: "one.md", floor: 380, ceiling: 510 },
   { path: "two.md", floor: 880, ceiling: 1020 },
@@ -68,10 +54,7 @@ function sizes(one: number, two: number): Map<string, number> {
   ]);
 }
 
-/**
- * A document with everything anyone might argue should not count: frontmatter,
- * a table, a fenced block, and a paragraph the formatter hard-wrapped.
- */
+/** A document with everything anyone might argue should not count: frontmatter, a table, a fence. */
 const FIXTURE = [
   "---",
   "title: A budgeted document",
@@ -97,11 +80,7 @@ const FIXTURE = [
 
 describe("the number everyone will argue about", () => {
   it("counts frontmatter, table pipes and fence contents, exactly like wc -w", () => {
-    // Pinned twice on purpose: against a literal, so the definition cannot be
-    // quietly reinterpreted, and against `wc -w` itself, so it cannot drift
-    // from the command every reader will check it with. An implementation that
-    // skipped frontmatter or fences would still be self-consistent — and every
-    // word it stopped counting is still a word an agent has to read.
+    // Pinned against both a literal and `wc -w` itself, so it can't drift from either.
     const path = join(mkdtempSync(join(tmpdir(), "length-budget-")), "fixture.md");
     writeFileSync(path, FIXTURE);
 
@@ -128,9 +107,7 @@ describe("the tree as it stands", () => {
   });
 
   it("has individual ceilings that sum to the aggregate ceiling", () => {
-    // Not decoration. Any larger aggregate ceiling is slack layered on top of
-    // the per-file bands, and slack is how one file gets robbed to pay another
-    // with the total still green.
+    // A larger aggregate ceiling would be slack one file could be robbed to pay another with.
     expect(aggregateCeiling()).toBe(BUDGETS.reduce((total, b) => total + b.ceiling, 0));
     expect(AGGREGATE_FLOOR).toBeLessThan(aggregateCeiling());
   });
@@ -149,16 +126,8 @@ describe("what it catches", () => {
   });
 
   it("the budget must be lowered when the file shrinks", () => {
-    // The anti-KNOWN_DANGLING assertion, and the first one someone will delete
-    // when it is inconvenient. Unplugged: make this a ceiling instead of a
-    // band. It passes on the day of the cut and every day after, the budget
-    // goes on blessing words that were already removed, and the next several
-    // hundred words of growth are free. That is not hypothetical — it is
-    // `KNOWN_DANGLING`, which argues for exactly this in its own docstring,
-    // implements the ceiling half, and has not moved since it was written.
-    //
-    // The aggregate is switched off here (floor 0) so the assertion is about
-    // the per-file band alone; the two firing together has its own case below.
+    // The anti-KNOWN_DANGLING assertion: unplug the floor and a ceiling alone keeps blessing
+    // words already removed. Aggregate floor is 0 here so this is about the per-file band alone.
     const problems = budgetProblems(sizes(350, 1000), FAKE, 0);
 
     expect(problems).toHaveLength(1);
@@ -169,11 +138,7 @@ describe("what it catches", () => {
   });
 
   it("reports the total when every individual file is inside its band", () => {
-    // Both files lose 100 words. Both bands are satisfied — the per-file floors
-    // sum to 1260, well under the total's 1380 — and 200 words have gone from
-    // the path an agent must read with nothing per-file to see it. This is the
-    // erosion only the aggregate catches, and the reason it carries a floor of
-    // its own rather than the sum of the parts.
+    // Both per-file floors are satisfied while 200 words erode from the path — only the aggregate floor catches this.
     const problems = budgetProblems(sizes(400, 900), FAKE, FAKE_FLOOR);
 
     expect(problems).toHaveLength(1);
@@ -182,10 +147,7 @@ describe("what it catches", () => {
   });
 
   it("catches words moved between two budgeted files, from both ends", () => {
-    // The other half of that argument. A 200-word transfer leaves the total
-    // untouched, so the aggregate cannot see it and the per-file bands must —
-    // which is why the ceilings sum exactly rather than the total being a
-    // second, looser opinion.
+    // A transfer between files leaves the total untouched, so only the per-file bands can catch it.
     const problems = budgetProblems(sizes(300, 1200), FAKE, FAKE_FLOOR);
 
     expect(problems).toHaveLength(2);
@@ -196,9 +158,7 @@ describe("what it catches", () => {
   });
 
   it("reports the file and the total when a single cut is big enough to be both", () => {
-    // Deliberately two messages and not one. A file 30 words under its floor
-    // puts the total 30 under its own, because the bands are the same width;
-    // both statements are true and both budgets have to move.
+    // Deliberately two messages, not one: both budgets have to move.
     const problems = budgetProblems(sizes(350, 1000), FAKE, FAKE_FLOOR);
 
     expect(problems).toHaveLength(2);
@@ -226,11 +186,7 @@ describe("a ceiling can only be lowered", () => {
   ];
 
   it("reads its own source, so the ratchet cannot go quiet on a reformat", () => {
-    // Unplugged: the whole mechanism reads the committed file as *text*. Put
-    // the entries in a shape the parser does not match — a reformat, a helper,
-    // a spread — and `raisedCeilings` compares against nothing, every raise is
-    // allowed, and the check reports green forever. That is the fail-open the
-    // rest of docs:check is built against, and this is what turns it red.
+    // Unplugged: a reformat the parser doesn't match leaves `raisedCeilings` comparing against nothing, and every raise passes.
     expect(parseBudgets(read("src/cli/length-budget.ts"))).toEqual([...BUDGETS]);
   });
 
@@ -268,9 +224,7 @@ describe("a ceiling can only be lowered", () => {
   });
 
   it("does not accept an override with no reason", () => {
-    // A bare file name is the form somebody reaches for when the point is to
-    // get past the check rather than to justify anything, and it is the form
-    // that leaves a log nobody can read afterwards.
+    // A bare file name is the form reached for to get past the check rather than to justify anything.
     const raises = raisedCeilings(parseBudgets(committed), raised);
 
     expect(ratchetProblems(raises, "one.md")).toHaveLength(1);
@@ -299,14 +253,8 @@ describe("a ceiling can only be lowered", () => {
 });
 
 /**
- * The ratchet's baseline, which an audit caught comparing a file to itself.
- *
- * The first version read `git show HEAD:...`. On any ref CI checks out the
- * working tree *is* `HEAD`, so it compared the file to itself, returned no
- * raises, and passed — the whole argument for why this file is not
- * `KNOWN_DANGLING`, inert on the only ref that matters. These assertions are
- * about which revision is asked for, because that is the entire defect: the
- * comparison was always correct and was always handed the wrong input.
+ * The first version of this baseline read `git show HEAD:...`, which on any CI ref is the working
+ * tree comparing itself to itself and always passes; these assertions pin which revision is asked for.
  */
 /** A committed `length-budget.ts`, in the shape `parseBudgets` reads. */
 const sourceFor = (budgets: readonly Budget[]): string =>
@@ -359,10 +307,7 @@ describe("the baseline the ceiling is judged against", () => {
   });
 
   it("permits everything when the baseline predates this file, which is this branch", () => {
-    // Not a bug and not a pass: `git show <base>:src/cli/length-budget.ts` fails
-    // on the branch that adds the file, so there is no prior ceiling and the
-    // ratchet is inert until this lands on the default branch. Pinned because
-    // the same silence covers a rename, which would reset every ceiling.
+    // Correct here (no prior ceiling exists yet) but the same silence also covers a rename.
     expect(
       raisedCeilings(parseBudgets(""), [{ path: "one.md", floor: 1, ceiling: 99_999 }]),
     ).toEqual([]);
@@ -374,10 +319,10 @@ describe("the baseline the ceiling is judged against", () => {
       ...FAKE.slice(1),
     ];
 
-    // What the old wiring did: the tip against itself. Always empty, always green.
+    // The tip against itself: always empty, always green.
     expect(raisedCeilings(parseBudgets(sourceFor(raised)), raised)).toEqual([]);
 
-    // What it does now: the tip against where the branch forked from.
+    // The tip against where the branch forked from.
     expect(raisedCeilings(parseBudgets(forkPoint), raised)).toEqual([
       { path: "one.md", from: 510, to: 900 },
     ]);

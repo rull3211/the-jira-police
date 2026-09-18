@@ -1,27 +1,11 @@
 /**
- * Two functions from `solve-run.ts`, and both are here because of what is *not*.
+ * Two functions from `solve-run.ts`, tested here because `solve-run.ts` has no general test
+ * harness for the rest of its dependencies.
  *
- * `solve-run.ts` has no general test harness — nothing in this tree constructs
- * `runWriteRungs`'s dependencies, which is why D4e could measure that its own
- * call-site mutation survives the whole suite. That gap is recorded at the call
- * site and is still not closed. What is covered here is the two places where
- * the *absence* of a test was itself the defect:
- *
- * `sleep` is the only line in the review chain that has to hold the process
- * open, it did the opposite for a day, and the failure is invisible to every
- * kind of test this repository usually writes. It has to be a child process. A
- * unit test cannot observe "the event loop stayed alive" from inside a runner
- * that is itself holding the loop open — Vitest's own timers, workers and file
- * handles keep the process up no matter what `sleep` does, so an in-process
- * assertion would pass against both the broken version and the fixed one. The
- * thing being tested is a property of a program, so the test runs a program.
- *
- * `createReviewAct`'s refused-checkout branch is the daemon's copy of a branch
- * `advance` also has, and the copy that ran against PR #2663 every two minutes
- * for four days without recording a thing. `delivery.test.ts` covers the other
- * copy thoroughly; that coverage is exactly what made this one look tested. A
- * duplicated branch nothing constructs is where two copies drift, and the
- * direction they drifted last time was silence.
+ * `sleep` runs as a child process because a unit test cannot observe "the event loop stayed
+ * alive" from inside a runner that is itself holding the loop open. `createReviewAct`'s
+ * refused-checkout branch is a duplicate of one `advance` already has, tested separately since
+ * nothing else constructs it.
  */
 
 import { execFileSync } from "node:child_process";
@@ -39,20 +23,16 @@ const SOLVE_RUN = fileURLToPath(new URL("./solve-run.ts", import.meta.url));
 /**
  * How long the child is asked to sleep.
  *
- * Long enough that an unref'd timer loses the race by a wide margin — the
- * broken version exits in the time it takes to load the module, which is
- * milliseconds — and short enough that this test is not the reason anyone stops
- * running the suite.
+ * Long enough that an unref'd timer loses the race by a wide margin, short enough that this
+ * test is not the reason anyone stops running the suite.
  */
 const SLEEP_MS = 400;
 
 /**
  * The margin below which we call it "did not wait".
  *
- * Deliberately well under `SLEEP_MS` rather than equal to it. A loaded machine
- * can overshoot a timer but cannot undershoot one, so the only way to land
- * below this is not to have waited at all, and a tight bound would fail on
- * timer granularity instead of on the defect.
+ * Deliberately well under `SLEEP_MS`, not equal to it — a loaded machine can overshoot a timer
+ * but cannot undershoot one, so a tight bound would fail on timer granularity instead of the defect.
  */
 const WAITED_AT_LEAST_MS = 200;
 
@@ -80,10 +60,8 @@ describe("sleep", () => {
       ].join("\n"),
     );
 
-    // Restore the `.unref()` and this is where it fails: the child prints
-    // nothing at all, because it exits before the timer fires. The elapsed
-    // assertion below is the readable one; this is the one that actually
-    // catches the mutation.
+    // The line that actually catches the mutation: an unref'd timer exits the child before it
+    // fires, so it prints nothing at all.
     expect(stdout).toMatch(/^waited:\d+$/);
 
     const waited = Number(stdout.slice("waited:".length));
@@ -92,11 +70,8 @@ describe("sleep", () => {
   });
 
   it("exits zero rather than 13, which is how the defect actually presented", () => {
-    // `solve-once.ts` awaits the chain at the top level. An unref'd sleep makes
-    // Node drain the loop with that await unsettled, and it exits 13 with a
-    // warning rather than an error — so the run looked like a crash with no
-    // stack, on a ticket that had already been claimed, solved and published.
-    // Asserting the code pins the symptom a future reader will search for.
+    // An unref'd sleep makes Node drain the loop with the top-level await unsettled, exiting 13
+    // with a warning rather than an error — a crash with no stack on an already-published ticket.
     const { status } = runChild(
       [`import { sleep } from ${JSON.stringify(SOLVE_RUN)};`, `await sleep(${SLEEP_MS});`].join(
         "\n",
@@ -126,9 +101,8 @@ const ticket: WatchedTicket = {
 /**
  * A round the survey has already decided on, one attempt in.
  *
- * `failedStarts: 1` rather than `0` so the assertion below reads `2` and not
- * `1`: a call site that wrote a constant, or re-derived the count from an empty
- * marker, would land on `1` and look right.
+ * `failedStarts: 1` rather than `0` so the assertion below reads `2` and not `1` — a call site
+ * that wrote a constant would land on `1` and look right.
  */
 const pending: PendingRound = {
   comments: [],
@@ -177,24 +151,21 @@ const CONFLICTED_ATTACH: AdvanceRequest["attach"] = () =>
 /**
  * One watched ticket whose checkout cannot be handed over.
  *
- * `passes` throws rather than returning a stub. The claim this test makes is
- * partly about what did *not* happen — no pass runs on a round that never got a
- * worktree — and a stub that quietly answers would let that half pass silently.
+ * `passes` throws rather than stubs, so a pass running on a round that never got a worktree
+ * fails loudly instead of passing silently.
  */
 function actHarness(attach: AdvanceRequest["attach"] = REFUSING_ATTACH): ActHarness {
   const calls: (readonly string[])[] = [];
   const commands: CommandRunner = {
     run: (argv) => {
       calls.push(argv);
-      // A branch that already contains its base, so the merge round below
-      // reaches a verdict without a pass. Everything else answers the marker
-      // edit, which is the only other call the refusal path makes.
+      // A branch that already contains its base, so the merge round below reaches a verdict
+      // without a pass.
       if (argv.includes("rev-list")) {
         return Promise.resolve({ ...OK, stdout: "0\n" });
       }
-      // Only the GraphQL call gets a body. Answering every command with that
-      // JSON would make `git status --porcelain` read as a dirty checkout, and
-      // the merge round would refuse before it reached the question under test.
+      // Only the GraphQL call gets a body — answering every command with it would make `git
+      // status --porcelain` read as dirty and refuse before reaching the question under test.
       if (!argv.includes("graphql")) {
         return Promise.resolve(OK);
       }
@@ -264,30 +235,21 @@ describe("createReviewAct", () => {
 
     await h.act(ticket, pending, 2663);
 
-    // The whole of #2663's four days: this branch returned the refusal and
-    // wrote nothing, so every cap read a marker that said the pull request was
-    // idle while a tick was failing on it every two minutes. Revert the call to
-    // a plain `{ kind: "failed", stage: "worktree" }` and this is the assertion
-    // that goes red — the outcome above is identical either way, which is why
-    // it cannot be the one guarding this.
+    // The outcome above is identical whether or not the marker is written, so it cannot be the
+    // assertion guarding this — this one is.
     expect(written(h)).toContain("Failed starts: 2");
   });
 
   it("spends the round on the merge when the base will not go into the branch", async () => {
-    // The daemon's own path, and the one that has to agree with `advance`. A
-    // review round here would run `pnpm install`, typecheck and test against a
-    // tree that does not exist yet, then answer a reviewer from whatever came
-    // out — so the checkout decides the round, not the survey. `passes` throws,
-    // which is the other half of the claim: this branch is already current, so
-    // the merge round reaches its verdict without paying for a pass.
+    // A review round here would run install/typecheck/test against a tree that does not exist
+    // yet — the checkout decides the round, not the survey, so `passes` throws and must not run.
     const h = actHarness(CONFLICTED_ATTACH);
 
     const outcome = await h.act(ticket, pending, 2663);
 
     expect(outcome).toEqual({ kind: "synced", round: 3, behind: 0, conflicts: [] });
-    // Reserved like any other round, and the history line says which kind it
-    // was: a merge round answers nobody, so a marker that recorded it as an
-    // ordinary round would leave the reviewer's silence looking like assent.
+    // A merge round answers nobody, so a marker recording it as an ordinary round would leave
+    // the reviewer's silence looking like assent.
     expect(written(h)).toContain("bot: iteration count 3");
     expect(written(h)).toContain("round 3 — merge");
     // And neither of the two counters a merge has no business moving.
@@ -300,11 +262,8 @@ describe("createReviewAct", () => {
 
     await h.act(ticket, pending, 2663);
 
-    // Both counters stand still and the cursor does not move. A failed start
-    // that consumed a round would let a wedged pull request exhaust
-    // `MAX_PR_ROUNDS_TOTAL` and be reported as an argument that went too long;
-    // one that advanced `Last read` would drop the reviewer's comments on the
-    // way there, unanswered and now invisible.
+    // A failed start that consumed a round would exhaust `MAX_PR_ROUNDS_TOTAL` on a wedged pull
+    // request; one that advanced `Last read` would drop the reviewer's comments unanswered.
     expect(written(h)).toContain("bot: iteration count 1");
     expect(written(h)).toContain("Reviewer rounds: 1");
     expect(written(h)).toContain("Last read: 2026-09-05T08:00:00Z");

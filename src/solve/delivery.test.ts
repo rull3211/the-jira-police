@@ -32,13 +32,7 @@ const MANIFEST = JSON.stringify({
 
 const FILES = ["src/app/head.tsx", "src/app/head.test.tsx"];
 const NUMSTAT = [`12\t3\t${FILES[0] ?? ""}`, `9\t0\t${FILES[1] ?? ""}`, ""].join(NUL);
-/**
- * A diff the gate refuses — one ordinary file and one lockfile.
- *
- * Six files until 2026-09-06, when the size caps were deleted and a wide diff
- * stopped being a refusal. The test below is about `advance` not pushing a
- * refused round, so what it needs is any refusal that is still one.
- */
+/** A diff the gate refuses: one ordinary file and one lockfile. */
 const REFUSED_DIFF = ["1\t0\tsrc/app.ts", "8\t2\tpnpm-lock.yaml", ""].join(NUL);
 
 const IDENTITY: BotIdentity = { name: "jira-police", email: "jira-police@example.invalid" };
@@ -68,8 +62,7 @@ const reviewJson = (overrides: Partial<ReviewState> = {}): string => {
   const base = {
     state: "OPEN",
     isDraft: true,
-    // The pull request's own creation, which is the floor under the silence
-    // clock: a payload without it is refused rather than read as quiet.
+    // The floor under the silence clock: a payload without it is refused, not read as quiet.
     createdAt: "2026-09-05T09:00:00Z",
     reviews: [{ author: { login: "copilot" }, body: "The wrapper element looks unnecessary." }],
     comments: [] as unknown[],
@@ -79,12 +72,7 @@ const reviewJson = (overrides: Partial<ReviewState> = {}): string => {
   return JSON.stringify(base);
 };
 
-/**
- * A marker comment as `gh pr view --json comments` returns it.
- *
- * Carries an `id`, because `findMarker` refuses a marker it could not edit and
- * a fixture without one would exercise that refusal rather than the cursor.
- */
+/** A marker comment as `gh pr view --json comments` returns it. Carries an `id`, since `findMarker` refuses a marker it could not edit. */
 const markerComment = (
   count: number,
   lastRead: string,
@@ -181,20 +169,11 @@ const inline = (...nodes: readonly unknown[]): Rule => ({
 const posts = (h: Harness): readonly string[] =>
   h.calls
     .filter((argv) => asked("addComment")(argv))
-    // `gh api graphql` passes each variable as its own `-f key=value`, and the
-    // last element is the query, not the body. Reading `at(-1)` returns the
-    // mutation text for every call and silently matches nothing.
+    // The last argv element is the mutation query, not the body; `at(-1)` would silently match nothing.
     .map((argv) => argv.find((element) => element.startsWith("body=")) ?? "")
     .map((body) => body.slice("body=".length));
 
-/**
- * The bodies of every inline thread reply the run posted, in order.
- *
- * Reads them off the `gh` argv rather than off the answer the pass produced,
- * because the gap this exists to catch is between those two: `answerThreads`
- * hands `replyToThread` a body and `replyToThread` is what decides the bytes.
- * Asserting on the pass's own text would have passed throughout the loop.
- */
+/** The bodies of every inline thread reply the run posted, in order, read off the `gh` argv rather than the pass's own text. */
 const replies = (h: Harness): readonly string[] =>
   h.calls
     .filter((argv) => asked("addPullRequestReviewThreadReply")(argv))
@@ -203,28 +182,15 @@ const replies = (h: Harness): readonly string[] =>
     .map((body) => body.slice("body=".length));
 
 /**
- * The GitHub account this service posts through, which is a person's.
- *
- * Named here because the whole sentinel scheme exists to work around it: a
- * reply the bot wrote and a comment the operator wrote arrive under the same
- * login, so any test that keys "ours" on the author is testing something the
- * production code cannot do.
+ * The GitHub account this service posts through, which is a person's — a bot reply and an
+ * operator comment arrive under the same login, so no test may key "ours" on the author.
  */
 const OPERATOR = "rull3211";
 
 /**
- * A thread comment carrying what this service would really have replied.
- *
- * **Not `"bot: " + text`, and that distinction is the whole of PR #548.** Two
- * tests below assert that a thread we already answered is not answered again,
- * and both were green for the entire six days the loop was live — because they
- * hand-wrote a prefix that `answerThreads` never actually sent. A fixture that
- * models another module's output tests the model.
- *
- * So the fixture is built by running the writer and taking the bytes it put on
- * the wire. Drop the prefix from `replyToThread` and these fixtures lose it
- * too, and the tests that depend on it fail — which is what they were always
- * supposed to do.
+ * A thread comment carrying what this service would really have replied — built by running
+ * `replyToThread` and taking the bytes it put on the wire, not `"bot: " + text` (PR #548): a
+ * hand-written prefix here would pass even if the real writer stopped sending one.
  */
 const ourReply = async (text: string): Promise<unknown> => {
   let sent = "";
@@ -277,13 +243,8 @@ const markerWritten = (h: Harness): boolean =>
   h.calls.some((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv));
 
 /**
- * The body of the newest marker write, whichever mutation carried it.
- *
- * Both, deliberately: a pull request with no marker yet is posted to and one
- * with a marker is edited, and the attempt counter has to survive either. A
- * helper reading only `addComment` — which is what `posts` does, for the reply
- * channel — would report an empty string for every test whose fixture supplies
- * a marker, and an assertion on an empty string is one that cannot fail.
+ * The body of the newest marker write, whichever mutation carried it — a pull request with no
+ * marker yet is posted to, one with a marker is edited, and the counter must survive either.
  */
 const markerBody = (h: Harness): string =>
   h.calls
@@ -340,12 +301,7 @@ const spent = (count: number, lastRead = "2026-09-05T08:00:00Z"): Rule => ({
   reply: { stdout: reviewJson({ comments: [markerComment(count, lastRead)] } as never) },
 });
 
-/**
- * A pull request spelled out whole: both counts on the marker, and exactly the
- * reviews and comments named. Used by the round-classification tests, which are
- * the only ones that care that the two counts can differ and that the reviews
- * list can be empty while the comments list is not.
- */
+/** A pull request spelled out whole: both marker counts, and exactly the reviews/comments named. */
 const board = (opts: {
   readonly count: number;
   readonly reviewerCount: number;
@@ -371,13 +327,7 @@ const saw =
   (argv: readonly string[]): boolean =>
     needles.every((needle) => argv.includes(needle));
 
-/**
- * A pull request whose reviewer has spoken and left no issue comment at all.
- *
- * Lets a test distinguish "the round ran because of the thread" from "the round
- * ran because of a comment", and — since `advance` now posts its answer to the
- * comment channel — "it said nothing because there was nothing to say".
- */
+/** A pull request whose reviewer has spoken and left no issue comment at all. */
 const QUIET: Rule = {
   match: saw("pr", "view"),
   reply: {
@@ -404,9 +354,7 @@ function harness(
   const seen: { pass: Pass; options: SolveRunOptions }[] = [];
 
   const defaults: readonly Rule[] = [
-    // A Node base: `pom.xml` is absent. Answering every `git show` with the
-    // manifest would make the base look like it declared both toolchains, and
-    // `verify` refuses that rather than choosing.
+    // A Node base: `pom.xml` is absent, since `verify` refuses a base that declares both toolchains.
     {
       match: (argv) => argv.includes("show") && argv.some((arg) => arg.endsWith(":pom.xml")),
       reply: { exitCode: 128 },
@@ -417,9 +365,7 @@ function harness(
     { match: saw("rev-parse"), reply: { stdout: "a1b2c3d4e5f6" } },
     { match: saw("pr", "create"), reply: { stdout: PR_URL } },
     { match: saw("pr", "view"), reply: { stdout: reviewJson() } },
-    // The marker's three GraphQL calls. All succeed by default, so a test that
-    // wants a failed reservation has to say so — the reservation refusing is
-    // the interesting case and must not be reachable by forgetting a fixture.
+    // The marker's three GraphQL calls all succeed by default; a failed reservation must be arranged, not stumbled into.
     { match: asked("reviewThreads"), reply: { stdout: threadsJson() } },
     {
       match: asked("pullRequest(number:"),
@@ -437,9 +383,7 @@ function harness(
         stdout: JSON.stringify({ data: { updateIssueComment: { issueComment: { id: POSTED } } } }),
       },
     },
-    // The two thread writes, both succeeding by default for the same reason: a
-    // test about a reply that would not post has to arrange that failure, so it
-    // cannot be reached by leaving a fixture out.
+    // The two thread writes also succeed by default; a reply that fails to post must be arranged explicitly.
     {
       match: asked("addPullRequestReviewThreadReply"),
       reply: {
@@ -479,13 +423,7 @@ function harness(
   return { deps: { commands, passes }, calls, seen };
 }
 
-/**
- * Matches the first time only, which is how a two-state git read is scripted.
- *
- * The merge round reads `--diff-filter=U` twice and must get different answers:
- * once for what git flagged, and once afterwards to prove nothing is unmerged
- * any more. A rule answering both the same way makes the second read vacuous.
- */
+/** Matches the first time only, so a two-state git read (e.g. `--diff-filter=U` before and after a merge round) can be scripted. */
 const once = (match: (argv: readonly string[]) => boolean) => {
   let used = false;
   return (argv: readonly string[]): boolean => {
@@ -527,7 +465,6 @@ describe("publish", () => {
   });
 
   it("opens the pull request as a draft", async () => {
-    // The one property that keeps a human between this and a merge.
     const h = harness();
 
     await publish(h.deps, publishRequest);
@@ -578,8 +515,7 @@ describe("publish", () => {
   });
 
   it("keeps a pull request that opened but got no reviewer out of `failed`", async () => {
-    // The pull request is durable and externally visible. Reporting this as an
-    // ordinary failure invites a retry, and the retry opens a second one.
+    // A retry on an ordinary failure would open a second pull request.
     const h = harness({}, [
       { match: saw("pr", "edit"), reply: { exitCode: 1, stderr: "reviewer not found" } },
     ]);
@@ -629,11 +565,7 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    // An hour, measured from the pull request's own creation because nothing
-    // else on it carries a date. The number is the outcome's whole contribution
-    // to the silence bound — `advance` measures and the caller decides, so a
-    // foreground command and a daemon can be patient by different amounts
-    // without either of them counting ticks.
+    // Measured from the pull request's own creation; `advance` only measures, the caller decides the bound.
     expect(outcome).toEqual({ kind: "waiting", quietMs: 3_600_000 });
     expect(h.seen).toEqual([]);
     expect(ran(h, "pr", "ready")).toBe(false);
@@ -664,17 +596,7 @@ describe("advance", () => {
   });
 
   it("undrafts on an approval instead of paying a round to acknowledge it", async () => {
-    // The whole point of dropping the green light, end to end: the reviewer has
-    // said it wants nothing, so the inbox is empty and the pull request goes to
-    // a human for free. `h.seen` empty is the saving — #2661's `bot: round 1`
-    // and #2663's `round 6` were both paid passes that produced a sentence
-    // noting an approval.
-    //
-    // **And `ready` rather than `waiting` is the guard the user asked for.**
-    // Drop the green light from `anyoneResponded` as well as from `comments`
-    // and this goes red with `waiting`: the pull request stays a draft, on
-    // every tick, until the silence brake gives up on a reviewer that already
-    // answered.
+    // An approval must go through `anyoneResponded` as well as `comments`, or this stays `waiting` until the silence brake fires.
     const h = harness({}, [
       {
         match: saw("pr", "view"),
@@ -704,10 +626,7 @@ describe("advance", () => {
   });
 
   it("keeps waiting when the only thing on the pull request is a deploy notice", async () => {
-    // The opposite depth, and the reason the two escapes are not one rule.
-    // Continuous integration is not a party to the review, so its notice must
-    // not open the gate — undrafting here would hand a human a pull request no
-    // reviewer had looked at, on the strength of a robot saying a URL exists.
+    // CI is not a party to the review; undrafting on its notice would hand a human an unreviewed pull request.
     const h = harness({}, [
       {
         match: saw("pr", "view"),
@@ -738,9 +657,7 @@ describe("advance", () => {
   });
 
   it("measures the silence from the reviewer's last word, not from the last deploy", async () => {
-    // The notice is triggered by our own push, so counting it would let the
-    // loop reset its own clock every round: a reviewer that has gone away would
-    // never look quiet, and the silence brake would never fire.
+    // The notice is triggered by our own push; counting it would reset the clock every round and the silence brake would never fire.
     const h = harness({}, [
       {
         match: saw("pr", "view"),
@@ -765,8 +682,7 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    // A full hour from the pull request's own creation. Count the notice and
-    // this reads one minute instead.
+    // A full hour from the pull request's own creation; counting the notice would read one minute instead.
     expect(outcome).toEqual({ kind: "waiting", quietMs: 3_600_000 });
   });
 
@@ -791,10 +707,7 @@ describe("advance", () => {
       }),
     ],
   ])("carries what a successful round could not settle — %s", async (_case, report) => {
-    // Only `exhausted` used to carry this, so on a round that worked the field
-    // the skill calls "what tells a human to stop the loop and look" was read
-    // and dropped. Both construction sites, because they are separate returns
-    // and a fix to one leaves the other silent.
+    // Both construction sites: `iterated` and `exhausted` are separate returns, and a fix to one leaves the other silent.
     const h = harness({ review: report });
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -805,9 +718,6 @@ describe("advance", () => {
     });
   });
 
-  // `publish` already treats a failed reviewer request as its own outcome.
-  // `advance` used to discard the same result while its type said "the reviewer
-  // was asked again", so the one caller that could act on it was never told.
   it("reports that the re-request failed instead of claiming the reviewer was asked", async () => {
     const h = harness({ review: review() }, [
       {
@@ -818,18 +728,13 @@ describe("advance", () => {
 
     const outcome = await advance(h.deps, advanceRequest);
 
-    // Still an iterated round: the code is pushed and the pull request is
-    // healthy. Only the notification is missing, and a human can supply it.
+    // Still iterated: the code pushed fine, only the notification is missing.
     expect(outcome).toMatchObject({ kind: "iterated", round: 1, reviewerRequested: "failed" });
     expect(ran(h, "push")).toBe(true);
   });
 
   it("does not undraft a pull request whose re-request failed", async () => {
-    // The dangerous reading of "the reviewer never came back" is to give up and
-    // mark it ready. With the cursor in place the next tick sees nothing new
-    // and undrafts by itself, which is bad enough; doing it on the very round
-    // that failed to notify anyone would put an unreviewed pull request in
-    // front of a reviewer who was never asked.
+    // Undrafting here would put an unreviewed pull request in front of a reviewer who was never asked.
     const h = harness({ review: review() }, [
       { match: saw("pr", "edit"), reply: { exitCode: 1, stderr: "HTTP 403" } },
     ]);
@@ -840,27 +745,18 @@ describe("advance", () => {
   });
 
   it("does not ask the reviewer to re-read a tree it did not change", async () => {
-    // Measured on PR #2658. The round at 12:23 changed no code, re-requested
-    // review anyway, and Copilot re-reviewed the identical tree at 12:28 and
-    // restated its previous verdict. That is a paid review whose only possible
-    // output is the one already on the pull request, and the loop then has to
-    // spend a round reading it. `changed: false` is what routes here — a review
-    // that raised only questions, answered without an edit.
+    // `changed: false` routes here — a review that raised only questions, answered without an edit (PR #2658).
     const h = harness({ review: review({ changed: false }) });
 
     const outcome = await advance(h.deps, advanceRequest);
 
     expect(outcome).toMatchObject({ kind: "iterated", reviewerRequested: "unnecessary" });
     expect(ran(h, "pr", "edit")).toBe(false);
-    // Proves it took the no-change path rather than duplicating the test above.
     expect(ran(h, "push")).toBe(false);
   });
 
   it("does not report a failed re-request when it never made one", async () => {
-    // The reading that would undo the fix. "Not asked" and "asked and it did
-    // not work" are the same boolean and opposite instructions: one is a person
-    // clicking the reviewer in, the other is nothing to do. A round that
-    // pushed nothing must not send anybody after that button.
+    // "Not asked" and "asked and it failed" must not collapse to the same boolean and opposite instruction.
     const h = harness({ review: review({ changed: false }) }, [
       { match: saw("pr", "edit"), reply: { exitCode: 1, stderr: "HTTP 403" } },
     ]);
@@ -871,9 +767,7 @@ describe("advance", () => {
   });
 
   it("does not claim to have pushed on a round that changed nothing", async () => {
-    // Found on round 2 of PR #2658: the round deliberately changed no code and
-    // the headline still read "round 2 pushed". The kind does not imply the
-    // push, so the round has to carry the fact.
+    // `kind` does not imply the push (PR #2658 round 2 changed no code but headlined "round 2 pushed").
     const h = harness({ review: review({ changed: false, filesTouched: [] }) });
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -892,11 +786,7 @@ describe("advance", () => {
   });
 
   it("does not claim a push when the edits turned out to commit to nothing", async () => {
-    // The path between the other two, and the one a reader would miss: the pass
-    // says it changed files, and `git commit` then finds the tree identical —
-    // a rewrite that reproduced the file byte for byte. Nothing reaches the
-    // branch, so nothing may be claimed, and the model's own `changed` flag is
-    // the wrong thing to have believed.
+    // The pass says it changed files, but `git commit` finds the tree byte-identical; the model's `changed` flag is not to be trusted here.
     const h = harness({ review: review() }, [
       {
         match: saw("commit"),
@@ -910,9 +800,7 @@ describe("advance", () => {
   });
 
   it("puts its answer to a review body on the pull request", async () => {
-    // Round 3 of PR #2658: Copilot's feedback was a summary review, which has
-    // no thread to reply to, so the pass's refutation went to the operator's
-    // terminal and the reviewer's objection stood unanswered in public.
+    // A summary review has no thread to reply to (PR #2658 round 3); without this the answer never reaches the pull request.
     const h = harness({ review: review({ changed: false, responses: ["Checked: no icon link"] }) });
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -922,9 +810,7 @@ describe("advance", () => {
   });
 
   it("prefixes what it posts, so the next round does not read it as feedback", async () => {
-    // There is no login to key on — `gh` posts as the operator — so `bot: ` is
-    // the only thing separating our own words from a reviewer's. Without it the
-    // loop is handed its own last answer and argues with itself.
+    // `gh` posts as the operator, so `bot: ` is the only thing separating our words from a reviewer's.
     const h = harness({ review: review({ changed: false, responses: ["answered"] }) });
 
     await advance(h.deps, advanceRequest);
@@ -936,8 +822,7 @@ describe("advance", () => {
   });
 
   it("says nothing on the pull request when every comment had a thread", async () => {
-    // The bot chatter the marker section refuses to add. A round whose input
-    // was entirely inline has already answered in the right place.
+    // A round entirely inline has already answered in the right place.
     const h = harness({ review: review({ changed: false }) }, [QUIET, inline(thread())]);
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -947,10 +832,7 @@ describe("advance", () => {
   });
 
   it("takes the pull request out of draft when the round changed nothing", async () => {
-    // This side is finished: nothing new to re-read, nothing more the loop can
-    // do. A later tick would clear the draft only if nothing new arrived, so on
-    // an active pull request it never clears and a human reviews something
-    // flagged unfinished.
+    // Nothing new to re-read, nothing more the loop can do; an active pull request must never be left flagged unfinished.
     const h = harness({ review: review({ changed: false }) });
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -1006,8 +888,7 @@ describe("advance", () => {
   });
 
   it("keeps the round when it cannot leave draft, and says so out loud", async () => {
-    // The round did its work. Discarding it over a failed transition would
-    // throw away a paid pass; hiding the failure sends nobody to the button.
+    // Discarding it over a failed transition would throw away a paid pass; hiding the failure sends nobody to the button.
     const h = harness({ review: review({ changed: false }) }, [
       { match: saw("pr", "ready"), reply: { exitCode: 1, stderr: "HTTP 403" } },
     ]);
@@ -1018,8 +899,7 @@ describe("advance", () => {
   });
 
   it("does not undraft while it is still iterating", async () => {
-    // Undrafting mid-loop puts a half-answered pull request in front of a
-    // human as though it were finished.
+    // Undrafting mid-loop puts a half-answered pull request in front of a human as though it were finished.
     const h = harness({ review: review() });
 
     await advance(h.deps, advanceRequest);
@@ -1037,12 +917,7 @@ describe("advance", () => {
   });
 
   it("does not feed the round our own previous replies", async () => {
-    // `reviewerComments` is tested on its own below; this asserts `advance`
-    // actually routes through it. A pass answering its own last answer is a
-    // loop with no new information in it, and it burns a round each time.
-    //
-    // Note the author: our own comment arrives under the operator's login,
-    // because that is who `gh` is authenticated as. Only the prefix marks it.
+    // Our own comment arrives under the operator's login (that's who `gh` authenticates as); only the prefix marks it.
     const h = harness({ review: review() }, [
       {
         match: saw("pr", "view"),
@@ -1067,9 +942,7 @@ describe("advance", () => {
   });
 
   it("does not give up when the only comment left is our own", async () => {
-    // Our reply is not feedback. Counting it would spend rounds answering
-    // ourselves, and here it would undraft while the reviewer is still typing.
-    // Again under the operator's login, and again told apart by the prefix.
+    // Counting our own reply as feedback would undraft while the reviewer is still typing.
     const h = harness({}, [
       {
         match: saw("pr", "view"),
@@ -1114,9 +987,7 @@ describe("advance", () => {
   });
 
   it("does not reserve a round it is not going to run", async () => {
-    // The reservation comes before the pass, so the cap has to come before the
-    // reservation. Bumping the count on a round that stops immediately would
-    // charge a pull request for the ticks that report it is out of rounds.
+    // The cap must come before the reservation, or a round that stops immediately still gets charged.
     const h = harness({}, [spent(3)]);
 
     await advance(h.deps, { ...advanceRequest, maxRounds: 3 });
@@ -1125,13 +996,7 @@ describe("advance", () => {
   });
 
   it("cuts no checkout on any outcome decided before a round runs", async () => {
-    // The poll-cycle guard, and the one with a price on it. `advance` used to
-    // be handed a worktree, so every tick paid a fetch, a checkout and an
-    // install before anyone had asked whether there was anything to answer —
-    // at one tick a minute across a watched set, that is the whole cost of the
-    // cycle spent on pull requests nobody had touched. The survey is two `gh`
-    // reads and names its repository explicitly, so it needs no checkout at
-    // all. Unplug this and the cheap half of the cycle stops being cheap.
+    // The survey is two `gh` reads and names its repository explicitly, so it needs no checkout; unplugging this pays a fetch/checkout/install every tick.
     const cases: readonly { readonly why: string; readonly rules: readonly Rule[] }[] = [
       {
         why: "waiting",
@@ -1171,10 +1036,7 @@ describe("advance", () => {
   });
 
   it("reports a refused checkout as its own stage, before anything is spent", async () => {
-    // Its own stage rather than `read` or `resolve`, because of where it
-    // happens: after the round has been decided and before it is reserved. No
-    // round has moved and no pass has run, so the honest report is that the
-    // machine could not get to the work — not that the work failed.
+    // No round has moved and no pass has run, so the honest report is that the machine could not get to the work, not that the work failed.
     const h = harness({}, []);
 
     const outcome = await advance(h.deps, {
@@ -1187,12 +1049,7 @@ describe("advance", () => {
   });
 
   it("counts the attempt even though it counts no round", async () => {
-    // The hole every other bound shares: `MAX_REVIEW_ITERATIONS` and
-    // `MAX_PR_ROUNDS_TOTAL` are read out of the marker and the marker only
-    // moves when a round reserves, so a failure on this side of the checkout is
-    // invisible to both. SSX-3835 spent four days here. The write is the only
-    // thing that makes the failure countable, so it is asserted separately from
-    // the outcome above.
+    // Both round bounds are read out of the marker, so a failure before the checkout is invisible unless this write happens (SSX-3835).
     const h = harness({}, []);
 
     await advance(h.deps, { ...advanceRequest, attach: () => Promise.resolve(refusedCheckout) });
@@ -1203,15 +1060,7 @@ describe("advance", () => {
   });
 
   it("does not spend a round on an attempt that never got one", async () => {
-    // The other half, and the direction that fails silently. Writing the
-    // attempt through the same marker the rounds live in makes it easy to bump
-    // the round while recording the attempt — and a stall would then exhaust
-    // `MAX_PR_ROUNDS_TOTAL` and be reported as an argument that went too long.
-    // Four rounds gone but the reviewer budget untouched, so the survey still
-    // decides on a round rather than settling as exhausted before it gets here.
-    // The reviewer's comment is dated, which matters for the second assertion:
-    // an undated one cannot move the high-water mark whatever the code does, so
-    // the fixture would pass the cursor claim by having nothing to advance to.
+    // Writing the attempt through the same marker as rounds risks bumping the round count too, which would misreport a stall as exhausted.
     const h = harness({}, [
       board({
         count: 4,
@@ -1223,14 +1072,12 @@ describe("advance", () => {
     await advance(h.deps, { ...advanceRequest, attach: () => Promise.resolve(refusedCheckout) });
 
     expect(markerBody(h)).toContain("iteration count 4");
-    // And the high-water mark stays where it was, so the comments this attempt
-    // decided to answer are still unanswered next tick rather than skipped.
+    // The high-water mark stays where it was, so the unanswered comments are not skipped next tick.
     expect(markerBody(h)).toContain("Last read: 2026-09-05T08:00:00Z");
   });
 
   it("keeps counting across attempts rather than restarting at one", async () => {
-    // A counter that reset on each attempt would never reach the bound, which
-    // is the failure mode that looks exactly like the bound being absent.
+    // A counter that reset on each attempt would never reach the bound, indistinguishable from the bound being absent.
     const h = harness({}, [stalling(2)]);
 
     await advance(h.deps, { ...advanceRequest, attach: () => Promise.resolve(refusedCheckout) });
@@ -1239,10 +1086,7 @@ describe("advance", () => {
   });
 
   it("still reports the checkout failure when the attempt cannot be recorded", async () => {
-    // Two unrelated failures, and flattening them would lose the one an
-    // operator can act on. A `gh` that cannot write cannot read either, so the
-    // next survey says so on its own; what must not happen is the round
-    // reporting a comment problem when the problem is the worktree.
+    // Two unrelated failures; the round must report the worktree problem, not the comment-write failure.
     const h = harness({}, [
       { match: asked("updateIssueComment"), reply: { exitCode: 1, stderr: "gh: 404" } },
       { match: asked("addComment"), reply: { exitCode: 1, stderr: "gh: 404" } },
@@ -1261,10 +1105,7 @@ describe("advance", () => {
   });
 
   it("stops attempting once the bound is reached, and does not attach to find out", async () => {
-    // The brake. It fires from the survey, before `attach` is called, because
-    // the whole point is to stop paying for the attempt — and on a salvaging
-    // worktree an attempt is a full checkout and install rather than the free
-    // refusal it used to be.
+    // Fires from the survey, before `attach`, since a salvaging worktree's attempt is a full checkout and install, not a free refusal.
     const h = harness({}, [stalling(3)]);
     let attached = 0;
 
@@ -1282,9 +1123,7 @@ describe("advance", () => {
   });
 
   it("carries the last reason into the stall, so the log names the cause", async () => {
-    // A stall that says only "three attempts failed" sends an operator to read
-    // the marker to find out what for. The reason is already on the marker; the
-    // outcome carries it so the one line a daemon logs is enough.
+    // A stall reporting only "three attempts failed" sends an operator to read the marker to find out what for.
     const h = harness({}, [stalling(3)]);
 
     const outcome = await advance(h.deps, {
@@ -1292,9 +1131,7 @@ describe("advance", () => {
       attach: () => Promise.resolve(refusedCheckout),
     });
 
-    // The kind is asserted alongside the reason, not left to the test above.
-    // A `failed`/`worktree` outcome carries the identical string, so a
-    // reason-only assertion is green with the bound unplugged entirely.
+    // `kind` is asserted alongside the reason: a `failed`/`worktree` outcome carries the same string, so a reason-only check would pass with the bound unplugged.
     expect(outcome).toMatchObject({
       kind: "stalled",
       reason: "the worktree has uncommitted changes",
@@ -1322,10 +1159,7 @@ describe("advance", () => {
   });
 
   it("lets a pull request that recovered start counting again", async () => {
-    // The bound is on consecutive attempts. A reservation proves the machinery
-    // works on this pull request right now, so the failures before it are
-    // history — and carrying them forward would stall a pull request that had
-    // already recovered.
+    // The bound is on consecutive attempts; a reservation proves the machinery works now, so earlier failures are history.
     const h = harness({ review: review() }, [stalling(2)]);
 
     await advance(h.deps, advanceRequest);
@@ -1334,10 +1168,7 @@ describe("advance", () => {
   });
 
   it("does not re-mark a pull request ready that is already out of draft", async () => {
-    // Not an optimisation. `ready` is the outcome of every tick on an undrafted
-    // pull request waiting for a human to merge it, and that wait is measured
-    // in days — so an unconditional `gh pr ready` is a write per pull request
-    // per tick, forever, on the pull requests where nothing is happening.
+    // Not an optimisation: an unconditional `gh pr ready` would write every tick, forever, on pull requests waiting days for a human merge.
     const h = harness({}, [
       {
         match: saw("pr", "view"),
@@ -1371,8 +1202,7 @@ describe("advance", () => {
 
     expect(outcome).toMatchObject({ kind: "iterated", round: 1 });
     expect(ran(h, "push")).toBe(false);
-    // And no re-request either, for the reason the test below this one gives:
-    // there is nothing new on the branch for a reviewer to look at.
+    // No re-request either: nothing new on the branch for a reviewer to look at.
     expect(ran(h, "pr", "edit")).toBe(false);
   });
 
@@ -1465,8 +1295,7 @@ describe("advance's review cursor", () => {
         state: "OPEN",
         isDraft: true,
         createdAt: "2026-09-05T09:00:00Z",
-        // Dateless, so the review body itself cannot be what makes the round
-        // run — otherwise every test below would pass with no cursor at all.
+        // Dateless, so the review body cannot be what makes the round run, or every test below would pass with no cursor at all.
         reviews: [{ author: { login: "copilot" }, body: "" }],
         comments: [
           markerComment(markCount, lastRead),
@@ -1478,11 +1307,7 @@ describe("advance's review cursor", () => {
   });
 
   it("does not act twice on a comment an earlier round already read", async () => {
-    // **The mutation that matters most in the whole feature.** Unplug the
-    // high-water mark and this fails: the same comment is resolved on every
-    // tick, at full solve cost, until somebody merges the pull request. The
-    // round cap bounds that today and D4 removes the cap for human feedback,
-    // which is exactly the feedback that sits unanswered the longest.
+    // Unplug the high-water mark and the same comment resolves at full solve cost on every tick until the pull request is merged.
     const h = harness({}, [withComment(1, "2026-09-05T10:00:00Z", "2026-09-05T09:00:00Z")]);
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -1493,9 +1318,7 @@ describe("advance's review cursor", () => {
   });
 
   it("acts on a comment written after the mark", async () => {
-    // The other half of the same mutation. A cursor that never lets anything
-    // through is a loop that has stopped, and it would look identical to the
-    // test above.
+    // A cursor that never lets anything through is a stopped loop, indistinguishable from the test above.
     const h = harness({ review: review() }, [
       withComment(1, "2026-09-05T09:00:00Z", "2026-09-05T10:00:00Z"),
     ]);
@@ -1506,9 +1329,7 @@ describe("advance's review cursor", () => {
   });
 
   it("treats a comment written at exactly the mark as already read", async () => {
-    // Strictly newer. Equality here re-handles the newest comment of the
-    // previous round on every tick — the same runaway, arriving as an
-    // off-by-one rather than as a missing feature.
+    // Must be strictly newer: equality would re-handle the previous round's newest comment every tick.
     const h = harness({}, [withComment(1, "2026-09-05T10:00:00Z", "2026-09-05T10:00:00Z")]);
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -1526,10 +1347,7 @@ describe("advance's review cursor", () => {
   });
 
   it("refuses the round when the marker will not parse, and does not read it as zero", async () => {
-    // Losing the count is how a bounded loop becomes an unbounded one, quietly,
-    // on the one pull request whose marker got mangled — which is also the one
-    // nobody is watching. Make the parse failure fall back to zero and this
-    // fails: the round runs, and it runs again every tick after that.
+    // A parse failure that fell back to zero would turn a bounded loop unbounded, quietly, on exactly the pull request nobody is watching.
     const h = harness({}, [
       {
         match: saw("pr", "view"),
@@ -1572,16 +1390,14 @@ describe("advance's review cursor", () => {
   });
 
   it("reserves the round before running the pass", async () => {
-    // Reverse this ordering and a failed write hands back a free round, every
-    // tick, forever. The count is a reservation, not a receipt.
+    // Reversed, a failed write would hand back a free round every tick, forever: the count is a reservation, not a receipt.
     const h = harness({ review: review() });
 
     await advance(h.deps, advanceRequest);
 
     const reserved = h.calls.findIndex((argv) => asked("addComment")(argv));
     expect(reserved).toBeGreaterThanOrEqual(0);
-    // Every command the pass causes comes after it. `git show` reading the
-    // manifest is the first thing `resolveReview` does.
+    // `git show` reading the manifest is the first thing `resolveReview` does.
     expect(h.calls.findIndex((argv) => saw("show")(argv))).toBeGreaterThan(reserved);
   });
 
@@ -1614,9 +1430,7 @@ describe("advance's review cursor", () => {
   });
 
   it("edits the marker by its node id, and never with --edit-last", async () => {
-    // `gh pr comment --edit-last` edits the last comment of the *current user*,
-    // and the current user is the operator. A round running after a human
-    // commented would overwrite that person's words with machine state.
+    // `--edit-last` edits the last comment of the current user, the operator — a round after a human commented would overwrite their words.
     const h = harness({ review: review() }, [spent(1)]);
 
     await advance(h.deps, advanceRequest);
@@ -1629,9 +1443,7 @@ describe("advance's review cursor", () => {
   });
 
   it("never treats a human's comment as the marker to overwrite", async () => {
-    // The operator's own comment arrives under the same login the bot posts as,
-    // so nothing but the prefix separates them. Getting this wrong destroys
-    // somebody's words rather than costing money.
+    // Nothing but the prefix separates the operator's comments from the bot's; getting this wrong destroys somebody's words.
     const h = harness({ review: review() }, [
       {
         match: saw("pr", "view"),
@@ -1687,9 +1499,7 @@ describe("advance's review cursor", () => {
   });
 
   it("does not move the mark backwards when the batch came back undated", async () => {
-    // An all-undated batch must not reset the cursor to the epoch and re-open
-    // every comment before it. The comments are still handled; they just do not
-    // get to say when.
+    // An all-undated batch must not reset the cursor to the epoch and re-open every prior comment.
     const h = harness({ review: review() }, [
       {
         match: saw("pr", "view"),
@@ -1707,10 +1517,7 @@ describe("advance's review cursor", () => {
   });
 
   it("writes a marker the next round can read back", async () => {
-    // A round that renders something `parseMarker` refuses makes the pull
-    // request permanently unadvanceable, by its own hand. The first round has
-    // no mark to keep and its comments may be undated, which is where the
-    // tempting empty string would land.
+    // A round that renders something `parseMarker` refuses makes the pull request permanently unadvanceable by its own hand.
     const h = harness({ review: review() });
 
     await advance(h.deps, advanceRequest);
@@ -1722,9 +1529,7 @@ describe("advance's review cursor", () => {
   });
 
   it("stops at the absolute cap without undrafting", async () => {
-    // Unlike `exhausted`. A pull request that has cost twenty rounds says
-    // nothing about whether the code is ready, and undrafting on it would be
-    // the loop reporting a verdict it did not reach.
+    // Unlike `exhausted`: a pull request that cost twenty rounds says nothing about whether the code is ready.
     const h = harness({}, [spent(20)]);
 
     const outcome = await advance(h.deps, { ...advanceRequest, maxRounds: 3, maxTotalRounds: 20 });
@@ -1735,9 +1540,7 @@ describe("advance's review cursor", () => {
   });
 
   it("lets the absolute cap outrank a relaxed reviewer cap", async () => {
-    // The two caps are separate so that raising the policy one cannot step past
-    // the brake. Check the reviewer's budget first and this returns `exhausted`
-    // — or worse, runs — on a pull request the brake has already stopped.
+    // The caps are separate so raising the policy one cannot step past the brake.
     const h = harness({}, [spent(20)]);
 
     const outcome = await advance(h.deps, {
@@ -1760,10 +1563,7 @@ describe("advance's inline threads", () => {
   };
 
   it("runs a round for an open thread even when no issue comment is new", async () => {
-    // The gate reads both channels, and this is the half that was missing on
-    // #2658: the substance of that review lived in the threads, `--json` could
-    // not see it, and the loop marked the pull request reviewed. Make the gate
-    // consider comments alone and this undrafts over an unanswered review.
+    // The gate reads both channels: on #2658 the review's substance lived in threads that `--json` could not see, and the loop undrafted unreviewed.
     const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
 
     const outcome = await advance(h.deps, advanceRequest);
@@ -1773,14 +1573,7 @@ describe("advance's inline threads", () => {
   });
 
   it("does not re-litigate a thread whose last comment is ours", async () => {
-    // The instability rule, keyed on a fact rather than a date: a bot reviewer
-    // restating a settled point leaves no new comment, so nothing time-based
-    // could tell this from a fresh objection. Unplug it and the round argues
-    // with an answer it already gave, every tick, at full solve cost.
-    //
-    // The fixture is built by the real writer. Hand-written, this test passed
-    // through the whole of PR #548 while production did exactly what it says
-    // cannot happen.
+    // Keyed on a fact, not a date: a bot restating a settled point leaves no new comment, so nothing time-based could tell this from a fresh objection.
     const h = harness({}, [
       QUIET,
       inline(talking(spoke("copilot", "this is not idempotent"), await ourReply("it is"))),
@@ -1793,8 +1586,7 @@ describe("advance's inline threads", () => {
   });
 
   it("acts again when the reviewer comes back after our reply", async () => {
-    // The other half of the rule. One that never lets a thread through is a
-    // loop that has stopped listening, and it looks identical to the test above.
+    // A rule that never lets a thread through is a loop that stopped listening, and looks identical to the test above.
     const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [
       QUIET,
       inline(
@@ -1821,9 +1613,7 @@ describe("advance's inline threads", () => {
   });
 
   it("hands the pass each thread's id and words, not a summary of them", async () => {
-    // #2658 again: the pass was given the review's one-line summary, inferred
-    // what the inline comments must have said, guessed one of them right and
-    // invented the other. It gets the text now, and the id it has to quote back.
+    // On #2658 the pass, given only the review's summary, guessed at what the inline comments said and invented one.
     const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
 
     await advance(h.deps, advanceRequest);
@@ -1833,9 +1623,7 @@ describe("advance's inline threads", () => {
   });
 
   it("answers the thread only after the commit it talks about is pushed", async () => {
-    // A reply says what changed. Posted before the push it is a public claim
-    // about a commit that may never arrive, and the reviewer reads an answer to
-    // a change that is not there.
+    // Posted before the push, a reply is a public claim about a commit that may never arrive.
     const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
 
     await advance(h.deps, advanceRequest);
@@ -1846,9 +1634,7 @@ describe("advance's inline threads", () => {
   });
 
   it("still answers on a round that changed no code", async () => {
-    // The no-change branch is a separate return and was separately capable of
-    // staying silent. A round that answered without editing has answered, and
-    // the argument belongs next to the comment rather than in a terminal.
+    // The no-change branch is a separate return and was separately capable of staying silent.
     const h = harness({ review: review({ changed: false, threadAnswers: [ANSWER] }) }, [
       QUIET,
       inline(thread()),
@@ -1861,15 +1647,7 @@ describe("advance's inline threads", () => {
   });
 
   it("marks its thread reply as its own, so the next round reads it back as answered", async () => {
-    // PR #548 on insurance-ssx-mono-repo. The loop answered its own replies,
-    // round after round, because `answerThreads` sent the pass's body through
-    // untouched and `unansweredThreads` keeps any thread whose last comment is
-    // not `isOurs`. Both halves were tested and neither test spanned the gap.
-    //
-    // So this drives a real round, takes the body `gh` was actually handed, and
-    // feeds *that* back in as the thread's last comment. A hand-written
-    // "bot: ..." fixture here would assert the prefix against itself and stay
-    // green through the whole outage.
+    // PR #548: `answerThreads` sent the body through untouched and `unansweredThreads` filtered on `isOurs`, but the two halves were never tested together.
     const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [QUIET, inline(thread())]);
 
     await advance(h.deps, advanceRequest);
@@ -1877,17 +1655,13 @@ describe("advance's inline threads", () => {
     const posted = replies(h);
     expect(posted).toHaveLength(1);
 
-    // Back in through the real reader, not a hand-built `ReviewThread`: the
-    // shape GitHub returns is parsed by `readReviewThreads` and only then
-    // filtered, so a prefix lost in parsing would still be caught here.
+    // Through the real reader, not a hand-built `ReviewThread`: a prefix lost in parsing would still be caught here.
     const answered = await asLaterRoundSees(
       talking(spoke("copilot", "this is not idempotent"), spoke(OPERATOR, posted[0] ?? "")),
     );
     expect(unansweredThreads(answered)).toEqual([]);
 
-    // The control, and the half that says the filter still works: the same
-    // thread with the reviewer speaking last is still owed an answer. Without
-    // it, a filter that dropped everything would pass the line above.
+    // Control: the same thread with the reviewer speaking last is still owed an answer.
     const reopened = await asLaterRoundSees(
       talking(
         spoke(OPERATOR, posted[0] ?? ""),
@@ -1898,9 +1672,7 @@ describe("advance's inline threads", () => {
   });
 
   it("posts nothing on a thread it was never given", async () => {
-    // The id is model-authored, so it is untrusted like every other field the
-    // pass fills in. One that came from nowhere addresses a conversation this
-    // round never read, and answering it is the loop talking to a stranger.
+    // The id is model-authored, so it is untrusted like every other field the pass fills in.
     const h = harness(
       { review: review({ threadAnswers: [{ ...ANSWER, threadId: "PRRT_elsewhere" }] }) },
       [QUIET, inline(thread())],
@@ -1938,9 +1710,7 @@ describe("advance's inline threads", () => {
   });
 
   it("keeps a pushed round when the reply would not post, and says so out loud", async () => {
-    // The same trade `reviewerRequested` makes. The code is pushed and the pull
-    // request is healthy; discarding the round over a comment that would not
-    // send helps nobody. Silence is the part that is not acceptable.
+    // Discarding a healthy pushed round over a comment that would not send helps nobody; the silence is the part that is not acceptable.
     const h = harness({ review: review({ threadAnswers: [ANSWER] }) }, [
       QUIET,
       inline(thread()),
@@ -1957,9 +1727,7 @@ describe("advance's inline threads", () => {
   });
 
   it("fails the round when the inline comments cannot be read at all", async () => {
-    // Half a review is worse than none: the round would resolve what it did see
-    // and undraft on the strength of it. `readReviewThreads` refuses rather than
-    // returning a short list, and this call site must not soften that.
+    // Half a review is worse than none: `readReviewThreads` refuses rather than returning a short list, and this call site must not soften that.
     const h = harness({ review: review() }, [
       QUIET,
       { match: asked("reviewThreads"), reply: { exitCode: 1, stderr: "HTTP 502" } },
@@ -1973,8 +1741,7 @@ describe("advance's inline threads", () => {
   });
 
   it("names the open thread when it gives up on the pull request", async () => {
-    // `unresolved` is what tells a human to stop the loop and look, and on a
-    // capped pull request the threads are most of what is still open.
+    // `unresolved` tells a human to stop the loop and look; on a capped pull request the threads are most of what is still open.
     const h = harness({}, [spent(20), inline(thread())]);
 
     const outcome = await advance(h.deps, { ...advanceRequest, maxTotalRounds: 20 });
@@ -2013,10 +1780,7 @@ describe("reviewerComments", () => {
   });
 
   it("keeps a comment posted from the account the bot posts under", () => {
-    // The mutation whose failure destroys somebody's words rather than costing
-    // money. `gh` is authenticated as the operator, so this human comment and
-    // the bot's own arrive with the same author — verified on PR #2658. Only
-    // the prefix separates them.
+    // `gh` is authenticated as the operator, so a human comment and the bot's own arrive with the same author (verified on PR #2658).
     const human = said("rull3211", "Can you also handle the empty case?");
 
     expect(reviewerComments(stateWith(human))).toEqual([human]);
@@ -2036,19 +1800,11 @@ describe("reviewerComments", () => {
 describe("advance's round classification", () => {
   const REVIEWER = { author: { login: "copilot" }, body: "the wrapper looks unnecessary" };
 
-  /**
-   * A review with nothing in the body, which is what an inline comment arrives
-   * under. It opens the `waiting` gate — somebody spoke — and contributes no
-   * comment of its own, so the two thread tests below get a batch that is
-   * entirely inline and can be classified by the thread alone.
-   */
+  /** A review with an empty body, opening the `waiting` gate without contributing a comment of its own. */
   const APPROVED = { author: { login: "copilot" }, body: "" };
 
   it("wakes for a person who commented before the reviewer did", async () => {
-    // The comment was always collected; the gate threw it away. `waiting` asked
-    // whether the *requested reviewer* had spoken, which is a narrower question
-    // than the list behind it answers, so a human review on a pull request the
-    // bot reviewer had not reached yet went unread.
+    // `waiting` asked whether the requested reviewer had spoken, narrower than the list behind it, so a human review went unread.
     const h = harness({ review: review() }, [
       board({ count: 0, reviewerCount: 0, comments: [fromHuman("please rename this")] }),
     ]);
@@ -2060,11 +1816,7 @@ describe("advance's round classification", () => {
   });
 
   it("runs a round for a person after the reviewer's budget is spent", async () => {
-    // The user's rule, and the reason for it: `MAX_REVIEW_ITERATIONS` bounds two
-    // machines talking to each other, because nothing in that conversation adds
-    // information from outside it. A person asking for a change is exactly the
-    // outside information the cap protects against the absence of. Capping it
-    // would be the bot telling a reviewer it has run out of turns.
+    // `MAX_REVIEW_ITERATIONS` bounds two machines talking past each other; a person's request is exactly the outside information the cap protects against the absence of.
     const h = harness({ review: review() }, [
       board({ count: 3, reviewerCount: 3, comments: [fromHuman("please rename this")] }),
     ]);
@@ -2076,10 +1828,7 @@ describe("advance's round classification", () => {
   });
 
   it("counts a mixed batch as a human round", async () => {
-    // Where the rule is easiest to get subtly wrong, and the asymmetry decides
-    // it: over-counting silently declines work a person asked for because a bot
-    // happened to comment in the same window, under-counting spends one more
-    // round. Only one of those is recoverable by whoever notices.
+    // Over-counting silently declines a person's request because a bot commented in the same window; under-counting only costs one extra round.
     const h = harness({ review: review() }, [
       board({
         count: 3,
@@ -2102,8 +1851,7 @@ describe("advance's round classification", () => {
 
     await advance(h.deps, advanceRequest);
 
-    // The total moves — the absolute brake counts everything — and the
-    // reviewer's half does not.
+    // The total moves (the absolute brake counts everything), the reviewer's half does not.
     expect(wrote(h)).toContain("bot: iteration count 2");
     expect(wrote(h)).toContain("Reviewer rounds: 1");
   });
@@ -2120,9 +1868,7 @@ describe("advance's round classification", () => {
   });
 
   it("still stops a human at the absolute cap", async () => {
-    // `MAX_PR_ROUNDS_TOTAL` is a brake on the machinery rather than a policy
-    // about a reviewer, and a brake a person's comment could step past is not a
-    // brake. This is the half of the split that human feedback does not lift.
+    // `MAX_PR_ROUNDS_TOTAL` is a brake on the machinery, not a reviewer policy; one a person's comment could step past is not a brake.
     const h = harness({ review: review() }, [
       board({ count: 20, reviewerCount: 0, comments: [fromHuman("one more thing")] }),
     ]);
@@ -2134,10 +1880,7 @@ describe("advance's round classification", () => {
   });
 
   it("reads a thread's origin from whoever raised the point", async () => {
-    // The first comment, not the last. A reviewer's thread that a person has
-    // replied on is still the reviewer's point, and reading the newest comment
-    // instead would let any passer-by reset the reviewer's budget by agreeing
-    // with it.
+    // The first comment, not the last — reading the newest would let any passer-by reset the reviewer's budget by agreeing with it.
     const h = harness({ review: review() }, [
       board({ count: 3, reviewerCount: 3, reviews: [APPROVED] }),
       inline(talking(spoke("copilot", "this is not idempotent"), spoke("a-colleague", "agreed"))),
@@ -2161,9 +1904,7 @@ describe("advance's round classification", () => {
   });
 
   it("undrafts and keeps listening when the reviewer's budget runs out", async () => {
-    // The rename is the point. `exhausted` read as a terminal, and it is not
-    // one any more: the pull request comes out of draft, says so, and a human
-    // comment arriving afterwards still gets a round.
+    // `exhausted` is not a terminal: the pull request comes out of draft and a later human comment still gets a round.
     const h = harness({ review: review() }, [
       board({ count: 3, reviewerCount: 3, reviews: [REVIEWER] }),
     ]);
@@ -2206,28 +1947,19 @@ describe("advance's merge round", () => {
 
     expect(outcome).toEqual({ kind: "synced", round: 3, behind: 7, conflicts: [] });
     const body = markerBody(h);
-    // The total moves, because a merge round costs money like any other and
-    // `MAX_PR_ROUNDS_TOTAL` is a brake on the machinery rather than a policy
-    // about reviewers.
+    // The total moves: a merge round costs money like any other.
     expect(body).toContain("iteration count 3");
-    // The reviewer's own budget does not. `MAX_REVIEW_ITERATIONS` bounds an
-    // argument between two machines, and spending one of its turns here would
-    // tell a reviewer the loop was out of turns because a base moved.
+    // The reviewer's own budget does not; spending a turn here would tell the reviewer the loop was out of turns because a base moved.
     expect(body).toContain("Reviewer rounds: 1");
-    // And the high-water mark does not, because nothing read a comment. Moving
-    // it would mark the reviewer's point as handled by a round that never
-    // looked at it, and the pull request would sit there looking answered.
+    // The high-water mark does not move either, since nothing read a comment.
     expect(body).toContain("Last read: 2026-09-05T08:00:00Z");
     expect(body).not.toContain("2026-09-05T10:00:00Z");
-    // Said out loud on the pull request, because a round that answers nobody is
-    // otherwise indistinguishable from a round that ignored the review.
+    // Said out loud: otherwise a round that answers nobody looks like a round that ignored the review.
     expect(body).toContain("round 3 — merge");
   });
 
   it("does not touch the branch when the round could not be reserved", async () => {
-    // The reservation is the brake, so it fails closed here exactly as it does
-    // for a review round: no marker, no round — including the git half, which
-    // is what would otherwise push a merge commit nothing had counted.
+    // Fails closed exactly as a review round does: no marker, no round, including the git half that would otherwise push an uncounted merge commit.
     const h = harness({}, [
       { match: asked("addComment"), reply: { exitCode: 1, stderr: "gh: rate limited" } },
       BEHIND,
@@ -2242,9 +1974,7 @@ describe("advance's merge round", () => {
   });
 
   it("reports a branch that turned out to be current as a sync of nothing", async () => {
-    // The base moved between the attach that found the conflict and this round.
-    // Not a failure: the branch contains its base, which is the state the round
-    // exists to reach, and no scripted pass means reaching one throws.
+    // The base moved between the conflicted attach and this round; the branch already containing it is the round's goal state, not a failure.
     const h = harness({}, [
       board({ count: 0, reviewerCount: 0, reviews: [WAITING_REVIEWER] }),
       { match: saw("rev-list", "--count"), reply: { stdout: "0\n" } },
@@ -2272,8 +2002,7 @@ describe("advance's merge round", () => {
         BEHIND,
         { match: saw("merge", "--no-edit"), reply: { exitCode: 1, stderr: "CONFLICT (content)" } },
         { match: once(saw("--diff-filter=U")), reply: { stdout: `${CONFLICTED}\n` } },
-        // `git grep` exits 1 when it finds nothing, which is the answer being
-        // hoped for. The fake's default of 0 would read as *markers found*.
+        // `git grep` exits 1 when it finds nothing; the fake's default of 0 would read as markers found.
         { match: saw("grep"), reply: { exitCode: 1 } },
       ],
     );
@@ -2285,9 +2014,7 @@ describe("advance's merge round", () => {
   });
 
   it("does not call a merge that would not push a sync", async () => {
-    // `pushBranch` resets to `ORIG_HEAD` when the push fails, so the branch is
-    // as it was and nothing downstream may read this as merged. `merge` rather
-    // than `verification`: the steps never gave a verdict, the plumbing broke.
+    // `pushBranch` resets to `ORIG_HEAD` on a failed push, so nothing downstream may read this as merged; stage is `merge` since the plumbing broke, not verification.
     const h = harness({}, [
       board({ count: 0, reviewerCount: 0, reviews: [WAITING_REVIEWER] }),
       BEHIND,

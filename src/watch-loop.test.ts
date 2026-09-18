@@ -13,28 +13,14 @@ function settingsWith(overrides: Partial<Record<string, string>>): Settings {
   return readSettings({ ...ENV, ...overrides });
 }
 
-/**
- * Never called by the tests that only read the schedule.
- *
- * `createWatchLoop` composes a loop and returns it without running it, so those
- * assertions read what it decided rather than watching it happen. A client that
- * throws on any use keeps it that way: if a future change makes construction
- * reach Jira, they fail instead of quietly acquiring a network dependency.
- */
+/** Never called by tests that only read the schedule; throws if a future change makes construction reach Jira. */
 const CLIENT = new Proxy({} as JiraClient, {
   get() {
     throw new Error("createWatchLoop must not touch Jira before it ticks");
   },
 });
 
-/**
- * A watch armed the way the daemon arms it.
- *
- * `SKILL_NAME` is named rather than left to default, and the two vault tests
- * below are worth nothing without it: the fallback is `mock-triage`, a stand-in
- * that needs no vault, so an armed loop built on the default would never have
- * reached the check they claim to be about.
- */
+/** A watch armed the way the daemon arms it. `SKILL_NAME` must be non-default, or the vault tests below never reach the check they claim to be about (the default `mock-triage` needs no vault). */
 const ARMED = {
   WATCH_ENABLED: "true",
   SKILL_NAME: "intake-triage",
@@ -60,11 +46,8 @@ describe("createWatchLoop", () => {
     expect(loop).toBeNull();
   });
 
-  // The guard is the *order* rather than the switch, and it is the same one
-  // `createReviewLoop` makes: build the dependencies first and a grooming-only
-  // daemon refuses to start, for want of a vault path it would never read. The
-  // operator's report would be "it stopped working" and the cause would be a
-  // feature they had switched off.
+  // Same guard as `createReviewLoop`: building dependencies before the switch check would
+  // refuse to start a watch-off daemon for want of a vault path it never reads.
   it("does not need a vault path when the watch is off", () => {
     expect(() =>
       createWatchLoop(
@@ -77,10 +60,7 @@ describe("createWatchLoop", () => {
     ).not.toThrow();
   });
 
-  // The other half, and the reason the re-triage's groom is built here at all:
-  // armed, a missing vault path is a startup error rather than a cycle that
-  // throws identically every six hours, backs off to the cap, and reports
-  // itself only as "loop.cycle_failed" — on the loop nobody is watching.
+  // Armed, a missing vault path must be a startup error, not a cycle failing identically forever.
   it("refuses at startup when the watch is armed with no vault path", () => {
     expect(() =>
       createWatchLoop(
@@ -94,9 +74,6 @@ describe("createWatchLoop", () => {
   });
 
   it("ticks on WATCH_POLL_MS, not on either of the other two cadences", () => {
-    // Six hours by default and deliberately the slowest thing here: the trigger
-    // is a person changing their mind. Reading the poll or review cadence would
-    // buy nothing and spend on every ticket in the watched set, every time.
     const loop = createWatchLoop(
       settingsWith({
         ...ARMED,
@@ -134,13 +111,7 @@ function adf(text: string): unknown {
   return { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] };
 }
 
-/**
- * One watched ticket with an unanswered trigger on it.
- *
- * Our own triage comment first, so there is a high-water mark, then a reply
- * after it, which is what makes `decideWatch` return `retriage` — the one
- * decision that reaches the memo.
- */
+/** One watched ticket with an unanswered trigger: our comment sets a high-water mark, then a reply after it, making `decideWatch` return `retriage`. */
 const ACTIVITY: IssueActivity = {
   key: "SSX-1234",
   statusCategoryKey: "new",
@@ -179,13 +150,8 @@ function tickingClient(): JiraClient {
 
 describe("the memo the watch loop was handed", () => {
   it("is the one every tick consults, so a refusal is not re-bought forever", async () => {
-    // **The mutation this file exists for.** `relevance.ts` names the cost its
-    // own design cannot pay: a `no` writes nothing to the ticket, so the
-    // trigger is still there next sweep on identical content. The memo is the
-    // only record that the answer was already bought — and constructed inside
-    // `runCycle` it records nothing that outlives one tick, while every
-    // assertion above still passes. Handed in, the mutation has to ignore an
-    // argument, and two ticks see that.
+    // A `no` writes nothing to the ticket, so the trigger persists; the memo must be the only
+    // record that the answer was already bought, and must outlive a single tick.
     const consulted: { key: string; at: number }[] = [];
     const memo: WatchMemo = {
       seen: (key, at) => {
@@ -210,16 +176,11 @@ describe("the memo the watch loop was handed", () => {
     await loop?.runCycle();
 
     expect(consulted).toHaveLength(2);
-    // Both ticks asked about the same trigger, which is the fact a per-tick
-    // memo can never know and the reason the second look costs nothing.
+    // Both ticks ask about the same trigger, which a per-tick memo could never know.
     expect(consulted[0]).toEqual({ key: "SSX-1234", at: Date.parse(THEIRS_AT) });
     expect(consulted[1]).toEqual(consulted[0]);
   });
 
-  // The *position* of that consultation — before the paid check rather than
-  // after it — is not assertable from here: this file cannot reach the checker
-  // to count it, and the sweep swallows a re-triage failure, so a late gate
-  // would look identical from the outside. It is pinned in `sweep.test.ts`,
-  // where the checker is an argument. Written down rather than left as a gap
-  // somebody re-discovers by moving the line.
+  // The position of that consultation (before, not after, the paid check) isn't assertable
+  // from here; it's pinned in `sweep.test.ts`, where the checker is an argument.
 });

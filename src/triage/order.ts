@@ -1,37 +1,14 @@
 /**
- * What order triage works in, and where the cursor is allowed to stop.
- *
- * These are two different questions and this module exists because the poller
- * used to answer them with one mechanism. `runPollCycle` walked the issues
- * oldest-first and advanced the cursor as it went, so "the order we work in"
- * and "how far we have safely read" were the same loop variable. That is fine
- * while the only order is created-ascending and wrong the moment it is not:
- * re-sorting the loop would advance the cursor past an older ticket that had
- * not been triaged at all, which is precisely the permanent-strand failure
- * rule 2 of the poller's header exists to prevent.
- *
- * So the two are separated here:
- *
- *   `byStatusPriority` — the order to *spend* in. Leftmost column first.
- *   `settledCursor`    — how far we have read, derived from created-ascending
- *                        order and the set of issues that actually succeeded,
- *                        with no reference to the order they were attempted in.
- *
- * The second is a guard, and its property is worth stating plainly: **the
- * cursor never passes an issue that has not succeeded**, whatever order the
- * loop ran in and whatever it did afterwards. That is what makes re-ordering
- * safe, so it is tested by unplugging it — see `order.test.ts`.
+ * Order to work in (`byStatusPriority`) and how far the cursor may safely advance
+ * (`settledCursor`) are kept separate: the cursor never passes an issue that has not succeeded,
+ * regardless of the order tickets were attempted in.
  */
 
 import type { TicketRef } from "../jira/types.ts";
 
 /**
- * Fails loudly on a timestamp we cannot read.
- *
- * `Date.parse` returns NaN rather than throwing, and NaN from a comparator
- * leaves the order arbitrary — which would silently drop tickets. Everything in
- * the poll cycle is built to never lose an issue quietly, so a nonsensical
- * timestamp should stop the cycle instead.
+ * Throws on an unparseable timestamp — `Date.parse` returns NaN rather than throwing, and NaN in
+ * a comparator would silently leave the order arbitrary.
  */
 function instant(ticket: TicketRef): number {
   const parsed = Date.parse(ticket.created);
@@ -42,16 +19,9 @@ function instant(ticket: TicketRef): number {
 }
 
 /**
- * Oldest first. The order the cursor is reasoned about in, always.
- *
- * Compares instants, not strings. Jira returns `created` with a numeric offset
- * rather than `Z` — `2026-09-02T09:55:34.178+0200` — and the offset changes at
- * the DST boundary. A lexicographic compare then orders `02:00+0100` (01:00Z)
- * before `02:30+0200` (00:30Z), which is backwards, and the cursor would
- * advance past the earlier ticket and drop it permanently.
- *
- * Ties break on key so the order is total: equal timestamps are common, and an
- * unstable order there would make the cursor's resume point non-deterministic.
+ * Oldest first, comparing instants rather than strings — Jira's offset-suffixed timestamps
+ * (`+0200`) sort backwards lexicographically across a DST boundary. Ties break on key so the
+ * cursor's resume point is deterministic.
  */
 export function byCreatedAscending(a: TicketRef, b: TicketRef): number {
   const delta = instant(a) - instant(b);
@@ -59,20 +29,12 @@ export function byCreatedAscending(a: TicketRef, b: TicketRef): number {
 }
 
 /**
- * Where a ticket's status sits in the configured priority list.
+ * Where a ticket's status sits in the configured priority list. Matches by id or name — unlike
+ * `TRIAGE_ONLY_STATUS`'s JQL matching, where some status names don't resolve, this compares in
+ * JS against the API response, so name matching is safe here.
  *
- * Matches on **either** id or name, and that is not the usual "accept both for
- * convenience". `TRIAGE_ONLY_STATUS` learned the hard way that this board's
- * status *names* do not all resolve — `Mottatt` matched zero issues in JQL
- * while `10165` matched all 51 — so an operator who has been told to prefer ids
- * there would be baffled to find ids rejected here. The comparison in this
- * module is in JavaScript against what the API returned, not in JQL, so the
- * name half is sound here even where it is not there; supporting both is what
- * keeps one convention across the two settings.
- *
- * Unlisted sorts last, as does a ticket whose status Jira did not return.
- * `priority.length` rather than `Infinity` so the value stays a number that can
- * be logged and compared without special cases.
+ * Unlisted sorts last, at `priority.length` rather than `Infinity`, so the value stays a plain
+ * comparable number.
  */
 export function statusRank(priority: readonly string[], ticket: TicketRef): number {
   const index = priority.findIndex((entry) => matches(entry, ticket));
@@ -93,13 +55,9 @@ function matches(entry: string, ticket: TicketRef): boolean {
 }
 
 /**
- * The order to spend model runs in: by column, then oldest first within a
- * column.
- *
- * An empty `priority` returns created-ascending unchanged, which is how the
- * setting stays off by default rather than by a flag somewhere else. See
- * `TRIAGE_STATUS_PRIORITY` in `settings.ts` for why blank reads as "today's
- * behaviour" here while blank reads as "no restriction" in `TRIAGE_ONLY_STATUS`.
+ * The order to spend model runs in: by column, then oldest first within a column. An empty
+ * `priority` returns created-ascending unchanged — see `TRIAGE_STATUS_PRIORITY` in `settings.ts`
+ * for why blank means "today's behaviour" here but "no restriction" in `TRIAGE_ONLY_STATUS`.
  */
 export function byStatusPriority(
   priority: readonly string[],
@@ -115,21 +73,10 @@ export function byStatusPriority(
 }
 
 /**
- * How far the cursor may advance, given what succeeded.
- *
- * Takes the issues in **created-ascending** order and returns the timestamp of
- * the last one in an unbroken run of successes from the oldest forward, or
- * `null` when the oldest itself did not succeed. `null` means "do not move the
- * cursor", which `recordSeen` already reads as keeping the previous value.
- *
- * Everything that is not a success stops the run, and the three ways that
- * happens are deliberately not distinguished: a failure, an issue abandoned to
- * a shutdown, and an issue the loop has not reached yet are all "we cannot
- * prove this one was handled", and the cursor treats them identically. That is
- * what lets this be called after every issue rather than once at the end — the
- * answer only ever grows as the set of successes grows, so persisting it per
- * issue keeps the crash cost at one triage without ever moving the cursor
- * somewhere a later failure would have to take back.
+ * How far the cursor may advance: the timestamp of the last success in an unbroken run from the
+ * oldest (created-ascending), or `null` if the oldest itself didn't succeed. A failure, an
+ * abandoned issue, and one not yet reached are all treated as "not proven handled" — which is
+ * what makes it safe to call this after every issue rather than once at the end.
  */
 export function settledCursor(
   createdAscending: readonly TicketRef[],

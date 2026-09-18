@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2673 tests in 80
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2683 tests in 80
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -45,34 +45,37 @@ holes.** Other documents cite `PLAN.md §N`, and renumbering on every deletion w
 repoint every one of them — the failure §14 exists about. A missing number almost always means that
 entry shipped and was deleted. **One of them did not ship**, and it is named with the holes below
 rather than here, because the qualifier is worth nothing without the case: a hole list that flattens
-"built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `ARCHITECTURE.md` §16,
+"built" and "abandoned" sends somebody into the git history looking for a feature nobody wrote. The settled half of the two guardrail entries now lives in `architecture/guardrails.md` §16,
 every file that cited them has been repointed there, and what is still open from them is §17.
 
 <!-- refs:off -->
 
-**The holes are §4, §12, §15, §16, §18, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30 and §32, and this line names them rather than
+**The holes are §4, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32 and §36, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
 "goes to zero" is no longer part of this argument: the claim is withdrawn in `docs-check.ts`, on
 the evidence that the number has not moved once in forty-one commits.
 
-**Only §18 was ever actually counted, and finding out why is §19.** Adding the first four names
-raised the dangling count by two, not by four: the resolver pools section ids from every document
-into one set, so a dead `PLAN.md §12` resolves against `ARCHITECTURE.md`'s live §12, and the same
-for §15 and §16. §18 dangled only because no document here has an eighteenth section. The region is
-still right — a hole list should not be checked — but it is buying much less than it looks like it
-is buying.
+**Only §18 was ever actually counted, and finding out why shipped as §19.** Adding the first four
+names raised the dangling count by two, not by four: the resolver of the time pooled section ids
+from every document into one set, so a dead `PLAN.md §12` matched `ARCHITECTURE.md`'s live §12, and
+the same for §15 and §16. §18 dangled only because no document here has an eighteenth section. The
+region is still right — a hole list should not be checked — but at the time it was buying much less
+than it looked like it was buying.
 
 §12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §20 was the
 scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
 entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
-worth a permanent number, because the session was compacted once while it was open; §25 was the
+worth a permanent number, because the session was compacted once while it was open; §19 was the
+per-document resolver itself, shipped whole — the story is `INCIDENTS.md`'s 2026-09-18 entry, "The
+`§N` checker that resolved a citation against any document that happened to define it"; §25 was the
 fitness block owning the region it writes, shipped in PR #37; §26 and §27 were the closed-ticket
 clause and the status allowlist that narrowed it, and each is a hole one commit after it was written
 — opened and deleted inside the branch that built it, which is what the rule now asks for. **§24 is
-absent from that list and is not a hole** — it was skipped rather than spent, for the reason §19
-gives. §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
+absent from that list and is not a hole** — it was skipped rather than spent, for the reason recorded
+in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an unrelated edit
+repaired nothing." §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
 inside the branch that built it. **§29 is the exception the paragraph above flags** — the handed-off
 unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
 (unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
@@ -82,8 +85,10 @@ inside the branch that built it, and §32 was the untagged thread reply that let
 with itself on PR #548 — same shape, opened and deleted inside its own branch. §4 was recon reading
 staged images and §22 the age-based sweep its own last phase deferred; both shipped once that phase
 built `sweep-once` and `staging-sweep.ts`, walking the skill-root and image-staging parents alike
-rather than leaving the sweep narrowed to the one §22 was opened for. The triage-selection
-entries are now all closed, so the next entry is §34.
+rather than leaving the sweep narrowed to the one §22 was opened for. §36 was `branch-stack.sh`
+counting commit identity instead of commit content, opened and deleted inside the branch that built
+it — the story is `INCIDENTS.md`'s 2026-09-18 entry. The triage-selection entries are now all
+closed, so the next entry is §37.
 
 <!-- refs:on -->
 
@@ -263,7 +268,7 @@ environment cannot answer a question about CI's.**
 - **The compact brief has never been seen firing.** `pnpm hooks:brief` renders it on demand and its
   suite covers the extraction, but nobody has observed the runtime deliver a `SessionStart` payload
   after a compaction — so neither the field name it branches on nor the fact of registration is
-  confirmed from a session's own vantage point (`ARCHITECTURE.md` §16). It accepts both `trigger`
+  confirmed from a session's own vantage point (`architecture/guardrails.md` §16). It accepts both `trigger`
   and `source` for that reason.
 - **The analyst's denial list is a list of strings, and only four of its names have ever been
   measured** (`runner.ts:103`). The probe that measured them named four other built-ins; `WebFetch`,
@@ -358,19 +363,21 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **114 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **108 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
-  headings that define them, and **exactly 39 point at sections that have never existed** (below,
-  "The citations that were never written down"). What is still unresolved is which _document_ a
-  citation meant, since almost none of them says.
+  headings that define them, and **exactly 40 point at sections that have never existed** (below,
+  "The citations that were never written down"). Which _document_ a bare citation meant, since almost
+  none of them says, is checked too now — the story is
+  [`INCIDENTS.md`'s `§N` checker entry](.claude/skills/dev-house-rules/INCIDENTS.md#the-n-checker-that-resolved-a-citation-against-any-document-that-happened-to-define-it):
+  **118 resolve in more than one document with no name saying which**, held by `KNOWN_AMBIGUOUS`.
   `CLAUDE.md`'s own routing table was the third gap here and is now closed: its filenames are links,
   so deleting a phase file fails the check by name instead of keeping it green. The size of the
   system is now derived by `docs:check`; whether any of it resolves is still not.
 - **An incident unreachable from a rule now fails `docs:check`; the reverse direction does not.**
   Closed by `rule-citations.ts`: every `###` entry in `INCIDENTS.md` must be cited from one of the
-  six documents in `CITING_FILES`, or carry a `**No rule yet**` line that parses. 44 entries, 39
-  cited, 5 declared. What is still missing is the direction this bullet used to claim was the one
-  that mattered — **42 of the 71 rule paragraphs cite no incident**, and that number is printed in
+  six documents in `CITING_FILES`, or carry a `**No rule yet**` line that parses. 54 entries, 45
+  cited, 9 declared. What is still missing is the direction this bullet used to claim was the one
+  that mattered — **42 of the 72 rule paragraphs cite no incident**, and that number is printed in
   the summary and failed on by nobody. It is not a debt to pay down blind: 18 of the 42 are file
   openers, reading pointers and section labels rather than rules, so the honest fix is a citation
   convention for rule paragraphs, which does not exist yet.
@@ -385,11 +392,13 @@ not a plan item. What is left below is only what is still missing.
   "seven quotes appear above this line" is a check with one site and a bespoke parser — but the
   gap is real and the alternative is to stop writing such sentences, which is the cheaper fix and
   is not currently a rule.
-- **Cost figures are facts with many homes.** `$0.94`, `$0.11`, `$3.99` and `$4.50` occupy 17
+- **Cost figures are facts with many homes.** `$0.94`, `$0.11`, `$3.99` and `$4.50` occupy 18
   file-homes between them, outside the `docs:check` exemption rule 3 grants. The figures themselves
   are history and stay unchecked; the total is derived, so the class spreading further goes red —
   this bullet said "three" of `$4.50` while it was already in four, which is the drift it describes,
-  happening to it.
+  happening to it. It rose again, 17 to 18, the day `ARCHITECTURE.md` split into `architecture/*.md`:
+  `$0.11` had one home because §10 and §13 shared a file, and now has two because they don't.
+  Splitting a file can grow this count on its own, with no new figure and no new claim.
 - **A citation to a document outside the tree cannot be checked, and does not look different.**
   `docs:check` can only resolve what it can open, so an out-of-tree quotation is exempt by nature
   while reading exactly like a verifiable one — which is how two of them were misattributed to
@@ -412,7 +421,7 @@ not a plan item. What is left below is only what is still missing.
 - **This one is closed, and is kept because it was wrong in a specific way.** It said registration
   was the operator's and outside this tree, so every guard was built inert and the whole of the
   evidence was `pnpm test:hooks` and hand-fed payloads, never an observed refusal. Registration moved
-  into the tree as PR #23 and a refusal **was** observed on 2026-09-09 (`ARCHITECTURE.md` §16). The
+  into the tree as PR #23 and a refusal **was** observed on 2026-09-09 (`architecture/guardrails.md` §16). The
   narrower claim it was replaced with — "the agent still cannot read the settings file, so it can
   watch a guard refuse without ever confirming what is wired" — was wrong in turn, and that is the
   second correction this item has taken. The read is allowed; what stays true is only that reading a
@@ -428,7 +437,7 @@ these accumulate, and it is one instance of a possible rule rather than a rule.
 repository's own evidence is that checks on documents catch less than driving a command does. The
 guard work that was worth more than the whole `docs:check` list has now shipped, so what is left
 here is genuinely the cheaper half — and the thing still worth more than any of it is the wiring,
-which is not ours (`ARCHITECTURE.md` §16). If the next session has budget for exactly one, take the
+which is not ours (`architecture/guardrails.md` §16). If the next session has budget for exactly one, take the
 class check with
 its test: it is the only item whose absence has already produced two shipped contradictions.
 
@@ -442,23 +451,38 @@ ten tokens in order to say they resolve to nothing would otherwise report itself
 defects. That is the write-up perturbing the count it reports — a failure this file has now paid for
 twice, and the reason the exemption is a marked region rather than a file-level opt-out.
 
-**The resolver is built. The 39 fixes are not, and they were always the expensive half.** `docs:check`
-now parses the headings of the four section-numbered documents and resolves every `§N` in markdown
-_and_ in `.ts` against them, so "roughly 39" is **exactly 39**, held by `KNOWN_DANGLING` and compared
-with `!==` — fixing some fails the check as loudly as adding one, because a ceiling would let the
-debt be paid down silently and then quietly regrow. The list below still cost a full-tree audit plus
-a `git log --all` check, and it is kept because regenerating it is the expensive part. **Branch:**
-`fix/section-resolver` shipped the check; the fixes need one of their own, off `main`.
+**The resolver is built. The 40 fixes are not, and they were always the expensive half.** `docs:check`
+now parses the headings of the eleven section-numbered documents and resolves every `§N` in markdown
+_and_ in `.ts` per document, against a name where one is given, so "roughly 39" is **exactly
+40**, held by `KNOWN_DANGLING` and compared with `!==` — fixing some fails the check as loudly as
+adding one, because a ceiling would let the debt be paid down silently and then quietly regrow. The
+list below still cost a full-tree audit plus a `git log --all` check, and it is kept because
+regenerating it is the expensive part. **Branch:** `fix/section-resolver` shipped the check;
+`fix/section-scoped-resolver` made it per-document and added one more (below), and shipped and
+deleted the entry that added a second — the fixes still need a branch of their own, off `main`.
 
-**39 dangling `§N` citations** in shipped source. The first diagnosis — that a renumbering
-stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c` appear in **no revision of `PLAN.md` that
-`git log --all` can reach**, in any form. They were never written down. `ARCHITECTURE.md:619` says
-"See PLAN.md §5b", the one citation naming its target, and it resolves to nothing;
-`ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 16.
+**39 dangling `§N` citations** in shipped source, plus one more the per-document resolver surfaced.
+The first diagnosis — that a renumbering stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c`
+appear in **no revision of `PLAN.md` that `git log --all` can reach**, in any form. They were never
+written down. `ARCHITECTURE.md:619` says "See PLAN.md §5b", the one citation naming its target, and
+it resolves to nothing; `ARCHITECTURE.md:1095` cites `§24` in a document whose sections stop at 16.
+The extra one is a different shape:
+[an incident](.claude/skills/dev-house-rules/INCIDENTS.md#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent)
+writes "`PLAN.md` §12" to illustrate a citation that used to name a real section — the pooled
+resolver read the qualifier as decoration and matched `§12` against `architecture/triage.md` instead,
+so it was never checked against the document it actually named. Per-document resolution checks the
+name, `PLAN.md` has no `§12` since it shipped and was deleted, and it is now correctly dangling. A
+second instance of the same shape, in the resolver's own retired write-up, went with it when that
+entry was deleted on shipping.
 
-**The quieter half is worse.** Some references are in range and silently repointed: six files say
-"§1 refuses on-disk state", but that rule moved to `ARCHITECTURE.md §5`. A dangling number fails
-when checked; a repointed one reads correctly forever.
+**The quieter half was worse, and the per-document resolver is what stopped it being silent.** Some references are in
+range and repointed: six files say "§1 refuses on-disk state", but that rule moved to
+`architecture/overview.md §5`. A dangling number failed when checked; a repointed one used to read
+correctly forever, because the pooled resolver had no way to ask which document `§1` meant. Now it
+does: those six are flagged `ambiguous` rather than passing, held by `KNOWN_AMBIGUOUS` alongside 118
+others. Flagged is not fixed — the six still cite the wrong section until a human names
+`architecture/overview.md` — but a defect a check cannot see is worse than one it reports and nobody
+has gotten to yet.
 
 **The root cause is structural.** `PLAN.md` numbers its sections and rule 2 deletes entries when
 they ship, so every `§N` there named a slot guaranteed to be reused. **Half of that is now fixed by
@@ -469,10 +493,10 @@ had not named.
 
 **The deletion case, found while retiring §12 and §15 on `fix/unverified-claims`.** Five files cited
 "`PLAN.md` §12". Deleting §12 does not dangle any of them, because `§12` is still a heading in
-`ARCHITECTURE.md` — so `docs:check` stayed green while every one of those citations came to point at
+`architecture/triage.md` — so `docs:check` stayed green while every one of those citations came to point at
 "Local divergence from upstream" instead of the guardrail argument. The resolver's rule is _this
 token is a heading in **some** document_, and that rule is blind by construction to a citation
-becoming wrong by deletion elsewhere. They were repointed by hand, at `ARCHITECTURE.md` §16, and
+becoming wrong by deletion elsewhere. They were repointed by hand, at `architecture/guardrails.md` §16, and
 nothing would have failed if they had not been. **A check that cannot see the failure mode its own
 document describes is the sharpest version of item 3's argument**, which is why item 3 is now
 partly instanced rather than only recommended.
@@ -484,24 +508,25 @@ Three fixes were named; the first is done, the third matters most and has its fi
    and that arrived as `refs:off` / `refs:on` markers rather than a file-level opt-out, so exempting
    a paragraph never quietly exempts the document around it. A guard that fires on its own
    documentation gets switched off.
-2. Fix the 39. Most need a human: the intended target is often unrecoverable, and deleting a comment
+2. Fix the 40. Most need a human: the intended target is often unrecoverable, and deleting a comment
    that cites nothing sometimes destroys the only record of a decision.
 3. **Stop citing `PLAN.md` by number from code.** Cite `ARCHITECTURE.md`, whose sections are stable,
    or quote the reasoning where it is used. **First instance done:** the guardrail argument moved out
-   of `PLAN.md` §12 into `ARCHITECTURE.md` §16 precisely because five files were citing a plan entry
+   of `PLAN.md` §12 into `architecture/guardrails.md` §16 precisely because five files were citing a plan entry
    as though it were a permanent home. The general form of the rule is that an argument other
    documents cite does not belong in the document whose entries are deleted on purpose.
 
-**What the resolver cannot catch, which is why item 2 is still a human's.** Almost no citation names
-its target document — `§7b` in `src/watch/decide.ts` says nothing about where `§7b` would live — so
-the strongest available rule is _this token is a heading in **some** document_. That catches all 39.
-It cannot catch a reference that still resolves and now means something else, and the tree has those
-too; they are listed below. The check shrinks the set that needs a human read. It does not claim the
-set is empty.
+**What the resolver still cannot catch, which is why item 2 is still a human's.** Per-document
+resolution means `§7b` in `src/watch/decide.ts` — naming no target document — is checked
+against `src/watch/decide.ts`'s own sections first (it has none), then against every other document
+that defines `§7b` (none do), and correctly lands dangling. A qualified citation to a document that
+does define the id, though, is trusted: `architecture/guardrails.md §16` resolves because §16 exists
+there, not because that is provably where the author meant to point. The check shrinks the set that
+needs a human read. It does not claim the set is empty.
 
 **What would make this the wrong idea.** Item 2 is a large mechanical diff across `src/` with real
-judgement in it, and a batch pass by an agent is how 39 confident references to nothing got here. If
-the answer to a dangling `§7b` turns out to be "delete the citation", then 39 comments get shorter
+judgement in it, and a batch pass by an agent is how 40 confident references to nothing got here. If
+the answer to a dangling `§7b` turns out to be "delete the citation", then 40 comments get shorter
 and nothing gets more correct. Read three of them before fixing any.
 
 #### The sites, so nobody pays for the audit twice
@@ -528,22 +553,25 @@ Dangling, grouped by the token they cite. None of these tokens has ever been a h
 | `§5b`   | `ARCHITECTURE.md:619` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                              |
 | `§24`   | `ARCHITECTURE.md:1095` — self-reference in a file whose sections stop at 16; intended target is almost certainly §15, "The solve pipeline"                               |
 
-**In range and silently repointed — the harder half, because nothing will ever flag these:**
+**In range and repointed — flagged `ambiguous` by the per-document resolver, not yet fixed:**
 
 - "§1 refuses on-disk state" — `solve/attempts.ts:31`, `watch/relevance.ts:40`, `watch/memo.ts:21,26`,
-  `solve/review-cycle.ts:24,26`. That rule is now `ARCHITECTURE.md §5`; `PLAN.md §1` is the model
+  `solve/review-cycle.ts:24,26`. That rule is now `architecture/overview.md §5`; `PLAN.md §1` is the model
   question.
 - "§6's rule is _advance, then claim_" — `index.ts:44`, `review-loop.ts:97`, `review-loop.test.ts:150`.
-  Now `ARCHITECTURE.md §2` (L143); `PLAN.md §6` is the second gate.
+  Now `architecture/overview.md §2` (L143); `PLAN.md §6` is the second gate.
 
 **Clean, and worth knowing so the resolver is not written to re-check them:** all 7 `invariant N`
 references (`README.md:447`, `ARCHITECTURE.md:1511,1635,1726,1735,1750`, `solve/claim.ts:26`) cite
-invariants 5, 11 and 13 and are correct; every `§14.N` sub-reference resolves; the ~57 `§11`
-citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as are the
-`SOLVE_INSTRUCTIONS.md` ones.
+invariants 5, 11 and 13 and are correct; every `§14.N` sub-reference resolves, uniquely, since only
+`architecture/invariants.md` defines them. The ~57 bare `§11` citations from `src/triage/*` into
+`INTAKE_INSTRUCTIONS.md` are in range but, under the per-document resolver, no longer "clean": none
+names its target, `§11` is also a heading in `architecture/overview.md` and `PLAN.md`, and all ~57 are
+now flagged `ambiguous` rather than passing silently — the same is true of the `SOLVE_INSTRUCTIONS.md`
+ones.
 
 **The legal vocabulary, which the resolver now parses rather than being told:** `ARCHITECTURE.md`
-§1–16 plus its §14 invariants 1–17; `PLAN.md` §1–21 less the numbers it has retired;
+§1–16 plus its §14 invariants 1–17; `PLAN.md` §1–36 less the numbers it has retired;
 `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
 `SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten cited tokens are in none of them.
 
@@ -552,7 +580,7 @@ citations from `src/triage/*` into `INTAKE_INSTRUCTIONS.md` are all in range, as
 ### 17. Two guardrail questions that outlived the entries they were written in
 
 **Branch:** none yet. These came out of §12 and §15, which shipped and were deleted; the settled
-half of both is now `ARCHITECTURE.md` §16 and this is the half that is still open. They are here
+half of both is now `architecture/guardrails.md` §16 and this is the half that is still open. They are here
 rather than there because §16 describes what the guardrails **are**, and a document describing a
 built thing is the wrong place to keep a defect nobody has fixed.
 
@@ -599,64 +627,6 @@ for both directions — a real push refused, a commit message naming it allowed.
 where narrowing is the expensive direction. `git push` inside `sh -c '...'` is the case to hold
 onto; the substring floor is what covers it today and the fix must not remove that.
 
-### 19. `§N` resolves against every document at once, so cross-document references are barely checked
-
-**Branch:** none yet.
-
-**What is wrong.** `docs-check.ts` builds one `defined` set by unioning the section ids of
-`ARCHITECTURE.md`, `PLAN.md` and the two instruction skills, then asks whether each `§N` reference
-appears in it. The document a reference belongs to is discarded. So `PLAN.md §12` — an entry that
-shipped and was deleted — resolves happily against `ARCHITECTURE.md`'s §12, and a reader following
-it lands somewhere unrelated. Three of this file's own dead numbers were passing that way.
-
-**How it was found.** By accident, and only because the accident was the right shape: the entry
-numbered 18 was deleted, two mentions of it were left in prose, `docs:check` correctly flagged both,
-and wrapping the whole hole list in `refs:off` should then have dropped the dangling count by four.
-It dropped by two. The gap between the predicted number and the measured one is the entire finding —
-a check that had gone green a second earlier was hiding it.
-
-**Measured 2026-09-09 by the corpus audit, and this entry's own prediction is refuted.** It said to
-expect `KNOWN_DANGLING` to "rise sharply" under strict per-document resolution. It rises by eleven,
-39 to 50. What is large is the ambiguity, not the error: the four documents define 77 numbered
-headings that collapse to 43 distinct tokens once pooled, and **181 of the 243 resolving citations —
-74.5% — would resolve in more than one document.** So the check is nearly right about the population
-it reports while answering a far weaker question than it looks like it is asking, which is the house
-speciality. Two figures make that concrete: renumbering `INTAKE_INSTRUCTIONS.md` wholesale turns
-only 2 of the 243 red, and 15 citations resolve **only** by pooling — among them the `§12` and `§15`
-in §17's own opening line, this file citing its retired numbers and being told they are fine.
-
-**The shape of the fix.** References already carry the file they were found in — `referencesIn`
-takes a path — so the work is to key `defined` by document and resolve `§N` against the document
-that owns it, with an explicit rule for the cross-document form (`ARCHITECTURE.md §16` names its
-target and should resolve there, a bare `§16` should resolve locally). The 15 pooling-only citations
-are the whole migration; the eleven are the debt it exposes.
-
-**What would make it the wrong idea.** Eleven is small enough that raising `KNOWN_DANGLING` to 50 is
-tempting, and that is the failure the constant's own comment warns about. Fix the eleven in the same
-week, or say in the code that the resolver is aspirational — do not widen the number and leave it.
-
-<!-- refs:off -->
-
-**The other direction, found 2026-09-10 while opening what became §25, since shipped.** Everything
-above is about a _dead_ reference resolving against a live section elsewhere. The reverse is worse
-and had not been noticed: numbering a new `PLAN.md` entry §24 — the next free number, chosen without
-a thought — **repaired** `ARCHITECTURE.md:1104`'s dangling `§24`, and `docs:check` reported the count falling to
-38 and asked for `KNOWN_DANGLING` to be lowered to match. Nothing about that citation had improved.
-It is still a self-reference in a file whose sections stop at 16, still pointing at nothing, and
-§14's table still names §15 as its intended target. Two things follow. **The count is sensitive to
-edits in files that have nothing to do with it**, so a routine plan entry can turn a check green
-about a defect it did not touch — and had the invitation been accepted, deleting the entry on ship
-would have failed `docs:check` on a later, unrelated commit, with a message pointing at neither
-cause. The entry was renumbered to §25 instead and §24 left unused, which is the smallest thing that
-does not launder a broken citation. **A number skipped on purpose is not a hole**: the list above
-holds sections that shipped and were deleted, and this one never existed. Every `§N` in this
-paragraph is a number being discussed rather than a reference being made, which is why the region is
-`refs:off` — the same reason §14's table is.
-
-<!-- refs:on -->
-
----
-
 ### 31. A claim stranded by a signal is stranded for ever
 
 **Branch:** none yet.
@@ -665,7 +635,7 @@ paragraph is a number being discussed rather than a reference being made, which 
 a startup sweep, or a reconciliation of "a pull request exists" against "the ticket still says
 solving".
 
-**Why it is owed.** `ARCHITECTURE.md` invariant 14 rests entirely on a `finally`, which every
+**Why it is owed.** `architecture/invariants.md` invariant 14 rests entirely on a `finally`, which every
 stack-skipping exit misses: `process.exit(130)` on a second signal (`src/index.ts:104`),
 `process.exit(1)` on an uncaught exception (`:156`), `SIGKILL`, a slept laptop. There is no TTL,
 lease or reaper in `src/`. With `MAX_CONCURRENT_SOLVES=1` one stranded claim halts the solve half

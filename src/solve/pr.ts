@@ -1,146 +1,25 @@
 /**
- * Delivery: the commit, the push, the draft PR, the review round-trip, and the
- * undraft. Everything between "the worktree holds a verified fix" and "a human
- * has something to look at".
+ * Delivery: commit, push, draft PR, review round-trip, and undraft.
  *
- * The solve pipeline before this point is all refusal — `branch.ts` decides what
- * may be written to, `diff-gate.ts` decides whether the diff is one we are
- * willing to show anyone, `verify.ts` decides whether it actually passes. This
- * module is the first one that makes something visible outside the machine, and
- * it is deliberately the dumbest module in the phase: it builds argv arrays,
- * hands them to the injected runner, and translates exit codes into a small
- * closed set of outcomes. It decides nothing about whether the delivery *should*
- * happen. That question was answered upstream, and answering it twice in two
- * places is how the two answers start disagreeing.
- *
- * ## argv arrays, never a command string
- *
- * Every command here is a `readonly string[]` handed to `CommandRunner.run`,
- * which spawns without a shell. This matters more here than anywhere else in
- * the phase, because of where the arguments come from. A PR title and body are
- * written by a model, and the model wrote them after reading a Jira ticket that
- * anyone with a board account can edit. So the path is:
- *
- *     ticket text (attacker-controlled) → model → `--title` / `--body`
- *
- * With a shell in that path, a summary containing shell metacharacters is
- * remote code execution against the machine running the solver. With argv, it
- * is a pull request with a stupid title. There is no escaping function in this
- * file and there must never be one: an escaper is a thing that can have a bug,
- * and the absence of a shell is a thing that cannot. `src/solve/exec.ts` closes
- * the other half by refusing to start any program that is not `git` or `gh`, so
- * even an argument-injection bug in this file cannot reach a new binary.
- *
- * ## `--force` is not here, and must not be added
- *
- * `push` is `--set-upstream origin <branch>` and nothing else. Not `--force`,
- * not `--force-with-lease`, not `+refs/…`. The branch was created by
- * `createWorktree` with `git worktree add -b`, which fails if the branch already
- * exists, so a push that git rejects as non-fast-forward means something this
- * service does not model is writing to that ref — a second solver, a human who
- * pushed a correction, a retried run. Every one of those is a case where
- * overwriting is the wrong move and stopping is the right one.
- *
- * The temptation to add `--force-with-lease` will come from a real failure: a
- * retry after a partial run, where the remote branch exists and the local one
- * has been rebuilt. Fix that by not reusing the branch, not by learning to
- * overwrite. A force-push in an automated loop is unrecoverable in the one
- * direction that matters — the overwritten commits are on nobody's machine.
- *
- * ## The PR number is parsed, not guessed
- *
- * `gh pr create` prints the PR URL on stdout and nothing else useful. The number
- * is extracted with an end-anchored regex against the trimmed last line, and if
- * that does not match, this returns `failed`. It does not fall back to
- * `gh pr list`, does not scan for the first run of digits, and does not assume
- * "the newest PR on the branch is ours".
- *
- * The reason is that the number is subsequently passed to `gh pr edit`,
- * `gh pr view` and `gh pr ready` — commands that change or read *a* pull
- * request. A wrong number does not fail; it succeeds against somebody else's
- * PR, and `gh pr ready` in particular takes a human's draft out of draft. The
- * cost of refusing to guess is a run that stops with a draft PR open and a clear
- * message. The cost of guessing wrong is an action taken on a stranger's branch.
- * Those are not comparable.
- *
- * ## The loop this module contains nothing against
- *
- * State it plainly, because it is the most important paragraph in the file. The
- * PR body is written by a model. It is then read by the review bot, whose
- * comments come back through `readReview` and `formatReviewFeedback` and are fed
- * to the model again on the next pass. That is a closed loop carrying untrusted
- * text, and *nothing in this file breaks it*. `formatReviewFeedback` does not
- * sanitise; its `---` delimiters are forgeable by any comment body containing
- * the same delimiter, and whatever a review comment says reaches the model
- * verbatim, including text aimed at the model rather than at the code.
- *
- * The containment for that lives elsewhere and is structural rather than
- * textual: the session's tool denial list bounds what the model can do at all,
- * `diff-gate.ts` refuses a diff that touches CI, secrets or lockfiles whatever
- * the model believed it was asked to do, `verify.ts` reruns the tests from the
- * pristine manifest, and the PR stays a *draft* with a human on the other end.
- * Adding a keyword filter here would be worse than useless — it would suggest
- * the loop is contained at this layer, and it is not. This is a known, accepted
- * limitation of running the review loop at all.
- *
- * ## Failures are returned; two things throw
- *
- * A `git` or `gh` command that fails produces a `failed` outcome carrying the
- * command's own complaint, never an exception. The orchestrator is the thing
- * that knows whether a failed push means "retry next tick", "unclaim the ticket"
- * or "stop the cycle", and an exception would take that decision away from it by
- * unwinding through it.
- *
- * The exceptions are the two branch guards — `push` and `createDraftPr` throw
- * when handed a protected or non-work branch. That is deliberate and is the one
- * asymmetry in the module. `failed` is a value the orchestrator is expected to
- * handle, log and possibly retry; "you tried to push to `main`" must not be
- * something anything can retry, and must not be reachable by a caller that
- * ignores a return value. It is a bug in the caller, not a fact about the
- * remote, and the two should not arrive by the same channel.
+ * Commands are argv arrays handed to `CommandRunner.run`, which spawns without a
+ * shell, so nothing here escapes arguments. A failed `git`/`gh` command returns a
+ * `failed` outcome; `push` and `createDraftPr` throw instead, on a protected or
+ * non-work branch.
  */
 
 import { logger } from "../logger.ts";
 import { assertWorkBranch, isProtectedRef } from "./branch.ts";
-// The prefix that marks a comment as ours, and the only thing that does. Taken
-// from `marker.ts` rather than restated here: two copies of a sentinel is one
-// sentinel and one silent bug the day somebody changes the other.
 import { BOT_PREFIX, isOurs } from "./marker.ts";
 import { newestInstant } from "./silence.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
 
-/**
- * The reviewer asked for on every PR this service opens.
- *
- * `@copilot` is the handle GitHub's own review bot answers to for
- * `gh pr edit --add-reviewer`. It is a constant rather than configuration
- * because the whole review loop — request, poll, feed back, undraft — is built
- * around a reviewer that responds without a human being paged, and swapping in
- * a person's handle would turn a polling loop into a machine that pesters
- * somebody every tick.
- */
+/** `@copilot`, GitHub's own review bot; the loop assumes a reviewer that answers without paging a human. */
 export const COPILOT_REVIEWER = "@copilot";
 
-/**
- * Cap on the feedback block handed back to the model.
- *
- * A review can be long, and the block is concatenated into a prompt alongside
- * the ticket, the diff and the instructions. Bounding it here rather than at
- * the prompt-assembly site means the caller cannot forget: by the time an
- * oversized block reaches the prompt it has already displaced the parts of the
- * context that were actually load-bearing.
- */
+/** Cap on the feedback block handed to the model; bounded here so the prompt-assembly caller can't forget. */
 export const MAX_FEEDBACK_CHARS = 20_000;
 
-/**
- * The commit identity, passed explicitly on every commit.
- *
- * Not read from ambient git config. The solver runs in a worktree of somebody
- * else's repository on a machine whose `~/.gitconfig` belongs to a human, and
- * inheriting that identity would attribute machine-written commits to them —
- * in `git blame`, in the PR author line, and in whatever CODEOWNERS automation
- * reads the committer. The commits must say what made them.
- */
+/** The commit identity, passed explicitly per commit so it never inherits the operator's `~/.gitconfig`. */
 export interface BotIdentity {
   readonly name: string;
   readonly email: string;
@@ -178,7 +57,7 @@ export interface CreatePrRequest {
   readonly repo: string;
   readonly baseBranch: string;
   readonly branch: string;
-  /** Model-authored. See the header: attacker-influenced, and that is accepted. */
+  /** Model-authored; may contain attacker-influenced text from the ticket. */
   readonly title: string;
   readonly body: string;
   readonly timeoutMs: number;
@@ -201,26 +80,14 @@ export type RequestReviewResult =
   | { readonly outcome: "requested" }
   | { readonly outcome: "failed"; readonly reason: string };
 
-/**
- * Which of the two reviewers said this, and only one of them is on a budget.
- *
- * `MAX_REVIEW_ITERATIONS` exists to stop two machines talking to each other
- * forever, because nothing in that conversation brings in information from
- * outside it. A person asking for a change *is* that outside information, so
- * counting their request against the cap would end with the loop telling a
- * reviewer it had run out of turns. The cap therefore counts `reviewer`
- * feedback and nothing else, and this field is what tells them apart.
- */
+/** Whether feedback came from the requested reviewer or a human; only reviewer feedback counts against `MAX_REVIEW_ITERATIONS`. */
 export type ReviewOrigin = "reviewer" | "human";
 
 /**
- * Classifies one login against the requested reviewer.
+ * Classifies a login against the requested reviewer.
  *
- * **A blank reviewer reads as `reviewer`, not as `human`.** Nothing can match
- * an empty name, so the natural reading would make every comment human — and
- * `origin` decides what is exempt from a spend cap, so an empty setting would
- * release `MAX_REVIEW_ITERATIONS` on every pull request at once. The exemption
- * has to be something a reviewer name grants, never something its absence does.
+ * A blank reviewer reads as `reviewer`, not `human` — otherwise an empty
+ * setting would exempt every comment from `MAX_REVIEW_ITERATIONS`.
  */
 export function reviewOrigin(login: string, reviewer: string): ReviewOrigin {
   if (reviewer.replace(/^@/u, "").trim() === "") {
@@ -229,36 +96,10 @@ export function reviewOrigin(login: string, reviewer: string): ReviewOrigin {
   return matchesReviewer(login, reviewer) ? "reviewer" : "human";
 }
 
-/**
- * Accounts whose comments are not events on a pull request at all.
- *
- * One entry, and it is the one that was measured. PR #2663 carries two
- * `:rocket: Application Deployed` notices from `github-actions`, and the marker
- * shows what they cost: `round 7` and `round 9`, each a paid pass whose entire
- * published output was a sentence saying the only comment was a deploy notice.
- * Worse than the money — a CI account does not match the requested reviewer, so
- * it classified as `human`, and human rounds are deliberately exempt from
- * `MAX_REVIEW_ITERATIONS`. Continuous integration was the one input to this
- * loop that could spend without a cap.
- *
- * **Narrow on purpose, and the failure direction says why.** A name that is not
- * on this list reaches the loop and costs a round, visibly, on a pull request
- * somebody reads. A list wide enough to swallow a reviewer would silence the
- * review itself and look exactly like a reviewer that never answered. So this
- * is not `*[bot]`: the reviewer *is* a bot, and `matchesReviewer` is checked
- * first only as a second lock on that door rather than as the thing holding it.
- */
+/** Accounts whose comments are not review events at all (e.g. CI deploy notices); kept narrow, since a list wide enough to catch a real reviewer would look like one that never answered. */
 const AUTOMATION_AUTHORS: ReadonlySet<string> = new Set(["github-actions"]);
 
-/**
- * Whether a login is an automation account rather than a party to the review.
- *
- * The `[bot]` suffix is stripped before comparing because the same account is
- * spelled two ways by the two transports this file reads — `gh pr view --json`
- * returned `github-actions` on #2663, while GraphQL and the events API say
- * `github-actions[bot]`. Keying on one spelling would work until the day the
- * comment arrived over the other one.
- */
+/** Strips a trailing `[bot]` suffix before comparing — the same account is spelled with and without it depending on which API returned it. */
 function isAutomation(login: string, reviewer: string): boolean {
   return (
     !matchesReviewer(login, reviewer) && AUTOMATION_AUTHORS.has(login.replace(/\[bot\]$/u, ""))
@@ -270,22 +111,12 @@ export interface ReviewComment {
   readonly body: string;
   /** Whether the requested reviewer wrote this, or a person did. */
   readonly origin: ReviewOrigin;
-  /**
-   * When it was written, or `""` when the entry carried no readable date.
-   *
-   * Empty rather than absent so the cursor has to decide what to do about it
-   * rather than being able to forget the case exists. `isNewer` treats it as
-   * new, which costs a round and does not lose a reviewer's request.
-   */
+  /** ISO date, or `""` when the entry carried no readable date; `isNewer` treats `""` as new. */
   readonly createdAt: string;
   /**
-   * The GraphQL node id, or `""` for an entry that has none.
-   *
-   * Only an issue comment can be edited by id, which is how the marker is
-   * rewritten each round without `gh pr comment --edit-last` — that flag edits
-   * the last comment of the *current user*, and the current user is the
-   * operator, so a round running after a human commented would overwrite their
-   * words with machine state.
+   * The GraphQL node id, or `""` if absent. Only an issue comment can be
+   * edited by id — `gh pr comment --edit-last` edits the operator's own last
+   * comment instead, which would overwrite a human's words after they commented.
    */
   readonly id: string;
 }
@@ -294,38 +125,18 @@ export interface ReviewState {
   /**
    * Whether anyone the loop should answer has said anything at all yet.
    *
-   * **This used to ask about the requested reviewer alone, and that discarded
-   * every human who commented first.** The comments were never missing —
-   * `readReview` builds its list from reviews and issue comments with no author
-   * filter — but the gate in front of them asked a narrower question than the
-   * list answered, so a person's review was read, found, and thrown away while
-   * the loop reported itself as waiting.
-   *
-   * Our own comments do not count. They are dropped by the `bot: ` prefix
-   * rather than by a login, because `gh` is authenticated as the operator and
-   * there is no name that separates the bot from the human it posts as. Without
-   * that, the marker this loop wrote would read as somebody having spoken, and
-   * the round after it would undraft a pull request no reviewer had looked at.
+   * Answers for every commenter, not just the requested reviewer — a human's
+   * review counts too. Our own comments are excluded by the `bot: ` prefix
+   * rather than a login, since `gh` is authenticated as the operator and no
+   * login separates the bot from the human it posts as.
    */
   readonly anyoneResponded: boolean;
   /**
    * Whether the reviewer answered by saying it could not review.
    *
-   * A third state between "no response" and "a review", and it exists because
-   * the second one swallowed it. Observed live on PR #2657: the Copilot app was
-   * requested, ran, could not read the pull request (`Resource not accessible
-   * by integration` — its installation lacked `pull_requests: read` on that
-   * repository) and posted **a normal `COMMENTED` review** whose entire body
-   * was "Copilot encountered an error and was unable to review this pull
-   * request."
-   *
-   * Without this flag that is indistinguishable from a reviewer with an
-   * opinion, and both readings of it are wrong. As a comment it is feedback,
-   * so a review round would spend a paid pass asking a model to address an
-   * error message. As an empty review it is approval, so the loop would
-   * undraft and mark the ticket `agent:done` on the strength of a review that
-   * never happened — a bot telling a human the code was reviewed when it was
-   * not, which is the worst outcome this pipeline can produce.
+   * A third state between "no response" and "a review": the reviewer app can
+   * post an ordinary `COMMENTED` review whose entire body is an error message,
+   * which is neither feedback to act on nor an approval to undraft on.
    */
   readonly reviewerErrored: boolean;
   /** Every comment with usable text, from reviews and issue comments alike. */
@@ -335,36 +146,18 @@ export interface ReviewState {
   /**
    * When the pull request itself was opened.
    *
-   * The floor under the silence clock, and the only instant that is guaranteed
-   * to exist. A pull request nobody has reviewed, commented on or marked has no
-   * other date on it at all, and that is exactly the pull request the silence
-   * bound is for — a reviewer that was never really requested. Without this the
-   * one case the bound exists to catch is the one case it cannot measure.
+   * The floor under the silence clock: the one instant guaranteed to exist even
+   * on a pull request nobody has reviewed, commented on, or marked.
    */
   readonly createdAt: string;
   /**
    * The newest instant among every entry that counts as an event, including
-   * the ones `comments` drops below.
+   * ones `comments` drops (a reviewer's empty approval, its error notice, its
+   * green light) — each is still something that happened.
    *
-   * Computed before that filtering, which is the point. `comments` drops
-   * whitespace-only bodies, the reviewer's own error notice, the reviewer's
-   * green light, and anything that was pure boilerplate — every one of which is
-   * still something that happened, and an approving review with an empty body
-   * is the commonest of them. A silence clock reading the filtered list would
-   * report a pull request as untouched for hours because the only thing on it
-   * was an approval.
-   *
-   * **One exception, and it is a different question rather than an exception to
-   * the rule above.** Automation authors (`isAutomation`) are removed before
-   * this is computed, because a deploy notice is not an event on the pull
-   * request at all — and it is triggered by *our own* push, so counting it
-   * would let the loop reset its own silence clock and never notice a reviewer
-   * that has gone away.
-   *
-   * Our own comments are counted too. See `silence.ts`: the asymmetry between
-   * waiting too long and giving up too early decides it.
-   *
-   * `""` when no entry carried a readable date.
+   * Automation authors are excluded even here, since a deploy notice triggered
+   * by our own push would let the loop reset its own silence clock. `""` when
+   * no entry carried a readable date.
    */
   readonly newestAt: string;
 }
@@ -376,41 +169,22 @@ export type ReadReviewResult =
 export interface ThreadComment {
   readonly author: string;
   readonly body: string;
-  /**
-   * Whether the requested reviewer wrote this, or a person did.
-   *
-   * Classified here rather than in `delivery.ts` so both transports answer the
-   * question the same way. An inline thread and a review body are the same
-   * feedback arriving down two pipes, and a round that counted one of them
-   * against the cap and not the other would be applying two policies.
-   */
+  /** Whether the requested reviewer wrote this, or a person did; classified here so both transports (a thread, a review body) apply the same round-counting rule. */
   readonly origin: ReviewOrigin;
   /** ISO 8601, as GitHub returns it. Not parsed here; ordering is the API's. */
   readonly createdAt: string;
 }
 
 /**
- * One inline conversation on the diff.
- *
- * These are the comments `gh pr view --json reviews,comments` cannot reach, and
- * on the first real review round they were the entire substance of the review:
- * the summary body said "minor robustness/test-isolation improvements
- * suggested" and the two things actually being asked for were down here. A loop
- * reading only the summary does not miss the review politely — it infers what
- * the review probably said and then acts on the inference.
+ * One inline conversation on the diff — the comments `gh pr view
+ * --json reviews,comments` cannot reach, and sometimes the entire substance of
+ * a review whose summary body says nothing.
  */
 export interface ReviewThread {
   /** The GraphQL node id. What a reply and a resolve are both addressed to. */
   readonly id: string;
   readonly isResolved: boolean;
-  /**
-   * Whether the diff has moved out from under the thread.
-   *
-   * Not the same as resolved and must not be read as it. An outdated thread is
-   * one whose lines changed, which is what happens when a round addresses the
-   * comment — and also what happens when an unrelated edit lands nearby. It is
-   * a hint about where to look, not a verdict about whether the point stands.
-   */
+  /** Whether the diff has moved out from under the thread; not the same as resolved, only a hint about where to look. */
   readonly isOutdated: boolean;
   readonly path: string;
   /** `null` on an outdated thread — GitHub drops the line once the diff moves. */
@@ -426,27 +200,16 @@ export interface ThreadReplyRequest {
   /** Where `gh` runs. Any checkout of the repository will do; GraphQL takes the ids. */
   readonly cwd: string;
   readonly threadId: string;
-  /**
-   * The answer, **unprefixed**. Refused when blank — a reply nobody can read is
-   * not a reply. `replyToThread` adds `BOT_PREFIX` itself, so a caller that adds
-   * one too gets it twice; the marking is not the caller's job.
-   */
+  /** The answer, **unprefixed**; refused when blank. `replyToThread` adds `BOT_PREFIX` itself, so a caller must not add its own. */
   readonly body: string;
   readonly timeoutMs: number;
 }
 
 /**
- * Proof that a reply was posted, and the only way to get one.
- *
- * `resolveThread` takes this rather than a thread id, so there is no code path
- * that resolves a thread without having just answered it. That is §6.1c's bound
- * expressed in the type system rather than in a comment asking nicely.
- *
- * Resolving is a bigger privilege than it looks: it is how a reviewer's queue
- * gets shorter, so a bot that can resolve silently can bury an objection it
- * merely disagreed with. Requiring the receipt means every thread this service
- * closes has the argument for closing it sitting in public, next to the comment
- * it answers, where the reviewer and any human can read it and reopen.
+ * Proof that a reply was posted, and the only way to get one — `resolveThread`
+ * takes this rather than a thread id, so no code path resolves a thread
+ * without having just answered it. That is §6.1c's bound expressed in the
+ * type system rather than in a comment asking nicely.
  */
 export interface ThreadReply {
   readonly threadId: string;
@@ -482,25 +245,16 @@ export type MarkReadyResult =
 /**
  * The PR URL, matched at the end of the line and nowhere else.
  *
- * End-anchored on purpose. `gh` prints `https://host/org/repo/pull/42`, and the
- * anchor is what stops `…/pull/42/files` — a URL that appears in review output,
- * in a body the model wrote, and in gh's own hints — from being read as the PR
- * this run just created. An unanchored match against arbitrary stdout is a
- * number lifted from whichever line happened to contain one.
+ * End-anchored so `…/pull/42/files` and other incidental URLs in the same
+ * output (review comments, gh's own hints) can't be read as the PR this run
+ * just created.
  */
 const PR_URL = /\/pull\/(\d+)\s*$/u;
 
 /** What `git rev-parse HEAD` is allowed to have printed. */
 const SHA = /^[0-9a-f]{7,64}$/u;
 
-/**
- * Git's two ways of saying the index held nothing.
- *
- * Matched as substrings of stdout because the exact wording around them varies
- * with git version and with whether the worktree has untracked files. Both
- * phrases have been stable across git for well over a decade; the surrounding
- * sentence has not.
- */
+/** Git's two ways of saying the index held nothing, matched as substrings since exact wording varies with git version and untracked files. */
 const NOTHING_TO_COMMIT = ["nothing to commit", "no changes added"];
 
 /** Same shape as `worktree.ts`; duplicated rather than exported, both are three lines. */
@@ -514,16 +268,9 @@ const DETAIL_HALF = 200;
 /**
  * A failed command, in one line a person can act on.
  *
- * **Both ends are kept, and the middle is dropped.** This used to keep the
- * first 300 characters, and the first live pull-request run showed why that is
- * the wrong end. Commitlint echoes the message it was given before it prints
- * its verdict, so 300 characters of head was 300 characters of our own commit
- * body and the rule name — the only part that says what to change — was cut.
- *
- * Head alone is wrong, and tail alone would be too: a tool that fails on the
- * third of five steps says which step at the top and prints the stack at the
- * bottom. Keeping both ends costs a few hundred characters in a log line and
- * removes a whole class of "the error message did not contain the error".
+ * Both ends are kept and the middle dropped: a tool that fails on step three
+ * of five says which step at the top and prints the stack at the bottom, so
+ * truncating from either end alone loses the part that says what to change.
  */
 function why(result: CommandResult): string {
   if (result.timedOut) {
@@ -545,13 +292,9 @@ function bothEnds(text: string, half = DETAIL_HALF): string {
 /**
  * Whether an identity value is safe to put in a commit header.
  *
- * This is configuration rather than model output, so it is not an attack
- * surface in the way the PR body is. It is checked anyway because the failure
- * mode is quiet: a newline in `user.name` becomes a newline inside the `author`
- * line of the commit object, and depending on git version that either produces
- * a commit no tool can parse or one whose author field says something the
- * config did not. A misconfiguration should fail here, at the point the value
- * becomes an argument, rather than in whatever reads the object later.
+ * Checked because the failure mode is quiet: a newline in `user.name` becomes
+ * a newline inside the commit object's `author` line, corrupting it in a way
+ * that surfaces only in whatever reads the object later.
  */
 function usableIdentityPart(value: string): boolean {
   return value.trim() !== "" && !/[\n\r]/u.test(value);
@@ -560,22 +303,12 @@ function usableIdentityPart(value: string): boolean {
 /**
  * Stages and commits everything in the worktree.
  *
- * `add -A` and not a path list: the diff gate has already inspected the full
- * working tree and either accepted or refused it, so committing a subset would
- * mean shipping something other than what was approved. If the gate passed the
- * diff, the diff is what goes in.
- *
- * The message is two `-m` flags rather than one concatenated string, and never
- * a heredoc or a `--file`. Two flags is how git is told "subject, blank line,
- * body" without this module having to know that the separator is a blank line;
- * a concatenated string would put that formatting rule here, where it would be
- * subtly wrong for a body that already starts with a newline. The heredoc
- * version is worse still — it needs a shell, and there is no shell.
- *
- * "Nothing to commit" is its own outcome and not a failure. A solve run that
- * concluded the ticket needed no code change is a legitimate thing for the
- * model to do, and collapsing it into `failed` would put it in the same bucket
- * as a broken index, which the orchestrator must treat completely differently.
+ * `add -A`, not a path list: the diff gate already inspected and approved the
+ * full working tree, so committing a subset would ship something other than
+ * what was approved. The message is two `-m` flags rather than a heredoc,
+ * since there is no shell to run one in. "Nothing to commit" is its own
+ * outcome, not `failed` — a model concluding no code change was needed is
+ * legitimate and must not read as a broken index.
  */
 export async function commitAll(
   runner: CommandRunner,
@@ -598,9 +331,8 @@ export async function commitAll(
   }
 
   // `-c` before `-C`: these are git's own options and must precede the
-  // subcommand's. Passing the identity per-invocation rather than running
-  // `git config user.name` first means it cannot be left behind in the
-  // worktree's config for whatever runs next.
+  // subcommand's; passing identity per-invocation keeps it out of the
+  // worktree's persisted config.
   const committed = await runner.run(
     [
       "git",
@@ -619,9 +351,8 @@ export async function commitAll(
     options,
   );
   if (failed(committed)) {
-    // Checked before the failure is reported, and against stdout — git prints
-    // "nothing to commit" to stdout while exiting non-zero, which is the one
-    // case where a non-zero exit is not a problem.
+    // Checked against stdout: git prints "nothing to commit" there while
+    // exiting non-zero.
     const output = committed.stdout.toLowerCase();
     if (!committed.timedOut && NOTHING_TO_COMMIT.some((phrase) => output.includes(phrase))) {
       logger.info("solve.pr.nothing_to_commit", { worktreePath });
@@ -640,8 +371,8 @@ export async function commitAll(
 
   const sha = head.stdout.trim();
   if (!SHA.test(sha)) {
-    // The sha is quoted in the report and in the Jira comment. Something that
-    // is not a sha reaching those places would be indistinguishable from one.
+    // The sha is quoted in the report and the Jira comment; anything else
+    // reaching those places would be indistinguishable from one.
     return {
       outcome: "failed",
       reason: `committed, but rev-parse printed ${JSON.stringify(sha.slice(0, 60))} rather than a sha`,
@@ -655,17 +386,10 @@ export async function commitAll(
 /**
  * Pushes the branch and sets its upstream.
  *
- * `assertWorkBranch` first, and it throws rather than returning `failed`. See
- * the header: a protected push target is a caller bug that must not be
- * retryable, and the runner is never reached — nothing is sent to the remote
- * and no partial state exists to clean up.
- *
- * `--set-upstream` so the branch has a tracking ref, which is what makes a
- * later `gh pr create --head` and any human `git pull` on the branch behave.
- *
- * There is no `--force` and no `--force-with-lease`, and their absence is the
- * point rather than an oversight. A rejected push means the remote branch moved
- * under us, and every reason that can happen is a reason to stop.
+ * `assertWorkBranch` throws rather than returning `failed`, so a protected
+ * push target is never retried and the runner is never reached. No
+ * `--force`/`--force-with-lease`: a rejected push means the remote moved,
+ * which is always a reason to stop rather than retry.
  */
 export async function push(runner: CommandRunner, request: PushRequest): Promise<PushResult> {
   const { worktreePath, branch, timeoutMs } = request;
@@ -688,29 +412,13 @@ export async function push(runner: CommandRunner, request: PushRequest): Promise
 }
 
 /**
- * Opens the pull request as a draft.
+ * Opens the pull request as a draft, always — `markReady` undrafts it only
+ * after the review loop finishes, so it can never be merged unreviewed.
  *
- * Draft, always. The undraft is a separate call (`markReady`) made only after
- * the review loop has finished, so the window where a PR exists and has not
- * been looked at is a window in which it cannot be merged and does not page
- * reviewers.
- *
- * Two refusals, both throwing for the reason given in the header:
- *
- *  - `assertWorkBranch` on the head. A PR whose head is a protected branch is
- *    a request to merge `main` into something, which is never what this
- *    service meant to do.
- *  - head equal to base. gh would reject it too, but with a message about
- *    "no commits between" that reads like a problem with the diff rather than
- *    with the arguments.
- *
- * The base is deliberately *not* required to be protected. A stacked PR onto
- * another work branch is legitimate, and nothing here writes to the base — the
- * only ref this module pushes to is the head, which is already guarded.
- *
- * `--repo` is always passed, so gh does not infer the repository from whatever
- * remote the cwd happens to have. The cwd is still the worktree, because gh
- * resolves `--head` against the local git state.
+ * `assertWorkBranch` and a head-equals-base check both throw rather than
+ * return `failed`, per the header. The base is not required to be protected:
+ * a stacked PR onto another work branch is legitimate, since nothing here
+ * pushes to the base.
  */
 export async function createDraftPr(
   runner: CommandRunner,
@@ -725,13 +433,9 @@ export async function createDraftPr(
     );
   }
   if (isProtectedRef(branch)) {
-    // Unreachable while `assertWorkBranch` holds — `isWorkBranch` already
-    // rejects a protected name after the prefix. Kept because the rule is
-    // absolute and should not depend on reading the implementation of a
-    // function in another file, and recorded honestly: unplugging this guard on
-    // its own fails no test, exactly like the `BRANCH` backstop in
-    // `worktree.ts`. It is a hedge against a future edit loosening
-    // `isWorkBranch`, not a control doing work today.
+    // Unreachable while `assertWorkBranch` holds; kept as a hedge against a
+    // future edit loosening `isWorkBranch`, like the `BRANCH` backstop in
+    // `worktree.ts`.
     throw new Error(`refusing to open a pull request from protected ref ${JSON.stringify(branch)}`);
   }
 
@@ -774,14 +478,9 @@ export async function createDraftPr(
 /**
  * The PR number and URL from gh's stdout, or `null`.
  *
- * Only the last non-empty line is considered. gh prints progress and hints
- * before the URL, and some of those lines contain URLs of their own; taking the
- * last line is the rule that matches what gh actually does, and it fails closed
- * when gh changes rather than matching something else.
- *
- * Exported because "given this stdout, which number" is the highest-consequence
- * decision in the module and deserves to be tested directly rather than through
- * a fake runner.
+ * Only the last non-empty line is considered — gh prints progress and hints
+ * first, some containing URLs of their own. Exported so "given this stdout,
+ * which number" can be tested directly.
  */
 export function parsePrUrl(
   stdout: string,
@@ -793,9 +492,8 @@ export function parsePrUrl(
     return null;
   }
   const number = Number.parseInt(digits, 10);
-  // A pull request is numbered from 1, and a value past the safe integer range
-  // has already lost digits by the time it is compared here. Either means the
-  // line was not the URL this run produced.
+  // A pull request numbers from 1; anything past the safe-integer range has
+  // already lost digits, so either means this wasn't the URL this run produced.
   if (!Number.isSafeInteger(number) || number <= 0) {
     return null;
   }
@@ -805,11 +503,10 @@ export function parsePrUrl(
 /**
  * Asks the reviewer for a review.
  *
- * Separate from `createDraftPr` because it fails separately and for reasons
- * that are not the PR's fault: the reviewer app may not be installed on the
- * org, or the token may lack the scope. A run whose PR exists but whose review
- * request failed is in a recoverable state — a human can add the reviewer — and
- * folding the two calls together would make that look like a failed PR.
+ * Separate from `createDraftPr` because it fails for different reasons (the
+ * reviewer app may not be installed, or the token may lack scope) — a PR that
+ * exists but couldn't get a reviewer added is recoverable, and folding the two
+ * calls together would make that look like a failed PR.
  */
 export async function requestReview(
   runner: CommandRunner,
@@ -851,21 +548,10 @@ interface RawEntry {
 }
 
 /**
- * When an entry was written, and the two field names that answer it.
- *
- * **A review does not have `createdAt`.** Probed against PR #2658 on 2026-09-05,
- * after the plan flagged this as the half of the question that mattered: a
- * review's key list is `author, authorAssociation, body, commit, id,
- * includesCreatedEdit, reactionGroups, state, submittedAt`, and asking for
- * `createdAt` on one returns `null` for every entry. An issue comment has
- * `createdAt` and no `submittedAt`. `readReview` merges the two lists, so a
- * cursor reading only `createdAt` would date every issue comment and no review
- * at all — and an undated entry is treated as new, which turns the cursor into
- * "everything is new" for exactly the feedback the loop is bounded on. That is
- * the runaway the cursor exists to prevent, arriving through a field name.
- *
- * Both are read, neither is required to be the one present. Nothing checks they
- * agree, because they never co-occur.
+ * When an entry was written: a review uses `submittedAt`, an issue comment
+ * uses `createdAt`, and they never co-occur. Reading only one field would date
+ * every comment and no review at all, and an undated entry counts as new — the
+ * exact runaway the review cursor is bounded against.
  */
 function dateOf(record: Record<string, unknown>): string | null {
   const submitted = record["submittedAt"];
@@ -879,17 +565,10 @@ function dateOf(record: Record<string, unknown>): string | null {
 /**
  * Reviews or comments, normalised.
  *
- * Three distinct treatments, and the differences are deliberate:
- *
- *  - **absent or null** → an empty list. A PR with no reviews yet is the normal
- *    state for the first several ticks of the polling loop, and gh omits the
- *    key rather than sending `[]` in some versions.
- *  - **present but not an array** → `null`, which the caller turns into
- *    `failed`. That is gh returning a shape this does not understand, and
- *    reading it as "no reviews" would mean the loop undrafts a PR whose reviews
- *    it never managed to read.
- *  - **an element that is not an object** → skipped. One malformed entry among
- *    twenty should not discard the nineteen.
+ *  - absent/null → `[]` (no reviews yet is normal).
+ *  - present but not an array → `null`, which the caller turns into `failed`
+ *    rather than reading an unrecognised shape as "no reviews".
+ *  - a non-object element → skipped, so one bad entry doesn't discard the rest.
  */
 function entriesOf(value: unknown): readonly RawEntry[] | null {
   if (value === undefined || value === null) {
@@ -920,17 +599,10 @@ function entriesOf(value: unknown): readonly RawEntry[] | null {
 /**
  * Whether a login belongs to the reviewer we asked for.
  *
- * A prefix match on the lowercased login, after stripping a leading `@` from
- * the reviewer name. This is looser than equality on purpose: the handle asked
- * for is `@copilot`, and the login that comes back on the review is
- * `copilot-pull-request-reviewer[bot]`. GitHub app logins acquire and shed
- * suffixes without notice, and an exact comparison that stopped matching would
- * fail in the worst possible direction — the loop would decide the reviewer
- * never responded and wait forever rather than undrafting.
- *
- * The empty-reviewer guard is load-bearing rather than defensive tidiness:
- * `"".startsWith("")` is true, so a reviewer of `""` or `"@"` would match every
- * login on the PR and report a response from a bot that was never asked.
+ * A prefix match after stripping a leading `@`, since GitHub app logins
+ * (`copilot-pull-request-reviewer[bot]` vs. `@copilot`) acquire suffixes
+ * without notice. The empty-reviewer guard is load-bearing: `"".startsWith("")`
+ * is true, so an empty reviewer would otherwise match every login.
  */
 function matchesReviewer(login: string, reviewer: string): boolean {
   const wanted = reviewer.replace(/^@/u, "").toLowerCase();
@@ -950,14 +622,7 @@ export interface FindPrRequest {
 }
 
 export type FindPrResult =
-  /**
-   * One pull request, and its state.
-   *
-   * `state` is carried rather than reduced to a boolean because the three
-   * values mean three different next moves: `OPEN` is a review round, `MERGED`
-   * is the ticket finished, `CLOSED` is a person declining the change. A caller
-   * handed only "usable/not" would have to guess between the last two.
-   */
+  /** One pull request, and its state — carried rather than reduced to a boolean, since `OPEN`/`MERGED`/`CLOSED` each mean a different next move. */
   | {
       readonly outcome: "found";
       readonly number: number;
@@ -971,32 +636,14 @@ export type FindPrResult =
 /**
  * Finds the pull request for a branch.
  *
- * Exists because a review round starts from a ticket, and everything else it
- * needs hangs off a pull request number that nothing on this machine records.
- * The branch is the join: it is derived from the issue key and the summary by
- * `branchNameFor`, so it can be recomputed from the ticket alone, which is what
- * makes a review round resumable without any stored state.
- *
- * ## Closed and merged are searched for, not filtered out
- *
- * `--state all`, deliberately. Restricting to open ones would report a merged
- * pull request as "none", and the caller would read that as "nothing has been
- * published yet" — the opposite of the truth, at the one moment the loop is
- * supposed to stop. A terminal pull request is a *result*, not an absence.
- *
- * ## Ambiguity is refused rather than resolved
- *
- * Two open pull requests on one branch is not a state this service creates, so
- * seeing it means something happened that is not understood — a human opened a
- * second one, or a branch was reused. Picking either would be a guess, made
- * immediately before pushing a commit to whichever was picked. It fails
- * instead, and says both numbers so a person can look.
- *
- * The terminal case does not need that care: with no open pull request, a merge
- * is reported if any of them merged, regardless of how many there are, because
- * "this branch reached `main`" is true whichever one carried it. That reading is
- * also independent of the order `gh` happens to return rows in, which is not
- * documented and must not be relied on.
+ * The branch is derived from the ticket (`branchNameFor`), so it can be
+ * recomputed without any stored state, which is what makes a review round
+ * resumable. `--state all`: a merged PR must read as "found", not "none", at
+ * exactly the moment the loop is supposed to stop. Two or more *open* PRs on
+ * one branch is refused rather than guessed at, since picking one would happen
+ * right before pushing a commit to it; multiple terminal PRs are fine to
+ * collapse, since "this branch reached `main`" is true regardless of which one
+ * carried it.
  */
 export async function findPullRequest(
   runner: CommandRunner,
@@ -1047,8 +694,8 @@ export async function findPullRequest(
     const state = row?.["state"];
     const isDraft = row?.["isDraft"];
     if (typeof number !== "number" || typeof state !== "string" || typeof isDraft !== "boolean") {
-      // One unreadable row is not "no pull requests". Dropping it silently is
-      // how a merged PR becomes an absence, so the whole call fails instead.
+      // One unreadable row is not "no pull requests" — dropping it silently is
+      // how a merged PR becomes an absence.
       return {
         outcome: "failed",
         reason: "a pull request row is missing number, state or isDraft",
@@ -1087,25 +734,11 @@ export async function findPullRequest(
 /**
  * Reads the current review state of the PR.
  *
- * One `gh pr view --json` call, parsed defensively: anything unexpected is a
- * `failed` outcome and never an exception, because this runs on a polling tick
- * and a throw here would take down the cycle over a PR that a human could just
- * look at.
- *
- * The strictness is deliberately uneven, and the line is drawn at what each
- * field decides:
- *
- *  - `reviews` and `comments` may be missing, and then they are empty. "No
- *    feedback yet" is a real state that this must be able to report.
- *  - `state` and `isDraft` may not be missing. Those two are what the caller
- *    checks before `gh pr ready`, and a default would be a guess about the
- *    actual condition of a pull request immediately before an irreversible
- *    action is taken on it.
- *
- * `anyoneResponded` is computed independently of whether the entry carried
- * usable text. An approving review has an empty body and is still a response —
- * treating it as silence would leave the loop waiting on a reviewer that has
- * already finished.
+ * Parsed defensively: anything unexpected is a `failed` outcome, never a
+ * throw, since this runs on a polling tick and a crash here would take down
+ * the cycle over a PR a human could just look at. `reviews`/`comments` may be
+ * missing (read as empty); `state`/`isDraft` may not, since a default there
+ * would be a guess made immediately before `gh pr ready`.
  */
 export async function readReview(
   runner: CommandRunner,
@@ -1123,15 +756,9 @@ export async function readReview(
       "--repo",
       repo,
       "--json",
-      // The field list is unchanged, and that is worth a line rather than a
-      // silent omission: `--json` selects top-level fields only, and each entry
-      // in `reviews` and `comments` already arrives whole — with its own `id`,
-      // and with `submittedAt` or `createdAt` depending on which list it came
-      // from. Adding `id` here would ask for the pull request's id, not theirs.
-      //
-      // `createdAt` *is* asked for at this level and does mean the pull
-      // request's own, which is the floor under the silence clock. See
-      // `ReviewState.createdAt`.
+      // Each entry in `reviews`/`comments` carries its own `id` and either
+      // `submittedAt` or `createdAt`; the `createdAt` requested here is the
+      // pull request's own — see `ReviewState.createdAt`.
       "reviews,comments,state,isDraft,createdAt",
     ],
     { cwd: worktreePath, timeoutMs },
@@ -1175,12 +802,9 @@ export async function readReview(
     };
   }
 
-  // Refused rather than defaulted, for a narrower reason than the pair above.
-  // Nothing irreversible hangs off it; what hangs off it is the loop's ability
-  // to tell "quiet for ten minutes" from "quiet since it was opened", and a
-  // default of `""` disables the silence bound on exactly the pull requests
-  // that have nothing else dated on them — which is every pull request the
-  // bound was written for.
+  // Refused rather than defaulted: a default of `""` would disable the
+  // silence bound on exactly the pull requests it exists for — ones with
+  // nothing else dated on them.
   const createdAt = root["createdAt"];
   if (typeof createdAt !== "string") {
     return {
@@ -1190,55 +814,27 @@ export async function readReview(
     };
   }
 
-  // **Automation is dropped here, before anything is derived from the list**,
-  // because the claim is not "a deploy notice is not feedback" but "a deploy
-  // notice is not an event on this pull request". All three fields below read
-  // this array, and it has to be the same answer in all three: dropped from
-  // `comments` alone, a CI notice would still report that somebody responded —
-  // which on a draft pull request is the difference between waiting for a
-  // review and undrafting on the strength of a robot saying a URL exists. It
-  // comes out of `newestAt` for a further reason: the notice is triggered by
-  // our own push, so leaving it in lets the loop reset its own silence clock
-  // and never notice a reviewer that has gone away.
+  // Dropped here, before anything is derived, so all three fields below agree:
+  // left in `comments` alone it would still count as a response; left in
+  // `newestAt` it would let our own push reset the silence clock.
   const entries = [...reviews, ...comments].filter((entry) => !isAutomation(entry.login, reviewer));
   const fromReviewer = entries.filter((entry) => matchesReviewer(entry.login, reviewer));
   return {
     outcome: "read",
     review: {
-      // Checked on the raw entries rather than on the filtered `comments`
-      // below, because an approving review has an empty body and is still a
-      // response — and so is a review whose whole substance is inline, which
-      // arrives here as an entry with nothing in it. Treating either as silence
-      // would leave the loop waiting on a reviewer that has already finished.
-      //
-      // **The green light is the sharpest case of that and the reason this line
-      // must not be tidied into reading `comments`.** It is dropped below, so a
-      // pull request whose only response is `🟢 Approval recommended` has an
-      // empty comment list and a reviewer who has plainly spoken. Reading the
-      // filtered list here would call that silence, and `advance` undrafts on
-      // *responded plus nothing to do* — so the pull request the loop has
-      // finished with would stay a draft until the silence brake gave up on it.
-      // Two drops, deliberately at different depths: automation is not an
-      // event, an approval is an event with nothing in it.
+      // Checked on the raw entries, not the filtered `comments` below: an
+      // approving review or a green light has an empty/boilerplate body and is
+      // still a response. Reading the filtered list here would make a finished
+      // pull request look silent and stall the undraft on it.
       anyoneResponded: entries.some((entry) => !isOurs(entry.body ?? "")),
       reviewerErrored: fromReviewer.some((entry) => isReviewerError(entry.body)),
-      // Whitespace-only bodies are dropped here and not above: they are a
-      // response for the purpose of "has the reviewer spoken", and nothing at
-      // all for the purpose of "what should the model change". The reviewer's
-      // own error notice goes the same way and for the same reason — there is
-      // nothing in it to change — and so does its green light, which is a
-      // reviewer saying it wants nothing changed. Paying a pass to answer an
-      // approval is the same waste as paying one to answer a crash report.
-      //
-      // Both of those drops are scoped to the reviewer, not applied to every
-      // entry. A human quoting the failure in a comment is asking for
-      // something, and a human writing "approval recommended" is a person
-      // approving with words a bot happens to share; matching on text alone
-      // would delete a person's message in either case.
+      // Whitespace-only bodies, the reviewer's error notice, and its green
+      // light are dropped here — real content for "has it spoken", nothing to
+      // act on for "what should change" — scoped to the reviewer only, so a
+      // human quoting the same words isn't silently edited.
       comments: entries.flatMap((entry) => {
-        // Chrome comes off before the blank check rather than after, so a
-        // review whose body was *only* boilerplate drops out entirely instead
-        // of reaching the pass as an empty comment to puzzle over.
+        // Chrome comes off before the blank check, so an all-boilerplate
+        // review drops out entirely instead of reaching the pass empty.
         const body =
           entry.body !== null && matchesReviewer(entry.login, reviewer)
             ? stripReviewerChrome(entry.body)
@@ -1260,28 +856,17 @@ export async function readReview(
       state,
       isDraft,
       createdAt,
-      // Every entry the loop counts as an event, before the filtering above —
-      // so an approval and a blank review still move it, and an automation
-      // notice never existed to move it. See `ReviewState.newestAt`.
+      // Every entry counted before the filtering above, so an approval or
+      // automation notice still (or never) moves the clock; see `ReviewState.newestAt`.
       newestAt: newestInstant(entries.map((entry) => entry.createdAt ?? "")) ?? "",
     },
   };
 }
 
 /**
- * Phrases a reviewer uses to say it could not review.
- *
- * Matching a vendor's error prose is brittle and this is the narrowest form of
- * it available: the app posts the failure as an ordinary review, so its text is
- * the only thing distinguishing "I could not read this" from "I read it and had
- * nothing to say". Both fragments are required to appear together, which is
- * what keeps a review *about* an error — "this encountered an error and was
- * unable to parse the config" — from matching.
- *
- * If GitHub rewords it, this stops matching and the loop goes back to treating
- * an error as feedback. That is the failure direction to be in: it wastes a
- * review round and says so in the pull request, where the next person to look
- * will see an error message quoted as a review comment and come back here.
+ * Phrases the reviewer app uses to say it could not review — matched as an
+ * ordinary review body, since that's the only channel it has to say so. Both
+ * fragments are required together, so a review *about* an error doesn't match.
  */
 const REVIEWER_ERROR = [/encountered an error/iu, /unable to review/iu];
 
@@ -1291,38 +876,20 @@ function isReviewerError(body: string | null): boolean {
 }
 
 /**
- * The reviewer's verdict line when it has nothing to ask for.
- *
- * Copilot opens every review with one of three headings — observed across
- * #2658, #2661 and #2663: `### 🟢 Approval recommended`, `### 🟡 Changes
- * recommended`, `### 🔵 Needs a closer look`. The green one is not feedback. It
- * is the reviewer saying the argument is over, and the loop was paying a full
- * round to reach that conclusion for itself: #2661's `bot: round 1` is
- * *"approval noted, no changes needed this round"* and #2663's `round 6` says
- * the same thing in different words. Two rounds, one per pull request, to
- * publish an acknowledgement nobody needed.
- *
- * **Two fragments, both required**, exactly as `REVIEWER_ERROR` needs two: the
- * phrase alone is something a human plausibly writes *about* a review, and the
- * marker alone is a green circle. Together they are a heading only this
- * reviewer emits.
+ * The reviewer's verdict line when it has nothing to ask for — one of three
+ * headings it opens every review with; the green one means approval and
+ * should not cost a full round just to be acknowledged.
  */
 const REVIEWER_GREEN_LIGHT = [/\u{1F7E2}/u, /approval recommended/iu];
 
 /**
  * Whether the reviewer's body is a green light and nothing else.
  *
- * **Only the verdict line is examined**, not the whole body. A review that
- * *quotes* the green heading while its own verdict is `🔵 Needs a closer look`
- * is a review with something in it, and matching anywhere would drop it — which
- * is the one failure this whole family of matchers is written to avoid, since a
- * dropped review is a request nobody answers and nothing says so.
- *
- * What it does not have to guard is the case that looks most dangerous: a green
- * light carrying inline comments. Those are threads, read over GraphQL by
- * `readReviewThreads`, and an open thread keeps the inbox non-empty on its own.
- * The reviewer approving in the summary while objecting on a line is therefore
- * still a round, by construction rather than by rule.
+ * Only the verdict (first non-blank) line is examined, not the whole body —
+ * a review quoting the green heading while its real verdict is something else
+ * must not be dropped. Inline comments carrying an objection are threads, read
+ * separately, so a summary approval alongside an open thread still counts as
+ * a round.
  */
 function isGreenLight(body: string | null): boolean {
   if (body === null) {
@@ -1333,36 +900,18 @@ function isGreenLight(body: string | null): boolean {
 }
 
 /**
- * A link only the reviewer's own marketing puts in a review body.
+ * A link only the reviewer's own promotional footer puts in a review body.
  *
- * Observed on PR #1413, 2026-09-05: Copilot ends every review with a rule and a
- * promotional block offering to *"Add a `code-review` agent skill"*. The pass is
- * handed the body whole, so it read that as a request, declined it in
- * `responses`, and the decline was posted publicly on a timezone bugfix where it
- * reads as noise. Nothing was wrong with the reasoning; the input was never
- * feedback.
- *
- * **Two conditions, for the same reason `REVIEWER_ERROR` needs two fragments.**
- * A trailing rule alone is far too common, and a 💡 alone is something a
- * reviewer plausibly writes when suggesting an idea — stripping *that* would
- * delete a real suggestion, which is the one failure direction worth avoiding
- * here. A link to GitHub's own docs about configuring the reviewer is the part
- * no code review contains.
+ * Two conditions required together, as with `REVIEWER_ERROR`: a trailing rule
+ * alone is too common, and a 💡 alone is something a real reviewer might write.
  */
 const REVIEWER_PROMO = /docs\.github\.com\/copilot/u;
 
 /**
- * Drops a trailing boilerplate block from a reviewer's body.
- *
- * Applied to the reviewer's entries only, on exactly the grounds the drop above
- * is scoped: a human who quotes the footer is a human saying something, and
- * matching on text alone would silently edit a person's words.
- *
- * Fails open by construction. If the vendor reformats, the block stops matching
- * and comes back — costing one bullet in a public comment, visible on the pull
- * request, where the next person to read it will come back here. The opposite
- * bias, a rule loose enough to swallow real feedback, is not recoverable by
- * anyone noticing.
+ * Drops a trailing boilerplate block from a reviewer's body — scoped to the
+ * reviewer's own entries, so a human quoting the footer isn't edited.
+ * Fails open: if the vendor reformats the block, it stops matching and
+ * reappears in the pull request instead of silently swallowing real feedback.
  */
 function stripReviewerChrome(body: string): string {
   const rule = body.lastIndexOf("\n---");
@@ -1371,15 +920,7 @@ function stripReviewerChrome(body: string): string {
     : body;
 }
 
-/**
- * How many threads, and how many comments in each, one read asks for.
- *
- * The maximum a single GraphQL connection accepts. Paging is not implemented
- * and truncation is refused instead, because the only reason this function
- * exists is that the loop was acting on feedback it could not see — quietly
- * dropping the hundred-and-first thread would rebuild that defect one page
- * further out. A pull request that hits either bound wants a human anyway.
- */
+/** How many threads, and comments per thread, one read asks for; the GraphQL connection max, refused rather than paged past. */
 const THREAD_PAGE = 100;
 
 const THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
@@ -1434,10 +975,9 @@ function parseThreadComments(value: unknown, reviewer: string): readonly ThreadC
       return null;
     }
     const login = dig(record, "author", "login");
-    // A deleted account comes back as a null author. The comment it left is
-    // still on the thread and still says whatever it says. It classifies as
-    // `human`, which is the safe direction: an unnamed account is not the
-    // reviewer, and reading it as one would put a person's point on a budget.
+    // A deleted account comes back as a null author; it classifies as
+    // `human`, the safe direction, since an unnamed login is never the
+    // reviewer.
     const author = typeof login === "string" ? login : "unknown";
     comments.push({ author, body, origin: reviewOrigin(author, reviewer), createdAt });
   }
@@ -1447,20 +987,11 @@ function parseThreadComments(value: unknown, reviewer: string): readonly ThreadC
 /**
  * Reads the inline review threads on a pull request.
  *
- * Separate from `readReview` and over a different transport, because the two
- * cannot be merged: `gh pr view --json` has no flag for these at all, and the
- * fields that make a thread actionable — its node id, and whether it is already
- * resolved — exist only in GraphQL. So this is `gh api graphql`, and it is the
- * only place in the tree that speaks it.
- *
- * **Nothing here degrades to an empty list.** `entriesOf` skips a malformed
- * entry, on the reasoning that one bad review among twenty should not discard
- * the nineteen; the opposite rule applies here and for a reason that is
- * specific rather than stylistic. A dropped review is a comment the loop does
- * not answer. A dropped *thread* is a comment the loop does not answer while
- * believing it has answered everything — and the round then resolves what it
- * did see, undrafts, and tells a human the review was addressed. Every
- * unreadable shape is therefore a refusal, including a single bad node.
+ * A separate transport (`gh api graphql`) because `gh pr view --json` has no
+ * flag for a thread's node id or resolved state. Nothing here degrades to an
+ * empty list on a malformed shape — unlike `entriesOf`, since a dropped thread
+ * is a comment the loop doesn't answer while believing it answered everything,
+ * then resolves what it did see and tells a human the review was addressed.
  */
 export async function readReviewThreads(
   runner: CommandRunner,
@@ -1481,8 +1012,8 @@ export async function readReviewThreads(
       "gh",
       "api",
       "graphql",
-      // `-f` and not `-F`: the typed form reads a value beginning with `@` out
-      // of a file, and the raw form does not interpret the value at all.
+      // `-f` is the raw form; `-F` (typed) would read a value starting with
+      // `@` out of a file.
       "-f",
       `owner=${parts[1] ?? ""}`,
       "-f",
@@ -1511,9 +1042,8 @@ export async function readReviewThreads(
     };
   }
 
-  // GraphQL answers a partly-failed query with data *and* errors, and gh has
-  // been known to exit 0 on it. Half a thread list read as a whole one is the
-  // failure this function exists to prevent.
+  // GraphQL can answer a partly-failed query with data *and* errors, and gh
+  // has been known to exit 0 on it.
   if (dig(parsed, "errors") !== undefined) {
     return {
       outcome: "failed",
@@ -1578,10 +1108,8 @@ export async function readReviewThreads(
   logger.info(
     "solve.pr.threads_read",
     { repo, number, threads: threads.length, open },
-    // `open`, not `threads.length`. A pull request with two threads both
-    // resolved is read on every tick for as long as it stays open and has
-    // nothing left to say; keying on the total would mark it as news forever,
-    // which is the shape of idle line this mark was added for.
+    // `open`, not `threads.length`: keying on the total would mark a pull
+    // request with only resolved threads as news forever.
     { quiet: open === 0 },
   );
   return { outcome: "read", threads };
@@ -1600,12 +1128,9 @@ const RESOLVE_MUTATION = `mutation($threadId:ID!){
 /**
  * Runs a GraphQL operation and hands back its parsed payload, or a reason.
  *
- * `numbers` is separate from `fields` because gh's two flags mean different
- * things and only one of them is safe for a value this service did not write.
- * `-F` is typed — it turns `42` into an Int, which an `Int!` variable requires
- * — but it also reads a value beginning with `@` out of a *file*. So a model-
- * authored reply body goes through `-f`, which interprets nothing, and only
- * values this code produced as digits go through `-F`.
+ * `numbers` is separate from `fields` because only `-F` is safe for a value
+ * this service did not write: it also reads a value starting with `@` out of
+ * a file, so a model-authored reply body must go through `-f` instead.
  */
 async function mutate(
   runner: CommandRunner,
@@ -1645,40 +1170,16 @@ async function mutate(
 }
 
 /**
- * Answers one inline review thread, in public.
+ * Answers one inline review thread, in public — so the reviewer sees it on
+ * the next pass and a human sees it without going looking, especially for a
+ * comment the round declines rather than acts on.
  *
- * The disagreements this service has with a reviewer used to live in
- * `responses`, which reaches an operator's terminal and nobody else. A reply on
- * the thread puts the argument next to the comment it answers, where the
- * reviewer sees it on the next pass and a human sees it without being told to
- * go looking. That matters most for the comments the round *declines*: a
- * decline nobody can see is indistinguishable from not having read it.
- *
- * The body is bounded by GitHub rather than here. There is no truncation,
- * because a half-posted argument is worse than a long one.
- *
- * **The prefix is applied here, and that is the fix for a loop that ran in
- * public.** `unansweredThreads` keeps a thread whose last comment is not
- * `isOurs`, and `isOurs` is the `BOT_PREFIX` and nothing else, because `gh`
- * posts as the operator and there is no login to key on. This function used to
- * send the caller's body through untouched, so every reply the service made was
- * read back on the next round as a reviewer's comment and answered again. PR
- * #548 on `insurance-ssx-mono-repo` is what that looks like from outside.
- *
- * Tagging in the transport rather than at the caller is the whole point: the
- * caller is where the fault was, and a prefix added there would fix this one
- * call site and leave the next one free to repeat it. Here there is no way to
- * post an untagged reply, so the writer and `unansweredThreads` cannot disagree.
- * It is unconditional — a body that already begins with the prefix is prefixed
- * again — because the alternative is a branch whose only effect is cosmetic.
- *
- * **The blank check runs first, and the order is load-bearing.** Prefix a body
- * of whitespace and it stops trimming to empty, so the refusal below silently
- * stops firing and a blank reply becomes grounds to resolve a thread.
- *
- * It does not reach backwards. A reply posted before this existed carries no
- * prefix and is indistinguishable from a reviewer's, so pull requests already
- * looping keep looping until a cap fires.
+ * The prefix (`BOT_PREFIX`) is applied here rather than at the caller, since
+ * `isOurs`/`unansweredThreads` key on it and there is no login to key on
+ * instead; a body already starting with it is prefixed again regardless,
+ * since a branch to avoid that would be purely cosmetic. The blank check runs
+ * before prefixing, since prefixing first would let a whitespace-only reply
+ * slip past it.
  */
 export async function replyToThread(
   runner: CommandRunner,
@@ -1725,16 +1226,15 @@ export async function replyToThread(
  * Marks a thread resolved, and only one that has just been answered.
  *
  * Takes the receipt `replyToThread` returns instead of a thread id, so the
- * argument for closing the thread is already public by the time this runs.
- * The receipt is checked at runtime too, not only by the type: a hand-built
- * `ThreadReply` with an empty URL is a caller reaching around the rule, and it
- * is refused for the same reason the type exists.
+ * argument for closing the thread is already public by the time this runs; a
+ * hand-built `ThreadReply` with an empty URL is refused at runtime too, not
+ * only by the type.
  *
  * What this cannot enforce is the other half of §6.1c — resolve only when the
  * round changed code for the thread or cited something checkable against it,
  * and send anything resting on judgement alone to `unresolved`. That is a
- * judgement about the argument, so it lives in the instructions. This enforces
- * that the argument was made at all.
+ * judgement about the argument, so it lives in the instructions; this enforces
+ * only that the argument was made at all.
  */
 export async function resolveThread(
   runner: CommandRunner,
@@ -1810,20 +1310,14 @@ const PR_NODE_QUERY = `query($owner:String!,$name:String!,$number:Int!){
 /**
  * Posts the marker comment, once, on a pull request that has none.
  *
- * Through `addComment` rather than `gh pr comment` because the node id of what
- * was created is the whole point: without it the next round has to find the
- * comment again by prefix, and a round that cannot find what it just wrote
- * posts a second one.
+ * Through `addComment` rather than `gh pr comment`, since the node id of what
+ * was created is the whole point — without it the next round can't find the
+ * comment again and posts a second one.
  *
- * **This one does not stamp `BOT_PREFIX`, and the asymmetry with `replyToThread`
- * is deliberate — do not "fix" it.** Both of its callers already send a marked
- * body, and one of them sends the marker, which opens `bot: iteration count `.
- * Stamping here would make that `bot: bot: iteration count `, `isMarker` would
- * stop matching it, `findMarker` would find nothing, and every round would post
- * a fresh marker and re-run from a count of zero. The threads had no such
- * conflict, which is why the prefix could move into the transport there and
- * cannot here. The cost is that this stays the caller's job on this path; the
- * two call sites are in `delivery.ts` and both are covered.
+ * This one does not stamp `BOT_PREFIX` itself, unlike `replyToThread` — both
+ * callers already send a marked body, so stamping here would double it into
+ * `bot: bot: `, breaking `isMarker`/`findMarker` and resetting the count every
+ * round.
  */
 export async function postComment(
   runner: CommandRunner,
@@ -1888,11 +1382,9 @@ export async function postComment(
 /**
  * Rewrites one comment, named by its node id.
  *
- * **Not `gh pr comment --edit-last`.** That flag edits the last comment of the
- * *current user*, and the current user is the operator this service is
- * authenticated as — so a round running after a human commented would overwrite
- * that person's words with machine state. The obvious flag is the dangerous
- * one, which is why the safe path is spelled out in a mutation instead.
+ * Not `gh pr comment --edit-last`: that flag edits the last comment of the
+ * *current user*, which is the operator this service is authenticated as, so
+ * a round running after a human commented would overwrite their words.
  */
 export async function editComment(
   runner: CommandRunner,
@@ -1933,13 +1425,9 @@ export async function editComment(
 }
 
 /**
- * Takes the PR out of draft.
- *
- * The last thing the pipeline does, and the only irreversible-feeling one — an
- * undrafted PR notifies reviewers and becomes mergeable. It is a separate
- * exported function with no logic of its own precisely so the decision to call
- * it lives entirely in the orchestrator, where the review-iteration count and
- * the verification verdict are both in scope.
+ * Takes the PR out of draft — the last thing the pipeline does, and the only
+ * irreversible-feeling one, since an undrafted PR notifies reviewers and
+ * becomes mergeable.
  */
 export async function markReady(
   runner: CommandRunner,
@@ -1968,16 +1456,10 @@ const TRUNCATION_NOTE = `\n\n[Feedback truncated at ${String(MAX_FEEDBACK_CHARS)
 /**
  * Renders review comments as a plain-text block for the next model pass.
  *
- * Plain text and not JSON or markdown: this is concatenated into a prompt, and
- * the two structured formats both invite the reader to believe the structure is
- * trustworthy. It is not — see the header. The `---` delimiters below are a
- * reading aid for a human debugging a prompt, nothing more, and a comment body
- * containing the same delimiter forges one. That is stated rather than fixed,
- * because escaping it would imply the boundary means something.
- *
- * The count is in the header line so a truncated block is still self-describing:
- * the reader can see that four of eleven comments are present and that the rest
- * exist somewhere else.
+ * Plain text, not JSON or markdown, since either structured format would
+ * invite the reader to trust structure that untrusted comment bodies can
+ * forge; the `---` delimiters are a debugging aid only. The count is in the
+ * header so a truncated block still says how much of the total it holds.
  */
 export function formatReviewFeedback(comments: readonly ReviewComment[]): string {
   if (comments.length === 0) {
@@ -2006,21 +1488,11 @@ function capped(block: string): string {
 /**
  * Renders inline review threads for the next model pass, ids and all.
  *
- * Separate from `formatReviewFeedback` because the two are read for different
- * things. A review body is prose to act on. A thread is prose to act on **and**
- * an address to answer at, so the id is in the header of every entry and the
- * schema tells the pass to copy it back verbatim. A round that paraphrases an
- * id answers nothing and resolves nothing.
- *
- * **Every comment on the thread is rendered, including this service's own
- * previous replies**, and that is the point rather than completeness for its
- * own sake. It is what lets a pass see that a point has already been answered
- * in public and decline to argue it again — the plan's rule that a reviewer
- * re-raising a settled point must not restart the argument, expressed as a fact
- * the pass can read off the thread instead of a policy it has to be told.
- *
- * The same caveat as the sibling: `---` is a reading aid, a comment body
- * containing one forges a boundary, and the whole block is untrusted input.
+ * A thread is prose to act on **and** an address to answer at, so every
+ * entry's id is in its header and the schema tells the pass to copy it back
+ * verbatim. Every comment on the thread is rendered, including this
+ * service's own previous replies, so a pass can see a point was already
+ * answered and decline to argue it again instead of being told to.
  */
 export function formatThreads(threads: readonly ReviewThread[]): string {
   if (threads.length === 0) {

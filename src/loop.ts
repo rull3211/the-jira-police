@@ -1,16 +1,8 @@
 /**
- * The scheduling shell around `runPollCycle`: when to poll again, and when to
- * stop.
+ * The scheduling shell around `runPollCycle`: when to poll again, and when to stop.
  *
- * Kept separate from `index.ts` so it can be tested. `index.ts` executes on
- * import — it is an entry point — so anything a test needs to reach has to live
- * somewhere a test can import without starting a service.
- *
- * `runPollCycle` already isolates per-issue failures, so a throw reaching this
- * layer means something broader broke: Jira is down, the credential expired,
- * the disk is full. Those are exactly the failures that repeat, so retrying at
- * the normal cadence would hammer a struggling dependency and bury the real
- * error in a wall of identical log lines. Hence the backoff.
+ * A throw reaching this layer means something broader broke (Jira down, credential expired, disk
+ * full) — the kind of failure that repeats, so it backs off instead of hammering at full cadence.
  */
 
 import { setTimeout as delay } from "node:timers/promises";
@@ -34,13 +26,7 @@ export interface LoopSummary {
   readonly failures: number;
 }
 
-/**
- * Normal interval when the last cycle succeeded, doubling while it does not.
- *
- * Capped rather than unbounded: a service that has backed off to six hours is
- * indistinguishable from a dead one, and the outage it is waiting on will
- * usually have been fixed long before.
- */
+/** Normal interval after success, doubling on each consecutive failure up to `backoffCapMs`. */
 export function nextDelayMs(
   consecutiveFailures: number,
   intervalMs: number,
@@ -53,13 +39,7 @@ export function nextDelayMs(
   return Math.min(backoffCapMs, intervalMs * 2 ** consecutiveFailures);
 }
 
-/**
- * Waits, but wakes immediately on shutdown.
- *
- * A plain timer would make Ctrl-C take up to a full poll interval to be
- * noticed, which reads as a hang. Abort is a normal outcome here, not an
- * error, so it resolves rather than throwing.
- */
+/** Waits but wakes immediately on abort; resolves rather than throwing since abort is a normal outcome here. */
 export async function interruptibleSleep(ms: number, signal: AbortSignal): Promise<void> {
   try {
     await delay(ms, undefined, { signal });
@@ -86,8 +66,7 @@ export async function runLoop(options: LoopOptions): Promise<LoopSummary> {
       logger.error("loop.cycle_failed", { error, consecutiveFailures });
     }
 
-    // Checked again because a cycle can take a while, and shutdown requested
-    // during one should not be followed by a sleep and another cycle.
+    // Re-checked: shutdown requested during a long cycle must not be followed by a sleep.
     if (options.signal.aborted) {
       break;
     }

@@ -36,8 +36,7 @@ describe("isOurs", () => {
   });
 
   it("treats a human's comment as somebody else's", () => {
-    // The whole reason the prefix exists. `gh` is authenticated as the
-    // operator, so this comment and the one above have the same author.
+    // Same author as ours, since `gh` posts as the operator; only the prefix distinguishes them.
     expect(isOurs("This still leaks on the error path.")).toBe(false);
   });
 
@@ -71,29 +70,20 @@ describe("renderMarker", () => {
   });
 
   it("writes the reviewer count after the high-water mark, not before it", () => {
-    // Position is the compatibility guarantee. The first two lines are read
-    // positionally, and markers written before this line existed are sitting on
-    // open pull requests right now; inserting it above would make every one of
-    // them unreadable, which by this file's own rule means unadvanceable.
+    // The first two lines are read positionally; inserting above them would make older markers unreadable.
     const lines = renderMarker(marker({ reviewerCount: 2 })).split("\n");
     expect(lines[2]).toBe("Reviewer rounds: 2");
   });
 
   it("appends the attempt count rather than inserting it", () => {
-    // The same compatibility guarantee as the line above, and the rule it
-    // states applies unchanged to every line added after it: the first two are
-    // positional, so anything new goes at the end of the header block. Putting
-    // this fourth is what keeps markers already sitting on open pull requests
-    // readable — and by this file's own rule, unreadable means unadvanceable.
+    // New fields go at the end of the header block, same rule as the reviewer count above.
     const lines = renderMarker(marker({ reviewerCount: 2, failedStarts: 1 })).split("\n");
     expect(lines[2]).toBe("Reviewer rounds: 2");
     expect(lines[3]).toBe("Failed starts: 1");
   });
 
   it("says nothing at all when nothing has gone wrong", () => {
-    // Legibility rather than economy, and the round trip survives it precisely
-    // because an absent line reads as zero. A marker on a healthy pull request
-    // should not carry a line reporting that no attempt has failed.
+    // A healthy pull request's marker should not carry a line reporting that nothing failed.
     expect(renderMarker(marker({ failedStarts: 0 }))).not.toContain("Failed starts");
   });
 
@@ -105,9 +95,7 @@ describe("renderMarker", () => {
 
 describe("parseMarker", () => {
   it("reads back a marker written by an earlier process", () => {
-    // Note this body predates the reviewer count: two open pull requests carry
-    // markers in exactly this shape. A missing line reads as `count`, which is
-    // the conservative direction — the reviewer cap can only fire sooner.
+    // Predates the reviewer count; a missing line reads as `count`, the conservative direction.
     const result = parseMarker(
       "bot: iteration count 2\nLast read: 2026-09-05T10:22:31Z\n\n- narrowed the type\n- split the helper",
     );
@@ -124,12 +112,7 @@ describe("parseMarker", () => {
   });
 
   it("reads a missing attempt count as none rather than refusing", () => {
-    // The opposite reading to the one the count itself gets two tests below,
-    // and deliberately so. Both pick the recoverable mistake: an unreadable
-    // round count read as zero *removes* a brake, while an absent attempt line
-    // read as anything but zero would apply one to a pull request that has
-    // never failed to start — and every marker written before this line existed
-    // is exactly that pull request.
+    // Opposite reading from an unreadable round count: an absent attempt line means the pull request has never failed to start.
     const result = parseMarker("bot: iteration count 2\nLast read: 2026-09-05T10:22:31Z");
     expect(result.outcome === "parsed" && result.marker.failedStarts).toBe(0);
   });
@@ -142,10 +125,7 @@ describe("parseMarker", () => {
   });
 
   it("refuses an attempt count it cannot read, and does not read it as zero", () => {
-    // Zero is the brake released. It is the right answer for a line that is
-    // absent — that marker predates the line — and the wrong one for a line
-    // that is present and mangled, because something wrote it and the number it
-    // meant was not nothing.
+    // Zero is right for an absent line but wrong for one present and mangled.
     expect(
       unreadable("bot: iteration count 2\nLast read: 2026-09-05T10:00:00Z\nFailed starts: three"),
     ).toContain("not a whole number");
@@ -157,8 +137,7 @@ describe("parseMarker", () => {
   });
 
   it("keeps the instant exactly as it was written", () => {
-    // Re-rendering a Date would rewrite the format on every round and turn the
-    // diff between two markers into noise.
+    // Re-rendering a Date would rewrite the format every round and turn marker diffs into noise.
     const result = parseMarker("bot: iteration count 1\nLast read: 2026-09-05T10:22:31.482Z");
     expect(result.outcome === "parsed" && result.marker.lastRead).toBe("2026-09-05T10:22:31.482Z");
   });
@@ -168,9 +147,7 @@ describe("parseMarker", () => {
   });
 
   it("refuses a count that is not a whole number of rounds, and does not read it as zero", () => {
-    // The mutation that matters most in this file. An unreadable marker read as
-    // zero is how a bounded loop becomes an unbounded one, silently, on the one
-    // pull request whose marker got mangled.
+    // An unreadable marker read as zero would silently turn a bounded loop into an unbounded one.
     expect(unreadable("bot: iteration count three\nLast read: 2026-09-05T10:00:00Z")).toContain(
       "not a whole number",
     );
@@ -192,8 +169,7 @@ describe("parseMarker", () => {
   });
 
   it("refuses a marker with no high-water mark", () => {
-    // A marker without one is a cursor that cannot tell a new comment from an
-    // old one, which is the whole thing it exists to do.
+    // Without one the cursor cannot tell a new comment from an old one.
     expect(unreadable("bot: iteration count 3")).toContain("no high-water mark");
     expect(unreadable("bot: iteration count 3\n\n- narrowed the type")).toContain(
       "no high-water mark",
@@ -207,10 +183,7 @@ describe("parseMarker", () => {
   });
 
   it("reads a missing reviewer line as every round, not as none of them", () => {
-    // The two guesses are not symmetric. Reading a pre-split marker's rounds as
-    // the reviewer's can only make `MAX_REVIEW_ITERATIONS` fire sooner; reading
-    // them as human rounds hands the whole budget back on every pull request
-    // currently open, which is the direction that costs money.
+    // Reading a pre-split marker's rounds as human would hand back the whole budget on every open pull request.
     const result = parseMarker("bot: iteration count 4\nLast read: 2026-09-05T10:00:00Z");
     expect(result.outcome === "parsed" && result.marker.reviewerCount).toBe(4);
   });
@@ -223,8 +196,7 @@ describe("parseMarker", () => {
   });
 
   it("refuses a reviewer count that is not a whole number, and does not read it as zero", () => {
-    // Same rule as the total, and for the same reason: zero here is a fresh
-    // reviewer budget on a pull request that has already spent one.
+    // Zero here would be a fresh reviewer budget on a pull request that already spent one.
     expect(
       unreadable("bot: iteration count 3\nLast read: 2026-09-05T10:00:00Z\nReviewer rounds: two"),
     ).toContain("not a whole number of reviewer rounds");
@@ -242,10 +214,7 @@ describe("parseMarker", () => {
   });
 
   it("refuses more reviewer rounds than rounds rather than clamping them", () => {
-    // The repair — `min(a, b)` — is the tempting one and it is wrong. A marker
-    // in this state was edited by something that did not understand it, so the
-    // count it resumes from is one nobody can vouch for, on the single pull
-    // request where the state is known to be broken.
+    // Clamping with min(a, b) is tempting and wrong: a marker in this state was edited by something that did not understand it.
     expect(
       unreadable("bot: iteration count 2\nLast read: 2026-09-05T10:00:00Z\nReviewer rounds: 3"),
     ).toContain("3 reviewer rounds out of 2 rounds");
@@ -276,9 +245,7 @@ describe("findMarker", () => {
   });
 
   it("refuses two markers rather than picking one", () => {
-    // Picking the higher count would resume from one and orphan the other, and
-    // the reason there are two is that something already went wrong. A loop
-    // that repairs it by choosing has stopped being able to report it.
+    // Choosing one would orphan the other and hide that something already went wrong.
     const result = findMarker([at(MARKER, "IC_1"), at(MARKER, "IC_2")]);
 
     expect(result).toMatchObject({ outcome: "unusable" });
@@ -286,8 +253,7 @@ describe("findMarker", () => {
   });
 
   it("refuses a marker with no node id rather than reading it as absent", () => {
-    // Absent is the tempting shortcut and the worst of the three: it posts a
-    // second marker immediately and reports nothing.
+    // Reading it as absent would post a second marker immediately and report nothing.
     const result = findMarker([at(MARKER, "")]);
 
     expect(result).toMatchObject({ outcome: "unusable" });
@@ -301,9 +267,7 @@ describe("isNewer", () => {
   });
 
   it("is false at exactly the high-water mark", () => {
-    // Strictly newer, and this is the off-by-one the cursor exists to close: a
-    // comment created at the recorded instant was the newest thing the last
-    // round read, so treating it as fresh re-handles it every tick forever.
+    // Strictly newer: a comment at the recorded instant was already read, so treating it as fresh would re-handle it every tick.
     expect(isNewer("2026-09-05T10:22:31Z", "2026-09-05T10:22:31Z")).toBe(false);
   });
 
@@ -312,14 +276,12 @@ describe("isNewer", () => {
   });
 
   it("compares instants rather than strings", () => {
-    // The same moment in two offsets. A lexical comparison calls the first one
-    // newer and drops a real comment.
+    // Same moment in two offsets; a lexical comparison would call the first one newer.
     expect(isNewer("2026-09-05T11:22:31+01:00", "2026-09-05T10:22:31Z")).toBe(false);
   });
 
   it("treats an unreadable timestamp on either side as new", () => {
-    // Not symmetric: re-reading a comment costs a round, dropping one loses a
-    // reviewer's request with nothing saying so.
+    // Not symmetric: re-reading a comment costs a round, dropping one loses a request silently.
     expect(isNewer("who knows", "2026-09-05T10:22:31Z")).toBe(true);
     expect(isNewer("2026-09-05T10:22:31Z", "who knows")).toBe(true);
   });

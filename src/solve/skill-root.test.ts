@@ -30,14 +30,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  // Read-only directories cannot be removed until they are unlocked, which is
-  // what `removeSkillRoot` is for. Using it here means the cleanup path is
-  // exercised by every test in this file, not only the two that assert on it.
-  //
-  // Listed rather than named: roots are uniquely suffixed now, so there is no
-  // name to reconstruct. `rm(parent, { force: true })` is not the shortcut it
-  // looks like — `force` suppresses "it was not there", not EACCES, and a
-  // locked-down root is precisely what `rm` cannot descend into.
+  // Listed rather than named (roots are uniquely suffixed) and unlocked via `removeSkillRoot`
+  // rather than `rm(parent, { force: true })` — `force` suppresses "not there", not EACCES.
   for (const entry of await readdir(parent)) {
     await removeSkillRoot(join(parent, entry));
   }
@@ -70,11 +64,7 @@ async function writable(path: string): Promise<boolean> {
 
 describe("sourceSkillDirectory", () => {
   it("points at a skill that is actually installed", async () => {
-    // THE ONE THAT MATTERS, and the reason this module exists. Every pass sends
-    // `/agent-solve` as its first prompt line; if this path is wrong the slash
-    // command resolves to nothing. Probed 2026-09-04 from a directory without
-    // the skill: `Unknown command: /agent-solve`. So this is the unit-test
-    // shadow of a real failure that had already shipped into `buildSolveArgs`.
+    // Every pass sends `/agent-solve` as its first prompt line; if this path is wrong the slash command resolves to nothing.
     const info = await stat(sourceSkillDirectory());
     expect(info.isDirectory()).toBe(true);
     await expect(readFile(join(sourceSkillDirectory(), "SKILL.md"), "utf8")).resolves.toContain(
@@ -83,17 +73,7 @@ describe("sourceSkillDirectory", () => {
   });
 
   it("documents the capability the prompt hands the pass", async () => {
-    // The prompt tells a pass to follow this contract *exactly*, so a capability
-    // the prompt grants and the contract does not describe is not a gap, it is a
-    // contradiction — and the contract wins, because it is the document the pass
-    // was told to obey. That is not hypothetical: §8 spent a day instructing
-    // passes to state plainly that they "cannot see" other repositories, while
-    // the prompt above it listed the checkouts they could see.
-    //
-    // Two assertions for the two halves that can rot apart. The heading is how
-    // §0a says which block of the prompt it is about, and it is a string literal
-    // on the other side. The section marker is what SKILL.md's summary and §0's
-    // inventory both point at.
+    // §8 once had passes claiming they "cannot see" other repositories while the prompt listed checkouts they could see; the heading (§0a) and section marker (§0) are the two halves that can rot apart.
     const instructions = await readFile(
       join(sourceSkillDirectory(), "SOLVE_INSTRUCTIONS.md"),
       "utf8",
@@ -113,10 +93,7 @@ describe("prepareSkillRoot", () => {
   });
 
   it("copies the whole skill, not just its entry point", async () => {
-    // SKILL.md defers the actual contracts to SOLVE_INSTRUCTIONS.md. Staging
-    // only the file named in the frontmatter would give the model a document
-    // whose every cross-reference is dangling. One assertion per pass, because
-    // the argv is built once and all four resolve the same skill.
+    // SKILL.md defers the actual contracts to SOLVE_INSTRUCTIONS.md; staging only the frontmatter's entry point would leave every cross-reference dangling.
     const instructions = await readFile(
       join(skillIn(await staged()), "SOLVE_INSTRUCTIONS.md"),
       "utf8",
@@ -127,9 +104,7 @@ describe("prepareSkillRoot", () => {
   });
 
   it("contains the skill and nothing else", async () => {
-    // The whole point of staging rather than adding this repository. `--add-dir`
-    // grants write to a pass that pre-approves `Write`, so whatever is in here
-    // is writable-in-principle by the solver — the list must stay this short.
+    // `--add-dir` grants write to a pass that pre-approves `Write`, so whatever is in here is writable-in-principle by the solver.
     const root = await staged();
     expect(await readdir(root)).toEqual([".claude"]);
     expect(await readdir(join(root, ".claude"))).toEqual(["skills"]);
@@ -137,11 +112,7 @@ describe("prepareSkillRoot", () => {
   });
 
   it("leaves nothing writable, directories included", async () => {
-    // THE GUARD. Files-only would still let a `fix` pass unlink the skill and
-    // write its own in its place, because on POSIX it is the directory's write
-    // bit that governs creating and removing entries. Asserted via access(W_OK)
-    // rather than by reading st_mode, so the test measures the same thing the
-    // kernel will tell the model.
+    // Files-only would still let a `fix` pass unlink and replace the skill, since it's the directory's write bit that governs that on POSIX.
     const root = await staged();
     const dir = skillIn(root);
 
@@ -152,9 +123,6 @@ describe("prepareSkillRoot", () => {
   });
 
   it("actually refuses a write, not just the permission bit", async () => {
-    // The bit above says "no". This checks the filesystem agrees, which is the
-    // claim `skill-root.ts` makes and the one a live probe confirmed against a
-    // real model session on 2026-09-04 — both writes came back EACCES.
     const dir = skillIn(await staged());
 
     await expect(writeFile(join(dir, "SKILL.md"), "TAMPERED")).rejects.toThrow();
@@ -169,17 +137,13 @@ describe("prepareSkillRoot", () => {
   });
 
   it("replaces a read-only leftover from an interrupted run", async () => {
-    // Without the pre-clear, the second run's `cp` hits EACCES on the first
-    // run's locked-down copy and every subsequent solve for that ticket
-    // refuses — a failure that would only appear after something crashed.
+    // Without the pre-clear, the second run's `cp` hits EACCES on the first run's locked-down copy.
     await staged("SSX-1");
     await expect(staged("SSX-1")).resolves.toContain("SSX-1-skill");
   });
 
   it("refuses instead of throwing when it cannot stage", async () => {
-    // A broken install should stop the run with a sentence, matching
-    // `createWorktree`. Forced through an unwritable parent, since the source
-    // skill genuinely exists in this repository.
+    // Forced through an unwritable parent, since the source skill genuinely exists in this repository.
     const outer = await mkdtemp(join(tmpdir(), "skill-root-locked-"));
     const locked = join(outer, "locked");
     await mkdir(locked, { recursive: true });

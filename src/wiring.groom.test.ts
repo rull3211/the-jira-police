@@ -1,17 +1,9 @@
 /**
  * Tests the composition itself: analyse → gate → post.
  *
- * Separate from `wiring.test.ts` because it mocks the two subprocess runners,
- * and `vi.mock` applies to a whole file. The distinction is worth the extra
- * file: everything here is about the ORDER and the CONDITIONS, which is the
- * part that was wrong before the split and the part unit tests of the pieces
- * cannot see.
- *
- * Written after a mutation escaped. Deleting `assertPostable` from `createGroom`
- * left all 264 tests green — the gate was fully tested in isolation and called
- * by nothing that anything asserted on. That is the second time this exact
- * shape of bug has appeared in this service, so the rule it implies is worth
- * stating: a guard is not shipped until a test fails when it is unplugged.
+ * Separate from `wiring.test.ts` because it mocks the two subprocess runners and `vi.mock`
+ * applies to a whole file. Everything here is about order and conditions, which unit tests of
+ * the pieces alone cannot see — a guard is not shipped until a test fails when it's unplugged.
  */
 
 import { mkdtemp, readFile } from "node:fs/promises";
@@ -85,24 +77,10 @@ function payload(overrides: Partial<TriagePayload> = {}): TriagePayload {
   };
 }
 
-/**
- * A scratch OUTPUT_DIR shared by every test that does not name its own.
- *
- * `createGroom` writes a rejection file when the gate refuses, so the refusal
- * tests below have a filesystem side effect. Left on the default `groomed/`
- * they would write `SSX-1234.rejected.md` into the repo on every `pnpm test` —
- * which is how a fixture ends up committed by accident.
- */
+/** Shared OUTPUT_DIR for tests without their own: a refusal writes a rejection file, and the default `groomed/` would commit it as a fixture. */
 const SCRATCH = await mkdtemp(join(tmpdir(), "groom-"));
 
-/**
- * An accepted ticket — the only kind that gets an agent-fitness note.
- *
- * `solvable: false` with a populated `blockers` list is the interesting shape,
- * not an edge case: it is what the first two live runs on SSX-3822 actually
- * produced, and it is the case the note exists to serve, since the blockers are
- * a to-do list a human can often clear cheaply.
- */
+/** An accepted ticket with `solvable: false` and populated `blockers` — the note exists to serve exactly this shape, since the blockers are a to-do list a human can often clear cheaply. */
 function readyish(overrides: Partial<TriagePayload> = {}): TriagePayload {
   return payload({
     verdict: "ready-ish",
@@ -159,9 +137,7 @@ describe("createGroom with WRITE_BACK off", () => {
   });
 
   it("does not refuse an incoherent verdict, since nothing is being published", async () => {
-    // The local report is still worth having, and `parsePayload` already
-    // refuses the contradiction this gate exists for. Applying the posting
-    // rules to a run that posts nothing would fail tickets for no benefit.
+    // The posting gate only applies to runs that post; nothing is published here.
     runTriage.mockResolvedValue(payload({ mutation: mutation({ commentBody: "" }) }));
 
     await expect(createGroom(settings())(TICKET)).resolves.toBeDefined();
@@ -179,16 +155,9 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("hands the poster the analyst's own mutation, unaltered", async () => {
-    // The property the whole design rests on: the thing checked is the thing
-    // posted. If these two could differ, the gate would be checking a draft.
-    //
-    // This fixture is `needs-info`, which is below the threshold for the
-    // fitness note, and its body carries no block from an earlier run — both
-    // halves matter now that `withFitnessNote` strips before it splices, since
-    // a `needs-info` re-run over a body that DID carry one is edited, not
-    // passed through. The ready-ish case — where the note IS spliced in — is
-    // covered below, and the same property holds there because the splice
-    // happens before the gate.
+    // The thing checked must be the thing posted, or the gate is only checking a draft.
+    // Covers `needs-info`, below the fitness-note threshold; the ready-ish case, where the
+    // note is spliced in before the gate, is covered separately below.
     const result = payload();
     runTriage.mockResolvedValue(result);
     await createGroom(on())(TICKET);
@@ -200,10 +169,8 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("posts the agent-fitness note on a ready-ish ticket", async () => {
-    // MUTATION TEST. Unplug `withFitnessNote` in `createGroom` and this fails.
-    // Without it the blockers stay in a gitignored local file, so the one
-    // audience who can actually clear them — the reporter and the Trio — never
-    // sees the list.
+    // Unplug `withFitnessNote` in `createGroom` and this fails: without it the blockers stay
+    // in a gitignored local file the reporter never sees.
     runTriage.mockResolvedValue(readyish());
     await createGroom(on())(TICKET);
 
@@ -215,8 +182,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("keeps the footer sentinel last, so a re-run still updates in place", async () => {
-    // The poster identifies its own previous comment by that exact trailing
-    // line. Splice the note after it and every re-run posts a duplicate.
+    // The poster identifies its own previous comment by this trailing line; splicing the note after it would duplicate on every re-run.
     runTriage.mockResolvedValue(readyish());
     await createGroom(on())(TICKET);
 
@@ -227,10 +193,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("gates the body it will actually post, not the draft before the splice", async () => {
-    // The note is added before `assertPostable` runs, so the checked text and
-    // the sent text are the same string. Asserting it the other way round —
-    // that the analyst's original body is NOT what got posted — is what makes
-    // this distinct from the test above.
+    // The note is added before `assertPostable` runs, so checked and sent text are the same string.
     const original = readyish();
     runTriage.mockResolvedValue(original);
     await createGroom(on())(TICKET);
@@ -242,8 +205,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("REFUSES to post when the gate objects", async () => {
-    // The mutation test this file was written for. Unplug `assertPostable`
-    // from `createGroom` and this is what fails.
+    // Unplug `assertPostable` from `createGroom` and this is what fails.
     runTriage.mockResolvedValue(payload({ mutation: mutation({ component: "Nonsense" }) }));
 
     await expect(createGroom(on())(TICKET)).rejects.toThrow(/refusing to post/);
@@ -251,9 +213,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("refuses the SSX-3822 contradiction before anything reaches the board", async () => {
-    // The incident that caused all of this. Under the old single-run design the
-    // comment was already posted by the time the payload could be inspected;
-    // here the refusal happens with the poster still un-dispatched.
+    // The refusal happens with the poster still un-dispatched.
     runTriage.mockResolvedValue(
       payload({
         verdict: "ready-ish",
@@ -268,8 +228,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("gates BEFORE posting, not after", async () => {
-    // Ordering is the entire fix, so it is asserted directly rather than
-    // inferred from the absence of a call.
+    // Asserted directly rather than inferred from the absence of a call.
     const order: string[] = [];
     runTriage.mockImplementation(() => {
       order.push("analyse");
@@ -306,10 +265,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("records the refused mutation, so the refusal can be judged afterwards", async () => {
-    // Without this the gate destroys the one artifact needed to tell a correct
-    // refusal from a false positive — the comment body it objected to. Uses a
-    // real temp directory rather than a mock: the thing being tested is that a
-    // file an operator can open ends up on disk.
+    // Real temp directory rather than a mock: what's tested is that a file an operator can open ends up on disk.
     const directory = await mkdtemp(join(tmpdir(), "groom-reject-"));
     runTriage.mockResolvedValue(
       payload({
@@ -324,12 +280,8 @@ describe("createGroom with WRITE_BACK on", () => {
 
     const written = await readFile(join(directory, "SSX-1234.rejected.md"), "utf8");
     expect(written).toContain("Nonsense");
-    // The row, not just the text. Which row a placeholder was attributed to is
-    // now what decides whether it blocks, so a refusal artifact that omits it
-    // cannot be judged — an operator would not be able to tell a correct pass
-    // on an advisory row from a guard that failed to fire on a blocking one.
+    // The row decides whether a placeholder blocks, so an artifact that omits it can't be judged.
     expect(written).toContain("[N] (row 9)");
-    // The body itself, which is the evidence the whole file exists to preserve.
     expect(written).toContain("Gaps remain.");
   });
 
@@ -343,9 +295,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("clears a superseded rejection once a later run passes the gate", async () => {
-    // Observed on SSX-3822: a refusal file sat next to the successful report
-    // for the same key, so the directory claimed both that the ticket had been
-    // groomed and that it had been refused.
+    // A stale refusal file next to a later success would claim the ticket was both groomed and refused.
     const directory = await mkdtemp(join(tmpdir(), "groom-supersede-"));
     const groom = createGroom(settings({ WRITE_BACK: "true", OUTPUT_DIR: directory }));
 
@@ -360,8 +310,7 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("runs the analyst with --no-write even when it is going to post", async () => {
-    // The analyst is never re-armed. Posting is a separate session with a
-    // separate allowlist; this run could not write if it decided to.
+    // The analyst is never re-armed; posting is a separate session with its own allowlist.
     runTriage.mockResolvedValue(payload());
     await createGroom(on())(TICKET);
 

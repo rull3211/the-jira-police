@@ -29,14 +29,7 @@ function attachment(overrides: Partial<JiraAttachment> = {}): JiraAttachment {
   };
 }
 
-/**
- * SSX-3917 as the Jira API returned it on 2026-09-17, in that order.
- *
- * A captured ticket rather than a generated one, because the shape that matters
- * is not the count: the last upload arrived half an hour after the other seven,
- * which on a bug report is where the clarifying screenshot tends to land, and it
- * is the one the cap discards.
- */
+/** SSX-3917 as the Jira API returned it, in that order; the last upload, which the cap discards, arrived half an hour after the other seven. */
 const SSX_3917: readonly JiraAttachment[] = [
   attachment({ id: "744704", filename: "image-20260915-105134.png", size: 41_113 }),
   attachment({ id: "744706", filename: "image-20260915-105209.png", size: 89_634 }),
@@ -153,7 +146,9 @@ describe("stageImages", () => {
 
   it("keeps the oldest attachments of a real over-cap ticket, and drops the rest unfetched", async () => {
     const read = reader();
+    // refs:off
     // The cap this ticket was actually measured against (PLAN.md §4, SSX-3917),
+    // refs:on
     // held here rather than read off `DEFAULT_IMAGE_STAGE_OPTIONS` — that default
     // moved to 10 to give this exact ticket headroom, so the fixture no longer
     // exceeds it and the over-cap scenario needs its own number to reproduce.
@@ -162,10 +157,7 @@ describe("stageImages", () => {
     const kept = SSX_3917.slice(0, maxImages);
     const dropped = SSX_3917.slice(maxImages);
 
-    // The scenario, asserted rather than described: every file is comfortably
-    // under the byte cap, and the ones position discards are the two *largest*
-    // on the ticket. Without this, editing a size above could turn the test
-    // into a byte-cap test still named for the count cap.
+    // Asserted rather than assumed, so a size edit elsewhere can't silently turn this into a byte-cap test.
     expect(dropped.length).toBeGreaterThan(0);
     expect(Math.max(...SSX_3917.map((image) => image.size))).toBeLessThan(maxImageBytes);
     expect(Math.min(...dropped.map((image) => image.size))).toBeGreaterThan(
@@ -189,9 +181,7 @@ describe("stageImages", () => {
   });
 
   it("spends a slot on a candidate that fails, and says so rather than claiming a full set", async () => {
-    // The cap counts fetches, not successes. One staged image out of a limit of
-    // two is the honest outcome here, and the omission line has to mean
-    // "not fetched" rather than "staged as many as allowed".
+    // The cap counts fetches, not successes: one staged out of a limit of two is the honest outcome.
     const result = staged(
       await stageImages(
         reader(async (id) => (id === "1" ? Buffer.from("MZ ") : PNG)),
@@ -304,10 +294,7 @@ describe("stageImages", () => {
   });
 
   it("will not join an id it did not check onto a path", async () => {
-    // The reader here is a double, and a double takes ids the real client
-    // refuses. Deleting `assertAttachmentId` from the stager therefore costs
-    // nothing unless a test supplies an id the real client would have thrown
-    // on — this is that test.
+    // A double takes ids the real client refuses, so deleting `assertAttachmentId` here would not go unnoticed.
     const read = reader();
 
     const result = await stageImages(

@@ -1,53 +1,8 @@
 /**
- * The service: poll, triage, repeat, until asked to stop — and, since Phase E,
- * look at the pull requests already under review while it does, and sweep the
- * tickets triage sent back to see whether anyone answered.
+ * The service: poll, triage, repeat — plus sweeping PRs under review and tickets sent back for an answer.
  *
- *   pnpm start
- *   node src/index.ts --skill live-triage-probe --interval 30s --for 4m
- *
- * Flags override settings for a single run. They exist because a smoke test
- * wants a 30-second cadence and a real skill without editing `.env` and
- * risking those values being left behind in it.
- *
- * Shutdown is graceful: SIGINT/SIGTERM lets the current cycle finish, so an
- * issue mid-triage is either completed and recorded or left untouched for the
- * next run. A second signal exits immediately, for when that is too slow.
- *
- * ## Three loops, and the separation is the safety property
- *
- * The grooming loop is the one that has been running in production. The review
- * loop spends an order of magnitude more per action and shells out to `git` and
- * `gh`. The watch loop is the newest and the only one that spends with nobody
- * having asked for anything. **The first requirement of adding either was that
- * it cannot stop the grooming loop from doing what it did yesterday**, and the
- * cheapest way to get that is not a `try`/`catch` around a shared tick — it is
- * loops that share only a Jira client and a shutdown signal. A `gh` that is
- * missing, a repository that was renamed, a review sweep backing off to fifteen
- * minutes: none of them are visible from the others.
- *
- * They also want different cadences for different reasons — see
- * `reviewIntervalMs` and `watchIntervalMs` — and a single tick would make the
- * two-minute one wait behind the twenty-minute-per-issue one.
- * `TRIAGE_TIMEOUT_MS` is 20 minutes, so one wedged triage would hold the review
- * sweep for longer than a reviewer takes to answer, every time. The watch pulls
- * hardest of all: six hours, because its trigger is a person changing their
- * mind.
- *
- * **What that costs, stated plainly, because nothing here bounds it:** the three
- * loops can spend at the same time and no setting spans them. A tick's worth of
- * review rounds is bounded by `MAX_REVIEW_ROUNDS_PER_TICK`, a triage cycle by
- * the queue, and a watch sweep by the size of the watched set — and the total is
- * the sum of three numbers nobody chose together.
- *
- * **The solve half is inside the review loop rather than beside it**, which is
- * why there are three loops here and not four. "Advance before claiming" is §6's
- * rule and a fourth loop could not keep it — two cadences race, and the one that
- * wins spends the only concurrency slot on a new ticket while a pull request
- * waits. As one tick's sequence it is guaranteed by the code rather than by the
- * scheduler. So the chain the watch starts now finishes here: a sent-back ticket
- * answered by its reporter is re-triaged, handed back as `agent:solvable`, and
- * picked up by the claim step on a later tick with nobody typing anything.
+ * The three loops share only a Jira client and a shutdown signal, so a failure in one cannot stop
+ * another. See architecture/overview.md §2.
  */
 
 import { parseDuration } from "./duration.ts";
@@ -87,13 +42,7 @@ function applyOverrides(settings: Settings, argv: readonly string[]): Settings {
   };
 }
 
-/**
- * Wires shutdown to signals and, optionally, to a deadline.
- *
- * The deadline is what makes an unattended smoke test possible: run for four
- * minutes, then stop the way a real shutdown would rather than being killed
- * mid-triage by an external timer.
- */
+/** Wires shutdown to signals and, optionally, a deadline, so a timed smoke test stops like a real shutdown rather than being killed mid-triage. */
 function createShutdown(runForMs: number | undefined): AbortController {
   const controller = new AbortController();
   let requested = false;
@@ -111,16 +60,8 @@ function createShutdown(runForMs: number | undefined): AbortController {
   process.on("SIGINT", () => stop("SIGINT"));
   process.on("SIGTERM", () => stop("SIGTERM"));
 
-  // SIGHUP is the one that actually happened. Node's default action for it is
-  // immediate termination, so a daemon started in a terminal died the instant
-  // that terminal closed — mid-cycle, with no `service.stopped` line and no
-  // chance to finish the ticket in flight. The symptom is the worst kind: a
-  // service that is simply gone, with nothing in its own logs to say why.
-  //
-  // Handled identically to the other two rather than ignored. A closed terminal
-  // is a legitimate request to stop; the bug was never that it stopped, only
-  // that it stopped abruptly and silently. Surviving a hangup is a job for
-  // nohup or a service manager, not for this process to arrogate.
+  // Node's default action for SIGHUP is immediate termination, so left unhandled it
+  // kills the service mid-cycle instead of shutting down gracefully.
   process.on("SIGHUP", () => stop("SIGHUP"));
 
   if (runForMs !== undefined) {
@@ -131,20 +72,7 @@ function createShutdown(runForMs: number | undefined): AbortController {
   return controller;
 }
 
-/**
- * Makes a silent death loud.
- *
- * `runLoop` catches everything `runCycle` throws, so no triage failure can end
- * the service — which means any exit that is not a signal came from outside
- * that try, and Node's default is to print to stderr and leave. If stderr is a
- * terminal that has since closed, the reason is simply lost, and the only
- * evidence left is a stale state file and a process that is no longer there.
- *
- * These handlers do not attempt recovery: the process still exits, because a
- * daemon carrying on after an unhandled rejection is in an unknown state. They
- * exist so the last thing it does is say why, in the same structured format as
- * everything else it logs.
- */
+/** Logs unhandled rejections and exceptions before exiting; anything reaching here bypassed `runLoop`'s own catch and would otherwise be lost silently. */
 function logUnexpectedExits(): void {
   process.on("unhandledRejection", (reason) => {
     logger.error("service.unhandled_rejection", { error: reason });
@@ -176,17 +104,9 @@ async function main(): Promise<void> {
   const client = createJiraClient(settings);
   const shutdown = createShutdown(runForMs);
 
-  // Built before anything starts ticking, so a configuration problem on the
-  // review side stops the process instead of leaving the grooming loop running
-  // against a service that is half up.
-  //
-  // The attempt ledger is built here for the reason the watch's memo is: its
-  // lifetime is the process's. The outcomes that release a ticket without
-  // labelling it — a refused diff, a failed pass, a transiently abandoned one —
-  // put `agent:start` back exactly as they found it, so the queue offers the
-  // ticket again on the very next tick with no condition that ever clears. The
-  // ledger is the only thing that ever says no; per cycle it would say it to
-  // nothing. See `solve/attempts.ts`.
+  // Built before the loops start so a review config problem fails fast instead of leaving
+  // grooming running against a half-up service. The ledger's lifetime must be the process's,
+  // not the cycle's, or a released-but-unlabelled ticket would retry every tick forever.
   const review = createReviewLoop(
     settings,
     client,
@@ -194,11 +114,8 @@ async function main(): Promise<void> {
     BACKOFF_CAP_MS,
     createAttemptLedger(numeric(settings, "MAX_SOLVE_ATTEMPTS_PER_TICKET", 3)),
   );
-  // The watch's memo is built here rather than inside the loop because its
-  // lifetime is this process's, and this is the function that has one. A
-  // relevance check that says no writes nothing to the ticket, so the trigger
-  // survives the answer; the memo is the only record that the answer was bought.
-  // Constructed per cycle it would be no bound at all — see `watch-loop.ts`.
+  // Built here, not per cycle, because its lifetime must be the process's: a relevance check
+  // that says no writes nothing to the ticket, so the memo is the only record an answer was spent.
   const watch = createWatchLoop(
     settings,
     client,
@@ -209,9 +126,8 @@ async function main(): Promise<void> {
   const deps = createPollDeps(settings, client, shutdown.signal);
 
   const grooming = runLoop({
-    // State is reloaded each cycle rather than held in memory: the file is the
-    // source of truth, and rereading it means an out-of-band edit — or a
-    // `poll:once` run alongside this one — is respected instead of clobbered.
+    // Reloaded each cycle, not held in memory, so an out-of-band edit or a concurrent
+    // `poll:once` run is respected instead of clobbered.
     runCycle: async () => {
       const state = await loadState(settings.STATE_PATH);
       const outcome = await runPollCycle(state, deps);
@@ -225,11 +141,8 @@ async function main(): Promise<void> {
           abandoned: outcome.abandoned,
           cursor: outcome.state.cursor,
         },
-        // `found` and `skipped` are deliberately not read. A cycle that found
-        // forty tickets and had already seen all forty did nothing, and on a
-        // board this size that is every cycle. What makes it news is that the
-        // service *spent* something: a triage, a failure, or a ticket left
-        // behind.
+        // `found`/`skipped` aren't news: most cycles see everything and change nothing.
+        // Only spending something (a triage, a failure, an abandonment) is news.
         {
           quiet: outcome.triaged === 0 && outcome.failed === 0 && outcome.abandoned === 0,
         },
@@ -240,10 +153,8 @@ async function main(): Promise<void> {
     signal: shutdown.signal,
   });
 
-  // Both are awaited together rather than raced: a shutdown aborts the shared
-  // signal, and each loop finishes the cycle it is in. Stopping when the first
-  // one returns would kill a review round mid-push to make a poll cycle's exit
-  // look tidy.
+  // Awaited together, not raced: stopping when the first loop returns would kill another
+  // loop's cycle mid-push just to make the exit look tidy.
   const [groomed, reviewed, watched] = await Promise.all([
     grooming,
     review === null ? Promise.resolve(null) : runLoop(review),

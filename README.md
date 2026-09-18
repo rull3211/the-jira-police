@@ -21,8 +21,9 @@ this codebase.
 > Recorded rather than quietly corrected: prose drifting away from behaviour is the defect class
 > this service exists to catch, and the README is not exempt from it.
 
-`ARCHITECTURE.md` is the design document — why grooming is three steps, which credential is
-allowed to do what, and what is deliberately unbuilt. This file is how to run it.
+`ARCHITECTURE.md` is the design document's quickindex — why grooming is three steps, which
+credential is allowed to do what, and what is deliberately unbuilt, routed to the right
+`architecture/*.md` file. This file is how to run it.
 
 ---
 
@@ -493,7 +494,7 @@ and solve still see attachments as text or not at all; the command exists so the
 judged from a real ticket before any pass is wired to it. It downloads, writes the staged files to a
 read-only directory under `tmpdir()` and the report to `<OUTPUT_DIR>/<KEY>.attachments.md`, and posts
 nothing. Exit 1 means the ticket has images and none of them is staged, which is the case a pass has
-to bail on. [`ARCHITECTURE.md` §13](ARCHITECTURE.md) has the decision behind it.
+to bail on. [`architecture/not-built.md` §13](architecture/not-built.md) has the decision behind it.
 
 **`recon:once` is the only way to run recon outside the full solve pipeline.** It cuts a real
 worktree from `SOLVE_REPO_ROOT`, runs recon in it, and always discards the worktree afterwards,
@@ -612,7 +613,7 @@ there is no build step here.
 
 ## Settings
 
-Full table in `ARCHITECTURE.md` §10. The ones that matter for a demo:
+Full table in `architecture/configuration.md` §10. The ones that matter for a demo:
 
 | Setting                         | Default       | Notes                                                                      |
 | ------------------------------- | ------------- | -------------------------------------------------------------------------- |
