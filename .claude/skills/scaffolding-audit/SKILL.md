@@ -51,8 +51,9 @@ looking:
   refusal and hid a live hole in `branch-guard.sh`;
 - a documentation check that verified the number phrasings somebody had thought to write down,
   and silently ignored the rest;
-- a cross-document reference resolver that pools section ids from every document into one set, so
-  a dead reference resolves against a different file's live section;
+- a cross-document reference resolver that pooled section ids from every document into one set, so
+  a dead reference resolved against a different file's live section — fixed by resolving per
+  document (`PLAN.md` §19);
 - a docs suite made entirely of consistency checks, read by everyone as keeping the documents
   honest, with no length or growth ceiling in it anywhere — the corpus tripled while every gate
   stayed green.
@@ -137,8 +138,10 @@ State in one line whether each still holds, then move past it.
 - `pnpm test:hooks` proves each script _emits_ a decision, never that the runtime acts on one.
   Which decision shapes have been watched honoured lives in `architecture/guardrails.md` §16, not here.
   `ask` is the one nobody has seen, and a class of fail-open guards rests on it — `PLAN.md` §17.
-- `PLAN.md` §19: the section resolver pools ids across documents, so `KNOWN_DANGLING` and the
-  reference cleanup are both measuring a smaller population than anyone thinks. Open, unfixed.
+- `PLAN.md` §19: the resolver now resolves each `§N` per document instead of pooling, and flags a
+  citation resolving in more than one document as `ambiguous` rather than picking one silently.
+  Shipped; what's still open is fixing the 41 dangling and 119 ambiguous citations it measures —
+  a human's job, per the same entry.
 - Nothing checks that the four questions in `FINISHING.md` were **asked**. `pinned-prose.ts` (via
   `docs:check`) does check the `CLAUDE.md` copy against the original and that there are four; the
   rest is a reminder hook and a CI step that reads the pull request body.
