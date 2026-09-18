@@ -316,6 +316,96 @@ for r in "git -C . status" "git --no-pager log --oneline" \
     "$(bash_payload "$r" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
 done
 
+# `worktree add -b` is rule 3's escape hatch; refusing it from a protected
+# branch would trap the agent the same way refusing `switch -c` does.
+for w in "git worktree add -b fix/x ../d origin/main" "git worktree add -bfix/x ../d" \
+  "pnpm test && git worktree add -b fix/z ../d"; do
+  expect "on main allows: $w" SILENT \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The other side: each of these still touches a protected ref or checks one
+# out, so each must be refused even with the hatch open. `-Bmain` matters
+# because `${1#-b}` does not strip an uppercase `-B`, so the name read back
+# would be `-Bmain` — a token no protected-name check would match.
+for w in "git worktree add -b main ../d" "git worktree add -b release/1 ../d" \
+  "git worktree add -bmain ../d" "git worktree add -B main ../d" \
+  "git worktree add -Bmain ../d" "git worktree add -Bfix/x ../d" \
+  "git worktree add ../d main" \
+  "git worktree add --detach ../d" "git worktree remove ../d" "git worktree prune"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The older hatches: `checkout -B`/`switch -C` reset an existing branch, so
+# they can move `main` from a standing start the same way `worktree add -B` can.
+for w in "git checkout -B main" "git checkout -B main origin/x" "git checkout -Bmain" \
+  "git switch -C main" "git switch -C release/1" "git switch -Cmain" \
+  "git checkout -b main" "git switch -c develop"; do
+  expect "on main refuses: $w" DENY \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The other half of every hatch assertion: the remedy the denial text names has
+# to still work, or the guard traps the agent on the branch it is refusing.
+for w in "git switch -c fix/x" "git checkout -b fix/x" "git checkout -B fix/x" \
+  "git switch -" "git switch fix/ordinary"; do
+  expect "on main allows: $w" SILENT \
+    "$(bash_payload "$w" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# Which checkout a write is judged against, rather than the project directory —
+# needs a real second worktree, since every `Bash` payload above has no
+# `file_path` to resolve one from.
+write_payload() {
+  node -e '
+    process.stdout.write(
+      JSON.stringify({ tool_name: "Write", tool_input: { file_path: process.argv[1] } }),
+    );
+  ' "$1"
+}
+
+pair_main="$(scratch)"
+pair_feat="$(mktemp -d)/wt"
+git -C "$pair_main" worktree add -q -b feat/elsewhere "$pair_feat" HEAD
+
+expect "a write into the main worktree is refused from a feature one" DENY \
+  "$(write_payload "$pair_main/f.txt" | CLAUDE_PROJECT_DIR="$pair_feat" "$HOOKS/branch-guard.sh" | decision)"
+
+# The converse: rule 3 parks the primary checkout on main and works in a
+# worktree, so refusing a write into a feature worktree would refuse the normal
+# path.
+expect "a write into a feature worktree is allowed from main" SILENT \
+  "$(write_payload "$pair_feat/f.txt" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+
+# A Write names a path that does not exist yet, so resolution walks up to the
+# nearest directory that does. Without that walk this allows, because `git -C` on
+# a missing directory fails and the target looks like no repository at all.
+expect "a new nested path resolves to its worktree" DENY \
+  "$(write_payload "$pair_main/a/b/new.ts" | CLAUDE_PROJECT_DIR="$pair_feat" "$HOOKS/branch-guard.sh" | decision)"
+
+# NotebookEdit spells the same field differently, and a guard that reads only
+# `file_path` would wave it through.
+nb_payload() {
+  node -e '
+    process.stdout.write(
+      JSON.stringify({ tool_name: "NotebookEdit", tool_input: { notebook_path: process.argv[1] } }),
+    );
+  ' "$1"
+}
+
+expect "notebook_path is resolved the same way" DENY \
+  "$(nb_payload "$pair_main/n.ipynb" | CLAUDE_PROJECT_DIR="$pair_feat" "$HOOKS/branch-guard.sh" | decision)"
+
+# Fail closed on anything that cannot name a worktree: a relative path is a
+# guess (the payload's cwd is not in it), so both this and a path under no
+# repository fall back to the project directory rather than to "allow".
+expect "a relative path falls back to the project directory" DENY \
+  "$(write_payload "f.txt" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+
+expect "a path under no repository falls back too" DENY \
+  "$(write_payload "/tmp" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+
 git -C "$main_repo" switch -q feat/ordinary
 expect "off main: a commit is fine" SILENT \
   "$(bash_payload "git commit -m x" | CLAUDE_PROJECT_DIR="$main_repo" "$HOOKS/branch-guard.sh" | decision)"
@@ -536,6 +626,14 @@ expect "compact carries rule 1 verbatim" yes \
   "$(contains "$compact" 'Never work on `main`')"
 expect "compact carries rule 2 verbatim" yes \
   "$(contains "$compact" 'A human merges. Always.')"
+
+# Rule 3 is the reason it is a numbered item rather than a paragraph under one:
+# the extractor takes `^[0-9]+\. ` and its continuations and nothing else, so an
+# unnumbered rule is a rule that disappears at exactly the moment — a fresh
+# context inheriting a summary — it was written for.
+expect "compact carries the worktree rule" yes \
+  "$(contains "$compact" 'own worktree')"
+
 expect "compact carries the 3am question" yes \
   "$(contains "$compact" 'If this fails at 3am')"
 expect "compact names committing" yes \
@@ -580,11 +678,11 @@ mv "$brief_repo/.claude/skills/dev-house-rules/FINISHING.md.bak" \
 #
 # They exist because the first version of this block guarded the checklist half
 # and left the rules half unwatched, while one comment described both as
-# "extracted" — so a pasted copy of the two rules passed everything above. An
+# "extracted" — so a pasted copy of the rules half passed everything above. An
 # asymmetry between what a comment claims and what an assertion covers is
 # invisible from the inside; this was found by mutating the half nobody had
 # mutated. The lesson is per-extraction, not per-file.
-sed -i.bak 's/^## Two rules that are not advisory/## Two important rules/' "$brief_repo/CLAUDE.md"
+sed -i.bak 's/^## Three rules that are not advisory/## Three important rules/' "$brief_repo/CLAUDE.md"
 no_rules="$(brief_out '{"trigger":"compact"}')"
 expect "renaming the rules heading drops the rules" no \
   "$(contains "$no_rules" 'A human merges. Always.')"

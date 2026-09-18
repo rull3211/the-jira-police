@@ -118,8 +118,9 @@ jobs:
         run: pnpm test
 
       # The hook guards are not vitest, so `pnpm test` above does not touch
-      # them — and they are the only mechanical enforcement of the two rules
-      # that are not advisory. One of them once failed open on a branch name
+      # them — and they are the only mechanical enforcement of rules 1 and 2 of
+      # the three that are not advisory; rule 3 has none at all. One of them
+      # once failed open on a branch name
       # containing a quote while still looking installed, which is the whole
       # argument for running them somewhere nobody can forget.
       - name: Hook guards

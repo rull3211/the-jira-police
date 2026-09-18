@@ -406,6 +406,12 @@ const HISTORICAL: readonly HistoricalFigure[] = [
     why: "the write-verb audit's before-and-after, 107 to 186. It equals today's count by coincidence of timing; the sentence is about the change, and pinning it to the tree would make an incident rewrite itself",
   },
   {
+    file: ".claude/skills/dev-house-rules/INCIDENTS.md",
+    value: 2,
+    noun: "assertions",
+    why: "what the pre-worktree-branch suite loses when the second fail-open defect is reintroduced; it measures a suite that no longer exists, and the sentence exists to correct a claim that it measured zero",
+  },
+  {
     file: ".claude/skills/dev-house-rules/PROVING.md",
     value: 87,
     noun: "assertions",

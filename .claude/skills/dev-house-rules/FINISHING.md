@@ -35,7 +35,7 @@ oxfmt <changed docs> && pnpm check-types && pnpm lint && pnpm test && pnpm docs:
 ```
 
 If the change touched `.claude/hooks/`, add `pnpm test:hooks` — vitest does not cover those guards,
-and they are the only mechanical enforcement of the two rules that are not advisory. CI runs all of
+which are all the enforcement rules 1 and 2 have; rule 3 has none. CI runs all of
 it against the pushed ref, plus one check nobody runs by hand: the pull request body must carry a
 `Rules owed:` line, below. Do not soften a red check; a check that cannot fail the run reports
 rather than guards.
