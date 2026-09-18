@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2621 tests in 76
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2712 tests in 84
 > files**, no build step.
 >
 > **It loops, and it claims.** `src/index.ts:247` is a `Promise.all` over three loops — grooming,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30, §32 and §36, and this line names them rather than
+**The holes are §12, §15, §16, §18, §20, §21, §23, §25, §26, §27, §28, §29, §30, §32, §36 and §37, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -81,8 +81,10 @@ written down here. §30 was the daemon check and the rule it put in `STARTING.md
 inside the branch that built it, and §32 was the untagged thread reply that let the service argue
 with itself on PR #548 — same shape, opened and deleted inside its own branch. §36 was
 `branch-stack.sh` counting commit identity instead of commit content, opened and deleted inside the
-branch that built it — the story is `INCIDENTS.md`'s 2026-09-18 entry. The triage-selection entries
-are now all closed, so the next entry is §39.
+branch that built it — the story is `INCIDENTS.md`'s 2026-09-18 entry. §37 was the log viewer,
+shipped as `pnpm logs` and deleted inside the branch that built it; what it left unbuilt is §39,
+which is a new entry rather than a survival of the old one. The triage-selection entries are now all
+closed, so the next entry is §40.
 
 <!-- refs:on -->
 
@@ -778,68 +780,6 @@ while reading as finished is worse than none — the same reasoning that has pla
 before the push. It depends on the declined item being reported prominently enough that a reviewer
 acts on it, and that is a claim about human attention nothing here can test.
 
-### 37. Nothing reads the log back, so a filter is a `jq` invocation nobody writes
-
-**Branch:** `feat/daemon-log-tui`.
-
-**What is not built.** Any consumer of this service's own log. `logger.ts` writes JSON lines to
-stdout and stderr and that is the end of the path: no file, no rotation, no parser, no
-pretty-printer, no `LOG_FILE`. `README.md`'s four-step ramp says "read the log before going on" and
-prints raw JSON lines as the expected output, with no pipe beside them. `daemon-status.ts` is the
-only tooling that observes a running daemon and it reads `ps`, not a line of log.
-`architecture/triage.md` names the consequence in passing — `groomed/solve-cycle.md` exists because
-"judging needs something that outlives stdout" — which is a second artifact written to work around
-the first one being unreadable.
-
-**Why it is owed.** The operator's question is almost always a filter: _what did the solve half do_,
-or _show me only what changed something_. `q` (⏳/🔧) was added so the second question has an answer,
-and answering it still costs a hand-written `jq` selector against a stream that is scrolling. A
-terminal reader with the two filters built in — the status mark and which part of the service spoke
-— turns both into a keystroke.
-
-**Two commits, and the first is the one with the blast radius.**
-
-1. **`src` on every line.** `createLogger(source)` replaces the bare `logger` export, so a call site
-   must name what it is speaking as, and the type checker — not a reviewer — finds the ones that
-   did not. Every logging module in the tree is touched. Source names are the message namespaces
-   that already exist (`solve`, `watch`, `triage`, `poll`, `jira`, `session`, `service`, …), so the invariant is
-   `message` starts with `${src}.`, a test can check it across the tree, and **no message string
-   changes** — `README.md`'s samples, and every test asserting on a message, stay true. Grouping
-   the namespaces into a handful of buckets is the viewer's job, not the logger's: that keeps the
-   logger stating facts, and leaves the grouping free to move without touching every logging
-   module again.
-2. **`pnpm logs`.** Reads those lines from stdin and renders them, keys from `/dev/tty`. The
-   transport is an interface with stdin as its first implementation, because attaching to a daemon
-   already running — and eventually sending it a command — is a socket the daemon would have to
-   listen on, and that is a privilege with its own phasing, not a thing to smuggle in behind a
-   viewer. Reading a saved file is the same code path (`pnpm logs < run.ndjson`), which is what
-   makes the filter testable against output a real daemon produced.
-
-**What would make it the wrong idea, in the order I expect to find out:**
-
-- **The real complaint may be that stdout does not outlive the run, not that it cannot be
-  filtered.** A file sink plus `grep` is a tenth of this and would answer "what happened an hour
-  ago", which a live tail with a filter still cannot. If that is the actual pain, this builds the
-  wrong thing well. The replay path is the hedge and also the tell: if it gets all the use, the
-  file sink was the feature.
-- **A hand-rolled TUI at zero dependencies is terminal-handling code, and it fails on the
-  operator's terminal, not on mine.** Raw mode, the alternate screen and cursor visibility are
-  process-global state that an unclean exit leaves behind — a crash that skips the restore hands
-  back a terminal with no cursor and no echo. Restore has to be on `exit`, on the signals, and on
-  `uncaughtException`, and none of that is exercised by a green suite.
-- **Emoji are not one column wide and the terminals disagree about which.** The marks in use (⏳ 🔧)
-  are wide; `ℹ️` and `⚠️` are a base character plus a variation selector and render at either width
-  depending on the terminal. Any level glyph has to come from the wide set or the whole table
-  shears on the first warning.
-- **`src` widens every line of a documented format for one consumer.** A field every call site must
-  now supply, read by one command that did not exist last week, is a cost paid by everyone reading
-  raw output for a benefit only the viewer collects.
-- **A mechanical edit across every logging module is where a real change hides.** The diff is import
-  lines and a receiver rename, which is exactly the shape a reviewer skims.
-- **The viewer must survive lines that are not its own.** `watch/sweep.ts` writes `↳` report lines
-  through `deps.report` onto the same file descriptor, interleaved with the JSON. A parser that
-  drops what it cannot parse would silently eat them, and would eat a crash trace the same way.
-
 ### 38. `branch-guard.sh` resolves one branch, and it is not the one being written to
 
 **Branch:** none yet. Not this one — hook code with its own suite does not belong in a diff about
@@ -872,6 +812,45 @@ script emits, so the case that fails when this is unplugged has to construct a r
 which no existing hook test does.
 
 ---
+
+### 39. Nothing keeps the log after the run that wrote it, and nothing can attach to a daemon already running
+
+**Branch:** none yet.
+
+**What is not built.** A sink. `logger.ts` writes to stdout and stderr and nothing else: no file, no
+rotation, no `LOG_FILE`. `pnpm logs` reads the stream it is handed, so reading a run afterwards
+means having thought to capture it — `2>&1 | tee run.ndjson` — before it started. A daemon somebody
+started without that pipe cannot be observed at all beyond `daemon:status`, which reads `ps`.
+
+**Why it is owed, and why it was not done alongside the viewer.** These are one question asked
+twice: both are answered by the daemon holding a descriptor somebody else can open later — a file,
+or a socket. The socket is the larger of the two and the one with privilege in it, because a socket
+a viewer can read is a socket a viewer can eventually write, which is what `feed.ts`'s unused
+`send` slot is shaped for. That is a phase with its own blast radius and does not belong behind a
+read-only viewer.
+
+**And there is a live consequence, measured while writing the viewer's handover.** Because the log
+path is a pipe and nothing else, **the service's life is coupled to whoever is reading its stdout**:
+the next line written after the reader quits raises `EPIPE`, unhandled, and the process dies on an
+uncaught exception rather than on a signal — so a mid-solve daemon skips the `finally` that releases
+`agent:solving` and strands the claim. `README.md` works around it by telling the operator to
+redirect to a file, which is the sink this entry is about, built by hand each time. Two fixes are
+possible and they are not the same: a sink makes fd 1 a file, and an `EPIPE` handler makes losing
+the log survivable. The second is the smaller one and is what a daemon should do regardless — a
+service should not die because nobody is listening — and it has never been true here.
+
+**What would make it the wrong idea:**
+
+- **The file sink may be the whole feature, and the socket a thing nobody asks for.** The entry this
+  one replaces predicted the opposite — that live filtering was the need and replay the hedge — and
+  the way to find out is which of the two forms in `README.md` gets used. If it is the `tee` one,
+  build the sink and stop.
+- **A log file is an artifact with a lifetime**, and nothing here has ever had to rotate, expire or
+  bound one. The service writes JSON lines at a cycle's rate into a directory nobody sweeps; the
+  first unattended week is what would find that out, and `state/` is the only precedent.
+- **A control socket is a second way in.** Every privilege this service holds is reached through one
+  composition today. A socket that accepts a command is a second, and it would need its refusals
+  worked out before its conveniences, not after.
 
 ## Verification
 

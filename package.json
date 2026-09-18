@@ -15,6 +15,7 @@
     "watch:once": "node --env-file-if-exists=.env src/cli/watch-once.ts",
     "attach:stage": "node --env-file-if-exists=.env src/cli/attach-stage.ts",
     "daemon:status": "node src/cli/daemon-status.ts",
+    "logs": "node src/cli/logs.ts",
     "check-types": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",

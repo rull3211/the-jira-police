@@ -154,7 +154,7 @@ describe("the tree", () => {
   });
 
   it("declares no source that nothing emits", () => {
-    const used = new Set(scans.flatMap(({ scan }) => [...scan.bindings.values()]));
+    const used = new Set(scans.flatMap(({ scan }) => Array.from(scan.bindings.values())));
 
     expect([...LOG_SOURCES].filter((source) => !used.has(source))).toEqual([]);
   });

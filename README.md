@@ -319,7 +319,8 @@ write access from a shell history entry.
 ### Work up to it in four steps
 
 Each step turns on one more real thing. Run each for a bounded `--for` and read the log before
-going on.
+going on — redirect it to a file and read it with [`pnpm logs`](#reading-the-log), which is also
+what lets you read the same run twice.
 
 **1 — the loop itself. Free, no Atlassian, no model.**
 
@@ -480,6 +481,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm dev`                                             | The daemon with `--watch`; same flags                                                                     | as above                    |
 | `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind    | a report + `tmpdir()`       |
 | `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                               | no                          |
+| `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira     | no                          |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                  | no                          |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                  | no                          |
 | `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                            | no                          |
@@ -506,6 +508,65 @@ until you remove it by hand. Same applies to editing a file under `pnpm dev`, wh
 `pnpm daemon:status` says whether one is running.
 
 The typecheck script is **`check-types`**, not `typecheck`.
+
+### Reading the log
+
+Every line the service writes is a JSON object, which is exact and unreadable at the rate a cycle
+produces it. `pnpm logs` is the reader. Pipe a run into it, or replay a file:
+
+```bash
+pnpm poll:once --dry-run 2>&1 | tee run.ndjson   # capture something first, free
+pnpm logs < run.ndjson                           # then read it, as many times as you like
+```
+
+**Redirect stderr, or you will never see a warning.** `warn` and `error` go to stderr and everything
+else to stdout, so a bare `|` hands the viewer everything except the two levels you were probably
+looking for, and silently drops 🟠 and 🔴. Nothing in the viewer can detect this — the missing lines
+were never written to the pipe.
+
+**Do not pipe `pnpm start` into it. Write to a file and follow the file:**
+
+```bash
+pnpm start --interval 30s --for 10m > run.ndjson 2>&1 &   # the daemon owns its own fd 1
+tail -f run.ndjson | pnpm logs                            # quit this as often as you like
+```
+
+Quitting the viewer closes the pipe, and **the next log line the writer attempts then kills it** —
+Node raises `EPIPE` as an unhandled error, so the process dies on an uncaught exception rather than
+on a signal. For a daemon that is mid-solve, that skips the `finally` releasing `agent:solving`, and
+nothing reclaims that label on its own: the same stranded claim as pressing Ctrl-C twice, reached by
+pressing `q` in what looks like a read-only window. The `> run.ndjson` form is immune because the
+daemon's fd 1 is a file — the only thing that dies with the viewer is `tail`. A direct pipe is fine
+for the commands that cannot write, which is `poll:once --dry-run` and a `mock-triage` smoke run.
+
+It reads lines from **stdin** and keys from `/dev/tty`, so the pipe and the keyboard are two
+different descriptors and both work at once. It posts nothing, reads no settings and holds no
+credential — the safe thing to try it on is a `--dry-run` you have already captured.
+
+Three filters, all off until you press something, all ANDed:
+
+| Keys     | Filters by                                                                |
+| -------- | ------------------------------------------------------------------------- |
+| `1`–`4`  | Level: 🔍 debug, 🔵 info, 🟠 warn, 🔴 error                               |
+| `5` `6`  | The `q` mark: ⏳ nothing happened, 🔧 something did                       |
+| a letter | One source — `poll`, `solve`, `jira`, … The key is shown beside each name |
+
+`f` follows the tail, `j`/`k` and the arrows scroll, `g`/`G` jump to either end, `c` clears every
+filter, `q` quits. A filter that is on is drawn in brackets and one that is off in spaces, so the
+state survives a terminal with no colour; the two forms are the same width, so nothing on the row
+moves when you toggle one.
+
+**What would falsify it:** the header counts shown against arrived (`12/480 lines`). If narrowing
+to one source drops the total rather than the shown count, the filter is eating lines instead of
+hiding them. A line the parser cannot read — the `↳` report lines the sendback watch writes, or a
+stack trace — is shown verbatim and passes every filter; if one of those disappears when you press
+a key, that is the bug worth reporting. Quitting with `q` must give the cursor back: if the shell
+afterwards has no cursor or no echo, the restore path did not run, and `reset` fixes the terminal.
+
+**What it has never done:** attach to a daemon that is already running. There is no socket and the
+daemon listens on nothing — `pnpm logs` sees only what is piped into it, so a daemon started without
+the pipe cannot be watched after the fact. `feed.ts` is an interface with a `send` slot for that
+later, and nothing implements it.
 
 ### The escalation ladder
 

@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-86 production modules, 76 test files. Grouped by what they belong to rather than alphabetically,
+95 production modules, 84 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -154,6 +154,20 @@ inheritance.
 | `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                |
 | `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                         |
 
+**The log viewer — the only consumer of this service's own log**
+
+| Path                 | Role                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/logs.ts`    | `pnpm logs`. The impure half: `/dev/tty`, raw mode, the alternate screen, and restoring all three on every exit path                                    |
+| `src/logs/feed.ts`   | Where lines come from, behind an interface. `createStreamFeed` is the stdin implementation; `send` is the slot a daemon socket would fill               |
+| `src/logs/line.ts`   | One line to an entry. Anything it cannot classify becomes a `raw` entry rather than being dropped — `↳` report lines and stack traces share this stream |
+| `src/logs/filter.ts` | The three axes and how they AND. An empty axis means "no opinion", and a `raw` entry passes every filter                                                |
+| `src/logs/glyphs.ts` | The glyphs, and the check that each is a single two-column code point. The reason a warning cannot shear the table                                      |
+| `src/logs/keys.ts`   | Which key toggles which source, and the pool that cannot collide with a command key                                                                     |
+| `src/logs/state.ts`  | The whole viewer as one reducer over `line` / `key` / `resize` / `end`. Everything decidable is here, which is why it is all testable                   |
+| `src/logs/input.ts`  | Bytes from a terminal to key names — CSI sequences, the `~` forms, a lone escape                                                                        |
+| `src/logs/render.ts` | A state to the exact rows of a window. Width-stable chips, so toggling a filter never moves the row below it                                            |
+
 **Output**
 
 | Path                 | Role                                             |
@@ -176,6 +190,13 @@ still the number of entry points that could diverge from one another in producti
 `attach-stage-report.ts` is a library and not an entry point either, split off for the reason
 `watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
 check the report or the exit code would run the command instead.
+
+**`logs.ts` is the fourth kind, and it is the one the sentence above predicted.** It is a `src/cli/`
+file with a `pnpm` command that is not an entry point, is not `docs-check.ts`'s tooling, and is not
+`attach:stage`: it reads no settings, holds no credential, opens no network connection, and its
+input is a pipe rather than a queue. It is listed with `src/logs/*` above rather than with the
+commands, because what it belongs to is the viewer. Six is still the number of entry points that
+could diverge from one another in production.
 
 **It did exactly that, twice, and the second time nobody noticed for four modules.** The sentence
 here used to say `docs-check.ts` and `section-refs.ts` were "the seventh and eighth files in that
