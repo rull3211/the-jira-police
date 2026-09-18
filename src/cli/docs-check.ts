@@ -625,13 +625,13 @@ for (const document of NUMBERED_DOCUMENTS) {
  * means a new one arrived, and both are worth stopping for. One number for the whole tree, so it
  * cannot quietly grow to fit, and it names no file, so nothing is permanently blessed.
  */
-const KNOWN_DANGLING = 41;
+const KNOWN_DANGLING = 40;
 
 /**
  * References that resolve in more than one document with no name saying which, being fixed under
- * `PLAN.md` §19. Compared exactly, the same as `KNOWN_DANGLING` and for the same reason.
+ * `PLAN.md` §14. Compared exactly, the same as `KNOWN_DANGLING` and for the same reason.
  */
-const KNOWN_AMBIGUOUS = 119;
+const KNOWN_AMBIGUOUS = 118;
 
 const refFiles = [...files, ...typescriptFiles(ROOT)];
 const refBodies = new Map(
