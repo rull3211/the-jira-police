@@ -785,15 +785,15 @@ describe("terminalLabelAfter", () => {
    * labelling too, and a wrongly-labelled ticket leaves the queue permanently stuck.
    */
   const EXPECTED: Readonly<Record<string, "failed" | null>> = {
-    "no-worktree": null,
+    "no-worktree": "failed",
     bailed: "failed",
     "abandoned:judgement": "failed",
-    "abandoned:environment": null,
-    refused: null,
+    "abandoned:environment": "failed",
+    refused: "failed",
     escaped: null,
     failed: "failed",
-    crashed: null,
-    "unusable-base": null,
+    crashed: "failed",
+    "unusable-base": "failed",
     verified: null,
   };
 
@@ -810,9 +810,10 @@ describe("terminalLabelAfter", () => {
     });
   }
 
-  it("does not label a machine failure, so a re-run stays possible", () => {
-    // A crash says nothing about the ticket, and labelling it would turn a transient failure
-    // into one only a human could clear.
+  it("labels a machine crash too, so a ticket that always times out does not loop silently forever", () => {
+    // A crash says nothing about this attempt's ticket specifically, but leaving it unlabelled
+    // bought nothing but a silent reclaim every tick the in-memory ledger forgot on restart — the
+    // same shape SSX-3954 hit for `unusable-base`, below. A human reads the reason and clears it.
     expect(
       terminalLabelAfter({
         kind: "crashed",
@@ -820,7 +821,7 @@ describe("terminalLabelAfter", () => {
         reason: "recon pass of SSX-3831 exceeded 1800000ms",
         worktree,
       }),
-    ).toBeNull();
+    ).toBe("failed");
   });
 
   it("labels a bail, so the queue stops paying to be told no twice", () => {
@@ -836,7 +837,7 @@ describe("terminalLabelAfter", () => {
     ).toBe("failed");
   });
 
-  it("labels a deterministic build failure, so the daemon stops reclaiming it every restart (SSX-3954)", () => {
+  it("labels a deterministic build failure, so the daemon stops reclaiming it every restart", () => {
     // verify.ts only reaches `kind: "failed"` after the build/tests actually ran and did not
     // pass — a fact about the change, not the harness — so releasing it back to `agent:solvable`
     // bought nothing but a reclaim on every tick the in-memory attempt ledger forgot on restart.
@@ -846,6 +847,22 @@ describe("terminalLabelAfter", () => {
         reason: "2 tests failed",
         verification: {} as never,
         devLens: lens,
+        worktree,
+      }),
+    ).toBe("failed");
+  });
+
+  it("labels an unusable base too, so a broken repository toolchain does not loop silently forever (SSX-3954)", () => {
+    // SSX-3954: the repository's build did not pass in a fresh worktree before any change —
+    // reproduced as this harness's Maven/JDK toolchain against the repository's pinned Lombok
+    // version, a fact about the harness, not about the ticket. Recon and every later pass are
+    // skipped (`describeSolveOutcome`'s "Nothing was attempted"), and without a terminal label
+    // the ticket hit the same wall every tick the in-memory ledger had forgotten, across restarts.
+    expect(
+      terminalLabelAfter({
+        kind: "unusable-base",
+        reason: "the repository's own build does not pass in a fresh worktree",
+        verification: {} as never,
         worktree,
       }),
     ).toBe("failed");
@@ -915,13 +932,14 @@ describe("reportsToTicket", () => {
   });
 
   it("disagrees with terminalLabelAfter, because they ask different questions", () => {
-    // An environment abandon must be reported but NOT labelled: reporting tells the team the run
-    // happened, labelling would take a retryable ticket out of the queue for good.
+    // An escaped run must be reported but NOT labelled: reporting tells the team the run
+    // happened; labelling would blame the ticket for an operator's own concurrent edits to their
+    // checkout, which is what `escaped` actually means. It is the one outcome that still diverges
+    // now that every other release-with-no-verdict kind also labels `agent:failed`.
     const blocked: SolveOutcome = {
-      kind: "abandoned",
-      cause: "environment",
-      reason: "the write pass was denied its Write tool by a local policy hook",
-      devLens: lens,
+      kind: "escaped",
+      paths: ["/git/commerce-rest-api"],
+      would: "verified",
       worktree,
     };
     expect(reportsToTicket(blocked)).toBe(true);

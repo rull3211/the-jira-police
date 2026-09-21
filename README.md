@@ -80,13 +80,12 @@ flowchart TD
     QUEUE --> CLAIM
     CLAIM --> WT
     WT --> BASE
-    BASE -->|red| UNUSABLE([unusable-base · claim released])
+    BASE -->|red| FAILED([agent:failed · reason posted])
     BASE -->|green| RECON
-    RECON -->|declines| FAILED([agent:failed · reason posted])
+    RECON -->|declines| FAILED
     RECON -->|proceeds| WRITE
     WRITE --> CHECK
-    CHECK -->|refused| RELEASED([claim released · reason posted])
-    CHECK -->|failed| FAILED
+    CHECK -->|"refused or failed"| FAILED
     CHECK -->|passed| PUBLISH
     PUBLISH --> SYNC
     SYNC -->|"clean, or already current"| INBOX
