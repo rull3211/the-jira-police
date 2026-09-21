@@ -1313,6 +1313,21 @@ describe("runRepairRound", () => {
     const outcome = await runRepair(h);
 
     expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") {
+      throw new Error(`expected failed, got ${outcome.kind}`);
+    }
+    // Without this the outcome cannot say a round ran, so a pass that never helps and one that never runs read alike.
+    expect(outcome.repair).toEqual(parseFix(repair(), request.issueKey));
+  });
+
+  it("crashes rather than proceeding when the round reports no change and no abandonment", async () => {
+    // The contradiction is unrepresentable by construction; this pins that, so nobody adds a dead `changed: false` branch downstream.
+    const { h } = harness({ repair: repair({ changed: false, filesTouched: [] }) });
+
+    const outcome = await runRepair(h);
+
+    expect(outcome).toMatchObject({ kind: "crashed", pass: "repair" });
+    expect(h.calls.some((argv) => argv.includes("--numstat"))).toBe(false);
   });
 
   it("returns verified, keeping the original fix and simplify reports and carrying the repair", async () => {

@@ -40,7 +40,7 @@ import {
   SIMPLIFY_SCHEMA_JSON,
 } from "./schema.ts";
 
-/** Withheld from both passes; denying `Bash` is what makes "the harness runs the verification" structural rather than a convention. */
+/** Withheld from every pass; denying `Bash` is what makes "the harness runs the verification" structural rather than a convention. */
 const SOLVE_DENIED_COMMON: readonly string[] = [
   "Bash",
   "NotebookEdit",

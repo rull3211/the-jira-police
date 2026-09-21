@@ -241,6 +241,12 @@ export type SolveOutcome =
       readonly kind: "failed";
       readonly reason: string;
       readonly verification: VerificationResult;
+      /**
+       * What a repair round attempted when one ran and did not rescue the run, including a round
+       * that declined to change anything. Absent means no repair round ran: without the
+       * distinction, a pass that never helps and a pass that never runs produce identical outcomes.
+       */
+      readonly repair?: FixReport;
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
     }
@@ -656,7 +662,13 @@ function renderVerificationFailure(
  * Shaped on `runReviewRound`: same worktree, no simplify pass (a repair is a correction, not a
  * second draft), re-running the diff gate and `verify` afterward exactly as the pipeline's first
  * pass through them did. One attempt — bounding how many of these a ticket gets is the caller's
- * job, not this function's, the same split `MAX_PR_ROUNDS_TOTAL` keeps from `resolveReview`.
+ * job, not this function's, the same split `resolveReview` keeps from `runReviewRound`.
+ *
+ * **Call it only from inside `runPipeline`.** `runReviewRound` and `runConflictRound` are private
+ * behind a `resolve*` that stages a skill root and snapshots the watched checkouts; this is
+ * exported only so its tests can reach it. A write pass run outside `solveTicket`'s `try` has no
+ * write-escape guard, and `diff-gate.ts` reads the worktree alone — so a write into somebody
+ * else's checkout would go unseen by both.
  */
 export async function runRepairRound(
   deps: SolveDependencies,
@@ -697,6 +709,7 @@ export async function runRepairRound(
     return { kind: "abandoned", reason: repair.abandoned, cause, devLens, worktree };
   }
 
+  // No `changed: false` branch: `parseFix` refuses that without an `abandoned`, so past the check above it is unreachable.
   const finalDiff = await readNumstat(
     commands,
     worktree.path,
@@ -730,7 +743,14 @@ export async function runRepairRound(
     };
   }
   if (reverified.outcome === "failed") {
-    return { kind: "failed", reason: reverified.reason, verification: reverified, devLens, worktree };
+    return {
+      kind: "failed",
+      reason: reverified.reason,
+      verification: reverified,
+      repair,
+      devLens,
+      worktree,
+    };
   }
 
   const failFirst =
