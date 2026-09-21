@@ -242,6 +242,13 @@ export type SolveOutcome =
       readonly reason: string;
       readonly verification: VerificationResult;
       /**
+       * The fix pass's own report. Present because verification only runs after it, and carried
+       * rather than dropped so `residualRisk` survives: the agent's account of what else its change
+       * might have broken is the most useful thing a human reading a red run can be given, and it
+       * was being computed and discarded.
+       */
+      readonly fix: FixReport;
+      /**
        * What a repair round attempted when one ran and did not rescue the run, including a round
        * that declined to change anything. Absent means no repair round ran: without the
        * distinction, a pass that never helps and a pass that never runs produce identical outcomes.
@@ -747,6 +754,7 @@ export async function runRepairRound(
       kind: "failed",
       reason: reverified.reason,
       verification: reverified,
+      fix,
       repair,
       devLens,
       worktree,
@@ -949,7 +957,7 @@ async function runPipeline(
     };
   }
   if (verification.outcome === "failed") {
-    return { kind: "failed", reason: verification.reason, verification, devLens, worktree };
+    return { kind: "failed", reason: verification.reason, verification, fix, devLens, worktree };
   }
 
   // ---- fail-first ----------------------------------------------------------

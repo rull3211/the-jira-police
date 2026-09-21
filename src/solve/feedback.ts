@@ -146,9 +146,14 @@ function headline(outcome: SolveOutcome): string {
         )}. If you were editing those yourself while this ran, that is the likely cause and the run can simply be repeated.`;
     }
     case "failed": {
-      return `An agent made a change and this repository's own checks rejected it: ${safeText(
+      const rejected = `An agent made a change and this repository's own checks rejected it: ${safeText(
         outcome.reason,
       )}`;
+      // Written before verification ran, so it is the pass's prediction rather than a diagnosis — and it is frequently the failure itself, named by the only party who read the change.
+      const risk = outcome.fix.residualRisk.trim();
+      return risk === ""
+        ? rejected
+        : `${rejected}\n\nThe agent flagged this about its own change, before the checks ran: ${safeText(risk)}`;
     }
     case "crashed": {
       // Phrased to be unmistakably about the harness — misread as "the agent could not do it", it

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
+import type { FixReport } from "../solve/runner.ts";
 import type { ReviewCycleOutcome } from "../solve/review-cycle.ts";
 import {
   chainDecision,
@@ -25,6 +26,20 @@ const worktree = {
 };
 
 const lens = { accurate: true, correction: "" };
+
+/** Carried by `failed` as well as `verified`, so `residualRisk` reaches the reader of a red run. */
+const FIX_REPORT: FixReport = {
+  changed: true,
+  filesTouched: ["src/app/head.tsx"],
+  summary: "point the favicon at the nonprod asset",
+  commitSubject: "fix(advisor): point the favicon at the nonprod asset",
+  commitBody: "The head tag named the production file in every environment.",
+  testAdded: true,
+  testOmittedReason: "",
+  residualRisk: "",
+  abandoned: "",
+  abandonedCause: "none",
+};
 
 /** The one outcome that carries every pass's report, so it is built once. */
 const verified = {
@@ -99,6 +114,7 @@ const OUTCOMES: readonly SolveOutcome[] = [
   {
     kind: "failed",
     reason: "2 tests failed",
+    fix: FIX_REPORT,
     verification: {} as never,
     devLens: lens,
     worktree,
@@ -845,6 +861,7 @@ describe("terminalLabelAfter", () => {
       terminalLabelAfter({
         kind: "failed",
         reason: "2 tests failed",
+        fix: FIX_REPORT,
         verification: {} as never,
         devLens: lens,
         worktree,

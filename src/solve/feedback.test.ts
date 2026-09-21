@@ -15,9 +15,24 @@ import {
   safeText,
 } from "./feedback.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
+import type { FixReport } from "./runner.ts";
 import type { Worktree } from "./worktree.ts";
 
 const NOW = new Date("2026-09-04T10:00:00.000Z");
+
+/** A fix report for the outcomes that carry one; `residualRisk` is the field these tests vary. */
+const fixReport = (residualRisk = ""): FixReport => ({
+  changed: true,
+  filesTouched: ["src/app/head.tsx"],
+  summary: "point the favicon at the nonprod asset",
+  commitSubject: "fix(advisor): point the favicon at the nonprod asset",
+  commitBody: "The head tag named the production file in every environment.",
+  testAdded: true,
+  testOmittedReason: "",
+  residualRisk,
+  abandoned: "",
+  abandonedCause: "none",
+});
 
 const worktree: Worktree = {
   issueKey: "SSX-3822",
@@ -132,12 +147,43 @@ describe("renderSolveComment", () => {
     const failed = renderSolveComment("SSX-1", {
       kind: "failed",
       reason: "2 tests failed",
+      fix: fixReport(),
       verification: { outcome: "failed", reason: "2 tests failed" } as never,
       devLens: { accurate: true, correction: "" },
       worktree,
     });
 
     expect(failed).toContain("rejected it");
+  });
+
+  it("surfaces what the agent flagged about its own change, which is often the failure itself", () => {
+    // The pass is the only party that read the change; dropping this leaves the reader one Maven line.
+    const failed = renderSolveComment("SSX-1", {
+      kind: "failed",
+      reason: "2 tests failed",
+      fix: fixReport("CustomerCmHelperTest stubs a call this change stops making"),
+      verification: { outcome: "failed", reason: "2 tests failed" } as never,
+      devLens: { accurate: true, correction: "" },
+      worktree,
+    });
+
+    expect(failed).toContain("CustomerCmHelperTest stubs a call this change stops making");
+    expect(failed).toContain("before the checks ran");
+  });
+
+  it("adds nothing when the agent flagged no risk", () => {
+    // An empty field must not render an empty heading — the reader would read it as "considered and found nothing".
+    const failed = renderSolveComment("SSX-1", {
+      kind: "failed",
+      reason: "2 tests failed",
+      fix: fixReport("   "),
+      verification: { outcome: "failed", reason: "2 tests failed" } as never,
+      devLens: { accurate: true, correction: "" },
+      worktree,
+    });
+
+    expect(failed).not.toContain("flagged");
+    expect(failed.trimEnd()).toBe(failed);
   });
 
   it("does not claim the build fails when the build could not be run", () => {
@@ -443,6 +489,7 @@ describe("renderSolveComment, on a bail", () => {
     const body = renderSolveComment("SSX-3822", {
       kind: "failed",
       reason: "2 tests failed",
+      fix: fixReport(),
       verification: {} as never,
       devLens: { accurate: true, correction: "" },
       worktree,
