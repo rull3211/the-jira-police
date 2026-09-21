@@ -250,51 +250,25 @@ that is correct but visible to users, a dependent you could not check.
 A fresh session, given the diff the fix pass produced. You did not write it. That is the point:
 the author of a piece of code is the last person to notice it is convoluted.
 
-One question only: **can this same change be expressed more plainly, for a human?**
+**Invoke the `/simplify` skill to do the actual work.** It is Claude Code's own built-in command
+for exactly this judgement — reuse, clarity, redundant code, over-nesting — and it already knows to
+leave behavior alone; do not re-derive its judgement by hand. `Skill` is available in this pass and
+nowhere else in this file for that one call. What follows is this pipeline's own bound on top of
+it, which `/simplify` has no way to know:
 
-Read "simpler" as _clearer to the next person_, not _shorter_. Those come apart constantly, and
-when they do, clarity wins. Fewer lines is not the goal and is frequently the enemy of it.
-
-1. Read the diff as a reviewer would.
-2. **Match the repository.** Read `CLAUDE.md`, `AGENTS.md` or the equivalent if there is one, and
-   a neighbouring file if there is not. House style beats general style every time — code that is
-   objectively tidy and unlike everything around it is harder to read, not easier.
-3. Look for the ordinary things: an intermediate variable used once _and named worse than the
-   expression it holds_, a guard that cannot fire, an abstraction with one caller, a comment
-   restating the line below it, a nested conditional that flattens, an option nobody passes.
-4. **Apply §2's comment rule to the diff, including to comments the fix pass wrote.** Its default
-   is none, and this pass is the last chance to hold the diff to it. A comment survives only if
-   you can name the reader and what they would get wrong without it.
-5. **Simplify in the direction of explicit.** Specifically:
-   - no nested ternaries — an `if`/`else` chain or a `switch` reads better every time
-   - no dense one-liners assembled from three operations
-   - no cleverness that needs a moment's thought to unpack
-   - a well-named intermediate variable is usually _more_ readable than inlining it, so inline
-     only when the name was adding nothing
-6. Change only how the code is expressed. **If a change would alter what it does, it is out of
-   scope for this pass however much better it looks.**
-7. You may only touch files the fix pass already changed. The harness checks this against the fix
-   report and discards the run if you went outside that set — widening the diff is the opposite of
-   simplifying it.
-
-### Over-simplification is a failure mode, not a near miss
-
-Do not:
-
-- prioritise "fewer lines" over readability
-- remove an abstraction that was genuinely organising the code
-- combine concerns into one function because two felt like a lot
-- delete a comment carrying a _why_ that passes §2's test — a workaround for a named bug, an
-  ordering that looks arbitrary and is not. Comments restating _what_ go, and so do ones whose
-  reader you cannot name; that is not over-simplification, it is the rule
-- make the code harder to debug, step through, or extend
-
-The test to apply to every edit: **would a reviewer reading this cold understand it faster than
-before?** If the honest answer is "it's shorter", revert it.
-
-There is no commit message here. The change is still one change and gets one message, the fix
-pass's. That is also your bound: if simplifying would make that subject line wrong, you have
-changed behaviour and gone too far.
+1. **You may only touch files the fix pass already changed.** `filesTouched` below is checked
+   against the fix report and the run is discarded if you went outside that set — widening the
+   diff is the opposite of simplifying it, so if `/simplify` reaches further than that, undo the
+   part that did before you report.
+2. **If a change would alter what the code does, it is out of scope for this pass however much
+   better it looks.** `/simplify` is documented to leave behavior alone; this is the check on that
+   claim, not a duplicate of it.
+3. **Apply §2's comment rule to the diff, including to comments the fix pass wrote.** Its default
+   is none, and this pass is the last chance to hold the diff to it — a rule specific to this
+   repository that `/simplify` was not written knowing.
+4. There is no commit message here. The change is still one change and gets one message, the fix
+   pass's. That is also a bound: if simplifying would make that subject line wrong, behavior
+   changed and this pass went too far, regardless of what `/simplify` reports.
 
 ### Simplify output
 

@@ -39,8 +39,10 @@ saying "do not edit" would be a description of intent, not a control.
    else. Emits a structured summary and a commit subject.
 3. **`--simplify`** — a cold read of the diff, bounded to the files the fix pass touched. Given
    the diff and **not** the ticket, deliberately: showing it the requirement would invite it to
-   reconsider the change instead of the way the change is written. Usually changes nothing, and
-   that is a good outcome. Simpler means clearer, not shorter.
+   reconsider the change instead of the way the change is written. Delegates the actual judgement
+   to Claude Code's built-in `/simplify`; see `SOLVE_INSTRUCTIONS.md` §2a for the bound this
+   pipeline puts on top of it. Usually changes nothing, and that is a good outcome. Simpler means
+   clearer, not shorter.
 4. **`--review`** — one round of resolving reviewer feedback. May answer without touching code;
    a review that raised only questions is legitimately resolved by answering them.
 5. **`--merge`** — resolve the conflicts stopping this branch taking its base branch. Given the

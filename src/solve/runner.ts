@@ -3,8 +3,10 @@
  *
  * Only recon is read-only: the decision "should an agent touch this" is made
  * by something that cannot touch it, so a prompt-injection attempt needs to
- * survive an extra hop. The other three share a tool set and differ only in
- * what they are shown and must return.
+ * survive an extra hop. Fix, review and merge share a tool set and differ
+ * only in what they are shown and must return; simplify shares it too, plus
+ * `Skill`, the one capability that lets it invoke Claude Code's built-in
+ * `/simplify` mid-session rather than re-deriving its judgement by hand.
  *
  * `--allowedTools` restricts nothing — it is an auto-approve list, checked by
  * probe. Only `--disallowedTools` withholds, by removing the tool from the
@@ -71,6 +73,20 @@ export const FIX_DENIED_TOOLS: readonly string[] = [...SOLVE_DENIED_COMMON];
 /** Pre-approved so a headless run does not stall on a permission prompt. */
 export const RECON_ALLOWED_TOOLS: readonly string[] = ["Read", "Grep", "Glob"];
 export const FIX_ALLOWED_TOOLS: readonly string[] = ["Read", "Grep", "Glob", "Write", "Edit"];
+
+/**
+ * Simplify only: `Skill` lets the model invoke Claude Code's built-in `/simplify` mid-session —
+ * a structured tool call, not text the model outputs, so listing `/simplify` in the prompt would
+ * not have reached it. Not added to `FIX_ALLOWED_TOOLS`, which fix, review and merge also use:
+ * those three have no reason to invoke another skill mid-session, and granting the tool everywhere
+ * it is not needed would widen what a prompt-injected ticket could reach for no benefit.
+ *
+ * `--allowedTools` grants the tool class, not a specific skill name: nothing here stops the model
+ * invoking a different skill than `/simplify` through it, if one happens to be installed and a
+ * ticket talked it into trying. The prompt names `/simplify` specifically; the diff gate and
+ * `verify.ts` are what still bound the result regardless of which skill actually ran.
+ */
+export const SIMPLIFY_ALLOWED_TOOLS: readonly string[] = [...FIX_ALLOWED_TOOLS, "Skill"];
 
 /**
  * The passes, in the order a ticket meets them, as separate sessions: a session that already answered one question is a worse judge of the next.
@@ -262,7 +278,10 @@ const SCHEMA_FOR: Record<Pass, string> = {
 /** The command line for one pass. */
 export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
   const writes = WRITE_PASSES.has(pass);
-  const allowed = writes ? FIX_ALLOWED_TOOLS : RECON_ALLOWED_TOOLS;
+  // `Record<Pass, …>` would be one branch too many here: recon and the three plain write passes
+  // still share a list, and only simplify's differs.
+  const allowed =
+    pass === "simplify" ? SIMPLIFY_ALLOWED_TOOLS : writes ? FIX_ALLOWED_TOOLS : RECON_ALLOWED_TOOLS;
   const denied = writes ? FIX_DENIED_TOOLS : RECON_DENIED_TOOLS;
   // A `Record<Pass, …>` rather than a ternary chain: adding a pass fails to compile instead of silently inheriting the wrong schema.
   const schema = SCHEMA_FOR[pass];
@@ -643,26 +662,54 @@ export interface SimplifyReport {
   readonly declined: string;
 }
 
-/** Validates a simplify report and bounds it to what the fix pass touched — reaching further would be a second, unreviewed change riding along inside the diff. Checked again by the diff gate against the real diff, since this trusts only the model's own account. */
+/**
+ * Resolves a `changed`/`declined` contradiction by trusting whichever half carries real content,
+ * rather than the harness guessing which the model meant: `filesTouched`/`changes` non-empty reads
+ * as a change regardless of what `declined` also said, and empty reads as a decline, synthesising a
+ * reason if the model gave none. A coherent report passes through untouched.
+ */
+function normaliseSimplifyReport(report: SimplifyReport): SimplifyReport {
+  const declinedGiven = report.declined.trim() !== "";
+  if (report.changed !== declinedGiven) {
+    return report;
+  }
+  if (report.filesTouched.length > 0 || report.changes.length > 0) {
+    return { ...report, changed: true, declined: "" };
+  }
+  return {
+    changed: false,
+    filesTouched: [],
+    changes: [],
+    declined: declinedGiven ? report.declined : "simplify pass gave no usable report",
+  };
+}
+
+/**
+ * Validates a simplify report and bounds it to what the fix pass touched — reaching further would
+ * be a second, unreviewed change riding along inside the diff. Checked again by the diff gate
+ * against the real diff, since this trusts only the model's own account.
+ *
+ * Unlike `parseRecon`, `parseFix` and `parseReview` — which throw on the same
+ * `changed`/`declined` contradiction because a real decision rests on the answer
+ * (architecture/solve.md, "the parsers carry the rules the schema cannot express") — a
+ * contradictory simplify report is normalised rather than thrown on: nothing downstream branches
+ * on `changed` or `declined` (`orchestrator.ts` only logs it), so refusing here would discard an
+ * otherwise-complete, possibly-successful run to protect a fact nobody consults. SSX-3944 crashed
+ * on exactly this contradiction with a clean fix already sitting in the worktree.
+ */
 export function parseSimplify(
   value: unknown,
   issueKey: string,
   fixFiles: readonly string[],
 ): SimplifyReport {
   const record = asRecord(value, `simplify report for ${issueKey}`);
-  const report: SimplifyReport = {
+  const report = normaliseSimplifyReport({
     changed: bool(record, "changed"),
     filesTouched: strings(record, "filesTouched"),
     changes: strings(record, "changes"),
     declined: str(record, "declined"),
-  };
+  });
 
-  const declined = report.declined.trim() !== "";
-  if (report.changed === declined) {
-    throw new SolveParseError(
-      `${issueKey}: simplify pass must either report a change or say why it declined, and did ${report.changed ? "both" : "neither"}`,
-    );
-  }
   if (!report.changed) {
     return report;
   }

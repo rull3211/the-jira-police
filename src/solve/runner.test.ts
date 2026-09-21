@@ -7,6 +7,7 @@ import {
   PASSES,
   RECON_ALLOWED_TOOLS,
   RECON_DENIED_TOOLS,
+  SIMPLIFY_ALLOWED_TOOLS,
   type SolveRunOptions,
   SolveParseError,
   composeCommitMessage,
@@ -104,8 +105,16 @@ describe("the solve denylists", () => {
     for (const [allowed, denied] of [
       [RECON_ALLOWED_TOOLS, RECON_DENIED_TOOLS],
       [FIX_ALLOWED_TOOLS, FIX_DENIED_TOOLS],
+      [SIMPLIFY_ALLOWED_TOOLS, FIX_DENIED_TOOLS],
     ] as const) {
       expect(allowed.filter((tool) => denied.includes(tool))).toEqual([]);
+    }
+  });
+
+  it("grants Skill to simplify alone, so it can invoke /simplify mid-session", () => {
+    expect(SIMPLIFY_ALLOWED_TOOLS).toEqual([...FIX_ALLOWED_TOOLS, "Skill"]);
+    for (const tools of [RECON_ALLOWED_TOOLS, FIX_ALLOWED_TOOLS]) {
+      expect(tools).not.toContain("Skill");
     }
   });
 
@@ -131,6 +140,15 @@ describe("buildSolveArgs", () => {
   it("denies writing in recon and permits it in fix", () => {
     expect(flag(buildSolveArgs("recon", options), "--disallowedTools")).toContain("Write");
     expect(flag(buildSolveArgs("fix", options), "--disallowedTools")).not.toContain("Write");
+  });
+
+  it("gives simplify Skill on top of the ordinary write toolset, and nobody else", () => {
+    expect(flag(buildSolveArgs("simplify", options), "--allowedTools")).toBe(
+      "Read,Grep,Glob,Write,Edit,Skill",
+    );
+    for (const pass of ["recon", "fix", "review", "merge"] as const) {
+      expect(flag(buildSolveArgs(pass, options), "--allowedTools")).not.toContain("Skill");
+    }
   });
 
   it("adds the vault only when there is one", () => {
@@ -790,16 +808,49 @@ describe("parseSimplify", () => {
     expect(report.changed).toBe(false);
   });
 
-  it("rejects a report that both changed something and declined", () => {
-    expect(() =>
-      parseSimplify(simplify({ declined: "already minimal" }), "SSX-3822", FIX_FILES),
-    ).toThrow(/did both/u);
+  it("trusts the change over a stray declined reason, rather than crashing the run (SSX-3944)", () => {
+    // Unlike parseRecon/parseFix/parseReview, nothing downstream branches on this report — the
+    // real content (files, changes) is kept and the contradiction is resolved, not thrown on.
+    const report = parseSimplify(simplify({ declined: "already minimal" }), "SSX-3822", FIX_FILES);
+
+    expect(report).toEqual({
+      changed: true,
+      filesTouched: ["src/app/head.tsx"],
+      changes: ["dropped an intermediate variable used once"],
+      declined: "",
+    });
   });
 
-  it("rejects a report that neither changed anything nor said why", () => {
-    expect(() =>
-      parseSimplify(simplify({ changed: false, changes: [] }), "SSX-3822", FIX_FILES),
-    ).toThrow(/did neither/u);
+  it("reads neither a change nor a reason as a decline, rather than crashing the run", () => {
+    const report = parseSimplify(
+      simplify({ changed: false, filesTouched: [], changes: [] }),
+      "SSX-3822",
+      FIX_FILES,
+    );
+
+    expect(report).toEqual({
+      changed: false,
+      filesTouched: [],
+      changes: [],
+      declined: "simplify pass gave no usable report",
+    });
+  });
+
+  it("reads a change claimed alongside a decline as a decline, when neither names real content", () => {
+    // The contradiction resolves toward "changed" only when there is real content to trust;
+    // with none on either side, it reads as a decline rather than a change with nothing behind it.
+    const report = parseSimplify(
+      simplify({ filesTouched: [], changes: [], declined: "already minimal" }),
+      "SSX-3822",
+      FIX_FILES,
+    );
+
+    expect(report).toEqual({
+      changed: false,
+      filesTouched: [],
+      changes: [],
+      declined: "already minimal",
+    });
   });
 
   it("rejects a change with no files", () => {

@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2821 tests in 92
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2824 tests in 92
 > files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37, §40, §42 and §43, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37, §40, §42, §43 and §44, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -113,7 +113,11 @@ until whichever of two concurrently open branches merges second finds it already
 `.git/info/exclude` listing `.claude/` and `.storecode/` for every worktree cut from a repository,
 so a stray write to either (SSX-3954) is never untracked and never reaches the diff gate to be
 refused there alongside the real work beside it — opened and closed inside the branch that built
-it. §44 is open: the simplify pass running `/simplify` in place of its own bespoke report format.
+it. §44 was the simplify pass invoking Claude Code's own `/simplify` for the judgement it used to
+re-derive by hand, plus `parseSimplify` no longer crashing the run over a self-report contradiction
+nothing downstream reads (SSX-3944) — opened and closed inside the branch that built it, stacked on
+top of §43's, since both came out of the same session and §44's doc updates touch lines §43's
+already moved.
 The triage-selection entries are now all closed, so the next entry is §45.
 
 <!-- refs:on -->
@@ -781,33 +785,6 @@ and the run is gone.
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
-
-### 44. The simplify pass parses a bespoke JSON report instead of running the reviewed `/simplify` command
-
-**Branch:** `fix/simplify-pass-runs-slash-command`.
-
-**What is not built.** The simplify pass in `src/solve/runner.ts` does not run this repository's own
-`/simplify` command. It prompts a model for a structured report — `changed: true` with files and a
-diff-shaped description, or a non-empty `declined` reason, never both, never neither — and
-`parseSimplify` throws `SolveParseError` if the two conflict. SSX-3944's run hit exactly that: the
-model reported both, `parseSimplify` threw, `orchestrator.ts`'s `runPass` turned the throw into
-`SolveOutcome.kind: "crashed"`, and the ticket learned nothing about whether it is solvable.
-
-**Why it is owed.** The report shape is bespoke — invented for this pipeline, checked by a hand-written
-parser, exercised nowhere but here — while `/simplify` is a command this project already maintains,
-already reviewed, and already run by hand against this same kind of diff. A crash like SSX-3944's is a
-symptom of two things: whatever made the model emit a self-contradictory report, and a validator with
-exactly one way to fail loudly and none to fail informatively. Running the maintained command instead
-does not guarantee the first kind of failure never recurs, but it retires the bespoke report format
-and its one brittle parse path, and any future fix to `/simplify` itself benefits every caller instead
-of only this one.
-
-**What would make it the wrong idea.** `/simplify` was written for a human driving it interactively,
-not for a non-interactive pipeline pass with a machine-checked outcome — if it has no way to report
-"declined, and here is why" as distinctly from "nothing to simplify" as distinctly from "changed these
-files", the orchestrator loses the three-way distinction `parseSimplify` exists to enforce, and this
-would be trading one failure mode for a worse one. That is the first thing to confirm before touching
-`runner.ts`.
 
 ## Verification
 
