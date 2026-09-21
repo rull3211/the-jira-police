@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37, §40 and §41, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37, §40 and §42, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -102,11 +102,15 @@ abandoned mid-branch when the operator chose a `package.json` pipeline instead �
 into a working tree and deleted from one, so no commit ever held it and there is nothing to recover.
 What it would have argued for is in `feat/daemon-log-tui`'s pull request; the sentence is here
 because a hole with no entry behind it sends the next reader through a history that does not contain
-one. §41 was every non-`verified`, non-`escaped` solve outcome — `unusable-base`, `refused`,
+one. §42 was every non-`verified`, non-`escaped` solve outcome — `unusable-base`, `refused`,
 `crashed`, `no-worktree` and an environment `abandoned`, alongside the `failed` §7 already
 handled — routed to `agent:failed` so a ticket that cannot currently be judged stops looping
-silently and a human has to clear it, opened and closed inside the branch that built it. The
-triage-selection entries are now all closed, so the next entry is §42.
+silently and a human has to clear it, opened and closed inside the branch that built it. §41 does
+not appear in this branch's own history at all: an unmerged sibling (`docs/plan-audit`) opened and
+closed it first, for an unrelated topic, discovered only by checking `git log --all` before
+picking a number here — this document's own "next entry" pointer is a per-branch guess, good only
+until whichever of two concurrently open branches merges second finds it already wrong. The
+triage-selection entries are now all closed, so the next entry is §43.
 
 <!-- refs:on -->
 
