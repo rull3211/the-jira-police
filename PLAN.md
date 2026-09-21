@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2813 tests in 92
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2824 tests in 92
 > files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37, §40 and §42, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37, §40, §42, §43 and §44, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -109,8 +109,16 @@ silently and a human has to clear it, opened and closed inside the branch that b
 not appear in this branch's own history at all: an unmerged sibling (`docs/plan-audit`) opened and
 closed it first, for an unrelated topic, discovered only by checking `git log --all` before
 picking a number here — this document's own "next entry" pointer is a per-branch guess, good only
-until whichever of two concurrently open branches merges second finds it already wrong. The
-triage-selection entries are now all closed, so the next entry is §43.
+until whichever of two concurrently open branches merges second finds it already wrong. §43 was
+`.git/info/exclude` listing `.claude/` and `.storecode/` for every worktree cut from a repository,
+so a stray write to either (SSX-3954) is never untracked and never reaches the diff gate to be
+refused there alongside the real work beside it — opened and closed inside the branch that built
+it. §44 was the simplify pass invoking Claude Code's own `/simplify` for the judgement it used to
+re-derive by hand, plus `parseSimplify` no longer crashing the run over a self-report contradiction
+nothing downstream reads (SSX-3944) — opened and closed inside the branch that built it, stacked on
+top of §43's, since both came out of the same session and §44's doc updates touch lines §43's
+already moved.
+The triage-selection entries are now all closed, so the next entry is §45.
 
 <!-- refs:on -->
 

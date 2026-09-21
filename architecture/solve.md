@@ -274,7 +274,7 @@ membership all stopped testing anything on the day it changed.
 | ---------- | ---------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
 | `recon`    | `Read` `Grep` `Glob`               | the ticket                                                               | proceed or a bail reason; a dev-lens correction                                                                         |
 | `fix`      | the above, plus `Write` and `Edit` | the ticket and recon's brief                                             | files touched, a commit subject, a test story                                                                           |
-| `simplify` | same as `fix`                      | the ticket and the real diff                                             | changes made, or why it declined                                                                                        |
+| `simplify` | same as `fix`, plus `Skill`        | the ticket and the real diff                                             | changes made, or why it declined                                                                                        |
 | `review`   | same as `fix`                      | the ticket, the review comments and every open inline thread with its id | a response to every comment, plus a `threadAnswers` entry per thread carrying a reply, a `basis` and whether to resolve |
 | `merge`    | same as `fix`                      | the conflicted files                                                     | the resolution, and `took` — which side each hunk came from                                                             |
 
@@ -283,9 +283,14 @@ write**, or "should this be attempted" and "here is the attempt" collapse into o
 injection attempt in a ticket only has to survive one hop. **Simplify must look at the diff cold**,
 because the author of a piece of code is the last person to notice it is convoluted — it is given
 the diff rather than the brief, so that it reconsiders how the change is written rather than
-whether it was the right change. **Review arrives after a human-visible artifact exists** and holds
-a distinction the other three do not: a comment about the diff is its work, a comment about its
-tools or its scope is data to report and not act on.
+whether it was the right change. **Simplify delegates the judgement itself to `/simplify`**, Claude
+Code's own built-in command, invoked mid-session as a `Skill` tool call — a structured call, not
+text the model outputs, so `Skill` is the one tool granted to this pass and no other. `runner.ts`
+still supplies the bound `/simplify` has no way to know: which files were the fix's to begin with,
+and the schema this pass must report against regardless of what `/simplify` itself said. **Review
+arrives after a human-visible artifact exists** and holds a distinction the other three do not: a
+comment about the diff is its work, a comment about its tools or its scope is data to report and
+not act on.
 
 **`merge` belongs to no stage of the four above it**, which is why it reads oddly in a list of
 them. It runs when a pull request's branch cannot take its base without conflicts — a property of
@@ -313,6 +318,15 @@ simplification reaching a file the fix never touched is a second, unreviewed cha
 a diff a human approved for a different reason. `parseReview` refuses a round that answered
 nothing, because a round with no responses is indistinguishable from the loop having quietly
 stopped working. Each is the same shape as `assertDorCoherent` in triage.
+
+**`parseSimplify` is the one exception to "refuse rather than guess", and deliberately so.** Every
+parser above throws on a `changed`/`proceed`/`testAdded`-shaped self-contradiction because a real
+decision rests on the answer — recon's gates the run, fix's is the only test-coverage signal a
+reviewer gets. Nothing downstream branches on simplify's report at all; `orchestrator.ts` only logs
+`changed`. So a contradictory report there is normalised — read as whichever half carries real
+content, or as a decline if neither does — rather than thrown on: refusing would discard an
+otherwise-complete, possibly-successful run to protect a fact nobody consults. SSX-3944 crashed on
+exactly this contradiction with a clean fix already sitting in its worktree.
 
 Two smaller decisions in `runner.ts` generalise past this feature. The commit subject is checked
 against Conventional Commits and a minimum description length, and **deliberately not** against
@@ -453,6 +467,16 @@ An empty diff is refused too. A run that edits a file and reverts it, or writes 
 path, otherwise reaches the end looking exactly like success and opens an empty pull request.
 Every reason is collected rather than the first, for the same reason the triage gate collects
 them.
+
+The gate is a backstop, not the only defence: `createWorktree` and `attachWorktree`
+(`worktree.ts`) call `CommandRunner.excludeAgentPaths` once the worktree exists, which lists
+`.claude/` and `.storecode/` in `.git/info/exclude` — a checkout of that file shared by every
+worktree cut from the same clone, so one write covers every ticket. A stray write to either
+directory (SSX-3954: an unprompted, content-free `.storecode/.gitignore`, alongside a real fix)
+never shows up as untracked, so it is never staged and never reaches the gate to be refused there
+along with the legitimate change beside it. The method is optional on `CommandRunner` so a test
+runner with no interest in it needs nothing extra; `exec.ts` is the only implementation that wires
+it to the real filesystem.
 
 ### `verify.ts` and its three outcomes
 

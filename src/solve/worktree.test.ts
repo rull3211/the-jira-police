@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,10 +12,16 @@ import {
   attachWorktree,
   branchNameFor,
   createWorktree,
+  ensureAgentPathsExcluded,
   removeWorktree,
   slugify,
   worktreeAt,
 } from "./worktree.ts";
+
+/** A fresh, real directory standing in for `repoPath` — only the tests in this file that ask for one via `excludeAgentPaths` touch real disk. */
+function tempRepo(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "worktree-exclude-"));
+}
 
 const OK: CommandResult = { exitCode: 0, stdout: "", stderr: "", timedOut: false };
 const FAIL: CommandResult = { exitCode: 128, stdout: "", stderr: "fatal: nope", timedOut: false };
@@ -30,6 +40,23 @@ function fakeRunner(replies: readonly CommandResult[] = []): CommandRunner & {
       const reply = replies[index] ?? OK;
       index += 1;
       return Promise.resolve(reply);
+    },
+  };
+}
+
+/** A runner whose `excludeAgentPaths` records every path it was asked to exclude, rather than touching disk. */
+function fakeRunnerWithExclude(replies: readonly CommandResult[] = []): CommandRunner & {
+  calls: string[][];
+  excluded: string[];
+} {
+  const base = fakeRunner(replies);
+  const excluded: string[] = [];
+  return {
+    ...base,
+    excluded,
+    excludeAgentPaths: (repoPath) => {
+      excluded.push(repoPath);
+      return Promise.resolve();
     },
   };
 }
@@ -133,6 +160,33 @@ describe("branchNameFor", () => {
 });
 
 describe("createWorktree", () => {
+  it("excludes agent-owned paths once the worktree is added, when the runner offers it", async () => {
+    const runner = fakeRunnerWithExclude();
+
+    await createWorktree(runner, request());
+
+    expect(runner.excluded).toEqual(["/repos/buy-insurance-advisor-web"]);
+  });
+
+  it("does not fail the worktree when excludeAgentPaths rejects", async () => {
+    const runner = fakeRunner();
+    (runner as CommandRunner).excludeAgentPaths = () => Promise.reject(new Error("disk full"));
+
+    const result = await createWorktree(runner, request());
+
+    // A convenience write failing is not a reason to lose the worktree just created; the diff
+    // gate is still the backstop this exists to spare it, not the only line of defence.
+    expect(result.outcome).toBe("created");
+  });
+
+  it("touches nothing when the runner has no excludeAgentPaths, exactly as before this existed", async () => {
+    const runner = fakeRunner();
+
+    const result = await createWorktree(runner, request());
+
+    expect(result.outcome).toBe("created");
+  });
+
   it("fetches, checks the base, then adds the worktree — in that order", async () => {
     const runner = fakeRunner();
 
@@ -467,6 +521,14 @@ describe("removeWorktree", () => {
 });
 
 describe("attachWorktree", () => {
+  it("excludes agent-owned paths once the worktree is added, when the runner offers it", async () => {
+    const runner = fakeRunnerWithExclude();
+
+    await attachWorktree(runner, attach());
+
+    expect(runner.excluded).toEqual(["/repos/buy-insurance-advisor-web"]);
+  });
+
   it("checks out the branch the pull request is on", async () => {
     const runner = fakeRunner();
 
@@ -867,5 +929,41 @@ describe("worktreeAt", () => {
 
   it("finds nothing in an empty listing", () => {
     expect(worktreeAt("", "/tmp/solve/SSX-3822")).toEqual({ present: false });
+  });
+});
+
+describe("ensureAgentPathsExcluded", () => {
+  it("writes both agent-owned paths into a fresh repository's exclude file", async () => {
+    const repoPath = await tempRepo();
+
+    await ensureAgentPathsExcluded(repoPath);
+
+    const content = await readFile(join(repoPath, ".git", "info", "exclude"), "utf8");
+    expect(content).toContain("/.claude/\n");
+    expect(content).toContain("/.storecode/\n");
+  });
+
+  it("does not disturb lines already in the file", async () => {
+    const repoPath = await tempRepo();
+    await ensureAgentPathsExcluded(repoPath);
+
+    await ensureAgentPathsExcluded(repoPath);
+
+    const content = await readFile(join(repoPath, ".git", "info", "exclude"), "utf8");
+    // A second call must not double the lines — `.git/info/exclude` is shared by every worktree
+    // cut from this repo, and `createWorktree` calls this on every single one of them.
+    expect(content.split("\n").filter((line) => line === "/.claude/")).toHaveLength(1);
+    expect(content.split("\n").filter((line) => line === "/.storecode/")).toHaveLength(1);
+  });
+
+  it("appends after whatever a human already put in the file, without disturbing it", async () => {
+    const repoPath = await tempRepo();
+    await mkdir(join(repoPath, ".git", "info"), { recursive: true });
+    await writeFile(join(repoPath, ".git", "info", "exclude"), "*.local\n", "utf8");
+
+    await ensureAgentPathsExcluded(repoPath);
+
+    const content = await readFile(join(repoPath, ".git", "info", "exclude"), "utf8");
+    expect(content).toBe("*.local\n/.claude/\n/.storecode/\n");
   });
 });
