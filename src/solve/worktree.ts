@@ -3,10 +3,51 @@
  * Every git command is an argv array handed to an injected runner, never a shell string, since a Jira summary is attacker-controlled.
  */
 
+import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+
 import { createLogger } from "../logger.ts";
 import { isWorkBranch, WORK_BRANCH_PREFIXES } from "./branch.ts";
 
 const log = createLogger("solve");
+
+/**
+ * This service's own instructions and runtime state, worktree-root anchored so a same-named
+ * directory elsewhere in a repo's own source tree is untouched. Mirrors `diff-gate.ts`'s
+ * `.(claude|storecode)` `FORBIDDEN_PATHS` rule, which stays as the backstop for anything that
+ * reaches git despite this list.
+ */
+const AGENT_OWNED_EXCLUDES = ["/.claude/", "/.storecode/"];
+
+/**
+ * Adds `AGENT_OWNED_EXCLUDES` to the repository's local exclude file, so a solve worktree never
+ * reports them as untracked — a stray write to one (SSX-3954: an unprompted, content-free
+ * `.storecode/.gitignore`) is invisible to `git status`/`git add -A` rather than staged and then
+ * refused by the diff gate. `.git/info/exclude` lives in the common git directory, so one write
+ * here covers every worktree cut from `repoPath`.
+ * Idempotent by construction: called on every worktree creation, so it must not grow the file.
+ * Read-then-write, not locked: two worktrees for the same repository created at once can each
+ * read before either appends, and both add the same line. Harmless — git tolerates a repeated
+ * exclude pattern — so this accepts the race rather than serialising every worktree creation
+ * against a file write that only ever needs to succeed once per repository.
+ */
+export async function ensureAgentPathsExcluded(repoPath: string): Promise<void> {
+  const excludePath = join(repoPath, ".git", "info", "exclude");
+  const existing = await readFile(excludePath, "utf8").catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  });
+  const lines = new Set(existing.split("\n").map((line) => line.trim()));
+  const missing = AGENT_OWNED_EXCLUDES.filter((pattern) => !lines.has(pattern));
+  if (missing.length === 0) {
+    return;
+  }
+  await mkdir(dirname(excludePath), { recursive: true });
+  const separator = existing !== "" && !existing.endsWith("\n") ? "\n" : "";
+  await appendFile(excludePath, `${separator}${missing.join("\n")}\n`, "utf8");
+}
 
 export interface CommandResult {
   readonly exitCode: number;
@@ -21,9 +62,18 @@ export interface CommandOptions {
   readonly timeoutMs: number;
 }
 
-/** The one capability this module needs. `argv`, not a command string, so nothing has to split a ticket summary into extra arguments. */
+/**
+ * The capabilities this module needs. `argv`, not a command string, so nothing has to split a
+ * ticket summary into extra arguments.
+ */
 export interface CommandRunner {
   run: (argv: readonly string[], options: CommandOptions) => Promise<CommandResult>;
+  /**
+   * Optional so a fake runner with no interest in it needs nothing extra: every existing test
+   * builds one without this field and gets exactly the behaviour it had before this existed.
+   * Real wiring supplies {@link ensureAgentPathsExcluded}.
+   */
+  excludeAgentPaths?: (repoPath: string) => Promise<void>;
 }
 
 export interface Worktree {
@@ -133,6 +183,7 @@ export function why(result: CommandResult): string {
  * Five commands: fetch, verify the base resolves, list existing worktrees, salvage one at our path if unusable, then `worktree add -b` —
  * `-b` deliberately fails on an existing branch, so a second run for the same ticket cannot quietly reuse one that may carry commits.
  * Refusals are returned, not thrown: a ticket whose summary yields no usable slug is an ordinary occurrence, not a fault.
+ * A sixth step, not a git command: once added, `runner.excludeAgentPaths` runs if the runner offers it — see its own docstring.
  */
 export async function createWorktree(
   runner: CommandRunner,
@@ -202,8 +253,34 @@ export async function createWorktree(
     return refuse(`could not create the worktree (${why(added)})`);
   }
 
+  await excludeAgentPathsOrWarn(runner, issueKey, repoPath);
+
   log.info("solve.worktree.created", { issueKey, path, branch, baseRef });
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };
+}
+
+/**
+ * A failure here is a reason to keep going, not to refuse: the diff gate is still the backstop it
+ * always was, so a run that could not get this convenience is no worse off than before this existed.
+ * A no-op if `runner` carries no `excludeAgentPaths`, which every existing fake runner does not.
+ */
+async function excludeAgentPathsOrWarn(
+  runner: CommandRunner,
+  issueKey: string,
+  repoPath: string,
+): Promise<void> {
+  if (!runner.excludeAgentPaths) {
+    return;
+  }
+  try {
+    await runner.excludeAgentPaths(repoPath);
+  } catch (error) {
+    log.warn("solve.worktree.exclude-write-failed", {
+      issueKey,
+      repoPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export interface AttachRequest {
@@ -287,6 +364,8 @@ export async function attachWorktree(
       `could not attach a worktree to ${branch} (${why(added)}) — a local branch of that name with no worktree on it is the usual cause, and that is a leftover from an earlier run rather than something to work around`,
     );
   }
+
+  await excludeAgentPathsOrWarn(runner, issueKey, repoPath);
 
   log.info("solve.worktree.attached", { issueKey, path, branch, remote, reused: false });
   return { outcome: "created", worktree: { issueKey, path, branch, repoPath } };

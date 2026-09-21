@@ -8,12 +8,19 @@
  * automatically inherited.
  * No retries: `verify.ts` distinguishes "the tests failed" from "we could not find out", and a
  * retry here would quietly turn the second into the first.
+ * Also the one place that wires `excludeAgentPaths` to the real filesystem, so a fake runner in a
+ * test gets it only if the test asks for it.
  */
 
 import { spawn } from "node:child_process";
 
 import { createLogger } from "../logger.ts";
-import type { CommandOptions, CommandResult, CommandRunner } from "./worktree.ts";
+import {
+  ensureAgentPathsExcluded,
+  type CommandOptions,
+  type CommandResult,
+  type CommandRunner,
+} from "./worktree.ts";
 
 const log = createLogger("exec");
 
@@ -110,6 +117,7 @@ export function createCommandRunner(options: RunnerOptions = {}): CommandRunner 
   const spawnFn = options.spawnFn ?? spawn;
 
   return {
+    excludeAgentPaths: ensureAgentPathsExcluded,
     run: async (argv: readonly string[], runOptions: CommandOptions): Promise<CommandResult> => {
       const program = argv[0];
       if (program === undefined || !isAllowedExecutable(program)) {

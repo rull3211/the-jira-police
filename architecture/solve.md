@@ -454,6 +454,16 @@ path, otherwise reaches the end looking exactly like success and opens an empty 
 Every reason is collected rather than the first, for the same reason the triage gate collects
 them.
 
+The gate is a backstop, not the only defence: `createWorktree` and `attachWorktree`
+(`worktree.ts`) call `CommandRunner.excludeAgentPaths` once the worktree exists, which lists
+`.claude/` and `.storecode/` in `.git/info/exclude` — a checkout of that file shared by every
+worktree cut from the same clone, so one write covers every ticket. A stray write to either
+directory (SSX-3954: an unprompted, content-free `.storecode/.gitignore`, alongside a real fix)
+never shows up as untracked, so it is never staged and never reaches the gate to be refused there
+along with the legitimate change beside it. The method is optional on `CommandRunner` so a test
+runner with no interest in it needs nothing extra; `exec.ts` is the only implementation that wires
+it to the real filesystem.
+
 ### `verify.ts` and its three outcomes
 
 The model is never asked whether the tests passed. The harness runs them and reads exit codes,

@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
 import { ALLOWED_EXECUTABLES, childEnv, createCommandRunner, isAllowedExecutable } from "./exec.ts";
+import { ensureAgentPathsExcluded } from "./worktree.ts";
 
 /** A stand-in for a `ChildProcess`: two output streams, a `kill` that records signals, and the two events it listens for. */
 class FakeChild extends EventEmitter {
@@ -105,6 +106,14 @@ describe("childEnv", () => {
 });
 
 describe("createCommandRunner", () => {
+  it("wires excludeAgentPaths to the real implementation, not left for a caller to remember", () => {
+    // Left unwired here, `worktree.ts` would no-op on every real run and the diff-gate refusal
+    // this exists to avoid (SSX-3954) would keep recurring silently.
+    const runner = createCommandRunner({ parentEnv: {} });
+
+    expect(runner.excludeAgentPaths).toBe(ensureAgentPathsExcluded);
+  });
+
   it("refuses a program that is not on the allowlist, without spawning", async () => {
     const { spawnFn, calls } = fakeSpawn();
     const runner = createCommandRunner({ spawnFn, parentEnv: {} });
