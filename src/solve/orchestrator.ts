@@ -252,6 +252,13 @@ export type SolveOutcome =
       readonly recon: ReconVerdict;
       readonly fix: FixReport;
       readonly simplify: SimplifyReport;
+      /**
+       * Set only when a repair round produced this outcome — `fix` and `simplify` stay the
+       * original passes' own reports, unedited, and this carries what the repair round did on top.
+       * `undefined` on every path that exists today; `runRepairRound` is not yet called by anything
+       * (PLAN.md §45), so no outcome sets this field until that wiring lands.
+       */
+      readonly repair?: FixReport;
       readonly verification: VerificationResult;
       /**
        * Whether the run's own tests notice when its fix is taken away.
@@ -617,6 +624,142 @@ function verifyRequestOf(
     baseRef: request.baseRef,
     stepTimeoutMs: request.stepTimeoutMs,
     installTimeoutMs: request.installTimeoutMs,
+  };
+}
+
+/**
+ * Renders a failed verification as the repair pass's "here is what broke" — the harness's own
+ * captured output, not a model's account of it. Only the step(s) that did not pass: a passing
+ * install or an earlier passing step tells the repair pass nothing it needs.
+ */
+function renderVerificationFailure(
+  verification: Extract<VerificationResult, { outcome: "failed" }>,
+): string {
+  const failing = verification.steps.filter((step) => !step.passed);
+  const detail = failing
+    .map((step) => `## ${step.name}${step.timedOut ? " (timed out)" : ` (exit ${String(step.exitCode)})`}\n\n${step.output}`)
+    .join("\n\n");
+  return `${verification.reason}\n\n${detail}`;
+}
+
+/**
+ * One repair attempt after a failed verification.
+ *
+ * Not called from {@link runPipeline} yet — see PLAN.md §45. Built and tested against its own
+ * inputs first, per STARTING.md's "phase a privilege, and drive it by hand first": the refusal to
+ * run this is structural (nothing constructs a caller) rather than a flag nobody flipped.
+ *
+ * Grants no new privilege: `repair` is a `WRITE_PASSES` member in `runner.ts` and gets exactly
+ * `FIX_ALLOWED_TOOLS` — no `Bash`. `verify`'s `CommandRunner` remains the only thing that ever
+ * runs a command; this pass only reads what it already ran, via `verificationFailure`.
+ *
+ * Shaped on `runReviewRound`: same worktree, no simplify pass (a repair is a correction, not a
+ * second draft), re-running the diff gate and `verify` afterward exactly as the pipeline's first
+ * pass through them did. One attempt — bounding how many of these a ticket gets is the caller's
+ * job, not this function's, the same split `MAX_PR_ROUNDS_TOTAL` keeps from `resolveReview`.
+ */
+export async function runRepairRound(
+  deps: SolveDependencies,
+  request: SolveRequest,
+  worktree: Worktree,
+  base: SolveRunOptions,
+  recon: ReconVerdict,
+  fix: FixReport,
+  simplify: SimplifyReport,
+  devLens: DevLensFeedback,
+  verification: Extract<VerificationResult, { outcome: "failed" }>,
+): Promise<SolveOutcome> {
+  const { issueKey } = request;
+  const { commands, passes } = deps;
+
+  const brief = JSON.stringify(recon, null, 2);
+  const verificationFailure = renderVerificationFailure(verification);
+  const repairRun = await runPass(
+    passes,
+    "repair",
+    { ...base, brief, verificationFailure },
+    (output) => parseFix(output, issueKey),
+  );
+  if (!repairRun.ok) {
+    return crashed(issueKey, "repair", repairRun.reason, worktree);
+  }
+  const repair = repairRun.value;
+  if (repair.abandoned.trim() !== "") {
+    const cause = repair.abandonedCause as Exclude<AbandonCause, "none">;
+    log.info("solve.abandoned", {
+      issueKey,
+      pass: "repair",
+      cause,
+      reason: repair.abandoned,
+      leftFiles: repair.changed,
+      worktreePath: worktree.path,
+    });
+    return { kind: "abandoned", reason: repair.abandoned, cause, devLens, worktree };
+  }
+
+  const finalDiff = await readNumstat(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+  );
+  if (finalDiff === null) {
+    return {
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: ["could not read the diff, so there is nothing to bound"],
+      devLens,
+      worktree,
+    };
+  }
+  const changes = parseNumstat(finalDiff);
+  const verdict = checkDiff(changes);
+  if (!verdict.ok) {
+    log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
+    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
+  }
+
+  const reverified = await verify(commands, verifyRequestOf(request, worktree));
+  if (reverified.outcome === "refused") {
+    return {
+      kind: "refused",
+      stage: "verification",
+      reasons: [reverified.reason],
+      devLens,
+      worktree,
+    };
+  }
+  if (reverified.outcome === "failed") {
+    return { kind: "failed", reason: reverified.reason, verification: reverified, devLens, worktree };
+  }
+
+  const failFirst =
+    request.failFirstCheck === false
+      ? ({ outcome: "skipped", reason: "FAIL_FIRST_CHECK is off" } as const)
+      : await checkFailFirst(commands, {
+          repoPath: request.repoPath,
+          worktreePath: worktree.path,
+          probePath: `${worktree.path}-failfirst`,
+          baseRef: request.baseRef,
+          changedPaths: changes.map((change) => change.path),
+          stepTimeoutMs: request.stepTimeoutMs,
+          installTimeoutMs: request.installTimeoutMs,
+        });
+
+  log.info("solve.repaired", { issueKey, branch: worktree.branch, files: verdict.files });
+  return {
+    kind: "verified",
+    worktree,
+    commit: composeCommitMessage(repair, issueKey),
+    recon,
+    fix,
+    simplify,
+    repair,
+    verification: reverified,
+    failFirst,
+    devLens,
+    files: verdict.files,
+    lines: verdict.lines,
   };
 }
 

@@ -26,9 +26,9 @@ ask. Everything that protects the repository is mechanical and lives **outside**
 no `git`, no test runner and no package manager available to you. This is not a rule you are
 being asked to follow — it is the absence of a tool. Do not plan around it or ask for it.
 
-## The five passes
+## The six passes
 
-One skill, five invocations, with different capabilities. **The capability difference is enforced
+One skill, six invocations, with different capabilities. **The capability difference is enforced
 by the harness's flags, not by this file** — a skill file cannot restrict itself, and text here
 saying "do not edit" would be a description of intent, not a control.
 
@@ -49,17 +49,23 @@ saying "do not edit" would be a description of intent, not a control.
    conflicted paths and **not** the review: a branch that will not take its base cannot be built,
    so there is nothing a review round could answer a reviewer from, and this round answers nobody
    on purpose. Its scope is git's list of conflicted files, exactly.
+6. **`--repair`** — **built, not yet invoked by anything; see `PLAN.md` §45.** Same tools as
+   `--fix`. Given the fix pass's recon brief, the diff, and the harness's own captured output from
+   a verification step that failed — the one thing `--fix` can never see. Fixes the code the
+   failure points at, never the test it failed, unless the test itself encoded the old behaviour.
 
-Each pass is its own session rather than five turns of one, so a pass cannot carry a capability
+Each pass is its own session rather than six turns of one, so a pass cannot carry a capability
 past the point it was granted for, and so a pass that dies cannot leave a later one reasoning
 from half a conversation.
 
 Recon runs first and its verdict is honoured: if it says stop, the fix pass never starts and no
 model ever gets write access for that ticket. That ordering covers the first four. `--merge`
 belongs to none of it — it runs when the base has moved under a pull request that already exists,
-which is a fact about two histories rather than a stage of solving a ticket.
+which is a fact about two histories rather than a stage of solving a ticket. `--repair` belongs to
+none of it either, for the opposite reason: it exists only after a verification failure, and
+nothing in `src/solve/orchestrator.ts` calls it yet.
 
-`SOLVE_INSTRUCTIONS.md` §1, §2, §2a, §2b and §2c are the contracts for the five, in that order.
+`SOLVE_INSTRUCTIONS.md` §1, §2, §2a, §2b, §2c and §2d are the contracts for the six, in that order.
 This list must match them and the argument builder in `src/solve/runner.ts`; it previously said
 "two passes" and named only the first two, while both of those already had four.
 
@@ -70,6 +76,8 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
 - `/agent-solve <ISSUE-KEY> --simplify` — a cold read of the diff, bounded to the fix's files
 - `/agent-solve <ISSUE-KEY> --review` — resolve one round of reviewer feedback
 - `/agent-solve <ISSUE-KEY> --merge` — resolve the conflicts blocking the base branch merge
+- `/agent-solve <ISSUE-KEY> --repair` — correct the diff against a failed verification (not yet
+  called by the harness)
 - `--brief <path>` — the recon verdict, passed into the fix pass
 - `--vault <path>` — vault location, for conventions and domain terms
 

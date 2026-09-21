@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Pass, SolveRunOptions } from "./runner.ts";
+import { parseFix, parseRecon, parseSimplify } from "./runner.ts";
 import {
   type ConflictRoundRequest,
   type PassRunner,
@@ -12,11 +13,13 @@ import {
   resolveConflict,
   resolveReview,
   runReconOnly,
+  runRepairRound,
   solveTicket,
   solveWithRetry,
 } from "./orchestrator.ts";
 import { createLogger } from "../logger.ts";
 import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
+import type { VerificationResult } from "./verify.ts";
 
 /** The escape, not the byte, so this file stays greppable. See `verify.ts`. */
 const NUL = "\u0000";
@@ -1181,6 +1184,165 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, { ...reviewRequest, readDirs: READ_DIRS });
 
     expect(outcome.kind).toBe("resolved");
+  });
+});
+
+/**
+ * `runRepairRound` is not called by `runPipeline` yet — PLAN.md §45. These tests exercise it
+ * directly, the same way `resolveReview`'s tests exercise `runReviewRound` through its own public
+ * entry point, since a repair round has none yet.
+ */
+const repair = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  changed: true,
+  filesTouched: ["src/app/head.test.tsx"],
+  summary: "stop asserting the href the corrected code no longer produces",
+  commitSubject: "fix(advisor): correct the head link test for the merged fix",
+  commitBody: "The existing test still asserted the pre-fix href.",
+  testAdded: false,
+  testOmittedReason: "corrected an existing test rather than adding a new one",
+  residualRisk: "",
+  abandoned: "",
+  abandonedCause: "none",
+  ...overrides,
+});
+
+const FAILED_VERIFICATION: Extract<VerificationResult, { outcome: "failed" }> = {
+  outcome: "failed",
+  reason: "test did not pass (exit 1)",
+  steps: [
+    { name: "install", passed: true, exitCode: 0, timedOut: false, output: "" },
+    {
+      name: "test",
+      passed: false,
+      exitCode: 1,
+      timedOut: false,
+      output: "AssertionError: expected favicon-nonprod.svg, got favicon.svg",
+    },
+  ],
+};
+
+const repairBase: SolveRunOptions = {
+  issueKey: request.issueKey,
+  worktreePath: worktree.path,
+  ticket: request.ticket,
+};
+
+const devLensFixture = { accurate: true, correction: "" };
+
+const runRepair = (
+  h: Harness,
+  overrides: {
+    recon?: ReturnType<typeof parseRecon>;
+    fix?: ReturnType<typeof parseFix>;
+    simplify?: ReturnType<typeof parseSimplify>;
+  } = {},
+) =>
+  runRepairRound(
+    h.deps,
+    request,
+    worktree,
+    repairBase,
+    overrides.recon ?? parseRecon(recon(), request.issueKey),
+    overrides.fix ?? parseFix(fix(), request.issueKey),
+    overrides.simplify ?? parseSimplify(simplify(), request.issueKey, FILES),
+    devLensFixture,
+    FAILED_VERIFICATION,
+  );
+
+describe("runRepairRound", () => {
+  it("sends the recon brief and the verification failure, and does not hand it a rendered diff", async () => {
+    // No `diff` field: repair re-reads the worktree directly, the same discipline SOLVE_INSTRUCTIONS.md §2 asks of the fix pass.
+    const { h } = harness({ repair: repair() });
+
+    await runRepair(h);
+
+    const options = h.seen[0]?.options;
+    expect(options?.brief).toContain('"proceed": true');
+    expect(options?.verificationFailure).toContain("AssertionError");
+    expect(options?.diff).toBeUndefined();
+  });
+
+  it("runs exactly one pass: repair", async () => {
+    const { h } = harness({ repair: repair() });
+
+    await runRepair(h);
+
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["repair"]);
+  });
+
+  it("returns crashed when the repair pass dies", async () => {
+    const { h } = harness({}, [], { repair: "pass timed out after 900000ms" });
+
+    const outcome = await runRepair(h);
+
+    expect(outcome).toMatchObject({ kind: "crashed", pass: "repair" });
+  });
+
+  it("returns abandoned when the repair pass gives up", async () => {
+    const { h } = harness({
+      repair: repair({
+        changed: false,
+        filesTouched: [],
+        commitSubject: "",
+        commitBody: "",
+        abandoned: "the failure is in generated code outside the worktree's own source",
+        abandonedCause: "environment",
+      }),
+    });
+
+    const outcome = await runRepair(h);
+
+    expect(outcome).toMatchObject({ kind: "abandoned", cause: "environment" });
+  });
+
+  it("gates the corrected diff before re-verifying", async () => {
+    const { h } = harness({ repair: repair() }, [
+      { match: saw("--numstat"), reply: { stdout: REFUSED_DIFF } },
+    ]);
+
+    const outcome = await runRepair(h);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+  });
+
+  it("returns failed again when the repair still does not pass verification", async () => {
+    const { h } = harness({ repair: repair() }, [
+      { match: saw("run", "test"), reply: { exitCode: 1 } },
+    ]);
+
+    const outcome = await runRepair(h);
+
+    expect(outcome.kind).toBe("failed");
+  });
+
+  it("returns verified, keeping the original fix and simplify reports and carrying the repair", async () => {
+    const { h } = harness({ repair: repair() });
+    const originalFix = parseFix(fix(), request.issueKey);
+    const originalSimplify = parseSimplify(simplify(), request.issueKey, FILES);
+
+    const outcome = await runRepair(h, { fix: originalFix, simplify: originalSimplify });
+
+    expect(outcome.kind).toBe("verified");
+    if (outcome.kind !== "verified") {
+      throw new Error(`expected verified, got ${outcome.kind}`);
+    }
+    expect(outcome.fix).toEqual(originalFix);
+    expect(outcome.simplify).toEqual(originalSimplify);
+    expect(outcome.repair).toEqual(parseFix(repair(), request.issueKey));
+  });
+
+  it("builds the repair round's own commit message, with the trailer", async () => {
+    const { h } = harness({ repair: repair() });
+
+    const outcome = await runRepair(h);
+
+    if (outcome.kind !== "verified") {
+      throw new Error(`expected verified, got ${outcome.kind}`);
+    }
+    expect(outcome.commit.subject).toBe(
+      "fix(advisor): correct the head link test for the merged fix",
+    );
+    expect(outcome.commit.body.split("\n").at(-1)).toBe("Refs: SSX-3822");
   });
 });
 

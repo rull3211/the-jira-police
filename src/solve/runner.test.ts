@@ -729,11 +729,13 @@ const answer = (overrides: Record<string, unknown> = {}): Record<string, unknown
 const FIX_FILES = ["src/app/head.tsx", "src/app/head.test.tsx"];
 
 describe("every pass", () => {
-  it("gives each pass its own schema", () => {
+  it("gives each pass its own schema, except repair which reuses fix's on purpose", () => {
     // Iterates `PASSES` rather than a list written out here, so a pass added without a schema fails this test.
+    // `repair` is the one deliberate exception: its output is the same shape as a fix's (SOLVE_INSTRUCTIONS.md §2d), so it shares FIX_SCHEMA_JSON rather than carrying a byte-for-byte duplicate.
     const schemas = PASSES.map((pass) => flag(buildSolveArgs(pass, options), "--json-schema"));
+    const distinctPasses = PASSES.filter((pass) => pass !== "repair");
 
-    expect(new Set(schemas).size).toBe(PASSES.length);
+    expect(new Set(schemas).size).toBe(distinctPasses.length);
   });
 
   it("keeps recon read-only and lets every other pass write", () => {
