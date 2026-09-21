@@ -118,9 +118,67 @@ re-derive by hand, plus `parseSimplify` no longer crashing the run over a self-r
 nothing downstream reads (SSX-3944) — opened and closed inside the branch that built it, stacked on
 top of §43's, since both came out of the same session and §44's doc updates touch lines §43's
 already moved.
-The triage-selection entries are now all closed, so the next entry is §45.
+The triage-selection entries are now all closed, so the next entry is §46.
 
 <!-- refs:on -->
+
+### 45. The fix pass cannot see a test fail, and does not look for what else depends on what it changed
+
+**Branch:** feat/verify-repair-and-blast-radius
+
+**What is not built.** Two gaps found on the same real ticket (SSX-3944), stacked:
+
+1. No pass may run the test suite or read `verify.ts`'s output before it is produced — the harness
+   runs verification after every pass has already exited. A `failed` verification today writes
+   straight to `agent:failed` (`solve-outcome.ts:84-86`) with the diff finished and every pass's
+   turn already over. Nothing in this pipeline gets a chance to read the failure and act on it.
+2. The fix pass is scoped to the files recon named (`SOLVE_INSTRUCTIONS.md` §2) and has no
+   instruction to search the rest of the repository for other consumers or tests of what it
+   changed, so a stale test written against the old behaviour survives to verification
+   indistinguishable, from the pipeline's point of view, from a real regression.
+
+**Why they compound.** SSX-3944: `CustomerDtoMerger.updateContactInfo` was correctly changed from
+whole-object equality replacement to a per-field merge — the right fix, confirmed by hand. A
+different file, not in `plannedFiles`, `CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail`
+had an unused Mockito stub that only the old, buggy behaviour ever exercised, and Mockito's strict
+stubbing turned that into `UnnecessaryStubbingException` — real Maven output the fix pass never
+saw, on a file the fix pass never looked at. The run ended `agent:failed`, on a correct fix.
+
+**Two different shapes of fix, not one.**
+
+- **The blast-radius search is an instruction change, not a privilege grant.** The fix pass already
+  holds `Grep` and `Glob` (`runner.ts:75`); nothing tells it to point them at anything but the files
+  recon named. `SOLVE_INSTRUCTIONS.md` §2 gets an explicit step: before finishing, search the
+  repository for other callers and tests of every changed symbol, and either fix what depends on
+  the old behaviour or say in `residualRisk` what was found and left alone.
+- **The repair round reverses a documented boundary and needs its own phasing.** `Bash` is withheld
+  from every pass today via `SOLVE_DENIED_COMMON` (`runner.ts:42-44`), and the comment there says
+  why: denying it "is what makes 'the harness runs the verification' structural rather than a
+  convention." A repair pass needs the real test command and its real output, which means granting
+  a runner capability to exactly one new pass, nothing wider. Shape it on the existing **review
+  round** (`orchestrator.ts:1064-1187`): same worktree, a bounded number of rounds, fed
+  `VerificationResult.steps[].output` (already captured, already tail-bounded to 4000 chars —
+  `verify.ts:109-116`) as the "here is what broke" brief, re-running the diff gate and `verify`
+  after each attempt. Falls through to today's `agent:failed` path, unchanged, once the round cap
+  is hit or a round abandons.
+
+**Phasing the privilege** (`STARTING.md`, "Phase a privilege, and drive it by hand first"): built
+but inert first — the pass exists, wired to nothing, so the refusal to run it is structural, not
+promised; a dry run that writes its attempt to the worktree without trusting it; one named ticket
+behind a flag that must be typed; the loop only after the first three have been watched on
+something real.
+
+**What would make either half the wrong idea.** The blast-radius search can find a true positive
+that is itself a larger change than the ticket — updating a consumer might be its own ticket. The
+pass needs a "found it, did not touch it, said why" outcome, not a mandate to always fix what it
+finds, or it re-derives §33's still-open scope-widening problem inside a different pass. The repair
+round's risk runs the other way: handing a pass the actual red output is also handing it the
+easiest way to make it green — weaken or delete the failing assertion rather than fix the code.
+`SOLVE_INSTRUCTIONS.md` §2 step 4 already names this shape of failure for the fix pass itself; a
+pass built to stare at red output and told to make it pass is the one most likely to reach for
+exactly that shortcut, and the bound has to be mechanical — the diff gate already sees every test
+file a round touches, so a rule that a repair round touching a test file must also touch the
+non-test file the failure traces to is checkable, unlike a prompt asking it not to.
 
 ### 1. Which model runs which task, and nothing chooses today
 
