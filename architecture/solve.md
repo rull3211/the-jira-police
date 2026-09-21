@@ -491,6 +491,15 @@ change the run produced; `refused` is the harness declining to have an opinion. 
 would let a broken harness read as a broken fix — and the `agent:solvable` assessment would then be
 calibrated against evidence that was never gathered.
 
+**That is a claim about the reason, not about the Jira label**, and the two questions have
+different answers since `terminalLabelAfter` (`src/cli/solve-outcome.ts`) started writing
+`agent:failed` for `refused`, `unusable-base` and the rest of the "no verdict reached" family too
+(SSX-3954). The ticket's own comment (`describeSolveOutcome`, `feedback.ts`) still names each
+outcome's real cause exactly as specifically as before — nothing here reads it back to decide the
+label. What the label now answers is only "did this attempt end without a plan to try again on its
+own", which every non-`verified`, non-`escaped` outcome does; a human still has to open the comment
+to tell a bad fix from a harness that could not judge one.
+
 One outcome is assigned against intuition on purpose: **a timed-out step is a failure, not a
 refusal.** It ran, it did not pass in the time allowed, and a hang is a plausible thing for a bad
 fix to cause; the other reading is the one that lets an infinite loop through. Conversely a failed

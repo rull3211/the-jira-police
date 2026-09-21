@@ -44,32 +44,45 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
 /**
  * The label a finished solve leaves behind, or `null` to release the ticket.
  *
- * `null` means put the ticket back exactly as found — the right answer for outcomes that say
- * nothing about the ticket (crashed, unusable base, environment got in the way, no verdict
- * reached). `failed` was built, tested and unreachable until this function: a bailed ticket
- * restored byte-for-byte was indistinguishable from one nobody had tried, so auto mode re-claimed
- * it every tick forever (SSX-3831, 2026-09-05).
+ * `null` means put the ticket back exactly as found, so the queue offers it again on its own —
+ * reserved now for the two outcomes where that is actually the right answer. `verified` needs no
+ * terminal label because it is not terminal: `runWriteRungs` hands the ticket to
+ * `reviewTransition` instead. `escaped` stays a release for a reason specific to it, not to the
+ * family it used to sit in: its own docstring says the commonest cause is an operator editing
+ * their own checkout mid-run, which is not a fact about the ticket at all, so labelling one would
+ * name the wrong culprit.
  *
- * `bailed` is §5's case: recon read the code and declined. `abandoned` with cause `judgement` is
- * the same statement one pass later. `SolveOutcome.kind === "failed"` is a third: `verify.ts` ran
- * the build/tests and they did not pass, which is a statement about the change, not about the
- * harness (`architecture/solve.md`'s outcome table). Treated as a release until SSX-3954: an
- * in-memory attempt count is the only thing that ever stopped the reclaim, and it forgets on
- * every restart, so the ticket outlived the process. This is deliberately not `!isFailureExit`:
- * that asks whether a usable answer came back, this asks whether the ticket's fate is decided —
- * they agree today but are different questions, and deriving one from the other would let an
- * exit-code change silently relabel tickets.
+ * Every other outcome now writes `agent:failed` — `bailed` (§5's case: recon read the code and
+ * declined) and bad diffs, but also every "no verdict reached" outcome (`refused`, `crashed`,
+ * `unusable-base`, `no-worktree`, an environment `abandoned`) that used to release just like this
+ * one. That used to be the more careful answer:
+ * `architecture/solve.md`'s outcome table argues at length that `refused` must never be *reported*
+ * as `failed`, because the ticket's own comment (`describeSolveOutcome`, `feedback.ts`) is what a
+ * human reads to find the actual cause, and flattening the prose there would blame a broken
+ * harness on a fix. That argument still holds and nothing here touches it — the comment for each
+ * outcome kind stays exactly as specific as before. What changed is the label's job: a ticket
+ * whose attempt ended without a pull request and without a plan to try again automatically must
+ * not look, on the board, identical to one nobody has tried — SSX-3954 sat in `unusable-base`
+ * (this harness's Maven toolchain against a repository's pinned Lombok version, reproduced and
+ * unrelated to the ticket) and was silently reclaimed every tick the in-memory attempt ledger had
+ * forgotten, across every restart, forever. `agent:failed` is now that stop sign for every one of
+ * them: a human reads the comment for the real reason, fixes it if there is anything to fix, and
+ * removes the label by hand — the same recovery path `bailed` already used.
  *
- * `refused` and `crashed` keep releasing since no verdict was reached at all — a re-run is not
- * repeating a known-bad answer, it is the first answer. `escaped` releases too — its commonest
- * cause is an operator editing their own checkout mid-run, which is not a fact about the ticket at
- * all.
+ * The cost is real and is named rather than hidden: `agent:failed` no longer means only "the
+ * change was bad" for triage's own calibration reading (`runSolver`'s comment: recon's
+ * `devLensAccurate` is the only feedback `agent:solvable` ever gets, and it is read against this
+ * label). A human auditing that calibration now has to open the ticket's comment to tell "the fix
+ * was wrong" from "the harness could not judge it" apart — the type-level distinction the rest of
+ * this module carries did not disappear, it just stopped being visible from the label alone.
+ *
+ * This is deliberately not `!isFailureExit`: that asks whether a usable answer came back, this
+ * asks whether the ticket's fate is decided — they still disagree on both of the exceptions above
+ * (`bailed` and a `judgement` abandon exit `0` and are labelled; `escaped` exits `1` and is not),
+ * so deriving one from the other would still let an exit-code change silently relabel tickets.
  */
 export function terminalLabelAfter(outcome: SolveOutcome): SolveOutcomeLabel | null {
-  if (outcome.kind === "bailed" || outcome.kind === "failed") {
-    return "failed";
-  }
-  return outcome.kind === "abandoned" && outcome.cause === "judgement" ? "failed" : null;
+  return outcome.kind === "verified" || outcome.kind === "escaped" ? null : "failed";
 }
 
 /**
