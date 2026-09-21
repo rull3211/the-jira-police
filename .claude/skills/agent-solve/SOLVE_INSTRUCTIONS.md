@@ -152,12 +152,16 @@ a different change — the brief is what the bound was calculated against.
    none does, the test is decorative and must be strengthened or its weakness put in
    `residualRisk`. Then do the same against the _original_ bug: a test that passes against
    unmodified code is not a regression test at all, and the harness runs that one for real.
-5. **Search for what else depends on what you changed.** `Grep` the repository for other callers
-   and tests of every function or method you edited — not only the files recon named. A test
-   elsewhere that encodes the behaviour you just correctly changed will fail in the harness's own
-   test run after you have already exited, with nobody left to read the failure. Fix what you find
-   if it belongs to this change; if fixing it would itself be a larger change than the ticket, say
-   so in `residualRisk`, by file and symbol, rather than leaving it for the harness to discover.
+5. **Search for what else depends on the behaviour you changed — the behaviour, not the name you
+   edited.** Ask first which **publicly observable** thing your change alters: a return value, a
+   flag an accessor exposes, a call that now does or does not happen. Then `Grep` the repository
+   for consumers of _that_, and for their tests, outside the files recon named. **If the member you
+   edited is private, grepping its own name is guaranteed to find nothing** — and worse than
+   nothing, since a substring match returns similarly-named neighbours that are not consumers at
+   all. A test elsewhere encoding the behaviour you just correctly changed fails in the harness's
+   run after you have exited, with nobody left to read it. Fix what you find if it belongs to this
+   change; if fixing it would itself be a larger change than the ticket, say so in `residualRisk`,
+   by file and symbol, rather than leaving it for the harness to discover.
 6. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
    you cannot justify that way, revert — and hold every comment in it against the rule below.
 7. **Write the commit subject and body.** §3.
@@ -173,6 +177,17 @@ Note the order of the two checks and that they are not the same check. Every ass
 went red against the original bug and only one went red against the plausible wrong fix — so
 "write it and watch it fail" would have been fully satisfied by a suite that was six-sevenths
 decoration. The harness can only run the weaker one for you. The stronger one is yours.
+
+**Step 5 is here because its own first wording was written for one ticket and then defeated by that
+same ticket.** SSX-3944 changed `CustomerDtoMerger.updateContactInfo` correctly and broke
+`CustomerCmHelperTest` — a test of a different class — on two separate runs. The first wording asked
+for a grep for callers of the method you edited. That method is `private`, so it has no callers
+outside its own file, and a substring grep for its name returned five files: not one was the
+consumer, and several were an unrelated `updateContactInformation`. What the change actually altered
+was the value the public `contactInfoWasUpdated()` reports, and a single grep for _that_ name reaches
+the consumer. Following the old wording perfectly would not have found the defect it was written
+for, which is why the step now asks what your change makes observable before it asks you to search
+for anything.
 
 ### Comments: the default is none
 
