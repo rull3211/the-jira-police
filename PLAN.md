@@ -143,7 +143,7 @@ per-field merge in `CustomerDtoMerger.updateContactInfo`, and removing `Customer
 auto-vivification (the `= new ContactInfoDto()` field initializer plus the defensive
 `getContactInfo()`) — and **both strand the same test**.
 `CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail` holds a Mockito stub for
-`customerHandler.updateCustomer(...)` that only the *buggy* behaviour ever exercised, so strict
+`customerHandler.updateCustomer(...)` that only the _buggy_ behaviour ever exercised, so strict
 stubbing raises `UnnecessaryStubbingException`. Every correct fix stops that call; every correct fix
 therefore breaks that test. No implementation avoids it, and that is the whole argument for a
 mechanism rather than a better prompt.
@@ -168,10 +168,10 @@ not argued.** It shipped on this branch and both halves of the result matter:
 
 **The repair round needs no new privilege — written down here wrong first, and corrected before any
 code, not after.** The first draft argued a repair pass needs `Bash` to run the test command. It does
-not: `verify.ts` already separates *running* a step from *reporting* it — `runner: CommandRunner`
+not: `verify.ts` already separates _running_ a step from _reporting_ it — `runner: CommandRunner`
 (`verify.ts:404-483`) is always the harness, never the model, and `StepResult.output`
 (`verify.ts:109-116`) already carries the tail of what a failing step said. A repair pass needs to
-*read* that, the same way the review round (`orchestrator.ts:1064-1187`) is handed a reviewer's
+_read_ that, the same way the review round (`orchestrator.ts:1064-1187`) is handed a reviewer's
 comment as `reviewFeedback` — not to invoke the command itself. Shape it on the review round:
 `FIX_ALLOWED_TOOLS` (`Write`, `Edit`, `Grep`, `Glob`, `Read`), same worktree, a bounded number of
 rounds, fed the failure as data, re-running the diff gate and `verify` — mechanically, by the
@@ -260,7 +260,7 @@ about its own hooks. The cheap variant compares process start time against the n
 `src/` and needs no daemon change, at the cost of being a heuristic.
 
 **What would make it the wrong idea.** A staleness warning that fires on every ordinary edit is one
-that gets ignored, and this repository's working copy *is* the running service's program text, so
+that gets ignored, and this repository's working copy _is_ the running service's program text, so
 divergence during development is the normal state rather than the exception. It should report, never
 refuse, and the wording has to survive being seen constantly.
 
@@ -281,7 +281,7 @@ and the run never started. The branch there carried no commits of its own — it
 contained in `origin/main` — so nothing would have been lost by treating it the way the worktree
 salvage already treats its branch.
 
-**What would make it the wrong idea.** A branch that *does* carry commits is somebody's unpushed
+**What would make it the wrong idea.** A branch that _does_ carry commits is somebody's unpushed
 work, and deleting it to make room is the one outcome worse than refusing. Any fix must establish
 that the branch adds nothing over its upstream before touching it, and refuse loudly when it does.
 

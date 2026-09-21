@@ -650,7 +650,10 @@ function renderVerificationFailure(
 ): string {
   const failing = verification.steps.filter((step) => !step.passed);
   const detail = failing
-    .map((step) => `## ${step.name}${step.timedOut ? " (timed out)" : ` (exit ${String(step.exitCode)})`}\n\n${step.output}`)
+    .map(
+      (step) =>
+        `## ${step.name}${step.timedOut ? " (timed out)" : ` (exit ${String(step.exitCode)})`}\n\n${step.output}`,
+    )
     .join("\n\n");
   return `${verification.reason}\n\n${detail}`;
 }
