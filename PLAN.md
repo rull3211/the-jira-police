@@ -151,22 +151,24 @@ saw, on a file the fix pass never looked at. The run ended `agent:failed`, on a 
   recon named. `SOLVE_INSTRUCTIONS.md` §2 gets an explicit step: before finishing, search the
   repository for other callers and tests of every changed symbol, and either fix what depends on
   the old behaviour or say in `residualRisk` what was found and left alone.
-- **The repair round reverses a documented boundary and needs its own phasing.** `Bash` is withheld
-  from every pass today via `SOLVE_DENIED_COMMON` (`runner.ts:42-44`), and the comment there says
-  why: denying it "is what makes 'the harness runs the verification' structural rather than a
-  convention." A repair pass needs the real test command and its real output, which means granting
-  a runner capability to exactly one new pass, nothing wider. Shape it on the existing **review
-  round** (`orchestrator.ts:1064-1187`): same worktree, a bounded number of rounds, fed
-  `VerificationResult.steps[].output` (already captured, already tail-bounded to 4000 chars —
-  `verify.ts:109-116`) as the "here is what broke" brief, re-running the diff gate and `verify`
-  after each attempt. Falls through to today's `agent:failed` path, unchanged, once the round cap
-  is hit or a round abandons.
+- **The repair round needs no new privilege at all — first written down here wrong, and corrected
+  before any code, not after.** The first draft of this entry argued a repair pass needs `Bash` to
+  run the real test command. It does not: `verify.ts` already separates *running* a step from
+  *reporting* it — `runner: CommandRunner` (`verify.ts:404-483`) is always the harness, never the
+  model, and `StepResult.output` (`verify.ts:109-116`) already carries the tail of what a failing
+  step said, tail-bounded to 4000 characters. A repair pass needs to *read* that, the same way the
+  **review round** (`orchestrator.ts:1064-1187`) is hand a reviewer's comment as `reviewFeedback` —
+  not to invoke the command itself. Shape it exactly on the review round: `FIX_ALLOWED_TOOLS`
+  (`Write`, `Edit`, `Grep`, `Glob`, `Read`), same worktree, a bounded number of rounds, fed
+  `VerificationResult.steps[].output` as data, re-running the diff gate and `verify` — mechanically,
+  by the harness, as always — after each attempt. `SOLVE_DENIED_COMMON`'s denial of `Bash`
+  (`runner.ts:42-44`) is untouched by this feature; nothing here argues for lifting it.
 
-**Phasing the privilege** (`STARTING.md`, "Phase a privilege, and drive it by hand first"): built
-but inert first — the pass exists, wired to nothing, so the refusal to run it is structural, not
-promised; a dry run that writes its attempt to the worktree without trusting it; one named ticket
-behind a flag that must be typed; the loop only after the first three have been watched on
-something real.
+**Phasing, since this is still a new pass with its own privilege even without `Bash`** (`STARTING.md`,
+"Phase a privilege, and drive it by hand first"): built but inert first — the pass exists, wired to
+nothing, so the refusal to run it is structural, not promised; a dry run that writes its attempt to
+the worktree without trusting it; one named ticket behind a flag that must be typed; the loop only
+after the first three have been watched on something real.
 
 **What would make either half the wrong idea.** The blast-radius search can find a true positive
 that is itself a larger change than the ticket — updating a consumer might be its own ticket. The
