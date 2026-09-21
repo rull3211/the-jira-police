@@ -118,7 +118,7 @@ re-derive by hand, plus `parseSimplify` no longer crashing the run over a self-r
 nothing downstream reads (SSX-3944) — opened and closed inside the branch that built it, stacked on
 top of §43's, since both came out of the same session and §44's doc updates touch lines §43's
 already moved.
-The triage-selection entries are now all closed, so the next entry is §46.
+The triage-selection entries are now all closed, so the next entry is §48.
 
 <!-- refs:on -->
 
@@ -137,32 +137,46 @@ The triage-selection entries are now all closed, so the next entry is §46.
    changed, so a stale test written against the old behaviour survives to verification
    indistinguishable, from the pipeline's point of view, from a real regression.
 
-**Why they compound.** SSX-3944: `CustomerDtoMerger.updateContactInfo` was correctly changed from
-whole-object equality replacement to a per-field merge — the right fix, confirmed by hand. A
-different file, not in `plannedFiles`, `CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail`
-had an unused Mockito stub that only the old, buggy behaviour ever exercised, and Mockito's strict
-stubbing turned that into `UnnecessaryStubbingException` — real Maven output the fix pass never
-saw, on a file the fix pass never looked at. The run ended `agent:failed`, on a correct fix.
+**Why they compound, and why the second gap is not closable by instruction alone.** SSX-3944 was run
+six times on 2026-09-21. Two genuinely different and genuinely correct fixes were produced — a
+per-field merge in `CustomerDtoMerger.updateContactInfo`, and removing `CustomerDto`'s
+auto-vivification (the `= new ContactInfoDto()` field initializer plus the defensive
+`getContactInfo()`) — and **both strand the same test**.
+`CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail` holds a Mockito stub for
+`customerHandler.updateCustomer(...)` that only the *buggy* behaviour ever exercised, so strict
+stubbing raises `UnnecessaryStubbingException`. Every correct fix stops that call; every correct fix
+therefore breaks that test. No implementation avoids it, and that is the whole argument for a
+mechanism rather than a better prompt.
 
-**Two different shapes of fix, not one.**
+**What the blast-radius instruction can and cannot do — measured on the ticket it was written for,
+not argued.** It shipped on this branch and both halves of the result matter:
 
-- **The blast-radius search is an instruction change, not a privilege grant.** The fix pass already
-  holds `Grep` and `Glob` (`runner.ts:75`); nothing tells it to point them at anything but the files
-  recon named. `SOLVE_INSTRUCTIONS.md` §2 gets an explicit step: before finishing, search the
-  repository for other callers and tests of every changed symbol, and either fix what depends on
-  the old behaviour or say in `residualRisk` what was found and left alone.
-- **The repair round needs no new privilege at all — first written down here wrong, and corrected
-  before any code, not after.** The first draft of this entry argued a repair pass needs `Bash` to
-  run the real test command. It does not: `verify.ts` already separates *running* a step from
-  *reporting* it — `runner: CommandRunner` (`verify.ts:404-483`) is always the harness, never the
-  model, and `StepResult.output` (`verify.ts:109-116`) already carries the tail of what a failing
-  step said, tail-bounded to 4000 characters. A repair pass needs to *read* that, the same way the
-  **review round** (`orchestrator.ts:1064-1187`) is hand a reviewer's comment as `reviewFeedback` —
-  not to invoke the command itself. Shape it exactly on the review round: `FIX_ALLOWED_TOOLS`
-  (`Write`, `Edit`, `Grep`, `Glob`, `Read`), same worktree, a bounded number of rounds, fed
-  `VerificationResult.steps[].output` as data, re-running the diff gate and `verify` — mechanically,
-  by the harness, as always — after each attempt. `SOLVE_DENIED_COMMON`'s denial of `Bash`
-  (`runner.ts:42-44`) is untouched by this feature; nothing here argues for lifting it.
+- **It works when the changed member is public.** The `CustomerDto` run found
+  `CustomerDtoTest.getContactInfoNeverReturnsNullEvenWhenBackingFieldIsNull` — a test in a different
+  package whose only purpose was asserting the behaviour being removed — and correctly inverted it.
+  `getContactInfo()` is public, so grepping its name reaches its consumers.
+- **It cannot reach `CustomerCmHelperTest`, and no rewording changes that.** The dependency runs
+  `CustomerDto.getContactInfo()` → `updateContactInfo` (**private**) → `contactInfoUpdate`
+  (**private field**) → `contactInfoWasUpdated()` → `CustomerCmHelper.updateOrCreateCustomer` →
+  `customerHandler.updateCustomer` → an unused stub, in a test naming none of them. Five hops,
+  through private members, across three classes. A grep-based instruction is blind to it by
+  construction. Its first wording was worse still — it asked for callers of the edited method, which
+  for a private one returns only substring false positives — and that correction lives in
+  `SOLVE_INSTRUCTIONS.md` §2's own explanation of step 5, which is where a lesson about a rule goes.
+
+**So the instruction half is done and the mechanism half is the open work.**
+
+**The repair round needs no new privilege — written down here wrong first, and corrected before any
+code, not after.** The first draft argued a repair pass needs `Bash` to run the test command. It does
+not: `verify.ts` already separates *running* a step from *reporting* it — `runner: CommandRunner`
+(`verify.ts:404-483`) is always the harness, never the model, and `StepResult.output`
+(`verify.ts:109-116`) already carries the tail of what a failing step said. A repair pass needs to
+*read* that, the same way the review round (`orchestrator.ts:1064-1187`) is handed a reviewer's
+comment as `reviewFeedback` — not to invoke the command itself. Shape it on the review round:
+`FIX_ALLOWED_TOOLS` (`Write`, `Edit`, `Grep`, `Glob`, `Read`), same worktree, a bounded number of
+rounds, fed the failure as data, re-running the diff gate and `verify` — mechanically, by the
+harness, as always — after each attempt. `SOLVE_DENIED_COMMON`'s denial of `Bash` (`runner.ts:42-44`)
+is untouched; nothing here argues for lifting it.
 
 **Phasing, since this is still a new pass with its own privilege even without `Bash`** (`STARTING.md`,
 "Phase a privilege, and drive it by hand first"): built but inert first — the pass exists, wired to
@@ -180,17 +194,96 @@ function is exported for its tests alone, so it must be called from inside `runP
 worktree, so a write into another checkout would be invisible to both. Whoever builds the dry run
 owns keeping that true, since an exported function is reachable from anywhere.
 
+**Three things phase two must settle, each found by measuring rather than reasoning, and none of
+them obvious from the code.**
+
+1. **Feed it the structured reports, not only the 4000-character tail.** Measured on the real run:
+   `mvn test` emitted **6,981,557 bytes** and `tail` (`verify.ts:138-148`) keeps the last 4000 —
+   0.06%. The failing test's name does survive that window, but only just: it sits immediately above
+   the summary, and the final 1200 characters are pure boilerplate (`BUILD FAILURE`, timings, Help
+   links). Two or three failing tests would push the earlier names out entirely. Maven's own output
+   names the better source — `target/surefire-reports`, written into the worktree, where the pass
+   already holds `Read`, `Grep` and `Glob`. Pointing it there costs no privilege and removes the cap
+   as a concern; keep the tail as the toolchain-agnostic fallback for repositories that write no
+   reports.
+
+2. **The mechanical anti-cheating bound this entry used to propose is wrong, and the motivating case
+   is what disproves it.** The rule considered was: _a repair round touching a test file must also
+   touch the non-test file the failure traces to._ On SSX-3944 the production fix is already correct
+   and the only correct repair touches **a test file alone** — so that bound rejects the repair we
+   want and leaves the pass choosing between doing nothing and damaging working code to satisfy it.
+   A workable bound must separate "this test encoded the behaviour the ticket asked us to change"
+   from "this test caught a real regression", and nothing here knows how to check that
+   mechanically. Until something does, that is a reason to keep the pass behind a typed flag and out
+   of the loop — not a reason to ship the bound.
+
+3. **Green is not the goal, and on this case green is reachable dishonestly.** Deleting the unused
+   stub makes the build pass and leaves `testThatUpdateContactsInCMHandlesNoEmail` vacuous: under any
+   correct fix `updateContactsInCM` is never reached, so its `assertNull(…getEmail())` passes against
+   the object set up three lines above it. The honest repair asks what that test should assert now
+   that its premise is gone. A pass measured by an exit code will not ask, and `checkFailFirst` looks
+   only at the tests the run itself wrote, so nothing downstream would notice.
+
 **What would make either half the wrong idea.** The blast-radius search can find a true positive
 that is itself a larger change than the ticket — updating a consumer might be its own ticket. The
 pass needs a "found it, did not touch it, said why" outcome, not a mandate to always fix what it
 finds, or it re-derives §33's still-open scope-widening problem inside a different pass. The repair
 round's risk runs the other way: handing a pass the actual red output is also handing it the
-easiest way to make it green — weaken or delete the failing assertion rather than fix the code.
-`SOLVE_INSTRUCTIONS.md` §2 step 4 already names this shape of failure for the fix pass itself; a
-pass built to stare at red output and told to make it pass is the one most likely to reach for
-exactly that shortcut, and the bound has to be mechanical — the diff gate already sees every test
-file a round touches, so a rule that a repair round touching a test file must also touch the
-non-test file the failure traces to is checkable, unlike a prompt asking it not to.
+cheapest way to make it green — weaken or delete the failing assertion rather than fix the code.
+`SOLVE_INSTRUCTIONS.md` §2 step 4 already names this shape for the fix pass itself, and a pass built
+to stare at red output and told to make it pass is the one most likely to reach for it. Point 2
+above is why that bound is still unsolved rather than merely unwritten.
+
+### 46. Nothing can say which code a running daemon is executing
+
+**Branch:** none yet.
+
+**What is not built.** Any way to ask what a live daemon is actually running. `pnpm daemon:status`
+matches processes on their command text (`node … src/index.ts`) and reports a count; it cannot say
+which checkout a process was started from, nor which commit that checkout was on at the time.
+
+**Why it is owed, with the cost already paid.** Node loads `src/index.ts` and its imports once, at
+process start. Every commit, merge and branch switch afterwards changes the tree and not the running
+process. The skill root is the exception, and it makes the situation worse rather than better:
+`prepareSkillRoot` re-copies `.claude/skills/agent-solve/` from the tree on **every pass**, so a
+long-lived daemon runs old TypeScript against new markdown — two halves from different commits inside
+a single run. On 2026-09-21 a daemon started before PR #64 merged kept raising the `parseSimplify`
+contradiction that #64 had already removed. `daemon:status`'s own message — "a branch switch changes
+what the next tick runs" — is true only of the markdown, and it sent that session to the wrong
+diagnosis twice before the error string was grepped for in the tree and found not to be there.
+
+**The shape of the fix.** Record the HEAD sha and the checkout path when the daemon starts —
+`state/` is the precedent — and have `daemon:status` compare both against the current tree: _running
+code from `77ff859` in `/…/the-jira-police`, tree is at `6272103`, four commits behind; restart to
+pick them up._ That is a check rather than a reminder, which is the distinction `CLAUDE.md` draws
+about its own hooks. The cheap variant compares process start time against the newest mtime under
+`src/` and needs no daemon change, at the cost of being a heuristic.
+
+**What would make it the wrong idea.** A staleness warning that fires on every ordinary edit is one
+that gets ignored, and this repository's working copy *is* the running service's program text, so
+divergence during development is the normal state rather than the exception. It should report, never
+refuse, and the wording has to survive being seen constantly.
+
+### 47. `createWorktree` salvages a colliding worktree but not a colliding branch
+
+**Branch:** none yet.
+
+**What is not built.** Any handling for the case where the branch a solve wants already exists and
+its worktree does not. The reverse is handled: a worktree at the target path is detached, moved to a
+`-salvaged-<timestamp>` sibling and its branch deleted, so that collision heals itself. With no
+worktree there is nothing to salvage, and `git worktree add -b` fails outright — `exit 255: a branch
+named 'fix/ssx-3944-…' already exists`.
+
+**Why it is owed.** That state is precisely what hand-cleanup leaves behind, because removing a
+worktree is the obvious half and deleting its branch is not. Observed on SSX-3944, 2026-09-21:
+removing both worktrees while leaving the branch turned a self-healing situation into a hard refusal
+and the run never started. The branch there carried no commits of its own — its tip was already
+contained in `origin/main` — so nothing would have been lost by treating it the way the worktree
+salvage already treats its branch.
+
+**What would make it the wrong idea.** A branch that *does* carry commits is somebody's unpushed
+work, and deleting it to make room is the one outcome worse than refusing. Any fix must establish
+that the branch adds nothing over its upstream before touching it, and refuse loudly when it does.
 
 ### 1. Which model runs which task, and nothing chooses today
 
