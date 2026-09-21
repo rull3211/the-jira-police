@@ -791,7 +791,7 @@ describe("terminalLabelAfter", () => {
     "abandoned:environment": null,
     refused: null,
     escaped: null,
-    failed: null,
+    failed: "failed",
     crashed: null,
     "unusable-base": null,
     verified: null,
@@ -832,6 +832,21 @@ describe("terminalLabelAfter", () => {
         worktree,
         recon: {} as never,
         cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
+      }),
+    ).toBe("failed");
+  });
+
+  it("labels a deterministic build failure, so the daemon stops reclaiming it every restart (SSX-3954)", () => {
+    // verify.ts only reaches `kind: "failed"` after the build/tests actually ran and did not
+    // pass — a fact about the change, not the harness — so releasing it back to `agent:solvable`
+    // bought nothing but a reclaim on every tick the in-memory attempt ledger forgot on restart.
+    expect(
+      terminalLabelAfter({
+        kind: "failed",
+        reason: "2 tests failed",
+        verification: {} as never,
+        devLens: lens,
+        worktree,
       }),
     ).toBe("failed");
   });

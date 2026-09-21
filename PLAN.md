@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2811 tests in 92
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2812 tests in 92
 > files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37 and §40, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §36, §37 and §40, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -83,7 +83,12 @@ unsubscribe, deleted without shipping when the operator deferred it, and the dec
 parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
 written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
 inside the branch that built it, and §32 was the untagged thread reply that let the service argue
-with itself on PR #548 — same shape, opened and deleted inside its own branch. §4 was recon reading
+with itself on PR #548 — same shape, opened and deleted inside its own branch. §7 was the
+transient/deterministic split: `terminalLabelAfter` (`src/cli/solve-outcome.ts`) now routes a
+deterministic verification failure to `agent:failed` the same way it already did a bail, closing the
+reclaim loop `MAX_SOLVE_ATTEMPTS_PER_TICKET` could only slow, not stop — the third instance of the
+shape recorded in that function's own docstring, opened and deleted inside the branch that built it.
+§4 was recon reading
 staged images and §22 the age-based sweep its own last phase deferred; both shipped once that phase
 built `sweep-once` and `staging-sweep.ts`, walking the skill-root and image-staging parents alike
 rather than leaving the sweep narrowed to the one §22 was opened for. §36 was `branch-stack.sh`
@@ -221,16 +226,6 @@ denial-bearing fields are gated on the call not executing.
 **What is still owed is a consumer**, and `sessionDenials` at `triage/session.ts:357` currently has
 none. A fix pass that abandons for `judgement` while the harness watched its `Write` be vetoed is
 reporting `environment`, whatever it says, and wiring that means widening `PassRunner.run`.
-
-### 7. A transient/deterministic split, and the half of the attempt count that did not ship
-
-`refused` and `failed` still release, so a ticket whose diff the harness would not judge can be
-spent on repeatedly. The **ledger shipped** — `AttemptLedger` and `MAX_SOLVE_ATTEMPTS_PER_TICKET`
-bound it per ticket, in memory, which is the right trade because losing the poll cursor causes a
-double claim and losing this causes one extra attempt. **The split did not.** A solve that fails
-deterministically should stop being attempted, not be attempted more slowly, and nothing yet tells
-the two apart. This is also the only answer to D4e's stacking problem, where a re-claimed ticket is
-re-commented nightly.
 
 ### 8. Four findings from the SSX-3834 run, three of them still open
 

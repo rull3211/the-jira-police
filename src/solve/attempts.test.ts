@@ -4,9 +4,10 @@ import { createAttemptLedger } from "./attempts.ts";
 
 describe("what stops the daemon claiming the same ticket forever", () => {
   it("offers a ticket the operator's number of times and no more", () => {
-    // Without this bound, a refused/failed/abandoned run releases every label it
+    // Without this bound, a refused/crashed/environment-abandoned run releases every label it
     // found (including `agent:start`) and the queue offers the ticket again next
-    // tick, with nothing to ever stop it.
+    // tick, with nothing to ever stop it. A deterministic build failure needs no bound: it
+    // labels `agent:failed` on its own (`terminalLabelAfter`).
     const ledger = createAttemptLedger(3);
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
