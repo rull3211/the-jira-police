@@ -150,9 +150,15 @@ a different change — the brief is what the bound was calculated against.
    none does, the test is decorative and must be strengthened or its weakness put in
    `residualRisk`. Then do the same against the _original_ bug: a test that passes against
    unmodified code is not a regression test at all, and the harness runs that one for real.
-5. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
+5. **Search for what else depends on what you changed.** `Grep` the repository for other callers
+   and tests of every function or method you edited — not only the files recon named. A test
+   elsewhere that encodes the behaviour you just correctly changed will fail in the harness's own
+   test run after you have already exited, with nobody left to read the failure. Fix what you find
+   if it belongs to this change; if fixing it would itself be a larger change than the ticket, say
+   so in `residualRisk`, by file and symbol, rather than leaving it for the harness to discover.
+6. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
    you cannot justify that way, revert — and hold every comment in it against the rule below.
-6. **Write the commit subject and body.** §3.
+7. **Write the commit subject and body.** §3.
 
 Step 4 is here because of two shipped defects, and neither was caught by anything else. On PR
 #1413 a timezone regression test compared against `ZoneId.systemDefault()`, so it separated the
