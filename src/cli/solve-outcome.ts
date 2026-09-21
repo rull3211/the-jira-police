@@ -45,23 +45,28 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
  * The label a finished solve leaves behind, or `null` to release the ticket.
  *
  * `null` means put the ticket back exactly as found — the right answer for outcomes that say
- * nothing about the ticket (crashed, unusable base, environment got in the way). `failed` was
- * built, tested and unreachable until this function: a bailed ticket restored byte-for-byte was
- * indistinguishable from one nobody had tried, so auto mode re-claimed it every tick forever
- * (SSX-3831, 2026-09-05).
+ * nothing about the ticket (crashed, unusable base, environment got in the way, no verdict
+ * reached). `failed` was built, tested and unreachable until this function: a bailed ticket
+ * restored byte-for-byte was indistinguishable from one nobody had tried, so auto mode re-claimed
+ * it every tick forever (SSX-3831, 2026-09-05).
  *
  * `bailed` is §5's case: recon read the code and declined. `abandoned` with cause `judgement` is
- * the same statement one pass later. This is deliberately not `!isFailureExit`: that asks
- * whether a usable answer came back, this asks whether the ticket's fate is decided — they agree
- * today but are different questions, and deriving one from the other would let an exit-code
- * change silently relabel tickets.
+ * the same statement one pass later. `SolveOutcome.kind === "failed"` is a third: `verify.ts` ran
+ * the build/tests and they did not pass, which is a statement about the change, not about the
+ * harness (`architecture/solve.md`'s outcome table). Treated as a release until SSX-3954: an
+ * in-memory attempt count is the only thing that ever stopped the reclaim, and it forgets on
+ * every restart, so the ticket outlived the process. This is deliberately not `!isFailureExit`:
+ * that asks whether a usable answer came back, this asks whether the ticket's fate is decided —
+ * they agree today but are different questions, and deriving one from the other would let an
+ * exit-code change silently relabel tickets.
  *
- * `refused` and `failed` keep releasing since a re-run may succeed. `escaped` releases too — its
- * commonest cause is an operator editing their own checkout mid-run, which is not a fact about
- * the ticket at all.
+ * `refused` and `crashed` keep releasing since no verdict was reached at all — a re-run is not
+ * repeating a known-bad answer, it is the first answer. `escaped` releases too — its commonest
+ * cause is an operator editing their own checkout mid-run, which is not a fact about the ticket at
+ * all.
  */
 export function terminalLabelAfter(outcome: SolveOutcome): SolveOutcomeLabel | null {
-  if (outcome.kind === "bailed") {
+  if (outcome.kind === "bailed" || outcome.kind === "failed") {
     return "failed";
   }
   return outcome.kind === "abandoned" && outcome.cause === "judgement" ? "failed" : null;

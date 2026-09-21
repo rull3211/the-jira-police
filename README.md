@@ -86,6 +86,7 @@ flowchart TD
     RECON -->|proceeds| WRITE
     WRITE --> CHECK
     CHECK -->|refused| RELEASED([claim released · reason posted])
+    CHECK -->|failed| FAILED
     CHECK -->|passed| PUBLISH
     PUBLISH --> SYNC
     SYNC -->|"clean, or already current"| INBOX
