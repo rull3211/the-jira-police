@@ -170,6 +170,16 @@ nothing, so the refusal to run it is structural, not promised; a dry run that wr
 the worktree without trusting it; one named ticket behind a flag that must be typed; the loop only
 after the first three have been watched on something real.
 
+**Phase one is built and reviewed; phases two through four are what this entry is now for.**
+`runRepairRound` exists, is tested, and is called by nothing — `runPipeline`'s `failed` branch still
+routes straight to `agent:failed`, unchanged. Two things the review changed rather than the build:
+the `failed` outcome carries the round's report, because without it a pass that never helps and a
+pass that never runs produce identical outcomes and no measurement can separate them; and the
+function is exported for its tests alone, so it must be called from inside `runPipeline` — outside
+`solveTicket`'s `try` a write pass has no write-escape guard, and `diff-gate.ts` reads only the
+worktree, so a write into another checkout would be invisible to both. Whoever builds the dry run
+owns keeping that true, since an exported function is reachable from anywhere.
+
 **What would make either half the wrong idea.** The blast-radius search can find a true positive
 that is itself a larger change than the ticket — updating a consumer might be its own ticket. The
 pass needs a "found it, did not touch it, said why" outcome, not a mandate to always fix what it
