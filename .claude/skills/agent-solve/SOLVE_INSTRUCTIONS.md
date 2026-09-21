@@ -503,7 +503,9 @@ Conventional Commits, per the vault's `git-conventions.md`. Mechanically checked
 so a malformed one discards the run.
 
 - `<type>(<scope>): <subject>` — type from `fix|feat|chore|docs|test|refactor|perf|style|build|ci`
-- subject in the imperative, lower case, no trailing full stop, under 72 characters
+- subject in the imperative, lower case, no trailing full stop, under 72 characters. Over that, the
+  harness trims at the last word boundary rather than discarding the run, so lead with the point
+  instead of trailing it — a subject whose meaning lives in its last few words loses it
 - the body explains **why**, not what — the diff shows what
 - **one or two sentences, no more.** Write what a person writes. The harness keeps the first two
   sentences and drops the rest, so lead with the reason; anything longer belongs in `summary` and

@@ -667,9 +667,30 @@ describe("parseFix", () => {
     }
   });
 
-  it("rejects an over-long subject", () => {
+  it("trims an over-long subject at a word boundary instead of discarding the run", () => {
+    // Same split `composeCommitMessage` already makes for the body: wording is judgement, length is arithmetic.
+    const subject =
+      "fix(customer): stop an empty contact-info patch from wiping the stored contact details";
+
+    const report = parseFix(fix({ commitSubject: subject }), "SSX-3822");
+
+    expect(report.commitSubject).toBe(
+      "fix(customer): stop an empty contact-info patch from wiping the stored",
+    );
+    expect(report.commitSubject.length).toBeLessThanOrEqual(72);
+    expect(COMMIT_SUBJECT.test(report.commitSubject)).toBe(true);
+  });
+
+  it("leaves a subject already inside the cap exactly as written", () => {
+    const subject = "fix(customer): stop an empty patch wiping stored contact info";
+
+    expect(parseFix(fix({ commitSubject: subject }), "SSX-3822").commitSubject).toBe(subject);
+  });
+
+  it("refuses an over-long subject no word boundary can rescue", () => {
+    // One token past the cap: every cut lands mid-word, so trimming would mangle rather than shorten.
     expect(() => parseFix(fix({ commitSubject: `fix: ${"x".repeat(80)}` }), "SSX-3822")).toThrow(
-      /over 72/u,
+      /no word boundary under 72/u,
     );
   });
 

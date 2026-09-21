@@ -661,23 +661,46 @@ export function parseFix(value: unknown, issueKey: string): FixReport {
       `${issueKey}: testAdded and testOmittedReason disagree — exactly one of "a test was added" and "here is why not" must hold`,
     );
   }
-  assertCommitSubject(report.commitSubject, issueKey);
-  return report;
+  return { ...report, commitSubject: normaliseCommitSubject(report.commitSubject, issueKey) };
 }
 
-/** The commit-subject rules, factored out since the review pass has them too — two copies would be two things to keep in step. */
-function assertCommitSubject(subject: string, issueKey: string): void {
-  if (subject.length > MAX_SUBJECT) {
-    throw new SolveParseError(
-      `${issueKey}: commit subject is ${String(subject.length)} characters, over ${String(MAX_SUBJECT)}`,
-    );
-  }
+/**
+ * The commit-subject rules, factored out since the review pass has them too — two copies would be two things to keep in step.
+ *
+ * Over-length is trimmed rather than refused, the same split `composeCommitMessage` already makes
+ * for the body: the wording is the model's judgement, the length is arithmetic, and discarding a
+ * paid recon and fix over the arithmetic protects nothing downstream. SSX-3944 died at 85
+ * characters with a correct fix already in the worktree. Everything that is not counting still
+ * throws — a subject that is not Conventional Commits is wrong in a way no trim repairs.
+ */
+function normaliseCommitSubject(subject: string, issueKey: string): string {
   if (!COMMIT_SUBJECT.test(subject)) {
     throw new SolveParseError(
       `${issueKey}: commit subject ${JSON.stringify(subject)} is not Conventional Commits`,
     );
   }
-  assertDescribes(subject, issueKey);
+  const trimmed = trimSubjectToCap(subject);
+  if (trimmed.length > MAX_SUBJECT || !COMMIT_SUBJECT.test(trimmed)) {
+    throw new SolveParseError(
+      `${issueKey}: commit subject is ${String(subject.length)} characters and no word boundary under ${String(MAX_SUBJECT)} leaves a usable subject`,
+    );
+  }
+  assertDescribes(trimmed, issueKey);
+  return trimmed;
+}
+
+/** Cuts at the last word boundary inside the cap, then strips what the cut can strand — `COMMIT_SUBJECT` refuses a trailing period or space. */
+function trimSubjectToCap(subject: string): string {
+  if (subject.length <= MAX_SUBJECT) {
+    return subject;
+  }
+  const window = subject.slice(0, MAX_SUBJECT + 1);
+  const lastSpace = window.lastIndexOf(" ");
+  if (lastSpace <= 0) {
+    // A single token longer than the cap: every cut lands mid-word, so hand it back over-length and let the caller refuse rather than mangle it.
+    return subject;
+  }
+  return window.slice(0, lastSpace).replace(/[\s,;:—–-]+$/u, "");
 }
 
 function assertDescribes(subject: string, issueKey: string): void {
@@ -951,6 +974,5 @@ export function parseReview(value: unknown, issueKey: string): ReviewReport {
   if (report.filesTouched.length === 0) {
     throw new SolveParseError(`${issueKey}: review round reported a change but named no files`);
   }
-  assertCommitSubject(report.commitSubject, issueKey);
-  return report;
+  return { ...report, commitSubject: normaliseCommitSubject(report.commitSubject, issueKey) };
 }
