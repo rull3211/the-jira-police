@@ -87,8 +87,9 @@ with itself on PR #548 — same shape, opened and deleted inside its own branch.
 transient/deterministic split: `terminalLabelAfter` (`src/cli/solve-outcome.ts`) now routes a
 deterministic verification failure to `agent:failed` the same way it already did a bail, closing the
 reclaim loop `MAX_SOLVE_ATTEMPTS_PER_TICKET` could only slow, not stop — the third instance of the
-shape recorded in that function's own docstring, opened and deleted inside the branch that built it.
-§4 was recon reading
+shape recorded in that function's own docstring. Opened in an earlier session (`7e99804`) and
+closed here, on a real ticket looping live (SSX-3954), rather than opened and shipped in one branch
+like its neighbours above. §4 was recon reading
 staged images and §22 the age-based sweep its own last phase deferred; both shipped once that phase
 built `sweep-once` and `staging-sweep.ts`, walking the skill-root and image-staging parents alike
 rather than leaving the sweep narrowed to the one §22 was opened for. §36 was `branch-stack.sh`
