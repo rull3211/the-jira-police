@@ -124,9 +124,9 @@ The triage-selection entries are now all closed, so the next entry is §49.
 
 ### 45. Nothing has ever watched the repair pass work, so nothing may act on what it says
 
-**Branch:** none yet. Phase one (the blast-radius instruction, the inert pass) shipped on
-`feat/verify-repair-and-blast-radius`; phase two (the untrusted dry run) on `feat/repair-dry-run`.
-Phases three and four are unclaimed.
+**Branch:** none yet. Phase one (the blast-radius instruction, the inert pass) shipped in #67 and
+phase two (the untrusted dry run) in #68 — named by pull request rather than by branch, since both
+branches are deleted on merge. Phases three and four are unclaimed.
 
 **What is not built.** Any path by which a repair round's verdict changes what happens to a ticket.
 The round runs on every failed verification unless `REPAIR_ROUND=false`, and `runPipeline` discards
@@ -146,9 +146,16 @@ so nothing downstream notices either.
 
 **The first real round took the honest path, and that is one data point, not a licence.** On
 2026-09-22 it restored the test's premise explicitly rather than deleting the stub
-(`architecture/solve.md` §15). What that establishes is that the honest repair is reachable — not
-that it is what the pass does under pressure, and the run was on the ticket this pass was designed
-around. Phases three and four need diffs from tickets nobody had this pass in mind for.
+(`architecture/solve.md` §15 has the run and its cost). What that establishes is that the honest
+repair is _reachable_ — not that it is what the pass does under pressure, and the run was on the
+ticket this pass was designed around.
+
+**So the bar for starting phase three is evidence, not a decision.** Enough `repairOutcome` records
+to see a distribution rather than an anecdote, from tickets nobody had this pass in mind for,
+including at least one where the cheap repair is more tempting than the honest one — and every
+`verified` among them read as a diff, since that verdict is the one the exit code cannot audit. A
+phase three begun before that is the loop argument arriving one rung early: it would not be adding
+a capability, it would be removing the only reader the capability has.
 
 **The obvious mechanical bound is disproved, so do not reach for it on the way to phase three.** The
 rule considered was: _a repair round touching a test file must also touch the non-test file the
@@ -400,21 +407,12 @@ environment cannot answer a question about CI's.**
 
 ### 10. Still unobserved
 
-- **The repair round has been watched once, which is not enough to conclude anything about it.**
-  The `repairOutcome` distribution this phase exists to collect holds a single entry —
-  `verified`, on SSX-3944, and honest on inspection (`architecture/solve.md` §15). One run cannot
-  separate "this pass is sound" from "this ticket suited it", and the case it was measured on is
-  the one the pass was designed against, which is the weakest possible evidence. **What would show
-  more:** the same command on tickets nobody had this pass in mind for, and at least one where the
-  cheap dishonest repair is more tempting than the honest one.
-
-  **Re-driving a ticket takes two deliberate label edits, and the first draft of this entry did not
-  say so** — the hand-over-the-command rule failing exactly as `PROVING.md` warns, since a person
-  handed a command that refuses is a person who does not run it. `eligibility` gates the claim on
-  three things and a re-run trips the last two: `agent:solvable` must be present, `agent:start`
-  must be present under `SOLVE_MODE=manual`, and none of `SOLVE_QUEUE_EXCLUDED_LABELS` may be —
-  which includes the `agent:failed` the previous attempt wrote. Both refusals are free: they read
-  the board immediately before the write, and spend nothing when they fire.
+- **The repair round has been watched once and needs more before anything may act on it.** One
+  `repairOutcome`, `verified`, honest on inspection (`architecture/solve.md` §15) — on the ticket
+  the pass was designed against, which is the weakest evidence there is. §45 holds what phase three
+  needs before it can start. Re-driving a ticket the solver has already tried means adding
+  `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says so on
+  the way out.
 
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
