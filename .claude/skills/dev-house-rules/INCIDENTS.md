@@ -1614,36 +1614,86 @@ show whether the shape recurs, and 2026-09-18.
 
 ### The guard that judged a branch nobody was writing to
 
-`branch-guard.sh` enforces the first of the two non-advisory rules, and in a worktree it enforces it
-against the wrong checkout. `repo="${CLAUDE_PROJECT_DIR:-$PWD}"` (`:17`) is resolved to a branch once
-(`:34`), and the protected-branch refusal at `:302` tests that one name. Nothing in the script reads
-`tool_input.file_path`, so **which file is being written is not an input to the decision** — only
-which branch the project directory happens to be standing on.
+`branch-guard.sh` enforces the first of the three non-advisory rules, and in a worktree it enforced
+it against the wrong checkout. `repo="${CLAUDE_PROJECT_DIR:-$PWD}"` was resolved to a branch once and
+the protected-branch refusal tested that one name; nothing in the script read `tool_input.file_path`,
+so **which file was being written was not an input to the decision** — only which branch the project
+directory happened to be standing on.
 
 Probed with the same `Write` payload twice, differing only in `CLAUDE_PROJECT_DIR`: pointed at a
 worktree checked out on `main`, the guard denied; pointed at a feature worktree while the payload
 still named a file inside that `main` worktree, it allowed. The push and `gh pr merge` refusals are
 unaffected — both match command text, so they do not depend on where HEAD is.
 
-`:127` shows the inverse was already considered and accepted: `git -C /some/other/repo commit`
-refused while HEAD here is protected, an over-refusal in the safe direction. The under-refusal is
-the same blindness read the other way round, and `pnpm test:hooks` cannot see it — the suite feeds a
-payload and checks what the script emits for a given HEAD, which is the very thing that is being
-resolved from the wrong place.
+The script's own header already recorded the inverse as considered and accepted: `git -C
+/some/other/repo commit` refused while HEAD here is protected, an over-refusal in the safe
+direction. The under-refusal was the same blindness read the other way round, and `pnpm test:hooks`
+could not see it — every case fed a payload and checked what the script emitted for a given HEAD,
+which was the very thing being resolved from the wrong place.
 
 **Found by** a different hook getting it visibly wrong first: `commit-brief.sh` announced a commit
 on `fix/section-scoped-resolver` while the commit was being made on `feat/daemon-log-tui` in another
-worktree. `commit-brief.sh:44`, `branch-stack.sh:22` and `branch-guard.sh:17` are the same line, so
+worktree. `commit-brief.sh:44`, `branch-stack.sh:22` and `branch-guard.sh:22` are the same line, so
 the cosmetic one is the tell for the load-bearing one. Turned up while opening a worktree for
-unrelated work, not by an audit of the guards.
+unrelated work, not by an audit of the guards. Only the third was rescoped: the other two still read
+the project directory, and `architecture/guardrails.md` §16 records what that still costs.
 
 `CLAUDE.md` already says to assume your own compliance is the whole of the enforcement, which is the
 rule that covers this and is why the probe was run at all. What has no rule is narrower: a guard
 whose decision is scoped to a directory has to be exercised from every worktree the agent can reach,
 and this repository routinely has three open at once.
 
-**No rule yet** — the fix is not written and neither is the `test:hooks` case that would fail
-without it, and 2026-09-18.
+**Fixed in the commit that made the worktree rule 3**, because the two are one change: promoting the
+worktree is what turned this from an occasional mis-scoping into the normal path. `targetBranch`
+resolves the branch from the worktree the payload's own `file_path` or `notebook_path` sits in,
+walking up to the nearest directory that exists because a `Write` names one that does not; the
+project directory is consulted only where nothing more specific can be resolved, so a `Bash` call, a
+relative path and a file under no repository all keep the old behaviour. The `test:hooks` case that
+fails without it builds a real second worktree, which no hook test had done.
+
+**Both defects in that repair were found by running it, and both failed open** — which is the part
+worth keeping, because the fix for a guard that failed open was twice a guard that failed open. The
+resolution was first written _above_ the parse feeding it, so `set -u` killed the script before it
+printed anything, and a hook that prints nothing is read as "allow". Then splitting the parser's two
+fields with `${parsed#*$'\n'}` returned the string unchanged when there was no newline — command
+substitution having stripped the trailing one — so on a payload with a path and no command,
+`command_text` became the file path, parsed as a non-git command, and every write was allowed.
+
+**The first draft of this entry claimed the suite could not see either one, and that was wrong** —
+measured, after an independent read of the diff disputed it: reintroducing them fails 75 and 2
+assertions of the suite as it stood _before_ this branch. A by-hand probe caught both only because
+it ran first. The lesson is not that the suite is blind here; it is that a fix for a guard that
+failed open failed open twice more, and that what found it both times was running something.
+
+**No rule yet** — the fix and its `test:hooks` case are written, so what is left unwritten is the
+narrower lesson: "exercise a directory-scoped guard from every worktree the agent can reach" has
+one instance, which makes it a hypothesis rather than a rule, and 2026-09-18.
+
+### The escape hatch audited on the arm being added, while its two siblings stayed wide
+
+Widening `branch-guard.sh` to allow `git worktree add -b` from a protected branch — rule 3's remedy,
+which rule 1's guard was refusing — came with the reasoning written into the script: a hatch is an
+allow carved into a deny, so `-B` is refused because it _resets_ an existing branch and
+`git worktree add -Bmain ../d` would be rule 1 spelled as its own remedy. That argument was applied
+to the arm being added and to no other. `checkout -b`/`-B` and `switch` had been carved out of the
+same deny earlier, on the older standard of "creating a branch is the escape hatch", and so
+`git checkout -B main` and `git switch -C main` were **allowed from a protected branch** — the exact
+act the new code had just refused, one verb over.
+
+**Found by** an independent read of the diff that asked what else the sibling spellings could do,
+then confirmed by probe before anything was changed: both commands returned an allow with HEAD on
+`main`. The suite had thirteen assertions on the new hatch and none on the old ones.
+
+Fixed in the same commit that opened the hatch: one `isProtected` replacing three copies of the
+protected-name list, and `hatchNamesProtected` reading `-b`/`-B`/`-c`/`-C` in both the separated and
+attached spellings, so a name refused by one hatch cannot be accepted by another. Thirteen
+assertions and five mutations cover it; the mutation that matters is "reset flags treated as create
+flags", which the old suite could not have caught because it never asked.
+
+The rule is written: [the fourth guard-failure
+direction](BUILDING.md#fail-closed-except-guards-which-fail-open) — audit a hatch's
+_width_, and re-run that audit over the hatches already there rather than only the one you are
+adding.
 
 ### The `§N` checker that resolved a citation against any document that happened to define it
 

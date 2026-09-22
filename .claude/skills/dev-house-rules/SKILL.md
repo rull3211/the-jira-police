@@ -31,7 +31,7 @@ is the only rule here whose absence is invisible — skip it and everything stil
 
 ---
 
-## The two that are not advisory
+## The three that are not advisory
 
 Everything else is recoverable if you get it wrong. These are not: assume your own compliance is the
 whole of the enforcement, whatever the guards are doing (`architecture/guardrails.md` §16, and step 0 of
@@ -42,10 +42,11 @@ if you need the answer today):
    reviewable unit of privilege. Do not look for a way around this — ask.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
+3. **Start the work in its own worktree**; the primary checkout is the daemon's program text. A
+   human can waive this; nothing mechanical holds it.
 
-If you change a hook, run `pnpm test:hooks` — it caught a branch name containing a `"` that broke
-the denial JSON and made the guard fail _open_ while still looking installed. It proves the scripts
-emit, never that anything runs them, and until `8ad1a31` it proved that only on [one
+If you change a hook, run `pnpm test:hooks`. It proves the scripts emit a refusal, never that
+anything runs them, and until `8ad1a31` it proved that only on [one
 laptop](INCIDENTS.md#the-suite-that-was-a-statement-about-one-laptop).
 
 **How much of this to believe is its own skill.**

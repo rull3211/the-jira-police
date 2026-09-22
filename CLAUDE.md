@@ -3,26 +3,28 @@
 A TypeScript service that grooms Jira tickets and fixes the subset an agent can fix safely: triage,
 claim, fix in an isolated worktree, draft PR, answer the review. Node ≥24, pnpm, **no build step**.
 
-## Two rules that are not advisory
+## Three rules that are not advisory
 
 1. **Never work on `main` or any protected branch.** Branch first — `feat/`, `fix/`, `chore/`,
    `docs/`, `refactor/`. One branch per reviewable unit of privilege. Do not look for a way
    around this; ask.
 2. **A human merges. Always.** This service has no merge path and neither do you. Opening a pull
    request is the end of your side of the work.
+3. **Start the work in its own worktree**, leaving the primary checkout alone: `pnpm dev` runs
+   `node --watch`, so that checkout **is** the daemon's program text. All agent work, unless a human
+   says otherwise. [§16](architecture/guardrails.md) has the command.
 
-**Assume nothing mechanical is holding either one, because a guard can be registered and still fail
-open.** `.claude/hooks/branch-guard.sh` refuses writes and pushes naming a protected branch, and `gh
-pr merge` from every branch; `pnpm test:hooks` is its suite — run it if you change a hook, but it
-proves only that each script _emits_ the right refusal, never that the runtime _acts_ on it.
+**Assume nothing mechanical is holding any of them: a guard can be registered and still fail open,
+and rule 3 has no guard at all.** `.claude/hooks/branch-guard.sh` refuses writes and pushes naming a
+protected branch, and `gh pr merge` from anywhere; `pnpm test:hooks` proves only that it _emits_ the
+refusal, never that the runtime _acts_ on it —
 [`claude-validation-work`'s step 0](.claude/skills/claude-validation-work/SKILL.md#step-0--is-branch-guardsh-actually-firing-right-now)
 settles that in one turn. You may `Read` the `.claude/settings.json` registering them; _writing_ it
-is refused, as is any shell command that merely names the path, and that ban is not to be worked
-around. [`architecture/guardrails.md` §16](architecture/guardrails.md) has each guard, what the suite misses, and why the residual
-risk is `.claude/hooks/*.sh` rather than the settings file.
+is refused, as is any shell command naming the path, and that ban is not to be worked around.
+[`architecture/guardrails.md` §16](architecture/guardrails.md) has each guard and what the suite
+misses.
 
-**Do not stack branches deeply** — three stacked here once turned an incremental plan into a
-waterfall;
+**Do not stack branches deeply**;
 [`STARTING.md`](.claude/skills/dev-house-rules/STARTING.md#phase-a-privilege-and-drive-it-by-hand-first)
 has the story.
 
@@ -60,9 +62,9 @@ full. Ask them before every commit.
 - [ ] **Did something get through that these rules do not cover?**
 
 **If you cannot remember reading `FINISHING.md` in this session, you have not read it.** `pnpm
-hooks:brief` prints these four in full, the two rules above, and your branch and stack depth;
+hooks:brief` prints these four in full, the three rules above, and your branch and stack depth;
 `commit-brief.sh` prints them at a `git commit`, if the operator registered it — watched by hand,
-never by the suite ([§16](architecture/guardrails.md)). Both remind; neither can check. Read the four here.
+never by the suite ([§16](architecture/guardrails.md)). Neither can check. Read the four here.
 
 ## Where the truth lives
 
@@ -72,8 +74,8 @@ never by the suite ([§16](architecture/guardrails.md)). Both remind; neither ca
 - [dev-house-rules](.claude/skills/dev-house-rules/SKILL.md) — how we work
 
 **All four are treated as source.** Prose falsified by a change is rewritten in the same commit, not
-the next. Structural facts live in `architecture/*.md`, cited rather than copied — grep for the
-symbol; `pnpm docs:check` enforces the mechanical part.
+the next. Structural facts live in `architecture/*.md`, cited rather than copied; `pnpm docs:check`
+enforces the mechanical part.
 
 ## Before you start
 
