@@ -109,10 +109,13 @@ flowchart TD
 
 **The two yellow boxes are the only places a person is required.** Everything else runs unattended.
 
-### Five passes, five sessions
+### One session per pass
 
 The boxes labelled recon, write, round and merge are separate `storecode` invocations of the
-`agent-solve` skill, not turns of one conversation:
+`agent-solve` skill, not turns of one conversation. These are the rungs you can type; `PASSES` in
+`runner.ts` is the list, and it holds one more — `repair`, which has no rung and no caller yet
+(PLAN.md §45). The count is deliberately not written here: `architecture/solve.md` §15 owns it, and
+the last time it lived in two files it was wrong in both.
 
 | Pass         | Tools                                | Given                            |
 | ------------ | ------------------------------------ | -------------------------------- |

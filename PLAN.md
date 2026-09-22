@@ -118,13 +118,15 @@ re-derive by hand, plus `parseSimplify` no longer crashing the run over a self-r
 nothing downstream reads (SSX-3944) — opened and closed inside the branch that built it, stacked on
 top of §43's, since both came out of the same session and §44's doc updates touch lines §43's
 already moved.
-The triage-selection entries are now all closed, so the next entry is §48.
+The triage-selection entries are now all closed, so the next entry is §49.
 
 <!-- refs:on -->
 
 ### 45. The fix pass cannot see a test fail, and does not look for what else depends on what it changed
 
-**Branch:** feat/verify-repair-and-blast-radius
+**Branch:** none yet. Phase one shipped on `feat/verify-repair-and-blast-radius`, which is closed;
+phases two through four are unclaimed, so a resuming context matching this entry to its own branch
+finds nothing and should read the phasing below before cutting one.
 
 **What is not built.** Two gaps found on the same real ticket (SSX-3944), stacked:
 
@@ -149,7 +151,7 @@ therefore breaks that test. No implementation avoids it, and that is the whole a
 mechanism rather than a better prompt.
 
 **What the blast-radius instruction can and cannot do — measured on the ticket it was written for,
-not argued.** It shipped on this branch and both halves of the result matter:
+not argued.** It shipped in phase one and both halves of the result matter:
 
 - **It works when the changed member is public.** The `CustomerDto` run found
   `CustomerDtoTest.getContactInfoNeverReturnsNullEvenWhenBackingFieldIsNull` — a test in a different
@@ -284,6 +286,38 @@ salvage already treats its branch.
 **What would make it the wrong idea.** A branch that _does_ carry commits is somebody's unpushed
 work, and deleting it to make room is the one outcome worse than refusing. Any fix must establish
 that the branch adds nothing over its upstream before touching it, and refuse loudly when it does.
+
+### 48. `docs:check` cannot see a count written as a word, and its blind spot is shared by the sweep meant to cover it
+
+**Branch:** none yet.
+
+**What is not built.** Two things, and the fix is worth little without both. `FACTS` in
+`docs-check.ts` and `COUNTED_NOUNS` in `count-phrases.ts` both anchor on `(\d[\d,]*)`, so a count
+spelled `six` rather than `6` matches nothing. And `"passes"` is not a counted noun, so even the
+digit form would go unwatched.
+
+**Why it is owed, with the cost already paid twice.** The two halves of this checker are supposed to
+back each other up: a `FACT` pins a declared number to a computed one, and `count-phrases.ts` sweeps
+for numbers nobody declared — the second exists precisely because the first only sees the phrasing
+it was written for. **They share the digit assumption, so the backstop has the same blind spot as
+the thing it backs up.** Measured: adding `repair` to `PASSES` on 2026-09-21 falsified "The five
+passes" in `architecture/solve.md`, "Five passes, five sessions" in `README.md`, "four of the five
+passes" in the same file, and a hand-copied `PASSES = [...]` literal inside the paragraph that
+exists to record the _previous_ instance of this exact drift. All four survived a review and a run
+with all six CI gates green — the drift is not something the gates caught late, it is something no
+gate can see. The same class went unnoticed on 2026-09-08, which is what that paragraph was written
+about; it is now written about twice.
+
+**What it would let the service do.** Fail a pull request that leaves a word-count stale, which is
+the only reason any of the numeric facts here are trustworthy today.
+
+**What would make it the wrong idea.** Number-words are ordinary English and the false-positive rate
+is the whole risk: "the five minutes it takes", "one of the two rules". `COUNTED_NOUNS` is the
+existing answer to exactly that — it is a deliberate allow-list, and this stays safe only if word
+support is confined to the same list rather than widened to any `<word> <noun>` shape. A second
+trap is that the counter is the cheap half. On 2026-09-21 the pass table was also short a row, and
+no count check would have said so; a green counter that reads as "the docs are current" would be a
+worse outcome than the honest silence there is now.
 
 ### 1. Which model runs which task, and nothing chooses today
 
