@@ -122,6 +122,18 @@ inside the _message_. The cost of getting this wrong is not the blocked command.
 guard acquires an enemy, and the people most motivated to disable it are the ones maintaining it.
 [→](INCIDENTS.md#the-commit-message-that-was-refused-as-the-act-it-described)
 
+**The fourth direction is an escape hatch that is wider than the act it was cut for, and the audit
+is owed to every spelling, not just the one you are adding.** A hatch is an allow carved into a
+deny, so the question is never whether the command it names is safe but what else that spelling can
+do. `git worktree add -b` was widened for rule 3 and hardened in the same edit — `-B` refused because
+it _resets_ a branch and could therefore move `main` — while `checkout -B main` and `switch -C main`
+sat allowed on a protected branch, the same act through hatches cut earlier. The reasoning was
+written down in the file and applied to one arm of it. **So when you widen a hatch, re-run the
+argument over the hatches already there**, and keep the protected-name test in one function rather
+than one copy per arm: a name refused by one hatch and accepted by another is the hole the guard
+exists to close.
+[→](INCIDENTS.md#the-escape-hatch-audited-on-the-arm-being-added-while-its-two-siblings-stayed-wide)
+
 ---
 
 ## State lives in the remote system

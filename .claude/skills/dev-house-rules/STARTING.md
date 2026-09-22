@@ -35,12 +35,12 @@ Four rules, in order of how often they are broken:
 4. **When a document and your reasoning disagree, the document might be right.**
    [→ measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code)
 
-**Before finishing, ask which of the four you just falsified** — usually one, often two; the list is
-in [FINISHING.md](FINISHING.md).
+**Before finishing, ask which of the four you just falsified**; the list is in
+[FINISHING.md](FINISHING.md).
 
 ### The plan is written before the work, not after it
 
-Rule 2 fires on the way out; this is the same rule from the other end. **Before beginning anything
+This is rule 2 from the other end. **Before beginning anything
 that is not a one-line fix, write it into `PLAN.md` first** — what is being attempted, why now, what
 it would let the service do that it cannot do today, and what would make it the wrong idea. **Open
 the entry with a bold `Branch:` label** naming the branch, on its own line under the heading:
@@ -66,10 +66,9 @@ something but **finding something adjacent and believing it**.
 
 **Structural facts — the module map, the entry points, the composition — belong in the module's
 own `architecture/*.md` file, cited from here, never restated.** A count or a filename copied into
-a second document is a fact with **two homes and one maintainer**, and rule 3 says how that ends.
-The narrow exception is a number `pnpm docs:check` verifies everywhere it appears, which can no
-longer drift silently; cite-don't-copy is a rule about facts nothing checks. So it runs both ways,
-and the second half is the one that decays quietly:
+a second document is a fact with **two homes and one maintainer**, and rule 3 says how that ends;
+the exception is a number `pnpm docs:check` verifies everywhere it appears. It runs both ways, and
+the second half is the one that decays quietly:
 
 - **Check a structural claim against the module's file before acting on it**, including a claim in
   this one. If they disagree, one of them is stale and finding out which is the work.
@@ -79,23 +78,21 @@ and the second half is the one that decays quietly:
 
 ### Technique
 
-**Start from an entry point, not from a filename.** They are listed in the map, and each is a
-program that actually runs, so _what actually happens when…_ is answered by starting at the one that
-does it and following the calls. A name search tells you what something is _called_; an entry point
-tells you whether it _runs_.
+**Start from an entry point, not from a filename.** Each one in the map is a program that actually
+runs, so _what actually happens when…_ is answered by starting at the one that does it and following
+the calls. A name search tells you what something is _called_; an entry point tells you whether it
+_runs_.
 
 **Capability is a question about the composition, not about the module.** Privilege here is granted
-by wiring, deliberately — components are built inert and composed later, so granting one is a
-visible change in a single place a reviewer knows to read. "Can this component reach Jira?" answered
-from the component's own source is answered wrongly, with confidence.
+by wiring: components are built inert and composed later, so granting one is a visible change in one
+place a reviewer knows to read. "Can this component reach Jira?" answered from the component's own
+source is answered wrongly, with confidence.
 [→ the read tools the header said were denied](INCIDENTS.md#the-read-tools-the-header-said-were-denied)
 · [→ a refusal reasoned from the wrong tool
 surface](INCIDENTS.md#the-fitness-call-that-was-refused-three-times-for-two-wrong-reasons)
 
-**A comment holds a constraint or a non-obvious warning, at most one or two lines** — the argument
-and the measurement belong in the commit message, `PLAN.md`, or `ARCHITECTURE.md`/`INCIDENTS.md`,
-never the header; the standard is in [`CLAUDE.md`](../../../CLAUDE.md#code-comments). Comments can
-be stale too: prefer the test where they disagree.
+**Comments follow [`CLAUDE.md`](../../../CLAUDE.md#code-comments)'s standard**, and are a claim like
+any other: prefer the test where the two disagree.
 
 ### Read wide in a subagent; decide in the main context
 
@@ -108,7 +105,7 @@ whose output _is_ the conclusion, you read yourself.
 adversarial audit here was primed with the verdict it was invited to reach, duly reached it, was
 relayed at full strength, and was wrong.
 [→](INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way)
-The check is cheap and it is not optional:
+The check is not optional:
 
 - **Spot-check the load-bearing claims against the tree yourself** — the ones the decision turns on.
   A file:line that does not say what the report says invalidates the report, not just the row.
@@ -127,16 +124,15 @@ The check is cheap and it is not optional:
 
 ### The failure mode to design against: a search that confirms
 
-**Searching for a symbol answers a question about the name, not about the behaviour**, and it has
-got through here three times — a precondition that looked unreferenced and had two enforcers
-[→](INCIDENTS.md#the-precondition-with-no-references-and-two-enforcers), an audit whose `grep -c`
-returned the number its own predicted finding wanted
-[→](INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way), and —
-an hour later, in prose about that second instance — a `grep -c` counting mentions of an action at
-three times its rate
-[→](INCIDENTS.md#the-compaction-finding-that-counted-the-string-instead-of-the-call). A count is the
-most confirmable thing a search can return, and **it is checked least when it agrees with a rule
-already believed**. So:
+**Searching for a symbol answers a question about the name, not about the behaviour**, and it keeps
+getting through here: [a precondition that looked unreferenced and had two
+enforcers](INCIDENTS.md#the-precondition-with-no-references-and-two-enforcers), [a `grep -c` that
+returned the number its own finding
+wanted](INCIDENTS.md#the-audit-that-found-eight-things-and-got-three-of-them-wrong-on-the-way), and
+— an hour later, in prose about that one — [another counting mentions of an action at three times
+its rate](INCIDENTS.md#the-compaction-finding-that-counted-the-string-instead-of-the-call). A count
+is the most confirmable thing a search can return, and **it is checked least when it agrees with a
+rule already believed**. So:
 
 - **Search for the behaviour as well as the identifier.** If a symbol looks unused, search for what
   it would _do_ — the error it raises, the label it writes.
@@ -174,6 +170,12 @@ which makes the ordering enforceable rather than aspirational.
 **One branch per privilege, never `main`; a human always merges.** Both have guards, argued in
 `CLAUDE.md` and `architecture/guardrails.md` §16; neither rule is less binding when nothing is watching.
 
+**The branch gets its own worktree; the primary checkout is left alone** — rule 3 of `CLAUDE.md`,
+and the only one of the three with nothing mechanical behind it. It removes the hazard the checklist
+question below can only ask about: the primary checkout is the running daemon's program text, not a
+copy of it. `architecture/guardrails.md` §16 has the command.
+[→ guarded only by the operator saying so](INCIDENTS.md#the-daemon-that-was-only-ever-guarded-by-the-operator-saying-so)
+
 **Do not stack branches deeply** — each unmerged branch gates the ones above it. When the stack
 grows, ask for the base to be merged rather than building another floor on it, and delete the local
 branches that already merged; auto-delete-on-merge cleans the remote only.
@@ -187,10 +189,10 @@ branches that already merged; auto-delete-on-merge cleans the remote only.
       one-line fix, the entry is written first, opening with the `Branch:` label.
 - [ ] **What branch does this belong on, and [how deep is the
       stack](#phase-a-privilege-and-drive-it-by-hand-first)?** One per reviewable unit of privilege,
-      never `main`.
-- [ ] **Is the daemon running?** `pnpm daemon:status` — nothing else here will tell you. This working
-      copy _is_ the running service's program text, and the impatient second Ctrl-C strands a claim
-      nothing reclaims.
+      never `main`, and in [its own worktree](#phase-a-privilege-and-drive-it-by-hand-first).
+- [ ] **Is the daemon running?** `pnpm daemon:status` — nothing else here will tell you. Your
+      worktree keeps your edits out of its program text; the impatient second Ctrl-C still strands a
+      claim nothing reclaims.
       [→ guarded only by the operator saying so](INCIDENTS.md#the-daemon-that-was-only-ever-guarded-by-the-operator-saying-so)
 
 → [BUILDING.md](BUILDING.md)

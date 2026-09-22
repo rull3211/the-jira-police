@@ -50,8 +50,8 @@ export const PHASE_FILES: readonly string[] = [
  * Two-sided: fewer means the extractor lost sight of rules; more means the count went stale.
  */
 export const RULE_PARAGRAPHS: Record<string, number> = {
-  ".claude/skills/dev-house-rules/STARTING.md": 15,
-  ".claude/skills/dev-house-rules/BUILDING.md": 14,
+  ".claude/skills/dev-house-rules/STARTING.md": 16,
+  ".claude/skills/dev-house-rules/BUILDING.md": 15,
   ".claude/skills/dev-house-rules/PROVING.md": 27,
   ".claude/skills/dev-house-rules/FINISHING.md": 16,
 };
