@@ -49,10 +49,11 @@ saying "do not edit" would be a description of intent, not a control.
    conflicted paths and **not** the review: a branch that will not take its base cannot be built,
    so there is nothing a review round could answer a reviewer from, and this round answers nobody
    on purpose. Its scope is git's list of conflicted files, exactly.
-6. **`--repair`** — **built, not yet invoked by anything; see `PLAN.md` §45.** Same tools as
-   `--fix`. Given the fix pass's recon brief, the diff, and the harness's own captured output from
-   a verification step that failed — the one thing `--fix` can never see. Fixes the code the
-   failure points at, never the test it failed, unless the test itself encoded the old behaviour.
+6. **`--repair`** — runs after a failed verification, and **its verdict is measured, not used;
+   see `PLAN.md` §45.** Same tools as `--fix`. Given the fix pass's recon brief, the worktree
+   holding that change, and the harness's own captured output from the verification step that
+   failed — the one thing `--fix` can never see. Fixes the code the failure points at, never the
+   test it failed, unless the test itself encoded the old behaviour.
 
 Each pass is its own session rather than six turns of one, so a pass cannot carry a capability
 past the point it was granted for, and so a pass that dies cannot leave a later one reasoning

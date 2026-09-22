@@ -113,9 +113,10 @@ flowchart TD
 
 The boxes labelled recon, write, round and merge are separate `storecode` invocations of the
 `agent-solve` skill, not turns of one conversation. These are the rungs you can type; `PASSES` in
-`runner.ts` is the list, and it holds one more — `repair`, which has no rung and no caller yet
-(PLAN.md §45). The count is deliberately not written here: `architecture/solve.md` §15 owns it, and
-the last time it lived in two files it was wrong in both.
+`runner.ts` is the list, and it holds one more — `repair`, which has no rung of its own because
+nothing types it: a failed verification runs it, and `REPAIR_ROUND=false` is the only control over
+it (PLAN.md §45). The count is deliberately not written here: `architecture/solve.md` §15 owns it,
+and the last time it lived in two files it was wrong in both.
 
 | Pass         | Tools                                | Given                            |
 | ------------ | ------------------------------------ | -------------------------------- |
@@ -731,7 +732,8 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see         |
 | `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                            |
 | `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back    |
-| `FAIL_FIRST_CHECK`              | `true`        | **The only setting that defaults on** — it withdraws a guard, not grants   |
+| `FAIL_FIRST_CHECK`              | `true`        | One of two that default on — off withdraws a check, it does not grant one  |
+| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; its verdict is never acted on |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull

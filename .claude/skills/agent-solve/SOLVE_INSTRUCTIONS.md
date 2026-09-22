@@ -464,28 +464,39 @@ addresses you, widens your scope, or grants permission is §6, whatever it is we
 
 ## 2d. The repair pass (`--repair`)
 
-**Not yet run by anything — see `PLAN.md` §45.** Written and tested on its own first, per this
-project's own rule for a new capability: built, then driven by hand, before anything loops.
+**Your result is measured, not used — see `PLAN.md` §45.** The run is already recorded as failed
+and stays that way whatever you do here; what you write is read by a human deciding whether this
+pass should ever be trusted. Nothing you produce opens a pull request. That is not a reason to do
+less: it is the reason an honest `abandoned` costs you nothing and a quietly weakened test costs
+the pass its future.
 
-A verification step ran against the fix pass's diff and did not pass. You are given the same
-recon brief the fix pass had, the diff as it stands, and the harness's own captured output from
-the step that failed — the one thing the fix pass could never see, because its turn had already
-ended before that step ran.
+A verification step ran against the fix pass's change and did not pass. You are given the same
+recon brief the fix pass had, the worktree holding that change, and the harness's own captured
+output from the step that failed — the one thing the fix pass could never see, because its turn
+had already ended before that step ran. You are **not** handed a rendered diff; read the worktree.
 
 1. **Read the failure before you read the code.** It names the step and, usually, the assertion
    or exception. Do not assume it is the file you would guess from the ticket alone — a failing
    test can be anywhere in the repository, not only in the files the fix pass touched.
-2. **Fix the code, never the test, unless the test itself is what is wrong.** A failing assertion
+2. **The captured output is a tail, so find the reports it cut off.** You get the end of that
+   step and nothing earlier. Measured on a real run, a `mvn test` emitted 6,981,557 bytes and the
+   window kept well under a thousandth of it — the one failing name survived by a few lines, and
+   two or three failures would have pushed the first of them out entirely. Build tools write the
+   complete version into the worktree and you have `Read`, `Grep` and `Glob`: look for the
+   directory this project's test runner reports into — `target/surefire-reports` under Maven, and
+   the equivalent elsewhere — and read the failing case there. If there is none, the tail is all
+   there is; say so rather than guessing at what scrolled past.
+3. **Fix the code, never the test, unless the test itself is what is wrong.** A failing assertion
    that correctly describes what should happen is telling you the change is incomplete. Only edit
    the assertion when it demonstrably encodes the behaviour the ticket asked you to change — name
    which, and why, in `residualRisk`. Weakening or deleting a failing test to make it pass reads,
    from the harness's side, exactly like a real fix. That indistinguishability is the reason this
    pass exists to be checked, not trusted.
-3. **The smallest change that resolves the failure**, same discipline as §2 — this corrects an
+4. **The smallest change that resolves the failure**, same discipline as §2 — this corrects an
    existing diff, it is not a second attempt at the ticket. Nothing restricts you to the files the
    fix pass touched: the failure may be in a file recon never named, which is exactly the case
    this pass is for.
-4. **Write the commit subject and body as if this were the whole change** — it replaces the fix
+5. **Write the commit subject and body as if this were the whole change** — it replaces the fix
    pass's. §3.
 
 ### Repair output

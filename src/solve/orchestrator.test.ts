@@ -803,9 +803,14 @@ describe("solveTicket, at verification", () => {
     // `afterBase`, so the base's own test run passes — otherwise this is not a fact about the code.
     const { h } = harness(FULL, [{ match: afterBase(saw("run", "test")), reply: { exitCode: 1 } }]);
 
-    const outcome = await solveTicket(h.deps, request);
+    // `repairRound: false`, so this stays a test about the verification verdict alone. Leaving it
+    // on runs a repair pass here, and an unscripted pass cannot say so: `runPass` catches the
+    // harness's "must not have run" throw and the wiring files it as `repairOutcome`, so the
+    // outcome kind never moves and this reads green either way.
+    const outcome = await solveTicket(h.deps, { ...request, repairRound: false });
 
     expect(outcome.kind).toBe("failed");
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon", "fix", "simplify"]);
   });
 
   it("returns refused — not failed — when the harness could not form a verdict", async () => {
@@ -1358,6 +1363,122 @@ describe("runRepairRound", () => {
       "fix(advisor): correct the head link test for the merged fix",
     );
     expect(outcome.commit.body.split("\n").at(-1)).toBe("Refs: SSX-3822");
+  });
+});
+
+/**
+ * The round as `runPipeline` actually calls it: run, then disbelieved.
+ *
+ * Separate from the block above, which exercises `runRepairRound`'s own verdicts. What is under
+ * test here is that none of those verdicts reaches the caller — the pipeline keeps the report and
+ * throws the answer away, so `verified` from the round still leaves the ticket failed.
+ */
+
+/** Fails the second `run test` only: the base check passes, the post-fix verification is red, and the repair's re-run is green again. */
+const redThenGreen = (): Rule => ({
+  match: once(afterBase(saw("run", "test"))),
+  reply: { exitCode: 1 },
+});
+
+/** Every `run test` after the base check stays red, so the repair does not rescue it either. */
+const stayRed = (): Rule => ({
+  match: afterBase(saw("run", "test")),
+  reply: { exitCode: 1 },
+});
+
+const WITH_REPAIR = { ...FULL, repair: repair() };
+
+describe("the repair round, wired as an untrusted dry run", () => {
+  it("runs one repair pass after a failed verification", async () => {
+    const { h } = harness(WITH_REPAIR, [stayRed()]);
+
+    await solveTicket(h.deps, request);
+
+    // One, not a loop: a second round multiplies the cost of a verdict nothing acts on.
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon", "fix", "simplify", "repair"]);
+  });
+
+  it("still fails when the repair re-verifies green, and says the round would have passed", async () => {
+    // The whole point of the phase. Nobody has watched this pass work, and PLAN.md §45 records
+    // that green is reachable here by deleting the assertion that failed.
+    const { h } = harness(WITH_REPAIR, [redThenGreen()]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") {
+      throw new Error(`expected failed, got ${outcome.kind}`);
+    }
+    expect(outcome.repairOutcome).toBe("verified");
+    expect(outcome.repair).toEqual(parseFix(repair(), request.issueKey));
+  });
+
+  it("reports the pre-repair failure, never the round's own re-run", async () => {
+    // A `failed` outcome quoting a passing verification is a self-contradiction a reader acts on.
+    const { h } = harness(WITH_REPAIR, [redThenGreen()]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({ verification: { outcome: "failed" } });
+  });
+
+  it("keeps the repair's writes in the worktree rather than reverting them", async () => {
+    // The decision, pinned: nothing reads a failed worktree, and the round's diff is the only
+    // place PLAN.md §45's dishonest green would be visible. Undoing it would destroy the evidence.
+    const { h } = harness(WITH_REPAIR, [redThenGreen()]);
+
+    await solveTicket(h.deps, request);
+
+    const undo = h.calls.filter(
+      (argv) =>
+        argv.includes("stash") ||
+        argv.includes("--hard") ||
+        (argv.includes("checkout") && argv.includes("--") && !argv.includes("-C")),
+    );
+    expect(undo).toEqual([]);
+  });
+
+  it("carries the report when the repair round fails too", async () => {
+    const { h } = harness(WITH_REPAIR, [stayRed()]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      repairOutcome: "failed",
+      repair: parseFix(repair(), request.issueKey),
+    });
+  });
+
+  it("says a round ran even when it died before reporting", async () => {
+    // The case `repair` alone cannot express, and the reason `repairOutcome` is its own field:
+    // a round that crashed carries no `FixReport`, so its absence must not read as "none ran".
+    const { h } = harness(WITH_REPAIR, [stayRed()], { repair: "pass timed out after 900000ms" });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "crashed" });
+    expect(outcome).not.toHaveProperty("repair");
+  });
+
+  it("runs no round at all when REPAIR_ROUND is off", async () => {
+    const { h } = harness(WITH_REPAIR, [stayRed()]);
+
+    const outcome = await solveTicket(h.deps, { ...request, repairRound: false });
+
+    expect(h.seen.some((entry) => entry.pass === "repair")).toBe(false);
+    // Absent rather than a kind meaning "skipped": the outcome should look exactly as it did
+    // before this wiring existed, so an operator who turned it off gets the old artifact back.
+    expect(outcome).not.toHaveProperty("repairOutcome");
+  });
+
+  it("buys no round on a run that never failed verification", async () => {
+    const { h } = harness(WITH_REPAIR);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("verified");
+    expect(h.seen.some((entry) => entry.pass === "repair")).toBe(false);
   });
 });
 

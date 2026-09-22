@@ -266,9 +266,11 @@ quietly turn the second into the first.
 ### The six passes
 
 `recon` → `fix` → `simplify`, then `review` once per round of reviewer feedback, plus `merge` when
-a branch will not take its base. **`repair` is the sixth and nothing calls it** — it is built and
-tested, `runPipeline`'s `failed` branch still routes straight to `agent:failed`, so a run still
-costs five sessions at most; PLAN.md §45 holds the phasing and what phase two must settle. Two tool
+a branch will not take its base. **`repair` is the sixth, and the only one whose answer is thrown
+away** — `runPipeline`'s `failed` branch runs one round, keeps its report and its verdict on the
+outcome as `repair` and `repairOutcome`, and still returns `failed`, so a repair that re-verifies
+green opens no pull request; `REPAIR_ROUND=false` skips the round entirely. PLAN.md §45 holds the
+phasing and why the verdict is not trusted. Two tool
 sets — and `PASSES` in `runner.ts` is the list, iterated by the tests rather than restated in them,
 because three hand-copied copies of this membership all stopped testing anything on the day it
 changed.

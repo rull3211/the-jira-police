@@ -121,6 +121,14 @@ export interface SolveRequest {
    * regression test that is green against the bug it names.
    */
   readonly failFirstCheck?: boolean;
+  /**
+   * Whether a failed verification buys one repair round, `REPAIR_ROUND`.
+   *
+   * Defaults on for `failFirstCheck`'s reason and only while the round is
+   * untrusted: the run stays `failed` whatever the round concludes, so this
+   * withdraws a measurement rather than arming a privilege.
+   */
+  readonly repairRound?: boolean;
   readonly gitTimeoutMs: number;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
@@ -249,11 +257,29 @@ export type SolveOutcome =
        */
       readonly fix: FixReport;
       /**
-       * What a repair round attempted when one ran and did not rescue the run, including a round
-       * that declined to change anything. Absent means no repair round ran: without the
-       * distinction, a pass that never helps and a pass that never runs produce identical outcomes.
+       * What a repair round attempted, when one ran and produced a report. Absent covers two
+       * different things — no round ran, and a round that died before reporting — which is why
+       * `repairOutcome` is a separate field rather than this one's presence.
+       *
+       * The verification above is the one that produced this outcome, always: it is the
+       * pre-repair failure, never the round's own re-run. A `failed` outcome quoting a passing
+       * re-verification would contradict itself in the one sentence a human reads first.
        */
       readonly repair?: FixReport;
+      /**
+       * What the repair round concluded, discarded as a verdict and kept as a measurement.
+       *
+       * `SolveOutcome["kind"]`, the shape `escaped.would` uses for the same job. Phase two does
+       * not trust this pass (PLAN.md §45), so `verified` here means the round **would** have
+       * rescued the run and the outcome stayed `failed` anyway — the point of the phase. Absent
+       * means no round ran, whether `REPAIR_ROUND` is off or the run never reached one.
+       *
+       * The worktree holds the round's edits on top of the diff that failed, and the reported
+       * `reason` was measured before them; `describeSolveOutcome` and `solveReport` both say so,
+       * because a tree that no longer reproduces the failure it is kept as evidence of is the
+       * defect class this project exists to catch.
+       */
+      readonly repairOutcome?: SolveOutcome["kind"];
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
     }
@@ -268,8 +294,12 @@ export type SolveOutcome =
       /**
        * Set only when a repair round produced this outcome — `fix` and `simplify` stay the
        * original passes' own reports, unedited, and this carries what the repair round did on top.
-       * `undefined` on every path that exists today; `runRepairRound` is not yet called by anything
-       * (PLAN.md §45), so no outcome sets this field until that wiring lands.
+       *
+       * Still `undefined` on every outcome that leaves `solveTicket`, for a new reason: phase two
+       * calls `runRepairRound` but discards its verdict (PLAN.md §45), so a round that verifies
+       * green is reported as `failed` with `repairOutcome: "verified"`. Only `runRepairRound`'s
+       * own return value sets this, and only its tests read it. A phase that trusts the round is
+       * what makes this field reachable.
        */
       readonly repair?: FixReport;
       readonly verification: VerificationResult;
@@ -661,9 +691,12 @@ function renderVerificationFailure(
 /**
  * One repair attempt after a failed verification.
  *
- * Not called from {@link runPipeline} yet — see PLAN.md §45. Built and tested against its own
- * inputs first, per STARTING.md's "phase a privilege, and drive it by hand first": the refusal to
- * run this is structural (nothing constructs a caller) rather than a flag nobody flipped.
+ * Called from {@link runPipeline}'s `failed` branch, once, and **its verdict is discarded** — the
+ * run stays `failed` whatever this returns, carrying only the round's report and `repairOutcome`
+ * for a human to read (PLAN.md §45, phase two). So the `verified` this can return is a
+ * measurement, not a result: nobody has yet watched this pass work, and §45's point 3 records
+ * that green is reachable here by deleting the assertion that failed. Do not promote it to a
+ * result without the phase that watches it first.
  *
  * Grants no new privilege: `repair` is a `WRITE_PASSES` member in `runner.ts` and gets exactly
  * `FIX_ALLOWED_TOOLS` — no `Bash`. `verify`'s `CommandRunner` remains the only thing that ever
@@ -960,7 +993,49 @@ async function runPipeline(
     };
   }
   if (verification.outcome === "failed") {
-    return { kind: "failed", reason: verification.reason, verification, fix, devLens, worktree };
+    const failure = {
+      kind: "failed",
+      reason: verification.reason,
+      verification,
+      fix,
+      devLens,
+      worktree,
+    } as const;
+    if (request.repairRound === false) {
+      return failure;
+    }
+
+    // ---- the repair round, whose verdict is thrown away --------------------
+    // One attempt, deliberately: a second would multiply the cost of a verdict nothing acts on.
+    // The round writes into the worktree and those writes are kept — nothing downstream reads a
+    // failed worktree, and reverting could not tell its new files from the fix pass's anyway.
+    const round = await runRepairRound(
+      deps,
+      request,
+      worktree,
+      base,
+      recon,
+      fix,
+      simplify,
+      devLens,
+      verification,
+    );
+    // `crashed`, `abandoned` and `refused` rounds carry no report at all; `repairOutcome` is what
+    // says a round ran in those cases, and dropping it would make them look like no round.
+    const report = round.kind === "failed" || round.kind === "verified" ? round.repair : undefined;
+    // `verification` stays the pre-repair failure: `round.verification` may be green, and a
+    // `failed` outcome carrying a passing verification is a self-contradiction a reader acts on.
+    log.info("solve.repair.dry_run", {
+      issueKey,
+      would: round.kind,
+      reported: report !== undefined,
+      worktreePath: worktree.path,
+    });
+    return {
+      ...failure,
+      repairOutcome: round.kind,
+      ...(report === undefined ? {} : { repair: report }),
+    };
   }
 
   // ---- fail-first ----------------------------------------------------------

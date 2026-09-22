@@ -320,6 +320,12 @@ export const SETTINGS = [
     fallback: "true",
   },
   {
+    name: "REPAIR_ROUND",
+    description:
+      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK and for the same reason: it grants nothing and decides nothing. The run's outcome stays `failed` whatever the round concludes — the pass has never been watched working, and a green re-verification is reachable by deleting the failing assertion, which no exit code can distinguish from a fix. What it buys is the round's own report and verdict on the outcome, where a human can read them. Set it to false for cost: it is a model session plus a full re-verification per failed solve, plus a fail-first probe on the rounds that go green.",
+    fallback: "true",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",
@@ -440,6 +446,18 @@ export function flag(settings: Settings, name: SettingName): boolean {
  */
 export function failFirstCheck(settings: Settings): boolean {
   return settings["FAIL_FIRST_CHECK"].trim().toLowerCase() !== "false";
+}
+
+/**
+ * Whether a failed verification also buys one repair round. Only "false" turns it off.
+ *
+ * The mirror of `flag` for the same reason as `failFirstCheck`, and it is only the mirror while
+ * the round stays untrusted: the outcome is `failed` whatever the round returns, so this withdraws
+ * a measurement rather than arming a privilege. A phase that lets a repair decide the run must
+ * move this to `flag`.
+ */
+export function repairRound(settings: Settings): boolean {
+  return settings["REPAIR_ROUND"].trim().toLowerCase() !== "false";
 }
 
 export function list(settings: Settings, name: SettingName): readonly string[] {

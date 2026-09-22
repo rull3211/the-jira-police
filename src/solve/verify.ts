@@ -111,7 +111,7 @@ export interface StepResult {
   readonly passed: boolean;
   readonly exitCode: number;
   readonly timedOut: boolean;
-  /** Tail of the output, for the artifact. Bounded; computed but not read by anything downstream yet. */
+  /** Tail of the output. `renderVerificationFailure` is what reads it, so a failing step's last `MAX_OUTPUT` characters are all the repair pass ever sees of why. */
   readonly output: string;
 }
 

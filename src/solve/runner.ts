@@ -7,7 +7,8 @@
  * differ only in what they are shown and must return; simplify shares it too,
  * plus `Skill`, the one capability that lets it invoke Claude Code's built-in
  * `/simplify` mid-session rather than re-deriving its judgement by hand.
- * `repair` is not yet called by `orchestrator.ts` — PLAN.md §45.
+ * `repair` runs only after a failed verification, and only to be measured: `runPipeline` throws
+ * its verdict away — PLAN.md §45.
  *
  * `--allowedTools` restricts nothing — it is an auto-approve list, checked by
  * probe. Only `--disallowedTools` withholds, by removing the tool from the
@@ -91,8 +92,8 @@ export const SIMPLIFY_ALLOWED_TOOLS: readonly string[] = [...FIX_ALLOWED_TOOLS, 
 
 /**
  * The passes, in the order a ticket meets them, as separate sessions: a session that already answered one question is a worse judge of the next.
- * `repair` is the exception to "order": it exists only after a verification failure and nothing
- * in `orchestrator.ts` calls it yet — see PLAN.md §45. Listed here anyway because `Pass` is derived
+ * `repair` is the exception to "order": it exists only after a verification failure, which most
+ * runs never reach — see PLAN.md §45. Listed here because `Pass` is derived
  * from this array, and the schema/tool-grant maps below are `Record<Pass, …>` for the same reason
  * every other pass is: adding one without a schema entry fails to compile rather than inheriting a neighbour's.
  *
@@ -222,11 +223,17 @@ export function buildSolvePrompt(pass: Pass, options: SolveRunOptions): string {
       : [
           "",
           "",
-          "A verification step ran against the diff below and did not pass. This is the",
-          "harness's own captured output — it ran the step, not you, and this is the one",
-          "thing the pass that wrote this diff could never see. Fix the code the failure",
-          "points at; only edit the failing assertion itself if it demonstrably encodes the",
-          "behaviour this ticket asked you to change, and say so in `residualRisk`.",
+          "A verification step ran against the change already in your worktree and did not",
+          "pass. This is the harness's own captured output — it ran the step, not you, and",
+          "this is the one thing the pass that wrote that change could never see. Fix the",
+          "code the failure points at; only edit the failing assertion itself if it",
+          "demonstrably encodes the behaviour this ticket asked you to change, and say so in",
+          "`residualRisk`.",
+          "",
+          "It is the LAST few thousand characters of that step's output and nothing before",
+          "them, so an earlier failure may have scrolled out of it entirely. If this project",
+          "writes structured test reports into the worktree, they are complete where this is",
+          "not — find and read them before concluding what failed. SOLVE_INSTRUCTIONS.md §2d.",
           "",
           "----- BEGIN VERIFICATION FAILURE DATA -----",
           sanitiseUntrusted(options.verificationFailure),

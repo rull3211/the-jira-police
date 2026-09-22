@@ -151,7 +151,24 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
       ].join("\n");
     }
     case "failed": {
-      return `FAILED — ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
+      if (outcome.repairOutcome === undefined) {
+        return `FAILED — ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
+      }
+      const risk = outcome.repair?.residualRisk.trim() ?? "";
+      return [
+        `FAILED — ${outcome.reason}`,
+        // The verdict is stated as discarded rather than merely omitted: a reader who sees
+        // "verified" anywhere near a repair round will otherwise take it as the run's answer.
+        outcome.repairOutcome === "verified"
+          ? `A repair round ran and its corrected diff passed. That verdict is DISCARDED, not acted on — the pass has never been watched working, and deleting the assertion that failed reaches green the same way.`
+          : `A repair round ran and ended ${outcome.repairOutcome}, so it did not rescue the run either.`,
+        ...(risk === "" ? [] : [`The repair flagged this about its own edit: ${risk}`]),
+        // The reason above was measured before the round, so the tree it names no longer produces it.
+        `The worktree now holds the round's edits on top of the diff that failed, so it no longer reproduces the reason above.`,
+        `Read what it did: git -C ${outcome.worktree.path} diff ${outcome.worktree.branch}`,
+        `Set REPAIR_ROUND=false to stop buying this round.`,
+        `Worktree kept at ${outcome.worktree.path}`,
+      ].join("\n");
     }
     case "crashed": {
       return `CRASHED at the ${outcome.pass} pass — no verdict was reached, so this says nothing about the code: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;

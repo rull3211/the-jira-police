@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2842 tests in 92
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2850 tests in 92
 > files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
@@ -124,9 +124,9 @@ The triage-selection entries are now all closed, so the next entry is §49.
 
 ### 45. The fix pass cannot see a test fail, and does not look for what else depends on what it changed
 
-**Branch:** none yet. Phase one shipped on `feat/verify-repair-and-blast-radius`, which is closed;
-phases two through four are unclaimed, so a resuming context matching this entry to its own branch
-finds nothing and should read the phasing below before cutting one.
+**Branch:** `feat/repair-dry-run`, stacked on `feat/verify-repair-and-blast-radius` (PR #67), which
+carries phase one and is awaiting a human merge. Phase two — the untrusted dry run — is what that
+branch is building; phases three and four remain unclaimed.
 
 **What is not built.** Two gaps found on the same real ticket (SSX-3944), stacked:
 
@@ -225,6 +225,41 @@ them obvious from the code.**
    the object set up three lines above it. The honest repair asks what that test should assert now
    that its premise is gone. A pass measured by an exit code will not ask, and `checkFailFirst` looks
    only at the tests the run itself wrote, so nothing downstream would notice.
+
+**What phase two is doing, and the question this entry never asked.** The three above are settled
+in the branch: the pass is pointed at the structured reports by `SOLVE_INSTRUCTIONS.md` §2d rather
+than by a new prompt field, since `VerificationResult` carries no `Toolchain` and a harness that
+cannot tell maven from node must not name a maven path; the bound of point 2 is not shipped; and
+point 3 is why the verdict is thrown away. The question the entry did not ask is **what becomes of
+the repair's writes**, and it has to be decided rather than left emergent, because a `failed`
+outcome whose worktree holds repair edits is a different artifact from one that does not.
+
+**They are kept, and the reason is not preference.** Nothing reads a failed worktree — `runPipeline`
+returns before `checkFailFirst`, `watchedDirs` excludes the worktree by construction, and
+`runWriteRungs` returns early on any outcome that is not `verified` — so the edits cannot reach a
+decision, and a later solve for the same key salvages the path rather than reusing it. Reverting is
+also not cleanly available: `stageIntentToAdd` leaves an `--intent-to-add` entry for every created
+file, so neither `git checkout -- .` nor `git reset --hard` restores a pre-repair tree that contains
+files the _fix_ pass created, and no blunt revert can tell the repair's new files from the fix's.
+Against that, point 3 is decisive in the other direction: green is reachable dishonestly here, and a
+deleted stub is visible **only in the diff**. Discarding the writes would destroy the one artifact
+phase two exists to let a human read. The cost is that the kept worktree no longer reproduces the
+failure the outcome reports, so both channels a human reads say so rather than leaving it inferable.
+
+**The outcome carries `repairOutcome` as well as `repair`.** The report alone cannot measure the
+pass: a `crashed`, `abandoned` or `refused` round produces no `FixReport`, so carrying only the
+report makes a round that ran and died identical to no round at all — the defect the phase-one
+review already fixed once, in a second place. `repairOutcome` is `SolveOutcome["kind"]`, the shape
+`escaped.would` already uses for the same job, and `verified` on it is the measurement this phase
+was built for: the repair **would** have rescued the run, and a human still has to read the diff to
+find out whether it did so honestly.
+
+**`REPAIR_ROUND` gates the spend, defaulting on.** A round costs a session, a full re-verification
+and — when it goes green — a fail-first probe with its own install and test run, on every failed
+solve, unattended, for a verdict that is discarded. That is `FAIL_FIRST_CHECK`'s shape exactly: it
+grants nothing and reports, so it reads `!== "false"` and a typo cannot silently withdraw the
+measurement. It is the second setting in the file shaped that way, which falsifies a sentence in
+`BUILDING.md` that called it the only one.
 
 **What would make either half the wrong idea.** The blast-radius search can find a true positive
 that is itself a larger change than the ticket — updating a consumer might be its own ticket. The
@@ -587,7 +622,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **116 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **121 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that have never existed** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost
