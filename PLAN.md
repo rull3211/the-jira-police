@@ -142,8 +142,13 @@ build pass and leaves the test vacuous: under any correct fix `updateContactsInC
 so its `assertNull(…getEmail())` passes against the object set up three lines above it. The honest
 repair asks what the test should assert now that its premise is gone. **A pass measured by an exit
 code cannot tell those two apart**, and `checkFailFirst` looks only at tests the run itself wrote,
-so nothing downstream notices either. Until a human has read several of these diffs, the exit code
-is the only signal, and it is the one signal known not to work.
+so nothing downstream notices either.
+
+**The first real round took the honest path, and that is one data point, not a licence.** On
+2026-09-22 it restored the test's premise explicitly rather than deleting the stub
+(`architecture/solve.md` §15). What that establishes is that the honest repair is reachable — not
+that it is what the pass does under pressure, and the run was on the ticket this pass was designed
+around. Phases three and four need diffs from tickets nobody had this pass in mind for.
 
 **The obvious mechanical bound is disproved, so do not reach for it on the way to phase three.** The
 rule considered was: _a repair round touching a test file must also touch the non-test file the
@@ -395,14 +400,22 @@ environment cannot answer a question about CI's.**
 
 ### 10. Still unobserved
 
-- **The repair round has never run against a real failure.** Everything known about it comes from
-  its own tests: no `repair` session has been spawned, no worktree holds a real repair diff, and
-  the `repairOutcome` distribution this phase exists to collect is empty. It has no rung of its own
-  either — the only way to reach it is a `solve:once` that fails verification, so it cannot be
-  driven directly, which is phase three's job. **What would show it:** one `pnpm solve:once
-<KEY> --solve` against a ticket whose fix strands a test, then reading the kept worktree's diff
-  to see whether the round corrected the code or quietly weakened the assertion. Until several of
-  those have been read, §45's phases three and four have nothing to stand on.
+- **The repair round has been watched once, which is not enough to conclude anything about it.**
+  The `repairOutcome` distribution this phase exists to collect holds a single entry —
+  `verified`, on SSX-3944, and honest on inspection (`architecture/solve.md` §15). One run cannot
+  separate "this pass is sound" from "this ticket suited it", and the case it was measured on is
+  the one the pass was designed against, which is the weakest possible evidence. **What would show
+  more:** the same command on tickets nobody had this pass in mind for, and at least one where the
+  cheap dishonest repair is more tempting than the honest one.
+
+  **Re-driving a ticket takes two deliberate label edits, and the first draft of this entry did not
+  say so** — the hand-over-the-command rule failing exactly as `PROVING.md` warns, since a person
+  handed a command that refuses is a person who does not run it. `eligibility` gates the claim on
+  three things and a re-run trips the last two: `agent:solvable` must be present, `agent:start`
+  must be present under `SOLVE_MODE=manual`, and none of `SOLVE_QUEUE_EXCLUDED_LABELS` may be —
+  which includes the `agent:failed` the previous attempt wrote. Both refusals are free: they read
+  the board immediately before the write, and spend nothing when they fire.
+
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
   property the layout rests on is that six code points render two columns wide, and

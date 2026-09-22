@@ -270,7 +270,21 @@ a branch will not take its base. **`repair` is the sixth, and the only one whose
 away** — `runPipeline`'s `failed` branch runs one round, keeps its report and its verdict on the
 outcome as `repair` and `repairOutcome`, and still returns `failed`, so a repair that re-verifies
 green opens no pull request; `REPAIR_ROUND=false` skips the round entirely. PLAN.md §45 holds the
-phasing and why the verdict is not trusted. Two tool
+phasing and why the verdict is not trusted.
+
+**Measured on its first real run, SSX-3944 on 2026-09-22.** Five sessions, $3.03, 15m19s wall
+clock, of which the repair round was $0.76 — a third again on top of a run that would otherwise
+have stopped at `failed`, for an answer nothing acts on. It came back `verified` and was discarded
+as designed. Reading the diff is what the phase is for, and the diff was honest: the fix removed
+`CustomerDto`'s auto-vivification, which stranded a Mockito stub in `CustomerCmHelperTest` that
+only the buggy behaviour had ever exercised, and the round **restored the test's premise instead of
+deleting the stub** — three lines setting a `ContactInfoDto` with a phone and deliberately no
+email, so the path is reached on purpose. The failing assertion and the stub are untouched. That is
+the outcome §45 hoped for and the opposite of the cheap one it predicted; one case, on the ticket
+this pass was designed against, so it establishes that the honest repair is reachable and nothing
+about the rate.
+
+Two tool
 sets — and `PASSES` in `runner.ts` is the list, iterated by the tests rather than restated in them,
 because three hand-copied copies of this membership all stopped testing anything on the day it
 changed.
