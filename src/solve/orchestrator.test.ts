@@ -1386,6 +1386,20 @@ const stayRed = (): Rule => ({
   reply: { exitCode: 1 },
 });
 
+/**
+ * Red twice, at a different step each time: the post-fix verification stops at `lint`, the
+ * repair's re-run gets past it and stops at `test`.
+ *
+ * Two failures with the same reason cannot tell which one an outcome is quoting, and that is the
+ * only thing separating the pre-repair verdict from the round's own. The two rules key on
+ * different argv on purpose — `all.find` stops at the first match, so two counters watching one
+ * command would starve each other.
+ */
+const redAtDifferentSteps = (): readonly Rule[] => [
+  { match: once(afterBase(saw("run", "lint"))), reply: { exitCode: 1 } },
+  { match: afterBase(saw("run", "test")), reply: { exitCode: 1 } },
+];
+
 const WITH_REPAIR = { ...FULL, repair: repair() };
 
 describe("the repair round, wired as an untrusted dry run", () => {
@@ -1422,6 +1436,27 @@ describe("the repair round, wired as an untrusted dry run", () => {
     expect(outcome).toMatchObject({ verification: { outcome: "failed" } });
   });
 
+  it("quotes the first failure's step even when the round fails at a different one", async () => {
+    // The green round above cannot catch a wiring that prefers the round's own verification,
+    // because a green round has none to prefer. This is the same claim against the other half of
+    // what it quantifies over: two red verifications, told apart by which step stopped them.
+    const { h } = harness(WITH_REPAIR, redAtDifferentSteps());
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "failed" });
+    expect(outcome).toMatchObject({ reason: expect.stringContaining("lint") });
+    expect(outcome).not.toMatchObject({ reason: expect.stringContaining("test") });
+    // The steps too, not only the reason: a wiring that swaps the whole `verification` over and
+    // leaves `reason` alone is the plausible half-change, and `reason` alone cannot see it.
+    if (outcome.kind !== "failed" || outcome.verification.outcome !== "failed") {
+      throw new Error(`expected a failed verification, got ${outcome.kind}`);
+    }
+    expect(
+      outcome.verification.steps.filter((step) => !step.passed).map((step) => step.name),
+    ).toEqual(["lint"]);
+  });
+
   it("keeps the repair's writes in the worktree rather than reverting them", async () => {
     // The decision, pinned: nothing reads a failed worktree, and the round's diff is the only
     // place PLAN.md §45's dishonest green would be visible. Undoing it would destroy the evidence.
@@ -1429,11 +1464,12 @@ describe("the repair round, wired as an untrusted dry run", () => {
 
     await solveTicket(h.deps, request);
 
+    // Keyed on the worktree's own path, not on the subcommand alone: `checkFailFirst` legitimately
+    // runs `git checkout` inside the probe checkout, whose path is a different argv element.
     const undo = h.calls.filter(
       (argv) =>
-        argv.includes("stash") ||
-        argv.includes("--hard") ||
-        (argv.includes("checkout") && argv.includes("--") && !argv.includes("-C")),
+        argv.includes(worktree.path) &&
+        ["checkout", "restore", "reset", "stash", "clean"].some((verb) => argv.includes(verb)),
     );
     expect(undo).toEqual([]);
   });

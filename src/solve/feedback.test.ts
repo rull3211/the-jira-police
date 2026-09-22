@@ -171,6 +171,70 @@ describe("renderSolveComment", () => {
     expect(failed).toContain("before the checks ran");
   });
 
+  it("says a repair round ran and that its green result is not being acted on", () => {
+    // The daemon has no terminal watching it, so a round paid for and reported only there is
+    // indistinguishable from one that never ran.
+    const failed = renderSolveComment("SSX-1", {
+      kind: "failed",
+      reason: "2 tests failed",
+      fix: fixReport(),
+      repair: fixReport(),
+      repairOutcome: "verified",
+      verification: { outcome: "failed", reason: "2 tests failed" } as never,
+      devLens: { accurate: true, correction: "" },
+      worktree,
+    });
+
+    expect(failed).toContain("being acted on");
+    // The reader's first wrong inference is that a green repair means a pull request exists.
+    expect(failed).toContain("no pull request");
+  });
+
+  it("surfaces what the repair flagged about its own edit, not only the fix's", () => {
+    // Where "I edited the failing assertion because it encoded the old behaviour" lands — the one
+    // self-reported tell for the dishonest green PLAN.md §45 records.
+    const failed = renderSolveComment("SSX-1", {
+      kind: "failed",
+      reason: "2 tests failed",
+      fix: fixReport("   "),
+      repair: fixReport("deleted the stub the old behaviour needed"),
+      repairOutcome: "verified",
+      verification: { outcome: "failed", reason: "2 tests failed" } as never,
+      devLens: { accurate: true, correction: "" },
+      worktree,
+    });
+
+    expect(failed).toContain("deleted the stub the old behaviour needed");
+  });
+
+  it("says a round ran even when it died before producing a report", () => {
+    const failed = renderSolveComment("SSX-1", {
+      kind: "failed",
+      reason: "2 tests failed",
+      fix: fixReport(),
+      repairOutcome: "crashed",
+      verification: { outcome: "failed", reason: "2 tests failed" } as never,
+      devLens: { accurate: true, correction: "" },
+      worktree,
+    });
+
+    expect(failed).toContain("crashed");
+  });
+
+  it("says nothing about a repair round when none ran", () => {
+    // An operator with REPAIR_ROUND off must get the comment exactly as it read before the wiring.
+    const failed = renderSolveComment("SSX-1", {
+      kind: "failed",
+      reason: "2 tests failed",
+      fix: fixReport(),
+      verification: { outcome: "failed", reason: "2 tests failed" } as never,
+      devLens: { accurate: true, correction: "" },
+      worktree,
+    });
+
+    expect(failed).not.toContain("second agent");
+  });
+
   it("adds nothing when the agent flagged no risk", () => {
     // An empty field must not render an empty heading — the reader would read it as "considered and found nothing".
     const failed = renderSolveComment("SSX-1", {
