@@ -157,6 +157,12 @@ including at least one where the cheap repair is more tempting than the honest o
 phase three begun before that is the loop argument arriving one rung early: it would not be adding
 a capability, it would be removing the only reader the capability has.
 
+**Nothing collects that evidence today, so §49 comes first.** The records accrue on their own —
+`REPAIR_ROUND` defaults on, so every failed solve from here adds one — but they accrue to a log
+line, a ticket comment and a terminal, none of which can be read as a distribution, and the diffs
+the bar actually turns on go unfindable as soon as the next run salvages their worktree. Phase
+three is blocked on a ledger, not on the flag, and the flag is the smaller piece of work.
+
 **The obvious mechanical bound is disproved, so do not reach for it on the way to phase three.** The
 rule considered was: _a repair round touching a test file must also touch the non-test file the
 failure traces to._ On SSX-3944 the production fix is already correct and the only correct repair
@@ -254,6 +260,50 @@ support is confined to the same list rather than widened to any `<word> <noun>` 
 trap is that the counter is the cheap half. On 2026-09-21 the pass table was also short a row, and
 no count check would have said so; a green counter that reads as "the docs are current" would be a
 worse outcome than the honest silence there is now.
+
+### 49. The repair round's measurement has nowhere to accumulate, so §45 cannot clear its own bar
+
+**Branch:** none yet. A prerequisite for §45's phases three and four, not a successor to them.
+
+**What is not built.** Any durable record of what a repair round did. `repairOutcome` reaches
+exactly three places and every one of them is per-run: a `solve.repair.dry_run` log line, a comment
+on the ticket, and stdout. Two of the three scroll, and the third is scattered one row per Jira
+issue. `calibrationRow` (`feedback.ts`) does append to `dev-lens.md`, but it carries the dev-lens
+verdict only — `outcomeLabel` renders every run that bought a repair round as plain `failed`, which
+is exactly the collapse the `repairOutcome` field was added to `SolveOutcome` to prevent, restored
+one layer down in the one artifact that persists.
+
+**Why it is owed, and this is what makes it a prerequisite rather than a nicety.** §45's bar for
+starting phase three is a distribution of outcomes plus **every `verified` among them read as a
+diff**. Neither is obtainable today. Seeing the distribution means grepping logs that have scrolled
+or opening tickets one at a time; there is no page to read down, which is precisely what
+`dev-lens.md` exists to provide for the other blind call this service makes. So phase two ships a
+measurement whose results cannot be assembled, and §45 waits on evidence that nothing is collecting.
+
+**The diffs go missing on their own, which is the half that gets worse with time.** The artifact the
+bar actually turns on is the repair's diff, and it lives only in the kept worktree. The next solve
+for the same ticket salvages that worktree to a `-salvaged-<timestamp>` sibling, so the diffs do
+survive — as a pile of identically-named directories with nothing saying which round produced which,
+or what its verdict was. SSX-3944 already has four such siblings. Nothing records the worktree path
+alongside the outcome, so a `verified` from three weeks ago is unfindable by construction.
+
+**The shape of the fix.** `dev-lens.md` is the precedent and the argument for it is already written
+in its own header: append-only, one row per round, read down the page before trusting the thing it
+scores. A sibling file, not a column added to that one — scoring triage's blind `agent:solvable`
+call and scoring the repair pass are
+[two questions](.claude/skills/dev-house-rules/BUILDING.md#two-questions-that-agree-today-are-still-two-questions)
+that would be fused by sharing a table. Minimum columns: the date, the key, the `repairOutcome`, the
+files the round touched, **the worktree path as it was at the time**, and whether a human has read
+the diff yet — the last one because the bar is not "a `verified` happened" but "a `verified` was
+read and found honest".
+
+**What would make it the wrong idea.** A "read yet?" column nobody ever updates is worse than no
+column, because an unticked box reads as "not yet" forever and a ticked one is unfalsifiable — this
+would be the second artifact here to record a judgement nothing can check, and the first one needed
+a narrow, argued exception to "never rewritten" to stay honest. If the honest version is a file a
+person edits by hand after reading a diff, say so plainly rather than implying the harness knows.
+And if phases three and four are abandoned — which §45 explicitly allows, if the distribution shows
+the pass reaching for the cheap repair — this ledger is deleted with them rather than kept.
 
 ### 1. Which model runs which task, and nothing chooses today
 
@@ -410,9 +460,9 @@ environment cannot answer a question about CI's.**
 - **The repair round has been watched once and needs more before anything may act on it.** One
   `repairOutcome`, `verified`, honest on inspection (`architecture/solve.md` §15) — on the ticket
   the pass was designed against, which is the weakest evidence there is. §45 holds what phase three
-  needs before it can start. Re-driving a ticket the solver has already tried means adding
-  `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says so on
-  the way out.
+  needs before it can start and §49 the reason it cannot be counted yet. Re-driving a ticket the
+  solver has already tried means adding `agent:start` and clearing `agent:failed` first; both
+  refusals are free, and the CLI says so on the way out.
 
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
