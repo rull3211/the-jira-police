@@ -406,6 +406,12 @@ const HISTORICAL: readonly HistoricalFigure[] = [
     why: "the write-verb audit's before-and-after, 107 to 186. It equals today's count by coincidence of timing; the sentence is about the change, and pinning it to the tree would make an incident rewrite itself",
   },
   {
+    file: ".claude/skills/dev-house-rules/INCIDENTS.md",
+    value: 2,
+    noun: "assertions",
+    why: "what the pre-worktree-branch suite loses when the second fail-open defect is reintroduced; it measures a suite that no longer exists, and the sentence exists to correct a claim that it measured zero",
+  },
+  {
     file: ".claude/skills/dev-house-rules/PROVING.md",
     value: 87,
     noun: "assertions",
@@ -439,13 +445,7 @@ const HISTORICAL: readonly HistoricalFigure[] = [
     file: "PLAN.md",
     value: 4562,
     noun: "tests",
-    why: "the same foreign suite, cited where the base-check cost is argued",
-  },
-  {
-    file: "PLAN.md",
-    value: 4562,
-    noun: "tests",
-    why: "and again in the dev-lens calibration item; two homes for one foreign number, which is exactly the drift this file is about and still not ours to derive",
+    why: "the same foreign suite, quoted in PLAN.md §13 to tell what a duplicate blessing costs. PLAN.md carried this figure once and this list carried it twice, and the copy was invisible because staleness is keyed by value rather than by identity",
   },
 ];
 
