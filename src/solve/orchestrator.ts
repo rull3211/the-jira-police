@@ -1029,6 +1029,14 @@ async function runPipeline(
       issueKey,
       would: round.kind,
       reported: report !== undefined,
+      // The endings that carry no report are the ones whose reason exists only here — the outcome
+      // has room for `repairOutcome` and not for why it took that value.
+      why:
+        round.kind === "abandoned" || round.kind === "crashed"
+          ? round.reason
+          : round.kind === "refused"
+            ? round.reasons.join("; ")
+            : "",
       worktreePath: worktree.path,
     });
     return {
