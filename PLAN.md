@@ -395,6 +395,14 @@ environment cannot answer a question about CI's.**
 
 ### 10. Still unobserved
 
+- **The repair round has never run against a real failure.** Everything known about it comes from
+  its own tests: no `repair` session has been spawned, no worktree holds a real repair diff, and
+  the `repairOutcome` distribution this phase exists to collect is empty. It has no rung of its own
+  either — the only way to reach it is a `solve:once` that fails verification, so it cannot be
+  driven directly, which is phase three's job. **What would show it:** one `pnpm solve:once
+<KEY> --solve` against a ticket whose fix strands a test, then reading the kept worktree's diff
+  to see whether the round corrected the code or quietly weakened the assertion. Until several of
+  those have been read, §45's phases three and four have nothing to stand on.
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
   property the layout rests on is that six code points render two columns wide, and

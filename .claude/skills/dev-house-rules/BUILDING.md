@@ -89,9 +89,8 @@ solving, two label lists genuinely became one and staying separate would have be
 - **A setting that grants a privilege defaults off.** A typo must not arm anything.
 - **A setting that only reports defaults on**, and reads `!== "false"` rather than `=== "true"`.
   A typo must not silently _withdraw a guard_. `FAIL_FIRST_CHECK` and `REPAIR_ROUND` are the only
-  two settings in the file shaped this way, and the asymmetry is the point. **Check the shape still
-  matches the thing** — `REPAIR_ROUND` qualifies only because the repair round's verdict is thrown
-  away; on the day something acts on it, that setting grants a privilege and has to move to `flag`.
+  two settings in the file shaped this way, and the asymmetry is the point. Each states beside
+  itself in `settings.ts` what keeps it qualifying, since neither is unconditional.
 - **An allowlist gets no fallback at all.** A default for `SOLVE_REPOS` would be a write privilege
   that survives being deleted from configuration — an operator revoking access would have it handed
   straight back, editable only in source. Unset means nothing is allowed.

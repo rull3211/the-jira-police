@@ -63,8 +63,8 @@ Recon runs first and its verdict is honoured: if it says stop, the fix pass neve
 model ever gets write access for that ticket. That ordering covers the first four. `--merge`
 belongs to none of it — it runs when the base has moved under a pull request that already exists,
 which is a fact about two histories rather than a stage of solving a ticket. `--repair` belongs to
-none of it either, for the opposite reason: it exists only after a verification failure, and
-nothing in `src/solve/orchestrator.ts` calls it yet.
+none of it either, for the opposite reason: it exists only after a verification failure, which is
+the one point in the run where every other pass has already had its turn.
 
 `SOLVE_INSTRUCTIONS.md` §1, §2, §2a, §2b, §2c and §2d are the contracts for the six, in that order.
 This list must match them and the argument builder in `src/solve/runner.ts`; it previously said

@@ -275,9 +275,10 @@ export type SolveOutcome =
        * means no round ran, whether `REPAIR_ROUND` is off or the run never reached one.
        *
        * The worktree holds the round's edits on top of the diff that failed, and the reported
-       * `reason` was measured before them; `describeSolveOutcome` and `solveReport` both say so,
-       * because a tree that no longer reproduces the failure it is kept as evidence of is the
-       * defect class this project exists to catch.
+       * `reason` was measured before them — so `describeSolveOutcome` says that outright, a tree
+       * that no longer reproduces the failure it is kept as evidence of being the defect class
+       * this project exists to catch. `renderSolveComment` names no worktree at all, which is why
+       * it does not repeat the warning: a Jira reader is not being pointed at the tree.
        */
       readonly repairOutcome?: SolveOutcome["kind"];
       readonly devLens: DevLensFeedback;
