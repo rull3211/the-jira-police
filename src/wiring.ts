@@ -41,6 +41,7 @@ import {
   flag,
   list,
   numeric,
+  repairRound,
   solveMode,
 } from "./settings.ts";
 import type { ClaimCapabilities } from "./solve/claim.ts";
@@ -723,6 +724,7 @@ export function buildSolveRequest(
     baseRef: settings.SOLVE_BASE_REF,
     vaultPath: settings.VAULT_PATH,
     failFirstCheck: failFirstCheck(settings),
+    repairRound: repairRound(settings),
     gitTimeoutMs: numeric(settings, "SOLVE_GIT_TIMEOUT_MS", 1),
     stepTimeoutMs: numeric(settings, "SOLVE_STEP_TIMEOUT_MS", 1),
     installTimeoutMs: numeric(settings, "SOLVE_INSTALL_TIMEOUT_MS", 1),

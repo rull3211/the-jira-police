@@ -9,6 +9,7 @@ import {
   list,
   numeric,
   readSettings,
+  repairRound,
   solveMode,
 } from "./settings.ts";
 
@@ -168,6 +169,26 @@ describe("the solve settings", () => {
   it.each(["false", "FALSE", " false "])("turns off on an explicit %j", (value) => {
     expect(failFirstCheck(readSettings({ ...MINIMAL, FAIL_FIRST_CHECK: value }))).toBe(false);
   });
+
+  it("runs the repair round unless somebody turned it off", () => {
+    // The second setting shaped this way, and it qualifies only while the round's verdict is
+    // discarded — it withdraws a measurement, not a privilege.
+    expect(repairRound(readSettings(MINIMAL))).toBe(true);
+  });
+
+  it.each(["", "  ", "no", "0", "flase", "off", "true"])(
+    "keeps the repair round on %j, because only false may withdraw it",
+    (value) => {
+      expect(repairRound(readSettings({ ...MINIMAL, REPAIR_ROUND: value }))).toBe(true);
+    },
+  );
+
+  it.each(["false", "FALSE", " false "])(
+    "stops buying the repair round on an explicit %j",
+    (value) => {
+      expect(repairRound(readSettings({ ...MINIMAL, REPAIR_ROUND: value }))).toBe(false);
+    },
+  );
 
   it("defaults to manual, so a solve waits for a human", () => {
     expect(solveMode(readSettings(MINIMAL))).toBe("manual");

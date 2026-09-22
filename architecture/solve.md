@@ -175,7 +175,7 @@ shell.
 | --------- | -------------------------------------------------- | ----------------------------------------------- |
 | Runs      | `agent-solve`, once per pass                       | `git`, `gh`, the package manager                |
 | Sees      | the worktree, as its working directory             | the worktree and the repository it was cut from |
-| May write | files, in four of the five passes                  | nothing but the branch it created               |
+| May write | files, in five of the six passes                   | nothing but the branch it created               |
 | Cannot    | run anything, reach the network, spawn a sub-agent | form an opinion                                 |
 
 This is enforced the only way it can be. **`--allowedTools` does not restrict** (§6, §14.12) — it
@@ -263,12 +263,31 @@ It does not retry. A failed command is a fact the caller must decide about, and 
 particular distinguishes "the tests failed" from "we could not find out" — a retry here would
 quietly turn the second into the first.
 
-### The five passes
+### The six passes
 
 `recon` → `fix` → `simplify`, then `review` once per round of reviewer feedback, plus `merge` when
-a branch will not take its base. Five sessions, two tool sets — and `PASSES` in `runner.ts` is the
-list, iterated by the tests rather than restated in them, because three hand-copied copies of this
-membership all stopped testing anything on the day it changed.
+a branch will not take its base. **`repair` is the sixth, and the only one whose answer is thrown
+away** — `runPipeline`'s `failed` branch runs one round, keeps its report and its verdict on the
+outcome as `repair` and `repairOutcome`, and still returns `failed`, so a repair that re-verifies
+green opens no pull request; `REPAIR_ROUND=false` skips the round entirely. PLAN.md §45 holds the
+phasing and why the verdict is not trusted.
+
+**Measured on its first real run, SSX-3944 on 2026-09-22.** Five sessions, $3.03, 15m19s wall
+clock, of which the repair round was $0.76 — a third again on top of a run that would otherwise
+have stopped at `failed`, for an answer nothing acts on. It came back `verified` and was discarded
+as designed. Reading the diff is what the phase is for, and the diff was honest: the fix removed
+`CustomerDto`'s auto-vivification, which stranded a Mockito stub in `CustomerCmHelperTest` that
+only the buggy behaviour had ever exercised, and the round **restored the test's premise instead of
+deleting the stub** — three lines setting a `ContactInfoDto` with a phone and deliberately no
+email, so the path is reached on purpose. The failing assertion and the stub are untouched. That is
+the outcome §45 hoped for and the opposite of the cheap one it predicted; one case, on the ticket
+this pass was designed against, so it establishes that the honest repair is reachable and nothing
+about the rate.
+
+Two tool
+sets — and `PASSES` in `runner.ts` is the list, iterated by the tests rather than restated in them,
+because three hand-copied copies of this membership all stopped testing anything on the day it
+changed.
 
 | Pass       | Tools                              | Shown                                                                    | Must return                                                                                                             |
 | ---------- | ---------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
@@ -277,6 +296,7 @@ membership all stopped testing anything on the day it changed.
 | `simplify` | same as `fix`, plus `Skill`        | the ticket and the real diff                                             | changes made, or why it declined                                                                                        |
 | `review`   | same as `fix`                      | the ticket, the review comments and every open inline thread with its id | a response to every comment, plus a `threadAnswers` entry per thread carrying a reply, a `basis` and whether to resolve |
 | `merge`    | same as `fix`                      | the conflicted files                                                     | the resolution, and `took` — which side each hunk came from                                                             |
+| `repair`   | same as `fix`                      | the failing verification step's own captured output                      | the same report `fix` returns — a repair is a correction to the same change, not a different kind of report             |
 
 Separate sessions rather than one, and the reason differs each time. **Recon must not be able to
 write**, or "should this be attempted" and "here is the attempt" collapse into one answer, and any
@@ -937,18 +957,33 @@ that cannot be done with what the repository already has is a bail.
 
 **A drift worth recording, because the record of it drifted too.** This paragraph said for some
 time that `SKILL.md` described _two_ passes while the instructions and `runner.ts` had four. By
-2026-09-08 both halves of that sentence were wrong in different directions: the code has **five**
-(`PASSES = ["recon", "fix", "simplify", "review", "merge"]`), `SOLVE_INSTRUCTIONS.md` documents
-five (§1, §2, §2a, §2b, §2c), and `SKILL.md` listed five in its body under a heading that still
-said "The four passes". So the file recording the drift had itself gone stale by a different
-amount than the thing it was recording — a note about rot, rotting.
+2026-09-08 both halves of that sentence were wrong in different directions: the code had **five**
+(`PASSES` ran to `"merge"` and stopped), `SOLVE_INSTRUCTIONS.md` documented five (§1, §2, §2a, §2b,
+§2c), and `SKILL.md` listed five in its body under a heading that still said "The four passes". So
+the file recording the drift had itself gone stale by a different amount than the thing it was
+recording — a note about rot, rotting.
 
-Fixed in the same commit as this paragraph: the heading now reads "The five passes". It is left
+Fixed in the same commit as that paragraph: the heading then read "The five passes". It is left
 written up rather than silently corrected because the failure is the interesting part. Nothing
 reads the count, so no behaviour ever depended on it, and that is exactly why three separate
 numbers coexisted in three files for weeks. **A fact nothing mechanically checks is a fact that
 will be wrong**, which is the argument for `PASSES` being one exported list the tests iterate
 rather than a number anybody writes down.
+
+**And it happened again on 2026-09-22, which is the part worth the space.** Adding `repair` moved
+the count to six. `SOLVE_INSTRUCTIONS.md` gained §2d and `SKILL.md`'s heading was updated in the
+same branch — but this file and `README.md` both still said five, and this very paragraph carried a
+hand-copied `PASSES = [...]` that no longer matched the array. Three points follow. The first is
+that the paragraph arguing a hand-copied count will go stale had itself hand-copied one, so the
+literal is gone above rather than corrected — a prose sentence cannot hold that array, only cite it.
+The second is that the drift survived a green `pnpm docs:check`, which does have the right mechanism
+for this: a `FACT` in `docs-check.ts` pins a number to a computed value and fails when the two part.
+**It could not see this one because every site spells the number as a word.** `FACTS` and
+`count-phrases.ts` both match on `(\d[\d,]*)`, so "five passes" is invisible to the checker _and_ to
+the unwatched-phrase sweep that exists to catch facts nobody declared — the sweep's own blind spot
+and the checker's are the same blind spot, so neither covers the other. The third is that a claim
+about a count is the cheap half: the table above it was also short a row, and no counter would have
+said so.
 
 ### What is inert, and why that is the plan
 

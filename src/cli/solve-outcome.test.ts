@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
+import type { FixReport } from "../solve/runner.ts";
 import type { ReviewCycleOutcome } from "../solve/review-cycle.ts";
 import {
   chainDecision,
@@ -25,6 +26,20 @@ const worktree = {
 };
 
 const lens = { accurate: true, correction: "" };
+
+/** Carried by `failed` as well as `verified`, so `residualRisk` reaches the reader of a red run. */
+const FIX_REPORT: FixReport = {
+  changed: true,
+  filesTouched: ["src/app/head.tsx"],
+  summary: "point the favicon at the nonprod asset",
+  commitSubject: "fix(advisor): point the favicon at the nonprod asset",
+  commitBody: "The head tag named the production file in every environment.",
+  testAdded: true,
+  testOmittedReason: "",
+  residualRisk: "",
+  abandoned: "",
+  abandonedCause: "none",
+};
 
 /** The one outcome that carries every pass's report, so it is built once. */
 const verified = {
@@ -99,6 +114,7 @@ const OUTCOMES: readonly SolveOutcome[] = [
   {
     kind: "failed",
     reason: "2 tests failed",
+    fix: FIX_REPORT,
     verification: {} as never,
     devLens: lens,
     worktree,
@@ -219,6 +235,41 @@ describe("describeSolveOutcome", () => {
     for (const outcome of OUTCOMES) {
       expect(describeSolveOutcome(outcome)).not.toBe("");
     }
+  });
+
+  it("says a repair round's green verdict was discarded, and hands over the diff command", () => {
+    // "verified" appearing anywhere near a failed run is the reading to pre-empt: an operator who
+    // takes it as the answer will go looking for a pull request that does not exist.
+    const line = describeSolveOutcome({
+      kind: "failed",
+      reason: "test did not pass (exit 1)",
+      fix: FIX_REPORT,
+      repair: FIX_REPORT,
+      repairOutcome: "verified",
+      verification: {} as never,
+      devLens: lens,
+      worktree,
+    });
+
+    expect(line).toContain("DISCARDED");
+    // The tree no longer reproduces the reason printed directly above it, which is the one thing
+    // an operator reading a kept worktree cannot be left to infer.
+    expect(line).toContain("no longer reproduces");
+    expect(line).toContain(`git -C ${worktree.path} diff ${worktree.branch}`);
+    expect(line).toContain("REPAIR_ROUND=false");
+  });
+
+  it("prints the failed outcome exactly as before when no round ran", () => {
+    const line = describeSolveOutcome({
+      kind: "failed",
+      reason: "test did not pass (exit 1)",
+      fix: FIX_REPORT,
+      verification: {} as never,
+      devLens: lens,
+      worktree,
+    });
+
+    expect(line).toBe(`FAILED — test did not pass (exit 1)\nWorktree kept at ${worktree.path}`);
   });
 
   it("tells an operator which kind of abandon they are looking at", () => {
@@ -845,6 +896,7 @@ describe("terminalLabelAfter", () => {
       terminalLabelAfter({
         kind: "failed",
         reason: "2 tests failed",
+        fix: FIX_REPORT,
         verification: {} as never,
         devLens: lens,
         worktree,

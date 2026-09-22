@@ -146,9 +146,28 @@ function headline(outcome: SolveOutcome): string {
         )}. If you were editing those yourself while this ran, that is the likely cause and the run can simply be repeated.`;
     }
     case "failed": {
-      return `An agent made a change and this repository's own checks rejected it: ${safeText(
+      const rejected = `An agent made a change and this repository's own checks rejected it: ${safeText(
         outcome.reason,
       )}`;
+      // Written before verification ran, so it is the pass's prediction rather than a diagnosis — and it is frequently the failure itself, named by the only party who read the change.
+      const risk = outcome.fix.residualRisk.trim();
+      const flagged =
+        risk === ""
+          ? rejected
+          : `${rejected}\n\nThe agent flagged this about its own change, before the checks ran: ${safeText(risk)}`;
+      if (outcome.repairOutcome === undefined) {
+        return flagged;
+      }
+      // On the ticket, not only the terminal: under the daemon nobody is watching one, and a round
+      // reported nowhere is indistinguishable from a round that never ran.
+      const attempt =
+        outcome.repairOutcome === "verified"
+          ? `A second agent was then shown the failure and its corrected version passed the same checks — but that result is **not** being acted on and no pull request is being opened. This step is being measured, not trusted: making a failing check pass by weakening it looks identical from here.`
+          : `A second agent was then shown the failure and did not resolve it either (${safeText(outcome.repairOutcome)}).`;
+      const repairRisk = outcome.repair?.residualRisk.trim() ?? "";
+      return repairRisk === ""
+        ? `${flagged}\n\n${attempt}`
+        : `${flagged}\n\n${attempt}\n\nThat second agent flagged this about its own edit: ${safeText(repairRisk)}`;
     }
     case "crashed": {
       // Phrased to be unmistakably about the harness — misread as "the agent could not do it", it

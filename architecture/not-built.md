@@ -106,10 +106,13 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
   recon's copy reaches the fix pass only incidentally inside the JSON brief, and the fix, simplify
   and review copies go nowhere — a reporting channel for prompt injection with no listener. Deleting
   it is not obviously right: the field costs a schema entry and the plumbing already exists, so
-  wiring a listener is cheaper than rebuilding it after the first injection nobody heard about. Four
-  fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
-  proven), `ReviewThread.isOutdated`, `VerificationPlan.toolchain` and `StepResult.output`. Clean by
-  the same sweep: **all 52 settings are read**, and there are no orphan files.
+  wiring a listener is cheaper than rebuilding it after the first injection nobody heard about.
+  These fields are computed and dropped: `ReviewState.reviewerErrored` (the standing debt item, now
+  proven), `ReviewThread.isOutdated` and `VerificationPlan.toolchain`. `StepResult.output` left
+  this list when the repair round began reading it — and `VerificationPlan.toolchain` is the
+  reason that round cannot name a build tool's report directory, since `VerificationResult` never
+  carries it out of `verify`. Clean by
+  the same sweep: **all 53 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

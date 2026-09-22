@@ -320,6 +320,12 @@ export const SETTINGS = [
     fallback: "true",
   },
   {
+    name: "REPAIR_ROUND",
+    description:
+      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK — but read the difference before copying the reasoning: that one writes nothing, and this one runs a write pass. It arms a model session holding Write and Edit, in a worktree the run is already writing, and buys a re-verification and sometimes a fail-first probe. What it does not do is let anything act on the result. The outcome stays `failed` whatever the round concludes, because the pass has never been watched working and a green re-verification is reachable by deleting the failing assertion, which no exit code tells from a fix. So the thing a typo would withdraw is the measurement, not a guard on the writing — and on the day a phase acts on the verdict, this becomes a privilege switch and belongs on `flag`. Set it to false for cost.",
+    fallback: "true",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",
@@ -440,6 +446,18 @@ export function flag(settings: Settings, name: SettingName): boolean {
  */
 export function failFirstCheck(settings: Settings): boolean {
   return settings["FAIL_FIRST_CHECK"].trim().toLowerCase() !== "false";
+}
+
+/**
+ * Whether a failed verification also buys one repair round. Only "false" turns it off.
+ *
+ * The mirror of `flag` for the same reason as `failFirstCheck`, and it is only the mirror while
+ * the round stays untrusted: the outcome is `failed` whatever the round returns, so this withdraws
+ * a measurement rather than arming a privilege. A phase that lets a repair decide the run must
+ * move this to `flag`.
+ */
+export function repairRound(settings: Settings): boolean {
+  return settings["REPAIR_ROUND"].trim().toLowerCase() !== "false";
 }
 
 export function list(settings: Settings, name: SettingName): readonly string[] {

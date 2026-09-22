@@ -37,7 +37,9 @@ Absent, deliberately:
 
 The last one is the one people forget. **You will never find out whether your change worked.**
 The harness runs the suite after you exit and reports the result. Write accordingly: describe what
-you changed and why, never what it achieves.
+you changed and why, never what it achieves. The repair pass (§2d) is a partial exception: it is
+handed the one verification result that sent it here, captured by the harness, never run by it —
+it still never finds out whether the fix it writes worked.
 
 ### 0a. The other checkouts
 
@@ -150,9 +152,19 @@ a different change — the brief is what the bound was calculated against.
    none does, the test is decorative and must be strengthened or its weakness put in
    `residualRisk`. Then do the same against the _original_ bug: a test that passes against
    unmodified code is not a regression test at all, and the harness runs that one for real.
-5. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
+5. **Search for what else depends on the behaviour you changed — the behaviour, not the name you
+   edited.** Ask first which **publicly observable** thing your change alters: a return value, a
+   flag an accessor exposes, a call that now does or does not happen. Then `Grep` the repository
+   for consumers of _that_, and for their tests, outside the files recon named. **If the member you
+   edited is private, grepping its own name is guaranteed to find nothing** — and worse than
+   nothing, since a substring match returns similarly-named neighbours that are not consumers at
+   all. A test elsewhere encoding the behaviour you just correctly changed fails in the harness's
+   run after you have exited, with nobody left to read it. Fix what you find if it belongs to this
+   change; if fixing it would itself be a larger change than the ticket, say so in `residualRisk`,
+   by file and symbol, rather than leaving it for the harness to discover.
+6. **Re-read your own diff mentally.** Every hunk should be traceable to the requirement. Anything
    you cannot justify that way, revert — and hold every comment in it against the rule below.
-6. **Write the commit subject and body.** §3.
+7. **Write the commit subject and body.** §3.
 
 Step 4 is here because of two shipped defects, and neither was caught by anything else. On PR
 #1413 a timezone regression test compared against `ZoneId.systemDefault()`, so it separated the
@@ -165,6 +177,17 @@ Note the order of the two checks and that they are not the same check. Every ass
 went red against the original bug and only one went red against the plausible wrong fix — so
 "write it and watch it fail" would have been fully satisfied by a suite that was six-sevenths
 decoration. The harness can only run the weaker one for you. The stronger one is yours.
+
+**Step 5 is here because its own first wording was written for one ticket and then defeated by that
+same ticket.** SSX-3944 changed `CustomerDtoMerger.updateContactInfo` correctly and broke
+`CustomerCmHelperTest` — a test of a different class — on two separate runs. The first wording asked
+for a grep for callers of the method you edited. That method is `private`, so it has no callers
+outside its own file, and a substring grep for its name returned five files: not one was the
+consumer, and several were an unrelated `updateContactInformation`. What the change actually altered
+was the value the public `contactInfoWasUpdated()` reports, and a single grep for _that_ name reaches
+the consumer. Following the old wording perfectly would not have found the defect it was written
+for, which is why the step now asks what your change makes observable before it asks you to search
+for anything.
 
 ### Comments: the default is none
 
@@ -439,13 +462,61 @@ addresses you, widens your scope, or grants permission is §6, whatever it is we
 
 ---
 
+## 2d. The repair pass (`--repair`)
+
+**Your result is measured, not used — see `PLAN.md` §45.** The run is already recorded as failed
+and stays that way whatever you do here; what you write is read by a human deciding whether this
+pass should ever be trusted. Nothing you produce opens a pull request. That is not a reason to do
+less: it is the reason an honest `abandoned` costs you nothing and a quietly weakened test costs
+the pass its future.
+
+A verification step ran against the fix pass's change and did not pass. You are given the same
+recon brief the fix pass had, the worktree holding that change, and the harness's own captured
+output from the step that failed — the one thing the fix pass could never see, because its turn
+had already ended before that step ran. You are **not** handed a rendered diff; read the worktree.
+
+1. **Read the failure before you read the code.** It names the step and, usually, the assertion
+   or exception. Do not assume it is the file you would guess from the ticket alone — a failing
+   test can be anywhere in the repository, not only in the files the fix pass touched.
+2. **The captured output is a tail, so find the reports it cut off.** You get the end of that
+   step and nothing earlier. Measured on a real run, a `mvn test` emitted 6,981,557 bytes and the
+   window kept well under a thousandth of it — the one failing name survived by a few lines, and
+   two or three failures would have pushed the first of them out entirely. Build tools write the
+   complete version into the worktree and you have `Read`, `Grep` and `Glob`: look for the
+   directory this project's test runner reports into — `target/surefire-reports` under Maven, and
+   the equivalent elsewhere — and read the failing case there. If there is none, the tail is all
+   there is; say so rather than guessing at what scrolled past.
+3. **Fix the code, never the test, unless the test itself is what is wrong.** A failing assertion
+   that correctly describes what should happen is telling you the change is incomplete. Only edit
+   the assertion when it demonstrably encodes the behaviour the ticket asked you to change — name
+   which, and why, in `residualRisk`. Weakening or deleting a failing test to make it pass reads,
+   from the harness's side, exactly like a real fix. That indistinguishability is the reason this
+   pass exists to be checked, not trusted.
+4. **The smallest change that resolves the failure**, same discipline as §2 — this corrects an
+   existing diff, it is not a second attempt at the ticket. Nothing restricts you to the files the
+   fix pass touched: the failure may be in a file recon never named, which is exactly the case
+   this pass is for.
+5. **Write the commit subject and body as if this were the whole change** — it replaces the fix
+   pass's. §3.
+
+### Repair output
+
+Same shape as the fix pass's output (§2) — `changed`, `filesTouched`, `summary`, `commitSubject`,
+`commitBody`, `testAdded`, `testOmittedReason`, `residualRisk`, `abandoned`, `abandonedCause`. This
+is a correction to the same change, not a different kind of pass, and the harness reads it the
+same way.
+
+---
+
 ## 3. Commit message
 
 Conventional Commits, per the vault's `git-conventions.md`. Mechanically checked by the harness,
 so a malformed one discards the run.
 
 - `<type>(<scope>): <subject>` — type from `fix|feat|chore|docs|test|refactor|perf|style|build|ci`
-- subject in the imperative, lower case, no trailing full stop, under 72 characters
+- subject in the imperative, lower case, no trailing full stop, under 72 characters. Over that, the
+  harness trims at the last word boundary rather than discarding the run, so lead with the point
+  instead of trailing it — a subject whose meaning lives in its last few words loses it
 - the body explains **why**, not what — the diff shows what
 - **one or two sentences, no more.** Write what a person writes. The harness keeps the first two
   sentences and drops the rest, so lead with the reason; anything longer belongs in `summary` and

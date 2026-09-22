@@ -5,7 +5,7 @@
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
 > ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
 > and staged images its own abandoned runs left behind, and renders its log to a reader.
-> **2824 tests in 92 files**, no build step.
+> **2868 tests in 92 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -142,6 +142,189 @@ already moved.
 The triage-selection entries are now all closed, so the next entry is §45.
 
 <!-- refs:on -->
+
+### 45. Nothing has ever watched the repair pass work, so nothing may act on what it says
+
+**Branch:** none yet. Phase one (the blast-radius instruction, the inert pass) shipped in #67 and
+phase two (the untrusted dry run) in #68 — named by pull request rather than by branch, since both
+branches are deleted on merge. Phases three and four are unclaimed.
+
+**What is not built.** Any path by which a repair round's verdict changes what happens to a ticket.
+The round runs on every failed verification unless `REPAIR_ROUND=false`, and `runPipeline` discards
+its answer: the outcome stays `failed`, carrying `repair` and `repairOutcome` for a human to read.
+A round that re-verifies green opens nothing. What remains is STARTING.md's third and fourth rungs —
+one named ticket behind a flag that must be typed, and then the loop.
+
+**Why the verdict is not trusted yet, and this is the part that is not a scheduling problem.** Green
+is reachable here dishonestly, measured on the motivating ticket rather than argued. SSX-3944's
+`CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail` holds a Mockito stub that only the
+_buggy_ behaviour ever exercised, so every correct fix strands it. Deleting that stub makes the
+build pass and leaves the test vacuous: under any correct fix `updateContactsInCM` is never reached,
+so its `assertNull(…getEmail())` passes against the object set up three lines above it. The honest
+repair asks what the test should assert now that its premise is gone. **A pass measured by an exit
+code cannot tell those two apart**, and `checkFailFirst` looks only at tests the run itself wrote,
+so nothing downstream notices either.
+
+**The first real round took the honest path, and that is one data point, not a licence.** On
+2026-09-22 it restored the test's premise explicitly rather than deleting the stub
+(`architecture/solve.md` §15 has the run and its cost). What that establishes is that the honest
+repair is _reachable_ — not that it is what the pass does under pressure, and the run was on the
+ticket this pass was designed around.
+
+**So the bar for starting phase three is evidence, not a decision.** Enough `repairOutcome` records
+to see a distribution rather than an anecdote, from tickets nobody had this pass in mind for,
+including at least one where the cheap repair is more tempting than the honest one — and every
+`verified` among them read as a diff, since that verdict is the one the exit code cannot audit. A
+phase three begun before that is the loop argument arriving one rung early: it would not be adding
+a capability, it would be removing the only reader the capability has.
+
+**Nothing collects that evidence today, so §49 comes first.** The records accrue on their own —
+`REPAIR_ROUND` defaults on, so every failed solve from here adds one — but they accrue to a log
+line, a ticket comment and a terminal, none of which can be read as a distribution, and the diffs
+the bar actually turns on go unfindable as soon as the next run salvages their worktree. Phase
+three is blocked on a ledger, not on the flag, and the flag is the smaller piece of work.
+
+**The obvious mechanical bound is disproved, so do not reach for it on the way to phase three.** The
+rule considered was: _a repair round touching a test file must also touch the non-test file the
+failure traces to._ On SSX-3944 the production fix is already correct and the only correct repair
+touches **a test file alone** — so that bound rejects the repair we want and leaves the pass
+choosing between doing nothing and damaging working code to satisfy it. A workable bound has to
+separate "this test encoded the behaviour the ticket asked us to change" from "this test caught a
+real regression", and nothing here knows how to check that mechanically. Shipping the bound anyway
+is worse than shipping none, because it reads as enforcement.
+
+**What would make it the wrong idea.** Handing a pass the actual red output is also handing it the
+cheapest way to make it green. `SOLVE_INSTRUCTIONS.md` §2 step 4 names this shape for the fix pass,
+and a pass built to stare at red output and told to make it pass is the one most likely to reach for
+it. If the dry run's reports show that is what it usually does, the answer is to delete the pass,
+not to phase it further — and the measurement is there to make that outcome as visible as the other.
+
+### 46. Nothing can say which code a running daemon is executing
+
+**Branch:** none yet.
+
+**What is not built.** Any way to ask what a live daemon is actually running. `pnpm daemon:status`
+matches processes on their command text (`node … src/index.ts`) and reports a count; it cannot say
+which checkout a process was started from, nor which commit that checkout was on at the time.
+
+**Why it is owed, with the cost already paid.** Node loads `src/index.ts` and its imports once, at
+process start. Every commit, merge and branch switch afterwards changes the tree and not the running
+process. The skill root is the exception, and it makes the situation worse rather than better:
+`prepareSkillRoot` re-copies `.claude/skills/agent-solve/` from the tree on **every pass**, so a
+long-lived daemon runs old TypeScript against new markdown — two halves from different commits inside
+a single run. On 2026-09-21 a daemon started before PR #64 merged kept raising the `parseSimplify`
+contradiction that #64 had already removed. `daemon:status`'s own message — "a branch switch changes
+what the next tick runs" — is true only of the markdown, and it sent that session to the wrong
+diagnosis twice before the error string was grepped for in the tree and found not to be there.
+
+**The shape of the fix.** Record the HEAD sha and the checkout path when the daemon starts —
+`state/` is the precedent — and have `daemon:status` compare both against the current tree: _running
+code from `77ff859` in `/…/the-jira-police`, tree is at `6272103`, four commits behind; restart to
+pick them up._ That is a check rather than a reminder, which is the distinction `CLAUDE.md` draws
+about its own hooks. The cheap variant compares process start time against the newest mtime under
+`src/` and needs no daemon change, at the cost of being a heuristic.
+
+**What would make it the wrong idea.** A staleness warning that fires on every ordinary edit is one
+that gets ignored, and this repository's working copy _is_ the running service's program text, so
+divergence during development is the normal state rather than the exception. It should report, never
+refuse, and the wording has to survive being seen constantly.
+
+### 47. `createWorktree` salvages a colliding worktree but not a colliding branch
+
+**Branch:** none yet.
+
+**What is not built.** Any handling for the case where the branch a solve wants already exists and
+its worktree does not. The reverse is handled: a worktree at the target path is detached, moved to a
+`-salvaged-<timestamp>` sibling and its branch deleted, so that collision heals itself. With no
+worktree there is nothing to salvage, and `git worktree add -b` fails outright — `exit 255: a branch
+named 'fix/ssx-3944-…' already exists`.
+
+**Why it is owed.** That state is precisely what hand-cleanup leaves behind, because removing a
+worktree is the obvious half and deleting its branch is not. Observed on SSX-3944, 2026-09-21:
+removing both worktrees while leaving the branch turned a self-healing situation into a hard refusal
+and the run never started. The branch there carried no commits of its own — its tip was already
+contained in `origin/main` — so nothing would have been lost by treating it the way the worktree
+salvage already treats its branch.
+
+**What would make it the wrong idea.** A branch that _does_ carry commits is somebody's unpushed
+work, and deleting it to make room is the one outcome worse than refusing. Any fix must establish
+that the branch adds nothing over its upstream before touching it, and refuse loudly when it does.
+
+### 48. `docs:check` cannot see a count written as a word, and its blind spot is shared by the sweep meant to cover it
+
+**Branch:** none yet.
+
+**What is not built.** Two things, and the fix is worth little without both. `FACTS` in
+`docs-check.ts` and `COUNTED_NOUNS` in `count-phrases.ts` both anchor on `(\d[\d,]*)`, so a count
+spelled `six` rather than `6` matches nothing. And `"passes"` is not a counted noun, so even the
+digit form would go unwatched.
+
+**Why it is owed, with the cost already paid twice.** The two halves of this checker are supposed to
+back each other up: a `FACT` pins a declared number to a computed one, and `count-phrases.ts` sweeps
+for numbers nobody declared — the second exists precisely because the first only sees the phrasing
+it was written for. **They share the digit assumption, so the backstop has the same blind spot as
+the thing it backs up.** Measured: adding `repair` to `PASSES` on 2026-09-21 falsified "The five
+passes" in `architecture/solve.md`, "Five passes, five sessions" in `README.md`, "four of the five
+passes" in the same file, and a hand-copied `PASSES = [...]` literal inside the paragraph that
+exists to record the _previous_ instance of this exact drift. All four survived a review and a run
+with all six CI gates green — the drift is not something the gates caught late, it is something no
+gate can see. The same class went unnoticed on 2026-09-08, which is what that paragraph was written
+about; it is now written about twice.
+
+**What it would let the service do.** Fail a pull request that leaves a word-count stale, which is
+the only reason any of the numeric facts here are trustworthy today.
+
+**What would make it the wrong idea.** Number-words are ordinary English and the false-positive rate
+is the whole risk: "the five minutes it takes", "one of the two rules". `COUNTED_NOUNS` is the
+existing answer to exactly that — it is a deliberate allow-list, and this stays safe only if word
+support is confined to the same list rather than widened to any `<word> <noun>` shape. A second
+trap is that the counter is the cheap half. On 2026-09-21 the pass table was also short a row, and
+no count check would have said so; a green counter that reads as "the docs are current" would be a
+worse outcome than the honest silence there is now.
+
+### 49. The repair round's measurement has nowhere to accumulate, so §45 cannot clear its own bar
+
+**Branch:** none yet. A prerequisite for §45's phases three and four, not a successor to them.
+
+**What is not built.** Any durable record of what a repair round did. `repairOutcome` reaches
+exactly three places and every one of them is per-run: a `solve.repair.dry_run` log line, a comment
+on the ticket, and stdout. Two of the three scroll, and the third is scattered one row per Jira
+issue. `calibrationRow` (`feedback.ts`) does append to `dev-lens.md`, but it carries the dev-lens
+verdict only — `outcomeLabel` renders every run that bought a repair round as plain `failed`, which
+is exactly the collapse the `repairOutcome` field was added to `SolveOutcome` to prevent, restored
+one layer down in the one artifact that persists.
+
+**Why it is owed, and this is what makes it a prerequisite rather than a nicety.** §45's bar for
+starting phase three is a distribution of outcomes plus **every `verified` among them read as a
+diff**. Neither is obtainable today. Seeing the distribution means grepping logs that have scrolled
+or opening tickets one at a time; there is no page to read down, which is precisely what
+`dev-lens.md` exists to provide for the other blind call this service makes. So phase two ships a
+measurement whose results cannot be assembled, and §45 waits on evidence that nothing is collecting.
+
+**The diffs go missing on their own, which is the half that gets worse with time.** The artifact the
+bar actually turns on is the repair's diff, and it lives only in the kept worktree. The next solve
+for the same ticket salvages that worktree to a `-salvaged-<timestamp>` sibling, so the diffs do
+survive — as a pile of identically-named directories with nothing saying which round produced which,
+or what its verdict was. SSX-3944 already has four such siblings. Nothing records the worktree path
+alongside the outcome, so a `verified` from three weeks ago is unfindable by construction.
+
+**The shape of the fix.** `dev-lens.md` is the precedent and the argument for it is already written
+in its own header: append-only, one row per round, read down the page before trusting the thing it
+scores. A sibling file, not a column added to that one — scoring triage's blind `agent:solvable`
+call and scoring the repair pass are
+[two questions](.claude/skills/dev-house-rules/BUILDING.md#two-questions-that-agree-today-are-still-two-questions)
+that would be fused by sharing a table. Minimum columns: the date, the key, the `repairOutcome`, the
+files the round touched, **the worktree path as it was at the time**, and whether a human has read
+the diff yet — the last one because the bar is not "a `verified` happened" but "a `verified` was
+read and found honest".
+
+**What would make it the wrong idea.** A "read yet?" column nobody ever updates is worse than no
+column, because an unticked box reads as "not yet" forever and a ticked one is unfalsifiable — this
+would be the second artifact here to record a judgement nothing can check, and the first one needed
+a narrow, argued exception to "never rewritten" to stay honest. If the honest version is a file a
+person edits by hand after reading a diff, say so plainly rather than implying the harness knows.
+And if phases three and four are abandoned — which §45 explicitly allows, if the distribution shows
+the pass reaching for the cheap repair — this ledger is deleted with them rather than kept.
 
 ### 1. Which model runs which task, and nothing chooses today
 
@@ -324,6 +507,13 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 
 ### 10. Still unobserved
 
+- **The repair round has been watched once and needs more before anything may act on it.** One
+  `repairOutcome`, `verified`, honest on inspection (`architecture/solve.md` §15) — on the ticket
+  the pass was designed against, which is the weakest evidence there is. §45 holds what phase three
+  needs before it can start and §49 the reason it cannot be counted yet. Re-driving a ticket the
+  solver has already tried means adding `agent:start` and clearing `agent:failed` first; both
+  refusals are free, and the CLI says so on the way out.
+
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
   property the layout rests on is that six code points render two columns wide, and
@@ -461,7 +651,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **109 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **122 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that have never existed** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

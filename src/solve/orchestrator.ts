@@ -121,6 +121,14 @@ export interface SolveRequest {
    * regression test that is green against the bug it names.
    */
   readonly failFirstCheck?: boolean;
+  /**
+   * Whether a failed verification buys one repair round, `REPAIR_ROUND`.
+   *
+   * Defaults on for `failFirstCheck`'s reason and only while the round is
+   * untrusted: the run stays `failed` whatever the round concludes, so this
+   * withdraws a measurement rather than arming a privilege.
+   */
+  readonly repairRound?: boolean;
   readonly gitTimeoutMs: number;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
@@ -241,6 +249,38 @@ export type SolveOutcome =
       readonly kind: "failed";
       readonly reason: string;
       readonly verification: VerificationResult;
+      /**
+       * The fix pass's own report. Present because verification only runs after it, and carried
+       * rather than dropped so `residualRisk` survives: the agent's account of what else its change
+       * might have broken is the most useful thing a human reading a red run can be given, and it
+       * was being computed and discarded.
+       */
+      readonly fix: FixReport;
+      /**
+       * What a repair round attempted, when one ran and produced a report. Absent covers two
+       * different things — no round ran, and a round that died before reporting — which is why
+       * `repairOutcome` is a separate field rather than this one's presence.
+       *
+       * The verification above is the one that produced this outcome, always: it is the
+       * pre-repair failure, never the round's own re-run. A `failed` outcome quoting a passing
+       * re-verification would contradict itself in the one sentence a human reads first.
+       */
+      readonly repair?: FixReport;
+      /**
+       * What the repair round concluded, discarded as a verdict and kept as a measurement.
+       *
+       * `SolveOutcome["kind"]`, the shape `escaped.would` uses for the same job. Phase two does
+       * not trust this pass (PLAN.md §45), so `verified` here means the round **would** have
+       * rescued the run and the outcome stayed `failed` anyway — the point of the phase. Absent
+       * means no round ran, whether `REPAIR_ROUND` is off or the run never reached one.
+       *
+       * The worktree holds the round's edits on top of the diff that failed, and the reported
+       * `reason` was measured before them — so `describeSolveOutcome` says that outright, a tree
+       * that no longer reproduces the failure it is kept as evidence of being the defect class
+       * this project exists to catch. `renderSolveComment` names no worktree at all, which is why
+       * it does not repeat the warning: a Jira reader is not being pointed at the tree.
+       */
+      readonly repairOutcome?: SolveOutcome["kind"];
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
     }
@@ -252,6 +292,17 @@ export type SolveOutcome =
       readonly recon: ReconVerdict;
       readonly fix: FixReport;
       readonly simplify: SimplifyReport;
+      /**
+       * Set only when a repair round produced this outcome — `fix` and `simplify` stay the
+       * original passes' own reports, unedited, and this carries what the repair round did on top.
+       *
+       * Still `undefined` on every outcome that leaves `solveTicket`, for a new reason: phase two
+       * calls `runRepairRound` but discards its verdict (PLAN.md §45), so a round that verifies
+       * green is reported as `failed` with `repairOutcome: "verified"`. Only `runRepairRound`'s
+       * own return value sets this, and only its tests read it. A phase that trusts the round is
+       * what makes this field reachable.
+       */
+      readonly repair?: FixReport;
       readonly verification: VerificationResult;
       /**
        * Whether the run's own tests notice when its fix is taken away.
@@ -620,6 +671,163 @@ function verifyRequestOf(
   };
 }
 
+/**
+ * Renders a failed verification as the repair pass's "here is what broke" — the harness's own
+ * captured output, not a model's account of it. Only the step(s) that did not pass: a passing
+ * install or an earlier passing step tells the repair pass nothing it needs.
+ */
+function renderVerificationFailure(
+  verification: Extract<VerificationResult, { outcome: "failed" }>,
+): string {
+  const failing = verification.steps.filter((step) => !step.passed);
+  const detail = failing
+    .map(
+      (step) =>
+        `## ${step.name}${step.timedOut ? " (timed out)" : ` (exit ${String(step.exitCode)})`}\n\n${step.output}`,
+    )
+    .join("\n\n");
+  return `${verification.reason}\n\n${detail}`;
+}
+
+/**
+ * One repair attempt after a failed verification.
+ *
+ * Called from {@link runPipeline}'s `failed` branch, once, and **its verdict is discarded** — the
+ * run stays `failed` whatever this returns, carrying only the round's report and `repairOutcome`
+ * for a human to read (PLAN.md §45, phase two). So the `verified` this can return is a
+ * measurement, not a result: nobody has yet watched this pass work, and PLAN.md §45 records the
+ * measured case where green is reachable by deleting the assertion that failed. Do not promote it
+ * to a result without the phase that watches it first.
+ *
+ * Grants no new privilege: `repair` is a `WRITE_PASSES` member in `runner.ts` and gets exactly
+ * `FIX_ALLOWED_TOOLS` — no `Bash`. `verify`'s `CommandRunner` remains the only thing that ever
+ * runs a command; this pass only reads what it already ran, via `verificationFailure`.
+ *
+ * Shaped on `runReviewRound`: same worktree, no simplify pass (a repair is a correction, not a
+ * second draft), re-running the diff gate and `verify` afterward exactly as the pipeline's first
+ * pass through them did. One attempt — bounding how many of these a ticket gets is the caller's
+ * job, not this function's, the same split `resolveReview` keeps from `runReviewRound`.
+ *
+ * **Call it only from inside `runPipeline`.** `runReviewRound` and `runConflictRound` are private
+ * behind a `resolve*` that stages a skill root and snapshots the watched checkouts; this is
+ * exported only so its tests can reach it. A write pass run outside `solveTicket`'s `try` has no
+ * write-escape guard, and `diff-gate.ts` reads the worktree alone — so a write into somebody
+ * else's checkout would go unseen by both.
+ */
+export async function runRepairRound(
+  deps: SolveDependencies,
+  request: SolveRequest,
+  worktree: Worktree,
+  base: SolveRunOptions,
+  recon: ReconVerdict,
+  fix: FixReport,
+  simplify: SimplifyReport,
+  devLens: DevLensFeedback,
+  verification: Extract<VerificationResult, { outcome: "failed" }>,
+): Promise<SolveOutcome> {
+  const { issueKey } = request;
+  const { commands, passes } = deps;
+
+  const brief = JSON.stringify(recon, null, 2);
+  const verificationFailure = renderVerificationFailure(verification);
+  const repairRun = await runPass(
+    passes,
+    "repair",
+    { ...base, brief, verificationFailure },
+    (output) => parseFix(output, issueKey),
+  );
+  if (!repairRun.ok) {
+    return crashed(issueKey, "repair", repairRun.reason, worktree);
+  }
+  const repair = repairRun.value;
+  if (repair.abandoned.trim() !== "") {
+    const cause = repair.abandonedCause as Exclude<AbandonCause, "none">;
+    log.info("solve.abandoned", {
+      issueKey,
+      pass: "repair",
+      cause,
+      reason: repair.abandoned,
+      leftFiles: repair.changed,
+      worktreePath: worktree.path,
+    });
+    return { kind: "abandoned", reason: repair.abandoned, cause, devLens, worktree };
+  }
+
+  // No `changed: false` branch: `parseFix` refuses that without an `abandoned`, so past the check above it is unreachable.
+  const finalDiff = await readNumstat(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+  );
+  if (finalDiff === null) {
+    return {
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: ["could not read the diff, so there is nothing to bound"],
+      devLens,
+      worktree,
+    };
+  }
+  const changes = parseNumstat(finalDiff);
+  const verdict = checkDiff(changes);
+  if (!verdict.ok) {
+    log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
+    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
+  }
+
+  const reverified = await verify(commands, verifyRequestOf(request, worktree));
+  if (reverified.outcome === "refused") {
+    return {
+      kind: "refused",
+      stage: "verification",
+      reasons: [reverified.reason],
+      devLens,
+      worktree,
+    };
+  }
+  if (reverified.outcome === "failed") {
+    return {
+      kind: "failed",
+      reason: reverified.reason,
+      verification: reverified,
+      fix,
+      repair,
+      devLens,
+      worktree,
+    };
+  }
+
+  const failFirst =
+    request.failFirstCheck === false
+      ? ({ outcome: "skipped", reason: "FAIL_FIRST_CHECK is off" } as const)
+      : await checkFailFirst(commands, {
+          repoPath: request.repoPath,
+          worktreePath: worktree.path,
+          probePath: `${worktree.path}-failfirst`,
+          baseRef: request.baseRef,
+          changedPaths: changes.map((change) => change.path),
+          stepTimeoutMs: request.stepTimeoutMs,
+          installTimeoutMs: request.installTimeoutMs,
+        });
+
+  log.info("solve.repaired", { issueKey, branch: worktree.branch, files: verdict.files });
+  return {
+    kind: "verified",
+    worktree,
+    commit: composeCommitMessage(repair, issueKey),
+    recon,
+    fix,
+    simplify,
+    repair,
+    verification: reverified,
+    failFirst,
+    devLens,
+    files: verdict.files,
+    lines: verdict.lines,
+  };
+}
+
 async function runPipeline(
   deps: SolveDependencies,
   request: SolveRequest,
@@ -786,7 +994,56 @@ async function runPipeline(
     };
   }
   if (verification.outcome === "failed") {
-    return { kind: "failed", reason: verification.reason, verification, devLens, worktree };
+    const failure = {
+      kind: "failed",
+      reason: verification.reason,
+      verification,
+      fix,
+      devLens,
+      worktree,
+    } as const;
+    if (request.repairRound === false) {
+      return failure;
+    }
+
+    // ---- the repair round, whose verdict is thrown away --------------------
+    // One attempt: a second multiplies the cost of a verdict nothing acts on.
+    // Its writes stay in the worktree — nothing downstream reads a failed one.
+    const round = await runRepairRound(
+      deps,
+      request,
+      worktree,
+      base,
+      recon,
+      fix,
+      simplify,
+      devLens,
+      verification,
+    );
+    // `crashed`, `abandoned` and `refused` rounds carry no report at all; `repairOutcome` is what
+    // says a round ran in those cases, and dropping it would make them look like no round.
+    const report = round.kind === "failed" || round.kind === "verified" ? round.repair : undefined;
+    // `verification` stays the pre-repair failure: `round.verification` may be green, and a
+    // `failed` outcome carrying a passing verification is a self-contradiction a reader acts on.
+    log.info("solve.repair.dry_run", {
+      issueKey,
+      would: round.kind,
+      reported: report !== undefined,
+      // The endings that carry no report are the ones whose reason exists only here — the outcome
+      // has room for `repairOutcome` and not for why it took that value.
+      why:
+        round.kind === "abandoned" || round.kind === "crashed"
+          ? round.reason
+          : round.kind === "refused"
+            ? round.reasons.join("; ")
+            : "",
+      worktreePath: worktree.path,
+    });
+    return {
+      ...failure,
+      repairOutcome: round.kind,
+      ...(report === undefined ? {} : { repair: report }),
+    };
   }
 
   // ---- fail-first ----------------------------------------------------------
