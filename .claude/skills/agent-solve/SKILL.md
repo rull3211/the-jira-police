@@ -77,8 +77,8 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
 - `/agent-solve <ISSUE-KEY> --simplify` — a cold read of the diff, bounded to the fix's files
 - `/agent-solve <ISSUE-KEY> --review` — resolve one round of reviewer feedback
 - `/agent-solve <ISSUE-KEY> --merge` — resolve the conflicts blocking the base branch merge
-- `/agent-solve <ISSUE-KEY> --repair` — correct the diff against a failed verification (not yet
-  called by the harness)
+- `/agent-solve <ISSUE-KEY> --repair` — correct the diff against a failed verification (the
+  harness runs it and then disbelieves it)
 - `--brief <path>` — the recon verdict, passed into the fix pass
 - `--vault <path>` — vault location, for conventions and domain terms
 

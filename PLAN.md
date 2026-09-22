@@ -3,7 +3,7 @@
 > **Progress, 2026-09-08.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, and watches the ones it sent back for an answer. **2857 tests in 92
+> ticket for whatever happened, and watches the ones it sent back for an answer. **2868 tests in 92
 > files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
@@ -122,154 +122,43 @@ The triage-selection entries are now all closed, so the next entry is §49.
 
 <!-- refs:on -->
 
-### 45. The fix pass cannot see a test fail, and does not look for what else depends on what it changed
+### 45. Nothing has ever watched the repair pass work, so nothing may act on what it says
 
-**Branch:** `feat/repair-dry-run`, stacked on `feat/verify-repair-and-blast-radius` (PR #67), which
-carries phase one and is awaiting a human merge. Phase two — the untrusted dry run — is what that
-branch is building; phases three and four remain unclaimed.
+**Branch:** none yet. Phase one (the blast-radius instruction, the inert pass) shipped on
+`feat/verify-repair-and-blast-radius`; phase two (the untrusted dry run) on `feat/repair-dry-run`.
+Phases three and four are unclaimed.
 
-**What is not built.** Two gaps found on the same real ticket (SSX-3944), stacked:
+**What is not built.** Any path by which a repair round's verdict changes what happens to a ticket.
+The round runs on every failed verification unless `REPAIR_ROUND=false`, and `runPipeline` discards
+its answer: the outcome stays `failed`, carrying `repair` and `repairOutcome` for a human to read.
+A round that re-verifies green opens nothing. What remains is STARTING.md's third and fourth rungs —
+one named ticket behind a flag that must be typed, and then the loop.
 
-1. No pass may run the test suite or read `verify.ts`'s output before it is produced — the harness
-   runs verification after every pass has already exited. A `failed` verification today writes
-   straight to `agent:failed` (`solve-outcome.ts:84-86`) with the diff finished and every pass's
-   turn already over. Nothing in this pipeline gets a chance to read the failure and act on it.
-2. The fix pass is scoped to the files recon named (`SOLVE_INSTRUCTIONS.md` §2) and has no
-   instruction to search the rest of the repository for other consumers or tests of what it
-   changed, so a stale test written against the old behaviour survives to verification
-   indistinguishable, from the pipeline's point of view, from a real regression.
+**Why the verdict is not trusted yet, and this is the part that is not a scheduling problem.** Green
+is reachable here dishonestly, measured on the motivating ticket rather than argued. SSX-3944's
+`CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail` holds a Mockito stub that only the
+_buggy_ behaviour ever exercised, so every correct fix strands it. Deleting that stub makes the
+build pass and leaves the test vacuous: under any correct fix `updateContactsInCM` is never reached,
+so its `assertNull(…getEmail())` passes against the object set up three lines above it. The honest
+repair asks what the test should assert now that its premise is gone. **A pass measured by an exit
+code cannot tell those two apart**, and `checkFailFirst` looks only at tests the run itself wrote,
+so nothing downstream notices either. Until a human has read several of these diffs, the exit code
+is the only signal, and it is the one signal known not to work.
 
-**Why they compound, and why the second gap is not closable by instruction alone.** SSX-3944 was run
-six times on 2026-09-21. Two genuinely different and genuinely correct fixes were produced — a
-per-field merge in `CustomerDtoMerger.updateContactInfo`, and removing `CustomerDto`'s
-auto-vivification (the `= new ContactInfoDto()` field initializer plus the defensive
-`getContactInfo()`) — and **both strand the same test**.
-`CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail` holds a Mockito stub for
-`customerHandler.updateCustomer(...)` that only the _buggy_ behaviour ever exercised, so strict
-stubbing raises `UnnecessaryStubbingException`. Every correct fix stops that call; every correct fix
-therefore breaks that test. No implementation avoids it, and that is the whole argument for a
-mechanism rather than a better prompt.
+**The obvious mechanical bound is disproved, so do not reach for it on the way to phase three.** The
+rule considered was: _a repair round touching a test file must also touch the non-test file the
+failure traces to._ On SSX-3944 the production fix is already correct and the only correct repair
+touches **a test file alone** — so that bound rejects the repair we want and leaves the pass
+choosing between doing nothing and damaging working code to satisfy it. A workable bound has to
+separate "this test encoded the behaviour the ticket asked us to change" from "this test caught a
+real regression", and nothing here knows how to check that mechanically. Shipping the bound anyway
+is worse than shipping none, because it reads as enforcement.
 
-**What the blast-radius instruction can and cannot do — measured on the ticket it was written for,
-not argued.** It shipped in phase one and both halves of the result matter:
-
-- **It works when the changed member is public.** The `CustomerDto` run found
-  `CustomerDtoTest.getContactInfoNeverReturnsNullEvenWhenBackingFieldIsNull` — a test in a different
-  package whose only purpose was asserting the behaviour being removed — and correctly inverted it.
-  `getContactInfo()` is public, so grepping its name reaches its consumers.
-- **It cannot reach `CustomerCmHelperTest`, and no rewording changes that.** The dependency runs
-  `CustomerDto.getContactInfo()` → `updateContactInfo` (**private**) → `contactInfoUpdate`
-  (**private field**) → `contactInfoWasUpdated()` → `CustomerCmHelper.updateOrCreateCustomer` →
-  `customerHandler.updateCustomer` → an unused stub, in a test naming none of them. Five hops,
-  through private members, across three classes. A grep-based instruction is blind to it by
-  construction. Its first wording was worse still — it asked for callers of the edited method, which
-  for a private one returns only substring false positives — and that correction lives in
-  `SOLVE_INSTRUCTIONS.md` §2's own explanation of step 5, which is where a lesson about a rule goes.
-
-**So the instruction half is done and the mechanism half is the open work.**
-
-**The repair round needs no new privilege — written down here wrong first, and corrected before any
-code, not after.** The first draft argued a repair pass needs `Bash` to run the test command. It does
-not: `verify.ts` already separates _running_ a step from _reporting_ it — `runner: CommandRunner`
-(`verify.ts:404-483`) is always the harness, never the model, and `StepResult.output`
-(`verify.ts:109-116`) already carries the tail of what a failing step said. A repair pass needs to
-_read_ that, the same way the review round (`orchestrator.ts:1064-1187`) is handed a reviewer's
-comment as `reviewFeedback` — not to invoke the command itself. Shape it on the review round:
-`FIX_ALLOWED_TOOLS` (`Write`, `Edit`, `Grep`, `Glob`, `Read`), same worktree, a bounded number of
-rounds, fed the failure as data, re-running the diff gate and `verify` — mechanically, by the
-harness, as always — after each attempt. `SOLVE_DENIED_COMMON`'s denial of `Bash` (`runner.ts:42-44`)
-is untouched; nothing here argues for lifting it.
-
-**Phasing, since this is still a new pass with its own privilege even without `Bash`** (`STARTING.md`,
-"Phase a privilege, and drive it by hand first"): built but inert first — the pass exists, wired to
-nothing, so the refusal to run it is structural, not promised; a dry run that writes its attempt to
-the worktree without trusting it; one named ticket behind a flag that must be typed; the loop only
-after the first three have been watched on something real.
-
-**Phase one is built and reviewed; phases two through four are what this entry is now for.**
-`runRepairRound` exists, is tested, and is called by nothing — `runPipeline`'s `failed` branch still
-routes straight to `agent:failed`, unchanged. Two things the review changed rather than the build:
-the `failed` outcome carries the round's report, because without it a pass that never helps and a
-pass that never runs produce identical outcomes and no measurement can separate them; and the
-function is exported for its tests alone, so it must be called from inside `runPipeline` — outside
-`solveTicket`'s `try` a write pass has no write-escape guard, and `diff-gate.ts` reads only the
-worktree, so a write into another checkout would be invisible to both. Whoever builds the dry run
-owns keeping that true, since an exported function is reachable from anywhere.
-
-**Three things phase two must settle, each found by measuring rather than reasoning, and none of
-them obvious from the code.**
-
-1. **Feed it the structured reports, not only the 4000-character tail.** Measured on the real run:
-   `mvn test` emitted **6,981,557 bytes** and `tail` (`verify.ts:138-148`) keeps the last 4000 —
-   0.06%. The failing test's name does survive that window, but only just: it sits immediately above
-   the summary, and the final 1200 characters are pure boilerplate (`BUILD FAILURE`, timings, Help
-   links). Two or three failing tests would push the earlier names out entirely. Maven's own output
-   names the better source — `target/surefire-reports`, written into the worktree, where the pass
-   already holds `Read`, `Grep` and `Glob`. Pointing it there costs no privilege and removes the cap
-   as a concern; keep the tail as the toolchain-agnostic fallback for repositories that write no
-   reports.
-
-2. **The mechanical anti-cheating bound this entry used to propose is wrong, and the motivating case
-   is what disproves it.** The rule considered was: _a repair round touching a test file must also
-   touch the non-test file the failure traces to._ On SSX-3944 the production fix is already correct
-   and the only correct repair touches **a test file alone** — so that bound rejects the repair we
-   want and leaves the pass choosing between doing nothing and damaging working code to satisfy it.
-   A workable bound must separate "this test encoded the behaviour the ticket asked us to change"
-   from "this test caught a real regression", and nothing here knows how to check that
-   mechanically. Until something does, that is a reason to keep the pass behind a typed flag and out
-   of the loop — not a reason to ship the bound.
-
-3. **Green is not the goal, and on this case green is reachable dishonestly.** Deleting the unused
-   stub makes the build pass and leaves `testThatUpdateContactsInCMHandlesNoEmail` vacuous: under any
-   correct fix `updateContactsInCM` is never reached, so its `assertNull(…getEmail())` passes against
-   the object set up three lines above it. The honest repair asks what that test should assert now
-   that its premise is gone. A pass measured by an exit code will not ask, and `checkFailFirst` looks
-   only at the tests the run itself wrote, so nothing downstream would notice.
-
-**What phase two is doing, and the question this entry never asked.** The three above are settled
-in the branch: the pass is pointed at the structured reports by `SOLVE_INSTRUCTIONS.md` §2d rather
-than by a new prompt field, since `VerificationResult` carries no `Toolchain` and a harness that
-cannot tell maven from node must not name a maven path; the bound of point 2 is not shipped; and
-point 3 is why the verdict is thrown away. The question the entry did not ask is **what becomes of
-the repair's writes**, and it has to be decided rather than left emergent, because a `failed`
-outcome whose worktree holds repair edits is a different artifact from one that does not.
-
-**They are kept, and the reason is not preference.** Nothing reads a failed worktree — `runPipeline`
-returns before `checkFailFirst`, `watchedDirs` excludes the worktree by construction, and
-`runWriteRungs` returns early on any outcome that is not `verified` — so the edits cannot reach a
-decision, and a later solve for the same key salvages the path rather than reusing it. Reverting is
-also not cleanly available: `stageIntentToAdd` leaves an `--intent-to-add` entry for every created
-file, so neither `git checkout -- .` nor `git reset --hard` restores a pre-repair tree that contains
-files the _fix_ pass created, and no blunt revert can tell the repair's new files from the fix's.
-Against that, point 3 is decisive in the other direction: green is reachable dishonestly here, and a
-deleted stub is visible **only in the diff**. Discarding the writes would destroy the one artifact
-phase two exists to let a human read. The cost is that the kept worktree no longer reproduces the
-failure the outcome reports, so both channels a human reads say so rather than leaving it inferable.
-
-**The outcome carries `repairOutcome` as well as `repair`.** The report alone cannot measure the
-pass: a `crashed`, `abandoned` or `refused` round produces no `FixReport`, so carrying only the
-report makes a round that ran and died identical to no round at all — the defect the phase-one
-review already fixed once, in a second place. `repairOutcome` is `SolveOutcome["kind"]`, the shape
-`escaped.would` already uses for the same job, and `verified` on it is the measurement this phase
-was built for: the repair **would** have rescued the run, and a human still has to read the diff to
-find out whether it did so honestly.
-
-**`REPAIR_ROUND` gates the spend, defaulting on.** A round costs a session, a full re-verification
-and — when it goes green — a fail-first probe with its own install and test run, on every failed
-solve, unattended, for a verdict that is discarded. That is `FAIL_FIRST_CHECK`'s shape exactly: it
-grants nothing and reports, so it reads `!== "false"` and a typo cannot silently withdraw the
-measurement. It is the second setting in the file shaped that way, which falsifies a sentence in
-`BUILDING.md` that called it the only one.
-
-**What would make either half the wrong idea.** The blast-radius search can find a true positive
-that is itself a larger change than the ticket — updating a consumer might be its own ticket. The
-pass needs a "found it, did not touch it, said why" outcome, not a mandate to always fix what it
-finds, or it re-derives §33's still-open scope-widening problem inside a different pass. The repair
-round's risk runs the other way: handing a pass the actual red output is also handing it the
-cheapest way to make it green — weaken or delete the failing assertion rather than fix the code.
-`SOLVE_INSTRUCTIONS.md` §2 step 4 already names this shape for the fix pass itself, and a pass built
-to stare at red output and told to make it pass is the one most likely to reach for it. Point 2
-above is why that bound is still unsolved rather than merely unwritten.
+**What would make it the wrong idea.** Handing a pass the actual red output is also handing it the
+cheapest way to make it green. `SOLVE_INSTRUCTIONS.md` §2 step 4 names this shape for the fix pass,
+and a pass built to stare at red output and told to make it pass is the one most likely to reach for
+it. If the dry run's reports show that is what it usually does, the answer is to delete the pass,
+not to phase it further — and the measurement is there to make that outcome as visible as the other.
 
 ### 46. Nothing can say which code a running daemon is executing
 
@@ -622,7 +511,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **122 section references** from `src/` alone, mostly
+  repository's real cross-reference system — **121 section references** from `src/` alone, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that have never existed** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

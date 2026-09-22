@@ -694,9 +694,9 @@ function renderVerificationFailure(
  * Called from {@link runPipeline}'s `failed` branch, once, and **its verdict is discarded** — the
  * run stays `failed` whatever this returns, carrying only the round's report and `repairOutcome`
  * for a human to read (PLAN.md §45, phase two). So the `verified` this can return is a
- * measurement, not a result: nobody has yet watched this pass work, and §45's point 3 records
- * that green is reachable here by deleting the assertion that failed. Do not promote it to a
- * result without the phase that watches it first.
+ * measurement, not a result: nobody has yet watched this pass work, and PLAN.md §45 records the
+ * measured case where green is reachable by deleting the assertion that failed. Do not promote it
+ * to a result without the phase that watches it first.
  *
  * Grants no new privilege: `repair` is a `WRITE_PASSES` member in `runner.ts` and gets exactly
  * `FIX_ALLOWED_TOOLS` — no `Bash`. `verify`'s `CommandRunner` remains the only thing that ever

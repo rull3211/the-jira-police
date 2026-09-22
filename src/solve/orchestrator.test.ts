@@ -1193,9 +1193,11 @@ describe("resolveReview", () => {
 });
 
 /**
- * `runRepairRound` is not called by `runPipeline` yet — PLAN.md §45. These tests exercise it
- * directly, the same way `resolveReview`'s tests exercise `runReviewRound` through its own public
- * entry point, since a repair round has none yet.
+ * `runRepairRound`'s own verdicts, reached directly rather than through `runPipeline`.
+ *
+ * Every one of these is discarded by the only caller there is — the block further down is what
+ * pins that. Kept separate because the function has to be right about what it returns before it
+ * matters that nobody believes it: phase three is the change that makes these verdicts reachable.
  */
 const repair = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   changed: true,
