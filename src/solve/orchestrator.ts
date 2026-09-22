@@ -1006,9 +1006,8 @@ async function runPipeline(
     }
 
     // ---- the repair round, whose verdict is thrown away --------------------
-    // One attempt, deliberately: a second would multiply the cost of a verdict nothing acts on.
-    // The round writes into the worktree and those writes are kept — nothing downstream reads a
-    // failed worktree, and reverting could not tell its new files from the fix pass's anyway.
+    // One attempt: a second multiplies the cost of a verdict nothing acts on.
+    // Its writes stay in the worktree — nothing downstream reads a failed one.
     const round = await runRepairRound(
       deps,
       request,

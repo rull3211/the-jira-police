@@ -803,10 +803,8 @@ describe("solveTicket, at verification", () => {
     // `afterBase`, so the base's own test run passes — otherwise this is not a fact about the code.
     const { h } = harness(FULL, [{ match: afterBase(saw("run", "test")), reply: { exitCode: 1 } }]);
 
-    // `repairRound: false`, so this stays a test about the verification verdict alone. Leaving it
-    // on runs a repair pass here, and an unscripted pass cannot say so: `runPass` catches the
-    // harness's "must not have run" throw and the wiring files it as `repairOutcome`, so the
-    // outcome kind never moves and this reads green either way.
+    // `repairRound: false` keeps this about the verification verdict alone — and the pass list is
+    // asserted because an unscripted `repair` cannot announce itself: `runPass` eats the throw.
     const outcome = await solveTicket(h.deps, { ...request, repairRound: false });
 
     expect(outcome.kind).toBe("failed");
@@ -1440,8 +1438,7 @@ describe("the repair round, wired as an untrusted dry run", () => {
 
   it("quotes the first failure's step even when the round fails at a different one", async () => {
     // The green round above cannot catch a wiring that prefers the round's own verification,
-    // because a green round has none to prefer. This is the same claim against the other half of
-    // what it quantifies over: two red verifications, told apart by which step stopped them.
+    // because a green round has none to prefer. Two reds, told apart by which step stopped them.
     const { h } = harness(WITH_REPAIR, redAtDifferentSteps());
 
     const outcome = await solveTicket(h.deps, request);

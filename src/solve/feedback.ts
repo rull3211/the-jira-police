@@ -158,9 +158,8 @@ function headline(outcome: SolveOutcome): string {
       if (outcome.repairOutcome === undefined) {
         return flagged;
       }
-      // Said on the ticket and not only in the terminal: under the daemon nobody is watching a
-      // terminal, and a round that was paid for and reported nowhere is indistinguishable from one
-      // that never ran.
+      // On the ticket, not only the terminal: under the daemon nobody is watching one, and a round
+      // reported nowhere is indistinguishable from a round that never ran.
       const attempt =
         outcome.repairOutcome === "verified"
           ? `A second agent was then shown the failure and its corrected version passed the same checks — but that result is **not** being acted on and no pull request is being opened. This step is being measured, not trusted: making a failing check pass by weakening it looks identical from here.`
