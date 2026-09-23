@@ -526,8 +526,9 @@ it.** A failed verification buys one repair pass and `runPipeline` discards what
 (`architecture/solve.md` §15), so every round appends a row to `<OUTPUT_DIR>/repair-rounds.md` and
 this command reads that page back: how the rounds ended, and which green ones nobody has looked at.
 **The `Read` column is not the harness's to fill.** A green round is written `unread` and stays
-that way until a person opens the worktree the row names, reads the diff, and edits the cell by
-hand — correcting the code and weakening the assertion that failed both come back green, and
+that way until a person reads the round's edits — `git diff HEAD` in the worktree the row names,
+where the fix is committed underneath them — and edits the cell by hand. Correcting the code and
+weakening the assertion that failed both come back green, and
 nothing mechanical here separates them. So an untouched page means rounds happened, not that any of
 them were honest. Needs no credential, which is deliberate: a command that reaches nothing should
 require nothing, so this one runs in a fresh clone and in a checkout nobody has configured.

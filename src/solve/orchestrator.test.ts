@@ -216,6 +216,7 @@ const request: SolveRequest = {
   repoPath: "/repos/buy-insurance-advisor-web",
   parentDirectory: "/tmp/solve",
   baseRef: "origin/main",
+  identity: { name: "jira-police", email: "jira-police@example.invalid" },
   gitTimeoutMs: 30_000,
   stepTimeoutMs: 300_000,
   installTimeoutMs: 600_000,
@@ -1514,6 +1515,67 @@ describe("the repair round, wired as an untrusted dry run", () => {
 
     expect(outcome.kind).toBe("verified");
     expect(h.seen.some((entry) => entry.pass === "repair")).toBe(false);
+  });
+});
+
+/** `commitAll`'s own read-back; without a real sha it reports the commit as failed. */
+const SHA = "3f9a1c0e8b7d6f5a4c3b2a1908f7e6d5c4b3a291";
+const committed = (): Rule => ({
+  match: saw("rev-parse", "HEAD"),
+  reply: { stdout: `${SHA}\n` },
+});
+
+/** Every commit the run made, with how many passes had run when it was made. */
+const commits = (h: Harness) =>
+  h.calls.flatMap((argv, index) =>
+    argv.includes("commit") ? [{ argv, passesBefore: h.passesBefore[index] ?? -1 }] : [],
+  );
+
+describe("the commit that separates the fix from the repair round", () => {
+  it("commits the fix, under the fix's own message, after it fails and before the repair runs", async () => {
+    const { h } = harness(WITH_REPAIR, [committed(), stayRed()]);
+
+    await solveTicket(h.deps, request);
+
+    const made = commits(h);
+    expect(made).toHaveLength(1);
+    // Recon, fix and simplify before it and the repair after, so the repair's edits are the only
+    // uncommitted delta.
+    expect(made[0]?.passesBefore).toBe(3);
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon", "fix", "simplify", "repair"]);
+    const argv = made[0]?.argv ?? [];
+    expect(argv[argv.indexOf("-C") + 1]).toBe(worktree.path);
+    expect(argv).toContain("fix(advisor): add missing favicon link");
+    expect(argv).toContain("user.name=jira-police");
+  });
+
+  it("makes no commit on a run that verified, which `publish` would then find empty", async () => {
+    // The plausible wrong placement — committing after the gate, whatever verification says —
+    // leaves every ordinary solve with nothing for `publish` to commit, and no pull request.
+    const { h } = harness(WITH_REPAIR, [committed()]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("verified");
+    expect(commits(h)).toEqual([]);
+  });
+
+  it("makes no commit when REPAIR_ROUND is off, so a failed run looks as it always did", async () => {
+    const { h } = harness(WITH_REPAIR, [committed(), stayRed()]);
+
+    await solveTicket(h.deps, { ...request, repairRound: false });
+
+    expect(commits(h)).toEqual([]);
+  });
+
+  it("still runs the round when that commit fails — the measurement does not depend on it", async () => {
+    // No `committed()` rule: the fake's empty `rev-parse` makes `commitAll` report a failure.
+    const { h } = harness(WITH_REPAIR, [stayRed()]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(commits(h)).toHaveLength(1);
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "failed" });
   });
 });
 

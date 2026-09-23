@@ -99,7 +99,7 @@ Of the two defects that were left open when the above was written, one is now fi
 The second is fixed too, though not in the shape it was filed in:
 
 - **`removeWorktree` was never called.** Filed as "call it on success". That would have been data
-  loss — nothing in this phase commits, so a successful run's worktree is the only copy of the
+  loss — a successful run commits nothing in this phase, so its worktree is the only copy of the
   work. It is now called on `bailed` only, which is the one outcome whose worktree is provably
   empty. The full reasoning, and what is still not cleaned up, is under "Never a protected branch".
 
@@ -275,9 +275,12 @@ phasing and why the verdict is not trusted.
 **Thrown away as a verdict, kept as a measurement.** `reportOutcome` appends one row per round to
 `<OUTPUT_DIR>/repair-rounds.md` (`repair-ledger.ts`), a sibling of `dev-lens.md` rather than a
 column on it, and `pnpm repair:ledger` reads it back as a distribution. The harness writes every
-column but `Read`, which stays `unread` on a green round until a person opens the worktree the row
-names and replaces the cell by hand — a passing re-verification is reachable both by correcting
-the code and by weakening the assertion that failed, and no exit code here tells those apart. One
+column but `Read`, which stays `unread` on a green round until a person reads the round's edits
+and replaces the cell by hand — a passing re-verification is reachable both by correcting the code
+and by weakening the assertion that failed, and no exit code here tells those apart. **The edits
+are `git diff HEAD` in the worktree the row names**, because the fix is committed underneath them
+before the round runs; a worktree whose `HEAD` is still the base means that commit failed
+(`solve.repair.boundary_failed`), and the diff there holds fix and repair together. One
 case never reaches the page: `escapeVerdict` replaces the outcome with `escaped`, which carries
 `would` and not `repairOutcome`, so a round followed by a write-escape leaves no row.
 
@@ -415,9 +418,11 @@ there should be none.
 `removeWorktree` used to be called by nothing at all; the obvious fix — call it whenever the run
 succeeded — is wrong, and working out why produced the better rule.
 
-Nothing in this phase commits. `composeCommitMessage` composes a message and no `git commit` ever
-consumes it, so the worktree of a `verified` run holds uncommitted work that exists in exactly one
-place. Removing it on success would delete the artifact the run was for, and `describeSolveOutcome`
+Nothing in this phase pushes, and on the ordinary path nothing commits either: `composeCommitMessage`
+composes a message that only `publish` consumes, so the worktree of a `verified` run holds work
+that exists in exactly one place. The one commit made here is the fix's own, on a run that already
+failed verification, immediately before a repair round — local, and there to put a boundary
+between the fix and the round's edits. Removing it on success would delete the artifact the run was for, and `describeSolveOutcome`
 would still be telling the operator to go and read it. "Clean up on success" reads as tidiness and
 would have been data loss.
 

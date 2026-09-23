@@ -255,7 +255,10 @@ describe("describeSolveOutcome", () => {
     // The tree no longer reproduces the reason printed directly above it, which is the one thing
     // an operator reading a kept worktree cannot be left to infer.
     expect(line).toContain("no longer reproduces");
-    expect(line).toContain(`git -C ${worktree.path} diff ${worktree.branch}`);
+    // `diff HEAD`, not `diff <branch>` taken on trust: the two agree only because the fix is
+    // committed on that branch, and the command should say which delta it shows.
+    expect(line).toContain(`git -C ${worktree.path} diff HEAD`);
+    expect(line).toContain(`git -C ${worktree.path} show HEAD`);
     expect(line).toContain("REPAIR_ROUND=false");
   });
 

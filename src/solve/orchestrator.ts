@@ -40,7 +40,7 @@ import {
 } from "./base-sync.ts";
 import { checkDiff, parseNumstat } from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
-import type { BotIdentity } from "./pr.ts";
+import { type BotIdentity, commitAll } from "./pr.ts";
 import {
   type AbandonCause,
   type FixReport,
@@ -129,6 +129,8 @@ export interface SolveRequest {
    * withdraws a measurement rather than arming a privilege.
    */
   readonly repairRound?: boolean;
+  /** Whose name goes on the commits a run makes before `publish`: a merge round's, and the fix's ahead of a repair round. */
+  readonly identity: BotIdentity;
   readonly gitTimeoutMs: number;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
@@ -177,8 +179,8 @@ export type SolveOutcome =
    *
    * The only outcome that cleans up its worktree: recon has no `Write` and no
    * `Edit`, so a bailed worktree holds nothing. Every other outcome keeps its
-   * worktree, since it's the only copy of any work done and nothing in this
-   * phase commits.
+   * worktree, since it's the only copy of any work done — the one commit this
+   * phase can make, ahead of a repair round, is local and never pushed here.
    */
   | {
       readonly kind: "bailed";
@@ -1009,7 +1011,21 @@ async function runPipeline(
 
     // ---- the repair round, whose verdict is thrown away --------------------
     // One attempt: a second multiplies the cost of a verdict nothing acts on.
-    // Its writes stay in the worktree — nothing downstream reads a failed one.
+    // Its writes stay in the worktree, on top of this commit, so `git diff HEAD` there is the repair alone.
+    const boundary = await commitAll(commands, {
+      worktreePath: worktree.path,
+      ...composeCommitMessage(fix, issueKey),
+      identity: request.identity,
+      timeoutMs: request.gitTimeoutMs,
+    });
+    if (boundary.outcome === "failed") {
+      // Not a reason to skip the round: the measurement stands without it, only the diff blends.
+      log.warn("solve.repair.boundary_failed", {
+        issueKey,
+        reason: boundary.reason,
+        worktreePath: worktree.path,
+      });
+    }
     const round = await runRepairRound(
       deps,
       request,
@@ -1109,8 +1125,6 @@ export type ConflictRoundOutcome =
 
 export interface ConflictRoundRequest extends SolveRequest {
   readonly worktree: Worktree;
-  /** Whose name goes on the merge commit. */
-  readonly identity: BotIdentity;
 }
 
 /**

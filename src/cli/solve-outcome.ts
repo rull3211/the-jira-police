@@ -165,7 +165,8 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
         ...(risk === "" ? [] : [`The repair flagged this about its own edit: ${risk}`]),
         // The reason above was measured before the round, so the tree it names no longer produces it.
         `The worktree now holds the round's edits on top of the diff that failed, so it no longer reproduces the reason above.`,
-        `Read what it did: git -C ${outcome.worktree.path} diff ${outcome.worktree.branch}`,
+        `Read the round's edits alone: git -C ${outcome.worktree.path} diff HEAD`,
+        `and the fix they correct, committed underneath: git -C ${outcome.worktree.path} show HEAD (a solve.repair.boundary_failed warning above means it is not)`,
         `Set REPAIR_ROUND=false to stop buying this round.`,
         `Worktree kept at ${outcome.worktree.path}`,
       ].join("\n");
