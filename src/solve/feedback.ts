@@ -154,7 +154,7 @@ function headline(outcome: SolveOutcome): string {
       // reported nowhere is indistinguishable from a round that never ran.
       const attempt =
         outcome.repairOutcome === "verified"
-          ? `A second agent was then shown the failure and its corrected version passed the same checks — but that result is **not** being acted on and no pull request is being opened. Acting on a repaired result is a separate decision, made per run, because making a failing check pass by weakening it looks identical from here.`
+          ? `A second agent was then shown the failure and its corrected version passed the same checks — but that result is **not** being acted on and no pull request is being opened. Acting on a repaired result is a separate decision a person has to make, because making a failing check pass by weakening it looks identical from here.`
           : `A second agent was then shown the failure and did not resolve it either (${safeText(outcome.repairOutcome)}).`;
       const repairRisk = outcome.repair?.residualRisk.trim() ?? "";
       return repairRisk === ""

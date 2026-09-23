@@ -50,7 +50,7 @@ saying "do not edit" would be a description of intent, not a control.
    so there is nothing a review round could answer a reviewer from, and this round answers nobody
    on purpose. Its scope is git's list of conflicted files, exactly.
 6. **`--repair`** — runs after a failed verification. **Its verdict is discarded unless a person
-   armed the run for it, and then it lands as its own commit, read on its own; see `PLAN.md` §45.**
+   armed the run for it, and then it lands as its own commit, read on its own; see `architecture/solve.md` §15.**
    Same tools as `--fix`. Given the fix pass's recon brief, the worktree
    holding that change, and the harness's own captured output from the verification step that
    failed — the one thing `--fix` can never see. Fixes the code the failure points at, never the

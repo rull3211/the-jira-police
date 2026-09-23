@@ -115,9 +115,9 @@ The boxes labelled recon, write, round and merge are separate `storecode` invoca
 `agent-solve` skill, not turns of one conversation. These are the rungs you can type; `PASSES` in
 `runner.ts` is the list, and it holds one more — `repair`, which has no rung of its own because
 nothing types it: a failed verification runs it, and `REPAIR_ROUND=false` turns it off. What may be
-typed is `--repair`, which decides what a green round may do rather than whether one runs
-(PLAN.md §45). The count is deliberately not written here: `architecture/solve.md` §15 owns it,
-and the last time it lived in two files it was wrong in both.
+typed is `--repair`, which decides what a green round may do rather than whether one runs. The
+count is deliberately not written here: `architecture/solve.md` §15 owns it, along with why a
+repair is acted on at all, and the last time the count lived in two files it was wrong in both.
 
 | Pass         | Tools                                | Given                            |
 | ------------ | ------------------------------------ | -------------------------------- |
@@ -664,8 +664,10 @@ green one may do. Without it the verdict is recorded and discarded. With it, the
 opened from the repaired tree as two commits — the fix, then the repair — and its body says above
 everything else that the second was written by a pass shown the failure, and should be read on its
 own. It is refused below `--pr`, with `REPAIR_ROUND=false` (no round would run for it to act on),
-and by `bot:once`, and the daemon never sets it. PLAN.md §45 has why it exists before the evidence
-that was meant to justify it.
+and by `bot:once`. **The daemon's copy is `REPAIR_PUBLISH`**, off unless it reads exactly `true`,
+and the daemon's startup line says `promotesRepairs` either way; leave it off until you have read
+what `--repair` produces by hand. `architecture/solve.md` §15 has why both exist before the
+evidence that was meant to justify them.
 
 **`bot:once` is `solve:once` with triage in front.** It takes the same rungs. The difference is
 that it triages the ticket first and refuses to claim one the fitness call declines — so it is the
@@ -763,11 +765,12 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                            |
 | `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back    |
 | `FAIL_FIRST_CHECK`              | `true`        | One of two that default on — off withdraws a check, it does not grant one  |
-| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; acted on only with `--repair` |
+| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; acted on only when armed      |
+| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Exactly `true`, and only with `REPAIR_ROUND` on   |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
-request. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
+request; an unset `REPAIR_PUBLISH` lets the daemon open none from a repair round. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
 open in a file browser, because macOS puts the default under `/private/var` and the diff review the
 solver phase depends on is a person reading that worktree.
 

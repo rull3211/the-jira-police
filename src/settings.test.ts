@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SETTINGS,
   SettingsError,
+  daemonPromotesRepair,
   describeSettings,
   failFirstCheck,
   flag,
@@ -215,6 +216,28 @@ describe("the solve settings", () => {
       expect(repairRound(readSettings({ ...MINIMAL, REPAIR_ROUND: value }))).toBe(false);
     },
   );
+
+  it("lets the daemon act on no repair round unless somebody turned it on", () => {
+    // The negative the loop is judged on: nothing typed, nothing set, nothing promoted.
+    expect(daemonPromotesRepair(readSettings(MINIMAL))).toBe(false);
+  });
+
+  it.each(["", "  ", "yes", "1", "on", "ture", "false"])(
+    "reads REPAIR_PUBLISH=%j as off, because only true may arm it",
+    (value) => {
+      // The opposite shape to REPAIR_ROUND beside it, on purpose: that one measures, this one acts.
+      expect(daemonPromotesRepair(readSettings({ ...MINIMAL, REPAIR_PUBLISH: value }))).toBe(false);
+    },
+  );
+
+  it("arms the daemon only on an explicit true", () => {
+    expect(daemonPromotesRepair(readSettings({ ...MINIMAL, REPAIR_PUBLISH: "true" }))).toBe(true);
+  });
+
+  it("arms nothing when REPAIR_ROUND is off, since no round runs for it to act on", () => {
+    const settings = readSettings({ ...MINIMAL, REPAIR_PUBLISH: "true", REPAIR_ROUND: "false" });
+    expect(daemonPromotesRepair(settings)).toBe(false);
+  });
 
   it("defaults to manual, so a solve waits for a human", () => {
     expect(solveMode(readSettings(MINIMAL))).toBe("manual");

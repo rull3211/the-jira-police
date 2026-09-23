@@ -124,8 +124,8 @@ export interface SolveRequest {
   /** Whether a failed verification buys one repair round, `REPAIR_ROUND`. Alone it only measures; the privilege is this and `promoteRepair` together. */
   readonly repairRound?: boolean;
   /**
-   * `--repair`, typed per run: a green repair round becomes the outcome (PLAN.md §45). Off unless
-   * set, and must be — green is reachable by weakening the assertion that failed.
+   * `--repair` typed per run, or `REPAIR_PUBLISH` under the daemon: a green repair round becomes the
+   * outcome. Off unless set, and must be — green is reachable by weakening the assertion that failed.
    */
   readonly promoteRepair?: boolean;
   /** Whose name goes on the commits a run makes before `publish`: a merge round's, and the fix's ahead of a repair round. */
@@ -272,7 +272,7 @@ export type SolveOutcome =
        *
        * `SolveOutcome["kind"]`, the shape `escaped.would` uses for the same job. `verified` here
        * means the round **would** have rescued the run and was not let — the run was not armed
-       * with `promoteRepair`, or the fix could not be committed ahead of the round (PLAN.md §45).
+       * with `promoteRepair`, or the fix could not be committed ahead of the round (`architecture/solve.md` §15).
        * Absent means no round ran, whether `REPAIR_ROUND` is off or the run never reached one.
        *
        * Where the measurement lands: `repair-ledger.ts` turns this into a row in
@@ -695,7 +695,7 @@ function renderVerificationFailure(
  * Called from {@link runPipeline}'s `failed` branch, once. **Its verdict is discarded unless the
  * run is armed with `promoteRepair`** — otherwise the run stays `failed`, carrying the round's
  * report and `repairOutcome` for a human to read. Even armed, only a `verified` is promoted, and
- * that verdict is still one no exit code can audit: PLAN.md §45 records the measured case where
+ * that verdict is still one no exit code can audit: `architecture/solve.md` §15 records the measured case where
  * green is reachable by deleting the assertion that failed. Do not widen what is promoted.
  *
  * Grants no new privilege: `repair` is a `WRITE_PASSES` member in `runner.ts` and gets exactly

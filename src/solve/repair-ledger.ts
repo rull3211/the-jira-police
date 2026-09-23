@@ -1,6 +1,6 @@
 /**
  * The scoreboard for the repair round, whose verdict the pipeline throws away unless a run is armed
- * to act on it, and the evidence `PLAN.md` §45 was supposed to have before any run could be.
+ * to act on it — the evidence `architecture/solve.md` §15 names as the condition for keeping that on.
  *
  * A sibling of `dev-lens.md`, not a column on it: one table answering both would fuse two
  * questions. Writer and reader live here together so a test can prove they agree.
@@ -31,8 +31,9 @@ export const HEADER = [
   "# Repair rounds",
   "",
   "One row per repair round, appended, never rewritten. A failed verification buys one repair",
-  "pass (`REPAIR_ROUND`). `runPipeline` discards its verdict unless the run was armed with",
-  "`--repair`, and even then acts only on a `verified` one, by opening the pull request from it —",
+  "pass (`REPAIR_ROUND`). `runPipeline` discards its verdict unless the run was armed — `--repair`",
+  "by hand, `REPAIR_PUBLISH` for the daemon — and even then acts only on a `verified` one, by",
+  "opening the pull request from it —",
   "so this page is the only place every verdict accumulates, acted on or not. Read the `Round`",
   "column down the page before arming anything.",
   "",
@@ -44,12 +45,12 @@ export const HEADER = [
   "are the commit at `HEAD`, the second on that pull request. Write what the diff *did* —",
   "`honest` where it corrected the code, `cheap` where it weakened the assertion that failed — and",
   "the date. A passing re-verification is reachable both ways and no exit code tells them apart,",
-  "which is why acting on one takes a typed flag and why a promoted one still owes a reading here:",
+  "which is why acting on one takes a separate switch and why a promoted one still owes a reading:",
   '"a `verified` happened" and "a `verified` was read and found honest" are the two claims this',
   "column exists to keep apart.",
   "",
-  "Rounds that ended any other way are written `—`, because the bar in `PLAN.md` §45 turns on",
-  "`verified` alone. Annotate one anyway if you read it; nothing here will overwrite you.",
+  "Rounds that ended any other way are written `—`, because `verified` is the one verdict no exit",
+  "code can audit. Annotate one anyway if you read it; nothing here will overwrite you.",
   "",
   "The worktree path is the one the round ran in, recorded as it was at the time. A later solve",
   "for the same ticket moves that directory to a `-salvaged-<timestamp>` sibling, so an old path",

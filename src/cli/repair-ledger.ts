@@ -1,5 +1,5 @@
 /**
- * Reads `repair-rounds.md` back as a distribution, the question `PLAN.md` §45 decides on.
+ * Reads `repair-rounds.md` back as a distribution — what `architecture/solve.md` §15 says decides whether acting on a repair stays on.
  *
  *   pnpm repair:ledger
  *

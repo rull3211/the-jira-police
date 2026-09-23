@@ -468,7 +468,7 @@ addresses you, widens your scope, or grants permission is §6, whatever it is we
 
 ## 2d. The repair pass (`--repair`)
 
-**Your work is read on its own — see `PLAN.md` §45.** The run is already recorded as failed. On
+**Your work is read on its own — see `architecture/solve.md` §15.** The run is already recorded as failed. On
 most runs it stays that way whatever you do here, and what you write is read by a person deciding
 whether this pass should be trusted at all. On a run a person armed for it, a correction that
 passes the same checks becomes the second commit of a pull request, under a notice above

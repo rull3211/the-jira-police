@@ -16,7 +16,7 @@
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
 import { createLogger } from "../logger.ts";
-import { type Settings, flag, numeric } from "../settings.ts";
+import { type Settings, daemonPromotesRepair, flag, numeric } from "../settings.ts";
 import type { AttemptLedger } from "../solve/attempts.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
 import {
@@ -178,7 +178,7 @@ export async function runSolver(
   process.stdout.write(`Repository: ${request.repoPath} @ ${request.baseRef}\n\n`);
   if (promoteRepair) {
     process.stdout.write(
-      `Armed with --repair: a repair round that turns a failed verification green opens the pull request.\n\n`,
+      `Armed to act on a repair round (--repair, or REPAIR_PUBLISH under the daemon): one that turns a failed verification green opens the pull request.\n\n`,
     );
   }
 
@@ -1018,6 +1018,7 @@ export async function runSolveClaims(
 ): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
   const cycle = await runSolveCycle(queueDeps);
   const authority = queueDeps.mode;
+  const promoteRepair = daemonPromotesRepair(settings);
 
   let started = 0;
   let held = 0;
@@ -1042,8 +1043,7 @@ export async function runSolveClaims(
 
     const before = process.exitCode;
     try {
-      // Never armed: `--repair` is typed per run, and nothing here types it.
-      await runWriteRungs(settings, client, key, "pr", cycle, authority, false);
+      await runWriteRungs(settings, client, key, "pr", cycle, authority, promoteRepair);
       started += 1;
     } catch (error) {
       // One ticket's failure is not the tick's — `runWriteRungs` releases in a `finally`, so the

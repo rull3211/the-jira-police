@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { JiraClient } from "./jira/client.ts";
 import { createReviewLoop } from "./review-loop.ts";
@@ -108,6 +108,62 @@ describe("createReviewLoop", () => {
         UNUSED_LEDGER,
       ),
     ).not.toThrow();
+  });
+});
+
+/** Every log line `createReviewLoop` wrote while starting, parsed, keyed on nothing but what it said. */
+function startupLog(overrides: Partial<Record<string, string>>): Record<string, unknown>[] {
+  const lines: string[] = [];
+  const keep = (chunk: unknown): boolean => {
+    lines.push(String(chunk));
+    return true;
+  };
+  // `vitest.config.ts` silences the logger for every test, which would make this assert on nothing.
+  const level = process.env["LOG_LEVEL"];
+  process.env["LOG_LEVEL"] = "info";
+  vi.spyOn(process.stdout, "write").mockImplementation(keep);
+  vi.spyOn(process.stderr, "write").mockImplementation(keep);
+  try {
+    createReviewLoop(
+      settingsWith({ ...ARMED, ...overrides }),
+      CLIENT,
+      new AbortController().signal,
+      900_000,
+      UNUSED_LEDGER,
+    );
+  } finally {
+    vi.restoreAllMocks();
+    if (level === undefined) {
+      delete process.env["LOG_LEVEL"];
+    } else {
+      process.env["LOG_LEVEL"] = level;
+    }
+  }
+  return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+const said = (log: readonly Record<string, unknown>[], message: string) =>
+  log.find((line) => line["message"] === message);
+
+describe("what the daemon says about repair rounds when it starts", () => {
+  it("reports that it promotes none unless REPAIR_PUBLISH is on", () => {
+    // The loop's arming is not visible anywhere else an operator looks before the first tick.
+    expect(said(startupLog({}), "review.loop.start")?.["promotesRepairs"]).toBe(false);
+    expect(
+      said(startupLog({ REPAIR_PUBLISH: "true" }), "review.loop.start")?.["promotesRepairs"],
+    ).toBe(true);
+  });
+
+  it("warns when REPAIR_PUBLISH is on with no round for it to act on", () => {
+    const inert = startupLog({ REPAIR_PUBLISH: "true", REPAIR_ROUND: "false" });
+    expect(said(inert, "review.loop.repair_publish_inert")).toMatchObject({ level: "warn" });
+    expect(said(inert, "review.loop.start")?.["promotesRepairs"]).toBe(false);
+  });
+
+  it("stays quiet about it when the two agree", () => {
+    for (const overrides of [{}, { REPAIR_PUBLISH: "true" }, { REPAIR_ROUND: "false" }]) {
+      expect(said(startupLog(overrides), "review.loop.repair_publish_inert")).toBeUndefined();
+    }
   });
 });
 

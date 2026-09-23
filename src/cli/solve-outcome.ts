@@ -160,7 +160,7 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
         // The verdict is stated as discarded rather than merely omitted: a reader who sees
         // "verified" anywhere near a repair round will otherwise take it as the run's answer.
         outcome.repairOutcome === "verified"
-          ? `A repair round ran and its corrected diff passed. That verdict is DISCARDED, not acted on — this run was not armed with --repair, or it was and the fix could not be committed ahead of the round (solve.repair.not_promoted above). Deleting the assertion that failed reaches green the same way, which is why acting on one is typed per run.`
+          ? `A repair round ran and its corrected diff passed. That verdict is DISCARDED, not acted on — this run was not armed (--repair, or REPAIR_PUBLISH under the daemon), or it was and the fix could not be committed ahead of the round (solve.repair.not_promoted above). Deleting the assertion that failed reaches green the same way, which is why acting on one is switched on separately.`
           : `A repair round ran and ended ${outcome.repairOutcome}, so it did not rescue the run either.`,
         ...(risk === "" ? [] : [`The repair flagged this about its own edit: ${risk}`]),
         // The reason above was measured before the round, so the tree it names no longer produces it.

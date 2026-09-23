@@ -8,7 +8,7 @@
  * plus `Skill`, the one capability that lets it invoke Claude Code's built-in
  * `/simplify` mid-session rather than re-deriving its judgement by hand.
  * `repair` runs only after a failed verification, and `runPipeline` throws its verdict away unless
- * the run is armed with `--repair` — PLAN.md §45.
+ * the run is armed with `--repair` — `architecture/solve.md` §15.
  *
  * `--allowedTools` restricts nothing — it is an auto-approve list, checked by
  * probe. Only `--disallowedTools` withholds, by removing the tool from the
@@ -93,7 +93,7 @@ export const SIMPLIFY_ALLOWED_TOOLS: readonly string[] = [...FIX_ALLOWED_TOOLS, 
 /**
  * The passes, in the order a ticket meets them, as separate sessions: a session that already answered one question is a worse judge of the next.
  * `repair` is the exception to "order": it exists only after a verification failure, which most
- * runs never reach — see PLAN.md §45. Listed here because `Pass` is derived
+ * runs never reach — see `architecture/solve.md` §15. Listed here because `Pass` is derived
  * from this array, and the schema/tool-grant maps below are `Record<Pass, …>` for the same reason
  * every other pass is: adding one without a schema entry fails to compile rather than inheriting a neighbour's.
  *

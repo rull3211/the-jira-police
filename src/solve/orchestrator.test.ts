@@ -1415,7 +1415,7 @@ describe("the repair round, wired as an untrusted dry run", () => {
   });
 
   it("still fails when the repair re-verifies green, and says the round would have passed", async () => {
-    // The whole point of the phase. Nobody has watched this pass work, and PLAN.md §45 records
+    // The whole point of the phase. Nobody has watched this pass work, and `architecture/solve.md` §15 records
     // that green is reachable here by deleting the assertion that failed.
     const { h } = harness(WITH_REPAIR, [redThenGreen()]);
 
@@ -1460,7 +1460,7 @@ describe("the repair round, wired as an untrusted dry run", () => {
 
   it("keeps the repair's writes in the worktree rather than reverting them", async () => {
     // The decision, pinned: nothing reads a failed worktree, and the round's diff is the only
-    // place PLAN.md §45's dishonest green would be visible. Undoing it would destroy the evidence.
+    // place `architecture/solve.md` §15's dishonest green would be visible. Undoing it would destroy the evidence.
     const { h } = harness(WITH_REPAIR, [redThenGreen()]);
 
     await solveTicket(h.deps, request);

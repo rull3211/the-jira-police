@@ -12,7 +12,7 @@ import { createLogger } from "./logger.ts";
 import type { LoopOptions } from "./loop.ts";
 import type { AttemptLedger } from "./solve/attempts.ts";
 import { REVIEW_ROUND_USD } from "./solve/review-cycle.ts";
-import { type Settings, flag, numeric } from "./settings.ts";
+import { type Settings, daemonPromotesRepair, flag, numeric, repairRound } from "./settings.ts";
 import { createSolveDeps, createSolveRunDeps, reviewIntervalMs } from "./wiring.ts";
 
 const log = createLogger("review");
@@ -53,11 +53,17 @@ export function createReviewLoop(
     intervalMs,
     maxRoundsPerTick: maxRounds,
     worstCasePerTickUsd: Number((maxRounds * REVIEW_ROUND_USD).toFixed(2)),
+    promotesRepairs: daemonPromotesRepair(settings),
     note:
       maxRounds === 0
         ? "zero rounds per tick: every pull request is looked at and none is paid for"
         : "a look is two gh reads; only a round costs money",
   });
+  if (flag(settings, "REPAIR_PUBLISH") && !repairRound(settings)) {
+    log.warn("review.loop.repair_publish_inert", {
+      note: "REPAIR_PUBLISH=true arms nothing while REPAIR_ROUND=false: no repair round runs for it to act on",
+    });
+  }
 
   return {
     runCycle: async () => {
