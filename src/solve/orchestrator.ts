@@ -40,7 +40,7 @@ import {
 } from "./base-sync.ts";
 import { checkDiff, parseNumstat } from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
-import { type BotIdentity, commitAll } from "./pr.ts";
+import { type BotIdentity, type CommitResult, commitAll } from "./pr.ts";
 import {
   type AbandonCause,
   type FixReport,
@@ -270,10 +270,8 @@ export type SolveOutcome =
       /**
        * What the repair round concluded, discarded as a verdict and kept as a measurement.
        *
-       * `SolveOutcome["kind"]`, the shape `escaped.would` uses for the same job. `verified` here
-       * means the round **would** have rescued the run and was not let — the run was not armed
-       * with `promoteRepair`, or the fix could not be committed ahead of the round (PLAN.md §45).
-       * Absent means no round ran, whether `REPAIR_ROUND` is off or the run never reached one.
+       * `SolveOutcome["kind"]`, as `escaped.would` uses it. `verified` means a green round that was not
+       * promoted (see `unpromotable`, and PLAN.md §45); absent means no round ran.
        *
        * Where the measurement lands: `repair-ledger.ts` turns this into a row in
        * `repair-rounds.md`, which is the only place it outlives the run.
@@ -692,11 +690,8 @@ function renderVerificationFailure(
 /**
  * One repair attempt after a failed verification.
  *
- * Called from {@link runPipeline}'s `failed` branch, once. **Its verdict is discarded unless the
- * run is armed with `promoteRepair`** — otherwise the run stays `failed`, carrying the round's
- * report and `repairOutcome` for a human to read. Even armed, only a `verified` is promoted, and
- * that verdict is still one no exit code can audit: PLAN.md §45 records the measured case where
- * green is reachable by deleting the assertion that failed. Do not widen what is promoted.
+ * Called once, from {@link runPipeline}'s `failed` branch. **Its verdict is discarded unless the run
+ * is armed**, and even then only a `verified` is promoted — do not widen that; PLAN.md §45 has why.
  *
  * Grants no new privilege: `repair` is a `WRITE_PASSES` member in `runner.ts` and gets exactly
  * `FIX_ALLOWED_TOOLS` — no `Bash`. `verify`'s `CommandRunner` remains the only thing that ever
@@ -826,6 +821,31 @@ export async function runRepairRound(
     files: verdict.files,
     lines: verdict.lines,
   };
+}
+
+/**
+ * Why a green repair round cannot become the outcome, or `null`. `publish` must find the repair as
+ * a commit of its own on top of the fix, so both the fix's commit and an uncommitted delta are required.
+ */
+async function unpromotable(
+  commands: CommandRunner,
+  worktree: Worktree,
+  boundary: CommitResult,
+  timeoutMs: number,
+): Promise<string | null> {
+  if (boundary.outcome === "failed") {
+    return `the fix could not be committed ahead of the round, so both would ship as one commit (${boundary.reason})`;
+  }
+  const status = await commands.run(["git", "-C", worktree.path, "status", "--porcelain"], {
+    cwd: worktree.path,
+    timeoutMs,
+  });
+  if (failed(status)) {
+    return `could not read what the round left on top of the fix (${why(status)})`;
+  }
+  return status.stdout.trim() === ""
+    ? "the round left nothing on top of the fix, so there is no second commit to push"
+    : null;
 }
 
 async function runPipeline(
@@ -1035,12 +1055,12 @@ async function runPipeline(
       verification,
     );
     if (request.promoteRepair === true && round.kind === "verified") {
-      if (boundary.outcome !== "failed") {
+      const blocked = await unpromotable(commands, worktree, boundary, request.gitTimeoutMs);
+      if (blocked === null) {
         log.info("solve.repair.promoted", { issueKey, branch: worktree.branch });
         return round;
       }
-      // Promoting it would push fix and repair as one commit under the repair's message.
-      log.warn("solve.repair.not_promoted", { issueKey, reason: boundary.reason });
+      log.warn("solve.repair.not_promoted", { issueKey, reason: blocked });
     }
     // `crashed`, `abandoned` and `refused` rounds carry no report at all; `repairOutcome` is what
     // says a round ran in those cases, and dropping it would make them look like no round.

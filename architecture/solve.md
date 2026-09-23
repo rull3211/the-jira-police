@@ -278,8 +278,10 @@ returned as the outcome — carrying `repair`, `repairedFailure` and the round's
 verification — and `publish` commits the repair as a **second commit** on top of the fix, since
 the fix is already committed and the repair's edits are the only uncommitted delta. A red,
 crashed, abandoned or refused round is never promoted, and neither is a green one whose fix could
-not be committed first (`solve.repair.not_promoted`), since that would push both as one commit
-under the repair's message. `pr-text.ts` titles the pull request by the fix and puts a
+not be committed first, since that would push both as one commit under the repair's message, nor
+one that left nothing uncommitted on top of the fix — a flaky re-verification of an unchanged
+tree, which `publish` would report as a verified tree holding no change. Both are logged as
+`solve.repair.not_promoted`. `pr-text.ts` titles the pull request by the fix and puts a
 harness-written notice second on the page, above every model-written line, naming the failure the
 fix alone hit and telling the reviewer to read the second commit on its own. PLAN.md §45 holds the
 phasing, and why this was switched on before the evidence it asked for existed.
