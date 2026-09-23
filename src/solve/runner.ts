@@ -7,8 +7,8 @@
  * differ only in what they are shown and must return; simplify shares it too,
  * plus `Skill`, the one capability that lets it invoke Claude Code's built-in
  * `/simplify` mid-session rather than re-deriving its judgement by hand.
- * `repair` runs only after a failed verification, and only to be measured: `runPipeline` throws
- * its verdict away — PLAN.md §45.
+ * `repair` runs only after a failed verification, and `runPipeline` throws its verdict away unless
+ * the run is armed with `--repair` — PLAN.md §45.
  *
  * `--allowedTools` restricts nothing — it is an auto-approve list, checked by
  * probe. Only `--disallowedTools` withholds, by removing the tool from the

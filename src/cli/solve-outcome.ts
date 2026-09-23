@@ -160,7 +160,7 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
         // The verdict is stated as discarded rather than merely omitted: a reader who sees
         // "verified" anywhere near a repair round will otherwise take it as the run's answer.
         outcome.repairOutcome === "verified"
-          ? `A repair round ran and its corrected diff passed. That verdict is DISCARDED, not acted on — the pass has never been watched working, and deleting the assertion that failed reaches green the same way.`
+          ? `A repair round ran and its corrected diff passed. That verdict is DISCARDED, not acted on — this run was not armed with --repair, or it was and the fix could not be committed ahead of the round (solve.repair.not_promoted above). Deleting the assertion that failed reaches green the same way, which is why acting on one is typed per run.`
           : `A repair round ran and ended ${outcome.repairOutcome}, so it did not rescue the run either.`,
         ...(risk === "" ? [] : [`The repair flagged this about its own edit: ${risk}`]),
         // The reason above was measured before the round, so the tree it names no longer produces it.
@@ -175,6 +175,17 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
       return `CRASHED at the ${outcome.pass} pass — no verdict was reached, so this says nothing about the code: ${outcome.reason}\nWorktree kept at ${outcome.worktree.path}`;
     }
     case "verified": {
+      if (outcome.repair !== undefined) {
+        const { path } = outcome.worktree;
+        return [
+          `VERIFIED AFTER A REPAIR ROUND — ${outcome.files} file(s), ${outcome.lines} line(s) changed.`,
+          `The fix alone failed (${outcome.repairedFailure ?? "reason not recorded"}); a repair round was shown that failure and its correction passed.`,
+          `Committed: ${outcome.fix.commitSubject}. Commit would be, on top of it: ${outcome.commit.subject}`,
+          `Nothing was pushed and nothing was written to Jira.`,
+          `Read the repair alone: git -C ${path} diff HEAD`,
+          `and the fix it corrects: git -C ${path} show HEAD`,
+        ].join("\n");
+      }
       return [
         `VERIFIED — ${outcome.files} file(s), ${outcome.lines} line(s) changed.`,
         `Commit would be: ${outcome.commit.subject}`,

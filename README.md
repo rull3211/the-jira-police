@@ -114,8 +114,9 @@ flowchart TD
 The boxes labelled recon, write, round and merge are separate `storecode` invocations of the
 `agent-solve` skill, not turns of one conversation. These are the rungs you can type; `PASSES` in
 `runner.ts` is the list, and it holds one more — `repair`, which has no rung of its own because
-nothing types it: a failed verification runs it, and `REPAIR_ROUND=false` is the only control over
-it (PLAN.md §45). The count is deliberately not written here: `architecture/solve.md` §15 owns it,
+nothing types it: a failed verification runs it, and `REPAIR_ROUND=false` turns it off. What may be
+typed is `--repair`, which decides what a green round may do rather than whether one runs
+(PLAN.md §45). The count is deliberately not written here: `architecture/solve.md` §15 owns it,
 and the last time it lived in two files it was wrong in both.
 
 | Pass         | Tools                                | Given                            |
@@ -521,10 +522,11 @@ segment that `ISSUE_KEY` (`src/solve/worktree.ts`) cannot produce — so the cla
 unreported rather than swept. Dry by default, same shape as `triage:once`; nothing in `index.ts` or
 `review-loop.ts` calls it, so a stale directory only goes away when someone runs it.
 
-**`pnpm repair:ledger` is the only place a repair round's verdict survives the run that bought
+**`pnpm repair:ledger` is the only place every repair round's verdict survives the run that bought
 it.** A failed verification buys one repair pass and `runPipeline` discards what it concludes
-(`architecture/solve.md` §15), so every round appends a row to `<OUTPUT_DIR>/repair-rounds.md` and
-this command reads that page back: how the rounds ended, and which green ones nobody has looked at.
+unless the run was typed with `--repair` (`architecture/solve.md` §15), so every round, promoted
+or not, appends a row to `<OUTPUT_DIR>/repair-rounds.md` and this command reads that page back:
+how the rounds ended, and which green ones nobody has looked at.
 **The `Read` column is not the harness's to fill.** A green round is written `unread` and stays
 that way until a person reads the round's edits — `git diff HEAD` in the worktree the row names,
 where the fix is committed underneath them — and edits the cell by hand. Correcting the code and
@@ -648,12 +650,22 @@ pnpm solve:once SSX-1234 --claim   # claims, checks the queue drops it, releases
 pnpm solve:once SSX-1234 --solve   # ... and runs the solver; nothing is pushed
 pnpm solve:once SSX-1234 --pr      # ... and opens the draft PR, reviewer @copilot
 pnpm solve:once SSX-1234 --review  # ... and works the review through to a handover
+pnpm solve:once SSX-1234 --pr --repair  # --pr, and a repair round that goes green opens it
 pnpm solve:once SSX-1234 --advance # one review round on a PR an earlier run opened
 pnpm solve:once --watch            # poll every ticket under review until none is left
 pnpm solve:once SSX-1234 --watch   # the same loop, narrowed to one ticket
 
 pnpm bot:once SSX-1234 --review    # the same ladder, but triage runs first and gates it
 ```
+
+**`--repair` is not a rung, it is a modifier on `--pr` and `--review`.** A failed verification
+buys a repair round whenever `REPAIR_ROUND` allows, flag or no flag; `--repair` decides what a
+green one may do. Without it the verdict is recorded and discarded. With it, the pull request is
+opened from the repaired tree as two commits — the fix, then the repair — and its body says above
+everything else that the second was written by a pass shown the failure, and should be read on its
+own. It is refused below `--pr`, with `REPAIR_ROUND=false` (no round would run for it to act on),
+and by `bot:once`, and the daemon never sets it. PLAN.md §45 has why it exists before the evidence
+that was meant to justify it.
 
 **`bot:once` is `solve:once` with triage in front.** It takes the same rungs. The difference is
 that it triages the ticket first and refuses to claim one the fitness call declines — so it is the
@@ -751,7 +763,7 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                            |
 | `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back    |
 | `FAIL_FIRST_CHECK`              | `true`        | One of two that default on — off withdraws a check, it does not grant one  |
-| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; its verdict is never acted on |
+| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; acted on only with `--repair` |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull

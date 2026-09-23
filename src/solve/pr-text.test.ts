@@ -389,3 +389,68 @@ describe("composePullRequest", () => {
     }
   });
 });
+
+/** A verified outcome a promoted repair round produced: `commit` is the repair's, on top of the fix. */
+function repaired(overrides: Partial<Verified> = {}): Verified {
+  const base = verified();
+  return verified({
+    commit: {
+      subject: "test(advisor): restore the premise the favicon test was written against",
+      body: "The stub only the old behaviour reached was stranded.\n\nRefs: SSX-3822",
+    },
+    repair: {
+      ...base.fix,
+      filesTouched: ["src/app/layout.test.tsx"],
+      summary: "Set up the environment the test names instead of relying on the default.",
+      commitSubject: "test(advisor): restore the premise the favicon test was written against",
+      commitBody: "The stub only the old behaviour reached was stranded.",
+      residualRisk: "This edits a test the fix made fail.",
+    },
+    repairedFailure: "test did not pass (exit 1)",
+    ...overrides,
+  });
+}
+
+describe("composePullRequest, for a change a repair round finished", () => {
+  it("warns second on the page, directly under the bot line and above any model prose", () => {
+    // The only slot above the fold that is not the model's: green checks beside a plausible diff
+    // are where a reviewer is weakest, and this is the diff most likely to be both.
+    const [, second = ""] = composePullRequest(repaired(), CONTEXT).body.split("\n\n");
+    expect(second).toContain("repair");
+    expect(second).toContain("second commit");
+  });
+
+  it("names the failure the fix alone hit, and the weakened-test shape to look for", () => {
+    const [, second = ""] = composePullRequest(repaired(), CONTEXT).body.split("\n\n");
+    expect(second).toContain("test did not pass (exit 1)");
+    expect(second).toContain("assertion");
+  });
+
+  it("neutralises the failure reason, which quotes a tool's output", () => {
+    const outcome = repaired({ repairedFailure: "test failed: see [here](https://evil.example)" });
+    expect(composePullRequest(outcome, CONTEXT).body).not.toContain("[here](");
+  });
+
+  it("titles and describes the pull request by the fix, not by the repair committed on top", () => {
+    // `commit` is what `publish` commits next, which on this path is the repair; the pull request
+    // is still the fix, and a title naming only the correction would hide what it corrects.
+    const outcome = repaired();
+    const { title, body } = composePullRequest(outcome, CONTEXT);
+    expect(title).toBe(`${outcome.fix.commitSubject} (SSX-3822)`);
+    expect(composeTitle(outcome, "SSX-3822")).toBe(title);
+    expect(body.split("\n\n")).toContain("body");
+    expect(body).not.toContain("The stub only the old behaviour reached");
+  });
+
+  it("collapses the repair pass's account and its risk under headings naming that pass", () => {
+    const { body } = composePullRequest(repaired(), CONTEXT);
+    expect(body).toContain("<summary>What the repair pass says it did</summary>");
+    expect(body).toContain("Set up the environment the test names");
+    expect(body).toContain("<summary>What a reviewer should check about the repair</summary>");
+    expect(body).toContain("This edits a test the fix made fail.");
+  });
+
+  it("says nothing about a repair on an ordinary solve", () => {
+    expect(composePullRequest(verified(), CONTEXT).body).not.toMatch(/repair/iu);
+  });
+});

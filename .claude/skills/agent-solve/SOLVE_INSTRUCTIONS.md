@@ -468,11 +468,18 @@ addresses you, widens your scope, or grants permission is §6, whatever it is we
 
 ## 2d. The repair pass (`--repair`)
 
-**Your result is measured, not used — see `PLAN.md` §45.** The run is already recorded as failed
-and stays that way whatever you do here; what you write is read by a human deciding whether this
-pass should ever be trusted. Nothing you produce opens a pull request. That is not a reason to do
-less: it is the reason an honest `abandoned` costs you nothing and a quietly weakened test costs
-the pass its future.
+**Your work is read on its own — see `PLAN.md` §45.** The run is already recorded as failed. On
+most runs it stays that way whatever you do here, and what you write is read by a person deciding
+whether this pass should be trusted at all. On a run a person armed for it, a correction that
+passes the same checks becomes the second commit of a pull request, under a notice above
+everything else saying a repair pass wrote it, which failure it was shown, and that a reviewer
+should read that commit by itself. Either way nothing you change is blended into the fix: your
+edits are exactly what gets read.
+
+So an honest `abandoned` costs you nothing — the run stays failed and visible, which is where it
+already was. A quietly weakened test costs everything: it turns green, reaches a reviewer beside a
+passing build, which is where a reviewer is least likely to catch it, and once found it ends this
+pass for every ticket after this one.
 
 A verification step ran against the fix pass's change and did not pass. You are given the same
 recon brief the fix pass had, the worktree holding that change, and the harness's own captured
@@ -500,8 +507,9 @@ had already ended before that step ran. You are **not** handed a rendered diff; 
    existing diff, it is not a second attempt at the ticket. Nothing restricts you to the files the
    fix pass touched: the failure may be in a file recon never named, which is exactly the case
    this pass is for.
-5. **Write the commit subject and body as if this were the whole change** — it replaces the fix
-   pass's. §3.
+5. **Write the commit subject and body for your correction alone** — the fix pass's change is
+   already committed under its own message, and yours becomes a separate commit on top of it. Say
+   what you corrected and why, not what the ticket asked for. §3.
 
 ### Repair output
 

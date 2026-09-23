@@ -1,6 +1,6 @@
 /**
- * The scoreboard for the repair round, whose verdict the pipeline otherwise throws away, and what
- * `PLAN.md` §45 reads before it may start phase three.
+ * The scoreboard for the repair round, whose verdict the pipeline throws away unless a run is armed
+ * to act on it, and the evidence `PLAN.md` §45 was supposed to have before any run could be.
  *
  * A sibling of `dev-lens.md`, not a column on it: one table answering both would fuse two
  * questions. Writer and reader live here together so a test can prove they agree.
@@ -31,17 +31,20 @@ export const HEADER = [
   "# Repair rounds",
   "",
   "One row per repair round, appended, never rewritten. A failed verification buys one repair",
-  "pass (`REPAIR_ROUND`) and `runPipeline` discards its verdict, so this page is the only place",
-  "those verdicts accumulate. Read the `Round` column down the page before letting anything act",
-  "on one.",
+  "pass (`REPAIR_ROUND`). `runPipeline` discards its verdict unless the run was armed with",
+  "`--repair`, and even then acts only on a `verified` one, by opening the pull request from it —",
+  "so this page is the only place every verdict accumulates, acted on or not. Read the `Round`",
+  "column down the page before arming anything.",
   "",
   "**The `Read` column is yours, not the harness's.** A `verified` round is written `unread` and",
   "stays that way until a person reads the round's own edits — `git diff HEAD` in the row's",
   "worktree, where the fix is committed underneath them — and replaces the cell by hand. A",
   "worktree whose `HEAD` is still the base has no such commit, and its diff holds fix and repair",
-  "together. Write what the diff *did* — `honest` where it corrected the code, `cheap` where it",
-  "weakened the assertion that failed — and the date. A passing re-verification is reachable both",
-  "ways and no exit code tells them apart, which is the whole reason the verdict is discarded:",
+  "together. A `verified` round that opened a pull request leaves `git diff HEAD` empty: its edits",
+  "are the commit at `HEAD`, the second on that pull request. Write what the diff *did* —",
+  "`honest` where it corrected the code, `cheap` where it weakened the assertion that failed — and",
+  "the date. A passing re-verification is reachable both ways and no exit code tells them apart,",
+  "which is why acting on one takes a typed flag and why a promoted one still owes a reading here:",
   '"a `verified` happened" and "a `verified` was read and found honest" are the two claims this',
   "column exists to keep apart.",
   "",
@@ -63,12 +66,8 @@ export const HEADER = [
 ].join("\n");
 
 /**
- * One table row, or `null` when the outcome bought no repair round.
- *
- * Two shapes carry a round: a `failed` run with `repairOutcome`, and a `verified` run a promoted
- * round produced, which has `repair` and no `repairOutcome`. A run that escaped after its round is
- * the case this cannot see: `escapeVerdict` replaces the outcome with `escaped`, which carries
- * `would` and neither.
+ * One table row, or `null` when no round ran. A round arrives as `failed` with `repairOutcome` or,
+ * promoted, as `verified` with `repair`; an `escaped` run carries neither, so it leaves no row.
  */
 export function repairRow(issueKey: string, outcome: SolveOutcome, now: Date): string | null {
   if (outcome.kind !== "failed" && outcome.kind !== "verified") {
@@ -249,8 +248,8 @@ export function renderSummary(reading: LedgerReading): string {
   lines.push(
     "",
     `Green rounds: ${String(verified.length)}. That is the verdict no exit code can audit,`,
-    "so PLAN.md §45 needs each one read as a diff before anything may act on it.",
-    "Read one with:  git -C <worktree> diff HEAD",
+    "so each one owes a reading as a diff — a promoted one too, since a person is merging it.",
+    "Read one with:  git -C <worktree> diff HEAD   (empty if it opened a pull request: show HEAD)",
     "",
   );
 

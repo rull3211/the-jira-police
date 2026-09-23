@@ -267,14 +267,29 @@ quietly turn the second into the first.
 
 `recon` → `fix` → `simplify`, then `review` once per round of reviewer feedback, plus `merge` when
 a branch will not take its base. **`repair` is the sixth, and the only one whose answer is thrown
-away** — `runPipeline`'s `failed` branch runs one round, keeps its report and its verdict on the
-outcome as `repair` and `repairOutcome`, and still returns `failed`, so a repair that re-verifies
-green opens no pull request; `REPAIR_ROUND=false` skips the round entirely. PLAN.md §45 holds the
-phasing and why the verdict is not trusted.
+away by default** — `runPipeline`'s `failed` branch commits the fix under its own message, runs one
+round, keeps its report and its verdict on the outcome as `repair` and `repairOutcome`, and still
+returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely.
+
+**A run typed with `--repair` acts on a green round, and on nothing else.** `promoteRepair` on the
+request is set only by that flag, which `solve-args.ts` refuses below `--pr` and with
+`REPAIR_ROUND=false`; the daemon never sets it. Armed, a round that re-verifies `verified` is
+returned as the outcome — carrying `repair`, `repairedFailure` and the round's own green
+verification — and `publish` commits the repair as a **second commit** on top of the fix, since
+the fix is already committed and the repair's edits are the only uncommitted delta. A red,
+crashed, abandoned or refused round is never promoted, and neither is a green one whose fix could
+not be committed first (`solve.repair.not_promoted`), since that would push both as one commit
+under the repair's message. `pr-text.ts` titles the pull request by the fix and puts a
+harness-written notice second on the page, above every model-written line, naming the failure the
+fix alone hit and telling the reviewer to read the second commit on its own. PLAN.md §45 holds the
+phasing, and why this was switched on before the evidence it asked for existed.
 
 **Thrown away as a verdict, kept as a measurement.** `reportOutcome` appends one row per round to
 `<OUTPUT_DIR>/repair-rounds.md` (`repair-ledger.ts`), a sibling of `dev-lens.md` rather than a
-column on it, and `pnpm repair:ledger` reads it back as a distribution. The harness writes every
+column on it, and `pnpm repair:ledger` reads it back as a distribution. A promoted round writes a
+row too, `verified` and `unread`: it reaches the ledger as a `verified` outcome carrying `repair`
+rather than a `failed` one carrying `repairOutcome`, and `repairRow` reads both shapes. Its edits
+are then the commit at `HEAD` rather than `git diff HEAD`, which is empty. The harness writes every
 column but `Read`, which stays `unread` on a green round until a person reads the round's edits
 and replaces the cell by hand — a passing re-verification is reachable both by correcting the code
 and by weakening the assertion that failed, and no exit code here tells those apart. **The edits
@@ -286,7 +301,7 @@ case never reaches the page: `escapeVerdict` replaces the outcome with `escaped`
 
 **Measured on its first real run, SSX-3944 on 2026-09-22.** Five sessions, $3.03, 15m19s wall
 clock, of which the repair round was $0.76 — a third again on top of a run that would otherwise
-have stopped at `failed`, for an answer nothing acts on. It came back `verified` and was discarded
+have stopped at `failed`, for an answer nothing then acted on. It came back `verified` and was discarded
 as designed. Reading the diff is what the phase is for, and the diff was honest: the fix removed
 `CustomerDto`'s auto-vivification, which stranded a Mockito stub in `CustomerCmHelperTest` that
 only the buggy behaviour had ever exercised, and the round **restored the test's premise instead of

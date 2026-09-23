@@ -1371,8 +1371,9 @@ describe("runRepairRound", () => {
  * The round as `runPipeline` actually calls it: run, then disbelieved.
  *
  * Separate from the block above, which exercises `runRepairRound`'s own verdicts. What is under
- * test here is that none of those verdicts reaches the caller — the pipeline keeps the report and
- * throws the answer away, so `verified` from the round still leaves the ticket failed.
+ * test here is that, on a run not armed with `promoteRepair`, none of those verdicts reaches the
+ * caller — the pipeline keeps the report and throws the answer away, so `verified` from the round
+ * still leaves the ticket failed.
  */
 
 /** Fails the second `run test` only: the base check passes, the post-fix verification is red, and the repair's re-run is green again. */
@@ -1409,7 +1410,7 @@ describe("the repair round, wired as an untrusted dry run", () => {
 
     await solveTicket(h.deps, request);
 
-    // One, not a loop: a second round multiplies the cost of a verdict nothing acts on.
+    // One, not a loop, armed or not.
     expect(h.seen.map((entry) => entry.pass)).toEqual(["recon", "fix", "simplify", "repair"]);
   });
 
@@ -1576,6 +1577,73 @@ describe("the commit that separates the fix from the repair round", () => {
 
     expect(commits(h)).toHaveLength(1);
     expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "failed" });
+  });
+});
+
+const ARMED: SolveRequest = { ...request, promoteRepair: true };
+
+describe("the repair round, promoted by --repair", () => {
+  it("returns a green round as the outcome, carrying the repair and the failure it corrected", async () => {
+    const { h } = harness(WITH_REPAIR, [committed(), redThenGreen()]);
+
+    const outcome = await solveTicket(h.deps, ARMED);
+
+    expect(outcome.kind).toBe("verified");
+    if (outcome.kind !== "verified") {
+      throw new Error(`expected verified, got ${outcome.kind}`);
+    }
+    expect(outcome.repair).toEqual(parseFix(repair(), request.issueKey));
+    expect(outcome.repairedFailure).toContain("test");
+    // The round's own re-verification, which is green — the pre-repair one belongs to `repairedFailure`.
+    expect(outcome.verification.outcome).toBe("passed");
+    // What `publish` commits next: the repair, on top of the fix already committed.
+    expect(outcome.commit.subject).toBe(
+      "fix(advisor): correct the head link test for the merged fix",
+    );
+    expect(outcome.fix).toEqual(parseFix(fix(), request.issueKey));
+  });
+
+  it("leaves a green round failed when the fix could not be committed ahead of it", async () => {
+    // Promoting it would ship fix and repair as one commit under the repair's message, which is
+    // the blend the separate commit exists to prevent.
+    const { h } = harness(WITH_REPAIR, [redThenGreen()]);
+
+    const outcome = await solveTicket(h.deps, ARMED);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "verified" });
+  });
+
+  it("promotes nothing but a green round: a red one stays the pre-repair failure", async () => {
+    // The plausible wrong promotion — returning the round whatever it concluded — would report
+    // the round's own failure, at the step it stopped at, in place of the one that sent it there.
+    const { h } = harness(WITH_REPAIR, [committed(), ...redAtDifferentSteps()]);
+
+    const outcome = await solveTicket(h.deps, ARMED);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "failed" });
+    expect(outcome).toMatchObject({ reason: expect.stringContaining("lint") });
+  });
+
+  it("promotes nothing but a green round: a crashed one stays a failed run", async () => {
+    const { h } = harness(WITH_REPAIR, [committed(), stayRed()], {
+      repair: "pass timed out after 900000ms",
+    });
+
+    const outcome = await solveTicket(h.deps, ARMED);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "crashed" });
+  });
+
+  it("leaves a green round failed when the run was not armed, and absent is not armed", async () => {
+    // Absent first: it is what the daemon sends, and an explicit `false` alone cannot tell
+    // `=== true` from a fail-open `!== false` — measured, that mutation survived it.
+    for (const unarmed of [request, { ...request, promoteRepair: false }]) {
+      const { h } = harness(WITH_REPAIR, [committed(), redThenGreen()]);
+
+      const outcome = await solveTicket(h.deps, unarmed);
+
+      expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "verified" });
+    }
   });
 });
 

@@ -322,7 +322,7 @@ export const SETTINGS = [
   {
     name: "REPAIR_ROUND",
     description:
-      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK — but read the difference before copying the reasoning: that one writes nothing, and this one runs a write pass. It arms a model session holding Write and Edit, in a worktree the run is already writing, and buys a re-verification and sometimes a fail-first probe. What it does not do is let anything act on the result. The outcome stays `failed` whatever the round concludes, because the pass has never been watched working and a green re-verification is reachable by deleting the failing assertion, which no exit code tells from a fix. So the thing a typo would withdraw is the measurement, not a guard on the writing — concretely, rows stop appearing in repair-rounds.md and `pnpm repair:ledger` has nothing new to read. On the day a phase acts on the verdict, this becomes a privilege switch and belongs on `flag`. Set it to false for cost.",
+      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK — but read the difference before copying the reasoning: that one writes nothing, and this one runs a write pass. It arms a model session holding Write and Edit, in a worktree the run is already writing, and buys a re-verification and sometimes a fail-first probe. What it does not do on its own is let anything act on the result. The outcome stays `failed` whatever the round concludes unless the run was also typed with `--repair`, because a green re-verification is reachable by deleting the failing assertion, which no exit code tells from a fix. That flag is the half of the privilege that fails closed, so this one stays the mirror of `flag` even now that a verdict can be acted on: the thing a typo here would withdraw is still the measurement, not a guard on the writing — concretely, rows stop appearing in repair-rounds.md and `pnpm repair:ledger` has nothing new to read. A setting that let a round act with nothing typed would be a privilege switch and belong on `flag`; this is not that setting. Set it to false for cost.",
     fallback: "true",
   },
   {
@@ -468,14 +468,10 @@ export function failFirstCheck(settings: Settings): boolean {
 }
 
 /**
- * Whether a failed verification also buys one repair round. Only "false" turns it off.
- *
- * The mirror of `flag` for the same reason as `failFirstCheck`, and it is only the mirror while
- * the round stays untrusted: the outcome is `failed` whatever the round returns, so this withdraws
- * a measurement rather than arming a privilege. A phase that lets a repair decide the run must
- * move this to `flag`.
+ * Whether a failed verification also buys one repair round. Only "false" turns it off — the mirror
+ * of `flag` only while it cannot decide a run alone; anything letting it do so must move it to `flag`.
  */
-export function repairRound(settings: Settings): boolean {
+export function repairRound(settings: Pick<Settings, "REPAIR_ROUND">): boolean {
   return settings["REPAIR_ROUND"].trim().toLowerCase() !== "false";
 }
 

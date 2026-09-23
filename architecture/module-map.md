@@ -119,7 +119,7 @@ inheritance.
 | `src/solve/silence.ts`       | How long a pull request has been quiet, in wall-clock. Pure; the clock is injected             |
 | `src/solve/feedback.ts`      | What a run says back to the ticket, and the row it appends to `dev-lens.md`                    |
 | `src/solve/ledger.ts`        | What the two append-only scoreboards share: the header-once append, and `safeText`             |
-| `src/solve/repair-ledger.ts` | `repair-rounds.md` — the repair round's verdict, which `runPipeline` throws away. Both ends    |
+| `src/solve/repair-ledger.ts` | `repair-rounds.md` — every repair round's verdict, acted on or thrown away. Both ends          |
 | `src/solve/commenter.ts`     | Posting that comment over an Atlassian MCP session. The narrowest tool surface in the tree     |
 
 **The sendback watch**

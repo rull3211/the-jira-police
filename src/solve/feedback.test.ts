@@ -175,9 +175,12 @@ describe("renderSolveComment", () => {
       worktree,
     });
 
-    expect(failed).toContain("being acted on");
+    expect(failed).toContain("**not** being acted on");
     // The reader's first wrong inference is that a green repair means a pull request exists.
     expect(failed).toContain("no pull request");
+    // And the second, now that some runs do act on one: that this run chose not to for a reason
+    // about this ticket.
+    expect(failed).toContain("separate decision, made per run");
   });
 
   it("surfaces what the repair flagged about its own edit, not only the fix's", () => {

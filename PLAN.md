@@ -5,7 +5,7 @@
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
 > ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
 > and staged images its own abandoned runs left behind, and renders its log to a reader.
-> **2921 tests in 94 files**, no build step.
+> **2950 tests in 94 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -147,10 +147,10 @@ The next entry is §50.
 
 <!-- refs:on -->
 
-### 45. Nothing has ever watched the repair pass work, so nothing may act on what it says
+### 45. A person may act on what the repair pass says; the loop may not
 
-**Branch:** `feat/repair-manual-rung` (phase three, `--repair`), with `feat/repair-publish-loop`
-(phase four, `REPAIR_PUBLISH`) stacked on it one level deep. Phase one (the blast-radius
+**Branch:** `feat/repair-publish-loop` (phase four, `REPAIR_PUBLISH`), stacked one level deep on
+`feat/repair-manual-rung`, which builds phase three (`--repair`). Phase one (the blast-radius
 instruction, the inert pass) shipped in #67 and phase two (the untrusted dry run) in #68 — named by
 pull request rather than by branch, since both branches are deleted on merge.
 
@@ -169,11 +169,12 @@ future. **What would make the claim the wrong call:** a promoted repair merged a
 `cheap`. That is the case rule 2 was asserted to catch; one instance switches `REPAIR_PUBLISH` off,
 and the deletion below stays on the table.
 
-**What is not built.** Any path by which a repair round's verdict changes what happens to a ticket.
-The round runs on every failed verification unless `REPAIR_ROUND=false`, and `runPipeline` discards
-its answer: the outcome stays `failed`, carrying `repair` and `repairOutcome` for a human to read.
-A round that re-verifies green opens nothing. What remains is STARTING.md's third and fourth rungs —
-one named ticket behind a flag that must be typed, and then the loop.
+**What is not built.** Any unattended path by which a repair round's verdict changes what happens
+to a ticket. The manual rung exists: `solve:once <KEY> --pr --repair` lets a green round open the
+pull request, as a second commit the body names (`architecture/solve.md` §15). The daemon never
+sets it — `runSolveClaims` passes `false` — so on every run nobody typed, `runPipeline` still
+discards the answer and the outcome stays `failed`. What remains is STARTING.md's fourth rung, the
+loop, which adds no capability and only removes the person who typed the flag.
 
 **Why the verdict is not trusted yet, and this is the part that is not a scheduling problem.** Green
 is reachable here dishonestly, measured on the motivating ticket rather than argued. SSX-3944's
@@ -191,25 +192,24 @@ so nothing downstream notices either.
 repair is _reachable_ — not that it is what the pass does under pressure, and the run was on the
 ticket this pass was designed around.
 
-**So the bar for starting phase three is evidence, not a decision.** Enough `repairOutcome` records
-to see a distribution rather than an anecdote, from tickets nobody had this pass in mind for,
-including at least one where the cheap repair is more tempting than the honest one — and every
-`verified` among them read as a diff, since that verdict is the one the exit code cannot audit. A
-phase three begun before that is the loop argument arriving one rung early: it would not be adding
-a capability, it would be removing the only reader the capability has.
+**The bar this entry set, which phases three and four are claimed without.** Enough
+`repairOutcome` records to see a distribution rather than an anecdote, from tickets nobody had this
+pass in mind for, including at least one where the cheap repair is more tempting than the honest
+one — and every `verified` among them read as a diff, since that verdict is the one the exit code
+cannot audit. The objection it answered still stands: a phase three begun before that is the loop
+argument arriving one rung early, removing the only reader the capability has. The claim above is
+that a reviewer of the pull request is that reader; this paragraph is the case that they are a
+worse one.
 
-**What collects that evidence is now built, and has never been written to — the page does not yet
-exist.** That distinction is the one the code is careful about, so the plan should not blur it: an
-absent page and an empty one mean different things, and `pnpm repair:ledger` reports the first as
-"no page" rather than as a reading. `repair-rounds.md` takes a row per round and the command reads
-it back as a distribution, with the reading itself in a column only a person can fill. What neither
-can do is supply rows.
-`REPAIR_ROUND` is off in the operator's `.env`, deliberately, so nothing is buying a round today:
-it has to be bought per run, `REPAIR_ROUND=true pnpm solve:once <KEY> --solve`. Phase three starts
-when that page reads as a distribution rather than as an anecdote — and **if it shows the pass
-usually reaching for the cheap repair, the pass is deleted and the page goes with it.**
+**What collects that evidence is built, and holds one row.** `repair-rounds.md` takes a row per
+round — promoted rounds included — and `pnpm repair:ledger` reads it back as a distribution, with
+the reading itself in a column only a person can fill. What neither can do is supply rows.
+`REPAIR_ROUND` is off in the operator's `.env`, deliberately, so a round is bought per run:
+`REPAIR_ROUND=true pnpm solve:once <KEY> --solve` to measure one, `... --pr --repair` to let a
+green one open the pull request. **If the page shows the pass usually reaching for the cheap
+repair, the pass is deleted and the page goes with it**, however many rungs have shipped by then.
 
-**The obvious mechanical bound is disproved, so do not reach for it on the way to phase three.** The
+**The obvious mechanical bound is disproved, so do not reach for it as a compensation.** The
 rule considered was: _a repair round touching a test file must also touch the non-test file the
 failure traces to._ On SSX-3944 the production fix is already correct and the only correct repair
 touches **a test file alone** — so that bound rejects the repair we want and leaves the pass
@@ -221,8 +221,8 @@ is worse than shipping none, because it reads as enforcement.
 **What would make it the wrong idea.** Handing a pass the actual red output is also handing it the
 cheapest way to make it green. `SOLVE_INSTRUCTIONS.md` §2 step 4 names this shape for the fix pass,
 and a pass built to stare at red output and told to make it pass is the one most likely to reach for
-it. If the dry run's reports show that is what it usually does, the answer is to delete the pass,
-not to phase it further — and the measurement is there to make that outcome as visible as the other.
+it. If the ledger shows that is what it usually does, the answer is to delete the pass, not to
+phase it further — and the measurement is there to make that outcome as visible as the other.
 
 ### 46. Nothing can say which code a running daemon is executing
 
@@ -488,15 +488,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 
 ### 10. Still unobserved
 
-- **The repair round has been watched once, and the page that scores it has never seen a real
-  round.** One `repairOutcome`, `verified`, honest on inspection (`architecture/solve.md` §15) — on
-  the ticket the pass was designed against, which is the weakest evidence there is, and it predates
-  `repair-rounds.md`, so it is not on the page. Every row `pnpm repair:ledger` has ever read was
-  put there by hand to exercise the reader. §45 holds what phase three needs before it can start.
-  `REPAIR_ROUND` is off in `.env`, so a round is bought per run:
-  `REPAIR_ROUND=true pnpm solve:once <KEY> --solve`. Re-driving a ticket the solver has already
-  tried means adding `agent:start` and clearing `agent:failed` first; both refusals are free, and
-  the CLI says so on the way out.
+- **The repair round has been watched twice, both times on SSX-3944, and `--repair` has never
+  promoted one.** The 2026-09-22 round, honest on inspection (`architecture/solve.md` §15),
+  predates `repair-rounds.md`; a 2026-09-23 round is the page's one real row, still `unread`. Both
+  are on the ticket the pass was designed against, the weakest evidence there is. Nothing has
+  opened a pull request from a repair: the two-commit history and the notice `pr-text.ts` puts
+  above the fold exist only in their tests until
+  `REPAIR_ROUND=true pnpm solve:once <KEY> --pr --repair` runs on a ticket that fails verification
+  — not SSX-3944, which now solves cleanly. Re-driving a ticket the solver has already tried means
+  adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
+  so on the way out.
 
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
@@ -635,7 +636,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **126 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **124 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that have never existed** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

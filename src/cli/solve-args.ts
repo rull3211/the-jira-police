@@ -6,6 +6,8 @@
  * and any issue-scoped flag requires an issue key so a bare `--pr` cannot mean "every ticket."
  */
 
+import { type Settings, repairRound } from "../settings.ts";
+
 /** In privilege order. The index into this array *is* the ordering. */
 export const PHASES = ["plan", "claim", "solve", "pr", "review"] as const;
 
@@ -21,6 +23,7 @@ const PHASE_FLAGS: ReadonlyMap<string, SolvePhase> = new Map([
 
 export const USAGE =
   "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr | --review]\n" +
+  "       solve-once <ISSUE-KEY> --pr --repair\n" +
   "       solve-once <ISSUE-KEY> --advance\n" +
   "  (no arguments)          the whole queue, reporting the claims it would make\n" +
   "  <ISSUE-KEY>             one ticket, same reporting\n" +
@@ -32,6 +35,12 @@ export const USAGE =
   "                          per round, and the only loop in this service.\n" +
   "Each flag does everything the ones above it do. A run that does not reach a\n" +
   "pull request puts the labels back where it found them.\n" +
+  "\n" +
+  "  --repair                with --pr or --review: a repair round that turns a\n" +
+  "                          failed verification green opens the pull request, as a\n" +
+  "                          second commit the body names. Without it the round's\n" +
+  "                          verdict is recorded and discarded. Needs a round to\n" +
+  "                          run, so REPAIR_ROUND must not be false.\n" +
   "\n" +
   "  <ISSUE-KEY> --advance   one review round on the pull request that already\n" +
   "                          exists; does not claim, solve, or open anything\n" +
@@ -68,12 +77,20 @@ const ADVANCE_FLAG = "--advance";
  */
 const WATCH_FLAG = "--watch";
 
+/**
+ * A modifier on `--pr` and above, never a rung: a rung's index is its privilege, so one between
+ * `pr` and `review` would make `--review` imply it. Decides what a green repair round may do, not whether one runs.
+ */
+const REPAIR_FLAG = "--repair";
+
 export type SolveInvocation =
   | {
       readonly mode: "ladder";
       /** `null` means the whole queue. Only ever null at the `plan` phase. */
       readonly issueKey: string | null;
       readonly phase: SolvePhase;
+      /** `--repair`. Only ever true at a phase that includes `pr`. */
+      readonly repair: boolean;
     }
   | { readonly mode: "advance"; readonly issueKey: string }
   /** `null` means every ticket the review query returns. See `WATCH_FLAG`. */
@@ -144,11 +161,22 @@ export interface LadderSettings {
   readonly SOLVE_GITHUB_OWNER: string;
 }
 
+/**
+ * Why `--repair` cannot run, or `null`. With `REPAIR_ROUND=false` no round runs, so the flag would
+ * be accepted and do nothing — a run that reads as armed and is not.
+ */
+export function repairUnavailable(settings: Pick<Settings, "REPAIR_ROUND">): string | null {
+  return repairRound(settings)
+    ? null
+    : "REPAIR_ROUND=false, so no repair round will run for --repair to act on — set REPAIR_ROUND=true for this run";
+}
+
 export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   const positional: string[] = [];
   let phase: SolvePhase = "plan";
   let advance = false;
   let watch = false;
+  let repair = false;
   let namedRung = false;
 
   for (const arg of argv) {
@@ -162,6 +190,10 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
     }
     if (arg === WATCH_FLAG) {
       watch = true;
+      continue;
+    }
+    if (arg === REPAIR_FLAG) {
+      repair = true;
       continue;
     }
     const named = PHASE_FLAGS.get(arg);
@@ -183,6 +215,13 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   }
 
   const issueKey = positional[0] ?? null;
+
+  if (repair && (watch || advance)) {
+    return {
+      ok: false,
+      error: `${REPAIR_FLAG} cannot be combined with ${watch ? WATCH_FLAG : ADVANCE_FLAG} — that acts on a pull request an earlier run opened, and no repair round runs in it`,
+    };
+  }
 
   if (watch) {
     // `--advance --watch` reads fine as "watch" but is refused anyway: the two differ by whether
@@ -226,5 +265,12 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
     };
   }
 
-  return { ok: true, invocation: { mode: "ladder", issueKey, phase } };
+  if (repair && !includes(phase, "pr")) {
+    return {
+      ok: false,
+      error: `${REPAIR_FLAG} needs --pr or --review — it lets a green repair round open the pull request, and ${phase === "plan" ? "a run with no rung" : `--${phase}`} opens none`,
+    };
+  }
+
+  return { ok: true, invocation: { mode: "ladder", issueKey, phase, repair } };
 }
