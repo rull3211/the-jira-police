@@ -63,18 +63,29 @@ export const HEADER = [
 /**
  * One table row, or `null` when the outcome bought no repair round.
  *
- * A run that escaped after its round is the case this cannot see: `escapeVerdict` replaces the
- * outcome with `escaped`, which carries `would` and not `repairOutcome`.
+ * Two shapes carry a round: a `failed` run with `repairOutcome`, and a `verified` run a promoted
+ * round produced, which has `repair` and no `repairOutcome`. A run that escaped after its round is
+ * the case this cannot see: `escapeVerdict` replaces the outcome with `escaped`, which carries
+ * `would` and neither.
  */
 export function repairRow(issueKey: string, outcome: SolveOutcome, now: Date): string | null {
-  if (outcome.kind !== "failed" || outcome.repairOutcome === undefined) {
+  if (outcome.kind !== "failed" && outcome.kind !== "verified") {
+    return null;
+  }
+  const round =
+    outcome.kind === "failed"
+      ? outcome.repairOutcome
+      : outcome.repair === undefined
+        ? undefined
+        : outcome.kind;
+  if (round === undefined) {
     return null;
   }
   const touched = outcome.repair?.filesTouched ?? [];
   const files = touched.length === 0 ? NOTHING : touched.map((file) => safeText(file)).join(", ");
   // Only `verified` owes a reading: a column nobody can clear stops being read at all.
-  const read = outcome.repairOutcome === "verified" ? UNREAD : NOTHING;
-  return `| ${now.toISOString()} | ${issueKey} | ${outcome.repairOutcome} | ${files} | ${safeText(outcome.worktree.path)} | ${read} |\n`;
+  const read = round === "verified" ? UNREAD : NOTHING;
+  return `| ${now.toISOString()} | ${issueKey} | ${round} | ${files} | ${safeText(outcome.worktree.path)} | ${read} |\n`;
 }
 
 /**

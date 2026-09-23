@@ -60,6 +60,24 @@ function failed(
   };
 }
 
+/** A verified run; with `repair`, the shape a promoted repair round returns. */
+function verified(repair?: FixReport): Extract<SolveOutcome, { kind: "verified" }> {
+  return {
+    kind: "verified",
+    worktree,
+    commit: { subject: "fix(customer): stop auto-vivifying contactInfo", body: "Refs: SSX-3944" },
+    recon: {} as never,
+    fix: fixReport(),
+    simplify: {} as never,
+    ...(repair === undefined ? {} : { repair }),
+    verification: { outcome: "passed" } as never,
+    failFirst: { outcome: "skipped", reason: "FAIL_FIRST_CHECK is off" },
+    devLens: { accurate: true, correction: "" },
+    files: 1,
+    lines: 4,
+  };
+}
+
 /** The cells of the one data row in `text`, by the same unescaped-pipe rule the parser uses. */
 function onlyRecord(text: string) {
   const { records, unreadable } = parseLedger(text);
@@ -119,6 +137,24 @@ describe("repairRow", () => {
 
   it("writes no row for a failed run that bought no round", () => {
     expect(repairRow("SSX-3944", failed(), NOW)).toBeNull();
+  });
+
+  it("records a promoted round, which reaches it as `verified` rather than as `failed`", () => {
+    // The rounds a pull request is opened from are the ones this page most needs; they carry
+    // `repair` and no `repairOutcome`, so a predicate on `failed` alone drops every one silently.
+    const record = onlyRecord(
+      repairRow("SSX-3944", verified(fixReport(["src/CustomerCmHelperTest.java"])), NOW) ?? "",
+    );
+
+    expect(record.round).toBe("verified");
+    expect(record.read).toBe(UNREAD);
+    expect(record.files).toBe("src/CustomerCmHelperTest.java");
+  });
+
+  it("writes no row for a verified run no repair round produced", () => {
+    // The plausible wrong widening — firing on every `verified` — would score each clean solve as
+    // a green repair round, and bury the real ones under rows nobody owes a reading.
+    expect(repairRow("SSX-3944", verified(), NOW)).toBeNull();
   });
 
   it("writes no row for an outcome that never reaches a round", () => {

@@ -299,11 +299,9 @@ export type SolveOutcome =
        * Set only when a repair round produced this outcome — `fix` and `simplify` stay the
        * original passes' own reports, unedited, and this carries what the repair round did on top.
        *
-       * Still `undefined` on every outcome that leaves `solveTicket`, for a new reason: phase two
-       * calls `runRepairRound` but discards its verdict (PLAN.md §45), so a round that verifies
-       * green is reported as `failed` with `repairOutcome: "verified"`. Only `runRepairRound`'s
-       * own return value sets this, and only its tests read it. A phase that trusts the round is
-       * what makes this field reachable.
+       * Still `undefined` on every outcome that leaves `solveTicket`: phase two reports a green
+       * round as `failed` with `repairOutcome: "verified"` (PLAN.md §45). `repairRow` keys on this
+       * field, not on `repairOutcome`, for a promoted round — there is no other ledger signal.
        */
       readonly repair?: FixReport;
       readonly verification: VerificationResult;
