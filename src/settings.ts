@@ -322,7 +322,7 @@ export const SETTINGS = [
   {
     name: "REPAIR_ROUND",
     description:
-      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK — but read the difference before copying the reasoning: that one writes nothing, and this one runs a write pass. It arms a model session holding Write and Edit, in a worktree the run is already writing, and buys a re-verification and sometimes a fail-first probe. What it does not do is let anything act on the result. The outcome stays `failed` whatever the round concludes, because the pass has never been watched working and a green re-verification is reachable by deleting the failing assertion, which no exit code tells from a fix. So the thing a typo would withdraw is the measurement, not a guard on the writing — and on the day a phase acts on the verdict, this becomes a privilege switch and belongs on `flag`. Set it to false for cost.",
+      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK — but read the difference before copying the reasoning: that one writes nothing, and this one runs a write pass. It arms a model session holding Write and Edit, in a worktree the run is already writing, and buys a re-verification and sometimes a fail-first probe. What it does not do is let anything act on the result. The outcome stays `failed` whatever the round concludes, because the pass has never been watched working and a green re-verification is reachable by deleting the failing assertion, which no exit code tells from a fix. So the thing a typo would withdraw is the measurement, not a guard on the writing — concretely, rows stop appearing in repair-rounds.md and `pnpm repair:ledger` has nothing new to read. On the day a phase acts on the verdict, this becomes a privilege switch and belongs on `flag`. Set it to false for cost.",
     fallback: "true",
   },
   {
@@ -352,12 +352,16 @@ export class SettingsError extends Error {
 }
 
 /**
- * Resolves every declared setting, reporting all missing ones at once.
+ * Resolves every declared setting and says which required ones were absent.
  *
  * Blank strings count as absent, since an empty `.env` value is almost always an unfilled
- * template line rather than a deliberate choice.
+ * template line rather than a deliberate choice. A missing required setting resolves to `""` here
+ * as well as being named, so the two readers below differ only in whether they throw.
  */
-export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
+function resolveDeclared(env: NodeJS.ProcessEnv): {
+  readonly settings: Settings;
+  readonly missing: readonly string[];
+} {
   const resolved: Record<string, string> = {};
   const missing: string[] = [];
 
@@ -373,16 +377,31 @@ export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
     }
     if (spec.required === true) {
       missing.push(spec.name);
-      continue;
     }
     resolved[spec.name] = "";
   }
 
+  return { settings: resolved as Settings, missing };
+}
+
+/** Resolves every declared setting, reporting all missing ones at once. */
+export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
+  const { settings, missing } = resolveDeclared(env);
   if (missing.length > 0) {
     throw new SettingsError(missing);
   }
+  return settings;
+}
 
-  return resolved as Settings;
+/**
+ * The same read, with a required-but-absent setting left empty instead of throwing.
+ *
+ * **Only for a command that reads a local artifact and reaches nothing**, so it runs in a fresh
+ * clone or an unconfigured checkout. Anything talking to a remote system keeps {@link readSettings}:
+ * an empty credential fails at the call, a long way from the decision that let it through.
+ */
+export function readLocalSettings(env: NodeJS.ProcessEnv = process.env): Settings {
+  return resolveDeclared(env).settings;
 }
 
 /**

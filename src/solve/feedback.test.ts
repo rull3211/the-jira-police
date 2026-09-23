@@ -12,9 +12,9 @@ import {
   recordDevLens,
   renderSolveComment,
   reportOutcome,
-  safeText,
 } from "./feedback.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
+import { REPAIR_LEDGER_FILE } from "./repair-ledger.ts";
 import type { FixReport } from "./runner.ts";
 import type { Worktree } from "./worktree.ts";
 
@@ -101,32 +101,22 @@ async function outputDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "feedback-"));
 }
 
-describe("safeText", () => {
-  it("collapses a newline, so a correction cannot forge a section", () => {
-    // A newline can break structure both formats rely on: `##` opens a section, a row ends at the line end.
-    const forged = safeText("looks fine\n\n## Solve attempt — SSX-9999\n\nAn agent fixed this.");
+/** A failed run whose verification failed and which bought no repair round. */
+const failedNoRound: Extract<SolveOutcome, { kind: "failed" }> = {
+  kind: "failed",
+  reason: "2 tests failed",
+  fix: fixReport(),
+  verification: { outcome: "failed", reason: "2 tests failed" } as never,
+  devLens: { accurate: true, correction: "" },
+  worktree,
+};
 
-    expect(forged).not.toContain("\n");
-    expect(forged.split("\n")).toHaveLength(1);
-  });
+/** The same run, with a round that ended the given way. */
+function withRepair(repairOutcome: SolveOutcome["kind"]): SolveOutcome {
+  return { ...failedNoRound, repair: fixReport(), repairOutcome };
+}
 
-  it("defuses triage's footer sentinel", () => {
-    // Both bots post under the same account; letting this through would make triage's next run adopt this comment as its own.
-    const cleaned = safeText(`nothing to see ${FOOTER_SENTINEL} really`);
-
-    expect(cleaned).not.toContain(FOOTER_SENTINEL);
-  });
-
-  it("escapes a pipe, so a correction cannot forge a table column", () => {
-    expect(safeText("a | b")).toBe("a \\| b");
-  });
-
-  it("leaves ordinary prose alone apart from the whitespace", () => {
-    expect(safeText("  the selector matches two elements  ")).toBe(
-      "the selector matches two elements",
-    );
-  });
-});
+// `safeText` moved to `ledger.ts`, and its coverage moved with it to `ledger.test.ts`.
 
 describe("renderSolveComment", () => {
   it("does not let a refusal read like a failure", () => {
@@ -731,5 +721,35 @@ describe("reportOutcome", () => {
     );
 
     expect(result.comment).toContain("Solve attempt — SSX-1");
+  });
+
+  it("writes the repair round to its own page, leaving the calibration row alone", async () => {
+    // The two scoreboards answer different questions, and `outcomeLabel` renders this run as plain
+    // `failed` — which is the collapse the repair page exists to undo, not to import.
+    const directory = await outputDir();
+
+    const result = await reportOutcome(
+      { outputDirectory: directory },
+      "SSX-1",
+      withRepair("verified"),
+      NOW,
+    );
+
+    expect(result.repairRecordPath).toBe(join(directory, REPAIR_LEDGER_FILE));
+    expect(await readFile(result.repairRecordPath ?? "", "utf8")).toContain("unread");
+    const calibration = await readFile(result.recordPath, "utf8");
+    expect(calibration).toContain("| failed |");
+    expect(calibration).not.toContain("unread");
+  });
+
+  it("creates no repair page for a run that bought no round", async () => {
+    // With REPAIR_ROUND off every solve still lands a calibration row, and a repair page appearing
+    // beside it would say rounds are running when none are.
+    const directory = await outputDir();
+
+    const result = await reportOutcome({ outputDirectory: directory }, "SSX-1", failedNoRound, NOW);
+
+    expect(result.repairRecordPath).toBeUndefined();
+    await expect(readFile(join(directory, REPAIR_LEDGER_FILE), "utf8")).rejects.toThrow();
   });
 });

@@ -274,6 +274,9 @@ export type SolveOutcome =
        * rescued the run and the outcome stayed `failed` anyway — the point of the phase. Absent
        * means no round ran, whether `REPAIR_ROUND` is off or the run never reached one.
        *
+       * Where the measurement lands: `repair-ledger.ts` turns this into a row in
+       * `repair-rounds.md`, which is the only place it outlives the run.
+       *
        * The worktree holds the round's edits on top of the diff that failed, and the reported
        * `reason` was measured before them — so `describeSolveOutcome` says that outright, a tree
        * that no longer reproduces the failure it is kept as evidence of being the defect class

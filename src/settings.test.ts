@@ -8,6 +8,7 @@ import {
   flag,
   list,
   numeric,
+  readLocalSettings,
   readSettings,
   repairRound,
   solveMode,
@@ -56,6 +57,31 @@ describe("readSettings", () => {
 
   it("excludes sub-tasks by default", () => {
     expect(readSettings(MINIMAL).JIRA_EXCLUDED_TYPES).toBe("10009");
+  });
+});
+
+describe("readLocalSettings", () => {
+  it("resolves the fallbacks a local report needs without a credential in sight", () => {
+    // Whether `.env` is present is a property of the machine, not of the repository — it is
+    // gitignored. A read-only command going through `readSettings` would be unrunnable in a fresh
+    // clone, in CI, and in any worktree `.worktreeinclude` did not reach.
+    const settings = readLocalSettings({});
+
+    expect(settings.OUTPUT_DIR).toBe("groomed");
+    expect(settings.REPAIR_ROUND).toBe("true");
+  });
+
+  it("leaves a missing credential empty rather than inventing one", () => {
+    // The dangerous wrong version is a fallback here: a placeholder credential fails at the API
+    // call, a long way from the decision that let it through.
+    expect(readLocalSettings({}).JIRA_AUTH).toBe("");
+  });
+
+  it("still prefers a supplied value, so it reads the same environment as the strict one", () => {
+    expect(readLocalSettings({ OUTPUT_DIR: "elsewhere" }).OUTPUT_DIR).toBe("elsewhere");
+    expect(readLocalSettings({ ...MINIMAL, JIRA_PROJECT: "ABC" })).toEqual(
+      readSettings({ ...MINIMAL, JIRA_PROJECT: "ABC" }),
+    );
   });
 });
 

@@ -224,6 +224,12 @@ export async function runSolver(
     `\nCalibration row appended to ${feedback.recordPath}` +
       `${feedback.posted ? "" : ` — ${feedback.reason ?? "not posted"}`}\n`,
   );
+  if (feedback.repairRecordPath !== undefined) {
+    // The round's verdict is discarded, so this page is the only thing that will still know.
+    process.stdout.write(
+      `Repair round recorded in ${feedback.repairRecordPath} — read it with: pnpm repair:ledger\n`,
+    );
+  }
 
   // Which outcomes count is `isFailureExit`, kept there so it can be tested without spawning
   // this command.

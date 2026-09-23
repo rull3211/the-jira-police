@@ -490,6 +490,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm dev`                                             | The **headless** daemon with `--watch`; same flags. A restart would tear the viewer down anyway        | as above                    |
 | `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind | a report + `tmpdir()`       |
 | `pnpm daemon:status`                                   | Is a daemon running out of this tree? Reads `ps`; no credential, no network                            | no                          |
+| `pnpm repair:ledger`                                   | Every repair round so far, as a distribution, and which green ones nobody has read. No credential      | no                          |
 | `pnpm sweep:once`                                      | Report stale skill roots and staged-image directories past `STAGING_SWEEP_MAX_AGE_MS`                  | a report                    |
 | `pnpm sweep:once --write`                              | …and remove them. Never a live git worktree — see below                                                | filesystem (`tmpdir()`)     |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira  | no                          |
@@ -519,6 +520,22 @@ segment that `ISSUE_KEY` (`src/solve/worktree.ts`) cannot produce — so the cla
 `src/staging-sweep.ts` never matches one, and a name it does not recognise is left alone and left
 unreported rather than swept. Dry by default, same shape as `triage:once`; nothing in `index.ts` or
 `review-loop.ts` calls it, so a stale directory only goes away when someone runs it.
+
+**`pnpm repair:ledger` is the only place a repair round's verdict survives the run that bought
+it.** A failed verification buys one repair pass and `runPipeline` discards what it concludes
+(`architecture/solve.md` §15), so every round appends a row to `<OUTPUT_DIR>/repair-rounds.md` and
+this command reads that page back: how the rounds ended, and which green ones nobody has looked at.
+**The `Read` column is not the harness's to fill.** A green round is written `unread` and stays
+that way until a person opens the worktree the row names, reads the diff, and edits the cell by
+hand — correcting the code and weakening the assertion that failed both come back green, and
+nothing mechanical here separates them. So an untouched page means rounds happened, not that any of
+them were honest. Needs no credential, which is deliberate: a command that reaches nothing should
+require nothing, so this one runs in a fresh clone and in a checkout nobody has configured.
+
+**`OUTPUT_DIR` is relative, so it reads the page belonging to the directory you run it in**, and a
+solve writes its row under the checkout it ran in. Those are the same directory in the primary
+checkout and need not be in a worktree, so the command prints the absolute path it read and, when
+there is no page, says outright that an absent file is not evidence that no round has run.
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch. Three unrelated meanings of one word, and the
