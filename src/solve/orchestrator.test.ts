@@ -1582,9 +1582,17 @@ describe("the commit that separates the fix from the repair round", () => {
 
 const ARMED: SolveRequest = { ...request, promoteRepair: true };
 
+/** The worktree's own `status`, which is what says the round left a delta of its own on top of the fix. */
+const worktreeStatus = (reply: Partial<CommandResult>): Rule => ({
+  match: (argv) =>
+    argv.includes("status") && argv.includes(worktree.path) && !argv.includes("-uall"),
+  reply,
+});
+const REPAIR_LEFT_A_DELTA = worktreeStatus({ stdout: " M src/app/head.test.tsx\n" });
+
 describe("the repair round, promoted by --repair", () => {
   it("returns a green round as the outcome, carrying the repair and the failure it corrected", async () => {
-    const { h } = harness(WITH_REPAIR, [committed(), redThenGreen()]);
+    const { h } = harness(WITH_REPAIR, [committed(), REPAIR_LEFT_A_DELTA, redThenGreen()]);
 
     const outcome = await solveTicket(h.deps, ARMED);
 
@@ -1606,7 +1614,34 @@ describe("the repair round, promoted by --repair", () => {
   it("leaves a green round failed when the fix could not be committed ahead of it", async () => {
     // Promoting it would ship fix and repair as one commit under the repair's message, which is
     // the blend the separate commit exists to prevent.
-    const { h } = harness(WITH_REPAIR, [redThenGreen()]);
+    const { h } = harness(WITH_REPAIR, [REPAIR_LEFT_A_DELTA, redThenGreen()]);
+
+    const outcome = await solveTicket(h.deps, ARMED);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "verified" });
+  });
+
+  it("leaves a green round failed when it left nothing on top of the fix", async () => {
+    // A round that claimed a change and made none, re-verified green by a flaky check: promoted,
+    // `publish` would find nothing to commit and report the verified tree as holding no change
+    // while the fix sat committed and unpushed.
+    const { h } = harness(WITH_REPAIR, [
+      committed(),
+      worktreeStatus({ stdout: "" }),
+      redThenGreen(),
+    ]);
+
+    const outcome = await solveTicket(h.deps, ARMED);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "verified" });
+  });
+
+  it("leaves a green round failed when what it left cannot be read", async () => {
+    const { h } = harness(WITH_REPAIR, [
+      committed(),
+      worktreeStatus({ exitCode: 128, stderr: "fatal: not a git repository" }),
+      redThenGreen(),
+    ]);
 
     const outcome = await solveTicket(h.deps, ARMED);
 
@@ -1638,7 +1673,8 @@ describe("the repair round, promoted by --repair", () => {
     // Absent first: it is what the daemon sends, and an explicit `false` alone cannot tell
     // `=== true` from a fail-open `!== false` — measured, that mutation survived it.
     for (const unarmed of [request, { ...request, promoteRepair: false }]) {
-      const { h } = harness(WITH_REPAIR, [committed(), redThenGreen()]);
+      // Everything else a promotion needs is present, so arming is the only thing standing in the way.
+      const { h } = harness(WITH_REPAIR, [committed(), REPAIR_LEFT_A_DELTA, redThenGreen()]);
 
       const outcome = await solveTicket(h.deps, unarmed);
 
