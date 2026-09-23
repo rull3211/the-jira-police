@@ -396,13 +396,9 @@ export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
 /**
  * The same read, with a required-but-absent setting left empty instead of throwing.
  *
- * **Only for a command that reads a local artifact and reaches nothing.** A command that reaches
- * nothing should require nothing: it then runs in a fresh clone, in CI, and in any checkout nobody
- * has configured — `.env` is gitignored, so whether one is present is a property of the machine
- * rather than of the repository. (`.worktreeinclude` copies it into the worktrees Claude Code
- * creates, which makes that more likely and no more guaranteed.) Anything that talks to a remote
- * system must keep using {@link readSettings}: an empty credential fails at the call, a long way
- * from the decision that let it through.
+ * **Only for a command that reads a local artifact and reaches nothing**, so it runs in a fresh
+ * clone or an unconfigured checkout. Anything talking to a remote system keeps {@link readSettings}:
+ * an empty credential fails at the call, a long way from the decision that let it through.
  */
 export function readLocalSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   return resolveDeclared(env).settings;

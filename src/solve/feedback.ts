@@ -312,9 +312,8 @@ export interface FeedbackResult {
   /** Where the calibration row landed. */
   readonly recordPath: string;
   /**
-   * Where the repair-round row landed, absent when the run bought no round.
-   * Absent rather than empty so a caller cannot print a path for a round that never ran — the
-   * distinction `REPAIR_ROUND=false` makes, and the one a reader of the page depends on.
+   * Where the repair-round row landed. Absent rather than empty when no round ran, so a caller
+   * cannot print a path for one that never happened.
    */
   readonly repairRecordPath?: string;
   /** The comment body, whether or not anything posted it. */
@@ -326,14 +325,11 @@ export interface FeedbackResult {
 
 /**
  * Records the outcome locally and, if a commenter was supplied, on the ticket.
- * The local records are written first and unconditionally: they are the cheaper, more durable of
- * the two, so a run that comments but loses its own calibration row loses the part that
- * accumulates. A failed comment does not throw — by the time this runs the work is already done,
- * and turning "could not annotate the ticket" into an exception would make a reporting problem
- * look like a solve problem.
  *
- * Both scoreboards are written here rather than one here and one at the call site, because the
- * daemon and `solve:once` share exactly this function and nothing else downstream of a solve.
+ * Local records are written first and unconditionally, being the more durable of the two. A failed
+ * comment does not throw: the work is already done, and turning "could not annotate the ticket"
+ * into an exception would make a reporting problem look like a solve problem. Both scoreboards are
+ * written here because the daemon and `solve:once` share this function and nothing else.
  */
 export async function reportOutcome(
   deps: FeedbackDeps,
@@ -356,8 +352,8 @@ export async function reportOutcome(
     issueKey,
     outcome: outcomeLabel(outcome),
     devLensAccurate: lens?.accurate ?? null,
-    // Said here as well as in `solve.repair.dry_run`: that line is written by the pipeline and
-    // this one by the reporter, so a round recorded nowhere is visible as a disagreement.
+    // Also in `solve.repair.dry_run`, written by the pipeline rather than the reporter: a round
+    // recorded nowhere shows up as the two disagreeing.
     repairRound: repairRecordPath !== null,
   });
 

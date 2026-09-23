@@ -1,18 +1,12 @@
 /**
- * The scoreboard for the repair round, which is the one verdict this pipeline throws away.
+ * The scoreboard for the repair round, whose verdict the pipeline otherwise throws away, and what
+ * `PLAN.md` §45 reads before it may start phase three.
  *
- * A sibling of `dev-lens.md` rather than a column on it: that page scores triage's blind
- * `agent:solvable` call, this one scores a write pass shown the failure it is meant to correct.
- * One table answering both would fuse two questions, and `outcomeLabel` already renders every run
- * that bought a round as plain `failed` — the collapse `repairOutcome` exists to prevent.
+ * A sibling of `dev-lens.md`, not a column on it: one table answering both would fuse two
+ * questions. Writer and reader live here together so a test can prove they agree.
  *
- * `PLAN.md` §45 cannot start its third phase until this page shows a distribution rather than an
- * anecdote, with every `verified` among them read as a diff. The writer and the reader live here
- * together so the format has one owner and a test can prove they agree.
- *
- * **The harness writes every column but the last.** `Read` is a person's, and nothing here can
- * change it after the row is written — a box the harness ticks would record a judgement nothing
- * can check, which is the failure this column would otherwise be.
+ * **The harness writes every column but the last.** `Read` is a person's, and nothing here may
+ * change it after the row is written.
  */
 
 import { resolve } from "node:path";
@@ -30,9 +24,8 @@ export const UNREAD = "unread";
 const NOTHING = "—";
 
 /**
- * Written once, when the page does not exist yet.
- * Duplicated here rather than living only in the artifact: `groomed/` is gitignored, so a
- * convention recorded solely in the file is lost the first time the file is.
+ * Written once, when the page does not exist yet. Lives here rather than only in the artifact:
+ * `groomed/` is gitignored, so a convention recorded solely in the file dies with it.
  */
 export const HEADER = [
   "# Repair rounds",
@@ -70,10 +63,8 @@ export const HEADER = [
 /**
  * One table row, or `null` when the outcome bought no repair round.
  *
- * Pure, and the only place that decides which runs are scored: `failed` carrying a
- * `repairOutcome` is the only shape a round ever reaches. A run that escaped after its round is
- * the case this cannot see — `escapeVerdict` replaces the outcome with `escaped`, which carries
- * `would` and not `repairOutcome`.
+ * A run that escaped after its round is the case this cannot see: `escapeVerdict` replaces the
+ * outcome with `escaped`, which carries `would` and not `repairOutcome`.
  */
 export function repairRow(issueKey: string, outcome: SolveOutcome, now: Date): string | null {
   if (outcome.kind !== "failed" || outcome.repairOutcome === undefined) {
@@ -81,8 +72,7 @@ export function repairRow(issueKey: string, outcome: SolveOutcome, now: Date): s
   }
   const touched = outcome.repair?.filesTouched ?? [];
   const files = touched.length === 0 ? NOTHING : touched.map((file) => safeText(file)).join(", ");
-  // Only `verified` owes a reading. Asking for one on every row is how a column nobody clears
-  // stops being read at all, and the rounds that ended otherwise were already judged by an exit code.
+  // Only `verified` owes a reading: a column nobody can clear stops being read at all.
   const read = outcome.repairOutcome === "verified" ? UNREAD : NOTHING;
   return `| ${now.toISOString()} | ${issueKey} | ${outcome.repairOutcome} | ${files} | ${safeText(outcome.worktree.path)} | ${read} |\n`;
 }
@@ -90,9 +80,8 @@ export function repairRow(issueKey: string, outcome: SolveOutcome, now: Date): s
 /**
  * Appends the row, if there is one. Returns where it landed, or `null` when no round ran.
  *
- * A caller distinguishes "no round" from "a round nobody recorded" by that `null`; writing a row
- * for every failed solve would make `REPAIR_ROUND=false` indistinguishable from a round that
- * reported nothing.
+ * Writing a row for every failed solve would make `REPAIR_ROUND=false` indistinguishable from a
+ * round that reported nothing.
  */
 export async function recordRepairRound(
   directory: string,
@@ -118,22 +107,17 @@ export interface RepairRecord {
 
 export interface LedgerReading {
   readonly records: readonly RepairRecord[];
-  /**
-   * Table lines this could not read as a row.
-   * Counted rather than skipped: a page that silently drops rows understates the thing it scores,
-   * and the distribution is the whole reason anyone opens it.
-   */
+  /** Counted rather than skipped: a page that silently drops rows understates what it scores. */
   readonly unreadable: number;
 }
 
 const COLUMNS = 6;
 
 /**
- * Splits a table line into cells on the pipes the writer did not escape.
+ * Splits a table line on the pipes the writer did not escape.
  *
- * `safeText` turns every pipe that came from a model into `\|`, so a plain split would tear a
- * filename in half and shift every column after it — the row would parse, with the wrong answer
- * in the `Round` column.
+ * A plain split would tear a `safeText`-escaped filename in half and shift every column after it:
+ * the row still parses, with the wrong answer in `Round`.
  */
 function cells(line: string): readonly string[] {
   return line
@@ -143,8 +127,8 @@ function cells(line: string): readonly string[] {
 }
 
 /**
- * Reads the page back. The inverse of {@link repairRow}, and tested against it rather than
- * against a hand-written fixture, since a fixture would stop seeing the writer change.
+ * Reads the page back. Tested against {@link repairRow} rather than a fixture, which would stop
+ * seeing the writer change.
  */
 export function parseLedger(text: string): LedgerReading {
   const records: RepairRecord[] = [];
@@ -156,17 +140,15 @@ export function parseLedger(text: string): LedgerReading {
       continue;
     }
     const parts = cells(trimmed);
-    // Counted before anything is skipped. The heading test used to run first and treated any
-    // all-hyphen first cell as the alignment row, so a hand-written row with `-` for a date it
-    // did not know vanished without even reaching `unreadable` — the one thing that field exists
-    // to prevent, in the case the page most invites.
+    // Counted before anything is skipped: a heading test running first swallows a hand-written
+    // row whose date cell is `-`, without it ever reaching `unreadable`.
     if (parts.length !== COLUMNS) {
       unreadable += 1;
       continue;
     }
     const [when = "", issueKey = "", round = "", files = "", worktree = "", read = ""] = parts;
-    // The two lines every markdown table opens with. The alignment row is every cell hyphens, not
-    // just the first — and ASCII hyphens, which is why `NOTHING` is an em dash and must stay one.
+    // The alignment row is every cell ASCII hyphens, not just the first — which is why `NOTHING`
+    // is an em dash and must stay one.
     if (when === "When" || parts.every((cell) => /^:?-+:?$/u.test(cell))) {
       continue;
     }
@@ -195,16 +177,11 @@ export function isUnread(record: RepairRecord): boolean {
 }
 
 /**
- * What to say when there is no page, which is the answer most at risk of being over-read.
+ * What to say when there is no page — the answer most at risk of being over-read.
  *
- * Pure, and here rather than in the command, because the defect it exists to prevent is a claim
- * and not a mechanism: an earlier version read an absent file and concluded that no round had run
- * and that `REPAIR_ROUND` was on. Both were artefacts of a relative `OUTPUT_DIR` and a fallback,
- * and neither is knowable from here — a solve writes its row under the checkout it ran in, and
- * this process cannot see the environment that solve ran under.
- *
- * `supplied` is the raw `REPAIR_ROUND` from this process's environment, so an unset variable can
- * be reported as unset rather than as the default it resolves to.
+ * An absent page says nothing about whether a round has run: a solve writes its row under the
+ * checkout it ran in, which this process cannot see. `supplied` is the raw `REPAIR_ROUND` so an
+ * unset variable reads as unset rather than as the default it resolves to.
  */
 export function renderNoPage(
   path: string,
@@ -212,8 +189,8 @@ export function renderNoPage(
   supplied: string | undefined,
 ): string {
   const set = supplied !== undefined && supplied.trim() !== "";
-  // Resolved here rather than trusted from the caller: `OUTPUT_DIR` is relative, and a bare
-  // `groomed/repair-rounds.md` reads as an answer about whichever checkout you happen to be in.
+  // Resolved here, not trusted from the caller: `OUTPUT_DIR` is relative, so a bare path reads as
+  // an answer about whichever checkout you happen to be in.
   return (
     `No page at ${resolve(path)}\n\n` +
     `That is not evidence that no repair round has run. A solve writes its row under the\n` +
@@ -231,16 +208,11 @@ export function renderNoPage(
 }
 
 /**
- * The page as a person needs it: the distribution, then every `verified` round with whatever the
- * `Read` cell says.
+ * The distribution, then every `verified` round with whatever its `Read` cell says.
  *
- * Says when the counts are a floor rather than a total, because a line it could not read is a
- * round it cannot see. The floor it cannot report is on the page itself: a round followed by a
- * write-escape never reached a row at all.
- *
- * The `Read` cells are hand-written prose and are reproduced verbatim, never classified — a
- * counter over "honest" and "cheap" would be counting the string that describes the event rather
- * than the event, and this page exists because the event is one nothing mechanical can see.
+ * `Read` cells are reproduced verbatim, never classified: counting "honest" against "cheap" would
+ * count the string describing the event, and this page exists because nothing mechanical can see
+ * the event itself.
  */
 export function renderSummary(reading: LedgerReading): string {
   const { records, unreadable } = reading;

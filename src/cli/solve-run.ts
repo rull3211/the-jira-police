@@ -225,8 +225,7 @@ export async function runSolver(
       `${feedback.posted ? "" : ` — ${feedback.reason ?? "not posted"}`}\n`,
   );
   if (feedback.repairRecordPath !== undefined) {
-    // Named here because the round's verdict is discarded, so this page is the only thing that
-    // will still know it happened; `pnpm repair:ledger` is what reads it back.
+    // The round's verdict is discarded, so this page is the only thing that will still know.
     process.stdout.write(
       `Repair round recorded in ${feedback.repairRecordPath} — read it with: pnpm repair:ledger\n`,
     );
