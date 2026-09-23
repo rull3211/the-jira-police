@@ -149,9 +149,25 @@ The next entry is §50.
 
 ### 45. Nothing has ever watched the repair pass work, so nothing may act on what it says
 
-**Branch:** none yet. Phase one (the blast-radius instruction, the inert pass) shipped in #67 and
-phase two (the untrusted dry run) in #68 — named by pull request rather than by branch, since both
-branches are deleted on merge. Phases three and four are unclaimed.
+**Branch:** `feat/repair-manual-rung` (phase three, `--repair`), with `feat/repair-publish-loop`
+(phase four, `REPAIR_PUBLISH`) stacked on it one level deep. Phase one (the blast-radius
+instruction, the inert pass) shipped in #67 and phase two (the untrusted dry run) in #68 — named by
+pull request rather than by branch, since both branches are deleted on merge.
+
+**Phases three and four are claimed before the bar below is met, and that is the operator's
+decision, not the evidence's.** The evidence is two observations, both on SSX-3944 — the 2026-09-22
+round, which predates the page, and one row on `repair-rounds.md`, still `unread` — which is the
+ticket this pass was designed around, the weakness this entry already names. The argument for
+proceeding anyway: rule 2 is the backstop, since a human merges every pull request a repair could
+open; the reasoning travels on every such pull request; and a pass that can only ever be measured
+is blocking the tool. **The argument against still stands and is not answered by that one:** the
+failure this entry fears is a vacuous test, and green CI beside a plausible diff is exactly where a
+human reviewer is weakest. So the compensations are part of the claim, not its decoration — the
+repair lands as its own commit, the pull request names it above the fold, every promoted round
+still writes a ledger row `unread`, and the pass is still told that a weakened test costs it its
+future. **What would make the claim the wrong call:** a promoted repair merged and later read as
+`cheap`. That is the case rule 2 was asserted to catch; one instance switches `REPAIR_PUBLISH` off,
+and the deletion below stays on the table.
 
 **What is not built.** Any path by which a repair round's verdict changes what happens to a ticket.
 The round runs on every failed verification unless `REPAIR_ROUND=false`, and `runPipeline` discards
