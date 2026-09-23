@@ -132,6 +132,10 @@ Anything else is `proceed: false`. See §5.
 The three bail fields are non-empty **iff** `proceed` is false. Any of them set on a `proceed`,
 or any of them missing on a bail, is a malformed run — see §5 for what each one is for.
 
+**An empty field is a zero-length string, not the two characters `""`.** The quote marks above are
+JSON syntax, not content: send the field empty, not holding a pair of quotes. A field holding `""`
+reads as a bail that was never declared.
+
 ---
 
 ## 2. The fix pass (`--fix`)
