@@ -524,7 +524,8 @@ unreported rather than swept. Dry by default, same shape as `triage:once`; nothi
 
 **`pnpm repair:ledger` is the only place every repair round's verdict survives the run that bought
 it.** A failed verification buys one repair pass and `runPipeline` discards what it concludes
-unless the run was typed with `--repair` (`architecture/solve.md` §15), so every round, promoted
+unless the run was armed — `--repair` typed, or `REPAIR_PUBLISH` for the daemon —
+(`architecture/solve.md` §15), so every round, promoted
 or not, appends a row to `<OUTPUT_DIR>/repair-rounds.md` and this command reads that page back:
 how the rounds ended, and which green ones nobody has looked at.
 **The `Read` column is not the harness's to fill.** A green round is written `unread` and stays
@@ -664,7 +665,7 @@ green one may do. Without it the verdict is recorded and discarded. With it, the
 opened from the repaired tree as two commits — the fix, then the repair — and its body says above
 everything else that the second was written by a pass shown the failure, and should be read on its
 own. It is refused below `--pr`, with `REPAIR_ROUND=false` (no round would run for it to act on),
-and by `bot:once`. **The daemon's copy is `REPAIR_PUBLISH`**, off unless it reads exactly `true`,
+and by `bot:once`. **The daemon's copy is `REPAIR_PUBLISH`**, off unless it reads `true` (any case),
 and the daemon's startup line says `promotesRepairs` either way; leave it off until you have read
 what `--repair` produces by hand. `architecture/solve.md` §15 has why both exist before the
 evidence that was meant to justify them.
@@ -766,7 +767,7 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back    |
 | `FAIL_FIRST_CHECK`              | `true`        | One of two that default on — off withdraws a check, it does not grant one  |
 | `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; acted on only when armed      |
-| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Exactly `true`, and only with `REPAIR_ROUND` on   |
+| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on      |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull

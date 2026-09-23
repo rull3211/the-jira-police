@@ -16,7 +16,7 @@
 
 import type { IssueDetail, JiraClient } from "../jira/client.ts";
 import { createLogger } from "../logger.ts";
-import { type Settings, daemonPromotesRepair, flag, numeric } from "../settings.ts";
+import { type Settings, flag, numeric } from "../settings.ts";
 import type { AttemptLedger } from "../solve/attempts.ts";
 import { type ClaimReceipt, claimTicket, releaseClaim } from "../solve/claim.ts";
 import {
@@ -1015,10 +1015,11 @@ export async function runSolveClaims(
   queueDeps: SolveDeps,
   client: JiraClient,
   ledger: AttemptLedger,
+  /** Decided once by `createReviewLoop`, which logs it, so the startup report is the value acted on. */
+  promoteRepair: boolean,
 ): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
   const cycle = await runSolveCycle(queueDeps);
   const authority = queueDeps.mode;
-  const promoteRepair = daemonPromotesRepair(settings);
 
   let started = 0;
   let held = 0;

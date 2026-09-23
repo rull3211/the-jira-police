@@ -8,7 +8,7 @@
  * plus `Skill`, the one capability that lets it invoke Claude Code's built-in
  * `/simplify` mid-session rather than re-deriving its judgement by hand.
  * `repair` runs only after a failed verification, and `runPipeline` throws its verdict away unless
- * the run is armed with `--repair` — `architecture/solve.md` §15.
+ * the run is armed (`--repair`, or `REPAIR_PUBLISH` for the daemon) — `architecture/solve.md` §15.
  *
  * `--allowedTools` restricts nothing — it is an auto-approve list, checked by
  * probe. Only `--disallowedTools` withholds, by removing the tool from the

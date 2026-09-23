@@ -46,6 +46,7 @@ export function createReviewLoop(
   // Built here, not per tick, so a malformed query (unsafe project key, auto mode with no issue
   // types, an unrecognised SOLVE_MODE) stops the process at startup rather than every cycle.
   const queueDeps = createSolveDeps(settings, client, signal);
+  const promoteRepair = daemonPromotesRepair(settings);
 
   // Logged because the operator is the only bound on what this costs, and can't act on a number
   // never shown.
@@ -53,7 +54,7 @@ export function createReviewLoop(
     intervalMs,
     maxRoundsPerTick: maxRounds,
     worstCasePerTickUsd: Number((maxRounds * REVIEW_ROUND_USD).toFixed(2)),
-    promotesRepairs: daemonPromotesRepair(settings),
+    promotesRepairs: promoteRepair,
     note:
       maxRounds === 0
         ? "zero rounds per tick: every pull request is looked at and none is paid for"
@@ -74,7 +75,7 @@ export function createReviewLoop(
 
       // Not wrapped in its own try: `runLoop` catches, and swallowing it here would hide the
       // fault from the backoff that exists to slow it.
-      await runSolveClaims(settings, queueDeps, client, ledger);
+      await runSolveClaims(settings, queueDeps, client, ledger, promoteRepair);
     },
     intervalMs,
     backoffCapMs,

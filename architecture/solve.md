@@ -274,7 +274,8 @@ returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely
 **A run typed with `--repair`, or the daemon with `REPAIR_PUBLISH`, acts on a green round and on
 nothing else.** `promoteRepair` on the request is set by that flag, which `solve-args.ts` refuses
 below `--pr` and with `REPAIR_ROUND=false`, or for the daemon by `daemonPromotesRepair`, which
-needs an exact `REPAIR_PUBLISH=true` and a round to act on; the daemon reports which at startup.
+needs `REPAIR_PUBLISH=true` through `flag()` and a round to act on; the daemon reports which at
+startup.
 Armed, a round that re-verifies `verified` is
 returned as the outcome — carrying `repair`, `repairedFailure` and the round's own green
 verification — and `publish` commits the repair as a **second commit** on top of the fix, since
@@ -1074,7 +1075,9 @@ command and reading the output before the loop was given it. What the loop added
 at all: by then the bot could already do everything, and the daemon only changed who asks.
 
 So this heading is now doubly historical, and both halves are worth keeping for the same reason.
-There is no inert code left, and there is no unwatched stage left either. What remains from the
+There is no inert code left, and one unwatched stage, knowingly: `REPAIR_PUBLISH` lets the loop
+open a pull request from a repair round before anyone has watched `--repair` promote one by hand,
+and it is off until someone decides otherwise (§15 has the argument). What remains from the
 argument is the standard the next capability will be held to: **built, reviewed, driven by hand
 against a named ticket, and granted in a commit a reviewer can see.** The one item that did _not_
 clear that bar before the loop was switched on is cost per ticket per day, which §13 now carries as
