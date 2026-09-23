@@ -197,8 +197,8 @@ describe("the solve settings", () => {
   });
 
   it("runs the repair round unless somebody turned it off", () => {
-    // The second setting shaped this way, and it qualifies only while the round's verdict is
-    // discarded — it withdraws a measurement, not a privilege.
+    // The second setting shaped this way, and it qualifies only while it cannot decide a run alone
+    // — `--repair` is the half that fails closed, so this withdraws a measurement, not a privilege.
     expect(repairRound(readSettings(MINIMAL))).toBe(true);
   });
 
