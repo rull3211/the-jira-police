@@ -523,12 +523,26 @@ function asRecord(value: unknown, what: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/**
+ * A field whose whole value is `""` or `''` means the empty string, not those two characters.
+ *
+ * Models reproduce the quote marks from the example blocks in `SOLVE_INSTRUCTIONS.md` instead of
+ * emitting an empty value, and every field where empty carries meaning is held to an iff against a
+ * boolean — so two characters read as a bail, or as an abandonment, that the run never declared.
+ * Confined to the whole-string case on purpose: `"too big"` is a bail reason that happens to be
+ * quoted, and stripping those quotes would turn a real bail into a proceed.
+ */
+function emptyIfQuoteMarks(value: string): string {
+  const trimmed = value.trim();
+  return trimmed === '""' || trimmed === "''" ? "" : value;
+}
+
 function str(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   if (typeof value !== "string") {
     throw new SolveParseError(`${key} was not a string`);
   }
-  return value;
+  return emptyIfQuoteMarks(value);
 }
 
 function bool(record: Record<string, unknown>, key: string): boolean {
@@ -588,8 +602,10 @@ export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
 
   const bailed = verdict.bailReason.trim() !== "";
   if (verdict.proceed && bailed) {
+    // The value, not just the contradiction: the first of these cost a session transcript to
+    // diagnose because the message named the rule and printed nothing that broke it.
     throw new SolveParseError(
-      `${issueKey}: proceed is true but a bail reason was given — the run contradicted itself, so neither reading is safe to act on`,
+      `${issueKey}: proceed is true but a bail reason was given — the run contradicted itself, so neither reading is safe to act on. bailReason was ${JSON.stringify(verdict.bailReason)}`,
     );
   }
   if (!verdict.proceed && !bailed) {

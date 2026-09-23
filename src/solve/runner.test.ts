@@ -409,6 +409,60 @@ describe("parseRecon", () => {
     );
   });
 
+  it('reads the two-character string `""` as the empty value the model meant', () => {
+    // SSX-3944, 2026-09-23: the model copied the literal quote marks out of the example block in
+    // SOLVE_INSTRUCTIONS.md, so a coherent proceed crashed on the bail iff.
+    const verdict = parseRecon(
+      recon({ bailReason: '""', bailRemedy: '""', injectionNoticed: '""' }),
+      "SSX-3822",
+    );
+    expect(verdict.proceed).toBe(true);
+    expect(verdict.bailReason).toBe("");
+    expect(verdict.bailRemedy).toBe("");
+    expect(verdict.injectionNoticed).toBe("");
+  });
+
+  it("reads `''` the same way, and tolerates whitespace around it", () => {
+    expect(parseRecon(recon({ bailReason: "''" }), "SSX-3822").proceed).toBe(true);
+    expect(parseRecon(recon({ bailReason: '  ""  ' }), "SSX-3822").proceed).toBe(true);
+  });
+
+  it("does not strip quotes that wrap real content", () => {
+    // Asserts the value, not just that it threw: a rule stripping any wrapping quote leaves
+    // `too big`, which is still non-empty, so the iff fires either way and a throw cannot tell the
+    // two implementations apart. Only the surviving text can.
+    const verdict = parseRecon(
+      recon({
+        proceed: false,
+        bailReason: '"too big"',
+        bailBlockers: ['`postcode.ts` is duplicated and none is marked "authoritative".'],
+        bailRemedy: "Say which package owns the rule.",
+        plannedFiles: [],
+        approach: "",
+        testPlan: "",
+        estimatedLines: 0,
+      }),
+      "SSX-3822",
+    );
+    expect(verdict.bailReason).toBe('"too big"');
+    expect(verdict.bailBlockers[0]).toBe(
+      '`postcode.ts` is duplicated and none is marked "authoritative".',
+    );
+  });
+
+  it("leaves a lone quote mark alone, which is not an empty value", () => {
+    // A rule stripping quotes positionally turns `"` into empty and silently promotes a bail to a
+    // proceed — the exact failure this normaliser exists to prevent, arriving from the other side.
+    expect(() => parseRecon(recon({ bailReason: '"' }), "SSX-3822")).toThrow(
+      /contradicted itself/u,
+    );
+  });
+
+  it("names the offending value when the bail iff is violated", () => {
+    // The crash that found this printed no values, so diagnosis needed the session transcript.
+    expect(() => parseRecon(recon({ bailReason: "too big" }), "SSX-3822")).toThrow(/too big/u);
+  });
+
   it("accepts a bail that says why, and requires nothing else of it", () => {
     const verdict = parseRecon(
       recon({
@@ -558,6 +612,15 @@ describe("shortCommitBody", () => {
 describe("parseFix", () => {
   it("accepts a coherent report", () => {
     expect(parseFix(fix(), "SSX-3822").changed).toBe(true);
+  });
+
+  it('reads `""` as empty in the fields held to an iff', () => {
+    // The same failure recon hit on SSX-3944, one pass over: `abandoned` and `testOmittedReason`
+    // are shown as `""` in the fix example block and are held to the same kind of iff.
+    const report = parseFix(fix({ abandoned: '""', testOmittedReason: '""' }), "SSX-3822");
+    expect(report.changed).toBe(true);
+    expect(report.abandoned).toBe("");
+    expect(report.testOmittedReason).toBe("");
   });
 
   it("accepts a run that abandoned after touching something", () => {
