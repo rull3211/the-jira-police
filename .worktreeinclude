@@ -1,0 +1,15 @@
+# Gitignored files copied into every worktree Claude Code creates: `--worktree`, a subagent with
+# `isolation: worktree`, and desktop parallel sessions. Only files that are also gitignored are
+# copied, so nothing tracked is duplicated.
+#
+# This hands live Jira and GitHub credentials to every such worktree, a subagent's included. That
+# is the point — rule 3 puts all agent work in a worktree, and a worktree could not run
+# `solve:once` at all — but it is a widening, not a convenience.
+#
+# It copies rather than links, so a worktree keeps the values it was born with: change
+# REPAIR_ROUND in the primary checkout and an existing worktree will not see it.
+#
+# Does not apply to a worktree made by hand with `git worktree add`, nor when a WorktreeCreate
+# hook replaces the default git logic.
+.env
+.env.local
