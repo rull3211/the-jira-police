@@ -272,6 +272,15 @@ outcome as `repair` and `repairOutcome`, and still returns `failed`, so a repair
 green opens no pull request; `REPAIR_ROUND=false` skips the round entirely. PLAN.md §45 holds the
 phasing and why the verdict is not trusted.
 
+**Thrown away as a verdict, kept as a measurement.** `reportOutcome` appends one row per round to
+`<OUTPUT_DIR>/repair-rounds.md` (`repair-ledger.ts`), a sibling of `dev-lens.md` rather than a
+column on it, and `pnpm repair:ledger` reads it back as a distribution. The harness writes every
+column but `Read`, which stays `unread` on a green round until a person opens the worktree the row
+names and replaces the cell by hand — a passing re-verification is reachable both by correcting
+the code and by weakening the assertion that failed, and no exit code here tells those apart. One
+case never reaches the page: `escapeVerdict` replaces the outcome with `escaped`, which carries
+`would` and not `repairOutcome`, so a round followed by a write-escape leaves no row.
+
 **Measured on its first real run, SSX-3944 on 2026-09-22.** Five sessions, $3.03, 15m19s wall
 clock, of which the repair round was $0.76 — a third again on top of a run that would otherwise
 have stopped at `failed`, for an answer nothing acts on. It came back `verified` and was discarded

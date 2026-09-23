@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-103 production modules, 92 test files. Grouped by what they belong to rather than alphabetically,
+106 production modules, 94 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -108,17 +108,19 @@ inheritance.
 
 **Solve — delivery and the review round-trip**
 
-| Path                        | Role                                                                                           |
-| --------------------------- | ---------------------------------------------------------------------------------------------- |
-| `src/solve/pr.ts`           | `git` and `gh` as argv arrays. Commit, push, draft PR, read review and threads, reply, resolve |
-| `src/solve/pr-text.ts`      | The title and body of the draft pull request. Pure, so the wording is readable in a test       |
-| `src/solve/marker.ts`       | The round cursor as one comment: render, parse, locate, refuse rather than reset. No I/O       |
-| `src/solve/delivery.ts`     | `publish`, `surveyReview` and `advance` — the review round-trip as callable steps              |
-| `src/solve/base-sync.ts`    | Bringing a PR's branch up to its base before a round spends. Built after a $16 invoice         |
-| `src/solve/review-cycle.ts` | One pass over every watched pull request. Cheap look for all, paid round for the few           |
-| `src/solve/silence.ts`      | How long a pull request has been quiet, in wall-clock. Pure; the clock is injected             |
-| `src/solve/feedback.ts`     | What a run says back to the ticket. `safeText` and `shorten` bound what a model wrote          |
-| `src/solve/commenter.ts`    | Posting that comment over an Atlassian MCP session. The narrowest tool surface in the tree     |
+| Path                         | Role                                                                                           |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- |
+| `src/solve/pr.ts`            | `git` and `gh` as argv arrays. Commit, push, draft PR, read review and threads, reply, resolve |
+| `src/solve/pr-text.ts`       | The title and body of the draft pull request. Pure, so the wording is readable in a test       |
+| `src/solve/marker.ts`        | The round cursor as one comment: render, parse, locate, refuse rather than reset. No I/O       |
+| `src/solve/delivery.ts`      | `publish`, `surveyReview` and `advance` — the review round-trip as callable steps              |
+| `src/solve/base-sync.ts`     | Bringing a PR's branch up to its base before a round spends. Built after a $16 invoice         |
+| `src/solve/review-cycle.ts`  | One pass over every watched pull request. Cheap look for all, paid round for the few           |
+| `src/solve/silence.ts`       | How long a pull request has been quiet, in wall-clock. Pure; the clock is injected             |
+| `src/solve/feedback.ts`      | What a run says back to the ticket, and the row it appends to `dev-lens.md`                    |
+| `src/solve/ledger.ts`        | What the two append-only scoreboards share: the header-once append, and `safeText`             |
+| `src/solve/repair-ledger.ts` | `repair-rounds.md` — the repair round's verdict, which `runPipeline` throws away. Both ends    |
+| `src/solve/commenter.ts`     | Posting that comment over an Atlassian MCP session. The narrowest tool surface in the tree     |
 
 **The sendback watch**
 
@@ -155,6 +157,7 @@ inheritance.
 | `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                                                 |
 | `src/cli/sweep-once.ts`          | `pnpm sweep:once [--write]`. Reports, and with `--write` removes, stale skill roots and staged-image directories. Dry by default, not on any automatic path |
 | `src/cli/sweep-once-report.ts`   | Its report, kept where a test can import it without running the command                                                                                     |
+| `src/cli/repair-ledger.ts`       | `pnpm repair:ledger`. Reads `repair-rounds.md` back as a distribution. Needs no credential, writes nothing                                                  |
 | `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                     |
 | `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                    |
 | `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                               |

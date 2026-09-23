@@ -533,7 +533,7 @@ is the only one that changes what the skill reads:
      idempotency check could not help here, because this deployment posts under the same Jira
      account as the operator — so the footer sentinel was doing the work alone, which is the
      narrow case the guard was written for and the one least likely to have been exercised by
-     accident. That is also why `safeText` in `src/solve/feedback.ts` strips the sentinel out of
+     accident. That is also why `safeText` in `src/solve/ledger.ts` strips the sentinel out of
      any text it embeds: the sentinel is load-bearing, and forging it is the way to be mistaken
      for a bot.
    - It **volunteered the account collision** as a caveat on its own verdict rather than reporting

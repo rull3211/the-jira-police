@@ -6,21 +6,22 @@
  * to `dev-lens.md` (append-only, unlike the snapshot `solve-cycle.md` beside it) so the blind
  * `agent:solvable` call in triage can eventually be scored.
  *
+ * `reportOutcome` is also where the repair round's row is appended, to its own page — see
+ * `repair-ledger.ts` for why that is a sibling and not a seventh column here.
+ *
  * `TicketCommenter` is one method wide, the same reasoning as `ClaimCapabilities`: the type tells
  * a reviewer the blast radius without them reading the implementation. An absent `commenter` means
  * only one thing — the run succeeded and opened a pull request instead; see `reportsToTicket`.
  *
  * The correction is model-authored text read from a ticket anyone with a Jira account can edit;
- * `safeText` defends against it being read as structure.
+ * `ledger.ts`'s `safeText` defends against it being read as structure.
  */
 
-import { mkdir, appendFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
-
 import { createLogger } from "../logger.ts";
-import { oneLine, shorten } from "../text.ts";
-import { FOOTER_SENTINEL } from "../triage/gate.ts";
+import { shorten } from "../text.ts";
+import { appendLedgerRow, safeText } from "./ledger.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
+import { recordRepairRound } from "./repair-ledger.ts";
 
 const log = createLogger("solve");
 
@@ -48,15 +49,6 @@ export interface FeedbackDeps {
    * Kept optional because a caller that wants the calibration row without a Jira write is legitimate.
    */
   readonly commenter?: TicketCommenter;
-}
-
-/**
- * Makes untrusted text safe to place inside a structured document: collapses whitespace runs
- * (shared with `oneLine`), escapes pipes so it cannot forge a table column, and strips triage's
- * footer sentinel so a correction can't make triage's next run adopt this comment as its own.
- */
-export function safeText(text: string): string {
-  return oneLine(text.replaceAll(FOOTER_SENTINEL, "[sentinel removed]")).replaceAll("|", "\\|");
 }
 
 /**
@@ -301,31 +293,30 @@ export function calibrationRow(issueKey: string, outcome: SolveOutcome, now: Dat
   return `| ${now.toISOString()} | ${issueKey} | ${outcomeLabel(outcome)} | ${verdict} | ${correction} |\n`;
 }
 
-/**
- * Appends one row, writing the header first if this is the first run.
- * Checked by content, not file existence: an empty file left by an interrupted first write would
- * otherwise collect rows under no table at all.
- */
+/** Appends one row, writing the header first if this is the first run. */
 export async function recordDevLens(
   directory: string,
   issueKey: string,
   outcome: SolveOutcome,
   now: Date,
 ): Promise<string> {
-  await mkdir(directory, { recursive: true });
-  const path = join(directory, DEV_LENS_FILE);
-  const existing = await readFile(path, "utf8").catch(() => "");
-  await appendFile(
-    path,
-    (existing.startsWith("# Dev-lens") ? "" : HEADER) + calibrationRow(issueKey, outcome, now),
-    "utf8",
+  return await appendLedgerRow(
+    directory,
+    DEV_LENS_FILE,
+    HEADER,
+    calibrationRow(issueKey, outcome, now),
   );
-  return path;
 }
 
 export interface FeedbackResult {
   /** Where the calibration row landed. */
   readonly recordPath: string;
+  /**
+   * Where the repair-round row landed, absent when the run bought no round.
+   * Absent rather than empty so a caller cannot print a path for a round that never ran — the
+   * distinction `REPAIR_ROUND=false` makes, and the one a reader of the page depends on.
+   */
+  readonly repairRecordPath?: string;
   /** The comment body, whether or not anything posted it. */
   readonly comment: string;
   readonly posted: boolean;
@@ -335,11 +326,14 @@ export interface FeedbackResult {
 
 /**
  * Records the outcome locally and, if a commenter was supplied, on the ticket.
- * The local record is written first and unconditionally: it is the cheaper, more durable of the
- * two, so a run that comments but loses its own calibration row loses the part that accumulates.
- * A failed comment does not throw — by the time this runs the work is already done, and turning
- * "could not annotate the ticket" into an exception would make a reporting problem look like a
- * solve problem.
+ * The local records are written first and unconditionally: they are the cheaper, more durable of
+ * the two, so a run that comments but loses its own calibration row loses the part that
+ * accumulates. A failed comment does not throw — by the time this runs the work is already done,
+ * and turning "could not annotate the ticket" into an exception would make a reporting problem
+ * look like a solve problem.
+ *
+ * Both scoreboards are written here rather than one here and one at the call site, because the
+ * daemon and `solve:once` share exactly this function and nothing else downstream of a solve.
  */
 export async function reportOutcome(
   deps: FeedbackDeps,
@@ -348,19 +342,28 @@ export async function reportOutcome(
   now: Date,
 ): Promise<FeedbackResult> {
   const recordPath = await recordDevLens(deps.outputDirectory, issueKey, outcome, now);
+  const repairRecordPath = await recordRepairRound(deps.outputDirectory, issueKey, outcome, now);
   const comment = renderSolveComment(issueKey, outcome);
   const lens = lensOf(outcome);
+
+  const written = {
+    recordPath,
+    ...(repairRecordPath === null ? {} : { repairRecordPath }),
+    comment,
+  };
 
   log.info("solve.feedback", {
     issueKey,
     outcome: outcomeLabel(outcome),
     devLensAccurate: lens?.accurate ?? null,
+    // Said here as well as in `solve.repair.dry_run`: that line is written by the pipeline and
+    // this one by the reporter, so a round recorded nowhere is visible as a disagreement.
+    repairRound: repairRecordPath !== null,
   });
 
   if (deps.commenter === undefined) {
     return {
-      recordPath,
-      comment,
+      ...written,
       posted: false,
       reason: "no commenter is wired, so nothing was posted to Jira",
     };
@@ -368,10 +371,10 @@ export async function reportOutcome(
 
   try {
     await deps.commenter.comment(issueKey, comment);
-    return { recordPath, comment, posted: true };
+    return { ...written, posted: true };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     log.warn("solve.feedback.not_posted", { issueKey, reason });
-    return { recordPath, comment, posted: false, reason };
+    return { ...written, posted: false, reason };
   }
 }

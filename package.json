@@ -17,6 +17,7 @@
     "watch:once": "node --env-file-if-exists=.env src/cli/watch-once.ts",
     "attach:stage": "node --env-file-if-exists=.env src/cli/attach-stage.ts",
     "sweep:once": "node --env-file-if-exists=.env src/cli/sweep-once.ts",
+    "repair:ledger": "node --env-file-if-exists=.env src/cli/repair-ledger.ts",
     "daemon:status": "node src/cli/daemon-status.ts",
     "logs": "node src/cli/logs.ts",
     "check-types": "tsc --noEmit",
