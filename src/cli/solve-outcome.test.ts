@@ -46,6 +46,7 @@ const verified = {
   kind: "verified",
   files: 1,
   lines: 4,
+  bumps: [],
   commit: { subject: "fix(advisor): add missing favicon link" },
   recon: {},
   fix: {},
@@ -302,6 +303,28 @@ describe("describeSolveOutcome", () => {
     expect(describeSolveOutcome(verified)).not.toMatch(/repair/iu);
   });
 
+  it("says a verified run moved a dependency version, on or off a repair round", () => {
+    const bumps = [
+      {
+        path: "pom.xml",
+        line: 33,
+        property: "lisa-services-api.version",
+        dependencies: ["storebrand.lisa.services:lisa-services-api"],
+        from: "3.181",
+        to: "3.203",
+      },
+    ];
+    const plain = { ...(verified as Extract<SolveOutcome, { kind: "verified" }>), bumps };
+    const expected =
+      "MOVES A DEPENDENCY VERSION: lisa-services-api.version 3.181 → 3.203 in pom.xml (storebrand.lisa.services:lisa-services-api) — checked against, not read";
+
+    expect(describeSolveOutcome(plain).split("\n")[1]).toBe(expected);
+    expect(
+      describeSolveOutcome({ ...plain, fix: FIX_REPORT, repair: FIX_REPORT }).split("\n")[1],
+    ).toBe(expected);
+    expect(describeSolveOutcome(verified)).not.toContain("DEPENDENCY");
+  });
+
   it("prints the failed outcome exactly as before when no round ran", () => {
     const line = describeSolveOutcome({
       kind: "failed",
@@ -386,6 +409,24 @@ describe("describeSolveOutcome", () => {
 
     expect(line).toContain("Worktree removed");
     expect(line).not.toContain(worktree.path);
+  });
+
+  it("does not call a refused plan recon's decision, and names each refused path", () => {
+    const line = describeSolveOutcome({
+      kind: "bailed",
+      reason: "recon planned a change to a path no run may make",
+      refusedPlan: ["pom.xml: the Maven build is defined here"],
+      devLens: lens,
+      worktree,
+      recon: {} as never,
+      cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
+    });
+
+    expect(line).toMatch(/^STOPPED AT THE PLAN — recon said proceed/u);
+    expect(line).not.toContain("recon declined");
+    expect(line).toContain("\n  pom.xml: the Maven build is defined here\n");
+    expect(line).toContain("make it on the base branch and re-run");
+    expect(line).toContain("Worktree removed");
   });
 
   it("warns that the kept worktree is kept, not held", () => {

@@ -137,6 +137,32 @@ describe("formatReport", () => {
     expect(report).toContain("confirm where the behaviour moved");
   });
 
+  it("prints the plan recon gave, then the harness's stop after it", () => {
+    const cleanup = {
+      outcome: "removed",
+      path: WORKTREE.path,
+      branch: { outcome: "deleted" },
+    } as const;
+    const outcome: ReconOnlyOutcome = {
+      kind: "bailed",
+      reason: "recon planned a change to a path no run may make",
+      recon: verdict({ plannedFiles: ["src/app/head.tsx", "pom.xml"] }),
+      refusedPlan: ["pom.xml: the Maven build is defined here"],
+      devLens: { accurate: true, correction: "" },
+      cleanup,
+    };
+
+    const report = formatReport("SSX-4001", outcome, NOW);
+
+    expect(exitCodeFor(outcome)).toBe(EXIT.bailed);
+    expect(report).toContain("## Planned files\n\n- src/app/head.tsx\n- pom.xml");
+    expect(report).toContain("## Stopped by the harness");
+    expect(report).toContain("- pom.xml: the Maven build is defined here");
+    expect(report.indexOf("## Stopped by the harness")).toBeGreaterThan(
+      report.indexOf("## Planned files"),
+    );
+  });
+
   it("cannot be made to forge a heading out of recon's own prose", () => {
     // Recon's fields are model output over an untrusted ticket, so a heading
     // painted into `rootCause` must not become a real one in the report.

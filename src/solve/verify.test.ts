@@ -310,6 +310,67 @@ describe("unverifiableChanges", () => {
     expect(runner.calls[0]).toContain("-z");
   });
 
+  describe("and a pom.xml", () => {
+    const pom = [
+      "<project>",
+      "  <properties>",
+      "    <x.version>1.0</x.version>",
+      "  </properties>",
+      "  <dependencies>",
+      "    <dependency>",
+      "      <groupId>g</groupId>",
+      "      <artifactId>a</artifactId>",
+      "      <version>${x.version}</version>",
+      "    </dependency>",
+      "  </dependencies>",
+      "</project>",
+    ];
+    /** The whole-file diff `judgeBumps` asks git for, with the given lines replaced. */
+    const pomDiff = (replace: Record<string, string>): string =>
+      [
+        "diff --git a/pom.xml b/pom.xml",
+        "index 1111111..2222222 100644",
+        "--- a/pom.xml",
+        "+++ b/pom.xml",
+        `@@ -1,${String(pom.length)} +1,${String(pom.length)} @@`,
+        ...pom.flatMap((line) => {
+          const now = replace[line];
+          return now === undefined ? [` ${line}`] : [`-${line}`, `+${now}`];
+        }),
+        "",
+      ].join("\n");
+    const changed = out(`src/A.java${NUL}pom.xml${NUL}`);
+
+    it("does not count one whose only change is a dependency version", async () => {
+      const runner = fakeRunner({
+        "--unified": out(
+          pomDiff({ "    <x.version>1.0</x.version>": "    <x.version>1.1</x.version>" }),
+        ),
+        "ls-tree": out(`pom.xml${NUL}`),
+        "--name-only": changed,
+      });
+
+      expect(await unverifiableChanges(runner, request({ dependencyBumps: true }))).toEqual([]);
+      // Off, the same bump is a changed build file like any other, and the judge is never asked.
+      expect(await unverifiableChanges(runner, request())).toEqual(["pom.xml"]);
+      expect(runner.calls.filter((argv) => argv.includes("ls-tree"))).toHaveLength(1);
+    });
+
+    it("still counts one changed in any other way", async () => {
+      const runner = fakeRunner({
+        "--unified": out(
+          pomDiff({ "      <artifactId>a</artifactId>": "      <artifactId>b</artifactId>" }),
+        ),
+        "ls-tree": out(`pom.xml${NUL}`),
+        "--name-only": changed,
+      });
+
+      expect(await unverifiableChanges(runner, request({ dependencyBumps: true }))).toEqual([
+        "pom.xml",
+      ]);
+    });
+  });
+
   it("reports inability to tell, rather than an empty list", async () => {
     // An empty list means "nothing was tainted"; a failed diff means "unknown" and must not be read as the former.
     expect(await unverifiableChanges(fakeRunner({ diff: bad() }), request())).toBeNull();

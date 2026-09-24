@@ -102,6 +102,10 @@ function headline(outcome: SolveOutcome): string {
       )}`;
     }
     case "bailed": {
+      // Not "the agent stopped": recon said proceed, and whoever acts next needs to know the harness overruled it.
+      if (outcome.refusedPlan !== undefined) {
+        return "An agent read the code and planned a change to files no run of this pipeline may edit, so it was stopped before changing anything.";
+      }
       // Capped as well as sectioned: `bailReason` is one sentence here, and detail lives below.
       return `An agent read the code and stopped before changing anything: ${shorten(
         safeText(outcome.reason),
@@ -195,7 +199,7 @@ function correctionBlock(outcome: SolveOutcome): readonly string[] {
 /**
  * The two sections a bail owes the person holding the ticket: what blocks it and what would fix
  * it, from separate schema fields rather than one string that `safeText` would flatten into a
- * wall of text.
+ * wall of text — or, for a plan the harness stopped, from `refusedPlanDetail`.
  * §5 of the plan records the pattern this closes: the remedy is the only actionable part, so it
  * gets the most room and the last word before the footer. Absent fields render nothing rather
  * than an empty heading.
@@ -205,6 +209,9 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
   // though it's inert at run time — same standing as the `crashed` clause in `lensOf`.
   if (outcome.kind !== "bailed") {
     return [];
+  }
+  if (outcome.refusedPlan !== undefined) {
+    return refusedPlanDetail(outcome.refusedPlan);
   }
   // Defensively read, like `lensOf`: a renderer that throws here would discard the headline that
   // was already composed, not just this section.
@@ -231,6 +238,26 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
     ...(remedy === ""
       ? []
       : ["", "**To make this agent-solvable**", "", shorten(remedy, LIMITS.remedy)]),
+  ];
+}
+
+/**
+ * The two headings a recon bail gets, filled by the harness. Two remedies, because the gate cannot
+ * tell a change the ticket needs from a plan that overreached, and a person reading the ticket can.
+ */
+function refusedPlanDetail(refusedPlan: readonly string[]): readonly string[] {
+  const reasons = refusedPlan.map((reason) => safeText(reason)).filter((reason) => reason !== "");
+  const extra = reasons.length - LIMITS.blockers;
+  return [
+    "",
+    "**What is in the way**",
+    "",
+    ...reasons.slice(0, LIMITS.blockers).map((reason) => `* ${shorten(reason, LIMITS.blocker)}`),
+    ...(extra > 0 ? [`* …and ${String(extra)} more, in the run's own report.`] : []),
+    "",
+    "**To make this agent-solvable**",
+    "",
+    "If the ticket really needs that change, a person makes it on the base branch and re-runs this ticket; the agent can then do the rest. If it does not, the plan overreached, and a re-run may plan differently.",
   ];
 }
 
@@ -277,12 +304,17 @@ const HEADER = [
 ].join("\n");
 
 /**
- * The `Outcome` column, read down the page as a scoreboard.
- * `abandoned` is the one kind meaning two incompatible things; the cause is appended rather than
- * folded into a second column so old rows stay readable.
+ * The `Outcome` column, read down the page as a scoreboard. `abandoned` and `bailed` each cover two
+ * incompatible things; the difference is appended rather than a second column, so old rows stay readable.
  */
 function outcomeLabel(outcome: SolveOutcome): string {
-  return outcome.kind === "abandoned" ? `abandoned (${outcome.cause})` : outcome.kind;
+  if (outcome.kind === "abandoned") {
+    return `abandoned (${outcome.cause})`;
+  }
+  // Recon said proceed here, so counting this as recon declining would score the wrong judgement.
+  return outcome.kind === "bailed" && outcome.refusedPlan !== undefined
+    ? "bailed (plan refused)"
+    : outcome.kind;
 }
 
 /** One table row. Pure. */

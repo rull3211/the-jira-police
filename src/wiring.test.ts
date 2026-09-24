@@ -677,6 +677,20 @@ describe("buildSolveRequest", () => {
     expect(request.identity).toEqual({ name: "jira-police", email: "jp@x.invalid" });
   });
 
+  it("allows dependency bumps unless DEPENDENCY_BUMPS says otherwise, and a typo turns them off", () => {
+    const bumps = (value: string | undefined) =>
+      buildSolveRequest(
+        settingsWith(value === undefined ? SOLVE_ENV : { ...SOLVE_ENV, DEPENDENCY_BUMPS: value }),
+        detailWith(["svc:buy-insurance-advisor-web"]),
+        "ticket text",
+      ).dependencyBumps;
+
+    expect(bumps(undefined)).toBe(true);
+    expect(bumps("true")).toBe(true);
+    expect(bumps("false")).toBe(false);
+    expect(bumps("ture")).toBe(false);
+  });
+
   it("refuses a repository that is not on the allowlist", () => {
     // Refused here rather than discovered after four model sessions.
     expect(() =>
@@ -918,6 +932,7 @@ function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
     devLens: { accurate: true, correction: "" },
     files: 1,
     lines: 4,
+    bumps: [],
   };
 }
 

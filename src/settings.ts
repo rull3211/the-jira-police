@@ -332,6 +332,12 @@ export const SETTINGS = [
     fallback: "false",
   },
   {
+    name: "DEPENDENCY_BUMPS",
+    description:
+      "Whether a solve run may change a pom.xml when the only change is the version of a dependency the file already declares — the one exception to the rule that no run edits a file defining what passing means (architecture/solve.md §15). The pull request names every bump above anything a model wrote. On by default, by the operator's decision, against the house rule that a setting granting a privilege defaults off: bumping a library to get what a ticket needs is treated as ordinary work. Read through `flag`, so only `true` arms it and a typo turns it off rather than on. Off, a plan naming pom.xml is stopped before the fix pass and any pom.xml change is refused at the diff gate, exactly as before the exception existed.",
+    fallback: "true",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",

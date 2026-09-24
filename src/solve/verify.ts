@@ -3,11 +3,13 @@
  * that is the one question the thing being judged must not answer about itself.
  *
  * Commands are discovered from the base manifest (`git show <base>:package.json`), never the
- * worktree, and `verify` refuses to run unless `VERIFICATION_PATHS` are unchanged from the base —
- * see architecture/solve.md §15 for why a base declaring both `package.json` and `pom.xml` is also refused.
+ * worktree, and `verify` refuses to run unless `VERIFICATION_PATHS` are unchanged from the base but
+ * for a dependency version bump `dependency-bump.ts` allows — see architecture/solve.md §15, which
+ * also has why a base declaring both `package.json` and `pom.xml` is refused.
  */
 
 import { createLogger } from "../logger.ts";
+import { judgeBumps } from "./dependency-bump.ts";
 import { VERIFICATION_PATHS } from "./diff-gate.ts";
 import type { CommandRunner } from "./worktree.ts";
 
@@ -133,6 +135,8 @@ export interface VerifyRequest {
   readonly baseRef: string;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
+  /** `DEPENDENCY_BUMPS`: whether a pom.xml changed only by a dependency bump may still be graded. Absent means no. */
+  readonly dependencyBumps?: boolean;
 }
 
 const MAX_OUTPUT = 4000;
@@ -343,7 +347,7 @@ function nodePlan(raw: string): PlanResult {
 /** Uses `--name-only -z` for the same reason the diff gate does: without it, a filename containing a newline becomes two entries. */
 export async function unverifiableChanges(
   runner: CommandRunner,
-  request: Pick<VerifyRequest, "worktreePath" | "baseRef" | "stepTimeoutMs">,
+  request: Pick<VerifyRequest, "worktreePath" | "baseRef" | "stepTimeoutMs" | "dependencyBumps">,
 ): Promise<readonly string[] | null> {
   const { worktreePath, baseRef, stepTimeoutMs } = request;
 
@@ -356,7 +360,19 @@ export async function unverifiableChanges(
   }
 
   const paths = diffed.stdout.split(NUL).filter((path) => path !== "");
-  return paths.filter((path) => VERIFICATION_PATHS.some((rule) => rule.pattern.test(path)));
+  const touched = paths.filter((path) =>
+    VERIFICATION_PATHS.some((rule) => rule.pattern.test(path)),
+  );
+  if (request.dependencyBumps !== true) {
+    return touched;
+  }
+  // The same judge the diff gate asks, so the two cannot disagree about which build change is allowed.
+  const bumps = await judgeBumps(
+    runner,
+    { worktreePath, baseRef, timeoutMs: stepTimeoutMs },
+    touched,
+  );
+  return touched.filter((path) => bumps.get(path)?.ok !== true);
 }
 
 export type BaseCheck =

@@ -150,6 +150,33 @@ function repairBanner(outcome: Verified): string {
   );
 }
 
+/** A code span that cannot be closed early by what it quotes. */
+function code(text: string): string {
+  return `\`${text.replace(/[`\r\n]/gu, "")}\``;
+}
+
+/**
+ * Every dependency version the run moved, harness-composed and above every model-written line: the
+ * checks ran against the new version, and nothing here read what else that version changed.
+ */
+function bumpNotice(outcome: Verified): string {
+  if (outcome.bumps.length === 0) {
+    return "";
+  }
+  const lines = outcome.bumps.map(
+    (bump) =>
+      `- ${code(bump.property ?? "<version>")} ${code(bump.from)} → ${code(bump.to)} in ` +
+      `${code(bump.path)}, for ${bump.dependencies.map((dependency) => code(dependency)).join(", ")}`,
+  );
+  return [
+    `⚠️ **This pull request moves a dependency version.** Every check below ran against the new ` +
+      `version, but the harness read none of the releases in between — what else they change, ` +
+      `including anything the tests depend on, is for a person to check.`,
+    "",
+    ...lines,
+  ].join("\n");
+}
+
 export function composePullRequest(
   outcome: Verified,
   context: PullRequestContext,
@@ -168,6 +195,7 @@ export function composePullRequest(
       `merge path. Ticket: [${issueKey}](${browseUrl(jiraBaseUrl, issueKey)})`,
 
     repairBanner(outcome),
+    bumpNotice(outcome),
 
     prose(withoutTrailer(changeOf(outcome, issueKey).body)),
 

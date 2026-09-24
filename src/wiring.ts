@@ -725,6 +725,7 @@ export function buildSolveRequest(
     vaultPath: settings.VAULT_PATH,
     failFirstCheck: failFirstCheck(settings),
     repairRound: repairRound(settings),
+    dependencyBumps: flag(settings, "DEPENDENCY_BUMPS"),
     identity: botIdentityOf(settings),
     gitTimeoutMs: numeric(settings, "SOLVE_GIT_TIMEOUT_MS", 1),
     stepTimeoutMs: numeric(settings, "SOLVE_STEP_TIMEOUT_MS", 1),

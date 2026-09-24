@@ -5,7 +5,7 @@
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
 > ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
 > and staged images its own abandoned runs left behind, and renders its log to a reader.
-> **2965 tests in 94 files**, no build step.
+> **3044 tests in 95 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -53,7 +53,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §49 and §50, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51 and §52, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -146,9 +146,34 @@ three was blocked on it, and clearing that blocker did not ship the phase — th
 typed `--repair` rung and the `REPAIR_PUBLISH` loop. The last two were claimed before the
 evidence §45 itself asked for, by the operator's decision, and that argument — with its
 counter-argument and what withdraws it — now lives in `architecture/solve.md` §15 rather than
-being deleted with the entry. The next entry is §50.
+being deleted with the entry. §51 stopped a recon plan naming a path the diff gate refuses before
+the fix pass, and was opened and deleted inside the branch that built it. §52 let a run change a
+`pom.xml` when the only change is a dependency version, behind `DEPENDENCY_BUMPS`; its Node half is
+§54. §53 is taken by a branch open alongside it. The next entry is §55.
 
 <!-- refs:on -->
+
+### 54. A dependency bump in a Node repository is still refused, because the pass cannot write the lockfile
+
+**Branch:** none yet.
+
+**What is not built.** The `pom.xml` exception (`architecture/solve.md` §15) has no Node
+counterpart. A version bump there changes `package.json` and the lockfile together, and the pass
+has no shell, so it cannot produce the lockfile; `verify` installs with the lockfile pinned, so a
+hand-edited `package.json` alone fails at install. Both files stay refused, and a Node ticket that
+needs a newer library is a bail.
+
+**The shape it would take.** The judge would allow a `package.json` change that only moves the
+version of an existing entry in `dependencies` or `devDependencies`, and the harness — not the
+model — would regenerate the lockfile with the repository's own package manager before `verify`,
+reporting the lockfile diff as the harness's in the pull request. That makes the harness run an
+install with a manifest the model edited, which is new privilege and the reason this is its own
+entry rather than a line in the Maven one.
+
+**What would make it the wrong idea.** A regenerated lockfile can move far more than the one
+version asked for — every transitive range resolves afresh — and no reviewer reads a lockfile
+diff. If that is the cost, a narrower form updates only the named package's entries in the
+lockfile and refuses when anything else would move.
 
 ### 46. Nothing can say which code a running daemon is executing
 
@@ -252,6 +277,16 @@ nothing and should not wait for the choosing. Every cost figure in this file —
 $0.45, recon $1.58, the ticket comment $0.40, a review round $0.94 — is a measurement of an unnamed
 model. None of them can be reproduced, compared, or defended, and the cost-per-ticket-per-day
 number in §2 would inherit that at a larger scale and with nobody watching.
+
+**The default has already moved once, and nothing recorded it.** Measured from the session
+transcripts: every solve pass through 2026-09-17 ran on `claude-opus-5`, and every pass from
+2026-09-21 on `claude-sonnet-5`, with no change in this tree. The likeliest cause is the operator's
+own global CLI setting, `opusplan`, which is Opus only in plan mode — inferred, not proven. The
+effect is measured: recon and fix passes mostly stopped opening `SOLVE_INSTRUCTIONS.md` — 2 of the
+34 run from 2026-09-21 to SSX-3918's failure on 2026-09-24, against nearly every one before — so
+its proceed criteria and the gate's path list stopped reaching the model, and SSX-3918 paid a fix
+pass for a `pom.xml` edit the gate then refused unconditionally.
+"Unset means today's behaviour" below is a behaviour nobody in this repository controls.
 
 **Where a cheaper model is safe is decided by the gate, not by the price.** The rule: downgrade
 where a mechanical gate checks the whole output, and do not downgrade where the gate only bounds a
@@ -427,6 +462,13 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
   so on the way out.
 
+- **A review round on a pull request that carries a dependency bump has never run.** The first
+  such pull request exists, storebrand-digital/insurance-commerce-rest-api#1459, opened 2026-09-24
+  with the notice above everything the model wrote. Every later round gates the pull request's
+  whole diff, so the bump reaches the judge again on each one; that path is tested, not watched.
+  The pull request body is written once, so a bump a later round introduces would not be named in
+  it.
+
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
   property the layout rests on is that six code points render two columns wide, and
@@ -564,7 +606,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **122 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **125 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that have never existed** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

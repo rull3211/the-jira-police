@@ -63,6 +63,7 @@ function verified(overrides: Partial<Verified> = {}): Verified {
     devLens: { accurate: true, correction: "" },
     files: 2,
     lines: 31,
+    bumps: [],
     ...overrides,
   };
 }
@@ -452,5 +453,53 @@ describe("composePullRequest, for a change a repair round finished", () => {
 
   it("says nothing about a repair on an ordinary solve", () => {
     expect(composePullRequest(verified(), CONTEXT).body).not.toMatch(/repair/iu);
+  });
+});
+
+describe("composePullRequest, for a change that moves a dependency version", () => {
+  const bump = {
+    path: "pom.xml",
+    line: 33,
+    property: "lisa-services-api.version",
+    dependencies: ["storebrand.lisa.services:lisa-services-api"],
+    from: "3.181",
+    to: "3.203",
+  };
+
+  it("names each bump second on the page, above any model prose", () => {
+    const [, second = ""] = composePullRequest(verified({ bumps: [bump] }), CONTEXT).body.split(
+      "\n\n",
+    );
+    expect(second).toContain("moves a dependency version");
+    expect(second).toContain("read none of the releases in between");
+  });
+
+  it("says which version moved, from what, to what, and for which dependency", () => {
+    const { body } = composePullRequest(verified({ bumps: [bump] }), CONTEXT);
+    expect(body).toContain(
+      "- `lisa-services-api.version` `3.181` → `3.203` in `pom.xml`, for `storebrand.lisa.services:lisa-services-api`",
+    );
+  });
+
+  it("marks a literal version as one", () => {
+    const { body } = composePullRequest(
+      verified({
+        bumps: [{ ...bump, property: null, dependencies: ["org.mockito:mockito-core"] }],
+      }),
+      CONTEXT,
+    );
+    expect(body).toContain("- `<version>` `3.181` → `3.203`");
+  });
+
+  it("keeps a coordinate from closing its code span", () => {
+    const { body } = composePullRequest(
+      verified({ bumps: [{ ...bump, dependencies: ["g:a` [x](https://evil.example) `"] }] }),
+      CONTEXT,
+    );
+    expect(body).toContain("`g:a [x](https://evil.example) `");
+  });
+
+  it("says nothing about dependencies on a change that moved none", () => {
+    expect(composePullRequest(verified(), CONTEXT).body).not.toContain("dependency version");
   });
 });

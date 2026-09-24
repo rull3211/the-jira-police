@@ -7,6 +7,8 @@
  *     ↓
  *   recon         read-only. may say no, and saying no is a success
  *     ↓
+ *   plan check    a plan naming a path the diff gate refuses stops here
+ *     ↓
  *   fix           the only pass that may write the change
  *     ↓
  *   simplify      a cold read of the diff; usually changes nothing
@@ -19,7 +21,7 @@
  * ```
  *
  * Three shapes of "no", kept apart because they call for different action:
- * **bailed** (recon declined, nothing written, a human picks it up), **failed**
+ * **bailed** (recon declined, or planned a path the gate refuses; nothing written, a human picks it up), **failed**
  * (the change was made and tests say it's wrong), and **refused** (the harness
  * declines to have an opinion — never report it as a statement about the code).
  *
@@ -38,7 +40,14 @@ import {
   pushBranch,
   type BaseSyncRequest,
 } from "./base-sync.ts";
-import { checkDiff, parseNumstat } from "./diff-gate.ts";
+import { type DependencyBump, judgeBumps } from "./dependency-bump.ts";
+import {
+  type DiffVerdict,
+  type FileChange,
+  checkDiff,
+  parseNumstat,
+  plannedPathRefusals,
+} from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
 import { type BotIdentity, type CommitResult, commitAll } from "./pr.ts";
 import {
@@ -123,6 +132,8 @@ export interface SolveRequest {
   readonly failFirstCheck?: boolean;
   /** Whether a failed verification buys one repair round, `REPAIR_ROUND`. Alone it only measures; the privilege is this and `promoteRepair` together. */
   readonly repairRound?: boolean;
+  /** `DEPENDENCY_BUMPS`: whether a pom.xml change that only moves a dependency version is allowed. Absent means no. */
+  readonly dependencyBumps?: boolean;
   /**
    * `--repair` typed per run, or `REPAIR_PUBLISH` under the daemon: a green repair round becomes the
    * outcome. Off unless set, and must be — green is reachable by weakening the assertion that failed.
@@ -174,7 +185,8 @@ export type SolveOutcome =
       readonly worktree: Worktree;
     }
   /**
-   * Recon read the code and declined. Not a failure.
+   * Recon read the code and declined, or the harness declined for it at a plan naming a refused
+   * path (`refusedPlan`). Not a failure.
    *
    * The only outcome that cleans up its worktree: recon has no `Write` and no
    * `Edit`, so a bailed worktree holds nothing. Every other outcome keeps its
@@ -184,7 +196,13 @@ export type SolveOutcome =
   | {
       readonly kind: "bailed";
       readonly reason: string;
+      /** The model's own verdict, never edited — under `refusedPlan` it still says `proceed`. */
       readonly recon: ReconVerdict;
+      /**
+       * Set when recon said `proceed` and the harness stopped the run anyway, because the plan named
+       * paths the diff gate refuses by name: one `path: why` per path. See `plannedPathRefusals`.
+       */
+      readonly refusedPlan?: readonly string[];
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
       /** What became of the worktree. `kept` if git refused, with its reason. */
@@ -312,11 +330,17 @@ export type SolveOutcome =
       readonly devLens: DevLensFeedback;
       readonly files: number;
       readonly lines: number;
+      /** Every dependency version the run moved, which the pull request names before any model's text. */
+      readonly bumps: readonly DependencyBump[];
     };
 
 function lensOf(recon: ReconVerdict): DevLensFeedback {
   return { accurate: recon.devLensAccurate, correction: recon.devLensCorrection };
 }
+
+/** `bailed.reason` when the harness, not recon, stopped the run; the model's plan is on `recon`, unedited. */
+export const PLAN_REFUSED_REASON =
+  "recon planned a change to a path no run may make, so the harness stopped the run before the fix pass";
 
 /**
  * The two reads of the worktree, kept separate rather than shared.
@@ -341,6 +365,24 @@ async function readNumstat(
   timeoutMs: number,
 ): Promise<string | null> {
   return await gitDiff(runner, worktreePath, timeoutMs, ["--numstat", "-z", baseRef]);
+}
+
+/** The gate over `changes`, with each changed `pom.xml` judged first — the one exception `checkDiff` cannot decide from paths. */
+async function gateDiff(
+  runner: CommandRunner,
+  request: Pick<SolveRequest, "baseRef" | "gitTimeoutMs" | "dependencyBumps">,
+  worktreePath: string,
+  changes: readonly FileChange[],
+): Promise<DiffVerdict> {
+  if (request.dependencyBumps !== true) {
+    return checkDiff(changes);
+  }
+  const bumps = await judgeBumps(
+    runner,
+    { worktreePath, baseRef: request.baseRef, timeoutMs: request.gitTimeoutMs },
+    changes.map((change) => change.path),
+  );
+  return checkDiff(changes, bumps);
 }
 
 /** The human-readable read, for a prompt. No `-z`: nothing here is parsed, so the gate's newline-in-filename defense does not apply. */
@@ -569,6 +611,8 @@ export type ReconOnlyOutcome =
       readonly kind: "bailed";
       readonly reason: string;
       readonly recon: ReconVerdict;
+      /** As on `SolveOutcome`'s `bailed`, so this reports what the full pipeline would do. */
+      readonly refusedPlan?: readonly string[];
       readonly devLens: DevLensFeedback;
       readonly cleanup: RemoveResult;
     }
@@ -646,7 +690,17 @@ export async function runReconOnly(
       devLensAccurate: recon.devLensAccurate,
     });
 
+    const refusedPlan = recon.proceed
+      ? plannedPathRefusals(recon.plannedFiles, worktree.path, request.dependencyBumps === true)
+      : [];
+    if (refusedPlan.length > 0) {
+      log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
+    }
+
     const cleanup = await removeWorktree(deps.commands, worktree, "discard", request.gitTimeoutMs);
+    if (refusedPlan.length > 0) {
+      return { kind: "bailed", reason: PLAN_REFUSED_REASON, recon, refusedPlan, devLens, cleanup };
+    }
     return recon.proceed
       ? { kind: "proceed", recon, devLens, cleanup }
       : { kind: "bailed", reason: recon.bailReason, recon, devLens, cleanup };
@@ -657,7 +711,10 @@ export async function runReconOnly(
 
 /** The only place a {@link VerifyRequest} is built, so the base check and the post-fix check cannot drift apart on timeout or base ref. */
 function verifyRequestOf(
-  request: Pick<SolveRequest, "repoPath" | "baseRef" | "stepTimeoutMs" | "installTimeoutMs">,
+  request: Pick<
+    SolveRequest,
+    "repoPath" | "baseRef" | "stepTimeoutMs" | "installTimeoutMs" | "dependencyBumps"
+  >,
   worktree: Worktree,
 ): VerifyRequest {
   return {
@@ -666,6 +723,7 @@ function verifyRequestOf(
     baseRef: request.baseRef,
     stepTimeoutMs: request.stepTimeoutMs,
     installTimeoutMs: request.installTimeoutMs,
+    dependencyBumps: request.dependencyBumps === true,
   };
 }
 
@@ -764,7 +822,7 @@ export async function runRepairRound(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = checkDiff(changes);
+  const verdict = await gateDiff(commands, request, worktree.path, changes);
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -820,6 +878,7 @@ export async function runRepairRound(
     devLens,
     files: verdict.files,
     lines: verdict.lines,
+    bumps: verdict.bumps,
   };
 }
 
@@ -918,11 +977,31 @@ async function runPipeline(
       leftFiles: false,
       worktreePath: worktree.path,
     });
-    // The one place a worktree is removed: recon has no Write/Edit, so there is nothing in it to lose.
+    // One of the two places a worktree is removed, both before any pass holds Write/Edit, so there is nothing in it to lose.
     // `removeWorktree` does not force, so if a future recon can write, git refuses and the reason travels out on the outcome.
     // `runReconOnly` repeats this reasoning for its own worktree, separately — there is no pipeline for it to be "in".
     const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
     return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree, cleanup };
+  }
+
+  // Before the fix pass, so a plan the gate was always going to refuse costs no `Write` and no spend.
+  const refusedPlan = plannedPathRefusals(
+    recon.plannedFiles,
+    worktree.path,
+    request.dependencyBumps === true,
+  );
+  if (refusedPlan.length > 0) {
+    log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
+    const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
+    return {
+      kind: "bailed",
+      reason: PLAN_REFUSED_REASON,
+      recon,
+      refusedPlan,
+      devLens,
+      worktree,
+      cleanup,
+    };
   }
 
   // ---- fix ---------------------------------------------------------------
@@ -995,7 +1074,7 @@ async function runPipeline(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = checkDiff(changes);
+  const verdict = await gateDiff(commands, request, worktree.path, changes);
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -1122,6 +1201,7 @@ async function runPipeline(
     devLens,
     files: verdict.files,
     lines: verdict.lines,
+    bumps: verdict.bumps,
   };
 }
 
@@ -1449,7 +1529,7 @@ async function runReviewRound(
       reasons: ["could not read the diff, so there is nothing to bound"],
     };
   }
-  const verdict = checkDiff(parseNumstat(diffText));
+  const verdict = await gateDiff(commands, request, worktree.path, parseNumstat(diffText));
   if (!verdict.ok) {
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
   }

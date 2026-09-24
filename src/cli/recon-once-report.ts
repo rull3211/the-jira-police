@@ -12,8 +12,9 @@ import { oneLine } from "../text.ts";
 
 /**
  * Exit codes. `bailed` gets its own rather than folding into `ok`: a human
- * scripting this command wants to tell "recon says no" apart from "recon
- * says yes" without parsing the report.
+ * scripting this command wants to tell "the run stops here" apart from "it
+ * would go on to the fix pass" without parsing the report — and recon saying
+ * yes to a plan the harness refuses is the first of those.
  */
 export const EXIT = { ok: 0, bailed: 1, usage: 2, failed: 3 } as const;
 
@@ -108,6 +109,17 @@ export function formatReport(issueKey: string, outcome: ReconOnlyOutcome, now: D
     );
   } else {
     lines.push(...reconSection(outcome.recon));
+    // Last in the body, since it overrules the plan printed above it.
+    if (outcome.kind === "bailed" && outcome.refusedPlan !== undefined) {
+      lines.push(
+        "",
+        "## Stopped by the harness",
+        "",
+        "Recon said proceed, but the plan names paths the diff gate refuses, so `solve:once` would stop here before the fix pass:",
+        "",
+        ...outcome.refusedPlan.map((reason) => `- ${oneLine(reason)}`),
+      );
+    }
   }
 
   lines.push(

@@ -134,7 +134,9 @@ asked whether the tests passed.
 Separate sessions rather than five turns is the safety property: a pass cannot carry a capability
 past the point it was granted for, and a pass that dies cannot leave a later one reasoning from
 half a conversation. Recon runs first and its verdict is honoured — if it says stop, the fix pass
-never starts and **no model gets write access for that ticket at all**. `--simplify` is given the
+never starts and **no model gets write access for that ticket at all**. The same happens when it
+says proceed with a plan naming a file the diff gate refuses by name, such as a lockfile: the harness stops
+the run there and says so on the ticket. `--simplify` is given the
 diff and not the ticket deliberately: showing it the requirement would invite it to reconsider the
 change instead of the way the change is written.
 
@@ -765,13 +767,14 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see         |
 | `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                            |
 | `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back    |
-| `FAIL_FIRST_CHECK`              | `true`        | One of two that default on — off withdraws a check, it does not grant one  |
+| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none   |
 | `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; acted on only when armed      |
 | `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on      |
+| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change that only moves a dependency version. Only `true` arms it |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
-request; an unset `REPAIR_PUBLISH` lets the daemon open none from a repair round. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
+request; an unset `REPAIR_PUBLISH` lets the daemon open none from a repair round. **`DEPENDENCY_BUMPS` breaks this, by the operator's decision**: unset, a run may bump a dependency version in `pom.xml`; a misspelled value still refuses it. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
 open in a file browser, because macOS puts the default under `/private/var` and the diff review the
 solver phase depends on is a person reading that worktree.
 

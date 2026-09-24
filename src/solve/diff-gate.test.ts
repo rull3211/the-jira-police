@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   DiffParseError,
+  FORBIDDEN_PATHS,
   type FileChange,
+  VERIFICATION_PATHS,
   checkDiff,
   parseNumstat,
   pathEscapes,
+  plannedPathRefusals,
 } from "./diff-gate.ts";
 
 /** Written out rather than inlined as `\0`: `"\0"` immediately followed by a digit is an octal escape and a syntax error in strict mode. */
@@ -116,13 +119,13 @@ describe("checkDiff — the plan's named refusals", () => {
       ok(`src/f${String(index)}.ts`, 200),
     );
 
-    expect(checkDiff(wide)).toEqual({ ok: true, files: 40, lines: 8040 });
+    expect(checkDiff(wide)).toEqual({ ok: true, files: 40, lines: 8040, bumps: [] });
   });
 
   it("still measures what it no longer refuses", () => {
     const verdict = checkDiff([ok("src/a.ts", 10, 5), ok("src/b.ts", 1, 0)]);
 
-    expect(verdict).toEqual({ ok: true, files: 2, lines: 16 });
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 16, bumps: [] });
   });
 });
 
@@ -179,6 +182,45 @@ describe("checkDiff — verification integrity", () => {
   });
 });
 
+describe("checkDiff — the dependency-bump exception", () => {
+  const bump = {
+    path: "pom.xml",
+    line: 15,
+    property: "lisa-services-api.version",
+    dependencies: ["storebrand.lisa.services:lisa-services-api"],
+    from: "3.181",
+    to: "3.203",
+  };
+  const allowed = (path: string) => new Map([[path, { ok: true, bumps: [bump] } as const]]);
+
+  it("passes a pom.xml the judge found to be only a bump, and carries the bump out", () => {
+    const verdict = checkDiff([ok("src/Main.java"), ok("pom.xml")], allowed("pom.xml"));
+
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 4, bumps: [bump] });
+  });
+
+  it("refuses a pom.xml the judge refused, and says why in both voices", () => {
+    const verdict = checkDiff(
+      [ok("pom.xml")],
+      new Map([["pom.xml", { ok: false, reason: "line 7 is project>parent>version" } as const]]),
+    );
+
+    expect(verdict.ok ? "" : verdict.reasons.join("\n")).toBe(
+      "pom.xml: the Maven build is defined here — a skipped test, a dropped module or a relaxed plugin makes the build pass without making the code correct — and this change is more than a dependency version: line 7 is project>parent>version",
+    );
+  });
+
+  it("lends the exception to no rule but the one that carries it", () => {
+    for (const path of ["package.json", "mvnw", "tsconfig.json"]) {
+      expect(checkDiff([ok(path)], allowed(path)).ok).toBe(false);
+    }
+  });
+
+  it("still refuses a pom.xml somewhere no file may be, whatever the judge said", () => {
+    expect(checkDiff([ok(".claude/pom.xml")], allowed(".claude/pom.xml")).ok).toBe(false);
+  });
+});
+
 describe("checkDiff — the rest", () => {
   it("accepts a small, ordinary fix", () => {
     const verdict = checkDiff([
@@ -186,7 +228,7 @@ describe("checkDiff — the rest", () => {
       ok("src/app/favicon.test.ts", 20, 0),
     ]);
 
-    expect(verdict).toEqual({ ok: true, files: 2, lines: 26 });
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 26, bumps: [] });
   });
 
   it("refuses an empty diff", () => {
@@ -236,12 +278,109 @@ describe("checkDiff — the rest", () => {
   it("counts both halves of a rename, via the parser", () => {
     const verdict = checkDiff(parseNumstat(`40\t10\t${NUL}src/old.ts${NUL}src/new.ts${NUL}`));
 
-    expect(verdict).toEqual({ ok: true, files: 2, lines: 50 });
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 50, bumps: [] });
   });
 
   it("catches a forbidden file being renamed out of the way", () => {
     expect(
       reasonsFor(parseNumstat(`0\t0\t${NUL}.github/workflows/ci.yml${NUL}docs/ci.yml${NUL}`)),
     ).toContain("CI privilege");
+  });
+});
+
+describe("plannedPathRefusals", () => {
+  const worktreePath = "/tmp/solve/SSX-3918";
+
+  it("names each path refused by name in a plan, and only those", () => {
+    const reasons = plannedPathRefusals(
+      [
+        "mvnw",
+        "src/main/java/no/storebrand/orders/f2100/adapter/F2100Service.java",
+        "docs/integrations/f2100.md",
+      ],
+      worktreePath,
+      true,
+    );
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toMatch(/^mvnw: the Maven wrapper/u);
+  });
+
+  it("refuses pom.xml by name when DEPENDENCY_BUMPS is off, as before the exception existed", () => {
+    expect(plannedPathRefusals(["pom.xml"], worktreePath, false)).toEqual([
+      expect.stringMatching(/^pom\.xml: the Maven build is defined here/u),
+    ]);
+  });
+
+  it("leaves pom.xml to the gate, since only its diff can show a dependency bump", () => {
+    // SSX-3918's plan: the pom change it needed is a bump, which a path cannot reveal.
+    expect(
+      plannedPathRefusals(
+        ["pom.xml", "src/main/java/no/storebrand/orders/f2100/adapter/F2100Service.java"],
+        worktreePath,
+        true,
+      ),
+    ).toEqual([]);
+    expect(checkDiff([ok("pom.xml")]).ok).toBe(false);
+  });
+
+  it("refuses nothing in an ordinary plan", () => {
+    expect(
+      plannedPathRefusals(["src/app/head.tsx", "src/app/head.test.tsx"], worktreePath, true),
+    ).toEqual([]);
+  });
+
+  it("gives the same answer as the gate, for every rule that refuses by name alone", () => {
+    // One path per rule; the first loop fails when a rule is added without one.
+    const samples = [
+      ".git/config",
+      ".github/workflows/ci.yml",
+      "src/.gitattributes",
+      ".circleci/config.yml",
+      "Jenkinsfile",
+      ".env.local",
+      ".claude/settings.json",
+      "pnpm-lock.yaml",
+      "package.json",
+      "tsconfig.base.json",
+      "eslint.config.js",
+      "vitest.config.ts",
+      "mvnw",
+      // Both lists at once, so a plan reports both reasons exactly as the gate does.
+      ".claude/package.json",
+    ];
+    for (const rule of [...FORBIDDEN_PATHS, ...VERIFICATION_PATHS]) {
+      if (rule.unless === undefined) {
+        expect(samples.some((sample) => rule.pattern.test(sample))).toBe(true);
+      }
+    }
+    for (const sample of samples) {
+      const gate = checkDiff([ok(sample)]);
+      expect(plannedPathRefusals([sample], worktreePath, true)).toEqual(
+        gate.ok ? [] : gate.reasons,
+      );
+    }
+  });
+
+  it("reads a path under the worktree the same as the relative one", () => {
+    // Models name a file by the absolute path they read it at; that is the same file, not an escape.
+    expect(plannedPathRefusals([`${worktreePath}/src/app/head.tsx`], worktreePath, true)).toEqual(
+      [],
+    );
+    expect(plannedPathRefusals([`${worktreePath}/mvnw`], `${worktreePath}/`, true)).toEqual(
+      plannedPathRefusals(["mvnw"], worktreePath, true),
+    );
+  });
+
+  it("refuses a plan to change a file outside the worktree", () => {
+    for (const planned of [
+      "/repos/lisa-services-api/pom.xml",
+      "../lisa-services-api/src/Reason.java",
+      `${worktreePath}-salvaged/src/app/head.tsx`,
+    ]) {
+      expect(plannedPathRefusals([planned], worktreePath, true)).toEqual([
+        `${JSON.stringify(planned)}: not a path inside the worktree`,
+      ]);
+    }
   });
 });
