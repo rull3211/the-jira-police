@@ -92,12 +92,16 @@ elsewhere and left alone, because each rewords an invariant, an architecture arg
 rule rather than a plan:
 
 - `architecture/invariants.md` invariant 14 says a crash, a bail, a failed verification and a
-  refused push "leave the board exactly as they found it". Since `65a9143`, `terminalLabelAfter`
-  gives every outcome but `verified` and `escaped` the `agent:failed` label, which the solve queue
-  excludes.
-- `architecture/overview.md`'s failure table, and the paragraph under it that opens "Three outcomes
-  deliberately write no terminal label", say the same of `refused`, `failed` and a transient
-  `abandoned`.
+  refused push "leave the board exactly as they found it". Half of that is still true. Since
+  `65a9143`, `terminalLabelAfter` gives every outcome but `verified` and `escaped` the
+  `agent:failed` label, which the solve queue excludes, so a bail, a failed verification and a
+  crash reported as the `crashed` outcome are labelled. What `runWriteRungs` still releases as found
+  is a run with no outcome to label — an exception out of the solver, or a refusal before it
+  starts — and a verified run whose publish fails, since `verified` has no terminal label.
+- `architecture/overview.md`'s failure table, in its `no-worktree` and `PreToolUse` rows, and the
+  paragraph under it that opens "Three outcomes deliberately write no terminal label", say
+  `no-worktree`, `refused`, `failed` and a transient `abandoned` are released unlabelled. All four
+  are labelled.
 - `architecture/module-map.md` and `daemon:status`'s message say the skill root is staged per pass;
   `prepareSkillRoot` runs once per run or round.
 - In the house rules, which change only by proposal: `INCIDENTS.md`'s "Thirty-nine citations to
@@ -106,9 +110,9 @@ rule rather than a plan:
   `PLAN.md` headings that `96998cc` deleted. §14's own heading still says it.
 
 **What would make it the wrong idea.** The overview paragraph is the argument the attempt ledger
-exists for: those outcomes release the ticket unlabelled, so something has to count claims. If every
-one of them is labelled now, the ledger's reason may have gone with the sentence, and the fix is a
-design question rather than a wording one.
+exists for, and a rewrite that drops the ledger with the sentence would be wrong: the endings that
+still release a ticket as found — an exception, a refusal before the solve, a failed publish — are
+what the ledger now bounds. The correction is to the ledger's reason, not to whether it has one.
 
 ### 54. A dependency bump in a Node repository is still refused, because the pass cannot write the lockfile
 
