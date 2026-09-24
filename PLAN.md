@@ -3,8 +3,9 @@
 > **Progress, 2026-09-18.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
-> and staged images its own abandoned runs left behind, and renders its log to a reader.
+> ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
+> reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
+> runs left behind.
 > **3073 tests in 95 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
@@ -89,8 +90,7 @@ inside the branch that built it, and §32 was the untagged thread reply that let
 with itself on PR #548 — same shape, opened and deleted inside its own branch. §7 was the
 transient/deterministic split: `terminalLabelAfter` (`src/cli/solve-outcome.ts`) now routes a
 deterministic verification failure to `agent:failed` the same way it already did a bail, closing the
-reclaim loop `MAX_SOLVE_ATTEMPTS_PER_TICKET` could only slow, not stop — the third instance of the
-shape recorded in that function's own docstring. Opened in an earlier session (`7e99804`) and
+reclaim loop `MAX_SOLVE_ATTEMPTS_PER_TICKET` could only slow, not stop. Opened in an earlier session (`7e99804`) and
 closed here, on a real ticket looping live (SSX-3954), rather than opened and shipped in one branch
 like its neighbours above. §4 was recon reading
 staged images and §22 the age-based sweep its own last phase deferred; both shipped once that phase
@@ -984,14 +984,16 @@ PR-exists reconciliation has no such hazard and is probably the half to build fi
 **What is not built.** Any outcome between accepting every item of a ticket and ending the run over
 one of them. A nine-file ticket with one questionable line yields zero files.
 
-**Why it is owed.** The two outcomes available are `injectionNoticed`, required in three schemas
-(`schema.ts:41`, `:272`, `:390`) and parsed (`runner.ts:799`, `:1165`, `:1210`) but branched on
-nowhere, and a bail, decided in recon (`orchestrator.ts:31`, returned at `:796`, fields at
-`schema.ts:38-40`). Recon has no `Write` and no `Edit` (`orchestrator.ts:213`), so a bail ends the
-run before the solve pass and the diff gate is never reached: the path lists are never consulted,
-and judgement about scope decides alone. A bail also writes no label and says nothing about
-solvability, so the ticket is released as found and offered again on the next tick at full solve
-cost. Sampled judgement probes on SSX-3894 put the bail rate at 2 of 4.
+**Why it is owed.** Every outcome available ends the run. `injectionNoticed` is required in
+`RECON_SCHEMA`, `REVIEW_SCHEMA` and `MERGE_SCHEMA` and parsed by each pass's parser, but nothing in
+the run acts on it; its one reader is `recon:once`'s report. A bail is decided in recon, which has no
+`Write` and no `Edit` (`RECON_DENIED_TOOLS` in `solve/runner.ts`), so it ends the run before the fix
+pass and the diff gate is never reached. `plannedPathRefusals` holds recon's planned files against
+the path lists, but only to stop a plan that needs a refused path; what goes into the plan is still
+judgement about scope alone. The fix pass's `abandoned` ends the run as well, over everything it was
+handed. A bail or an abandon writes `agent:failed` and comments on the ticket, so the ticket waits
+for a human rather than returning to the queue, and all of it is declined over one item. Sampled
+judgement probes on SSX-3894 put the bail rate at 2 of 4.
 
 What is missing is a per-item outcome: complete the in-scope work, leave the rest undone, and state
 which items were left and why on both the pull request and the ticket.
@@ -1070,15 +1072,17 @@ recurring charge rather than a wrong answer:
 
 ## Out of scope
 
-Auto-merge. Multi-repo. Cross-repo _changes_ — reads landed 2026-09-07 and the two are not the same
-grant: a pass may read every checkout on the machine and may write to one worktree, which is now
-watched rather than merely asserted. Reopening `agent:done` tickets. Bot-noise tickets
-(CVE/GHSA/SNYK/dependency bumps) — currently discarded at intake, and the most agent-fixable class
-there is, so worth revisiting once the pilot has a track record.
+Auto-merge. Cross-repo _changes_ — reads landed 2026-09-07 and the two are not the same grant: recon
+may read the other checkouts `SOLVE_READ_DIRS` names, and a write pass writes to one worktree, which
+is now watched rather than merely asserted. Reopening `agent:done` tickets. Bot-noise tickets
+(CVE/GHSA/SNYK/dependency bumps) as a class — intake discards their prefixes as a signal of who owns
+a ticket and triages them like any other, with nothing aimed at them, although they are the most
+agent-fixable class there is; worth revisiting once the pilot has a track record.
 
 ## Open, deliberately
 
-`bugFastPath` (default OFF) is the existing hook for bug-specific behaviour and is in direct
-tension with this feature: it short-circuits a `Feil` to a one-line note with no scorecard — and
-therefore no dev lens and no fitness call. If it is ever switched on, these two need reconciling.
+`bugFastPath` (default OFF), a switch the intake skill plans and nothing here implements, is in
+direct tension with this feature: it would short-circuit a `Feil` to a one-line note with no
+scorecard — and therefore no dev lens and no fitness call. If it is ever built and switched on,
+these two need reconciling.
 Flagged, not solved.
