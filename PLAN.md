@@ -104,7 +104,7 @@ line or two, opened in `b7faa73` and deleted in `849591a` that shipped it; §35 
 brought `CLAUDE.md`, `STARTING.md` and `FINISHING.md` to the standard §34 had just imposed on the
 code, opened in `5d42002` and deleted in `24341f6` — both the ordinary shape. §38 was
 `branch-guard.sh` resolving the session's project directory rather than the worktree the write
-lands in, shipped as `targetBranch` in `0cf4c10`.
+lands in, shipped as `targetBranch` in `57f6923`.
 
 **§40 was issued twice, which this file says never happens, and the second issue is how all three of
 §34, §35 and §38 came to be missing from the line above.** Its first use is the second of the two
@@ -208,9 +208,9 @@ which checkout a process was started from, nor which commit that checkout was on
 **Why it is owed, with the cost already paid.** Node loads `src/index.ts` and its imports once, at
 process start. Every commit, merge and branch switch afterwards changes the tree and not the running
 process. The skill root is the exception, and it makes the situation worse rather than better:
-`prepareSkillRoot` re-copies `.claude/skills/agent-solve/` from the tree on **every pass**, so a
-long-lived daemon runs old TypeScript against new markdown — two halves from different commits inside
-a single run. On 2026-09-21 a daemon started before PR #64 merged kept raising the `parseSimplify`
+`prepareSkillRoot` re-copies `.claude/skills/agent-solve/` from the tree on **every run and every
+round**, so a long-lived daemon runs old TypeScript against new markdown — two halves from
+different commits inside a single run. On 2026-09-21 a daemon started before PR #64 merged kept raising the `parseSimplify`
 contradiction that #64 had already removed. `daemon:status`'s own message — "a branch switch changes
 what the next tick runs" — is true only of the markdown, and it sent that session to the wrong
 diagnosis twice before the error string was grepped for in the tree and found not to be there.
@@ -283,16 +283,14 @@ worse outcome than the honest silence there is now.
 ### 1. Which model runs which task, and nothing chooses today
 
 Requested 2026-09-06, and **the first fact is that there is no setting to change.** `--model`
-appears nowhere in this tree. **Nine task kinds spawn a subprocess**, across five files and five
-argument builders: the triage analyst and the poster (`triage/runner.ts`, `triage/poster.ts`), the
-five solve passes — `recon`, `fix`, `simplify`, `review`, `merge`, all of them through the one
-`runSession` in `solve/passes.ts` (`solve/runner.ts`) — the ticket commenter (`solve/commenter.ts`),
-and the sendback-watch relevance check (`watch/relevance.ts`). Every one of them inherits whatever
-`storecode` happens to default to. Five argument builders, one flag each: the mechanism is trivial
-and the policy is the whole of the work. **This sentence counted six kinds, four files and three
-builders until 2026-09-18**, having never been recounted after `simplify`, `merge` and the relevance
-check were added — the unnamed one is the hazard, since a per-task setting that forgets a task
-silently leaves it on the default.
+appears nowhere in this tree. **Every task kind that spawns a subprocess** — the triage analyst and
+the poster (`triage/runner.ts`, `triage/poster.ts`), one solve pass per entry in `PASSES`
+(`solve/runner.ts`), all of them through the one `runSession` in `solve/passes.ts`, the ticket
+commenter (`solve/commenter.ts`) and the sendback-watch relevance check (`watch/relevance.ts`) —
+inherits whatever `storecode` happens to default to. Five argument builders, one flag each: the
+mechanism is trivial and the policy is the whole of the work. **This sentence names `PASSES` rather
+than counting it, having been wrong about the count twice** — the unnamed task is the hazard, since
+a per-task setting that forgets one silently leaves it on the default.
 
 **Two changes, and only the second is the feature.** _Recording_ which model a pass ran under costs
 nothing and should not wait for the choosing. Every cost figure in this file — triage $1.56, poster
@@ -355,10 +353,10 @@ A triage run was long quoted at $0.11 and that is wrong by 14×: a single bailed
 changes turned single-shot costs into recurring ones, so a per-run number is no longer enough.
 **The most overdue item in this file.**
 
-Three known inputs to it that are already measured or argued and have never been added up: the
-chain rebuilds its worktree every round, so twenty rounds is twenty installs; the review tick
+Two known inputs to it that are already measured or argued and have never been added up: the
+chain rebuilds its worktree every round, so twenty rounds is twenty installs; and the review tick
 re-reads every open bot pull request, so per-tick work scales with _unmerged_ pull requests rather
-than active ones; and a formatted approval costs one terminal round per pull request (§8).
+than active ones (§8).
 
 ### 3. The review round has no `verifyBase`
 
@@ -430,7 +428,7 @@ for `judgement` while the harness watched its `Write` be vetoed is reporting `en
 it says, and wiring that means widening `PassRunner.run`, which still returns only the parsed
 structured output.
 
-### 8. Four findings from the SSX-3834 run, three of them still open
+### 8. Three findings from the SSX-3834 run, still open
 
 - **`src/solve/poller.ts` logs `"dry run — no label was written"` immediately before writing
   labels.** True while `solve:once` was the only caller; false the moment `runSolveClaims` became the
@@ -440,21 +438,11 @@ structured output.
   every non-`[a-z0-9]` run to `-`, so run against real Norwegian summaries it gives
   `Beløp på` → `bel-p-p` and `Feil i årsavslutning` → `feil-i-rsavslutning`. On a Norwegian board
   that is every branch the bot will ever cut. **This bullet said `bel-p-p-` until it was run**; the
-  trailing hyphen is stripped, twice, and the tests carry no non-ASCII case to have shown it.
+  trailing hyphen is stripped, twice, and the tests carry no non-ASCII letter to have shown it.
 - **The review tick re-reads every open bot pull request.** Four here; three (`#2660`, `#1413`,
   `#2661`) returned `threads: 0` and exist only because nobody has merged them. Per-tick work scales
   with _unmerged_ pull requests, not active ones — an argument for merging promptly, and a second
   input to the cost number.
-- **A formatted approval costs one terminal round per pull request.** Copilot's approval is a
-  non-empty body with review `state: "COMMENTED"`, never `"APPROVED"`, so the general discriminator
-  is unusable for this reviewer. `delivery.ts` reads a non-empty comment list as actionable — the
-  only way out is the `comments.length === 0 && threads.length === 0` early return, and no approval
-  discriminator exists anywhere in the file — so it
-  reserves a round, and pays for a pass whose input is "looks good". It is bounded — the round
-  changes nothing, so the no-change rule undrafts. The cheap fix is unavailable for the reason the
-  `Suppressed comments` block was left unparsed: an approval and a summary-only review carrying real
-  feedback (#1413 exactly) are indistinguishable on the wire without reading the prose, and reading
-  the prose is what the paid pass is for.
 
 ### 9. The fail-first check cannot answer a question about CI
 
@@ -464,8 +452,8 @@ verdicts on a UTC runner and a developer's laptop. **A probe that runs in the op
 environment cannot answer a question about CI's.**
 
 **"Inherits" was the wrong word and the right conclusion**, which is worth the correction because it
-narrows the fix. `childEnv` is an allowlist of fifteen names, and it already forces `CI=1` and
-`NO_COLOR=1` — so a test branching on `CI` is answered correctly today. `TZ` is not on the list and
+narrows the fix. `childEnv` is an allowlist, `ENV_PASSTHROUGH` in `solve/exec.ts`, and it already
+forces `CI=1` and `NO_COLOR=1` — so a test branching on `CI` is answered correctly today. `TZ` is not on the list and
 nothing sets it, so the child resolves the _machine's_ zone, which is exactly the
 `ZoneId.systemDefault()` case. The gap is one unset variable in a list, not a missing sandbox.
 
@@ -581,7 +569,7 @@ states the rule that produced that shape, which is that a recorded verdict is ne
 - **`sectionReferences()` may be an orphan, and this is rehomed from an entry that shipped.** It
   counts `§N` tokens across the tree's TypeScript, and the section resolver that landed in PR #21
   resolves the same
-  tokens rather than counting them. Its single caller is the `FACT` table in the same file.
+  tokens rather than counting them. Its single caller is the `FACTS` table in the same file.
   **The churn half of this bullet is closed**: the function now masks `refs:off` regions, so the
   "106 → 141 on fixtures alone" failure cannot recur, and what is left is only the question of
   whether a count nobody reads earns its `docs:check` line beside a resolver that checks the same
@@ -630,7 +618,7 @@ not a plan item. What is left below is only what is still missing.
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
   repository's real cross-reference system — **125 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
-  headings that define them, and **exactly 40 point at sections that have never existed** (below,
+  headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost
   none of them says, is checked too now — the story is
   [`INCIDENTS.md`'s `§N` checker entry](.claude/skills/dev-house-rules/INCIDENTS.md#the-n-checker-that-resolved-a-citation-against-any-document-that-happened-to-define-it):
@@ -696,9 +684,11 @@ not a plan item. What is left below is only what is still missing.
 
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
-which is **blind to every squash- and rebase-merged branch**. `chore/agent-guardrails` has an
-identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
-these accumulate, and it is one instance of a possible rule rather than a rule.
+which is **blind to every squash- and rebase-merged branch**. `chore/agent-guardrails` had an
+identical patch-id and tree to `6a8cba7` and `--merged` could not see it, so it needed `-D`; on
+2026-09-24 `fix/worktree-rule-and-guard-scope`, which landed rebased as `57f6923` and `d0295b6`, was
+listed as merged and would have been refused by `-d`. That is how these accumulate, and it is two
+instances of a possible rule rather than a rule.
 
 **What would make this the wrong idea.** Every item above is a check on documents, and this
 repository's own evidence is that checks on documents catch less than driving a command does. The
@@ -736,11 +726,14 @@ protecting, and **the cheaper fix than maintaining it is a flag on `docs:check` 
 without requiring the constant to be falsified first.** That flag is not built.
 
 **40 dangling `§N` citations**, regenerated from the checker on 2026-09-18 rather than searched for.
-The first diagnosis — that a renumbering stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c`
-appear in **no revision of `PLAN.md` that `git log --all` can reach**, in any form. They were never
-written down. `architecture/overview.md:200` says "See PLAN.md §5b", the one citation naming its
-target, and it resolves to nothing; `architecture/overview.md:356` cites `§24` in a document whose
-own headings stop well short of it.
+The first diagnosis — that this file's own deletions stranded them — was right for 23 of them, and
+this entry said the opposite until 2026-09-24. `§3a`, `§5b`, `§6.1`, `§6.1c`, `§6.2` and `§6.3` were
+`PLAN.md` headings until `96998cc` deleted them on 2026-09-08. A search of the history for the token
+as cited, `§3a`, finds only this entry's own write-ups, because the headings were written `#### 3a.`.
+Only `§7b`, `§7c`, `§3c` and `§24` were never written down anywhere. `architecture/overview.md:200`
+says "See PLAN.md §5b", the one citation naming its target, and the name was right: the deleted §5b
+argued for the `PreToolUse` hook that sentence is about. `architecture/overview.md:356` cites `§24`
+in a document whose own headings stop well short of it.
 The extra one is a different shape:
 [an incident](.claude/skills/dev-house-rules/INCIDENTS.md#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent)
 writes "`PLAN.md` §12" to illustrate a citation that used to name a real section — the pooled
@@ -785,8 +778,10 @@ Three fixes were named; the first is done, the third matters most and has its fi
    and that arrived as `refs:off` / `refs:on` markers rather than a file-level opt-out, so exempting
    a paragraph never quietly exempts the document around it. A guard that fires on its own
    documentation gets switched off.
-2. Fix the 40. Most need a human: the intended target is often unrecoverable, and deleting a comment
-   that cites nothing sometimes destroys the only record of a decision.
+2. Fix the 40. The 23 whose target `96998cc` deleted can be read at `96998cc^:PLAN.md` and repointed
+   or quoted. The 16 citing `§7b`, `§7c`, `§3c` and `§24` need a human, since their target was never
+   written, and deleting a comment that cites nothing sometimes destroys the only record of a
+   decision. The quoted `§12` is an illustration, not a citation to fix.
 3. **Stop citing `PLAN.md` by number from code.** Cite `architecture/*.md`, whose section numbers are
    stable and survived the split out of `ARCHITECTURE.md` unchanged — §1–16 are now spread across
    eight files, each keeping the number it had — or quote the reasoning where it is used. **First instance done:** the guardrail argument moved out
@@ -803,36 +798,38 @@ there, not because that is provably where the author meant to point. The check s
 needs a human read. It does not claim the set is empty.
 
 **What would make this the wrong idea.** Item 2 is a large mechanical diff across `src/` with real
-judgement in it, and a batch pass by an agent is how 40 confident references to nothing got here. If
+judgement in it, and a batch pass by an agent is how the 16 references to nothing got here. If
 the answer to a dangling `§7b` turns out to be "delete the citation", then 40 comments get shorter
 and nothing gets more correct. Read three of them before fixing any.
 
-#### The sites, regenerated 2026-09-18
+#### The sites, regenerated 2026-09-18, lines rechecked 2026-09-24
 
 **Provenance, because it decides how far to trust each row.** Every row below came out of
 `docs:check` itself, not out of a sweep: the resolver already visits each site to decide it dangles,
 so lowering `KNOWN_DANGLING` makes it print them. The paths and lines are therefore the checker's,
 generated the same way twice. Verified by hand afterwards: twelve sampled lines read as quoted, the
-two `architecture/overview.md` rows say what they are quoted as saying, and — against every revision
-of `PLAN.md` that `git log --all` reaches — `§3a`, `§5b`, `§7b` and `§6.1c` have never existed there
-in any form. **Every path and line in the previous version of this table was wrong**, because the
+two `architecture/overview.md` rows say what they are quoted as saying, and `§7b` has never been a
+heading in any revision of `PLAN.md` that `git log --all` reaches. The same check said so of `§3a`,
+`§5b` and `§6.1c` as well, and was wrong (above). **Every path and line in the previous version of this table was wrong**, because the
 table was written against `ARCHITECTURE.md` before it was split into `architecture/*.md` and against
 `src/` before the comments above these citations were rewritten; nothing failed when it rotted,
 which is the argument for not keeping it by hand.
 
-Dangling, grouped by the token they cite. None of these tokens has ever been a heading anywhere:
+Dangling, grouped by the token they cite. `§7b`, `§7c`, `§3c` and `§24` have never been a heading
+anywhere; the rest were `PLAN.md` headings until `96998cc`, and `§12` still is one in
+`architecture/triage.md`:
 
 | token   | sites                                                                                                                                                                                  |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `§7b`   | `watch-loop.ts:33`, `cli/watch-once.ts:14`, `watch/counter.ts:4`, `watch/decide.ts:134,190,203`, `watch/decide.test.ts:183`, `watch/memo.ts:6`, `watch/relevance.ts:12`                |
-| `§6.1c` | `solve/pr.ts:213,1235`, `solve/commenter.ts:3`, `solve/delivery.ts:215,221`, `cli/solve-outcome.ts:177,296`, `cli/solve-outcome.test.ts:552`                                           |
-| `§6.1`  | `architecture/triage.md:321`, `cli/solve-outcome.ts:174`, `cli/solve-run.ts:476,816`, `jira/jql.ts:169`                                                                                |
+| `§6.1c` | `solve/pr.ts:213,1235`, `solve/commenter.ts:3`, `solve/delivery.ts:215,221`, `cli/solve-outcome.ts:243,362`, `cli/solve-outcome.test.ts:687`                                           |
+| `§6.1`  | `architecture/triage.md:321`, `cli/solve-outcome.ts:240`, `cli/solve-run.ts:489,829`, `jira/jql.ts:169`                                                                                |
 | `§3a`   | `architecture/overview.md:319`, `solve/attempts.ts:5`, `solve/commenter.ts:7`, `solve/commenter.test.ts:51`                                                                            |
 | `§6.3`  | `solve/delivery.ts:955`, `watch/counter.ts:8`, `watch/retriage.ts:6`, `watch/retriage.test.ts:138`                                                                                     |
 | `§7c`   | `jira/jql.ts:198`, `watch/retriage.ts:9`, `triage/gate.test.ts:508`                                                                                                                    |
-| `§3c`   | `cli/solve-outcome.ts:322,326`, `jira/jql.ts:172`                                                                                                                                      |
+| `§3c`   | `cli/solve-outcome.ts:388,392`, `jira/jql.ts:172`                                                                                                                                      |
 | `§6.2`  | `solve/delivery.ts:666`                                                                                                                                                                |
-| `§5b`   | `architecture/overview.md:200` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                                   |
+| `§5b`   | `architecture/overview.md:200` — **start here.** The only citation in the tree that names its target document; the name was right and the target was deleted                           |
 | `§24`   | `architecture/overview.md:356` — `` `agent-solve` (§24) ``, in a document whose own headings are 1, 2, 5, 6, 8, 9, 11; intended target is almost certainly `architecture/solve.md` §15 |
 | `§12`   | `.claude/skills/dev-house-rules/INCIDENTS.md:1058` — the quoted `` `PLAN.md` §12 `` above                                                                                              |
 
@@ -848,7 +845,7 @@ the deletion case above gives.
   `watch/relevance.ts:12`, `watch/memo.ts:9`, `architecture/overview.md:315`. `PLAN.md §1` is the
   model question and `architecture/overview.md §1` is the credential split; **the rule itself is in
   neither**, so these five have no correct target to be given.
-- "§6: advance, then claim" — `review-loop.ts:64`, `review-loop.test.ts:126`. Now
+- "§6: advance, then claim" — `review-loop.ts:71`, `review-loop.test.ts:182`. Now
   `architecture/overview.md §2`, at L98; `PLAN.md §6` is the second gate. A third site, `index.ts:44`,
   is gone — the entry named it and nothing noticed it had left.
 
@@ -868,13 +865,13 @@ than passing silently. The same is true of the `SOLVE_INSTRUCTIONS.md` ones. **T
 "~57" and the tilde is why it survived the drift** — an approximate number cannot be falsified by a
 recount, which is exactly what `STARTING.md` item 3 means by letting the dated list be the count.
 
-**The legal vocabulary, which the resolver parses rather than being told, as of 2026-09-18:**
+**The legal vocabulary, which the resolver parses rather than being told, as of 2026-09-24:**
 `architecture/overview.md` §1, 2, 5, 6, 8, 9, 11; `architecture/module-map.md` §7;
 `architecture/triage.md` §3, 4, 12; `architecture/solve.md` §15; `architecture/configuration.md` §10;
 `architecture/invariants.md` §14 plus §14.1–14.17; `architecture/not-built.md` §13;
 `architecture/guardrails.md` §16 — §1 through §16 exactly once each, across eight files. Then
-`PLAN.md` §1–41 less the numbers it has retired; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
-`SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten of the eleven dangling tokens are in none
+`PLAN.md`'s own entry numbers, less the ones it has retired; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
+`SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`/`2d`. Ten of the eleven dangling tokens are in none
 of them; `§12` is the exception, and the shape worth remembering — it exists, in
 `architecture/triage.md`, and dangles only because the citation names `PLAN.md`.
 
@@ -922,15 +919,16 @@ message that merely _discusses_ pushing to `main` is refused as though it were o
 times now, twice on this repository's own commits and again on 2026-09-18 — `git commit -m "docs:
 explain why git push to main is refused"` is still denied by the running script.
 
-**Two rewrites of this hook have landed since and neither touched it**, which is the part worth
-recording: `0cf4c10` put 146 lines into `branch-guard.sh` and `88caf5f` another 55, both in the
-adjacent blocks, and the four-line push check sat between them unchanged. A defect survives edits to
+**Three rewrites of this hook have landed since and none touched it**, which is the part worth
+recording: `57f6923` put 146 lines into `branch-guard.sh` and `d0295b6` another 55, both in the
+adjacent blocks, and `0bc643c` then trimmed their comments; the four-line push check sat between
+them unchanged throughout. A defect survives edits to
 the file it lives in when nothing fails.
 
-**It has a second half, found on 2026-09-18 and worse than the first.** `88caf5f` introduced
-`isProtected` to end exactly this class — its comment says "One list. A name refused by one hatch and
-accepted by another is the hole this guard exists to close, and there were three copies of it before
-this." **There were four.** The push check keeps its own inline `(main|master|develop)`, and
+**It has a second half, found on 2026-09-18 and worse than the first.** `d0295b6` introduced
+`isProtected` to end exactly this class, replacing what it counted as three copies of the list, and
+its comment still says "One list: a name refused by one hatch and accepted by another is the hole
+this guard exists to close." **There were four copies.** The push check keeps its own inline `(main|master|develop)`, and
 `isProtected` also protects `release/*`, so `git push origin release/1.2` is allowed — measured,
 silent, from a feature branch. The false positive is embarrassing; this one is a hole, and it is in
 the check whose comment claims the holes are closed.
