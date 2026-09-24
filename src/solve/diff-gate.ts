@@ -7,6 +7,8 @@
  * wrong one, and refusing here discards a pass that has already been paid for.
  */
 
+import type { BumpVerdict, DependencyBump } from "./dependency-bump.ts";
+
 /** One file's entry in a numstat record. */
 export interface FileChange {
   readonly path: string;
@@ -18,6 +20,8 @@ export interface FileChange {
 interface Rule {
   readonly pattern: RegExp;
   readonly why: string;
+  /** The one exception a rule may carry, decided by `dependency-bump.ts` from the change's content. */
+  readonly unless?: "dependency-bump";
 }
 
 /**
@@ -81,6 +85,7 @@ export const VERIFICATION_PATHS: readonly Rule[] = [
   {
     pattern: /(^|\/)pom\.xml$/u,
     why: "the Maven build is defined here — a skipped test, a dropped module or a relaxed plugin makes the build pass without making the code correct",
+    unless: "dependency-bump",
   },
   {
     // Matched even though `verify.ts` invokes `mvn` from PATH, not the wrapper: a rewritten `mvnw` still changes what every other run uses.
@@ -94,6 +99,8 @@ export type DiffVerdict =
       readonly ok: true;
       readonly files: number;
       readonly lines: number;
+      /** Every dependency version the diff moved; empty for a diff that touched no build file. */
+      readonly bumps: readonly DependencyBump[];
     }
   | {
       readonly ok: false;
@@ -201,6 +208,11 @@ function match(rules: readonly Rule[], path: string): Rule | undefined {
   return rules.find((rule) => rule.pattern.test(path));
 }
 
+/** Whether only a dependency bump could excuse a change to this path, so its content must be read. */
+export function isDependencyBumpPath(path: string): boolean {
+  return match(VERIFICATION_PATHS, path)?.unless === "dependency-bump";
+}
+
 /**
  * Every path in recon's plan that `checkDiff` would refuse by name, with why — empty when none.
  * The plan is the model's account, so this may only ever refuse: an empty answer allows nothing,
@@ -220,7 +232,8 @@ export function plannedPathRefusals(
       continue;
     }
     const rule = match(VERIFICATION_PATHS, path) ?? match(FORBIDDEN_PATHS, path);
-    if (rule !== undefined) {
+    // A path alone cannot say whether its change will be a dependency bump, so that rule waits for the diff.
+    if (rule !== undefined && rule.unless === undefined) {
       reasons.push(`${path}: ${rule.why}`);
     }
   }
@@ -231,8 +244,13 @@ export function plannedPathRefusals(
  * Collects every refusal reason rather than stopping at the first, and refuses an empty diff
  * outright — a run that edits a file and reverts it would otherwise look like success.
  */
-export function checkDiff(changes: readonly FileChange[]): DiffVerdict {
+export function checkDiff(
+  changes: readonly FileChange[],
+  /** From `judgeBumps`. A path it has no verdict for is refused as if no exception existed. */
+  bumpVerdicts: ReadonlyMap<string, BumpVerdict> = new Map(),
+): DiffVerdict {
   const reasons: string[] = [];
+  const bumps: DependencyBump[] = [];
 
   if (changes.length === 0) {
     return {
@@ -256,8 +274,13 @@ export function checkDiff(changes: readonly FileChange[]): DiffVerdict {
       );
     }
     const verification = match(VERIFICATION_PATHS, change.path);
-    if (verification !== undefined) {
-      reasons.push(`${change.path}: ${verification.why}`);
+    const bump = verification?.unless === undefined ? undefined : bumpVerdicts.get(change.path);
+    if (bump?.ok === true) {
+      bumps.push(...bump.bumps);
+    } else if (verification !== undefined) {
+      reasons.push(
+        `${change.path}: ${verification.why}${bump === undefined ? "" : ` — and this change is more than a dependency version: ${bump.reason}`}`,
+      );
     }
     const forbidden = match(FORBIDDEN_PATHS, change.path);
     if (forbidden !== undefined) {
@@ -275,5 +298,5 @@ export function checkDiff(changes: readonly FileChange[]): DiffVerdict {
   if (reasons.length > 0) {
     return { ok: false, reasons };
   }
-  return { ok: true, files, lines };
+  return { ok: true, files, lines, bumps };
 }
