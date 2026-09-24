@@ -344,26 +344,38 @@ export const REVIEW_SCHEMA = {
         properties: {
           path: {
             type: "string",
+            pattern: FILLED,
             description: "Repository-relative path of the file, exactly as in `filesTouched`.",
           },
           requestedBy: {
             type: "string",
+            pattern: FILLED,
             description:
               "Where the member asked: `comment N`, exactly as that comment's header numbers it, or the id of the thread, copied exactly.",
           },
           what: {
             type: "string",
+            pattern: FILLED,
             description: "One sentence: what you changed in that file beyond the ticket.",
           },
         },
       },
     },
   },
-  // `parseReview`'s answered-nothing rule, told in-session so a round is corrected rather than discarded after its work is done.
-  if: { properties: { responses: { maxItems: 0 } } },
-  // A JSON Schema keyword holding an object, never a function, so nothing can treat this as a promise.
-  // oxlint-disable-next-line unicorn/no-thenable
-  then: { properties: { threadAnswers: { minItems: 1 } } },
+  // `parseReview`'s rules a schema can say, told in-session so a round is corrected rather than discarded after its work is done.
+  allOf: [
+    {
+      if: { properties: { responses: { maxItems: 0 } } },
+      // A JSON Schema keyword holding an object, never a function, so nothing can treat this as a promise.
+      // oxlint-disable-next-line unicorn/no-thenable
+      then: { properties: { threadAnswers: { minItems: 1 } } },
+    },
+    {
+      if: { required: ["changed"], properties: { changed: { const: false } } },
+      // oxlint-disable-next-line unicorn/no-thenable
+      then: { properties: { widened: { maxItems: 0 } } },
+    },
+  ],
 } as const;
 
 /**

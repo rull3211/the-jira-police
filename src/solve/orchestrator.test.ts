@@ -1431,6 +1431,19 @@ describe("resolveReview", () => {
     expect(h.calls.some(PULL_REQUEST_DIFF)).toBe(true);
   });
 
+  it("logs each widening it kept, with the file, who asked and what changed", async () => {
+    const info = vi.spyOn(createLogger("solve"), "info").mockImplementation(() => {});
+    const { h } = harness({ review: review({ widened: [widening()] }) });
+
+    await resolveReview(h.deps, { ...reviewRequest, members: new Set(["comment 2"]) });
+
+    expect(info).toHaveBeenCalledWith(
+      "solve.review.widened",
+      expect.objectContaining({ widened: [widening()] }),
+    );
+    info.mockRestore();
+  });
+
   it("refuses a widening cited to a comment no member wrote, before verifying anything", async () => {
     const { h } = harness({ review: review({ widened: [widening()] }) });
 

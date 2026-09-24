@@ -609,6 +609,9 @@ function satisfies(value: unknown, rule: Rule): boolean {
   if (keyword === "maxItems") {
     return Array.isArray(value) && value.length <= Number(bound);
   }
+  if (keyword === "const") {
+    return value === bound;
+  }
   throw new Error(`a keyword this test does not evaluate: ${String(keyword)}`);
 }
 
@@ -692,11 +695,32 @@ function reviewParserAccepts(report: Record<string, unknown>): boolean {
   }
 }
 
-describe("REVIEW_SCHEMA's conditional, against parseReview", () => {
+describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
+  const holds = (report: Record<string, unknown>, properties: Readonly<Record<string, Rule>>) =>
+    Object.entries(properties).every(([field, rule]) => satisfies(report[field], rule));
+
+  /** Every constraint a `widened` field states; one with none left constrains nothing, as the CLI would read it. */
+  function itemsFilled(report: Record<string, unknown>): boolean {
+    const fields: Readonly<Record<string, Rule>> =
+      REVIEW_SCHEMA.properties.widened.items.properties;
+    const entries = Array.isArray(report["widened"]) ? (report["widened"] as unknown[]) : [];
+    return entries.every((entry) =>
+      Object.entries(fields).every(([field, rule]) => {
+        const { type: _type, description: _description, ...constraint } = rule;
+        return (
+          Object.keys(constraint).length === 0 ||
+          satisfies((entry as Record<string, unknown>)[field], constraint)
+        );
+      }),
+    );
+  }
+
   function schemaAccepts(report: Record<string, unknown>): boolean {
     return (
-      !satisfies(report["responses"], REVIEW_SCHEMA.if.properties.responses) ||
-      satisfies(report["threadAnswers"], REVIEW_SCHEMA.then.properties.threadAnswers)
+      itemsFilled(report) &&
+      REVIEW_SCHEMA.allOf.every(
+        (branch) => !holds(report, branch.if.properties) || holds(report, branch.then.properties),
+      )
     );
   }
 
@@ -711,6 +735,27 @@ describe("REVIEW_SCHEMA's conditional, against parseReview", () => {
     "a round answering only a thread": review({ responses: [], threadAnswers: [threadAnswer] }),
     "a round answering both": review({ threadAnswers: [threadAnswer] }),
     "a round answering nothing": review({ responses: [], threadAnswers: [] }),
+    "a widening on a round that changed something": review({
+      filesTouched: ["src/a.ts"],
+      widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
+    }),
+    "a widening on a round that changed nothing": review({
+      changed: false,
+      filesTouched: [],
+      widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
+    }),
+    "a widening naming no file": review({
+      filesTouched: ["src/a.ts"],
+      widened: [{ path: " ", requestedBy: "comment 1", what: "dropped an export" }],
+    }),
+    "a widening naming no request": review({
+      filesTouched: ["src/a.ts"],
+      widened: [{ path: "src/a.ts", requestedBy: '""', what: "dropped an export" }],
+    }),
+    "a widening saying nothing about what changed": review({
+      filesTouched: ["src/a.ts"],
+      widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "" }],
+    }),
   };
 
   for (const [name, report] of Object.entries(cases)) {
@@ -1407,14 +1452,15 @@ describe("parseReview", () => {
       expect(() => parseReview(without, "SSX-3784")).toThrow(/widened was not an array/u);
     });
 
+    // Each by its own message: a blank path is also missing from filesTouched, which would refuse it anyway.
     it.each([
-      ["no file", { path: "" }],
-      ["no request", { requestedBy: " " }],
-      ["nothing said about what changed", { what: "" }],
-    ])("refuses an entry with %s", (_label, overrides) => {
+      ["no file", { path: "" }, /named no file or no request/u],
+      ["no request", { requestedBy: " " }, /named no file or no request/u],
+      ["nothing said about what changed", { what: "" }, /did not say what changed/u],
+    ])("refuses an entry with %s", (_label, overrides, message) => {
       expect(() =>
         parseReview(review({ widened: [widenedChange(overrides)] }), "SSX-3784"),
-      ).toThrow(SolveParseError);
+      ).toThrow(message);
     });
 
     it("refuses a widening of a file the round says it did not touch", () => {

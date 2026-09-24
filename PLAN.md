@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3133 tests in 96 files**, no build step.
+> **3139 tests in 96 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -428,6 +428,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 - **The mixed-batch rule.** No round has yet read a human and a reviewer comment in the same batch.
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
+- **`boundWidening` has never refused a real round.** Its refusals are tested, not watched: on #2688
+  on 2026-09-24, round 6 was discarded inside `parseReview` before reaching it, and rounds 7 and 8
+  were not refused by it. A member's request aimed at a file the pull request had not changed is the
+  case that would show it.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
   daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket

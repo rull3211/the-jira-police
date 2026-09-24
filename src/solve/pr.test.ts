@@ -1223,7 +1223,6 @@ describe("readReview", () => {
   });
 });
 
-/** One thread node, with every field present unless a test removes it. */
 describe("readReview's repository members", () => {
   it("marks the member who asked, and not the reviewer or this service's own reply", async () => {
     // The shape PR #2688 came back in on 2026-09-24: `gh` posts as the operator, so ours reads MEMBER too.
@@ -1291,6 +1290,7 @@ describe("readReview's repository members", () => {
   });
 });
 
+/** One thread node, with every field present unless a test removes it. */
 function thread(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: "PRRT_1",
