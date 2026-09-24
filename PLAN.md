@@ -155,6 +155,26 @@ is §55.
 
 <!-- refs:on -->
 
+### 55. This file describes some things that are built, and cites lines that have moved
+
+**Branch:** `chore/plan-cleanup`
+
+**What is being attempted.** Read every entry against the tree at the merge of #75, #76 and #77, and
+cut what is no longer true: a sentence describing something that now exists, a count that has moved,
+a `file:line` that points at something else. Where a stale coordinate is still needed, name the
+symbol instead. Nothing is added except what a correction needs.
+
+**Why now.** Three branches merged within the hour, each editing this file from a different base,
+and the checks that pass cannot see most of this: `docs:check` pins the counts it was told about, and
+a line number that now points at the wrong statement still resolves. Found on a first read: §1 still
+counts five solve passes after `repair` became a sixth, the drift §48 exists to record; §33 cites
+`schema.ts` and `orchestrator.ts` by line after both files grew today; §14 gives this file's range as
+§1–41.
+
+**What would make it the wrong idea.** A cleanup that deletes an open item because it reads as old
+is worse than a stale sentence, since the stale sentence is at least still findable. Every cut here
+has to be backed by the tree or by a merged pull request, never by how an entry reads.
+
 ### 54. A dependency bump in a Node repository is still refused, because the pass cannot write the lockfile
 
 **Branch:** none yet.
