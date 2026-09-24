@@ -53,7 +53,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50 and §51, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51 and §52, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -147,37 +147,33 @@ typed `--repair` rung and the `REPAIR_PUBLISH` loop. The last two were claimed b
 evidence §45 itself asked for, by the operator's decision, and that argument — with its
 counter-argument and what withdraws it — now lives in `architecture/solve.md` §15 rather than
 being deleted with the entry. §51 stopped a recon plan naming a path the diff gate refuses before
-the fix pass, and was opened and deleted inside the branch that built it. The next entry is §53.
+the fix pass, and was opened and deleted inside the branch that built it. §52 let a run change a
+`pom.xml` when the only change is a dependency version, behind `DEPENDENCY_BUMPS`; its Node half is
+§54. §53 is taken by a branch open alongside it. The next entry is §55.
 
 <!-- refs:on -->
 
-### 52. A ticket that needs a newer version of a dependency cannot be solved at all
+### 54. A dependency bump in a Node repository is still refused, because the pass cannot write the lockfile
 
-**Branch:** `feat/maven-dependency-bump`, stacked on `fix/refuse-at-recon`, because that branch's
-plan check must stop refusing `pom.xml` by name the moment a `pom.xml` change can be allowed.
+**Branch:** none yet.
 
-**What is being attempted.** Let a run change `pom.xml` when the only change is the version of a
-dependency the file already declares: a literal `<version>` inside a `<dependency>`, or a property
-used nowhere but as dependency versions. One judge decides it, and the diff gate, `verify`'s
-refusal to grade a changed build file, and the plan check all ask it rather than keeping copies.
-Anything else in `pom.xml` stays refused, as do plugin and parent versions, profiles, `mvnw` and
-`.mvn/`. The pull request names each bump at the top, written by the harness.
+**What is not built.** The `pom.xml` exception (`architecture/solve.md` §15) has no Node
+counterpart. A version bump there changes `package.json` and the lockfile together, and the pass
+has no shell, so it cannot produce the lockfile; `verify` installs with the lockfile pinned, so a
+hand-edited `package.json` alone fails at install. Both files stay refused, and a Node ticket that
+needs a newer library is a bail.
 
-**Why now.** SSX-3918, 2026-09-24: the fix needs `ReasonForPolicyCancellation.KONV_ALIS`, which
-exists only from `lisa-services-api` 3.203, and no run may write the one-line bump that gets it.
-The operator's position, which this entry takes as given: bumping a dependency to get what the task
-needs is an ordinary part of solving a ticket, not an exception to it.
+**The shape it would take.** The judge would allow a `package.json` change that only moves the
+version of an existing entry in `dependencies` or `devDependencies`, and the harness — not the
+model — would regenerate the lockfile with the repository's own package manager before `verify`,
+reporting the lockfile diff as the harness's in the pull request. That makes the harness run an
+install with a manifest the model edited, which is new privilege and the reason this is its own
+entry rather than a line in the Maven one.
 
-**What it lets the service do.** Solve a ticket whose fix needs a newer version of a dependency the
-repository already uses, with the bump in the same pull request as the code that needs it.
-
-**What would make it the wrong idea.** A bump is code nobody in the repository wrote: 3.181 to
-3.203 is 22 releases, and the harness reads none of them. A test-scope dependency is part of what
-the tests do, so bumping one can change what "passing" means — the thing `pom.xml` was refused to
-prevent. The only defences are the notice and the human who merges. If a bump is ever found to have
-made verification pass without the code being right, narrow this to non-test scopes, or withdraw
-it. Not covered: a Node repository, where the bump also rewrites a lockfile the pass cannot
-produce.
+**What would make it the wrong idea.** A regenerated lockfile can move far more than the one
+version asked for — every transitive range resolves afresh — and no reviewer reads a lockfile
+diff. If that is the cost, a narrower form updates only the named package's entries in the
+lockfile and refuses when anything else would move.
 
 ### 46. Nothing can say which code a running daemon is executing
 
@@ -465,6 +461,13 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   the person. Re-driving a ticket the solver has already tried means
   adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
   so on the way out.
+
+- **A review round on a pull request that carries a dependency bump has never run.** The first
+  such pull request exists, storebrand-digital/insurance-commerce-rest-api#1459, opened 2026-09-24
+  with the notice above everything the model wrote. Every later round gates the pull request's
+  whole diff, so the bump reaches the judge again on each one; that path is tested, not watched.
+  The pull request body is written once, so a bump a later round introduces would not be named in
+  it.
 
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the

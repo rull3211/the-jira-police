@@ -593,7 +593,11 @@ the tests do, so this exception can change what passing means — the thing the 
 against. The notice and the human who merges are the only defences; if a bump is ever found to
 have made verification pass without the code being right, narrow this to non-test scopes or
 withdraw it. SSX-3918 is the case: `lisa-services-api` 3.181 to 3.203 for one enum constant, 22
-releases the harness reads none of.
+releases the harness reads none of; its first run under the exception opened
+storebrand-digital/insurance-commerce-rest-api#1459 on 2026-09-24. `DEPENDENCY_BUMPS` switches it,
+on by default by the operator's decision, and read through `flag()`. A Node repository has no
+counterpart: the lockfile a bump rewrites is one the pass cannot produce, which `PLAN.md` §54
+records.
 
 The gate is a backstop, not the only defence: `createWorktree` and `attachWorktree`
 (`worktree.ts`) call `CommandRunner.excludeAgentPaths` once the worktree exists, which lists
