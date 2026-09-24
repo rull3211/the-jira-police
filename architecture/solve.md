@@ -627,7 +627,10 @@ inside a processing instruction — Maven refuses to read the file at all, so th
 rather than green. The same drive found a hole older than this change: Maven joins the text either
 side of a comment, so `$<!-- x -->{name}` interpolates, and a property search over the original text
 never saw that use. Property uses are now searched in both — the original, where a use inside a
-comment still refuses as it always did, and the cut text. What stays open: anything that reads
+comment still refuses as it always did, and the cut text. Driven live on #1459 round 6, 2026-09-24:
+asked to correct that `pom.xml` comment, the round changed its one line, the gate passed it beside
+the pull request's own `lisa-services-api.version` bump, and it pushed as `3a6f897`. What stays
+open: anything that reads
 `pom.xml` as a file rather than as Maven's model, a plugin or a test, sees the edit, and nothing here
 knows of one.
 
