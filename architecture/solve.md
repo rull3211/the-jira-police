@@ -567,7 +567,7 @@ path, otherwise reaches the end looking exactly like success and opens an empty 
 Every reason is collected rather than the first, for the same reason the triage gate collects
 them.
 
-**In a review round one refused edit no longer costs every other.** Round 5 on #1459 did all four
+**In a review round one refused edit no longer costs every other.** Round 4 on #1459 did all four
 things Jacob's review asked, in files the pull request already changed, and was discarded whole
 because one of them edited a comment inside `pom.xml`. The gate now names the paths it refused
 (`refusedPaths`, `null` when a reason belongs to no ordinary path), and `dropRefusedEdits`
@@ -1108,7 +1108,7 @@ authority, on any pull request still open from then.
 
 A round that ends `abandoned`, `refused` or `failed` at verification used to post nothing, and its
 reservation had already moved the cursor past the comments it read — so the person who asked saw
-silence and had no reason to ask again. Rounds 6 and 7 on #2688 and round 5 on #1459 all ended that
+silence and had no reason to ask again. Rounds 6 and 7 on #2688 and round 4 on #1459 all ended that
 way on 2026-09-24. `tellWhoAsked` (`delivery.ts`) now replies before the outcome is returned: in the
 thread for each inline thread, and for the top-level comments, which GitHub gives no way to reply
 to, one `bot:` comment quoting the first line of each.

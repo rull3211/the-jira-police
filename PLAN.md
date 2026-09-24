@@ -93,7 +93,7 @@ verifies the rest, pushes it, and replies to the comment that asked naming the e
 the rule that dropped it. A refused path the round created, or one the pull request's own commits
 already break, still refuses the whole round.
 
-**Why now.** Round 5 on #1459: Jacob's review asked for four things in files the pull request
+**Why now.** Round 4 on #1459: Jacob's review asked for four things in files the pull request
 already changes, the round did all four, and the whole round was discarded because one of them
 edited a comment inside `pom.xml`, which the gate refuses whatever the change.
 
@@ -136,7 +136,7 @@ plain comment, which GitHub cannot reply to, a `bot:` comment mentioning the aut
 what it answers. A top-level comment that asks for nothing may be marked as needing no reply, and
 gets none.
 
-**Why now.** Rounds 6 and 7 on #2688 and round 5 on #1459 (Jacob's review, refused over a
+**Why now.** Rounds 6 and 7 on #2688 and round 4 on #1459 (Jacob's review, refused over a
 `pom.xml` comment edit) all did real work and posted nothing, and each round's reservation had
 already moved the cursor past the comment that asked, so nobody knew to ask again.
 
