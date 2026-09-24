@@ -55,6 +55,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   unresolved: "",
   abandoned: "",
   injectionNoticed: "",
+  widened: [],
   ...overrides,
 });
 
@@ -941,6 +942,76 @@ describe("advance", () => {
     expect(feedback).not.toContain("as you suggested");
   });
 
+  describe("a repository member's request", () => {
+    /** Copilot's review, then the operator asking for more, as PR #2688 had them. */
+    const memberAsked: Rule = {
+      match: saw("pr", "view"),
+      reply: {
+        stdout: JSON.stringify({
+          state: "OPEN",
+          isDraft: true,
+          createdAt: "2026-09-05T09:00:00Z",
+          reviews: [
+            {
+              author: { login: "copilot" },
+              authorAssociation: "NONE",
+              body: "the wrapper looks unnecessary",
+            },
+          ],
+          comments: [
+            {
+              author: { login: "rull3211" },
+              authorAssociation: "MEMBER",
+              body: "and drop the unused exports while you are in there",
+            },
+          ],
+          reviewRequests: [],
+        }),
+      },
+    };
+    const widened = (requestedBy: string) =>
+      review({ widened: [{ path: FILES[0] ?? "", requestedBy, what: "dropped the exports" }] });
+
+    it("is labelled with a token minted for the round, and the pass is told the same token", async () => {
+      const h = harness({ review: review() }, [memberAsked]);
+
+      await advance(h.deps, advanceRequest);
+
+      const options = h.seen[0]?.options;
+      const token = options?.memberToken ?? "";
+      expect(token).toMatch(/^[0-9a-f]{12}$/u);
+      expect(options?.reviewFeedback).toContain(`by rull3211 · repository member ${token} ---`);
+      expect(options?.reviewFeedback).toContain("by copilot ---");
+    });
+
+    it("gets a different token next round, so a label quoted back from this one does not pass", async () => {
+      const first = harness({ review: review() }, [memberAsked]);
+      const second = harness({ review: review() }, [memberAsked]);
+
+      await advance(first.deps, advanceRequest);
+      await advance(second.deps, advanceRequest);
+
+      expect(first.seen[0]?.options.memberToken).not.toBe(second.seen[0]?.options.memberToken);
+    });
+
+    it("lets a widening cite the member's comment", async () => {
+      const h = harness({ review: widened("comment 2") }, [memberAsked]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({ kind: "iterated", pushed: true });
+    });
+
+    it("refuses a widening cited to the reviewer's comment", async () => {
+      const h = harness({ review: widened("comment 1") }, [memberAsked]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({ kind: "refused", stage: "widening" });
+      expect(ran(h, "push")).toBe(false);
+    });
+  });
+
   it("does not give up when the only comment left is our own", async () => {
     // Counting our own reply as feedback would undraft while the reviewer is still typing.
     const h = harness({}, [
@@ -1759,6 +1830,7 @@ const said = (author: string, body: string, origin: ReviewOrigin = "reviewer"): 
   createdAt: "2026-09-05T10:00:00Z",
   id: "IC_1",
   origin,
+  member: false,
 });
 
 const stateWith = (...comments: readonly ReviewComment[]): ReviewState => ({

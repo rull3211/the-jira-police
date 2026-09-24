@@ -68,6 +68,7 @@ import {
   parseSimplify,
 } from "./runner.ts";
 import { prepareSkillRoot, removeSkillRoot } from "./skill-root.ts";
+import { checkWidening } from "./widening.ts";
 import {
   checkFailFirst,
   verify,
@@ -1412,7 +1413,7 @@ export type ReviewRoundOutcome =
    */
   | {
       readonly kind: "refused";
-      readonly stage: "diff-gate" | "verification" | "write-escape";
+      readonly stage: "diff-gate" | "verification" | "write-escape" | "widening";
       readonly reasons: readonly string[];
     }
   | { readonly kind: "failed"; readonly reason: string; readonly verification: VerificationResult }
@@ -1427,6 +1428,10 @@ export interface ReviewRoundRequest extends SolveRequest {
   readonly worktree: Worktree;
   /** The reviewer's comments, rendered. Data — see `REVIEW_SCHEMA`. */
   readonly reviewFeedback: string;
+  /** The token in `reviewFeedback`'s repository-member label, which the prompt names outside the fence. */
+  readonly memberToken: string;
+  /** What a `widened` entry may cite; `memberSources` over the same comments and threads `reviewFeedback` rendered. */
+  readonly members: ReadonlySet<string>;
 }
 
 /**
@@ -1467,6 +1472,44 @@ export async function resolveReview(
   }
 }
 
+/** `null` when every declared widening cites a member and a file the pull request already changed. */
+async function boundWidening(
+  runner: CommandRunner,
+  request: ReviewRoundRequest,
+  report: ReviewReport,
+): Promise<ReviewRoundOutcome | null> {
+  // HEAD is still the pull request as the member saw it: the pass has no shell, and the round's edits are uncommitted.
+  // Three dots, so a base that moved since does not lend the pull request its files.
+  const before = await gitDiff(runner, request.worktree.path, request.gitTimeoutMs, [
+    "--numstat",
+    "-z",
+    `${request.baseRef}...HEAD`,
+  ]);
+  if (before === null) {
+    return {
+      kind: "refused",
+      stage: "widening",
+      reasons: [
+        "could not read what the pull request changed before this round, so the widening it declared could not be bounded",
+      ],
+    };
+  }
+  const reasons = checkWidening(
+    report.widened,
+    request.members,
+    new Set(parseNumstat(before).map((change) => change.path)),
+  );
+  if (reasons.length === 0) {
+    return null;
+  }
+  log.info("solve.review.widening_refused", {
+    issueKey: request.issueKey,
+    widened: report.widened.length,
+    reasons: reasons.length,
+  });
+  return { kind: "refused", stage: "widening", reasons };
+}
+
 async function runReviewRound(
   deps: SolveDependencies,
   request: ReviewRoundRequest,
@@ -1483,6 +1526,7 @@ async function runReviewRound(
       worktreePath: worktree.path,
       ticket: request.ticket,
       reviewFeedback: request.reviewFeedback,
+      memberToken: request.memberToken,
       skillRootPath,
       ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
       ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
@@ -1514,6 +1558,18 @@ async function runReviewRound(
   if (!report.changed) {
     // A review round can raise only questions, with nothing to re-verify.
     return { kind: "no-change", report };
+  }
+
+  if (report.widened.length > 0) {
+    const refusal = await boundWidening(commands, request, report);
+    if (refusal !== null) {
+      return refusal;
+    }
+    // Each entry rather than a count: this line is the harness's only record of a change beyond the ticket, and on whose word.
+    log.info("solve.review.widened", {
+      issueKey,
+      widened: report.widened.map(({ path, requestedBy, what }) => ({ path, requestedBy, what })),
+    });
   }
 
   const diffText = await readNumstat(

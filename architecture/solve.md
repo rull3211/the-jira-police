@@ -344,14 +344,14 @@ sets — and `PASSES` in `runner.ts` is the list, iterated by the tests rather t
 because three hand-copied copies of this membership all stopped testing anything on the day it
 changed.
 
-| Pass       | Tools                              | Shown                                                                    | Must return                                                                                                             |
-| ---------- | ---------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `recon`    | `Read` `Grep` `Glob`               | the ticket                                                               | proceed or a bail reason; a dev-lens correction                                                                         |
-| `fix`      | the above, plus `Write` and `Edit` | the ticket and recon's brief                                             | files touched, a commit subject, a test story                                                                           |
-| `simplify` | same as `fix`, plus `Skill`        | the ticket and the real diff                                             | changes made, or why it declined                                                                                        |
-| `review`   | same as `fix`                      | the ticket, the review comments and every open inline thread with its id | a response to every comment, plus a `threadAnswers` entry per thread carrying a reply, a `basis` and whether to resolve |
-| `merge`    | same as `fix`                      | the conflicted files                                                     | the resolution, and `took` — which side each hunk came from                                                             |
-| `repair`   | same as `fix`                      | the failing verification step's own captured output                      | the same report `fix` returns — a repair is a correction to the same change, not a different kind of report             |
+| Pass       | Tools                              | Shown                                                                                                                              | Must return                                                                                                                                                                                             |
+| ---------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recon`    | `Read` `Grep` `Glob`               | the ticket                                                                                                                         | proceed or a bail reason; a dev-lens correction                                                                                                                                                         |
+| `fix`      | the above, plus `Write` and `Edit` | the ticket and recon's brief                                                                                                       | files touched, a commit subject, a test story                                                                                                                                                           |
+| `simplify` | same as `fix`, plus `Skill`        | the ticket and the real diff                                                                                                       | changes made, or why it declined                                                                                                                                                                        |
+| `review`   | same as `fix`                      | the ticket, the review comments — a repository member's labelled with the round's token — and every open inline thread with its id | a response to every comment, plus a `threadAnswers` entry per thread carrying a reply, a `basis` and whether to resolve, and a `widened` entry per file changed beyond the ticket at a member's request |
+| `merge`    | same as `fix`                      | the conflicted files                                                                                                               | the resolution, and `took` — which side each hunk came from                                                                                                                                             |
+| `repair`   | same as `fix`                      | the failing verification step's own captured output                                                                                | the same report `fix` returns — a repair is a correction to the same change, not a different kind of report                                                                                             |
 
 Separate sessions rather than one, and the reason differs each time. **Recon must not be able to
 write**, or "should this be attempted" and "here is the attempt" collapse into one answer, and any
@@ -382,7 +382,7 @@ Recon's denials are the union of the solve denylist and `DENIED_BUILTIN_TOOLS` �
 list — rather than a hand-written `Write`/`Edit` pair, so a future finding that denies a tool in
 triage denies it in recon without anyone remembering to.
 
-**The parsers carry the rules the harness acts on; the recon schema repeats its own.** `parseRecon`
+**The parsers carry the rules the harness acts on; the recon and review schemas repeat theirs.** `parseRecon`
 refuses a verdict that both proceeds and bails — the run contradicted itself, so neither reading
 is safe to act on — and one that declines without saying why, because the reason is the only
 calibration the fitness assessment ever gets. A draft-07 `if`/`then`/`else` expresses the same
@@ -394,13 +394,18 @@ what `str` reads as empty, quote marks alone included — and a note in a field 
 discarding a correct plan, as it did twice on SSX-3918 that day. `parseRecon` keeps every check as
 the net, and adds one the schema cannot: a verdict whose written fields all say the same thing is a
 placeholder, the "Test" verdict SSX-3918 produced after three rejections for omitting
-`plannedFiles`. `parseFix` refuses a report where `testAdded` and
+`plannedFiles`. `REVIEW_SCHEMA` does the same for `parseReview`, since #2688's round 6 was discarded
+after its work was done for answering nothing: it carries the answered-nothing rule, a `widened`
+entry on a round that changed nothing, and a blank `widened` field, as an `allOf` of conditionals.
+The one `parseReview` rule it cannot carry — a `widened` path missing from `filesTouched` — needs two
+fields compared, which draft-07 cannot say. `parseFix` refuses a report where `testAdded` and
 `testOmittedReason` agree: exactly one of "a test was added" and "here is why not" must hold.
 `parseSimplify` is handed the fix pass's file list and refuses anything outside it, because
 simplification reaching a file the fix never touched is a second, unreviewed change riding inside
 a diff a human approved for a different reason. `parseReview` refuses a round that answered
 nothing, because a round with no responses is indistinguishable from the loop having quietly
-stopped working. Each is the same shape as `assertDorCoherent` in triage.
+stopped working. It also refuses a `widened` entry naming a file the round says it did not touch,
+or declared on a round that changed nothing. Each is the same shape as `assertDorCoherent` in triage.
 
 **`parseSimplify` is the one exception to "refuse rather than guess", and deliberately so.** Every
 parser above throws on a `changed`/`proceed`/`testAdded`-shaped self-contradiction because a real
@@ -1046,13 +1051,46 @@ inbox costs nothing. The real reason is that the wait is unbounded: on a pull re
 still commenting on, the draft flag never clears, and a human reviews something whose own flag says
 it is unfinished.
 
+#### A repository member may widen a round, and the harness decides who that is
+
+A review comment cannot extend what the ticket asked for unless GitHub says a repository member
+wrote it. PR #2688 is why: the operator asked three times for five unused exports to go, in a file
+the pull request already changed, and three rounds declined on the skill's rule against drive-by
+refactors. The pass had nothing it was allowed to trust about who was asking — the operator and
+Copilot rendered identically, as `by <login>` inside one forgeable block.
+
+- **Who.** `isMemberComment` (`pr.ts`) reads `authorAssociation` from both transports and grants
+  `OWNER`, `MEMBER` and `COLLABORATOR`, never the requested reviewer, automation, a `[bot]` login,
+  or a body carrying the `bot: ` prefix. The prefix check is not redundant: `gh` posts as the
+  operator, so everything this service writes comes back `MEMBER`. A missing association is no
+  authority. It is a separate field from `origin`, which answers what a round costs against
+  `MAX_REVIEW_ITERATIONS` — there a deleted account reads `human`, the safe direction for that
+  question and the wrong one for this.
+- **Telling the pass.** Those comments' headers carry `repository member <token>`, and the prompt
+  names the token outside the fence. `advance` mints one per round, so a comment written before
+  the round cannot carry a label that passes: the one piece of structure in the review block a
+  comment body cannot forge.
+- **Bounding what it did.** The pass declares each widening in `widened`, and `boundWidening`
+  (`orchestrator.ts`) refuses the round at stage `widening`, before verification, when an entry
+  cites anything `memberSources` did not list or a path `<base>...HEAD` had not changed. Three dots,
+  so a base that moved since does not lend the pull request its files; `HEAD` rather than the
+  worktree, which already holds the round's own edits.
+
+**What it does not do.** It reads a declaration, so a round that widens without declaring passes,
+as it would have before. A refused round still writes nothing to the pull request, and its
+reservation has already moved the cursor past the comment that asked, so the member hears nothing
+unless they ask again. And the authority is only as good as the prefix on everything this service
+posts: replies from before `replyToThread` stamped it read as the operator's, with a member's
+authority, on any pull request still open from then.
+
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is
 model-written, the review bot reads it, the comments and the inline threads come back through
-`formatReviewFeedback` and `formatThreads` into one block and reach the model verbatim — delimiters and all, and those delimiters are forgeable by any comment
-containing the same string. The containment is structural and lives elsewhere: the denied tool
-set, the diff gate, verification from the pristine manifest, and a draft with a human on the other
-end. A keyword filter there would be worse than useless, because it would suggest the loop is
+`formatReviewFeedback` and `formatThreads` into one block and reach the model verbatim, delimiters
+and all. A comment containing the same string forges a delimiter, or a whole header; the member
+label's per-round token, above, is the one part of that block it cannot forge. The containment is
+structural and lives elsewhere: the denied tool set, `boundWidening`, the diff gate, verification
+from the pristine manifest, and a draft with a human on the other end. A keyword filter there would be worse than useless, because it would suggest the loop is
 contained at that layer when it is not. This is a known and accepted limitation of running the
 review loop at all.
 
