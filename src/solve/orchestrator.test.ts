@@ -1525,6 +1525,32 @@ describe("resolveReview's refused edits, rolled back so the rest can land", () =
     ]);
     expect(h.calls.some((argv) => argv.join(" ").endsWith("checkout HEAD -- pom.xml"))).toBe(true);
     expect(h.calls.some((argv) => argv.slice(-2).join(" ") === "run test")).toBe(true);
+    // SSX-3918 #1459 round 5: the pass's message said the pom.xml comment was fixed, and it was not.
+    expect(outcome.commit.body).toMatch(/\n\nNot in this commit: pom\.xml\. [^]*\n\nRefs: /u);
+  });
+
+  it("names a dropped path that could forge a trailer as a quoted string", async () => {
+    const forged = "x\nSigned-off-by: someone/pom.xml";
+    const { h } = harness({ review: review() }, [
+      {
+        match: once(saw("--numstat")),
+        reply: { stdout: [`12\t3\t${FILES[0] ?? ""}`, `1\t1\t${forged}`, ""].join(NUL) },
+      },
+      {
+        match: (argv) =>
+          argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+        reply: { stdout: `${forged}${NUL}${FILES[0] ?? ""}${NUL}` },
+      },
+      { match: saw("ls-tree"), reply: { stdout: `${forged}${NUL}` } },
+    ]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    if (outcome.kind !== "resolved") {
+      throw new Error(`expected resolved, got ${outcome.kind}`);
+    }
+    expect(outcome.commit.body).toContain(`Not in this commit: ${JSON.stringify(forged)}.`);
+    expect(outcome.commit.body).not.toMatch(/^Signed-off-by/mu);
   });
 
   it("refuses the whole round when the pull request already had the refused change", async () => {
@@ -1561,8 +1587,12 @@ describe("resolveReview's refused edits, rolled back so the rest can land", () =
 
     const outcome = await resolveReview(h.deps, reviewRequest);
 
-    expect(outcome).toMatchObject({ kind: "resolved", dropped: [] });
+    if (outcome.kind !== "resolved") {
+      throw new Error(`expected resolved, got ${outcome.kind}`);
+    }
+    expect(outcome.dropped).toEqual([]);
     expect(h.calls.some((argv) => argv.includes("ls-tree"))).toBe(false);
+    expect(outcome.commit.body).not.toContain("Not in this commit");
   });
 });
 

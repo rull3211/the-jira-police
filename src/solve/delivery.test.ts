@@ -1070,6 +1070,37 @@ describe("advance", () => {
       expect(told).not.toMatch(/@copilot/u);
     });
 
+    it("quotes a comment's first visible line, past an HTML comment GitHub would hide", async () => {
+      // SSX-3918 #1459 round 5 quoted `<!-- gh-pr-review -->`, which rendered as an empty quote.
+      const h = harness({ review: widened("comment 2") }, [
+        {
+          match: saw("pr", "view"),
+          reply: {
+            stdout: JSON.stringify({
+              state: "OPEN",
+              isDraft: true,
+              createdAt: "2026-09-05T09:00:00Z",
+              reviews: [],
+              comments: [
+                {
+                  author: { login: "jacobbiorn" },
+                  authorAssociation: "MEMBER",
+                  body: "<!-- gh-pr-review -->\n**Review:** 0 must fix \u00b7 3 nice to fix",
+                },
+              ],
+              reviewRequests: [],
+            }),
+          },
+        },
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).toContain("> **Review:** 0 must fix \u00b7 3 nice to fix");
+      expect(told).not.toContain("<!--");
+    });
+
     it("pushes the rest when one edit is refused, and tells the member who asked for it", async () => {
       const withPom = [`12\t3\t${FILES[0] ?? ""}`, "1\t1\tpom.xml", ""].join(NUL);
       let postRoundReads = 0;
@@ -1127,6 +1158,8 @@ describe("advance", () => {
       // Told to the comment the widening named, not to every comment on the round.
       expect(told).toContain("> and drop the unused exports while you are in there");
       expect(told).not.toContain("the wrapper looks unnecessary");
+      const commit = h.calls.find((argv) => argv.includes("commit") && argv.includes("-m"));
+      expect(commit?.join("\n")).toContain("Not in this commit: pom.xml.");
     });
 
     it("tells nothing to a comment the round marked as asking nothing", async () => {

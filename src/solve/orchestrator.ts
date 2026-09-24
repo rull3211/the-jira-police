@@ -1707,6 +1707,7 @@ async function runReviewRound(
       abandonedCause: "none",
     },
     issueKey,
+    droppedNote(dropped),
   );
   if (verification.outcome === "failed") {
     return await repairReviewRound(
@@ -1721,6 +1722,18 @@ async function runReviewRound(
   }
 
   return { kind: "resolved", report, commit, verification, dropped };
+}
+
+/** The pass wrote its commit message before these edits were rolled back, so it may still claim them. */
+function droppedNote(dropped: readonly DroppedEdit[]): string {
+  if (dropped.length === 0) {
+    return "";
+  }
+  // A path is the round's to name, and a newline in one would forge a trailer line.
+  const paths = dropped.map((edit) =>
+    /^[\w./-]+$/u.test(edit.path) ? edit.path : JSON.stringify(edit.path),
+  );
+  return `Not in this commit: ${paths.join(", ")}. The diff gate refused this round's edits there and they were rolled back, so anything above about them did not land.`;
 }
 
 /**

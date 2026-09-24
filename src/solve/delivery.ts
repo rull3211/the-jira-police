@@ -1249,9 +1249,11 @@ interface TellRequest {
   readonly timeoutMs: number;
 }
 
-/** A comment's first line, quoted, with every `@` broken so quoting a mention does not summon anyone. */
+/** A comment's first visible line, quoted, with every `@` broken so quoting a mention does not summon anyone. */
 function quoted(body: string): string {
-  const line = body.split("\n").find((candidate) => candidate.trim() !== "") ?? "";
+  // GitHub renders an HTML comment as nothing, so quoting one reads as an empty quote.
+  const visible = body.replace(/<!--[\s\S]*?(?:-->|$)/gu, "");
+  const line = visible.split("\n").find((candidate) => candidate.trim() !== "") ?? "";
   const cut = line.length > 120 ? `${line.slice(0, 117).trimEnd()}...` : line;
   return `> ${cut.trim().replaceAll("@", "@\u200b")}`;
 }

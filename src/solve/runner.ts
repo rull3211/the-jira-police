@@ -462,10 +462,17 @@ export interface CommitMessage {
  *
  * The body is also shortened here rather than trusted to the schema's instruction alone, since "keep it short" is arithmetic a model gets right only most of the time, and a 100-char commitlint cap doesn't forgive the rest. Nothing is lost: the long-form reasoning survives in `fix.summary`/`fix.residualRisk`, which reach the pull request body.
  */
-export function composeCommitMessage(report: FixReport, issueKey: string): CommitMessage {
+export function composeCommitMessage(
+  report: FixReport,
+  issueKey: string,
+  /** Harness-written, so wrapped but never cut to the model's sentence budget. */
+  note = "",
+): CommitMessage {
   const trailer = `Refs: ${issueKey}`;
-  const written = shortCommitBody(report.commitBody);
-  const body = written === "" ? trailer : `${written}\n\n${trailer}`;
+  const wrapped = wrapLine(note.trim(), BODY_WIDTH).join("\n");
+  const body = [shortCommitBody(report.commitBody), wrapped, trailer]
+    .filter((part) => part !== "")
+    .join("\n\n");
   return { subject: report.commitSubject, body };
 }
 

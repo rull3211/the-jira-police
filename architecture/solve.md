@@ -575,8 +575,12 @@ because one of them edited a comment inside `pom.xml`. The gate now names the pa
 changed and `HEAD` already had, then gates what is left again. The round continues to verification
 with `dropped` on its outcome, and `delivery.ts` tells whoever asked — the comment a `widened` entry
 names for that file, or the comments that asked anything — which edit was dropped and which rule
-dropped it. A path the round created, a path the pull request's own commits already break, a path
-outside the worktree, or a second gate that still refuses: the round is refused whole, as before.
+dropped it. The pass wrote its commit message before the rollback, so round 5 on #1459 pushed one
+saying the stale `pom.xml` comment was fixed; `droppedNote` now adds a harness line above the
+`Refs:` trailer naming each path not in the commit. The pass's replies can make the same claim, and
+the drop notice posted after them is what corrects it. A path the round created, a path the pull
+request's own commits already break, a path outside the worktree, or a second gate that still
+refuses: the round is refused whole, as before.
 The rules themselves are unchanged — nothing here lets an edit to a refused path through, it only
 stops that edit taking its neighbours with it. A solve run gets none of this: it has no pull request
 yet, so there is nothing to have landed the rest on.
@@ -1111,7 +1115,9 @@ reservation had already moved the cursor past the comments it read — so the pe
 silence and had no reason to ask again. Rounds 6 and 7 on #2688 and round 4 on #1459 all ended that
 way on 2026-09-24. `tellWhoAsked` (`delivery.ts`) now replies before the outcome is returned: in the
 thread for each inline thread, and for the top-level comments, which GitHub gives no way to reply
-to, one `bot:` comment quoting the first line of each.
+to, one `bot:` comment quoting the first visible line of each — past any HTML comment, which
+GitHub renders as nothing: quoting Jacob's review on #1459 by its `<!-- gh-pr-review -->` marker
+posted an empty quote.
 
 - **What is posted is the harness's reason, never the pass's replies.** A failed round's "Done —"
   describes a change that was discarded. `whyNothingLanded` writes the stage and the reasons, and a
