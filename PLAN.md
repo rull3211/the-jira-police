@@ -78,10 +78,52 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §58. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §60. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
+
+### 58. A review round that fails verification gets no repair round
+
+**Branch:** `feat/review-repair`, stacked on §57's `feat/human-review-widening`.
+
+**What is being attempted.** The repair authority a solve run has, given to a review round: a
+failed verification buys one repair pass under `REPAIR_ROUND`, its verdict recorded in
+`repair-rounds.md`, and a green one pushed only when armed — `--repair` by hand on `--advance`,
+`--review` and `--watch`, `REPAIR_PUBLISH` for the daemon.
+
+**Why now.** Round 7 on #2688, 2026-09-24: the member widening worked, the edit left `Address`
+declared and unused, `lint` failed, and the round ended `failed` with nothing posted. A repair pass
+handed eslint's one line would have deleted it. `runReviewRound` returns straight from `verify`.
+
+**The shape.** The round's edits are committed locally as the boundary, as the fix is before a
+solve's repair; a promoted green repair is pushed as a second commit with a harness-written notice
+on the pull request naming the failure; an unpromoted one leaves a local commit the next attach
+salvages and never pushes.
+
+**What would make it the wrong idea.** A review round's green repair reaches a pull request a
+person is already reading, where a solve's opens one nobody has read yet: the cheap repair — the
+assertion weakened — lands in a diff the reviewer thinks they have seen. The notice is the only
+compensation, as it is for solves.
+
+### 59. A review round that declines, fails or is refused says so nowhere
+
+**Branch:** `feat/review-repair`, as a separate commit from §58.
+
+**What is being attempted.** A round that ends `abandoned`, `refused` or `failed` replies to the
+comments that asked with why — in the thread for an inline thread, and for a review body or a
+plain comment, which GitHub cannot reply to, a `bot:` comment mentioning the author and quoting
+what it answers. A top-level comment that asks for nothing may be marked as needing no reply, and
+gets none.
+
+**Why now.** Rounds 6 and 7 on #2688 and round 5 on #1459 (Jacob's review, refused over a
+`pom.xml` comment edit) all did real work and posted nothing, and each round's reservation had
+already moved the cursor past the comment that asked, so nobody knew to ask again.
+
+**What would make it the wrong idea.** Only top-level comments can go unanswered: a thread whose
+last comment is not ours is unanswered by `unansweredThreads`' definition and would buy a round
+every tick. And a failed round's model-written "Done" replies are false once its change is
+discarded, so what is posted there is the harness's reason, not the pass's answers.
 
 ### 56. Documents outside this file still say a declined run leaves the board as it found it
 
