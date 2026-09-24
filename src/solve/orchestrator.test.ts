@@ -1489,6 +1489,83 @@ describe("resolveReview", () => {
   });
 });
 
+/** A pull request whose round also edited `pom.xml`, which the gate refuses whatever the change. */
+const POM_REFUSED = [`12\t3\t${FILES[0] ?? ""}`, "1\t1\tpom.xml", ""].join(NUL);
+
+/** The four reads `dropRefusedEdits` makes, answered for a round that edited a file the pull request already had. */
+const droppableEdit = (
+  overrides: {
+    readonly touched?: string;
+    readonly existing?: string;
+    readonly after?: string;
+  } = {},
+): readonly Rule[] => [
+  { match: once(saw("--numstat")), reply: { stdout: POM_REFUSED } },
+  {
+    match: (argv) => argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+    reply: { stdout: overrides.touched ?? `pom.xml${NUL}${FILES[0] ?? ""}${NUL}` },
+  },
+  { match: saw("ls-tree"), reply: { stdout: overrides.existing ?? `pom.xml${NUL}` } },
+  ...(overrides.after === undefined
+    ? []
+    : [{ match: saw("--numstat"), reply: { stdout: overrides.after } }]),
+];
+
+describe("resolveReview's refused edits, rolled back so the rest can land", () => {
+  it("restores the refused file the round edited, and resolves the rest", async () => {
+    const { h } = harness({ review: review() }, [...droppableEdit()]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    if (outcome.kind !== "resolved") {
+      throw new Error(`expected resolved, got ${outcome.kind}`);
+    }
+    expect(outcome.dropped).toEqual([
+      { path: "pom.xml", reasons: [expect.stringContaining("pom.xml: ") as string] },
+    ]);
+    expect(h.calls.some((argv) => argv.join(" ").endsWith("checkout HEAD -- pom.xml"))).toBe(true);
+    expect(h.calls.some((argv) => argv.slice(-2).join(" ") === "run test")).toBe(true);
+  });
+
+  it("refuses the whole round when the pull request already had the refused change", async () => {
+    // Rolling back to where the round started would change nothing; the refusal is about the pull request.
+    const { h } = harness({ review: review() }, [
+      ...droppableEdit({ touched: `${FILES[0] ?? ""}${NUL}` }),
+    ]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+    expect(h.calls.some((argv) => argv.includes("checkout"))).toBe(false);
+  });
+
+  it("refuses the whole round when the round created the refused file", async () => {
+    const { h } = harness({ review: review() }, [...droppableEdit({ existing: "" })]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+    expect(h.calls.some((argv) => argv.includes("checkout"))).toBe(false);
+  });
+
+  it("refuses the whole round when what is left still fails the gate", async () => {
+    const { h } = harness({ review: review() }, [...droppableEdit({ after: REFUSED_DIFF })]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+  });
+
+  it("drops nothing on a round the gate passed whole", async () => {
+    const { h } = harness({ review: review() });
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "resolved", dropped: [] });
+    expect(h.calls.some((argv) => argv.includes("ls-tree"))).toBe(false);
+  });
+});
+
 /** Review rounds run no base check, so the first `run test` is the round's own and the second the repair's. */
 const reviewRedThenGreen = (): Rule => ({
   match: once(saw("run", "test")),

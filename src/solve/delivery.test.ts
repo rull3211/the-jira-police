@@ -1070,6 +1070,65 @@ describe("advance", () => {
       expect(told).not.toMatch(/@copilot/u);
     });
 
+    it("pushes the rest when one edit is refused, and tells the member who asked for it", async () => {
+      const withPom = [`12\t3\t${FILES[0] ?? ""}`, "1\t1\tpom.xml", ""].join(NUL);
+      let postRoundReads = 0;
+      const h = harness(
+        {
+          review: review({
+            filesTouched: [FILES[0] ?? "", "pom.xml"],
+            widened: [
+              {
+                path: "pom.xml",
+                requestedBy: "comment 2",
+                what: "corrected the stale version comment",
+              },
+            ],
+          }),
+        },
+        [
+          memberAsked,
+          // The pull request's own diff, before the round: pom.xml is already in it.
+          {
+            match: (argv) =>
+              argv.includes("--numstat") && argv.some((arg) => arg.endsWith("...HEAD")),
+            reply: { stdout: withPom },
+          },
+          // The round's diff: refused the first time, clean once pom.xml is restored.
+          {
+            match: (argv) => {
+              if (!argv.includes("--numstat")) {
+                return false;
+              }
+              postRoundReads += 1;
+              return postRoundReads === 1;
+            },
+            reply: { stdout: withPom },
+          },
+          {
+            match: (argv) =>
+              argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+            reply: { stdout: `pom.xml${NUL}${FILES[0] ?? ""}${NUL}` },
+          },
+          { match: saw("ls-tree"), reply: { stdout: `pom.xml${NUL}` } },
+        ],
+      );
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({
+        kind: "iterated",
+        pushed: true,
+        dropped: { paths: ["pom.xml"], notice: { outcome: "posted" } },
+      });
+      const told = posts(h).find((body) => body.includes("part of this round was not pushed"));
+      expect(told).toContain("@rull3211 — The rest of this round was pushed");
+      expect(told).toContain("`pom.xml` was not changed: pom.xml:");
+      // Told to the comment the widening named, not to every comment on the round.
+      expect(told).toContain("> and drop the unused exports while you are in there");
+      expect(told).not.toContain("the wrapper looks unnecessary");
+    });
+
     it("tells nothing to a comment the round marked as asking nothing", async () => {
       const h = harness({ review: { ...widened("comment 1"), silent: ["comment 1"] } }, [
         memberAsked,

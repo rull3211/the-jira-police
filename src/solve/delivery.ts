@@ -45,6 +45,7 @@ import {
 import type { SyncedAttachResult } from "./base-sync.ts";
 import {
   type RepairVerdict,
+  type DroppedEdit,
   type ReviewRepair,
   type ReviewRoundOutcome,
   type ReviewRoundRequest,
@@ -283,6 +284,8 @@ export type AdvanceOutcome =
       readonly unresolved: string;
       /** Present when a promoted repair finished the round: the failure it fixed, and whether the notice naming it was posted. */
       readonly repaired?: { readonly failure: string; readonly notice: Spoken };
+      /** Present when the gate refused some of the round's edits and the rest landed: which, and whether the notice naming them was posted. */
+      readonly dropped?: { readonly paths: readonly string[]; readonly notice: Spoken };
     }
   /**
    * The **reviewer's** budget is spent. Undrafted anyway; a person can still comment
@@ -1106,6 +1109,23 @@ export async function runRound(
             timeoutMs: request.ghTimeoutMs,
           }),
         };
+  const dropped =
+    resolved.dropped.length === 0
+      ? undefined
+      : {
+          paths: resolved.dropped.map((edit) => edit.path),
+          notice: await announceDropped(commands, {
+            cwd: worktree.path,
+            repo,
+            number,
+            round: round + 1,
+            dropped: resolved.dropped,
+            comments,
+            threads,
+            report: resolved.report,
+            timeoutMs: request.ghTimeoutMs,
+          }),
+        };
   if (resolved.repair !== undefined) {
     await recordRepair(request, {
       issueKey: request.issueKey,
@@ -1130,7 +1150,63 @@ export async function runRound(
     threads: threadOutcome,
     unresolved: resolved.report.unresolved,
     ...(repaired === undefined ? {} : { repaired }),
+    ...(dropped === undefined ? {} : { dropped }),
   };
+}
+
+interface DroppedRequest {
+  readonly cwd: string;
+  readonly repo: string;
+  readonly number: number;
+  readonly round: number;
+  readonly dropped: readonly DroppedEdit[];
+  readonly comments: readonly ReviewComment[];
+  readonly threads: readonly ReviewThread[];
+  readonly report: ReviewReport;
+  readonly timeoutMs: number;
+}
+
+/**
+ * The edits the gate refused, told to whoever asked for them: the comment or thread a `widened`
+ * entry names for that file, or, when none does, the top-level comments that asked anything —
+ * the pass's own replies went out first and may say the dropped edit was made.
+ */
+async function announceDropped(
+  commands: SolveDependencies["commands"],
+  request: DroppedRequest,
+): Promise<Spoken> {
+  const paths = new Set(request.dropped.map((edit) => edit.path));
+  const sources = new Set(
+    request.report.widened
+      .filter((change) => paths.has(change.path))
+      .map((change) => change.requestedBy.trim().toLowerCase().replace(/\s+/gu, " ")),
+  );
+  const named = request.comments.filter((_comment, index) =>
+    sources.has(`comment ${String(index + 1)}`),
+  );
+  const threads = request.threads.filter((thread) => sources.has(thread.id.toLowerCase()));
+  const silent = new Set(request.report.silent);
+  const comments =
+    named.length > 0 || threads.length > 0
+      ? named
+      : request.comments.filter((_comment, index) => !silent.has(`comment ${String(index + 1)}`));
+  const why = request.dropped
+    .map(
+      (edit) =>
+        `\`${edit.path}\` was not changed: ${edit.reasons.join("; ") || "the gate refused it"}.`,
+    )
+    .join(" ");
+  return await tellWhoAsked(commands, {
+    cwd: request.cwd,
+    repo: request.repo,
+    number: request.number,
+    round: request.round,
+    comments,
+    threads,
+    headline: "part of this round was not pushed",
+    why: `The rest of this round was pushed, without some of what was asked. ${why} A person can make that change; this service is not allowed to.`,
+    timeoutMs: request.timeoutMs,
+  });
 }
 
 /** Harness-written, so a member reads the reason nothing landed rather than the pass's own replies, which described a change that was discarded. */
@@ -1167,6 +1243,8 @@ interface TellRequest {
   readonly threads: readonly ReviewThread[];
   /** Absent when the pass returned none, and then every comment is told: nothing says which asked. */
   readonly report?: ReviewReport;
+  /** Defaults to saying nothing from the round was pushed. */
+  readonly headline?: string;
   readonly why: string;
   readonly timeoutMs: number;
 }
@@ -1217,7 +1295,7 @@ async function tellWhoAsked(
       repo: request.repo,
       number: request.number,
       body:
-        `${BOT_PREFIX}round ${String(request.round)} — nothing from this round was pushed\n\n` +
+        `${BOT_PREFIX}round ${String(request.round)} — ${request.headline ?? "nothing from this round was pushed"}\n\n` +
         `${mentions.length === 0 ? "" : `${mentions.join(" ")} — `}${request.why}\n\n` +
         `In answer to:\n${asked.map((comment) => quoted(comment.body)).join("\n")}`,
       timeoutMs: request.timeoutMs,

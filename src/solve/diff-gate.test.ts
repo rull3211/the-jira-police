@@ -288,6 +288,34 @@ describe("checkDiff — the rest", () => {
   });
 });
 
+/** The paths a verdict refused, or `"passed"` when it refused none. */
+function refusedPaths(changes: readonly FileChange[]): readonly string[] | null | "passed" {
+  const verdict = checkDiff(changes);
+  return verdict.ok ? "passed" : verdict.refusedPaths;
+}
+
+describe("checkDiff — which paths it refused", () => {
+  it("names each refused path once, however many rules it tripped, and none it passed", () => {
+    expect(
+      refusedPaths([
+        { path: "src/app.ts", added: 1, removed: 0 },
+        { path: "pom.xml", added: 1, removed: 1 },
+        { path: ".github/workflows/ci.yml", added: 2, removed: 0 },
+      ]),
+    ).toEqual(["pom.xml", ".github/workflows/ci.yml"]);
+  });
+
+  it("names none when a reason belongs to no path that could be rolled back", () => {
+    expect(refusedPaths([])).toBeNull();
+    expect(
+      refusedPaths([
+        { path: "pom.xml", added: 1, removed: 1 },
+        { path: "../outside.ts", added: 1, removed: 0 },
+      ]),
+    ).toBeNull();
+  });
+});
+
 describe("plannedPathRefusals", () => {
   const worktreePath = "/tmp/solve/SSX-3918";
 

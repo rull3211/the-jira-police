@@ -1495,7 +1495,15 @@ export type ReviewRoundOutcome =
       readonly verification: VerificationResult;
       /** A promoted repair: `commit` is already made, and this is the second commit, on the uncommitted delta. */
       readonly repair?: ReviewRepair;
+      /** Edits rolled back so the rest could land; empty when the gate passed the round whole. */
+      readonly dropped: readonly DroppedEdit[];
     };
+
+/** An edit the gate refused and the harness rolled back so the rest of the round could land. */
+export interface DroppedEdit {
+  readonly path: string;
+  readonly reasons: readonly string[];
+}
 
 export interface ReviewRepair {
   readonly report: FixReport;
@@ -1668,8 +1676,17 @@ async function runReviewRound(
     };
   }
   const verdict = await gateDiff(commands, request, worktree.path, parseNumstat(diffText));
-  if (!verdict.ok) {
-    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, report };
+  const dropped = verdict.ok ? [] : await dropRefusedEdits(commands, request, verdict);
+  if (dropped === null) {
+    return {
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: verdict.ok ? [] : verdict.reasons,
+      report,
+    };
+  }
+  if (dropped.length > 0) {
+    log.info("solve.review.dropped", { issueKey, files: dropped.length });
   }
 
   const verification = await verify(commands, verifyRequestOf(request, worktree));
@@ -1692,10 +1709,70 @@ async function runReviewRound(
     issueKey,
   );
   if (verification.outcome === "failed") {
-    return await repairReviewRound(deps, request, skillRootPath, report, commit, verification);
+    return await repairReviewRound(
+      deps,
+      request,
+      skillRootPath,
+      report,
+      commit,
+      verification,
+      dropped,
+    );
   }
 
-  return { kind: "resolved", report, commit, verification };
+  return { kind: "resolved", report, commit, verification, dropped };
+}
+
+/**
+ * Restores each refused path to where the round found it, so the rest of the round can land, or
+ * `null` when the refusal must stand whole: a reason tied to no ordinary path, a path the round
+ * did not change (the pull request's own commits already break the gate), or one the round
+ * created, which restoring would mean deleting.
+ */
+async function dropRefusedEdits(
+  runner: CommandRunner,
+  request: ReviewRoundRequest,
+  verdict: Extract<DiffVerdict, { ok: false }>,
+): Promise<readonly DroppedEdit[] | null> {
+  const { worktree, gitTimeoutMs } = request;
+  const paths = verdict.refusedPaths;
+  if (paths === null || paths.length === 0) {
+    return null;
+  }
+  const changed = await gitDiff(runner, worktree.path, gitTimeoutMs, ["--name-only", "-z", "HEAD"]);
+  const existing = await runner.run(
+    ["git", "-C", worktree.path, "ls-tree", "--name-only", "-z", "HEAD", "--", ...paths],
+    { cwd: worktree.path, timeoutMs: gitTimeoutMs },
+  );
+  if (changed === null || failed(existing)) {
+    return null;
+  }
+  const touched = new Set(changed.split("\0").filter((path) => path !== ""));
+  const restorable = new Set(existing.stdout.split("\0").filter((path) => path !== ""));
+  if (!paths.every((path) => touched.has(path) && restorable.has(path))) {
+    return null;
+  }
+  const restored = await runner.run(
+    ["git", "-C", worktree.path, "checkout", "HEAD", "--", ...paths],
+    { cwd: worktree.path, timeoutMs: gitTimeoutMs },
+  );
+  if (failed(restored)) {
+    return null;
+  }
+
+  // The gate again over what is left, so a path the round made refusable some other way still refuses.
+  const remaining = await readNumstat(runner, worktree.path, request.baseRef, gitTimeoutMs);
+  if (remaining === null) {
+    return null;
+  }
+  const again = await gateDiff(runner, request, worktree.path, parseNumstat(remaining));
+  if (!again.ok) {
+    return null;
+  }
+  return paths.map((path) => ({
+    path,
+    reasons: verdict.reasons.filter((reason) => reason.startsWith(`${path}: `)),
+  }));
 }
 
 /**
@@ -1710,6 +1787,7 @@ async function repairReviewRound(
   report: ReviewReport,
   commit: CommitMessage,
   verification: Extract<VerificationResult, { outcome: "failed" }>,
+  dropped: readonly DroppedEdit[],
 ): Promise<ReviewRoundOutcome> {
   const { issueKey, worktree } = request;
   const failure = { kind: "failed", reason: verification.reason, verification, report } as const;
@@ -1760,6 +1838,7 @@ async function repairReviewRound(
           commit: composeCommitMessage(attempt.repair, issueKey),
           failure: verification.reason,
         },
+        dropped,
       };
     }
     log.warn("solve.repair.not_promoted", { issueKey, reason: blocked });

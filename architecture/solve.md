@@ -567,6 +567,20 @@ path, otherwise reaches the end looking exactly like success and opens an empty 
 Every reason is collected rather than the first, for the same reason the triage gate collects
 them.
 
+**In a review round one refused edit no longer costs every other.** Round 5 on #1459 did all four
+things Jacob's review asked, in files the pull request already changed, and was discarded whole
+because one of them edited a comment inside `pom.xml`. The gate now names the paths it refused
+(`refusedPaths`, `null` when a reason belongs to no ordinary path), and `dropRefusedEdits`
+(`orchestrator.ts`) restores them with `git checkout HEAD --` when every one is a file the round
+changed and `HEAD` already had, then gates what is left again. The round continues to verification
+with `dropped` on its outcome, and `delivery.ts` tells whoever asked — the comment a `widened` entry
+names for that file, or the comments that asked anything — which edit was dropped and which rule
+dropped it. A path the round created, a path the pull request's own commits already break, a path
+outside the worktree, or a second gate that still refuses: the round is refused whole, as before.
+The rules themselves are unchanged — nothing here lets an edit to a refused path through, it only
+stops that edit taking its neighbours with it. A solve run gets none of this: it has no pull request
+yet, so there is nothing to have landed the rest on.
+
 **The same path rules run once earlier, over recon's plan.** `plannedPathRefusals` asks of each
 `plannedFiles` entry the question `checkDiff` asks of each changed path, from the same two lists,
 and a `proceed` naming a refused path becomes a `bailed` outcome carrying `refusedPlan`, before the

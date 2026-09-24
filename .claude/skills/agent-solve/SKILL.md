@@ -103,7 +103,8 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
   runs the verification and its exit codes are the only evidence anyone will act on. A claim here
   is unfalsifiable noise at best and a false record at worst.
 - **Stay inside the stated scope.** The harness refuses a list of paths outright — including
-  anything that would change what "passing" means — and those refusals discard the whole run. It
+  anything that would change what "passing" means — and those refusals discard the whole run, or
+  in a review round at least the refused edit. It
   does **not** refuse on size: there is no file cap and no line cap, and there has not been one
   since 2026-09-06. `SOLVE_INSTRUCTIONS.md` §4 has the list, and is the only place it is written
   down. If the honest fix needs a refused path, return `proceed: false` and explain; do not deliver

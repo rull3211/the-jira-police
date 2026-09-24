@@ -444,6 +444,12 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         (outcome.pushed
           ? `ITERATED — round ${String(outcome.round)} pushed.`
           : `ITERATED — round ${String(outcome.round)} answered without changing code, so nothing was pushed.`) +
+        (outcome.dropped === undefined
+          ? ""
+          : ` The gate refused its edits to ${outcome.dropped.paths.join(", ")}, so those were rolled back and the rest pushed.` +
+            (outcome.dropped.notice.outcome === "failed"
+              ? ` The notice saying so did NOT reach the pull request — ${outcome.dropped.notice.reason}.`
+              : "")) +
         (outcome.repaired === undefined
           ? ""
           : ` Its own change failed (${outcome.repaired.failure}); a repair round corrected it and was pushed as the round's second commit — read that commit on its own.` +

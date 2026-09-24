@@ -141,7 +141,7 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
     case "ready":
       return `ready rounds=${String(outcome.rounds)}`;
     case "iterated":
-      return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)}${outcome.repaired === undefined ? "" : ` repaired=${outcome.repaired.notice.outcome}`} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
+      return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)}${outcome.repaired === undefined ? "" : ` repaired=${outcome.repaired.notice.outcome}`}${outcome.dropped === undefined ? "" : ` dropped=${String(outcome.dropped.paths.length)}`} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
     case "reviewer-exhausted":
       return `reviewer-exhausted rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
     case "capped":

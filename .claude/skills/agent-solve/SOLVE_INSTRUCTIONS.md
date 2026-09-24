@@ -604,7 +604,10 @@ Do not claim a result. `fix(advisor): handle missing postcode in quote form` is 
 ## 4. Scope bounds
 
 The harness applies a diff gate after you exit. Refusal discards the entire run — every pass of it,
-already paid for — so this is worth reading before you start rather than after.
+already paid for — so this is worth reading before you start rather than after. The one softening is
+in a review round: an edit the gate refuses to a file the pull request already had is rolled back,
+the rest lands, and whoever asked is told which edit was dropped. That is a salvage, not a
+permission — the edit still does not happen, so decline it in your reply instead of making it.
 
 **The gate refuses by path, and never by size.** There is no file count and no line count it stops
 you at. It measures the size and reports it, and that is all: a run that lost the plot is usually

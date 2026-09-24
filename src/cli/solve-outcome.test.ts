@@ -747,6 +747,23 @@ describe("describeAdvanceOutcome", () => {
     }
   });
 
+  it("names the edits the gate dropped when the rest of the round landed", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 5,
+      responses: ["Done — all four of the review's points."],
+      reviewerRequested: "asked",
+      pushed: true,
+      spoken: { outcome: "posted" },
+      undrafted: "still-drafting",
+      threads: { answered: 0, resolved: 0, failures: [] },
+      unresolved: "",
+      dropped: { paths: ["pom.xml"], notice: { outcome: "posted" } },
+    });
+    expect(text).toContain("The gate refused its edits to pom.xml");
+    expect(text).toContain("rolled back and the rest pushed");
+  });
+
   it("says so when the reason for a refusal never reached the pull request", () => {
     const text = describeAdvanceOutcome({
       kind: "refused",
