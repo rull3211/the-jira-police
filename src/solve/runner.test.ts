@@ -21,7 +21,7 @@ import {
   parseReview,
   parseSimplify,
 } from "./runner.ts";
-import { RECON_SCHEMA } from "./schema.ts";
+import { RECON_SCHEMA, REVIEW_SCHEMA } from "./schema.ts";
 
 const options: SolveRunOptions = {
   issueKey: "SSX-3822",
@@ -677,6 +677,63 @@ describe("RECON_SCHEMA's conditional, against parseRecon", () => {
     expect(
       schemaAccepts(recon({ bailReason: "n/a — proceeding.", bailRemedy: "n/a — proceeding." })),
     ).toBe(false);
+  });
+});
+
+function reviewParserAccepts(report: Record<string, unknown>): boolean {
+  try {
+    parseReview(report, "SSX-1");
+    return true;
+  } catch (error) {
+    if (error instanceof SolveParseError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+describe("REVIEW_SCHEMA's conditional, against parseReview", () => {
+  function schemaAccepts(report: Record<string, unknown>): boolean {
+    return (
+      !satisfies(report["responses"], REVIEW_SCHEMA.if.properties.responses) ||
+      satisfies(report["threadAnswers"], REVIEW_SCHEMA.then.properties.threadAnswers)
+    );
+  }
+
+  const threadAnswer = {
+    threadId: "PRRT_1",
+    reply: "Done — dropped the unused import.",
+    basis: "changed-code",
+    resolve: true,
+  };
+  const cases: Record<string, Record<string, unknown>> = {
+    "a round answering a summary comment": review(),
+    "a round answering only a thread": review({ responses: [], threadAnswers: [threadAnswer] }),
+    "a round answering both": review({ threadAnswers: [threadAnswer] }),
+    "a round answering nothing": review({ responses: [], threadAnswers: [] }),
+  };
+
+  for (const [name, report] of Object.entries(cases)) {
+    it(`agrees about ${name}`, () => {
+      expect(schemaAccepts(report)).toBe(reviewParserAccepts(report));
+    });
+  }
+
+  it("rejects round 6 on #2688, which put its whole answer in widened", () => {
+    const round6 = review({
+      filesTouched: ["src/api/commerce/types.ts"],
+      responses: [],
+      threadAnswers: [],
+      widened: [
+        {
+          path: "src/api/commerce/types.ts",
+          requestedBy: "comment 1",
+          what: "dropped four unused exports and one unreferenced interface",
+        },
+      ],
+    });
+
+    expect(schemaAccepts(round6)).toBe(false);
   });
 });
 

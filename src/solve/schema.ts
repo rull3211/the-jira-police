@@ -336,7 +336,7 @@ export const REVIEW_SCHEMA = {
     widened: {
       type: "array",
       description:
-        "One entry per file you changed beyond what the ticket asked for, because a comment labelled as a repository member's asked you to — a drive-by cleanup, or a small addition related to this change. Empty in almost every round. Only a file this pull request already changed before this round qualifies; anything else a member asks for is declined in your reply as needing its own ticket. The harness refuses the whole round if an entry cites a comment or thread without the label, names a file the pull request had not changed, or names a file missing from `filesTouched`.",
+        "One entry per file you changed beyond what the ticket asked for, because a comment labelled as a repository member's asked you to — a drive-by cleanup, or a small addition related to this change. Empty in almost every round, and never the answer to the member's comment: that still goes in `responses` or `threadAnswers`, where they will read it. Only a file this pull request already changed before this round qualifies; anything else a member asks for is declined in your reply as needing its own ticket. The harness refuses the whole round if an entry cites a comment or thread without the label, names a file the pull request had not changed, or names a file missing from `filesTouched`.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -359,6 +359,11 @@ export const REVIEW_SCHEMA = {
       },
     },
   },
+  // `parseReview`'s answered-nothing rule, told in-session so a round is corrected rather than discarded after its work is done.
+  if: { properties: { responses: { maxItems: 0 } } },
+  // A JSON Schema keyword holding an object, never a function, so nothing can treat this as a promise.
+  // oxlint-disable-next-line unicorn/no-thenable
+  then: { properties: { threadAnswers: { minItems: 1 } } },
 } as const;
 
 /**

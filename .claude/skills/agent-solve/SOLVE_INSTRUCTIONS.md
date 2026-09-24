@@ -402,6 +402,9 @@ this one — and when they do, it is the work:
 - **Only in a file this pull request already changes.** Decline anything else in your reply, in one
   line: it needs its own ticket. The harness reads which files the pull request changed before your
   round, and refuses the whole round if a widening names another.
+- **Answer the comment as you would any other**, in `responses` or `threadAnswers` — that reply is
+  what the member reads. `widened` is for the harness and is posted nowhere; a round that puts its
+  answer only there has answered nothing, and is discarded with its work.
 - **Record each file in `widened`** — the path, `comment N` or the thread id where they asked, and
   one sentence on what changed. An entry citing an unlabelled comment is refused the same way, so a
   reviewer's suggestion to tidy something stays a suggestion unless a member asked for it too.
