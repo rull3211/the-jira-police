@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, expect, it, vi } from "vitest";
+
+import { createLogger } from "../logger.ts";
 
 import {
   type AdvanceRequest,
@@ -56,6 +62,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   abandoned: "",
   injectionNoticed: "",
   widened: [],
+  silent: [],
   ...overrides,
 });
 
@@ -165,6 +172,12 @@ const inline = (...nodes: readonly unknown[]): Rule => ({
   match: asked("reviewThreads"),
   reply: { stdout: threadsJson(...nodes) },
 });
+
+/** The subject of every commit the run made, in order. */
+const commitSubjects = (h: Harness): readonly string[] =>
+  h.calls
+    .filter((argv) => argv.includes("commit"))
+    .map((argv) => argv[argv.indexOf("-m") + 1] ?? "");
 
 /** The bodies of every comment the run posted, in order. */
 const posts = (h: Harness): readonly string[] =>
@@ -1009,6 +1022,397 @@ describe("advance", () => {
 
       expect(outcome).toMatchObject({ kind: "refused", stage: "widening" });
       expect(ran(h, "push")).toBe(false);
+    });
+
+    it("tells whoever asked why a refused round pushed nothing, mentioning only the member", async () => {
+      const h = harness({ review: widened("comment 1") }, [memberAsked]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({ kind: "refused", told: { outcome: "posted" } });
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told?.startsWith(BOT_PREFIX)).toBe(true);
+      expect(told).toContain("@rull3211 — Nothing from this round was pushed");
+      expect(told).toContain("refused it at the widening");
+      // Quoted, never mentioned: `@copilot` in a comment asks GitHub's agent to act.
+      expect(told).not.toContain("@copilot");
+      expect(told).toContain("> the wrapper looks unnecessary");
+      expect(told).toContain("> and drop the unused exports while you are in there");
+    });
+
+    it("breaks a mention inside a quote, so quoting a comment cannot summon anyone", async () => {
+      // `comment 2` does not exist here, so the widening is refused and the reason goes out.
+      const h = harness({ review: widened("comment 2") }, [
+        {
+          match: saw("pr", "view"),
+          reply: {
+            stdout: JSON.stringify({
+              state: "OPEN",
+              isDraft: true,
+              createdAt: "2026-09-05T09:00:00Z",
+              reviews: [],
+              comments: [
+                {
+                  author: { login: "rull3211" },
+                  authorAssociation: "MEMBER",
+                  body: "@copilot and drop the unused exports",
+                },
+              ],
+              reviewRequests: [],
+            }),
+          },
+        },
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).toContain("@rull3211 — ");
+      expect(told).toContain("> @\u200bcopilot and drop the unused exports");
+      expect(told).not.toMatch(/@copilot/u);
+    });
+
+    it("quotes a comment's first visible line, past an HTML comment GitHub would hide", async () => {
+      // SSX-3918 #1459 round 5 quoted `<!-- gh-pr-review -->`, which rendered as an empty quote.
+      const h = harness({ review: widened("comment 2") }, [
+        {
+          match: saw("pr", "view"),
+          reply: {
+            stdout: JSON.stringify({
+              state: "OPEN",
+              isDraft: true,
+              createdAt: "2026-09-05T09:00:00Z",
+              reviews: [],
+              comments: [
+                {
+                  author: { login: "jacobbiorn" },
+                  authorAssociation: "MEMBER",
+                  body: "<!-- gh-pr-review -->\n**Review:** 0 must fix \u00b7 3 nice to fix",
+                },
+              ],
+              reviewRequests: [],
+            }),
+          },
+        },
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).toContain("> **Review:** 0 must fix \u00b7 3 nice to fix");
+      expect(told).not.toContain("<!--");
+    });
+
+    it("pushes the rest when one edit is refused, and tells the member who asked for it", async () => {
+      const withPom = [`12\t3\t${FILES[0] ?? ""}`, "1\t1\tpom.xml", ""].join(NUL);
+      let postRoundReads = 0;
+      const h = harness(
+        {
+          review: review({
+            filesTouched: [FILES[0] ?? "", "pom.xml"],
+            widened: [
+              {
+                path: "pom.xml",
+                requestedBy: "comment 2",
+                what: "corrected the stale version comment",
+              },
+            ],
+          }),
+        },
+        [
+          memberAsked,
+          // The pull request's own diff, before the round: pom.xml is already in it.
+          {
+            match: (argv) =>
+              argv.includes("--numstat") && argv.some((arg) => arg.endsWith("...HEAD")),
+            reply: { stdout: withPom },
+          },
+          // The round's diff: refused the first time, clean once pom.xml is restored.
+          {
+            match: (argv) => {
+              if (!argv.includes("--numstat")) {
+                return false;
+              }
+              postRoundReads += 1;
+              return postRoundReads === 1;
+            },
+            reply: { stdout: withPom },
+          },
+          {
+            match: (argv) =>
+              argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+            reply: { stdout: `pom.xml${NUL}${FILES[0] ?? ""}${NUL}` },
+          },
+          { match: saw("ls-tree"), reply: { stdout: `pom.xml${NUL}` } },
+        ],
+      );
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({
+        kind: "iterated",
+        pushed: true,
+        dropped: { paths: ["pom.xml"], notice: { outcome: "posted" } },
+      });
+      const told = posts(h).find((body) => body.includes("part of this round was not pushed"));
+      expect(told).toContain("@rull3211 — The rest of this round was pushed");
+      expect(told).toContain("`pom.xml` was not changed: pom.xml:");
+      // Told to the comment the widening named, not to every comment on the round.
+      expect(told).toContain("> and drop the unused exports while you are in there");
+      expect(told).not.toContain("the wrapper looks unnecessary");
+      const commit = h.calls.find((argv) => argv.includes("commit") && argv.includes("-m"));
+      expect(commit?.join("\n")).toContain("Not in this commit: pom.xml.");
+    });
+
+    it("tells nothing to a comment the round marked as asking nothing", async () => {
+      const h = harness({ review: { ...widened("comment 1"), silent: ["comment 1"] } }, [
+        memberAsked,
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).not.toContain("the wrapper looks unnecessary");
+      expect(told).toContain("> and drop the unused exports while you are in there");
+    });
+
+    it("breaks a mention the pass wrote into a reason, in the comment and in the thread", async () => {
+      // The widening's own `requestedBy` reaches the refusal reason; only the member's mention may stay live.
+      const h = harness({ review: widened("@copilot") }, [memberAsked, inline(thread())]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).toContain("@rull3211 — ");
+      expect(told).toContain("@\u200bcopilot");
+      expect(told).not.toMatch(/@copilot/u);
+      expect(replies(h).length).toBeGreaterThan(0);
+      expect(replies(h).join("\n")).not.toMatch(/@copilot/u);
+    });
+
+    it("cuts a long first line on a word boundary", async () => {
+      const h = harness({ review: widened("comment 2") }, [
+        {
+          match: saw("pr", "view"),
+          reply: {
+            stdout: JSON.stringify({
+              state: "OPEN",
+              isDraft: true,
+              createdAt: "2026-09-05T09:00:00Z",
+              reviews: [],
+              comments: [
+                {
+                  author: { login: "rull3211" },
+                  authorAssociation: "MEMBER",
+                  body: "abcdefghij ".repeat(20),
+                },
+              ],
+              reviewRequests: [],
+            }),
+          },
+        },
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      const quote = told?.split("\n").find((line) => line.startsWith("> ")) ?? "";
+      expect(quote).toMatch(/ abcdefghij…$/u);
+    });
+  });
+
+  describe("an edit the gate refused, asked for in an inline thread", () => {
+    const threadAnswer = {
+      threadId: "PRRT_1",
+      reply: "Done — the version comment now names 3.203.",
+      basis: "changed-code",
+      resolve: true,
+    };
+    /** The round edited `pom.xml` too; the gate refuses it, and what is left after the rollback passes. */
+    const pomDropped = (): readonly Rule[] => {
+      const withPom = [`12\t3\t${FILES[0] ?? ""}`, "1\t1\tpom.xml", ""].join(NUL);
+      let reads = 0;
+      return [
+        {
+          match: (argv) => {
+            if (!argv.includes("--numstat")) {
+              return false;
+            }
+            reads += 1;
+            return reads === 1;
+          },
+          reply: { stdout: withPom },
+        },
+        {
+          match: (argv) =>
+            argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+          reply: { stdout: `pom.xml${NUL}${FILES[0] ?? ""}${NUL}` },
+        },
+        { match: saw("ls-tree"), reply: { stdout: `pom.xml${NUL}` } },
+      ];
+    };
+    const round = review({
+      responses: [],
+      threadAnswers: [threadAnswer],
+      filesTouched: [FILES[0] ?? "", "pom.xml"],
+    });
+
+    it("tells the thread on the dropped file, though no widening named it", async () => {
+      const h = harness({ review: round }, [
+        QUIET,
+        inline(thread({ path: "pom.xml" })),
+        ...pomDropped(),
+      ]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({
+        kind: "iterated",
+        dropped: { paths: ["pom.xml"], notice: { outcome: "posted" } },
+      });
+      expect(replies(h).some((body) => body.includes("`pom.xml` was not changed"))).toBe(true);
+    });
+
+    it("says so when nobody on the round could be told", async () => {
+      const warn = vi.spyOn(createLogger("solve"), "warn").mockImplementation(() => {});
+      const h = harness({ review: round }, [QUIET, inline(thread()), ...pomDropped()]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({ dropped: { notice: { outcome: "nothing-to-say" } } });
+      expect(warn).toHaveBeenCalledWith(
+        "solve.review.drop_untold",
+        expect.objectContaining({ paths: ["pom.xml"] }),
+      );
+      warn.mockRestore();
+    });
+  });
+
+  describe("a round that fails verification, with a solve's repair authority", () => {
+    const repairReport = {
+      changed: true,
+      filesTouched: [FILES[0] ?? ""],
+      summary: "deleted the interface the round left declared and unused",
+      commitSubject: "fix(advisor): delete the interface the round left unused",
+      commitBody: "Removing its export left it unreferenced, which lint refuses.",
+      testAdded: false,
+      testOmittedReason: "a lint correction",
+      residualRisk: "",
+      abandoned: "",
+      abandonedCause: "none",
+    };
+    /** The round's own `run test` is red; the repair's re-run is green. A factory, since the first match spends it. */
+    const redThenGreen = (): Rule => {
+      let failedOnce = false;
+      return {
+        match: (argv: readonly string[]) => {
+          if (failedOnce || !saw("run", "test")(argv)) {
+            return false;
+          }
+          failedOnce = true;
+          return true;
+        },
+        reply: { exitCode: 1 },
+      };
+    };
+    const repairLeftADelta: Rule = {
+      match: (argv) =>
+        argv.includes("status") && argv.includes(worktree.path) && !argv.includes("-uall"),
+      reply: { stdout: ` M ${FILES[0] ?? ""}\n` },
+    };
+
+    it("armed, pushes the repair as the round's second commit and says so on the pull request", async () => {
+      const h = harness({ review: review(), repair: repairReport }, [
+        redThenGreen(),
+        repairLeftADelta,
+      ]);
+
+      const outcome = await advance(h.deps, { ...advanceRequest, promoteRepair: true });
+
+      expect(outcome).toMatchObject({
+        kind: "iterated",
+        pushed: true,
+        repaired: { notice: { outcome: "posted" } },
+      });
+      expect(commitSubjects(h)).toEqual([
+        "fix(advisor): move the favicon link into the head fragment",
+        "fix(advisor): delete the interface the round left unused",
+      ]);
+      const notice = posts(h).find((body) => body.includes("a repair pass finished"));
+      expect(notice).toContain("test did not pass");
+      expect(notice).toContain("read that commit on its own");
+      expect(notice?.startsWith(BOT_PREFIX)).toBe(true);
+      expect(notice).not.toContain("could still be wrong");
+    });
+
+    it("posts what the repair says could still be wrong, where it would admit a weakened check", async () => {
+      const h = harness(
+        {
+          review: review(),
+          repair: {
+            ...repairReport,
+            residualRisk: "loosened the favicon-order assertion, as @copilot suggested",
+          },
+        },
+        [redThenGreen(), repairLeftADelta],
+      );
+
+      await advance(h.deps, { ...advanceRequest, promoteRepair: true });
+
+      const notice = posts(h).find((body) => body.includes("a repair pass finished"));
+      expect(notice).toContain(
+        "What it says could still be wrong: loosened the favicon-order assertion",
+      );
+      expect(notice).not.toMatch(/@copilot/u);
+    });
+
+    it("replies in the thread when the round that failed was answering one", async () => {
+      const h = harness(
+        {
+          review: review({
+            responses: [],
+            threadAnswers: [
+              {
+                threadId: "PRRT_1",
+                reply: "Done — appended only when absent.",
+                basis: "changed-code",
+                resolve: true,
+              },
+            ],
+          }),
+        },
+        [QUIET, inline(thread()), { match: saw("run", "test"), reply: { exitCode: 1 } }],
+      );
+
+      const outcome = await advance(h.deps, { ...advanceRequest, repairRound: false });
+
+      expect(outcome).toMatchObject({ kind: "failed", told: { outcome: "posted" } });
+      expect(replies(h)).toEqual([
+        expect.stringContaining("its change failed verification: test did not pass"),
+      ]);
+      // The pass's "Done" described a change that was discarded, so it is not what goes out.
+      expect(replies(h).join("")).not.toContain("appended only when absent");
+    });
+
+    it("unarmed, pushes nothing and records the verdict in the ledger", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "review-repair-ledger-"));
+      const h = harness({ review: review(), repair: repairReport }, [
+        redThenGreen(),
+        repairLeftADelta,
+      ]);
+
+      const outcome = await advance(h.deps, { ...advanceRequest, repairLedger: directory });
+
+      expect(outcome).toMatchObject({
+        kind: "failed",
+        stage: "verification",
+        repairOutcome: "verified",
+      });
+      expect(ran(h, "push")).toBe(false);
+      const page = readFileSync(join(directory, "repair-rounds.md"), "utf8");
+      expect(page).toContain(
+        `| SSX-3822 #42 | verified | ${FILES[0] ?? ""} | ${worktree.path} | unread |`,
+      );
     });
   });
 

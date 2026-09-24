@@ -1,5 +1,5 @@
 /**
- * Two functions from `solve-run.ts`, tested here because `solve-run.ts` has no general test
+ * Three functions from `solve-run.ts`, tested here because `solve-run.ts` has no general test
  * harness for the rest of its dependencies.
  *
  * `sleep` runs as a child process because a unit test cannot observe "the event loop stayed
@@ -12,7 +12,7 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 
-import { createReviewAct } from "./solve-run.ts";
+import { createReviewAct, keepsEvidence } from "./solve-run.ts";
 import type { AdvanceRequest, PendingRound } from "../solve/delivery.ts";
 import type { SolveDependencies } from "../solve/orchestrator.ts";
 import type { WatchedTicket } from "../solve/review-cycle.ts";
@@ -267,5 +267,32 @@ describe("createReviewAct", () => {
     expect(written(h)).toContain("bot: iteration count 1");
     expect(written(h)).toContain("Reviewer rounds: 1");
     expect(written(h)).toContain("Last read: 2026-09-05T08:00:00Z");
+  });
+});
+
+describe("keepsEvidence", () => {
+  it("keeps a refused round's checkout, where the diff the gate judged lives", () => {
+    expect(keepsEvidence({ kind: "refused", stage: "diff-gate", reasons: ["pom.xml"] })).toBe(true);
+  });
+
+  it("keeps a failed round's checkout when a repair round ran, since the ledger names it", () => {
+    expect(
+      keepsEvidence({
+        kind: "failed",
+        stage: "verification",
+        reason: "lint did not pass (exit 1)",
+        repairOutcome: "verified",
+      }),
+    ).toBe(true);
+  });
+
+  it("discards a failed round's checkout when no repair round ran", () => {
+    expect(
+      keepsEvidence({
+        kind: "failed",
+        stage: "verification",
+        reason: "lint did not pass (exit 1)",
+      }),
+    ).toBe(false);
   });
 });

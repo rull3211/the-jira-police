@@ -49,17 +49,17 @@ async function main(): Promise<void> {
     // Shares nothing with the ladder below: no queue read, no claim written, no report produced
     // — it acts on a pull request the ticket only identifies. `--pr`'s configuration check still
     // applies, since the same GitHub owner names the repository this talks to.
-    const { issueKey } = args.invocation;
-    const missing = unavailable("pr", settings);
+    const { issueKey, repair } = args.invocation;
+    const missing = unavailable("pr", settings) ?? (repair ? repairUnavailable(settings) : null);
     if (missing !== null) {
       process.stderr.write(`refusing --advance: ${missing}\n`);
-      log.warn("solve-once.refused", { mode: "advance", issueKey, reason: missing });
+      log.warn("solve-once.refused", { mode: "advance", issueKey, repair, reason: missing });
       process.exitCode = 3;
       return;
     }
 
-    log.info("solve-once.settings", { ...describeSettings(settings), mode: "advance" });
-    await runAdvance(settings, createJiraClient(settings), issueKey);
+    log.info("solve-once.settings", { ...describeSettings(settings), mode: "advance", repair });
+    await runAdvance(settings, createJiraClient(settings), issueKey, repair);
     log.info("solve-once.done", { mode: "advance", issueKey });
     return;
   }
@@ -69,17 +69,17 @@ async function main(): Promise<void> {
     // report, since this command's subject is pull requests already open, not tickets that have
     // none — running `runSolveCycle` here would overwrite `solve-cycle.md` with a report about
     // work this mode never does.
-    const { issueKey } = args.invocation;
-    const missing = unavailable("pr", settings);
+    const { issueKey, repair } = args.invocation;
+    const missing = unavailable("pr", settings) ?? (repair ? repairUnavailable(settings) : null);
     if (missing !== null) {
       process.stderr.write(`refusing --watch: ${missing}\n`);
-      log.warn("solve-once.refused", { mode: "watch", issueKey, reason: missing });
+      log.warn("solve-once.refused", { mode: "watch", issueKey, repair, reason: missing });
       process.exitCode = 3;
       return;
     }
 
-    log.info("solve-once.settings", { ...describeSettings(settings), mode: "watch" });
-    await runWatch(settings, createJiraClient(settings), issueKey);
+    log.info("solve-once.settings", { ...describeSettings(settings), mode: "watch", repair });
+    await runWatch(settings, createJiraClient(settings), issueKey, repair);
     log.info("solve-once.done", { mode: "watch", issueKey });
     return;
   }

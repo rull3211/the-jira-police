@@ -746,6 +746,104 @@ function renderVerificationFailure(
   return `${verification.reason}\n\n${detail}`;
 }
 
+/** How a repair round ended, the one fact about it every caller keeps. */
+export type RepairVerdict = RepairAttempt["kind"];
+
+/** What one repair attempt concluded, before `runRepairRound` or `runReviewRound` turns it into its own outcome. */
+type RepairAttempt =
+  | { readonly kind: "crashed"; readonly reason: string }
+  | {
+      readonly kind: "abandoned";
+      readonly reason: string;
+      readonly cause: Exclude<AbandonCause, "none">;
+    }
+  | {
+      readonly kind: "refused";
+      readonly stage: "diff-gate" | "verification";
+      readonly reasons: readonly string[];
+    }
+  | {
+      readonly kind: "failed";
+      readonly reason: string;
+      readonly verification: Extract<VerificationResult, { outcome: "failed" }>;
+      readonly repair: FixReport;
+    }
+  | {
+      readonly kind: "verified";
+      readonly verification: VerificationResult;
+      readonly repair: FixReport;
+      readonly verdict: Extract<DiffVerdict, { ok: true }>;
+      readonly changes: readonly FileChange[];
+    };
+
+/**
+ * The repair pass, then the diff gate and `verify` over the whole diff, exactly as the change it
+ * corrects went through them. `options` carries the brief; the failure is rendered here.
+ */
+async function attemptRepair(
+  deps: SolveDependencies,
+  request: SolveRequest,
+  worktree: Worktree,
+  options: SolveRunOptions,
+  verification: Extract<VerificationResult, { outcome: "failed" }>,
+): Promise<RepairAttempt> {
+  const { issueKey } = request;
+  const { commands, passes } = deps;
+
+  const repairRun = await runPass(
+    passes,
+    "repair",
+    { ...options, verificationFailure: renderVerificationFailure(verification) },
+    (output) => parseFix(output, issueKey),
+  );
+  if (!repairRun.ok) {
+    return { kind: "crashed", reason: repairRun.reason };
+  }
+  const repair = repairRun.value;
+  if (repair.abandoned.trim() !== "") {
+    const cause = repair.abandonedCause as Exclude<AbandonCause, "none">;
+    log.info("solve.abandoned", {
+      issueKey,
+      pass: "repair",
+      cause,
+      reason: repair.abandoned,
+      leftFiles: repair.changed,
+      worktreePath: worktree.path,
+    });
+    return { kind: "abandoned", reason: repair.abandoned, cause };
+  }
+
+  // No `changed: false` branch: `parseFix` refuses that without an `abandoned`, so past the check above it is unreachable.
+  const finalDiff = await readNumstat(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+  );
+  if (finalDiff === null) {
+    return {
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: ["could not read the diff, so there is nothing to bound"],
+    };
+  }
+  const changes = parseNumstat(finalDiff);
+  const verdict = await gateDiff(commands, request, worktree.path, changes);
+  if (!verdict.ok) {
+    log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
+    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
+  }
+
+  const reverified = await verify(commands, verifyRequestOf(request, worktree));
+  if (reverified.outcome === "refused") {
+    return { kind: "refused", stage: "verification", reasons: [reverified.reason] };
+  }
+  if (reverified.outcome === "failed") {
+    return { kind: "failed", reason: reverified.reason, verification: reverified, repair };
+  }
+  return { kind: "verified", verification: reverified, repair, verdict, changes };
+}
+
 /**
  * One repair attempt after a failed verification.
  *
@@ -779,113 +877,74 @@ export async function runRepairRound(
   verification: Extract<VerificationResult, { outcome: "failed" }>,
 ): Promise<SolveOutcome> {
   const { issueKey } = request;
-  const { commands, passes } = deps;
-
-  const brief = JSON.stringify(recon, null, 2);
-  const verificationFailure = renderVerificationFailure(verification);
-  const repairRun = await runPass(
-    passes,
-    "repair",
-    { ...base, brief, verificationFailure },
-    (output) => parseFix(output, issueKey),
+  const attempt = await attemptRepair(
+    deps,
+    request,
+    worktree,
+    { ...base, brief: JSON.stringify(recon, null, 2) },
+    verification,
   );
-  if (!repairRun.ok) {
-    return crashed(issueKey, "repair", repairRun.reason, worktree);
-  }
-  const repair = repairRun.value;
-  if (repair.abandoned.trim() !== "") {
-    const cause = repair.abandonedCause as Exclude<AbandonCause, "none">;
-    log.info("solve.abandoned", {
-      issueKey,
-      pass: "repair",
-      cause,
-      reason: repair.abandoned,
-      leftFiles: repair.changed,
-      worktreePath: worktree.path,
-    });
-    return { kind: "abandoned", reason: repair.abandoned, cause, devLens, worktree };
-  }
-
-  // No `changed: false` branch: `parseFix` refuses that without an `abandoned`, so past the check above it is unreachable.
-  const finalDiff = await readNumstat(
-    commands,
-    worktree.path,
-    request.baseRef,
-    request.gitTimeoutMs,
-  );
-  if (finalDiff === null) {
-    return {
-      kind: "refused",
-      stage: "diff-gate",
-      reasons: ["could not read the diff, so there is nothing to bound"],
-      devLens,
-      worktree,
-    };
-  }
-  const changes = parseNumstat(finalDiff);
-  const verdict = await gateDiff(commands, request, worktree.path, changes);
-  if (!verdict.ok) {
-    log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
-    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
-  }
-
-  const reverified = await verify(commands, verifyRequestOf(request, worktree));
-  if (reverified.outcome === "refused") {
-    return {
-      kind: "refused",
-      stage: "verification",
-      reasons: [reverified.reason],
-      devLens,
-      worktree,
-    };
-  }
-  if (reverified.outcome === "failed") {
-    return {
-      kind: "failed",
-      reason: reverified.reason,
-      verification: reverified,
-      fix,
-      repair,
-      devLens,
-      worktree,
-    };
+  switch (attempt.kind) {
+    case "crashed": {
+      return crashed(issueKey, "repair", attempt.reason, worktree);
+    }
+    case "abandoned": {
+      return { kind: "abandoned", reason: attempt.reason, cause: attempt.cause, devLens, worktree };
+    }
+    case "refused": {
+      return { kind: "refused", stage: attempt.stage, reasons: attempt.reasons, devLens, worktree };
+    }
+    case "failed": {
+      return {
+        kind: "failed",
+        reason: attempt.reason,
+        verification: attempt.verification,
+        fix,
+        repair: attempt.repair,
+        devLens,
+        worktree,
+      };
+    }
+    case "verified": {
+      break;
+    }
   }
 
   const failFirst =
     request.failFirstCheck === false
       ? ({ outcome: "skipped", reason: "FAIL_FIRST_CHECK is off" } as const)
-      : await checkFailFirst(commands, {
+      : await checkFailFirst(deps.commands, {
           repoPath: request.repoPath,
           worktreePath: worktree.path,
           probePath: `${worktree.path}-failfirst`,
           baseRef: request.baseRef,
-          changedPaths: changes.map((change) => change.path),
+          changedPaths: attempt.changes.map((change) => change.path),
           stepTimeoutMs: request.stepTimeoutMs,
           installTimeoutMs: request.installTimeoutMs,
         });
 
-  log.info("solve.repaired", { issueKey, branch: worktree.branch, files: verdict.files });
+  log.info("solve.repaired", { issueKey, branch: worktree.branch, files: attempt.verdict.files });
   return {
     kind: "verified",
     worktree,
-    commit: composeCommitMessage(repair, issueKey),
+    commit: composeCommitMessage(attempt.repair, issueKey),
     recon,
     fix,
     simplify,
-    repair,
+    repair: attempt.repair,
     repairedFailure: verification.reason,
-    verification: reverified,
+    verification: attempt.verification,
     failFirst,
     devLens,
-    files: verdict.files,
-    lines: verdict.lines,
-    bumps: verdict.bumps,
+    files: attempt.verdict.files,
+    lines: attempt.verdict.lines,
+    bumps: attempt.verdict.bumps,
   };
 }
 
 /**
- * Why a green repair round cannot become the outcome, or `null`. `publish` must find the repair as
- * a commit of its own on top of the fix, so both the fix's commit and an uncommitted delta are required.
+ * Why a green repair round cannot become the outcome, or `null`. The repair must reach the pull request
+ * as a commit of its own, so both the corrected change's commit and an uncommitted delta are required.
  */
 async function unpromotable(
   commands: CommandRunner,
@@ -894,17 +953,17 @@ async function unpromotable(
   timeoutMs: number,
 ): Promise<string | null> {
   if (boundary.outcome === "failed") {
-    return `the fix could not be committed ahead of the round, so both would ship as one commit (${boundary.reason})`;
+    return `the change it corrects could not be committed ahead of the round, so both would ship as one commit (${boundary.reason})`;
   }
   const status = await commands.run(["git", "-C", worktree.path, "status", "--porcelain"], {
     cwd: worktree.path,
     timeoutMs,
   });
   if (failed(status)) {
-    return `could not read what the round left on top of the fix (${why(status)})`;
+    return `could not read what the round left on top of the change it corrects (${why(status)})`;
   }
   return status.stdout.trim() === ""
-    ? "the round left nothing on top of the fix, so there is no second commit to push"
+    ? "the round left nothing on top of the change it corrects, so there is no second commit to push"
     : null;
 }
 
@@ -1405,7 +1464,8 @@ async function runConflictRound(
 
 export type ReviewRoundOutcome =
   | { readonly kind: "no-change"; readonly report: ReviewReport }
-  | { readonly kind: "abandoned"; readonly reason: string }
+  /** `report` is present when the pass itself declined, and absent when it never returned one. */
+  | { readonly kind: "abandoned"; readonly reason: string; readonly report?: ReviewReport }
   /**
    * `write-escape` is the same guard `solveTicket` runs, reported differently:
    * a review round has no dev lens and no calibration row, so `refused` is
@@ -1415,14 +1475,42 @@ export type ReviewRoundOutcome =
       readonly kind: "refused";
       readonly stage: "diff-gate" | "verification" | "write-escape" | "widening";
       readonly reasons: readonly string[];
+      /** Which comments the round answered and which it left `silent`, so the refusal reaches only those that asked. */
+      readonly report?: ReviewReport;
     }
-  | { readonly kind: "failed"; readonly reason: string; readonly verification: VerificationResult }
+  | {
+      readonly kind: "failed";
+      readonly reason: string;
+      readonly report: ReviewReport;
+      /** The round's own failure, never the repair's: a `failed` carrying a green verification is a contradiction a reader acts on. */
+      readonly verification: VerificationResult;
+      /** Present when a repair round ran, whatever it concluded; absent means none did. */
+      readonly repairOutcome?: RepairVerdict;
+      readonly repair?: FixReport;
+    }
   | {
       readonly kind: "resolved";
       readonly report: ReviewReport;
       readonly commit: CommitMessage;
       readonly verification: VerificationResult;
+      /** A promoted repair: `commit` is already made, and this is the second commit, on the uncommitted delta. */
+      readonly repair?: ReviewRepair;
+      /** Edits rolled back so the rest could land; empty when the gate passed the round whole. */
+      readonly dropped: readonly DroppedEdit[];
     };
+
+/** An edit the gate refused and the harness rolled back so the rest of the round could land. */
+export interface DroppedEdit {
+  readonly path: string;
+  readonly reasons: readonly string[];
+}
+
+export interface ReviewRepair {
+  readonly report: FixReport;
+  readonly commit: CommitMessage;
+  /** The failure the round's own change hit, which the notice on the pull request names. */
+  readonly failure: string;
+}
 
 export interface ReviewRoundRequest extends SolveRequest {
   readonly worktree: Worktree;
@@ -1466,7 +1554,12 @@ export async function resolveReview(
       paths: escaped,
       would: outcome.kind,
     });
-    return { kind: "refused", stage: "write-escape", reasons: [describeEscape(escaped)] };
+    return {
+      kind: "refused",
+      stage: "write-escape",
+      reasons: [describeEscape(escaped)],
+      ...("report" in outcome && outcome.report !== undefined ? { report: outcome.report } : {}),
+    };
   } finally {
     await removeSkillRoot(staged.path);
   }
@@ -1507,7 +1600,7 @@ async function boundWidening(
     widened: report.widened.length,
     reasons: reasons.length,
   });
-  return { kind: "refused", stage: "widening", reasons };
+  return { kind: "refused", stage: "widening", reasons, report };
 }
 
 async function runReviewRound(
@@ -1553,7 +1646,7 @@ async function runReviewRound(
       leftFiles: report.changed,
       worktreePath: worktree.path,
     });
-    return { kind: "abandoned", reason: report.abandoned };
+    return { kind: "abandoned", reason: report.abandoned, report };
   }
   if (!report.changed) {
     // A review round can raise only questions, with nothing to re-verify.
@@ -1583,39 +1676,219 @@ async function runReviewRound(
       kind: "refused",
       stage: "diff-gate",
       reasons: ["could not read the diff, so there is nothing to bound"],
+      report,
     };
   }
   const verdict = await gateDiff(commands, request, worktree.path, parseNumstat(diffText));
-  if (!verdict.ok) {
-    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
+  const dropped = verdict.ok ? [] : await dropRefusedEdits(commands, request, verdict);
+  if (dropped === null) {
+    return {
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: verdict.ok ? [] : verdict.reasons,
+      report,
+    };
+  }
+  if (dropped.length > 0) {
+    log.info("solve.review.dropped", { issueKey, files: dropped.length });
   }
 
   const verification = await verify(commands, verifyRequestOf(request, worktree));
   if (verification.outcome === "refused") {
-    return { kind: "refused", stage: "verification", reasons: [verification.reason] };
+    return { kind: "refused", stage: "verification", reasons: [verification.reason], report };
   }
+  const commit = composeCommitMessage(
+    {
+      changed: report.changed,
+      filesTouched: report.filesTouched,
+      summary: report.summary,
+      commitSubject: report.commitSubject,
+      commitBody: report.commitBody,
+      testAdded: false,
+      testOmittedReason: "",
+      residualRisk: report.unresolved,
+      abandoned: "",
+      abandonedCause: "none",
+    },
+    issueKey,
+    droppedNote(dropped),
+  );
   if (verification.outcome === "failed") {
-    return { kind: "failed", reason: verification.reason, verification };
+    return await repairReviewRound(
+      deps,
+      request,
+      skillRootPath,
+      report,
+      commit,
+      verification,
+      dropped,
+    );
   }
 
-  return {
-    kind: "resolved",
-    report,
-    commit: composeCommitMessage(
-      {
-        changed: report.changed,
-        filesTouched: report.filesTouched,
-        summary: report.summary,
-        commitSubject: report.commitSubject,
-        commitBody: report.commitBody,
-        testAdded: false,
-        testOmittedReason: "",
-        residualRisk: report.unresolved,
-        abandoned: "",
-        abandonedCause: "none",
-      },
+  return { kind: "resolved", report, commit, verification, dropped };
+}
+
+/** The pass wrote its commit message before these edits were rolled back, so it may still claim them. */
+function droppedNote(dropped: readonly DroppedEdit[]): string {
+  if (dropped.length === 0) {
+    return "";
+  }
+  // A path is the round's to name, and a newline in one would forge a trailer line.
+  const paths = dropped.map((edit) =>
+    /^[\w./-]+$/u.test(edit.path) ? edit.path : JSON.stringify(edit.path),
+  );
+  return `Not in this commit: ${paths.join(", ")}. The diff gate refused this round's edits there and they were rolled back, so anything above about them did not land.`;
+}
+
+/**
+ * Restores each refused path to where the round found it, so the rest of the round can land, or
+ * `null` when the refusal must stand whole: a reason tied to no ordinary path, a path the round
+ * did not change (the pull request's own commits already break the gate), or one the round
+ * created, which restoring would mean deleting.
+ */
+async function dropRefusedEdits(
+  runner: CommandRunner,
+  request: ReviewRoundRequest,
+  verdict: Extract<DiffVerdict, { ok: false }>,
+): Promise<readonly DroppedEdit[] | null> {
+  const { worktree, gitTimeoutMs } = request;
+  const paths = verdict.refusedPaths;
+  if (paths === null || paths.length === 0) {
+    return null;
+  }
+  const changed = await gitDiff(runner, worktree.path, gitTimeoutMs, ["--name-only", "-z", "HEAD"]);
+  const existing = await runner.run(
+    ["git", "-C", worktree.path, "ls-tree", "--name-only", "-z", "HEAD", "--", ...paths],
+    { cwd: worktree.path, timeoutMs: gitTimeoutMs },
+  );
+  if (changed === null || failed(existing)) {
+    return null;
+  }
+  const touched = new Set(changed.split("\0").filter((path) => path !== ""));
+  const restorable = new Set(existing.stdout.split("\0").filter((path) => path !== ""));
+  if (!paths.every((path) => touched.has(path) && restorable.has(path))) {
+    return null;
+  }
+  const restored = await runner.run(
+    ["git", "-C", worktree.path, "checkout", "HEAD", "--", ...paths],
+    { cwd: worktree.path, timeoutMs: gitTimeoutMs },
+  );
+  if (failed(restored)) {
+    return null;
+  }
+
+  // The gate again over what is left, so a path the round made refusable some other way still refuses.
+  const remaining = await readNumstat(runner, worktree.path, request.baseRef, gitTimeoutMs);
+  if (remaining === null) {
+    return null;
+  }
+  const again = await gateDiff(runner, request, worktree.path, parseNumstat(remaining));
+  if (!again.ok) {
+    return null;
+  }
+  return paths.map((path) => ({
+    path,
+    reasons: verdict.reasons.filter((reason) => reason.startsWith(`${path}: `)),
+  }));
+}
+
+/**
+ * A failed review round's one repair, with a solve's authority and no more: `repairRound` buys it,
+ * and only `promoteRepair` with a green re-verification acts on it — do not widen that;
+ * `architecture/solve.md` §15.
+ */
+async function repairReviewRound(
+  deps: SolveDependencies,
+  request: ReviewRoundRequest,
+  skillRootPath: string,
+  report: ReviewReport,
+  commit: CommitMessage,
+  verification: Extract<VerificationResult, { outcome: "failed" }>,
+  dropped: readonly DroppedEdit[],
+): Promise<ReviewRoundOutcome> {
+  const { issueKey, worktree } = request;
+  const failure = { kind: "failed", reason: verification.reason, verification, report } as const;
+  if (request.repairRound === false) {
+    return failure;
+  }
+
+  // The round's own edits become the commit under the repair, so `git diff HEAD` is the repair alone.
+  const boundary = await commitAll(deps.commands, {
+    worktreePath: worktree.path,
+    ...commit,
+    identity: request.identity,
+    timeoutMs: request.gitTimeoutMs,
+  });
+  if (boundary.outcome === "failed") {
+    log.warn("solve.repair.boundary_failed", {
       issueKey,
-    ),
+      reason: boundary.reason,
+      worktreePath: worktree.path,
+    });
+  }
+  const attempt = await attemptRepair(
+    deps,
+    request,
+    worktree,
+    {
+      issueKey,
+      worktreePath: worktree.path,
+      ticket: request.ticket,
+      reviewRound: reviewRoundAccount(report),
+      skillRootPath,
+      ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
+      ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
+    },
     verification,
+  );
+  if (request.promoteRepair === true && attempt.kind === "verified") {
+    const blocked = await unpromotable(deps.commands, worktree, boundary, request.gitTimeoutMs);
+    if (blocked === null) {
+      log.info("solve.repair.promoted", { issueKey, branch: worktree.branch });
+      return {
+        kind: "resolved",
+        report,
+        commit,
+        verification: attempt.verification,
+        repair: {
+          report: attempt.repair,
+          commit: composeCommitMessage(attempt.repair, issueKey),
+          failure: verification.reason,
+        },
+        dropped,
+      };
+    }
+    log.warn("solve.repair.not_promoted", { issueKey, reason: blocked });
+  }
+  log.info("solve.repair.dry_run", {
+    issueKey,
+    would: attempt.kind,
+    reported: attempt.kind === "failed" || attempt.kind === "verified",
+    why:
+      attempt.kind === "abandoned" || attempt.kind === "crashed"
+        ? attempt.reason
+        : attempt.kind === "refused"
+          ? attempt.reasons.join("; ")
+          : "",
+    worktreePath: worktree.path,
+  });
+  return {
+    ...failure,
+    repairOutcome: attempt.kind,
+    ...(attempt.kind === "failed" || attempt.kind === "verified" ? { repair: attempt.repair } : {}),
   };
+}
+
+/** What the repair pass is told the round was for: the round's own account, since it has no recon brief. */
+function reviewRoundAccount(report: ReviewReport): string {
+  return JSON.stringify(
+    {
+      summary: report.summary,
+      filesTouched: report.filesTouched,
+      widened: report.widened,
+      commitSubject: report.commitSubject,
+    },
+    null,
+    2,
+  );
 }

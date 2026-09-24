@@ -271,13 +271,29 @@ quietly turn the second into the first.
 a branch will not take its base. **`repair` is the sixth, and the only one whose answer is thrown
 away by default** — `runPipeline`'s `failed` branch commits the fix under its own message, runs one
 round, keeps its report and its verdict on the outcome as `repair` and `repairOutcome`, and still
-returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely.
+returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely. **A review round
+that fails verification gets the same round**, from `repairReviewRound`: the round's own edits are
+committed as the boundary, the pass is given that round's account of itself in place of a recon
+brief, and `attemptRepair` — the pass, the diff gate and `verify`, shared with `runRepairRound` —
+decides it. Unarmed, the round still returns `failed`, now carrying `repairOutcome`; the local
+boundary commit is never pushed, and the next attach finds the checkout ahead of its remote and
+salvages it.
 
 **A run typed with `--repair`, or the daemon with `REPAIR_PUBLISH`, acts on a green round and on
 nothing else.** `promoteRepair` on the request is set by that flag, which `solve-args.ts` refuses
 below `--pr` and with `REPAIR_ROUND=false`, or for the daemon by `daemonPromotesRepair`, which
 needs `REPAIR_PUBLISH=true` through `flag()` and a round to act on; the daemon reports which at
-startup.
+startup. The review modes are armed the same way — `--repair` on `--review`, `--advance` and
+`--watch`, `REPAIR_PUBLISH` for the daemon's review sweep — through `buildAdvanceRequest`'s
+`promoteRepair` parameter, never a field a base request carries in. Armed, a green review-round
+repair returns as the round's `resolved` outcome carrying `repair`; `delivery.ts` commits it as the
+round's second commit, pushes, and posts a harness-written `bot:` comment naming the failure,
+telling the reader to take that commit on its own, and quoting the repair's `summary` and its
+`residualRisk` — the field where it would admit weakening a check — the review round's counterpart of the banner
+below, since a pull request already open has no body left to put it in. That notice is all the
+compensation there is, and it is needed more here than for a solve: a solve's repair opens a pull
+request nobody has read, a review round's lands in one a person is already reading, where the cheap
+repair — the assertion weakened — sits in a diff the reviewer may think they have seen.
 Armed, a round that re-verifies `verified` is
 returned as the outcome — carrying `repair`, `repairedFailure` and the round's own green
 verification — and `publish` commits the repair as a **second commit** on top of the fix, since
@@ -552,12 +568,34 @@ Two refusal families, and a third that was deleted:
   public. Four of the six files were one line each. The prose the cap shipped with claimed the
   recovery path was that _"a human looks, and either widens the cap for that ticket or agrees the
   ticket was mis-assessed"_ — there was no way to widen it for a ticket, and a `refused` round
-  writes nothing to the pull request, so nobody looked.
+  wrote nothing to the pull request then, so nobody looked. One now replies to whoever asked; see
+  "A round that lands nothing says why" under Delivery.
 
 An empty diff is refused too. A run that edits a file and reverts it, or writes only to an ignored
 path, otherwise reaches the end looking exactly like success and opens an empty pull request.
 Every reason is collected rather than the first, for the same reason the triage gate collects
 them.
+
+**In a review round one refused edit no longer costs every other.** Round 4 on #1459 did all four
+things Jacob's review asked, in files the pull request already changed, and was discarded whole
+because one of them edited a comment inside `pom.xml`. The gate now names the paths it refused
+(`refusedPaths`, `null` when a reason belongs to no ordinary path), and `dropRefusedEdits`
+(`orchestrator.ts`) restores them with `git checkout HEAD --` when every one is a file the round
+changed and `HEAD` already had, then gates what is left again. The round continues to verification
+with `dropped` on its outcome, and `delivery.ts` tells whoever asked — the comment a `widened` entry
+names for that file, or the comments that asked anything, and always an inline thread on a dropped
+file — which edit was dropped and which rule dropped it. A drop nobody could be told is logged as
+`solve.review.drop_untold` and printed as such, since the pass's replies then stand uncorrected. The pass wrote its commit message before the rollback, so round 5 on #1459 pushed one
+saying the stale `pom.xml` comment was fixed; `droppedNote` now adds a harness line above the
+`Refs:` trailer naming each path not in the commit. The pass's replies can make the same claim, and
+the drop notice posted after them is what corrects it. An edit that depended on the dropped one
+fails verification like any other, and the round's repair round takes it from there. A path the
+round created, a path the pull
+request's own commits already break, a path outside the worktree, or a second gate that still
+refuses: the round is refused whole, as before.
+The rules themselves are unchanged — nothing here lets an edit to a refused path through, it only
+stops that edit taking its neighbours with it. A solve run gets none of this: it has no pull request
+yet, so there is nothing to have landed the rest on.
 
 **The same path rules run once earlier, over recon's plan.** `plannedPathRefusals` asks of each
 `plannedFiles` entry the question `checkDiff` asks of each changed path, from the same two lists,
@@ -1077,11 +1115,43 @@ Copilot rendered identically, as `by <login>` inside one forgeable block.
   worktree, which already holds the round's own edits.
 
 **What it does not do.** It reads a declaration, so a round that widens without declaring passes,
-as it would have before. A refused round still writes nothing to the pull request, and its
-reservation has already moved the cursor past the comment that asked, so the member hears nothing
-unless they ask again. And the authority is only as good as the prefix on everything this service
+as it would have before. A refused round replies with the harness's reason, but its reservation
+has already moved the cursor past the comment that asked, so another round needs another comment. And the authority is only as good as the prefix on everything this service
 posts: replies from before `replyToThread` stamped it read as the operator's, with a member's
 authority, on any pull request still open from then.
+
+#### A round that lands nothing says why, to whoever asked
+
+A round that ends `abandoned`, `refused` or `failed` at verification used to post nothing, and its
+reservation had already moved the cursor past the comments it read — so the person who asked saw
+silence and had no reason to ask again. Rounds 6 and 7 on #2688 and round 4 on #1459 all ended that
+way on 2026-09-24. `tellWhoAsked` (`delivery.ts`) now replies before the outcome is returned: in the
+thread for each inline thread, and for the top-level comments, which GitHub gives no way to reply
+to, one `bot:` comment quoting the first visible line of each — past any HTML comment, which
+GitHub renders as nothing: quoting Jacob's review on #1459 by its `<!-- gh-pr-review -->` marker
+posted an empty quote.
+
+- **What is posted is the harness's reason, never the pass's replies.** A failed round's "Done —"
+  describes a change that was discarded. `whyNothingLanded` writes the stage and the reasons, and a
+  repair round's verdict when one ran; the one model-written text is a decline's own `abandoned`
+  reason, which is the decline.
+- **Only a member is mentioned.** Mentioning `@copilot` asks GitHub's agent to act, so a bot is
+  quoted and never mentioned. Every `@` in text anyone else wrote is broken with a zero-width
+  space: inside a quote, in the reason, which can carry a decline or a `requestedBy` the pass
+  wrote, and in a repair notice's quoted `summary` and `residualRisk`.
+- **A comment that asked for nothing is told nothing.** The review schema's `silent` lists
+  top-level comments that ask nothing of the pass — people talking among themselves — and they get
+  no entry in `responses` and no reply here. A thread cannot be `silent`: one whose last comment is
+  not ours is unanswered by `unansweredThreads`' definition and would buy a round every tick.
+  `parseReview` refuses a thread id there, and counts `silent` as an answer so a round of pure
+  chatter is not discarded for answering nothing.
+- **A pass that returned no report tells every comment**, since nothing says which asked.
+- **Infrastructure failures stay off the pull request.** `commit`, `push`, `cursor` and the rest
+  are the operator's problem, and a persistent one would repeat the same reply every tick.
+
+A thread replied to this way now ends with our comment, so the next survey no longer reads it as
+unanswered and does not retry it. That is deliberate: every ending that reaches here is
+deterministic or needs a person, and retrying bought the same refusal until `MAX_PR_ROUNDS_TOTAL`.
 
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is
@@ -1179,7 +1249,8 @@ at all: by then the bot could already do everything, and the daemon only changed
 
 So this heading is now doubly historical, and both halves are worth keeping for the same reason.
 There is no inert code left, and one unwatched stage, knowingly: `REPAIR_PUBLISH` lets the loop
-open a pull request from a repair round before anyone has watched `--repair` promote one by hand,
+open a pull request from a repair round, or push one to a pull request already open, before anyone
+has watched `--repair` promote one by hand,
 and it is off until someone decides otherwise (§15 has the argument). What remains from the
 argument is the standard the next capability will be held to: **built, reviewed, driven by hand
 against a named ticket, and granted in a commit a reviewer can see.** The one item that did _not_

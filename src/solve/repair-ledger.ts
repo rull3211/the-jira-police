@@ -31,11 +31,13 @@ export const HEADER = [
   "# Repair rounds",
   "",
   "One row per repair round, appended, never rewritten. A failed verification buys one repair",
-  "pass (`REPAIR_ROUND`). `runPipeline` discards its verdict unless the run was armed — `--repair`",
-  "by hand, `REPAIR_PUBLISH` for the daemon — and even then acts only on a `verified` one, by",
-  "opening the pull request from it —",
+  "pass (`REPAIR_ROUND`), whether a solve's or a review round's. Its verdict is discarded unless the",
+  "run was armed — `--repair` by hand, `REPAIR_PUBLISH` for the daemon — and even then only a",
+  "`verified` one is acted on, by opening the pull request from it or, for a review round, pushing",
+  "it to the pull request already open —",
   "so this page is the only place every verdict accumulates, acted on or not. Read the `Round`",
-  "column down the page before arming anything.",
+  "column down the page before arming anything. A review round's row names its pull request after",
+  "the ticket, and the change it corrected is the round's own commit rather than the fix.",
   "",
   "**The `Read` column is yours, not the harness's.** A `verified` round is written `unread` and",
   "stays that way until a person reads the round's own edits — `git diff HEAD` in the row's",
@@ -83,11 +85,48 @@ export function repairRow(issueKey: string, outcome: SolveOutcome, now: Date): s
   if (round === undefined) {
     return null;
   }
-  const touched = outcome.repair?.filesTouched ?? [];
+  return formatRow(issueKey, round, outcome.repair?.filesTouched ?? [], outcome.worktree.path, now);
+}
+
+function formatRow(
+  ticket: string,
+  round: string,
+  touched: readonly string[],
+  worktreePath: string,
+  now: Date,
+): string {
   const files = touched.length === 0 ? NOTHING : touched.map((file) => safeText(file)).join(", ");
   // Only `verified` owes a reading: a column nobody can clear stops being read at all.
   const read = round === "verified" ? UNREAD : NOTHING;
-  return `| ${now.toISOString()} | ${issueKey} | ${round} | ${files} | ${safeText(outcome.worktree.path)} | ${read} |\n`;
+  return `| ${now.toISOString()} | ${safeText(ticket)} | ${round} | ${files} | ${safeText(worktreePath)} | ${read} |\n`;
+}
+
+/** A review round's repair, as `delivery.ts` knows it; there is no `SolveOutcome` to read it from. */
+export interface ReviewRepairRecord {
+  readonly issueKey: string;
+  readonly number: number;
+  readonly round: string;
+  readonly files: readonly string[];
+  readonly worktreePath: string;
+}
+
+/** The same row `repairRow` writes, with the pull request after the ticket so the two kinds of round stay apart. */
+export function reviewRepairRow(record: ReviewRepairRecord, now: Date): string {
+  return formatRow(
+    `${record.issueKey} #${String(record.number)}`,
+    record.round,
+    record.files,
+    record.worktreePath,
+    now,
+  );
+}
+
+export async function recordReviewRepairRound(
+  directory: string,
+  record: ReviewRepairRecord,
+  now: Date,
+): Promise<string> {
+  return await appendLedgerRow(directory, REPAIR_LEDGER_FILE, HEADER, reviewRepairRow(record, now));
 }
 
 /**

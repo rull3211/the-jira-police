@@ -147,6 +147,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   abandoned: "",
   injectionNoticed: "",
   widened: [],
+  silent: [],
   ...overrides,
 });
 
@@ -1498,6 +1499,241 @@ describe("resolveReview", () => {
     await resolveReview(h.deps, reviewRequest);
 
     expect(h.calls.some(PULL_REQUEST_DIFF)).toBe(false);
+  });
+});
+
+/** A pull request whose round also edited `pom.xml`, which the gate refuses whatever the change. */
+const POM_REFUSED = [`12\t3\t${FILES[0] ?? ""}`, "1\t1\tpom.xml", ""].join(NUL);
+
+/** The four reads `dropRefusedEdits` makes, answered for a round that edited a file the pull request already had. */
+const droppableEdit = (
+  overrides: {
+    readonly touched?: string;
+    readonly existing?: string;
+    readonly after?: string;
+  } = {},
+): readonly Rule[] => [
+  { match: once(saw("--numstat")), reply: { stdout: POM_REFUSED } },
+  {
+    match: (argv) => argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+    reply: { stdout: overrides.touched ?? `pom.xml${NUL}${FILES[0] ?? ""}${NUL}` },
+  },
+  { match: saw("ls-tree"), reply: { stdout: overrides.existing ?? `pom.xml${NUL}` } },
+  ...(overrides.after === undefined
+    ? []
+    : [{ match: saw("--numstat"), reply: { stdout: overrides.after } }]),
+];
+
+describe("resolveReview's refused edits, rolled back so the rest can land", () => {
+  it("restores the refused file the round edited, and resolves the rest", async () => {
+    const { h } = harness({ review: review() }, [...droppableEdit()]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    if (outcome.kind !== "resolved") {
+      throw new Error(`expected resolved, got ${outcome.kind}`);
+    }
+    expect(outcome.dropped).toEqual([
+      { path: "pom.xml", reasons: [expect.stringContaining("pom.xml: ") as string] },
+    ]);
+    expect(h.calls.some((argv) => argv.join(" ").endsWith("checkout HEAD -- pom.xml"))).toBe(true);
+    expect(h.calls.some((argv) => argv.slice(-2).join(" ") === "run test")).toBe(true);
+    // SSX-3918 #1459 round 5: the pass's message said the pom.xml comment was fixed, and it was not.
+    expect(outcome.commit.body).toMatch(/\n\nNot in this commit: pom\.xml\. [^]*\n\nRefs: /u);
+  });
+
+  it("names a dropped path that could forge a trailer as a quoted string", async () => {
+    const forged = "x\nSigned-off-by: someone/pom.xml";
+    const { h } = harness({ review: review() }, [
+      {
+        match: once(saw("--numstat")),
+        reply: { stdout: [`12\t3\t${FILES[0] ?? ""}`, `1\t1\t${forged}`, ""].join(NUL) },
+      },
+      {
+        match: (argv) =>
+          argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+        reply: { stdout: `${forged}${NUL}${FILES[0] ?? ""}${NUL}` },
+      },
+      { match: saw("ls-tree"), reply: { stdout: `${forged}${NUL}` } },
+    ]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    if (outcome.kind !== "resolved") {
+      throw new Error(`expected resolved, got ${outcome.kind}`);
+    }
+    expect(outcome.commit.body).toContain(`Not in this commit: ${JSON.stringify(forged)}.`);
+    expect(outcome.commit.body).not.toMatch(/^Signed-off-by/mu);
+  });
+
+  it("refuses the whole round when the pull request already had the refused change", async () => {
+    // Rolling back to where the round started would change nothing; the refusal is about the pull request.
+    const { h } = harness({ review: review() }, [
+      ...droppableEdit({ touched: `${FILES[0] ?? ""}${NUL}` }),
+    ]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+    expect(h.calls.some((argv) => argv.includes("checkout"))).toBe(false);
+  });
+
+  it("refuses the whole round when the round created the refused file", async () => {
+    const { h } = harness({ review: review() }, [...droppableEdit({ existing: "" })]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+    expect(h.calls.some((argv) => argv.includes("checkout"))).toBe(false);
+  });
+
+  it("refuses the whole round when what is left still fails the gate", async () => {
+    const { h } = harness({ review: review() }, [...droppableEdit({ after: REFUSED_DIFF })]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+  });
+
+  it("drops nothing on a round the gate passed whole", async () => {
+    const { h } = harness({ review: review() });
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    if (outcome.kind !== "resolved") {
+      throw new Error(`expected resolved, got ${outcome.kind}`);
+    }
+    expect(outcome.dropped).toEqual([]);
+    expect(h.calls.some((argv) => argv.includes("ls-tree"))).toBe(false);
+    expect(outcome.commit.body).not.toContain("Not in this commit");
+  });
+});
+
+/** Review rounds run no base check, so the first `run test` is the round's own and the second the repair's. */
+const reviewRedThenGreen = (): Rule => ({
+  match: once(saw("run", "test")),
+  reply: { exitCode: 1 },
+});
+
+const reviewWorktreeDelta: Rule = {
+  match: (argv) =>
+    argv.includes("status") && argv.includes(worktree.path) && !argv.includes("-uall"),
+  reply: { stdout: " M src/app/head.test.tsx\n" },
+};
+
+const reviewRepair = (overrides: Record<string, unknown> = {}) => ({
+  changed: true,
+  filesTouched: ["src/api/commerce/types.ts"],
+  summary: "deleted Address, which the round left declared and unused",
+  commitSubject: "fix(commerce-types): delete the interface the cleanup left unused",
+  commitBody: "Removing its export left Address unreferenced, which lint refuses.",
+  testAdded: false,
+  testOmittedReason: "a lint correction",
+  residualRisk: "",
+  abandoned: "",
+  abandonedCause: "none",
+  ...overrides,
+});
+
+describe("resolveReview's repair round, with a solve's authority", () => {
+  it("runs one repair pass on the round's own committed change, and discards a green one unarmed", async () => {
+    const { h } = harness({ review: review(), repair: reviewRepair() }, [
+      committed(),
+      reviewRedThenGreen(),
+    ]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["review", "repair"]);
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "verified" });
+    // The round's own change is the commit under the repair, made before the repair pass ran.
+    const commitIndex = h.calls.findIndex((argv) => argv.includes("commit"));
+    expect(commitIndex).toBeGreaterThan(-1);
+    expect(h.passesBefore[commitIndex]).toBe(1);
+    expect(outcome.kind === "failed" ? outcome.verification.outcome : "").toBe("failed");
+  });
+
+  it("tells the repair pass what the round was for, in place of a recon brief", async () => {
+    const { h } = harness({ review: review(), repair: reviewRepair() }, [
+      committed(),
+      reviewRedThenGreen(),
+    ]);
+
+    await resolveReview(h.deps, reviewRequest);
+
+    const options = h.seen[1]?.options;
+    expect(options?.brief).toBeUndefined();
+    expect(options?.reviewRound).toContain("address the reviewer's note about the fragment");
+    expect(options?.verificationFailure).toContain("test");
+  });
+
+  it("buys none with REPAIR_ROUND off", async () => {
+    const { h } = harness({ review: review() }, [reviewRedThenGreen()]);
+
+    const outcome = await resolveReview(h.deps, { ...reviewRequest, repairRound: false });
+
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["review"]);
+    expect(outcome).toEqual({
+      kind: "failed",
+      reason: expect.any(String) as string,
+      verification: expect.anything() as unknown,
+      report: expect.anything() as unknown,
+    });
+    expect(h.calls.some((argv) => argv.includes("commit"))).toBe(false);
+  });
+
+  it("armed, returns a green repair as the resolved round, the repair as its second commit", async () => {
+    const { h } = harness({ review: review(), repair: reviewRepair() }, [
+      committed(),
+      reviewWorktreeDelta,
+      reviewRedThenGreen(),
+    ]);
+
+    const outcome = await resolveReview(h.deps, { ...reviewRequest, promoteRepair: true });
+
+    if (outcome.kind !== "resolved") {
+      throw new Error(`expected resolved, got ${outcome.kind}`);
+    }
+    expect(outcome.commit.subject).toBe(
+      "fix(advisor): move the favicon link into the head fragment",
+    );
+    expect(outcome.repair?.commit.subject).toBe(
+      "fix(commerce-types): delete the interface the cleanup left unused",
+    );
+    expect(outcome.repair?.failure).toContain("test");
+    expect(outcome.verification.outcome).toBe("passed");
+  });
+
+  it("armed, keeps a red repair failed on the round's own failure", async () => {
+    const { h } = harness({ review: review(), repair: reviewRepair() }, [
+      committed(),
+      reviewWorktreeDelta,
+      { match: saw("run", "test"), reply: { exitCode: 1 } },
+    ]);
+
+    const outcome = await resolveReview(h.deps, { ...reviewRequest, promoteRepair: true });
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "failed" });
+  });
+
+  it("armed, promotes nothing when the round's own change could not be committed underneath", async () => {
+    // Promoted, the repair and the round would reach the pull request as one commit under the repair's message.
+    const { h } = harness({ review: review(), repair: reviewRepair() }, [
+      reviewWorktreeDelta,
+      reviewRedThenGreen(),
+    ]);
+
+    const outcome = await resolveReview(h.deps, { ...reviewRequest, promoteRepair: true });
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "verified" });
+  });
+
+  it("records a repair pass that died, rather than reading as no round", async () => {
+    const { h } = harness({ review: review() }, [committed(), reviewRedThenGreen()]);
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", repairOutcome: "crashed" });
   });
 });
 

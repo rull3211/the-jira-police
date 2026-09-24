@@ -735,6 +735,13 @@ describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
     "a round answering only a thread": review({ responses: [], threadAnswers: [threadAnswer] }),
     "a round answering both": review({ threadAnswers: [threadAnswer] }),
     "a round answering nothing": review({ responses: [], threadAnswers: [] }),
+    "a round whose only comment asked for nothing": review({
+      changed: false,
+      filesTouched: [],
+      responses: [],
+      threadAnswers: [],
+      silent: ["comment 1"],
+    }),
     "a widening on a round that changed something": review({
       filesTouched: ["src/a.ts"],
       widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
@@ -1084,6 +1091,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   abandoned: "",
   injectionNoticed: "",
   widened: [],
+  silent: [],
   ...overrides,
 });
 
@@ -1437,6 +1445,29 @@ describe("parseReview", () => {
     expect(() => parseReview(review({ threadAnswers: "none" }), "SSX-3822")).toThrow(
       /not an array/u,
     );
+  });
+
+  describe("silent", () => {
+    it("reads a comment that asked nothing as considered, and posts nothing for it", () => {
+      const report = parseReview(
+        review({ changed: false, filesTouched: [], responses: [], silent: ["Comment 2"] }),
+        "SSX-3784",
+      );
+
+      expect(report.silent).toEqual(["comment 2"]);
+    });
+
+    it("refuses a thread id, since a thread whose last word is not ours comes back every round", () => {
+      expect(() => parseReview(review({ silent: ["PRRT_kwDOE4J7MM6lhZi7"] }), "SSX-3784")).toThrow(
+        /inline thread always gets an answer/u,
+      );
+    });
+
+    it("refuses a report with no silent list at all", () => {
+      const { silent: _absent, ...without } = review();
+
+      expect(() => parseReview(without, "SSX-3784")).toThrow(/silent was not an array/u);
+    });
   });
 
   describe("widened", () => {

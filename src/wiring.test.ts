@@ -999,6 +999,7 @@ describe("buildPublishRequest", () => {
       advanceBase(),
       attachSource,
       1,
+      false,
     );
 
     expect(request.maxFailedStarts).toBe(5);
@@ -1138,6 +1139,28 @@ describe("buildFindPrRequest", () => {
 });
 
 describe("buildAdvanceRequest", () => {
+  it("arms a review round's repair only when the caller says so, and records it either way", () => {
+    // `promoteRepair` is the grant, so it is a parameter here rather than a field a base can carry in unseen.
+    const armed = buildAdvanceRequest(
+      settingsWith(PUBLISH_ENV),
+      advanceBase(),
+      attachSource,
+      1,
+      true,
+    );
+    const unarmed = buildAdvanceRequest(
+      settingsWith(PUBLISH_ENV),
+      { ...advanceBase(), promoteRepair: true },
+      attachSource,
+      1,
+      false,
+    );
+
+    expect(armed.promoteRepair).toBe(true);
+    expect(unarmed.promoteRepair).toBe(false);
+    expect(armed.repairLedger).toBe(settingsWith(PUBLISH_ENV).OUTPUT_DIR);
+  });
+
   it("names the repository from configuration, as publishing does", () => {
     // The phase D2 privilege grant: this pushes to a pull request people are already reading,
     // so the target is decided by the same setting rather than by whatever remote the worktree
@@ -1147,6 +1170,7 @@ describe("buildAdvanceRequest", () => {
       advanceBase(),
       attachSource,
       2657,
+      false,
     );
 
     expect(request.repo).toBe("storebrand-digital/buy-insurance-advisor-web");
@@ -1164,6 +1188,7 @@ describe("buildAdvanceRequest", () => {
         advanceBase(),
         attachSource,
         2657,
+        false,
       ),
     ).toThrow(SettingsError);
   });
@@ -1173,7 +1198,7 @@ describe("buildAdvanceRequest", () => {
     // that opened the pull request.
     const base = advanceBase();
 
-    const request = buildAdvanceRequest(settingsWith(PUBLISH_ENV), base, attachSource, 1);
+    const request = buildAdvanceRequest(settingsWith(PUBLISH_ENV), base, attachSource, 1, false);
 
     expect(request.issueKey).toBe(base.issueKey);
     expect(request.repoPath).toBe(base.repoPath);
@@ -1189,6 +1214,7 @@ describe("buildAdvanceRequest", () => {
       advanceBase(),
       attachSource,
       1,
+      false,
     );
 
     expect("round" in request).toBe(false);
@@ -1203,6 +1229,7 @@ describe("buildAdvanceRequest", () => {
       advanceBase(),
       attachSource,
       1,
+      false,
     );
 
     expect(request.maxRounds).toBe(9);
@@ -1211,7 +1238,8 @@ describe("buildAdvanceRequest", () => {
 
   it("does not name a reviewer, so the delivery default applies", () => {
     expect(
-      "reviewer" in buildAdvanceRequest(settingsWith(PUBLISH_ENV), advanceBase(), attachSource, 1),
+      "reviewer" in
+        buildAdvanceRequest(settingsWith(PUBLISH_ENV), advanceBase(), attachSource, 1, false),
     ).toBe(false);
   });
 
@@ -1225,6 +1253,7 @@ describe("buildAdvanceRequest", () => {
       advanceBase(),
       attachSource,
       1,
+      false,
     );
 
     expect(request.identity).toEqual({ name: "jira-police", email: "jp@x.invalid" });

@@ -71,7 +71,7 @@ export function createReviewLoop(
       // Advance before claim, in one function: §6 requires a ticket already under review to move
       // on before a new one is claimed, which two loops on separate cadences can't guarantee.
       // Null: the daemon watches the whole board; naming one ticket is `--watch`'s job.
-      await runReviewSweep(settings, client, runDeps, null, signal);
+      await runReviewSweep(settings, client, runDeps, null, promoteRepair, signal);
 
       // Not wrapped in its own try: `runLoop` catches, and swallowing it here would hide the
       // fault from the backoff that exists to slow it.

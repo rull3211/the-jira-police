@@ -419,6 +419,23 @@ describe("outcomeNote", () => {
     ).toBe("iterated round=3 pushed=false spoken=posted undrafted=undrafted reviewer=unnecessary");
   });
 
+  it("says where a dropped edit's notice went", () => {
+    expect(
+      outcomeNote({
+        kind: "iterated",
+        round: 6,
+        responses: [],
+        reviewerRequested: "asked",
+        pushed: true,
+        spoken: { outcome: "nothing-to-say" },
+        undrafted: "still-drafting",
+        threads: { answered: 1, resolved: 1, failures: [] },
+        unresolved: "",
+        dropped: { paths: ["pom.xml"], notice: { outcome: "nothing-to-say" } },
+      }),
+    ).toContain(" dropped=1 told=nothing-to-say ");
+  });
+
   it("does not print a null quiet clock as a number", () => {
     // Null means the silence could not be measured, not zero — rendering it as `0ms` would say the opposite.
     expect(outcomeNote({ kind: "waiting", quietMs: null })).toBe("waiting quiet=unknown");
