@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-107 production modules, 95 test files. Grouped by what they belong to rather than alphabetically,
+108 production modules, 96 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -115,6 +115,7 @@ inheritance.
 | `src/solve/pr-text.ts`       | The title and body of the draft pull request. Pure, so the wording is readable in a test       |
 | `src/solve/marker.ts`        | The round cursor as one comment: render, parse, locate, refuse rather than reset. No I/O       |
 | `src/solve/delivery.ts`      | `publish`, `surveyReview` and `advance` — the review round-trip as callable steps              |
+| `src/solve/widening.ts`      | Whether a round's declared widening cites a repository member and a file already under review  |
 | `src/solve/base-sync.ts`     | Bringing a PR's branch up to its base before a round spends. Built after a $16 invoice         |
 | `src/solve/review-cycle.ts`  | One pass over every watched pull request. Cheap look for all, paid round for the few           |
 | `src/solve/silence.ts`       | How long a pull request has been quiet, in wall-clock. Pure; the clock is injected             |

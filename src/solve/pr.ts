@@ -98,6 +98,25 @@ export function reviewOrigin(login: string, reviewer: string): ReviewOrigin {
   return matchesReviewer(login, reviewer) ? "reviewer" : "human";
 }
 
+/** GitHub's `authorAssociation` values that make an author a repository member here; bot accounts read `NONE`. */
+const MEMBER_ASSOCIATIONS: ReadonlySet<string> = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+/** Whether a comment may widen a review round, which is not `reviewOrigin`'s question: a missing association is no authority, and ours is excluded by prefix because `gh` posts as the operator. */
+export function isMemberComment(
+  login: string,
+  association: string,
+  body: string,
+  reviewer: string,
+): boolean {
+  return (
+    MEMBER_ASSOCIATIONS.has(association) &&
+    !matchesReviewer(login, reviewer) &&
+    !isAutomation(login, reviewer) &&
+    !login.endsWith("[bot]") &&
+    !isOurs(body)
+  );
+}
+
 /** Accounts whose comments are not review events at all (e.g. CI deploy notices); kept narrow, since a list wide enough to catch a real reviewer would look like one that never answered. */
 const AUTOMATION_AUTHORS: ReadonlySet<string> = new Set(["github-actions"]);
 
@@ -113,6 +132,8 @@ export interface ReviewComment {
   readonly body: string;
   /** Whether the requested reviewer wrote this, or a person did. */
   readonly origin: ReviewOrigin;
+  /** Whether a repository member wrote this, and so may widen the round; see `isMemberComment`. */
+  readonly member: boolean;
   /** ISO date, or `""` when the entry carried no readable date; `isNewer` treats `""` as new. */
   readonly createdAt: string;
   /**
@@ -173,6 +194,8 @@ export interface ThreadComment {
   readonly body: string;
   /** Whether the requested reviewer wrote this, or a person did; classified here so both transports (a thread, a review body) apply the same round-counting rule. */
   readonly origin: ReviewOrigin;
+  /** Whether a repository member wrote this, and so may widen the round; see `isMemberComment`. */
+  readonly member: boolean;
   /** ISO 8601, as GitHub returns it. Not parsed here; ordering is the API's. */
   readonly createdAt: string;
 }
@@ -541,6 +564,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 interface RawEntry {
   readonly login: string;
+  /** GitHub's `authorAssociation`, `""` when absent. */
+  readonly association: string;
   /** `null` when gh gave something that is not a string, including for an approval. */
   readonly body: string | null;
   /** `null` when the entry carries no readable date. See `dateOf`. */
@@ -586,10 +611,12 @@ function entriesOf(value: unknown): readonly RawEntry[] | null {
       continue;
     }
     const login = asRecord(record["author"])?.["login"];
+    const association = record["authorAssociation"];
     const body = record["body"];
     const id = record["id"];
     entries.push({
       login: typeof login === "string" ? login : "",
+      association: typeof association === "string" ? association : "",
       body: typeof body === "string" ? body : null,
       createdAt: dateOf(record),
       id: typeof id === "string" ? id : "",
@@ -850,6 +877,7 @@ export async function readReview(
                 author: entry.login === "" ? "unknown" : entry.login,
                 body,
                 origin: reviewOrigin(entry.login, reviewer),
+                member: isMemberComment(entry.login, entry.association, body, reviewer),
                 createdAt: entry.createdAt ?? "",
                 id: entry.id,
               },
@@ -934,7 +962,7 @@ const THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
           id isResolved isOutdated path line
           comments(first:${String(THREAD_PAGE)}){
             pageInfo{ hasNextPage }
-            nodes{ author{login} body createdAt }
+            nodes{ author{login} authorAssociation body createdAt }
           }
         }
       }
@@ -981,7 +1009,19 @@ function parseThreadComments(value: unknown, reviewer: string): readonly ThreadC
     // `human`, the safe direction, since an unnamed login is never the
     // reviewer.
     const author = typeof login === "string" ? login : "unknown";
-    comments.push({ author, body, origin: reviewOrigin(author, reviewer), createdAt });
+    const association = record?.["authorAssociation"];
+    comments.push({
+      author,
+      body,
+      origin: reviewOrigin(author, reviewer),
+      member: isMemberComment(
+        author,
+        typeof association === "string" ? association : "",
+        body,
+        reviewer,
+      ),
+      createdAt,
+    });
   }
   return comments;
 }
@@ -1463,7 +1503,10 @@ const TRUNCATION_NOTE = `\n\n[Feedback truncated at ${String(MAX_FEEDBACK_CHARS)
  * forge; the `---` delimiters are a debugging aid only. The count is in the
  * header so a truncated block still says how much of the total it holds.
  */
-export function formatReviewFeedback(comments: readonly ReviewComment[]): string {
+export function formatReviewFeedback(
+  comments: readonly ReviewComment[],
+  memberToken: string,
+): string {
   if (comments.length === 0) {
     return "No review comments.";
   }
@@ -1471,7 +1514,7 @@ export function formatReviewFeedback(comments: readonly ReviewComment[]): string
   const rendered = comments
     .map(
       (comment, index) =>
-        `--- comment ${String(index + 1)} of ${String(comments.length)}, by ${comment.author} ---\n${comment.body.trim()}`,
+        `--- ${commentSource(index)} of ${String(comments.length)}, by ${comment.author}${comment.member ? ` · ${memberLabel(memberToken)}` : ""} ---\n${comment.body.trim()}`,
     )
     .join("\n\n");
   const block = `Review feedback (${String(comments.length)} ${comments.length === 1 ? "comment" : "comments"}):\n\n${rendered}`;
@@ -1496,7 +1539,7 @@ function capped(block: string): string {
  * service's own previous replies, so a pass can see a point was already
  * answered and decline to argue it again instead of being told to.
  */
-export function formatThreads(threads: readonly ReviewThread[]): string {
+export function formatThreads(threads: readonly ReviewThread[], memberToken: string): string {
   if (threads.length === 0) {
     return "No inline review threads.";
   }
@@ -1510,7 +1553,10 @@ export function formatThreads(threads: readonly ReviewThread[]): string {
           ? `${thread.path} (the diff has moved; no line)`
           : `${thread.path}:${String(thread.line)}`;
       const conversation = thread.comments
-        .map((comment) => `${comment.author} wrote:\n${comment.body.trim()}`)
+        .map(
+          (comment) =>
+            `${comment.author}${comment.member ? ` (${memberLabel(memberToken)})` : ""} wrote:\n${comment.body.trim()}`,
+        )
         .join("\n\n");
       return `--- thread ${String(index + 1)} of ${String(threads.length)} · id ${thread.id} · ${where} ---\n${conversation}`;
     })
@@ -1519,4 +1565,30 @@ export function formatThreads(threads: readonly ReviewThread[]): string {
   return capped(
     `Inline review threads (${String(threads.length)}). Answer every one in threadAnswers, copying each id exactly:\n\n${rendered}`,
   );
+}
+
+/** The words the prompt tells the pass to look for; `runner.ts` names them outside the fence. */
+export const MEMBER_LABEL = "repository member";
+
+/** The token is per round, so a comment written before the round cannot carry a label that passes. */
+export function memberLabel(memberToken: string): string {
+  return `${MEMBER_LABEL} ${memberToken}`;
+}
+
+/** How the pass names a review comment in `widened.requestedBy`, and the header that numbers it. */
+function commentSource(index: number): string {
+  return `comment ${String(index + 1)}`;
+}
+
+/** What a `widened` entry may cite — a member's comment by number, a thread a member spoke on by id — over the lists the formatters rendered, so a number means the same comment in both. */
+export function memberSources(
+  comments: readonly ReviewComment[],
+  threads: readonly ReviewThread[],
+): ReadonlySet<string> {
+  return new Set([
+    ...comments.flatMap((comment, index) => (comment.member ? [commentSource(index)] : [])),
+    ...threads.flatMap((thread) =>
+      thread.comments.some((comment) => comment.member) ? [thread.id] : [],
+    ),
+  ]);
 }

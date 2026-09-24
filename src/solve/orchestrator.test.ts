@@ -146,6 +146,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   unresolved: "",
   abandoned: "",
   injectionNoticed: "",
+  widened: [],
   ...overrides,
 });
 
@@ -1227,7 +1228,20 @@ const reviewRequest = {
   ...request,
   worktree,
   reviewFeedback: "Copilot: the wrapper element looks unnecessary here.",
+  memberToken: "a1b2c3d4e5f6",
+  members: new Set<string>(),
 };
+
+/** The pre-round read `boundWidening` makes: the pull request's own commits, not the worktree. */
+const PULL_REQUEST_DIFF = (argv: readonly string[]): boolean =>
+  argv.includes("--numstat") && argv.some((arg) => arg.endsWith("...HEAD"));
+
+const widening = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  path: FILES[0] ?? "",
+  requestedBy: "comment 2",
+  what: "dropped the five exports nothing imports",
+  ...overrides,
+});
 
 describe("resolveReview", () => {
   it("passes the reviewer's comments in and withholds the brief", async () => {
@@ -1395,6 +1409,82 @@ describe("resolveReview", () => {
     const outcome = await resolveReview(h.deps, { ...reviewRequest, readDirs: READ_DIRS });
 
     expect(outcome.kind).toBe("resolved");
+  });
+
+  it("names this round's member token to the pass", async () => {
+    const { h } = harness({ review: review() });
+
+    await resolveReview(h.deps, reviewRequest);
+
+    expect(h.seen[0]?.options.memberToken).toBe(reviewRequest.memberToken);
+  });
+
+  it("keeps a widening a member asked for, in a file the pull request already changed", async () => {
+    const { h } = harness({ review: review({ widened: [widening()] }) });
+
+    const outcome = await resolveReview(h.deps, {
+      ...reviewRequest,
+      members: new Set(["comment 2"]),
+    });
+
+    expect(outcome.kind).toBe("resolved");
+    expect(h.calls.some(PULL_REQUEST_DIFF)).toBe(true);
+  });
+
+  it("refuses a widening cited to a comment no member wrote, before verifying anything", async () => {
+    const { h } = harness({ review: review({ widened: [widening()] }) });
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "widening" });
+    expect(outcome.kind === "refused" ? outcome.reasons.join(" ") : "").toContain('"comment 2"');
+    expect(h.calls.some((argv) => argv.slice(-2).join(" ") === "run test")).toBe(false);
+  });
+
+  it("refuses a widening into a file the pull request had not changed, though the round's own diff now has it", async () => {
+    // The worktree diff includes the round's edits, so bounding against it would let a member's request reach any file the pass chose to touch.
+    const added = "src/api/commerce/unrelated.ts";
+    const { h } = harness(
+      {
+        review: review({
+          filesTouched: [...FILES, added],
+          widened: [widening({ path: added })],
+        }),
+      },
+      [
+        { match: PULL_REQUEST_DIFF, reply: { stdout: NUMSTAT } },
+        { match: saw("--numstat"), reply: { stdout: [NUMSTAT, `4\t0\t${added}`, ""].join(NUL) } },
+      ],
+    );
+
+    const outcome = await resolveReview(h.deps, {
+      ...reviewRequest,
+      members: new Set(["comment 2"]),
+    });
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "widening" });
+    expect(outcome.kind === "refused" ? outcome.reasons.join(" ") : "").toContain(added);
+  });
+
+  it("refuses a widening it cannot bound because the pull request's diff would not read", async () => {
+    const { h } = harness({ review: review({ widened: [widening()] }) }, [
+      { match: PULL_REQUEST_DIFF, reply: { exitCode: 128, stderr: "bad revision" } },
+    ]);
+
+    const outcome = await resolveReview(h.deps, {
+      ...reviewRequest,
+      members: new Set(["comment 2"]),
+    });
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "widening" });
+  });
+
+  it("reads nothing extra on a round that widened nothing", async () => {
+    const { h } = harness({ review: review() });
+
+    await resolveReview(h.deps, reviewRequest);
+
+    expect(h.calls.some(PULL_REQUEST_DIFF)).toBe(false);
   });
 });
 

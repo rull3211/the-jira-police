@@ -7,6 +7,8 @@
  * when to look again. Nothing here merges; a human merges, always.
  */
 
+import { randomBytes } from "node:crypto";
+
 import { createLogger } from "../logger.ts";
 import {
   type BotIdentity,
@@ -20,6 +22,7 @@ import {
   editComment,
   formatReviewFeedback,
   formatThreads,
+  memberSources,
   markReady,
   postComment,
   push,
@@ -199,7 +202,9 @@ export interface SurveyRequest {
 }
 
 export interface AdvanceRequest
-  extends SurveyRequest, Omit<ReviewRoundRequest, "reviewFeedback" | "worktree"> {
+  extends
+    SurveyRequest,
+    Omit<ReviewRoundRequest, "reviewFeedback" | "worktree" | "memberToken" | "members"> {
   readonly identity: BotIdentity;
   readonly reviewer?: string;
   /** See `WorktreeSource`. Not called on a look that finds nothing to do. */
@@ -305,12 +310,12 @@ export type AdvanceOutcome =
   /** The resolution pass declined. A human takes the pull request from here. */
   | { readonly kind: "abandoned"; readonly reason: string }
   /**
-   * `write-escape` says a checkout outside the worktree changed while the round ran, so
-   * nothing it produced is pushed.
+   * `write-escape`: a checkout outside the worktree changed while the round ran, so nothing is pushed.
+   * `widening`: the round declared a change beyond the ticket that no member's comment or reviewed file covers.
    */
   | {
       readonly kind: "refused";
-      readonly stage: "diff-gate" | "verification" | "write-escape";
+      readonly stage: "diff-gate" | "verification" | "write-escape" | "widening";
       readonly reasons: readonly string[];
     }
   | {
@@ -925,12 +930,15 @@ export async function runRound(
     return cursorFailed(`the round was not reserved, so it did not run — ${reserved.reason}`);
   }
 
+  const memberToken = randomBytes(6).toString("hex");
   const resolved = await resolveReview(deps, {
     ...request,
     worktree,
     // One block, so both halves land inside the single untrusted-data fence `runner.ts`
     // puts around review feedback.
-    reviewFeedback: `${formatReviewFeedback(comments)}\n\n${formatThreads(threads)}`,
+    reviewFeedback: `${formatReviewFeedback(comments, memberToken)}\n\n${formatThreads(threads, memberToken)}`,
+    memberToken,
+    members: memberSources(comments, threads),
   });
   if (resolved.kind === "abandoned") {
     return { kind: "abandoned", reason: resolved.reason };

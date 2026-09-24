@@ -122,7 +122,10 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
 - **Match the repository, not your preferences.** Read the surrounding code and follow its
   conventions, naming and test style. This is somebody's codebase and the change will be reviewed
   by the people who own it. No drive-by refactors, no reformatting, no tidying of adjacent code —
-  each one spends the diff budget and buries the actual change in a review.
+  each one buries the actual change in a review. **The one exception is a review round**, when a
+  comment the harness labels as a repository member's asks for exactly that in a file the pull
+  request already changes: the person who owns the code is the one asking.
+  `SOLVE_INSTRUCTIONS.md` §2b.
 - **Prefer a test that fails without the fix.** Where the repository has a test suite and the
   change is testable, add or extend one so the fix is demonstrated rather than asserted. If a
   meaningful test is not possible, say which and why in the summary.
