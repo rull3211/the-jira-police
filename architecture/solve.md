@@ -559,7 +559,8 @@ Two refusal families, and a third that was deleted:
   public. Four of the six files were one line each. The prose the cap shipped with claimed the
   recovery path was that _"a human looks, and either widens the cap for that ticket or agrees the
   ticket was mis-assessed"_ — there was no way to widen it for a ticket, and a `refused` round
-  writes nothing to the pull request, so nobody looked.
+  wrote nothing to the pull request then, so nobody looked. One now replies to whoever asked; see
+  "A round that lands nothing says why" under Delivery.
 
 An empty diff is refused too. A run that edits a file and reverts it, or writes only to an ignored
 path, otherwise reaches the end looking exactly like success and opens an empty pull request.
@@ -1084,11 +1085,39 @@ Copilot rendered identically, as `by <login>` inside one forgeable block.
   worktree, which already holds the round's own edits.
 
 **What it does not do.** It reads a declaration, so a round that widens without declaring passes,
-as it would have before. A refused round still writes nothing to the pull request, and its
-reservation has already moved the cursor past the comment that asked, so the member hears nothing
-unless they ask again. And the authority is only as good as the prefix on everything this service
+as it would have before. A refused round replies with the harness's reason, but its reservation
+has already moved the cursor past the comment that asked, so another round needs another comment. And the authority is only as good as the prefix on everything this service
 posts: replies from before `replyToThread` stamped it read as the operator's, with a member's
 authority, on any pull request still open from then.
+
+#### A round that lands nothing says why, to whoever asked
+
+A round that ends `abandoned`, `refused` or `failed` at verification used to post nothing, and its
+reservation had already moved the cursor past the comments it read — so the person who asked saw
+silence and had no reason to ask again. Rounds 6 and 7 on #2688 and round 5 on #1459 all ended that
+way on 2026-09-24. `tellWhoAsked` (`delivery.ts`) now replies before the outcome is returned: in the
+thread for each inline thread, and for the top-level comments, which GitHub gives no way to reply
+to, one `bot:` comment quoting the first line of each.
+
+- **What is posted is the harness's reason, never the pass's replies.** A failed round's "Done —"
+  describes a change that was discarded. `whyNothingLanded` writes the stage and the reasons, and a
+  repair round's verdict when one ran; the one model-written text is a decline's own `abandoned`
+  reason, which is the decline.
+- **Only a member is mentioned.** Mentioning `@copilot` asks GitHub's agent to act, so a bot is
+  quoted and never mentioned, and every `@` inside a quote is broken with a zero-width space.
+- **A comment that asked for nothing is told nothing.** The review schema's `silent` lists
+  top-level comments that ask nothing of the pass — people talking among themselves — and they get
+  no entry in `responses` and no reply here. A thread cannot be `silent`: one whose last comment is
+  not ours is unanswered by `unansweredThreads`' definition and would buy a round every tick.
+  `parseReview` refuses a thread id there, and counts `silent` as an answer so a round of pure
+  chatter is not discarded for answering nothing.
+- **A pass that returned no report tells every comment**, since nothing says which asked.
+- **Infrastructure failures stay off the pull request.** `commit`, `push`, `cursor` and the rest
+  are the operator's problem, and a persistent one would repeat the same reply every tick.
+
+A thread replied to this way now ends with our comment, so the next survey no longer reads it as
+unanswered and does not retry it. That is deliberate: every ending that reaches here is
+deterministic or needs a person, and retrying bought the same refusal until `MAX_PR_ROUNDS_TOTAL`.
 
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is

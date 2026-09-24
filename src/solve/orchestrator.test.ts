@@ -147,6 +147,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   abandoned: "",
   injectionNoticed: "",
   widened: [],
+  silent: [],
   ...overrides,
 });
 
@@ -1556,6 +1557,7 @@ describe("resolveReview's repair round, with a solve's authority", () => {
       kind: "failed",
       reason: expect.any(String) as string,
       verification: expect.anything() as unknown,
+      report: expect.anything() as unknown,
     });
     expect(h.calls.some((argv) => argv.includes("commit"))).toBe(false);
   });

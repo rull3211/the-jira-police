@@ -46,13 +46,14 @@ import type { SyncedAttachResult } from "./base-sync.ts";
 import {
   type RepairVerdict,
   type ReviewRepair,
+  type ReviewRoundOutcome,
   type ReviewRoundRequest,
   type SolveDependencies,
   resolveConflict,
   resolveReview,
 } from "./orchestrator.ts";
 import { type ReviewRepairRecord, recordReviewRepairRound } from "./repair-ledger.ts";
-import type { CommitMessage, ThreadAnswer } from "./runner.ts";
+import type { CommitMessage, ReviewReport, ThreadAnswer } from "./runner.ts";
 import { quietFor } from "./silence.ts";
 import type { Worktree } from "./worktree.ts";
 
@@ -315,7 +316,12 @@ export type AdvanceOutcome =
       readonly conflicts: readonly string[];
     }
   /** The resolution pass declined. A human takes the pull request from here. */
-  | { readonly kind: "abandoned"; readonly reason: string }
+  | {
+      readonly kind: "abandoned";
+      readonly reason: string;
+      /** Whether the reason reached the comments that asked. */
+      readonly told?: Spoken;
+    }
   /**
    * `write-escape`: a checkout outside the worktree changed while the round ran, so nothing is pushed.
    * `widening`: the round declared a change beyond the ticket that no member's comment or reviewed file covers.
@@ -324,6 +330,7 @@ export type AdvanceOutcome =
       readonly kind: "refused";
       readonly stage: "diff-gate" | "verification" | "write-escape" | "widening";
       readonly reasons: readonly string[];
+      readonly told?: Spoken;
     }
   | {
       /** `cursor`: a marker that will not parse, or a reservation that would not write. */
@@ -342,6 +349,8 @@ export type AdvanceOutcome =
       readonly reason: string;
       /** A `verification` failure's repair round, when one ran; absent means none did. */
       readonly repairOutcome?: RepairVerdict;
+      /** Set only on a `verification` failure, the one stage a pass's work reaches. */
+      readonly told?: Spoken;
     };
 
 /**
@@ -949,13 +958,26 @@ export async function runRound(
     memberToken,
     members: memberSources(comments, threads),
   });
-  if (resolved.kind === "abandoned") {
-    return { kind: "abandoned", reason: resolved.reason };
-  }
-  if (resolved.kind === "refused") {
-    return { kind: "refused", stage: resolved.stage, reasons: resolved.reasons };
-  }
-  if (resolved.kind === "failed") {
+  if (resolved.kind === "abandoned" || resolved.kind === "refused" || resolved.kind === "failed") {
+    // Before anything else is returned: the reservation has already moved the cursor past these
+    // comments, so this reply is the only way the people who asked learn to ask again.
+    const told = await tellWhoAsked(commands, {
+      cwd: worktree.path,
+      repo,
+      number,
+      round: round + 1,
+      comments,
+      threads,
+      ...(resolved.report === undefined ? {} : { report: resolved.report }),
+      why: whyNothingLanded(resolved),
+      timeoutMs: request.ghTimeoutMs,
+    });
+    if (resolved.kind === "abandoned") {
+      return { kind: "abandoned", reason: resolved.reason, told };
+    }
+    if (resolved.kind === "refused") {
+      return { kind: "refused", stage: resolved.stage, reasons: resolved.reasons, told };
+    }
     if (resolved.repairOutcome !== undefined) {
       await recordRepair(request, {
         issueKey: request.issueKey,
@@ -969,6 +991,7 @@ export async function runRound(
       kind: "failed",
       stage: "verification",
       reason: resolved.reason,
+      told,
       ...(resolved.repairOutcome === undefined ? {} : { repairOutcome: resolved.repairOutcome }),
     };
   }
@@ -1108,6 +1131,109 @@ export async function runRound(
     unresolved: resolved.report.unresolved,
     ...(repaired === undefined ? {} : { repaired }),
   };
+}
+
+/** Harness-written, so a member reads the reason nothing landed rather than the pass's own replies, which described a change that was discarded. */
+function whyNothingLanded(
+  resolved: Extract<ReviewRoundOutcome, { kind: "abandoned" | "refused" | "failed" }>,
+): string {
+  switch (resolved.kind) {
+    case "abandoned": {
+      return resolved.report === undefined
+        ? `This round could not finish, so nothing from it was pushed: ${resolved.reason}`
+        : `Declined, and nothing from this round was pushed: ${resolved.reason}`;
+    }
+    case "refused": {
+      return `Nothing from this round was pushed — the harness refused it at the ${resolved.stage}: ${resolved.reasons.join("; ")}`;
+    }
+    case "failed": {
+      const repair =
+        resolved.repairOutcome === undefined
+          ? ""
+          : resolved.repairOutcome === "verified"
+            ? " A repair round corrected it, but this run was not armed to push a repair, so that was recorded and not pushed."
+            : ` A repair round ran and ended ${resolved.repairOutcome}.`;
+      return `Nothing from this round was pushed — its change failed verification: ${resolved.reason}.${repair}`;
+    }
+  }
+}
+
+interface TellRequest {
+  readonly cwd: string;
+  readonly repo: string;
+  readonly number: number;
+  readonly round: number;
+  readonly comments: readonly ReviewComment[];
+  readonly threads: readonly ReviewThread[];
+  /** Absent when the pass returned none, and then every comment is told: nothing says which asked. */
+  readonly report?: ReviewReport;
+  readonly why: string;
+  readonly timeoutMs: number;
+}
+
+/** A comment's first line, quoted, with every `@` broken so quoting a mention does not summon anyone. */
+function quoted(body: string): string {
+  const line = body.split("\n").find((candidate) => candidate.trim() !== "") ?? "";
+  const cut = line.length > 120 ? `${line.slice(0, 117).trimEnd()}...` : line;
+  return `> ${cut.trim().replaceAll("@", "@\u200b")}`;
+}
+
+/**
+ * The reason, replied to each comment that asked: in the thread for an inline thread, and in one
+ * comment for the rest, which GitHub gives no way to reply to. Only a member is mentioned, since
+ * mentioning `@copilot` asks GitHub's agent to act, and `silent` comments are told nothing.
+ */
+async function tellWhoAsked(
+  commands: SolveDependencies["commands"],
+  request: TellRequest,
+): Promise<Spoken> {
+  const silent = new Set(request.report?.silent ?? []);
+  const asked = request.comments.filter(
+    (_comment, index) => !silent.has(`comment ${String(index + 1)}`),
+  );
+  const failures: string[] = [];
+  let posted = false;
+
+  for (const thread of request.threads) {
+    const replied = await replyToThread(commands, {
+      cwd: request.cwd,
+      threadId: thread.id,
+      body: request.why,
+      timeoutMs: request.timeoutMs,
+    });
+    if (replied.outcome === "failed") {
+      failures.push(`${thread.path}: ${replied.reason}`);
+    } else {
+      posted = true;
+    }
+  }
+
+  if (asked.length > 0) {
+    const mentions = [
+      ...new Set(asked.filter((comment) => comment.member).map((comment) => `@${comment.author}`)),
+    ];
+    const result = await postComment(commands, {
+      cwd: request.cwd,
+      repo: request.repo,
+      number: request.number,
+      body:
+        `${BOT_PREFIX}round ${String(request.round)} — nothing from this round was pushed\n\n` +
+        `${mentions.length === 0 ? "" : `${mentions.join(" ")} — `}${request.why}\n\n` +
+        `In answer to:\n${asked.map((comment) => quoted(comment.body)).join("\n")}`,
+      timeoutMs: request.timeoutMs,
+    });
+    if (result.outcome === "failed") {
+      failures.push(`the pull request comment: ${result.reason}`);
+    } else {
+      posted = true;
+    }
+  }
+
+  if (failures.length > 0) {
+    log.warn("solve.review.untold", { number: request.number, failures });
+    return { outcome: "failed", reason: failures.join("; ") };
+  }
+  return posted ? { outcome: "posted" } : { outcome: "nothing-to-say" };
 }
 
 interface AnnounceRequest {

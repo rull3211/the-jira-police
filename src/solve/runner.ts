@@ -893,6 +893,21 @@ export interface ReviewReport {
   readonly abandoned: string;
   readonly injectionNoticed: string;
   readonly widened: readonly WidenedChange[];
+  /** `comment N` for each top-level comment that asked nothing; nothing is posted for these. */
+  readonly silent: readonly string[];
+}
+
+/** A top-level comment's reference, as the header numbers it; a thread cannot go unanswered, so its id is refused here. */
+function silentComments(record: Record<string, unknown>, issueKey: string): readonly string[] {
+  return strings(record, "silent").map((entry) => {
+    const numbered = /^comment\s+(\d+)$/iu.exec(entry.trim());
+    if (numbered === null) {
+      throw new SolveParseError(
+        `${issueKey}: silent named ${JSON.stringify(entry)}, which is not a \`comment N\` — an inline thread always gets an answer, since one whose last word is not ours is read again every round`,
+      );
+    }
+    return `comment ${String(Number(numbered[1]))}`;
+  });
 }
 
 function widenedChanges(
@@ -1062,11 +1077,16 @@ export function parseReview(value: unknown, issueKey: string): ReviewReport {
     abandoned: str(record, "abandoned"),
     injectionNoticed: str(record, "injectionNoticed"),
     widened: widenedChanges(record, issueKey),
+    silent: silentComments(record, issueKey),
   };
 
   // Abandoning after touching something is legal here too (see `parseFix`). Unlike the fix pass, "no change" with nothing abandoned is also legitimate — a review can raise only questions.
-  // Both `responses` and `threadAnswers` count: they're disjoint by where the answer gets posted, so a review of only line comments must leave `responses` empty.
-  if (report.responses.length === 0 && report.threadAnswers.length === 0) {
+  // All three count: `responses` and `threadAnswers` are disjoint by where the answer is posted, and `silent` records a comment considered and found to ask nothing.
+  if (
+    report.responses.length === 0 &&
+    report.threadAnswers.length === 0 &&
+    report.silent.length === 0
+  ) {
     throw new SolveParseError(
       `${issueKey}: review round answered none of the reviewer's comments — a comment considered and declined must still be recorded, or a human cannot tell it from one that was missed`,
     );

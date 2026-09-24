@@ -129,6 +129,11 @@ const NOTHING: ReviewCycleOutcome = {
  *
  * No `default` arm — an outcome added to the union is a type error here rather than a round that logs `undefined`.
  */
+/** Where the reason for a round that landed nothing went, for a log line. */
+function told(spoken: { readonly outcome: string } | undefined): string {
+  return spoken === undefined ? "" : ` told=${spoken.outcome}`;
+}
+
 export function outcomeNote(outcome: AdvanceOutcome): string {
   switch (outcome.kind) {
     case "waiting":
@@ -146,11 +151,11 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
     case "synced":
       return `synced round=${String(outcome.round)} behind=${String(outcome.behind)} conflicts=${outcome.conflicts.length === 0 ? "none" : outcome.conflicts.join(",")}`;
     case "abandoned":
-      return `abandoned: ${outcome.reason}`;
+      return `abandoned: ${outcome.reason}${told(outcome.told)}`;
     case "refused":
-      return `refused at ${outcome.stage}: ${outcome.reasons.join("; ")}`;
+      return `refused at ${outcome.stage}: ${outcome.reasons.join("; ")}${told(outcome.told)}`;
     case "failed":
-      return `failed at ${outcome.stage}: ${outcome.reason}${outcome.repairOutcome === undefined ? "" : ` repair=${outcome.repairOutcome}`}`;
+      return `failed at ${outcome.stage}: ${outcome.reason}${outcome.repairOutcome === undefined ? "" : ` repair=${outcome.repairOutcome}`}${told(outcome.told)}`;
   }
 }
 

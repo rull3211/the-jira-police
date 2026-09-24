@@ -9,7 +9,7 @@
  * driving the harness by hand. Both must refuse to let a refusal read like a verdict.
  */
 
-import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
+import type { AdvanceOutcome, ReRequest, Spoken, Undraft } from "../solve/delivery.ts";
 import type { ReviewStage, SolveOutcomeLabel } from "../solve/labels.ts";
 import { hasGoneQuiet } from "../solve/silence.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
@@ -420,6 +420,13 @@ const UNDRAFT_LINE = {
 } as const satisfies Record<Undraft, string>;
 
 /** One line an operator can act on, per review-round outcome. */
+/** Only a failure is worth a line: a reason that reached the pull request is the ordinary case. */
+function toldLine(told: Spoken | undefined): string {
+  return told?.outcome === "failed"
+    ? `\nThe reason did NOT reach the comments that asked — ${told.reason}. Nobody on the pull request knows why nothing landed.`
+    : "";
+}
+
 export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
   switch (outcome.kind) {
     case "waiting": {
@@ -500,14 +507,21 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       );
     }
     case "abandoned": {
-      return `ABANDONED (this is not a failure) — a pass read the review and declined: ${outcome.reason}`;
+      return (
+        `ABANDONED (this is not a failure) — a pass read the review and declined: ${outcome.reason}` +
+        toldLine(outcome.told)
+      );
     }
     case "refused": {
-      return `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nNothing was pushed.`;
+      return (
+        `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nNothing was pushed.` +
+        toldLine(outcome.told)
+      );
     }
     case "failed": {
       return (
         `FAILED at the ${outcome.stage} stage — ${outcome.reason}` +
+        toldLine(outcome.told) +
         (outcome.repairOutcome === undefined
           ? ""
           : outcome.repairOutcome === "verified"

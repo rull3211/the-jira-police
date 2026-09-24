@@ -1464,7 +1464,8 @@ async function runConflictRound(
 
 export type ReviewRoundOutcome =
   | { readonly kind: "no-change"; readonly report: ReviewReport }
-  | { readonly kind: "abandoned"; readonly reason: string }
+  /** `report` is present when the pass itself declined, and absent when it never returned one. */
+  | { readonly kind: "abandoned"; readonly reason: string; readonly report?: ReviewReport }
   /**
    * `write-escape` is the same guard `solveTicket` runs, reported differently:
    * a review round has no dev lens and no calibration row, so `refused` is
@@ -1474,10 +1475,13 @@ export type ReviewRoundOutcome =
       readonly kind: "refused";
       readonly stage: "diff-gate" | "verification" | "write-escape" | "widening";
       readonly reasons: readonly string[];
+      /** Which comments the round answered and which it left `silent`, so the refusal reaches only those that asked. */
+      readonly report?: ReviewReport;
     }
   | {
       readonly kind: "failed";
       readonly reason: string;
+      readonly report: ReviewReport;
       /** The round's own failure, never the repair's: a `failed` carrying a green verification is a contradiction a reader acts on. */
       readonly verification: VerificationResult;
       /** Present when a repair round ran, whatever it concluded; absent means none did. */
@@ -1542,7 +1546,12 @@ export async function resolveReview(
       paths: escaped,
       would: outcome.kind,
     });
-    return { kind: "refused", stage: "write-escape", reasons: [describeEscape(escaped)] };
+    return {
+      kind: "refused",
+      stage: "write-escape",
+      reasons: [describeEscape(escaped)],
+      ...("report" in outcome && outcome.report !== undefined ? { report: outcome.report } : {}),
+    };
   } finally {
     await removeSkillRoot(staged.path);
   }
@@ -1583,7 +1592,7 @@ async function boundWidening(
     widened: report.widened.length,
     reasons: reasons.length,
   });
-  return { kind: "refused", stage: "widening", reasons };
+  return { kind: "refused", stage: "widening", reasons, report };
 }
 
 async function runReviewRound(
@@ -1629,7 +1638,7 @@ async function runReviewRound(
       leftFiles: report.changed,
       worktreePath: worktree.path,
     });
-    return { kind: "abandoned", reason: report.abandoned };
+    return { kind: "abandoned", reason: report.abandoned, report };
   }
   if (!report.changed) {
     // A review round can raise only questions, with nothing to re-verify.
@@ -1655,16 +1664,17 @@ async function runReviewRound(
       kind: "refused",
       stage: "diff-gate",
       reasons: ["could not read the diff, so there is nothing to bound"],
+      report,
     };
   }
   const verdict = await gateDiff(commands, request, worktree.path, parseNumstat(diffText));
   if (!verdict.ok) {
-    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
+    return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, report };
   }
 
   const verification = await verify(commands, verifyRequestOf(request, worktree));
   if (verification.outcome === "refused") {
-    return { kind: "refused", stage: "verification", reasons: [verification.reason] };
+    return { kind: "refused", stage: "verification", reasons: [verification.reason], report };
   }
   const commit = composeCommitMessage(
     {
@@ -1702,7 +1712,7 @@ async function repairReviewRound(
   verification: Extract<VerificationResult, { outcome: "failed" }>,
 ): Promise<ReviewRoundOutcome> {
   const { issueKey, worktree } = request;
-  const failure = { kind: "failed", reason: verification.reason, verification } as const;
+  const failure = { kind: "failed", reason: verification.reason, verification, report } as const;
   if (request.repairRound === false) {
     return failure;
   }

@@ -747,6 +747,16 @@ describe("describeAdvanceOutcome", () => {
     }
   });
 
+  it("says so when the reason for a refusal never reached the pull request", () => {
+    const text = describeAdvanceOutcome({
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: ["pom.xml: the Maven build is defined here"],
+      told: { outcome: "failed", reason: "HTTP 403" },
+    });
+    expect(text).toContain("did NOT reach the comments that asked — HTTP 403");
+  });
+
   it("does not let a discarded green repair read as the round's answer", () => {
     // "verified" near a failed round is what a reader takes as the result unless told otherwise.
     const text = describeAdvanceOutcome({

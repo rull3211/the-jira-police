@@ -60,6 +60,7 @@ const review = (overrides: Record<string, unknown> = {}): Record<string, unknown
   abandoned: "",
   injectionNoticed: "",
   widened: [],
+  silent: [],
   ...overrides,
 });
 
@@ -1020,6 +1021,66 @@ describe("advance", () => {
       expect(outcome).toMatchObject({ kind: "refused", stage: "widening" });
       expect(ran(h, "push")).toBe(false);
     });
+
+    it("tells whoever asked why a refused round pushed nothing, mentioning only the member", async () => {
+      const h = harness({ review: widened("comment 1") }, [memberAsked]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({ kind: "refused", told: { outcome: "posted" } });
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told?.startsWith(BOT_PREFIX)).toBe(true);
+      expect(told).toContain("@rull3211 — Nothing from this round was pushed");
+      expect(told).toContain("refused it at the widening");
+      // Quoted, never mentioned: `@copilot` in a comment asks GitHub's agent to act.
+      expect(told).not.toContain("@copilot");
+      expect(told).toContain("> the wrapper looks unnecessary");
+      expect(told).toContain("> and drop the unused exports while you are in there");
+    });
+
+    it("breaks a mention inside a quote, so quoting a comment cannot summon anyone", async () => {
+      // `comment 2` does not exist here, so the widening is refused and the reason goes out.
+      const h = harness({ review: widened("comment 2") }, [
+        {
+          match: saw("pr", "view"),
+          reply: {
+            stdout: JSON.stringify({
+              state: "OPEN",
+              isDraft: true,
+              createdAt: "2026-09-05T09:00:00Z",
+              reviews: [],
+              comments: [
+                {
+                  author: { login: "rull3211" },
+                  authorAssociation: "MEMBER",
+                  body: "@copilot and drop the unused exports",
+                },
+              ],
+              reviewRequests: [],
+            }),
+          },
+        },
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).toContain("@rull3211 — ");
+      expect(told).toContain("> @\u200bcopilot and drop the unused exports");
+      expect(told).not.toMatch(/@copilot/u);
+    });
+
+    it("tells nothing to a comment the round marked as asking nothing", async () => {
+      const h = harness({ review: { ...widened("comment 1"), silent: ["comment 1"] } }, [
+        memberAsked,
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).not.toContain("the wrapper looks unnecessary");
+      expect(told).toContain("> and drop the unused exports while you are in there");
+    });
   });
 
   describe("a round that fails verification, with a solve's repair authority", () => {
@@ -1076,6 +1137,34 @@ describe("advance", () => {
       expect(notice).toContain("test did not pass");
       expect(notice).toContain("read that commit on its own");
       expect(notice?.startsWith(BOT_PREFIX)).toBe(true);
+    });
+
+    it("replies in the thread when the round that failed was answering one", async () => {
+      const h = harness(
+        {
+          review: review({
+            responses: [],
+            threadAnswers: [
+              {
+                threadId: "PRRT_1",
+                reply: "Done — appended only when absent.",
+                basis: "changed-code",
+                resolve: true,
+              },
+            ],
+          }),
+        },
+        [QUIET, inline(thread()), { match: saw("run", "test"), reply: { exitCode: 1 } }],
+      );
+
+      const outcome = await advance(h.deps, { ...advanceRequest, repairRound: false });
+
+      expect(outcome).toMatchObject({ kind: "failed", told: { outcome: "posted" } });
+      expect(replies(h)).toEqual([
+        expect.stringContaining("its change failed verification: test did not pass"),
+      ]);
+      // The pass's "Done" described a change that was discarded, so it is not what goes out.
+      expect(replies(h).join("")).not.toContain("appended only when absent");
     });
 
     it("unarmed, pushes nothing and records the verdict in the ledger", async () => {
