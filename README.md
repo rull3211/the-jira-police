@@ -525,8 +525,8 @@ unreported rather than swept. Dry by default, same shape as `triage:once`; nothi
 `review-loop.ts` calls it, so a stale directory only goes away when someone runs it.
 
 **`pnpm repair:ledger` is the only place every repair round's verdict survives the run that bought
-it.** A failed verification buys one repair pass and `runPipeline` discards what it concludes
-unless the run was armed — `--repair` typed, or `REPAIR_PUBLISH` for the daemon —
+it.** A failed verification — a solve's or a review round's — buys one repair pass, and what it
+concludes is discarded unless the run was armed — `--repair` typed, or `REPAIR_PUBLISH` for the daemon —
 (`architecture/solve.md` §15), so every round, promoted
 or not, appends a row to `<OUTPUT_DIR>/repair-rounds.md` and this command reads that page back:
 how the rounds ended, and which green ones nobody has looked at.
@@ -655,19 +655,22 @@ pnpm solve:once SSX-1234 --pr      # ... and opens the draft PR, reviewer @copil
 pnpm solve:once SSX-1234 --review  # ... and works the review through to a handover
 pnpm solve:once SSX-1234 --pr --repair  # --pr, and a repair round that goes green opens it
 pnpm solve:once SSX-1234 --advance # one review round on a PR an earlier run opened
+pnpm solve:once SSX-1234 --advance --repair  # ... and a repair of a failed round that goes green is pushed
 pnpm solve:once --watch            # poll every ticket under review until none is left
 pnpm solve:once SSX-1234 --watch   # the same loop, narrowed to one ticket
 
 pnpm bot:once SSX-1234 --review    # the same ladder, but triage runs first and gates it
 ```
 
-**`--repair` is not a rung, it is a modifier on `--pr` and `--review`.** A failed verification
-buys a repair round whenever `REPAIR_ROUND` allows, flag or no flag; `--repair` decides what a
-green one may do. Without it the verdict is recorded and discarded. With it, the pull request is
-opened from the repaired tree as two commits — the fix, then the repair — and its body says above
-everything else that the second was written by a pass shown the failure, and should be read on its
-own. It is refused below `--pr`, with `REPAIR_ROUND=false` (no round would run for it to act on),
-and by `bot:once`. **The daemon's copy is `REPAIR_PUBLISH`**, off unless it reads `true` (any case),
+**`--repair` is not a rung, it is a modifier on `--pr`, `--review`, `--advance` and `--watch`.** A
+failed verification buys a repair round whenever `REPAIR_ROUND` allows, flag or no flag; `--repair`
+decides what a green one may do. Without it the verdict is recorded and discarded. With it, the pull
+request is opened from the repaired tree as two commits — the fix, then the repair — and its body
+says above everything else that the second was written by a pass shown the failure, and should be
+read on its own. A review round that fails gets the same: armed, its repair is pushed as the round's
+second commit and a `bot:` comment on the pull request names the failure and says to read that
+commit on its own. It is refused below `--pr`, with `REPAIR_ROUND=false` (no round would run for it
+to act on), and by `bot:once`. **The daemon's copy is `REPAIR_PUBLISH`**, off unless it reads `true` (any case),
 and the daemon's startup line says `promotesRepairs` either way; leave it off until you have read
 what `--repair` produces by hand. `architecture/solve.md` §15 has why both exist before the
 evidence that was meant to justify them.
@@ -742,39 +745,39 @@ there is no build step here.
 
 Full table in `architecture/configuration.md` §10. The ones that matter for a demo:
 
-| Setting                         | Default       | Notes                                                                      |
-| ------------------------------- | ------------- | -------------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket        |
-| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket    |
-| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post           |
-| `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`     |
-| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank widens rather than closes** — see below |
-| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below    |
-| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                         |
-| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                     |
-| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in  |
-| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed       |
-| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write        |
-| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it    |
-| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory             |
-| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it    |
-| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built        |
-| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days     |
-| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend     |
-| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot        |
-| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design     |
-| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above     |
-| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see         |
-| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                            |
-| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back    |
-| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none   |
-| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve; acted on only when armed      |
-| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on      |
-| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change that only moves a dependency version. Only `true` arms it |
+| Setting                         | Default       | Notes                                                                                 |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket                   |
+| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket               |
+| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                      |
+| `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`                |
+| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank widens rather than closes** — see below            |
+| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below               |
+| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                                    |
+| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                                |
+| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in             |
+| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed                  |
+| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write                   |
+| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it               |
+| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory                        |
+| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it               |
+| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built                   |
+| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days                |
+| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend                |
+| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot                   |
+| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design                |
+| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above                |
+| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see                    |
+| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                                       |
+| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back               |
+| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none              |
+| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed |
+| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                 |
+| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change that only moves a dependency version. Only `true` arms it            |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
-request; an unset `REPAIR_PUBLISH` lets the daemon open none from a repair round. **`DEPENDENCY_BUMPS` breaks this, by the operator's decision**: unset, a run may bump a dependency version in `pom.xml`; a misspelled value still refuses it. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
+request; an unset `REPAIR_PUBLISH` lets the daemon open or push nothing from a repair round. **`DEPENDENCY_BUMPS` breaks this, by the operator's decision**: unset, a run may bump a dependency version in `pom.xml`; a misspelled value still refuses it. `SOLVE_WORKTREE_ROOT` is the exception and grants nothing — set it to somewhere you can
 open in a file browser, because macOS puts the default under `/private/var` and the diff review the
 solver phase depends on is a person reading that worktree.
 

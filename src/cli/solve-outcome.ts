@@ -437,6 +437,12 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         (outcome.pushed
           ? `ITERATED — round ${String(outcome.round)} pushed.`
           : `ITERATED — round ${String(outcome.round)} answered without changing code, so nothing was pushed.`) +
+        (outcome.repaired === undefined
+          ? ""
+          : ` Its own change failed (${outcome.repaired.failure}); a repair round corrected it and was pushed as the round's second commit — read that commit on its own.` +
+            (outcome.repaired.notice.outcome === "failed"
+              ? ` The notice saying so did NOT reach the pull request — ${outcome.repaired.notice.reason}.`
+              : "")) +
         ` Responses:\n` +
         outcome.responses.map((response) => `  - ${response}`).join("\n") +
         REREQUEST_LINE[outcome.reviewerRequested] +
@@ -500,7 +506,14 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       return `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nNothing was pushed.`;
     }
     case "failed": {
-      return `FAILED at the ${outcome.stage} stage — ${outcome.reason}`;
+      return (
+        `FAILED at the ${outcome.stage} stage — ${outcome.reason}` +
+        (outcome.repairOutcome === undefined
+          ? ""
+          : outcome.repairOutcome === "verified"
+            ? `\nA repair round ran and its correction passed. That verdict is DISCARDED, not pushed — the run was not armed (--repair, or REPAIR_PUBLISH under the daemon), or it was and the round's own change could not be committed underneath it (solve.repair.not_promoted above). Recorded in repair-rounds.md; read it with: pnpm repair:ledger`
+            : `\nA repair round ran and ended ${outcome.repairOutcome}, so it did not rescue the round either. Recorded in repair-rounds.md.`)
+      );
     }
   }
 }

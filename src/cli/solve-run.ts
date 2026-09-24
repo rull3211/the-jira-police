@@ -447,6 +447,7 @@ export async function runAdvance(
   settings: Settings,
   client: JiraClient,
   issueKey: string,
+  promoteRepair: boolean,
 ): Promise<AdvanceOutcome | null> {
   const read = createTicketReader(client);
   const { text, detail } = await read(issueKey);
@@ -524,7 +525,10 @@ export async function runAdvance(
     return attached;
   };
 
-  const result = await advance(deps, buildAdvanceRequest(settings, base, attach, found.number));
+  const result = await advance(
+    deps,
+    buildAdvanceRequest(settings, base, attach, found.number, promoteRepair),
+  );
   process.stdout.write(`\n${describeAdvanceOutcome(result)}\n`);
   if (isAdvanceFailureExit(result)) {
     process.exitCode = 1;
@@ -535,13 +539,11 @@ export async function runAdvance(
   // most of them.
   await moveReviewStage(client, issueKey, reviewStageAfter(result));
 
-  // Kept when a human would want the diff: a refusal is a diff judged too large or too wide, and
-  // reading it is how an operator decides whether the gate or the pass was wrong.
   if (worktree !== null) {
     const cleanup = await removeWorktree(
       deps.commands,
       worktree,
-      result.kind === "refused" ? "keep-as-evidence" : "discard",
+      keepsEvidence(result) ? "keep-as-evidence" : "discard",
       base.gitTimeoutMs,
     );
     process.stdout.write(
@@ -587,6 +589,7 @@ export async function runReviewChain(
   settings: Settings,
   client: JiraClient,
   issueKey: string,
+  promoteRepair: boolean,
 ): Promise<void> {
   const pollMs = numeric(settings, "REVIEW_POLL_MS", 1);
   const silenceMs = numeric(settings, "REVIEW_SILENCE_MS", 1);
@@ -603,7 +606,7 @@ export async function runReviewChain(
   let rounds = 0;
 
   for (;;) {
-    const outcome = await runAdvance(settings, client, issueKey);
+    const outcome = await runAdvance(settings, client, issueKey, promoteRepair);
     if (outcome === null) {
       // `runAdvance` reached no round and already said why — no pull request, not open, no
       // worktree — and already set the exit code if that was an error.
@@ -665,6 +668,7 @@ function createReviewLook(
   client: JiraClient,
   deps: SolveDependencies,
   targets: Map<string, ReviewTarget>,
+  promoteRepair: boolean,
 ): (ticket: WatchedTicket) => Promise<ReviewLook> {
   const read = createTicketReader(client);
 
@@ -712,7 +716,7 @@ function createReviewLook(
 
     // Built here and reused by `act` rather than rebuilt there: a `MAX_REVIEW_ITERATIONS` read
     // twice could differ across a long tick, recording a round the survey never authorised.
-    const request = buildAdvanceRequest(settings, base, attach, found.number);
+    const request = buildAdvanceRequest(settings, base, attach, found.number, promoteRepair);
     targets.set(ticket.key, { request, holder });
 
     const surveyed = await surveyReview(deps.commands, request);
@@ -732,6 +736,16 @@ function createReviewLook(
  * Exported only so its refusal branch can be tested: this is the daemon's copy of `advance`'s
  * tail, and a duplicated branch nothing constructs is where the two copies drift.
  */
+/**
+ * Whether a round's checkout is kept for a person to read: a refusal's diff is how an operator tells
+ * a bad gate from a bad pass, and a repair round's row in `repair-rounds.md` names this checkout.
+ */
+export function keepsEvidence(result: AdvanceOutcome): boolean {
+  return (
+    result.kind === "refused" || (result.kind === "failed" && result.repairOutcome !== undefined)
+  );
+}
+
 export function createReviewAct(
   deps: SolveDependencies,
   targets: Map<string, ReviewTarget>,
@@ -778,7 +792,7 @@ export function createReviewAct(
         await removeWorktree(
           deps.commands,
           target.holder.worktree,
-          result === undefined || result.kind === "refused" ? "keep-as-evidence" : "discard",
+          result === undefined || keepsEvidence(result) ? "keep-as-evidence" : "discard",
           target.request.gitTimeoutMs,
         );
       }
@@ -801,13 +815,14 @@ export async function runReviewSweep(
   client: JiraClient,
   runDeps: SolveDependencies,
   issueKey: string | null,
+  promoteRepair: boolean,
   signal?: AbortSignal,
 ): Promise<ReviewCycleOutcome> {
   const targets = new Map<string, ReviewTarget>();
   const deps = createReviewCycleDeps(
     settings,
     client,
-    createReviewLook(settings, client, runDeps, targets),
+    createReviewLook(settings, client, runDeps, targets, promoteRepair),
     createReviewAct(runDeps, targets),
     signal,
   );
@@ -862,6 +877,7 @@ export async function runWatch(
   settings: Settings,
   client: JiraClient,
   issueKey: string | null,
+  promoteRepair: boolean,
 ): Promise<void> {
   const pollMs = numeric(settings, "REVIEW_POLL_MS", 1);
   const maxRounds = numeric(settings, "MAX_REVIEW_ROUNDS_PER_TICK", 0);
@@ -895,7 +911,7 @@ export async function runWatch(
   const runDeps = createSolveRunDeps(settings);
 
   for (let pass = 1; ; pass += 1) {
-    const outcome = await runReviewSweep(settings, client, runDeps, issueKey);
+    const outcome = await runReviewSweep(settings, client, runDeps, issueKey, promoteRepair);
 
     if (outcome.watched === 0) {
       process.stdout.write(
@@ -970,7 +986,7 @@ export async function runWriteRungs(
       // Runs here rather than after `finally`: the chain must only start on a run that actually
       // opened a pull request, and `keepClaim` is exactly that fact.
       if (includes(phase, "review")) {
-        await runReviewChain(settings, client, issueKey);
+        await runReviewChain(settings, client, issueKey, promoteRepair);
       }
     }
   } finally {

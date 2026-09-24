@@ -837,9 +837,13 @@ export function buildAdvanceRequest(
   base: SolveRequest,
   attach: WorktreeSource,
   number: number,
+  /** `--repair` by hand or `REPAIR_PUBLISH` for the daemon: whether a green repair round may push. */
+  promoteRepair: boolean,
 ): AdvanceRequest {
   return {
     ...base,
+    promoteRepair,
+    repairLedger: settings.OUTPUT_DIR,
     attach,
     cwd: base.repoPath,
     repo: githubRepoFor(settings, base.repoPath),

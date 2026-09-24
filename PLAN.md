@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3133 tests in 96 files**, no build step.
+> **3149 tests in 96 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -597,7 +597,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **126 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **127 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

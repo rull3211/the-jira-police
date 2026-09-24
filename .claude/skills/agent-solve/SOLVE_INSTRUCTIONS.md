@@ -545,6 +545,16 @@ had already ended before that step ran. You are **not** handed a rendered diff; 
    already committed under its own message, and yours becomes a separate commit on top of it. Say
    what you corrected and why, not what the ticket asked for. §3.
 
+### When the change that failed is a review round's
+
+The prompt says so, and gives you that round's own account — what it answered and which files it
+changed — in place of a recon brief. The fix is already on the pull request, and the round's edits
+are committed on top of it, so yours become a third commit that a reviewer already reading the pull
+request is told to read on its own. Everything above holds, and "the behaviour the ticket asked you
+to change" includes what the round was asked for: a member asked for five exports to go and the
+round left one declaration unused, so `lint` failed — the repair finishes that request, it does not
+undo it. A request you would have to reverse to go green is an `abandoned`, with the reason.
+
 ### Repair output
 
 Same shape as the fix pass's output (§2) — `changed`, `filesTouched`, `summary`, `commitSubject`,

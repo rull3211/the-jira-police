@@ -271,13 +271,25 @@ quietly turn the second into the first.
 a branch will not take its base. **`repair` is the sixth, and the only one whose answer is thrown
 away by default** — `runPipeline`'s `failed` branch commits the fix under its own message, runs one
 round, keeps its report and its verdict on the outcome as `repair` and `repairOutcome`, and still
-returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely.
+returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely. **A review round
+that fails verification gets the same round**, from `repairReviewRound`: the round's own edits are
+committed as the boundary, the pass is given that round's account of itself in place of a recon
+brief, and `attemptRepair` — the pass, the diff gate and `verify`, shared with `runRepairRound` —
+decides it. Unarmed, the round still returns `failed`, now carrying `repairOutcome`; the local
+boundary commit is never pushed, and the next attach finds the checkout ahead of its remote and
+salvages it.
 
 **A run typed with `--repair`, or the daemon with `REPAIR_PUBLISH`, acts on a green round and on
 nothing else.** `promoteRepair` on the request is set by that flag, which `solve-args.ts` refuses
 below `--pr` and with `REPAIR_ROUND=false`, or for the daemon by `daemonPromotesRepair`, which
 needs `REPAIR_PUBLISH=true` through `flag()` and a round to act on; the daemon reports which at
-startup.
+startup. The review modes are armed the same way — `--repair` on `--review`, `--advance` and
+`--watch`, `REPAIR_PUBLISH` for the daemon's review sweep — through `buildAdvanceRequest`'s
+`promoteRepair` parameter, never a field a base request carries in. Armed, a green review-round
+repair returns as the round's `resolved` outcome carrying `repair`; `delivery.ts` commits it as the
+round's second commit, pushes, and posts a harness-written `bot:` comment naming the failure and
+telling the reader to take that commit on its own — the review round's counterpart of the banner
+below, since a pull request already open has no body left to put it in.
 Armed, a round that re-verifies `verified` is
 returned as the outcome — carrying `repair`, `repairedFailure` and the round's own green
 verification — and `publish` commits the repair as a **second commit** on top of the fix, since
@@ -1173,7 +1185,8 @@ at all: by then the bot could already do everything, and the daemon only changed
 
 So this heading is now doubly historical, and both halves are worth keeping for the same reason.
 There is no inert code left, and one unwatched stage, knowingly: `REPAIR_PUBLISH` lets the loop
-open a pull request from a repair round before anyone has watched `--repair` promote one by hand,
+open a pull request from a repair round, or push one to a pull request already open, before anyone
+has watched `--repair` promote one by hand,
 and it is off until someone decides otherwise (§15 has the argument). What remains from the
 argument is the standard the next capability will be held to: **built, reviewed, driven by hand
 against a named ticket, and granted in a commit a reviewer can see.** The one item that did _not_

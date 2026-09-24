@@ -747,6 +747,40 @@ describe("describeAdvanceOutcome", () => {
     }
   });
 
+  it("does not let a discarded green repair read as the round's answer", () => {
+    // "verified" near a failed round is what a reader takes as the result unless told otherwise.
+    const text = describeAdvanceOutcome({
+      kind: "failed",
+      stage: "verification",
+      reason: "lint did not pass (exit 1)",
+      repairOutcome: "verified",
+    });
+    expect(text).toContain("FAILED");
+    expect(text).toContain("DISCARDED");
+    expect(text).toContain("repair-rounds.md");
+  });
+
+  it("names the failure a promoted repair corrected, and says to read its commit alone", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 8,
+      responses: ["Done — the five exports are gone."],
+      reviewerRequested: "asked",
+      pushed: true,
+      spoken: { outcome: "posted" },
+      undrafted: "still-drafting",
+      threads: { answered: 0, resolved: 0, failures: [] },
+      unresolved: "",
+      repaired: {
+        failure: "lint did not pass (exit 1)",
+        notice: { outcome: "failed", reason: "HTTP 403" },
+      },
+    });
+    expect(text).toContain("lint did not pass");
+    expect(text).toContain("read that commit on its own");
+    expect(text).toContain("did NOT reach the pull request — HTTP 403");
+  });
+
   it("does not let a refusal read like a round that ran", () => {
     const text = describeAdvanceOutcome({
       kind: "refused",

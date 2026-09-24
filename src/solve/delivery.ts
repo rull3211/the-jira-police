@@ -44,11 +44,14 @@ import {
 } from "./marker.ts";
 import type { SyncedAttachResult } from "./base-sync.ts";
 import {
+  type RepairVerdict,
+  type ReviewRepair,
   type ReviewRoundRequest,
   type SolveDependencies,
   resolveConflict,
   resolveReview,
 } from "./orchestrator.ts";
+import { type ReviewRepairRecord, recordReviewRepairRound } from "./repair-ledger.ts";
 import type { CommitMessage, ThreadAnswer } from "./runner.ts";
 import { quietFor } from "./silence.ts";
 import type { Worktree } from "./worktree.ts";
@@ -209,6 +212,8 @@ export interface AdvanceRequest
   readonly reviewer?: string;
   /** See `WorktreeSource`. Not called on a look that finds nothing to do. */
   readonly attach: WorktreeSource;
+  /** Where a review round's repair verdict is recorded (`repair-rounds.md`); absent writes nothing. */
+  readonly repairLedger?: string;
 }
 
 /** What happened to the "please look again" ping at the end of a round. */
@@ -275,6 +280,8 @@ export type AdvanceOutcome =
       readonly threads: ThreadOutcome;
       /** What the round could not settle, carried even on success so a human can see the open argument. */
       readonly unresolved: string;
+      /** Present when a promoted repair finished the round: the failure it fixed, and whether the notice naming it was posted. */
+      readonly repaired?: { readonly failure: string; readonly notice: Spoken };
     }
   /**
    * The **reviewer's** budget is spent. Undrafted anyway; a person can still comment
@@ -333,6 +340,8 @@ export type AdvanceOutcome =
         | "push"
         | "undraft";
       readonly reason: string;
+      /** A `verification` failure's repair round, when one ran; absent means none did. */
+      readonly repairOutcome?: RepairVerdict;
     };
 
 /**
@@ -947,7 +956,21 @@ export async function runRound(
     return { kind: "refused", stage: resolved.stage, reasons: resolved.reasons };
   }
   if (resolved.kind === "failed") {
-    return { kind: "failed", stage: "verification", reason: resolved.reason };
+    if (resolved.repairOutcome !== undefined) {
+      await recordRepair(request, {
+        issueKey: request.issueKey,
+        number,
+        round: resolved.repairOutcome,
+        files: resolved.repair?.filesTouched ?? [],
+        worktreePath: worktree.path,
+      });
+    }
+    return {
+      kind: "failed",
+      stage: "verification",
+      reason: resolved.reason,
+      ...(resolved.repairOutcome === undefined ? {} : { repairOutcome: resolved.repairOutcome }),
+    };
   }
   const answer = async (): Promise<ThreadOutcome> =>
     answerThreads(
@@ -1017,10 +1040,12 @@ export async function runRound(
     };
   }
 
+  // A promoted repair's round is already committed underneath it, so the only uncommitted delta is the repair's.
+  const message = resolved.repair?.commit ?? resolved.commit;
   const committed = await commitAll(commands, {
     worktreePath: worktree.path,
-    subject: resolved.commit.subject,
-    body: resolved.commit.body,
+    subject: message.subject,
+    body: message.body,
     identity: request.identity,
     timeoutMs: request.gitTimeoutMs,
   });
@@ -1044,6 +1069,29 @@ export async function runRound(
   const threadOutcome = await answer();
   const spoken = await say();
   const pushed = committed.outcome === "committed";
+  const repaired =
+    resolved.repair === undefined
+      ? undefined
+      : {
+          failure: resolved.repair.failure,
+          notice: await announceRepair(commands, {
+            cwd: worktree.path,
+            repo,
+            number,
+            round: round + 1,
+            repair: resolved.repair,
+            timeoutMs: request.ghTimeoutMs,
+          }),
+        };
+  if (resolved.repair !== undefined) {
+    await recordRepair(request, {
+      issueKey: request.issueKey,
+      number,
+      round: "verified",
+      files: resolved.repair.report.filesTouched,
+      worktreePath: worktree.path,
+    });
+  }
   const reviewerRequested = await reRequest(pushed);
   return {
     kind: "iterated",
@@ -1058,7 +1106,63 @@ export async function runRound(
     pushed,
     threads: threadOutcome,
     unresolved: resolved.report.unresolved,
+    ...(repaired === undefined ? {} : { repaired }),
   };
+}
+
+interface AnnounceRequest {
+  readonly cwd: string;
+  readonly repo: string;
+  readonly number: number;
+  readonly round: number;
+  readonly repair: ReviewRepair;
+  readonly timeoutMs: number;
+}
+
+/**
+ * Harness-written and posted on its own, since a round answered only in threads posts no summary
+ * comment to carry it; the round's replies describe its change as written, before the repair.
+ */
+async function announceRepair(
+  commands: SolveDependencies["commands"],
+  request: AnnounceRequest,
+): Promise<Spoken> {
+  const said = request.repair.report.summary.trim();
+  const posted = await postComment(commands, {
+    cwd: request.cwd,
+    repo: request.repo,
+    number: request.number,
+    body:
+      `${BOT_PREFIX}round ${String(request.round)} — ⚠️ a repair pass finished this round's change\n\n` +
+      `The round's own change failed verification: ${request.repair.failure}. A repair pass was shown ` +
+      `that failure and corrected it in the second of this round's two commits — read that commit on ` +
+      `its own. The replies to this round describe its change as it was written, before the repair.` +
+      (said === "" ? "" : `\n\nWhat the repair pass says it did: ${said}`),
+    timeoutMs: request.timeoutMs,
+  });
+  return posted.outcome === "failed"
+    ? { outcome: "failed", reason: posted.reason }
+    : { outcome: "posted" };
+}
+
+/** Never fails the round: the ledger is a measurement, and a row that would not write is logged instead. */
+async function recordRepair(request: AdvanceRequest, record: ReviewRepairRecord): Promise<void> {
+  if (request.repairLedger === undefined) {
+    return;
+  }
+  try {
+    await recordReviewRepairRound(
+      request.repairLedger,
+      record,
+      new Date(request.now ?? Date.now()),
+    );
+  } catch (error) {
+    log.warn("solve.repair.ledger_unwritten", {
+      issueKey: record.issueKey,
+      round: record.round,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export { COPILOT_REVIEWER };

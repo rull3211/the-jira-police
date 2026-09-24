@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -165,6 +169,12 @@ const inline = (...nodes: readonly unknown[]): Rule => ({
   match: asked("reviewThreads"),
   reply: { stdout: threadsJson(...nodes) },
 });
+
+/** The subject of every commit the run made, in order. */
+const commitSubjects = (h: Harness): readonly string[] =>
+  h.calls
+    .filter((argv) => argv.includes("commit"))
+    .map((argv) => argv[argv.indexOf("-m") + 1] ?? "");
 
 /** The bodies of every comment the run posted, in order. */
 const posts = (h: Harness): readonly string[] =>
@@ -1009,6 +1019,84 @@ describe("advance", () => {
 
       expect(outcome).toMatchObject({ kind: "refused", stage: "widening" });
       expect(ran(h, "push")).toBe(false);
+    });
+  });
+
+  describe("a round that fails verification, with a solve's repair authority", () => {
+    const repairReport = {
+      changed: true,
+      filesTouched: [FILES[0] ?? ""],
+      summary: "deleted the interface the round left declared and unused",
+      commitSubject: "fix(advisor): delete the interface the round left unused",
+      commitBody: "Removing its export left it unreferenced, which lint refuses.",
+      testAdded: false,
+      testOmittedReason: "a lint correction",
+      residualRisk: "",
+      abandoned: "",
+      abandonedCause: "none",
+    };
+    /** The round's own `run test` is red; the repair's re-run is green. A factory, since the first match spends it. */
+    const redThenGreen = (): Rule => {
+      let failedOnce = false;
+      return {
+        match: (argv: readonly string[]) => {
+          if (failedOnce || !saw("run", "test")(argv)) {
+            return false;
+          }
+          failedOnce = true;
+          return true;
+        },
+        reply: { exitCode: 1 },
+      };
+    };
+    const repairLeftADelta: Rule = {
+      match: (argv) =>
+        argv.includes("status") && argv.includes(worktree.path) && !argv.includes("-uall"),
+      reply: { stdout: ` M ${FILES[0] ?? ""}\n` },
+    };
+
+    it("armed, pushes the repair as the round's second commit and says so on the pull request", async () => {
+      const h = harness({ review: review(), repair: repairReport }, [
+        redThenGreen(),
+        repairLeftADelta,
+      ]);
+
+      const outcome = await advance(h.deps, { ...advanceRequest, promoteRepair: true });
+
+      expect(outcome).toMatchObject({
+        kind: "iterated",
+        pushed: true,
+        repaired: { notice: { outcome: "posted" } },
+      });
+      expect(commitSubjects(h)).toEqual([
+        "fix(advisor): move the favicon link into the head fragment",
+        "fix(advisor): delete the interface the round left unused",
+      ]);
+      const notice = posts(h).find((body) => body.includes("a repair pass finished"));
+      expect(notice).toContain("test did not pass");
+      expect(notice).toContain("read that commit on its own");
+      expect(notice?.startsWith(BOT_PREFIX)).toBe(true);
+    });
+
+    it("unarmed, pushes nothing and records the verdict in the ledger", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "review-repair-ledger-"));
+      const h = harness({ review: review(), repair: repairReport }, [
+        redThenGreen(),
+        repairLeftADelta,
+      ]);
+
+      const outcome = await advance(h.deps, { ...advanceRequest, repairLedger: directory });
+
+      expect(outcome).toMatchObject({
+        kind: "failed",
+        stage: "verification",
+        repairOutcome: "verified",
+      });
+      expect(ran(h, "push")).toBe(false);
+      const page = readFileSync(join(directory, "repair-rounds.md"), "utf8");
+      expect(page).toContain(
+        `| SSX-3822 #42 | verified | ${FILES[0] ?? ""} | ${worktree.path} | unread |`,
+      );
     });
   });
 
