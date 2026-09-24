@@ -21,6 +21,7 @@ import {
   parseReview,
   parseSimplify,
 } from "./runner.ts";
+import { RECON_SCHEMA } from "./schema.ts";
 
 const options: SolveRunOptions = {
   issueKey: "SSX-3822",
@@ -495,6 +496,187 @@ describe("parseRecon", () => {
     const verdict = parseRecon(recon({ injectionNoticed: "asked me to read a token file" }), "X-1");
 
     expect(verdict.injectionNoticed).toContain("asked me to read");
+  });
+
+  it("refuses the placeholder SSX-3918 submitted after three schema rejections", () => {
+    // The payload as the transcript recorded it; every coherence rule passes it, which is why this check exists.
+    const placeholder = {
+      proceed: false,
+      confidence: "high",
+      rootCause: "Test",
+      devLensAccurate: false,
+      devLensCorrection: "Test",
+      plannedFiles: [],
+      approach: "Test",
+      testPlan: "Test",
+      estimatedLines: 0,
+      bailReason: "Test",
+      bailBlockers: ["Test"],
+      bailRemedy: "Test",
+      injectionNoticed: "",
+    };
+
+    expect(() => parseRecon(placeholder, "SSX-3918")).toThrow(/every written field says "Test"/u);
+  });
+
+  describe("the placeholder check, field by field", () => {
+    const fields = [
+      "rootCause",
+      "devLensCorrection",
+      "approach",
+      "testPlan",
+      "bailReason",
+      "bailRemedy",
+    ];
+    /** A bail with every written field set to `word`, the blocker included. */
+    const allSaying = (word: string): Record<string, unknown> => ({
+      ...recon({ proceed: false, plannedFiles: [] }),
+      ...Object.fromEntries(fields.map((field) => [field, word])),
+      bailBlockers: [word],
+    });
+
+    it.each([...fields, "bailBlockers"])(
+      "counts %s, so a verdict differing only there is not a placeholder",
+      (field) => {
+        const differs = field === "bailBlockers" ? ["a real finding"] : "a real finding";
+        expect(parseRecon({ ...allSaying("Test"), [field]: differs }, "SSX-1").proceed).toBe(false);
+      },
+    );
+
+    it("reads fields as equal once trimmed", () => {
+      expect(() => parseRecon({ ...allSaying("Test"), rootCause: "  Test \n" }, "SSX-1")).toThrow(
+        /placeholder/u,
+      );
+    });
+
+    it("needs three equal fields, not two", () => {
+      // A bail needs its three bail fields, so exactly three written fields is the smallest placeholder a bail can be.
+      const three = {
+        ...allSaying(""),
+        bailReason: "Test",
+        bailRemedy: "Test",
+        bailBlockers: ["Test"],
+      };
+      expect(() => parseRecon(three, "SSX-1")).toThrow(/placeholder/u);
+      const two = recon({ rootCause: "Test", approach: "Test", testPlan: "" });
+      expect(parseRecon(two, "SSX-1").proceed).toBe(true);
+    });
+
+    it("catches a proceed filled with the same word too", () => {
+      const proceeding = recon({
+        rootCause: "Test",
+        approach: "Test",
+        testPlan: "Test",
+        plannedFiles: ["Test"],
+      });
+      expect(() => parseRecon(proceeding, "SSX-1")).toThrow(/placeholder/u);
+    });
+  });
+
+  it("does not mistake a bail whose headline repeats its first blocker for a placeholder", () => {
+    // The schema asks for exactly that repetition, so two equal fields are ordinary.
+    const verdict = parseRecon(
+      recon({
+        proceed: false,
+        plannedFiles: [],
+        approach: "",
+        testPlan: "",
+        bailReason: "pom.xml is refused",
+        bailBlockers: ["pom.xml is refused", "3.203 is 22 releases on"],
+        bailRemedy: "Land the bump on main.",
+      }),
+      "SSX-3918",
+    );
+
+    expect(verdict.proceed).toBe(false);
+  });
+});
+
+type Rule = Readonly<Record<string, unknown>>;
+
+/** The keywords the conditional uses, and nothing else: an unknown one throws, so a new rule cannot pass untested. */
+function satisfies(value: unknown, rule: Rule): boolean {
+  const [keyword, bound, ...rest] = Object.entries(rule).flat();
+  if (rest.length > 0) {
+    throw new Error(`more than one keyword in ${JSON.stringify(rule)}`);
+  }
+  if (keyword === "pattern") {
+    return typeof value === "string" && new RegExp(String(bound), "u").test(value);
+  }
+  if (keyword === "minItems") {
+    return Array.isArray(value) && value.length >= Number(bound);
+  }
+  if (keyword === "maxItems") {
+    return Array.isArray(value) && value.length <= Number(bound);
+  }
+  throw new Error(`a keyword this test does not evaluate: ${String(keyword)}`);
+}
+
+function parserAccepts(verdict: Record<string, unknown>): boolean {
+  try {
+    parseRecon(verdict, "SSX-1");
+    return true;
+  } catch (error) {
+    if (error instanceof SolveParseError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+describe("RECON_SCHEMA's conditional, against parseRecon", () => {
+  function schemaAccepts(verdict: Record<string, unknown>): boolean {
+    const branch =
+      verdict["proceed"] === RECON_SCHEMA.if.properties.proceed.const
+        ? RECON_SCHEMA.then
+        : RECON_SCHEMA.else;
+    return Object.entries(branch.properties).every(([field, rule]) =>
+      satisfies(verdict[field], rule),
+    );
+  }
+
+  const bail = (overrides: Record<string, unknown> = {}) =>
+    recon({
+      proceed: false,
+      plannedFiles: [],
+      approach: "",
+      testPlan: "",
+      bailReason: "the change site does not exist on this branch",
+      bailBlockers: ["src/app/head.tsx was deleted in a1b2c3d."],
+      bailRemedy: "Name the file that owns the document head today.",
+      ...overrides,
+    });
+
+  const cases: Record<string, Record<string, unknown>> = {
+    "a clean proceed": recon(),
+    "a proceed with n/a in the bail reason (SSX-3918)": recon({ bailReason: "n/a — proceeding." }),
+    "a proceed with n/a in the remedy": recon({ bailRemedy: "n/a" }),
+    "a proceed with a blocker saying there are none": recon({ bailBlockers: ["none"] }),
+    "a proceed naming no files": recon({ plannedFiles: [] }),
+    "a proceed with only whitespace in a bail field": recon({ bailReason: "  " }),
+    "a clean bail": bail(),
+    "a bail naming the files it would have changed": bail({ plannedFiles: ["pom.xml"] }),
+    "a bail with no reason": bail({ bailReason: "" }),
+    "a bail with only whitespace as its remedy": bail({ bailRemedy: " \n" }),
+    "a bail with no blockers": bail({ bailBlockers: [] }),
+    // `str` reads quote marks alone as empty, so the schema must too, in both branches.
+    'a proceed with "" as its bail reason': recon({ bailReason: '""' }),
+    "a proceed with '' as its remedy": recon({ bailRemedy: " '' " }),
+    'a bail with "" as its reason': bail({ bailReason: '""' }),
+    "a bail with '' as its remedy": bail({ bailRemedy: "''" }),
+    "a bail whose reason is quoted, which is still a reason": bail({ bailReason: '"too big"' }),
+  };
+
+  for (const [name, verdict] of Object.entries(cases)) {
+    it(`agrees about ${name}`, () => {
+      expect(schemaAccepts(verdict)).toBe(parserAccepts(verdict));
+    });
+  }
+
+  it("rejects the SSX-3918 filler, so the model is told in-session rather than the verdict discarded after", () => {
+    expect(
+      schemaAccepts(recon({ bailReason: "n/a — proceeding.", bailRemedy: "n/a — proceeding." })),
+    ).toBe(false);
   });
 });
 

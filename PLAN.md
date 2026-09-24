@@ -5,7 +5,7 @@
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
 > ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
 > and staged images its own abandoned runs left behind, and renders its log to a reader.
-> **3044 tests in 95 files**, no build step.
+> **3073 tests in 95 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -53,7 +53,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51 and §52, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52 and §53, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -149,7 +149,9 @@ counter-argument and what withdraws it — now lives in `architecture/solve.md` 
 being deleted with the entry. §51 stopped a recon plan naming a path the diff gate refuses before
 the fix pass, and was opened and deleted inside the branch that built it. §52 let a run change a
 `pom.xml` when the only change is a dependency version, behind `DEPENDENCY_BUMPS`; its Node half is
-§54. §53 is taken by a branch open alongside it. The next entry is §55.
+§54. §53 put the recon verdict's coherence rules into its output schema, so the model is
+corrected in-session, and was opened and deleted inside the branch that built it. The next entry
+is §55.
 
 <!-- refs:on -->
 
