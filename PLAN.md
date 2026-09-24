@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52 and §53, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53 and §55, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §55. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §57. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
@@ -102,33 +102,13 @@ rule rather than a plan:
   `prepareSkillRoot` runs once per run or round.
 - In the house rules, which change only by proposal: `INCIDENTS.md`'s "Thirty-nine citations to
   sections that were never written", and the example `STARTING.md` draws from it, rest on the
-  reading §14 held until today, that the dangling sites were never written. 23 of the 40 were
+  reading §14 held until 2026-09-24, that the dangling sites were never written. 23 of the 40 were
   `PLAN.md` headings that `96998cc` deleted. §14's own heading still says it.
 
 **What would make it the wrong idea.** The overview paragraph is the argument the attempt ledger
 exists for: those outcomes release the ticket unlabelled, so something has to count claims. If every
 one of them is labelled now, the ledger's reason may have gone with the sentence, and the fix is a
 design question rather than a wording one.
-
-### 55. This file describes some things that are built, and cites lines that have moved
-
-**Branch:** `chore/plan-cleanup`
-
-**What is being attempted.** Read every entry against the tree at the merge of #75, #76 and #77, and
-cut what is no longer true: a sentence describing something that now exists, a count that has moved,
-a `file:line` that points at something else. Where a stale coordinate is still needed, name the
-symbol instead. Nothing is added except what a correction needs.
-
-**Why now.** Three branches merged within the hour, each editing this file from a different base,
-and the checks that pass cannot see most of this: `docs:check` pins the counts it was told about, and
-a line number that now points at the wrong statement still resolves. Found on a first read: §1 still
-counts five solve passes after `repair` became a sixth, the drift §48 exists to record; §33 cites
-`schema.ts` and `orchestrator.ts` by line after both files grew today; §14 gives this file's range as
-§1–41.
-
-**What would make it the wrong idea.** A cleanup that deletes an open item because it reads as old
-is worse than a stale sentence, since the stale sentence is at least still findable. Every cut here
-has to be backed by the tree or by a merged pull request, never by how an entry reads.
 
 ### 54. A dependency bump in a Node repository is still refused, because the pass cannot write the lockfile
 
