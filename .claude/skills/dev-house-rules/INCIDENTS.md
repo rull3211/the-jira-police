@@ -8,10 +8,10 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 55
-entries below are cited that way, and the other ten each say in their own text that no rule has
-been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
-reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — most entries
+below are cited that way, and the rest each say in their own text that no rule has been written
+yet. `pnpm docs:check` prints both figures on every run, so they are not given here: this sentence
+used to state them, and they went stale while the check stayed green. Most entries also link the other way, from a closing `**The rule**`,
 so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
 what it rested on — **how many is deliberately not given here.** It used to say 28, nothing derived
 it, and by the time anyone noticed, the figure matched no definition of the thing it counted.
@@ -1756,3 +1756,33 @@ adding an unrelated plan entry.
 
 **No rule yet** — a ratchet moving for a reason unrelated to what it measures is a shape this file
 has not yet seen a second instance of, and `unrelated-repair` at 2.
+
+## 2026-09-24
+
+### The rounds thrown away after they were paid for, because a rule lived only in the parser
+
+**2026-09-24.** A pass's JSON is checked twice. The CLI checks it during the session, against the
+schema handed over with `--json-schema`, and a rejection there sends the model back to correct its
+answer before it exits. The harness's parser checks it again afterwards, and all a parser can do is
+throw. So a consistency rule held only by the parser does not correct a pass; it discards one that
+has finished and been paid for.
+
+Recon on SSX-3918 lost two correct plans that way in one day, over filler in a field that had to be
+empty (`architecture/solve.md`, the recon and review schemas paragraph). The same day #2688's
+round 6, the first live run of the member widening, made the cleanup correctly and cited the right
+comment, then left `responses` empty and put its whole answer in `widened`. `parseReview` threw on
+"answered none of the reviewer's comments", and the round was abandoned after $0.51.
+
+The second was fixed by copying the first — `REVIEW_SCHEMA` gained the answered-nothing rule as an
+`if`/`then`, the way `RECON_SCHEMA` already carried `parseRecon`'s — and the change being fixed had
+already repeated the shape: `widened` arrived with parser-only refusals for a blank field and for a
+widening on a round that changed nothing, so a round could be discarded for leaving blank a field
+nothing read. Both moved into the schema before the pull request merged. One cannot: a `widened`
+path must be in `filesTouched`, and draft-07 cannot compare two arrays, so that refusal still costs
+a finished round.
+
+**Found by** round 6 on a real pull request, for the first half; a review from a fresh context,
+handed only the diff and these rules, for the repetition.
+
+**No rule yet** — both sightings came on one day and the second was fixed by copying the first, so
+they count as one instance, and `parser-only` at 2.
