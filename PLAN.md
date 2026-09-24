@@ -175,6 +175,36 @@ version asked for — every transitive range resolves afresh — and no reviewer
 diff. If that is the cost, a narrower form updates only the named package's entries in the
 lockfile and refuses when anything else would move.
 
+### 53. Recon fills fields that must be empty, and the harness finds out after the pass
+
+**Branch:** `fix/recon-bail-filler`
+
+**What is being attempted.** Put the recon verdict's coherence rules into `RECON_SCHEMA` as a
+draft-07 `if`/`then`/`else`: a `proceed` must leave the three bail fields empty and name at least
+one file; a bail must fill all three. The CLI validates structured output in the session, so the
+model is told and corrects itself before the pass ends, instead of `parseRecon` discarding the
+whole verdict afterwards. `parseRecon` keeps every check, as the net. Separately, `parseRecon`
+refuses a verdict whose written fields all say the same thing, which is a placeholder and not an
+answer.
+
+**Why now.** Three runs lost to the same class in two days, all recon. 2026-09-23: `""` written as
+two quote characters, normalised in `str`. 2026-09-24, SSX-3918: a real bail rejected three times
+for omitting `plannedFiles`, then a verdict with every field set to "Test", which the parser
+accepted — under `solve:once` it would have posted "Test" to the ticket. Same day, SSX-3918 again:
+`proceed: true` with `bailReason` and `bailRemedy` both "n/a — proceeding.", which threw away a
+correct plan for $0.52. A probe measured that the CLI enforces a draft-07 conditional: with it,
+that exact filler was rejected in-session and the model corrected itself to `""`; the control
+without it accepted the filler.
+
+**What it lets the service do.** Keep a correct plan whose only fault is a note in a field that
+must be empty.
+
+**What would make it the wrong idea.** Every schema rejection is a re-prompt, and the schema's own
+header warns that re-prompts are capped. The "Test" verdict came out of exactly such a loop, so a
+constraint the model struggles with can turn a crash into garbage. That is why the rules mirror
+`parseRecon` and add nothing, why the descriptions say what an empty field is, and why the
+placeholder check exists.
+
 ### 46. Nothing can say which code a running daemon is executing
 
 **Branch:** none yet.
