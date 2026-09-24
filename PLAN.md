@@ -3,17 +3,14 @@
 > **Progress, 2026-09-18.** Phases A through F are built. The service discovers a ticket, triages
 > it, gates the result, posts a verdict, claims a solvable one, solves it in an isolated worktree,
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
-> ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
-> and staged images its own abandoned runs left behind, and renders its log to a reader.
+> ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
+> reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
+> runs left behind.
 > **3073 tests in 95 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
-> gated only on `SOLVE_ENABLED`. Earlier revisions of this header said the
-> solve half was "still a person typing a command" and that "nothing loops". Both were false, and
-> they were the two most important facts in the file. A third revision cited `review-loop.ts:114` in
-> a file 77 lines long — the same sentence, wrong a third way, which is why it now names the function
-> instead.
+> gated only on `SOLVE_ENABLED`.
 >
 > **A human always merges. The bot has no merge path.**
 >
@@ -53,107 +50,69 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52 and §53, and this line names them rather than
-citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
-repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
-still and would be holding entries nobody could ever pay. That its docstring once said the debt
-"goes to zero" is no longer part of this argument: the claim is withdrawn in `docs-check.ts`, on
-the evidence that the number has not moved once in forty-one commits.
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53 and §55, and this line names them rather than
+citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
+never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
+holds a debt still and would be holding entries nobody could ever pay.
 
-**Only §18 was ever actually counted, and finding out why shipped as §19.** Adding the first four
-names raised the dangling count by two, not by four: the resolver of the time pooled section ids
-from every document into one set, so a dead `PLAN.md §12` matched `ARCHITECTURE.md`'s live §12, and
-the same for §15 and §16. §18 dangled only because no document here has an eighteenth section. The
-region is still right — a hole list should not be checked — but at the time it was buying much less
-than it looked like it was buying.
+**Each of them shipped and was deleted, except as noted here.** For the rest, `git log -- PLAN.md`
+holds the entry and the commit that deleted it, so what follows is only what that history cannot say.
 
-§12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §20 was the
-scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
-entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
-worth a permanent number, because the session was compacted once while it was open; §19 was the
-per-document resolver itself, shipped whole — the story is `INCIDENTS.md`'s 2026-09-18 entry, "The
-`§N` checker that resolved a citation against any document that happened to define it"; §25 was the
-fitness block owning the region it writes, shipped in PR #37; §26 and §27 were the closed-ticket
-clause and the status allowlist that narrowed it, and each is a hole one commit after it was written
-— opened and deleted inside the branch that built it, which is what the rule now asks for. **§24 is
-absent from that list and is not a hole** — it was skipped rather than spent, for the reason recorded
-in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an unrelated edit
-repaired nothing." §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
-inside the branch that built it. **§29 is the first of the two exceptions the paragraph above
-flags** — the handed-off
-unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
-(unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
-parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
-written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
-inside the branch that built it, and §32 was the untagged thread reply that let the service argue
-with itself on PR #548 — same shape, opened and deleted inside its own branch. §7 was the
-transient/deterministic split: `terminalLabelAfter` (`src/cli/solve-outcome.ts`) now routes a
-deterministic verification failure to `agent:failed` the same way it already did a bail, closing the
-reclaim loop `MAX_SOLVE_ATTEMPTS_PER_TICKET` could only slow, not stop — the third instance of the
-shape recorded in that function's own docstring. Opened in an earlier session (`7e99804`) and
-closed here, on a real ticket looping live (SSX-3954), rather than opened and shipped in one branch
-like its neighbours above. §4 was recon reading
-staged images and §22 the age-based sweep its own last phase deferred; both shipped once that phase
-built `sweep-once` and `staging-sweep.ts`, walking the skill-root and image-staging parents alike
-rather than leaving the sweep narrowed to the one §22 was opened for. §36 was `branch-stack.sh`
-counting commit identity instead of commit content, opened and deleted inside the branch that built
-it — the story is `INCIDENTS.md`'s 2026-09-18 entry. §37 was the log viewer, shipped as `pnpm logs`
-and deleted inside the branch that built it; what it left unbuilt is §39, which is a new entry
-rather than a survival of the old one. §34 was the sweep that cut every prose comment in `src/` to a
-line or two, opened in `b7faa73` and deleted in `849591a` that shipped it; §35 was the catch-up that
-brought `CLAUDE.md`, `STARTING.md` and `FINISHING.md` to the standard §34 had just imposed on the
-code, opened in `5d42002` and deleted in `24341f6` — both the ordinary shape. §38 was
-`branch-guard.sh` resolving the session's project directory rather than the worktree the write
-lands in, shipped as `targetBranch` in `0cf4c10`.
+- **§29 did not ship.** It was the handed-off unsubscribe, deleted when the operator deferred it. The
+  decision it recorded — unsubscribe rather than a quiet state, chosen knowing it is one-way —
+  survives only in `1f8a3f4`'s parent, which is the cost of deferring by deletion.
+- **§40 was issued twice, and its first use did not ship.** That first use was a supervisor process
+  to run the daemon and the viewer together, abandoned mid-branch when the operator chose a
+  `package.json` pipeline instead; no commit ever held it, and what it would have argued for is in
+  `feat/daemon-log-tui`'s pull request. The reuse was opened in `2fb66e7` against a hole line that
+  already named §40, and closed in `82d6079`, a deletion-only commit that removed the §38 and §40
+  entries without adding either to this list. Both numbers had been picked by reading the last
+  heading rather than this line.
+- **No revision reachable by `git log --all` holds §30, §36, §42, §43 or §50 as a heading**, so for
+  these five the history has no entry to show. §30 was the daemon check and the rule it put in
+  `STARTING.md`; §36 was `branch-stack.sh` counting commit identity instead of commit content; §42
+  routed every non-`verified`, non-`escaped` outcome to `agent:failed`; §43 had every worktree's
+  `.git/info/exclude` list `.claude/` and `.storecode/`; §50 was the fix for a literal `""` in a
+  recon field, `6e78ce7`.
+- **§24 is absent from the list and is not a hole** — it was skipped rather than spent, for the
+  reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
+  unrelated edit repaired nothing."
 
-**§40 was issued twice, which this file says never happens, and the second issue is how all three of
-§34, §35 and §38 came to be missing from the line above.** Its first use is the second of the two
-exceptions the paragraph above flags: a supervisor process to run the daemon and the viewer
-together, abandoned mid-branch when the operator chose a `package.json` pipeline instead — written
-into a working tree and deleted from one, so no commit ever held it and there is nothing to recover.
-What it would have argued for is in `feat/daemon-log-tui`'s pull request; the sentence is here
-because a hole with no entry behind it sends the next reader through a history that does not contain
-one. **§40's number was reused**, which is the one hole here that records a defect rather than a
-feature: it was opened in `2fb66e7` against a hole line that _already named §40_, and closed in
-`82d6079`. That closing commit is 78 deletions and no insertions — it removed the §38 and §40
-entries without touching the list that was supposed to gain them, and its message reasoned that
-"nothing else in the tree cited either number", which was true of every other file and not of the
-paragraph it was editing. **A deletion-only commit cannot update a list, and nothing here checks
-that it did**; both numbers were picked by reading the last heading rather than this line, which is
-how one of them came to be issued twice. §41 was the audit that found it and repaired this list,
-opened and closed inside the branch that ran it — the shape §26, §27, §28, §30 and §32 have. Its own
-commits are deliberately not cited by hash: a stacked branch is rebased whenever its base moves, and
-a hash it wrote about itself is dangling the moment that happens. A concurrently open sibling reached
-for §41 as well before checking `git log --all`, so this document's own "next entry" pointer is a
-per-branch guess, good only until whichever of two open branches merges second finds it already
-wrong. §42 was every
-non-`verified`, non-`escaped` solve outcome — `unusable-base`, `refused`, `crashed`, `no-worktree`
-and an environment `abandoned`, alongside the `failed` §7 already handled — routed to `agent:failed`
-so a ticket that cannot currently be judged stops looping silently and a human has to clear it,
-opened and closed inside the branch that built it. §43 was
-`.git/info/exclude` listing `.claude/` and `.storecode/` for every worktree cut from a repository,
-so a stray write to either (SSX-3954) is never untracked and never reaches the diff gate to be
-refused there alongside the real work beside it — opened and closed inside the branch that built
-it. §44 was the simplify pass invoking Claude Code's own `/simplify` for the judgement it used to
-re-derive by hand, plus `parseSimplify` no longer crashing the run over a self-report contradiction
-nothing downstream reads (SSX-3944) — opened and closed inside the branch that built it, stacked on
-top of §43's, since both came out of the same session and §44's doc updates touch lines §43's
-already moved. §49 was the repair round's ledger — `repair-rounds.md`, `pnpm repair:ledger` and the
-`Read` column no code may write — opened and deleted inside the branch that built it, the ordinary
-shape. **It was the first hole here that is a prerequisite rather than a feature:** §45's phase
-three was blocked on it, and clearing that blocker did not ship the phase — the next line does.
-§45 was the repair pass, phased from inert (#67) through the untrusted dry run (#68) to the
-typed `--repair` rung and the `REPAIR_PUBLISH` loop. The last two were claimed before the
-evidence §45 itself asked for, by the operator's decision, and that argument — with its
-counter-argument and what withdraws it — now lives in `architecture/solve.md` §15 rather than
-being deleted with the entry. §51 stopped a recon plan naming a path the diff gate refuses before
-the fix pass, and was opened and deleted inside the branch that built it. §52 let a run change a
-`pom.xml` when the only change is a dependency version, behind `DEPENDENCY_BUMPS`; its Node half is
-§54. §53 put the recon verdict's coherence rules into its output schema, so the model is
-corrected in-session, and was opened and deleted inside the branch that built it. The next entry
-is §55.
+The next entry is §57. The pointer is a per-branch guess: two branches open at once each read it
+from their own base.
 
 <!-- refs:on -->
+
+### 56. Documents outside this file still say a declined run leaves the board as it found it
+
+**Branch:** none yet.
+
+**What is not built.** The correction of statements that the 2026-09-24 read of this file found false
+elsewhere and left alone, because each rewords an invariant, an architecture argument or a house
+rule rather than a plan:
+
+- `architecture/invariants.md` invariant 14 says a crash, a bail, a failed verification and a
+  refused push "leave the board exactly as they found it". Half of that is still true. Since
+  `65a9143`, `terminalLabelAfter` gives every outcome but `verified` and `escaped` the
+  `agent:failed` label, which the solve queue excludes, so a bail, a failed verification and a
+  crash reported as the `crashed` outcome are labelled. What `runWriteRungs` still releases as found
+  is a run with no outcome to label — an exception out of the solver, or a refusal before it
+  starts — and a verified run whose publish fails, since `verified` has no terminal label.
+- `architecture/overview.md`'s failure table, in its `no-worktree` and `PreToolUse` rows, and the
+  paragraph under it that opens "Three outcomes deliberately write no terminal label", say
+  `no-worktree`, `refused`, `failed` and a transient `abandoned` are released unlabelled. All four
+  are labelled.
+- `architecture/module-map.md` and `daemon:status`'s message say the skill root is staged per pass;
+  `prepareSkillRoot` runs once per run or round.
+- In the house rules, which change only by proposal: `INCIDENTS.md`'s "Thirty-nine citations to
+  sections that were never written", and the example `STARTING.md` draws from it, rest on the
+  reading §14 held until 2026-09-24, that the dangling sites were never written. 23 of the 40 were
+  `PLAN.md` headings that `96998cc` deleted. §14's own heading still says it.
+
+**What would make it the wrong idea.** The overview paragraph is the argument the attempt ledger
+exists for, and a rewrite that drops the ledger with the sentence would be wrong: the endings that
+still release a ticket as found — an exception, a refusal before the solve, a failed publish — are
+what the ledger now bounds. The correction is to the ledger's reason, not to whether it has one.
 
 ### 54. A dependency bump in a Node repository is still refused, because the pass cannot write the lockfile
 
@@ -188,9 +147,9 @@ which checkout a process was started from, nor which commit that checkout was on
 **Why it is owed, with the cost already paid.** Node loads `src/index.ts` and its imports once, at
 process start. Every commit, merge and branch switch afterwards changes the tree and not the running
 process. The skill root is the exception, and it makes the situation worse rather than better:
-`prepareSkillRoot` re-copies `.claude/skills/agent-solve/` from the tree on **every pass**, so a
-long-lived daemon runs old TypeScript against new markdown — two halves from different commits inside
-a single run. On 2026-09-21 a daemon started before PR #64 merged kept raising the `parseSimplify`
+`prepareSkillRoot` re-copies `.claude/skills/agent-solve/` from the tree on **every run and every
+round**, so a long-lived daemon runs old TypeScript against new markdown — two halves from
+different commits inside a single run. On 2026-09-21 a daemon started before PR #64 merged kept raising the `parseSimplify`
 contradiction that #64 had already removed. `daemon:status`'s own message — "a branch switch changes
 what the next tick runs" — is true only of the markdown, and it sent that session to the wrong
 diagnosis twice before the error string was grepped for in the tree and found not to be there.
@@ -263,16 +222,14 @@ worse outcome than the honest silence there is now.
 ### 1. Which model runs which task, and nothing chooses today
 
 Requested 2026-09-06, and **the first fact is that there is no setting to change.** `--model`
-appears nowhere in this tree. **Nine task kinds spawn a subprocess**, across five files and five
-argument builders: the triage analyst and the poster (`triage/runner.ts`, `triage/poster.ts`), the
-five solve passes — `recon`, `fix`, `simplify`, `review`, `merge`, all of them through the one
-`runSession` in `solve/passes.ts` (`solve/runner.ts`) — the ticket commenter (`solve/commenter.ts`),
-and the sendback-watch relevance check (`watch/relevance.ts`). Every one of them inherits whatever
-`storecode` happens to default to. Five argument builders, one flag each: the mechanism is trivial
-and the policy is the whole of the work. **This sentence counted six kinds, four files and three
-builders until 2026-09-18**, having never been recounted after `simplify`, `merge` and the relevance
-check were added — the unnamed one is the hazard, since a per-task setting that forgets a task
-silently leaves it on the default.
+appears nowhere in this tree. **Every task kind that spawns a subprocess** — the triage analyst and
+the poster (`triage/runner.ts`, `triage/poster.ts`), one solve pass per entry in `PASSES`
+(`solve/runner.ts`), all of them through the one `runSession` in `solve/passes.ts`, the ticket
+commenter (`solve/commenter.ts`) and the sendback-watch relevance check (`watch/relevance.ts`) —
+inherits whatever `storecode` happens to default to. Five argument builders, one flag each: the
+mechanism is trivial and the policy is the whole of the work. **This sentence names `PASSES` rather
+than counting it, having been wrong about the count twice** — the unnamed task is the hazard, since
+a per-task setting that forgets one silently leaves it on the default.
 
 **Two changes, and only the second is the feature.** _Recording_ which model a pass ran under costs
 nothing and should not wait for the choosing. Every cost figure in this file — triage $1.56, poster
@@ -335,10 +292,10 @@ A triage run was long quoted at $0.11 and that is wrong by 14×: a single bailed
 changes turned single-shot costs into recurring ones, so a per-run number is no longer enough.
 **The most overdue item in this file.**
 
-Three known inputs to it that are already measured or argued and have never been added up: the
-chain rebuilds its worktree every round, so twenty rounds is twenty installs; the review tick
+Two known inputs to it that are already measured or argued and have never been added up: the
+chain rebuilds its worktree every round, so twenty rounds is twenty installs; and the review tick
 re-reads every open bot pull request, so per-tick work scales with _unmerged_ pull requests rather
-than active ones; and a formatted approval costs one terminal round per pull request (§8).
+than active ones (§8).
 
 ### 3. The review round has no `verifyBase`
 
@@ -410,7 +367,7 @@ for `judgement` while the harness watched its `Write` be vetoed is reporting `en
 it says, and wiring that means widening `PassRunner.run`, which still returns only the parsed
 structured output.
 
-### 8. Four findings from the SSX-3834 run, three of them still open
+### 8. Three findings from the SSX-3834 run, still open
 
 - **`src/solve/poller.ts` logs `"dry run — no label was written"` immediately before writing
   labels.** True while `solve:once` was the only caller; false the moment `runSolveClaims` became the
@@ -420,21 +377,11 @@ structured output.
   every non-`[a-z0-9]` run to `-`, so run against real Norwegian summaries it gives
   `Beløp på` → `bel-p-p` and `Feil i årsavslutning` → `feil-i-rsavslutning`. On a Norwegian board
   that is every branch the bot will ever cut. **This bullet said `bel-p-p-` until it was run**; the
-  trailing hyphen is stripped, twice, and the tests carry no non-ASCII case to have shown it.
+  trailing hyphen is stripped, twice, and the tests carry no non-ASCII letter to have shown it.
 - **The review tick re-reads every open bot pull request.** Four here; three (`#2660`, `#1413`,
   `#2661`) returned `threads: 0` and exist only because nobody has merged them. Per-tick work scales
   with _unmerged_ pull requests, not active ones — an argument for merging promptly, and a second
   input to the cost number.
-- **A formatted approval costs one terminal round per pull request.** Copilot's approval is a
-  non-empty body with review `state: "COMMENTED"`, never `"APPROVED"`, so the general discriminator
-  is unusable for this reviewer. `delivery.ts` reads a non-empty comment list as actionable — the
-  only way out is the `comments.length === 0 && threads.length === 0` early return, and no approval
-  discriminator exists anywhere in the file — so it
-  reserves a round, and pays for a pass whose input is "looks good". It is bounded — the round
-  changes nothing, so the no-change rule undrafts. The cheap fix is unavailable for the reason the
-  `Suppressed comments` block was left unparsed: an approval and a summary-only review carrying real
-  feedback (#1413 exactly) are indistinguishable on the wire without reading the prose, and reading
-  the prose is what the paid pass is for.
 
 ### 9. The fail-first check cannot answer a question about CI
 
@@ -444,8 +391,8 @@ verdicts on a UTC runner and a developer's laptop. **A probe that runs in the op
 environment cannot answer a question about CI's.**
 
 **"Inherits" was the wrong word and the right conclusion**, which is worth the correction because it
-narrows the fix. `childEnv` is an allowlist of fifteen names, and it already forces `CI=1` and
-`NO_COLOR=1` — so a test branching on `CI` is answered correctly today. `TZ` is not on the list and
+narrows the fix. `childEnv` is an allowlist, `ENV_PASSTHROUGH` in `solve/exec.ts`, and it already
+forces `CI=1` and `NO_COLOR=1` — so a test branching on `CI` is answered correctly today. `TZ` is not on the list and
 nothing sets it, so the child resolves the _machine's_ zone, which is exactly the
 `ZoneId.systemDefault()` case. The gap is one unset variable in a list, not a missing sandbox.
 
@@ -561,7 +508,7 @@ states the rule that produced that shape, which is that a recorded verdict is ne
 - **`sectionReferences()` may be an orphan, and this is rehomed from an entry that shipped.** It
   counts `§N` tokens across the tree's TypeScript, and the section resolver that landed in PR #21
   resolves the same
-  tokens rather than counting them. Its single caller is the `FACT` table in the same file.
+  tokens rather than counting them. Its single caller is the `FACTS` table in the same file.
   **The churn half of this bullet is closed**: the function now masks `refs:off` regions, so the
   "106 → 141 on fixtures alone" failure cannot recur, and what is left is only the question of
   whether a count nobody reads earns its `docs:check` line beside a resolver that checks the same
@@ -610,7 +557,7 @@ not a plan item. What is left below is only what is still missing.
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
   repository's real cross-reference system — **125 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
-  headings that define them, and **exactly 40 point at sections that have never existed** (below,
+  headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost
   none of them says, is checked too now — the story is
   [`INCIDENTS.md`'s `§N` checker entry](.claude/skills/dev-house-rules/INCIDENTS.md#the-n-checker-that-resolved-a-citation-against-any-document-that-happened-to-define-it):
@@ -676,8 +623,8 @@ not a plan item. What is left below is only what is still missing.
 
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
-which is **blind to every squash- and rebase-merged branch**. `chore/agent-guardrails` has an
-identical patch-id and tree to `6a8cba7` and `--merged` cannot see it, so it needs `-D`. That is how
+which is **blind to every squash- and rebase-merged branch**. `chore/agent-guardrails` had an
+identical patch-id and tree to `6a8cba7` and `--merged` could not see it, so it needed `-D`. That is how
 these accumulate, and it is one instance of a possible rule rather than a rule.
 
 **What would make this the wrong idea.** Every item above is a check on documents, and this
@@ -716,11 +663,13 @@ protecting, and **the cheaper fix than maintaining it is a flag on `docs:check` 
 without requiring the constant to be falsified first.** That flag is not built.
 
 **40 dangling `§N` citations**, regenerated from the checker on 2026-09-18 rather than searched for.
-The first diagnosis — that a renumbering stranded them — is wrong: `§3a`, `§5b`, `§7b` and `§6.1c`
-appear in **no revision of `PLAN.md` that `git log --all` can reach**, in any form. They were never
-written down. `architecture/overview.md:200` says "See PLAN.md §5b", the one citation naming its
-target, and it resolves to nothing; `architecture/overview.md:356` cites `§24` in a document whose
-own headings stop well short of it.
+The first diagnosis — that this file's own deletions stranded them — was right for 23 of them, and
+this entry said the opposite until 2026-09-24. `§3a`, `§5b`, `§6.1`, `§6.1c`, `§6.2` and `§6.3` were
+`PLAN.md` headings until `96998cc` deleted them on 2026-09-08, written `#### 3a.`, without the `§` a
+citation uses. Only `§7b`, `§7c`, `§3c` and `§24` were never written down anywhere. `architecture/overview.md:200`
+says "See PLAN.md §5b", the one citation naming its target, and the name was right: the deleted §5b
+argued for the `PreToolUse` hook that sentence is about. `architecture/overview.md:356` cites `§24`
+in a document whose own headings stop well short of it.
 The extra one is a different shape:
 [an incident](.claude/skills/dev-house-rules/INCIDENTS.md#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent)
 writes "`PLAN.md` §12" to illustrate a citation that used to name a real section — the pooled
@@ -765,8 +714,10 @@ Three fixes were named; the first is done, the third matters most and has its fi
    and that arrived as `refs:off` / `refs:on` markers rather than a file-level opt-out, so exempting
    a paragraph never quietly exempts the document around it. A guard that fires on its own
    documentation gets switched off.
-2. Fix the 40. Most need a human: the intended target is often unrecoverable, and deleting a comment
-   that cites nothing sometimes destroys the only record of a decision.
+2. Fix the 40. The 23 whose target `96998cc` deleted can be read at `96998cc^:PLAN.md` and repointed
+   or quoted. The 16 citing `§7b`, `§7c`, `§3c` and `§24` need a human, since their target was never
+   written, and deleting a comment that cites nothing sometimes destroys the only record of a
+   decision. The quoted `§12` is an illustration, not a citation to fix.
 3. **Stop citing `PLAN.md` by number from code.** Cite `architecture/*.md`, whose section numbers are
    stable and survived the split out of `ARCHITECTURE.md` unchanged — §1–16 are now spread across
    eight files, each keeping the number it had — or quote the reasoning where it is used. **First instance done:** the guardrail argument moved out
@@ -783,36 +734,38 @@ there, not because that is provably where the author meant to point. The check s
 needs a human read. It does not claim the set is empty.
 
 **What would make this the wrong idea.** Item 2 is a large mechanical diff across `src/` with real
-judgement in it, and a batch pass by an agent is how 40 confident references to nothing got here. If
+judgement in it, and a batch pass by an agent is how the 16 references to nothing got here. If
 the answer to a dangling `§7b` turns out to be "delete the citation", then 40 comments get shorter
 and nothing gets more correct. Read three of them before fixing any.
 
-#### The sites, regenerated 2026-09-18
+#### The sites, regenerated 2026-09-18, lines rechecked 2026-09-24
 
 **Provenance, because it decides how far to trust each row.** Every row below came out of
 `docs:check` itself, not out of a sweep: the resolver already visits each site to decide it dangles,
 so lowering `KNOWN_DANGLING` makes it print them. The paths and lines are therefore the checker's,
 generated the same way twice. Verified by hand afterwards: twelve sampled lines read as quoted, the
-two `architecture/overview.md` rows say what they are quoted as saying, and — against every revision
-of `PLAN.md` that `git log --all` reaches — `§3a`, `§5b`, `§7b` and `§6.1c` have never existed there
-in any form. **Every path and line in the previous version of this table was wrong**, because the
+two `architecture/overview.md` rows say what they are quoted as saying, and `§7b` has never been a
+heading in any revision of `PLAN.md` that `git log --all` reaches. The same check said so of `§3a`,
+`§5b` and `§6.1c` as well, and was wrong (above). **Every path and line in the previous version of this table was wrong**, because the
 table was written against `ARCHITECTURE.md` before it was split into `architecture/*.md` and against
 `src/` before the comments above these citations were rewritten; nothing failed when it rotted,
 which is the argument for not keeping it by hand.
 
-Dangling, grouped by the token they cite. None of these tokens has ever been a heading anywhere:
+Dangling, grouped by the token they cite. `§7b`, `§7c`, `§3c` and `§24` have never been a heading
+anywhere. The rest were `PLAN.md` headings — `§12` until `2531bbb`, the others until `96998cc` — and
+`§12` is still one in `architecture/triage.md`:
 
 | token   | sites                                                                                                                                                                                  |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `§7b`   | `watch-loop.ts:33`, `cli/watch-once.ts:14`, `watch/counter.ts:4`, `watch/decide.ts:134,190,203`, `watch/decide.test.ts:183`, `watch/memo.ts:6`, `watch/relevance.ts:12`                |
-| `§6.1c` | `solve/pr.ts:213,1235`, `solve/commenter.ts:3`, `solve/delivery.ts:215,221`, `cli/solve-outcome.ts:177,296`, `cli/solve-outcome.test.ts:552`                                           |
-| `§6.1`  | `architecture/triage.md:321`, `cli/solve-outcome.ts:174`, `cli/solve-run.ts:476,816`, `jira/jql.ts:169`                                                                                |
+| `§6.1c` | `solve/pr.ts:213,1235`, `solve/commenter.ts:3`, `solve/delivery.ts:215,221`, `cli/solve-outcome.ts:243,362`, `cli/solve-outcome.test.ts:687`                                           |
+| `§6.1`  | `architecture/triage.md:321`, `cli/solve-outcome.ts:240`, `cli/solve-run.ts:489,829`, `jira/jql.ts:169`                                                                                |
 | `§3a`   | `architecture/overview.md:319`, `solve/attempts.ts:5`, `solve/commenter.ts:7`, `solve/commenter.test.ts:51`                                                                            |
 | `§6.3`  | `solve/delivery.ts:955`, `watch/counter.ts:8`, `watch/retriage.ts:6`, `watch/retriage.test.ts:138`                                                                                     |
 | `§7c`   | `jira/jql.ts:198`, `watch/retriage.ts:9`, `triage/gate.test.ts:508`                                                                                                                    |
-| `§3c`   | `cli/solve-outcome.ts:322,326`, `jira/jql.ts:172`                                                                                                                                      |
+| `§3c`   | `cli/solve-outcome.ts:388,392`, `jira/jql.ts:172`                                                                                                                                      |
 | `§6.2`  | `solve/delivery.ts:666`                                                                                                                                                                |
-| `§5b`   | `architecture/overview.md:200` — **start here.** The only citation in the tree that names its target document, and the name is wrong                                                   |
+| `§5b`   | `architecture/overview.md:200` — **start here.** The only citation in the tree that names its target document; the name was right and the target was deleted                           |
 | `§24`   | `architecture/overview.md:356` — `` `agent-solve` (§24) ``, in a document whose own headings are 1, 2, 5, 6, 8, 9, 11; intended target is almost certainly `architecture/solve.md` §15 |
 | `§12`   | `.claude/skills/dev-house-rules/INCIDENTS.md:1058` — the quoted `` `PLAN.md` §12 `` above                                                                                              |
 
@@ -828,7 +781,7 @@ the deletion case above gives.
   `watch/relevance.ts:12`, `watch/memo.ts:9`, `architecture/overview.md:315`. `PLAN.md §1` is the
   model question and `architecture/overview.md §1` is the credential split; **the rule itself is in
   neither**, so these five have no correct target to be given.
-- "§6: advance, then claim" — `review-loop.ts:64`, `review-loop.test.ts:126`. Now
+- "§6: advance, then claim" — `review-loop.ts:71`, `review-loop.test.ts:182`. Now
   `architecture/overview.md §2`, at L98; `PLAN.md §6` is the second gate. A third site, `index.ts:44`,
   is gone — the entry named it and nothing noticed it had left.
 
@@ -848,13 +801,13 @@ than passing silently. The same is true of the `SOLVE_INSTRUCTIONS.md` ones. **T
 "~57" and the tilde is why it survived the drift** — an approximate number cannot be falsified by a
 recount, which is exactly what `STARTING.md` item 3 means by letting the dated list be the count.
 
-**The legal vocabulary, which the resolver parses rather than being told, as of 2026-09-18:**
+**The legal vocabulary, which the resolver parses rather than being told, as of 2026-09-24:**
 `architecture/overview.md` §1, 2, 5, 6, 8, 9, 11; `architecture/module-map.md` §7;
 `architecture/triage.md` §3, 4, 12; `architecture/solve.md` §15; `architecture/configuration.md` §10;
 `architecture/invariants.md` §14 plus §14.1–14.17; `architecture/not-built.md` §13;
 `architecture/guardrails.md` §16 — §1 through §16 exactly once each, across eight files. Then
-`PLAN.md` §1–41 less the numbers it has retired; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
-`SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`. Ten of the eleven dangling tokens are in none
+`PLAN.md`'s own entry numbers, less the ones it has retired; `INTAKE_INSTRUCTIONS.md` §0–12 with `1b`/`6b`;
+`SOLVE_INSTRUCTIONS.md` §0–8 with `0a`/`2a`/`2b`/`2c`/`2d`. Ten of the eleven dangling tokens are in none
 of them; `§12` is the exception, and the shape worth remembering — it exists, in
 `architecture/triage.md`, and dangles only because the citation names `PLAN.md`.
 
@@ -902,15 +855,10 @@ message that merely _discusses_ pushing to `main` is refused as though it were o
 times now, twice on this repository's own commits and again on 2026-09-18 — `git commit -m "docs:
 explain why git push to main is refused"` is still denied by the running script.
 
-**Two rewrites of this hook have landed since and neither touched it**, which is the part worth
-recording: `0cf4c10` put 146 lines into `branch-guard.sh` and `88caf5f` another 55, both in the
-adjacent blocks, and the four-line push check sat between them unchanged. A defect survives edits to
-the file it lives in when nothing fails.
-
-**It has a second half, found on 2026-09-18 and worse than the first.** `88caf5f` introduced
-`isProtected` to end exactly this class — its comment says "One list. A name refused by one hatch and
-accepted by another is the hole this guard exists to close, and there were three copies of it before
-this." **There were four.** The push check keeps its own inline `(main|master|develop)`, and
+**It has a second half, found on 2026-09-18 and worse than the first.** `isProtected` was written to
+end exactly this class, replacing what it counted as three copies of the list, and its comment says
+"One list: a name refused by one hatch and accepted by another is the hole this guard exists to
+close." **There were four copies.** The push check keeps its own inline `(main|master|develop)`, and
 `isProtected` also protects `release/*`, so `git push origin release/1.2` is allowed — measured,
 silent, from a feature branch. The false positive is embarrassing; this one is a hole, and it is in
 the check whose comment claims the holes are closed.
@@ -966,14 +914,16 @@ PR-exists reconciliation has no such hazard and is probably the half to build fi
 **What is not built.** Any outcome between accepting every item of a ticket and ending the run over
 one of them. A nine-file ticket with one questionable line yields zero files.
 
-**Why it is owed.** The two outcomes available are `injectionNoticed`, required in three schemas
-(`schema.ts:41`, `:272`, `:390`) and parsed (`runner.ts:799`, `:1165`, `:1210`) but branched on
-nowhere, and a bail, decided in recon (`orchestrator.ts:31`, returned at `:796`, fields at
-`schema.ts:38-40`). Recon has no `Write` and no `Edit` (`orchestrator.ts:213`), so a bail ends the
-run before the solve pass and the diff gate is never reached: the path lists are never consulted,
-and judgement about scope decides alone. A bail also writes no label and says nothing about
-solvability, so the ticket is released as found and offered again on the next tick at full solve
-cost. Sampled judgement probes on SSX-3894 put the bail rate at 2 of 4.
+**Why it is owed.** Every outcome available ends the run. `injectionNoticed` is required in
+`RECON_SCHEMA`, `REVIEW_SCHEMA` and `MERGE_SCHEMA` and parsed by each pass's parser, but nothing in
+the run acts on it; its one reader is `recon:once`'s report. A bail is decided in recon, which has no
+`Write` and no `Edit` (`RECON_DENIED_TOOLS` in `solve/runner.ts`), so it ends the run before the fix
+pass and the diff gate is never reached. `plannedPathRefusals` holds recon's planned files against
+the path lists, but only to stop a plan that needs a refused path; what goes into the plan is still
+judgement about scope alone. The fix pass's `abandoned` ends the run as well, over everything it was
+handed. A bail or an abandon writes `agent:failed` and comments on the ticket, so the ticket waits
+for a human rather than returning to the queue, and all of it is declined over one item. Sampled
+judgement probes on SSX-3894 put the bail rate at 2 of 4.
 
 What is missing is a per-item outcome: complete the in-scope work, leave the rest undone, and state
 which items were left and why on both the pull request and the ticket.
@@ -1052,15 +1002,17 @@ recurring charge rather than a wrong answer:
 
 ## Out of scope
 
-Auto-merge. Multi-repo. Cross-repo _changes_ — reads landed 2026-09-07 and the two are not the same
-grant: a pass may read every checkout on the machine and may write to one worktree, which is now
-watched rather than merely asserted. Reopening `agent:done` tickets. Bot-noise tickets
-(CVE/GHSA/SNYK/dependency bumps) — currently discarded at intake, and the most agent-fixable class
-there is, so worth revisiting once the pilot has a track record.
+Auto-merge. Cross-repo _changes_ — reads landed 2026-09-07 and the two are not the same grant: recon
+may read the other checkouts `SOLVE_READ_DIRS` names, and a write pass writes to one worktree, which
+is now watched rather than merely asserted. Reopening `agent:done` tickets. Bot-noise tickets
+(CVE/GHSA/SNYK/dependency bumps) as a class — intake discards their prefixes as a signal of who owns
+a ticket and triages them like any other, with nothing aimed at them, although they are the most
+agent-fixable class there is; worth revisiting once the pilot has a track record.
 
 ## Open, deliberately
 
-`bugFastPath` (default OFF) is the existing hook for bug-specific behaviour and is in direct
-tension with this feature: it short-circuits a `Feil` to a one-line note with no scorecard — and
-therefore no dev lens and no fitness call. If it is ever switched on, these two need reconciling.
+`bugFastPath` (default OFF), a switch the intake skill plans and nothing here implements, is in
+direct tension with this feature: it would short-circuit a `Feil` to a one-line note with no
+scorecard — and therefore no dev lens and no fitness call. If it is ever built and switched on,
+these two need reconciling.
 Flagged, not solved.
