@@ -1786,3 +1786,35 @@ handed only the diff and these rules, for the repetition.
 
 **No rule yet** — both sightings came on one day and the second was fixed by copying the first, so
 they count as one instance, and `parser-only` at 2.
+
+### The doc comments left above a function inserted beneath them
+
+**2026-09-24.** Three helpers added on `feat/review-repair` — `told` in `review-cycle.ts`,
+`toldLine` in `solve-outcome.ts`, `keepsEvidence` in `solve-run.ts` — were each written directly
+under the doc comment of the function beside them. The old comment now opened onto the new helper,
+and the function it described had none. The third landed under `createReviewAct`'s _"Exported only
+so its refusal branch can be tested"_, and `keepsEvidence` is exported and does have a refusal
+branch, so the stray sentence read as its own. The widening branch did the same once in
+`pr.test.ts`.
+
+The tree already held three from earlier days: two in `wiring.ts`, one in `watch-args.ts`. One of
+the `wiring.ts` pair had been rewritten in place by `849591a`, the sweep that cut prose comments to
+one or two lines across the tree — a pass that read every comment for its wording and did not
+notice this one described nothing where it sat. The two in `wiring.ts` are moved back in the commit
+that adds this entry, since the branch edits that file; the one in `watch-args.ts` is left, in a
+file it does not touch.
+
+**It is the defect class in a form its three bullets did not name:** the sentence is true, of a
+function one declaration further down. Types, lint and tests pass, and a reviewer checking whether
+the sentence is true finds that it is. FINISHING.md's first question asks about exactly this, and
+the commit hook printed it at every one of these commits.
+
+**It is also the one form a tool can see.** A doc block followed directly by another doc block is
+always this, so a check in `docs:check` would find every instance by construction where these seven
+were found by reading. That check is proposed, not built.
+
+**Found by** a review from a fresh context, handed only the diff and these rules, for the four on
+the two branches; the same reviewer's sweep of the tree for the older three.
+
+**The rule** — the defect class, now with this as its fourth form.
+[→](BUILDING.md#the-defect-class)

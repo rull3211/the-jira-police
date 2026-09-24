@@ -459,14 +459,6 @@ function toSolveCandidate(ticket: TicketRef): SolveCandidate {
 }
 
 /**
- * Composes the solve-queue cycle from settings, the way `createPollDeps` composes the grooming
- * one: `solve:once` and the daemon must run the same composition, or the rehearsal proves
- * nothing. Nothing here can write — `SolveDeps` has no write function to give — so reading the
- * board and being able to change it stay two different call sites (`createClaimCapabilities`).
- * `solveMode` is called here, at composition, so an unrecognised `SOLVE_MODE` fails before a
- * query is built rather than at the point where its value would have gated a human's go-ahead.
- */
-/**
  * The solve pipeline's way of saying something on a ticket.
  *
  * Composed here, not in the command, for the same reason as `createSolveDeps`: constructing a
@@ -502,6 +494,14 @@ export function createWatchChecker(settings: Settings): RelevanceChecker {
   });
 }
 
+/**
+ * Composes the solve-queue cycle from settings, the way `createPollDeps` composes the grooming
+ * one: `solve:once` and the daemon must run the same composition, or the rehearsal proves
+ * nothing. Nothing here can write — `SolveDeps` has no write function to give — so reading the
+ * board and being able to change it stay two different call sites (`createClaimCapabilities`).
+ * `solveMode` is called here, at composition, so an unrecognised `SOLVE_MODE` fails before a
+ * query is built rather than at the point where its value would have gated a human's go-ahead.
+ */
 export function createSolveDeps(
   settings: Settings,
   client: JiraClient,
@@ -646,14 +646,6 @@ export function createSolveRunDeps(settings: Settings): SolveDependencies {
 export class NotSolvableError extends Error {}
 
 /**
- * Turns one ticket into the request `solveTicket` runs.
- *
- * The repository comes from the ticket's own `svc:` label, checked against `SOLVE_REPOS`.
- * `repoFromLabels` returns `null` for any ambiguous reading; `SOLVE_REPOS` says which repos may
- * be written to at all — kept as two checks so a missing label and a forbidden repository are
- * reported as the two different problems they are.
- */
-/**
  * Where worktrees are cut, and why it is configurable.
  *
  * Defaults to the system temp directory: temporary by construction, and away from the checkout
@@ -682,6 +674,14 @@ export function worktreeRoot(settings: Settings): string {
   }
 }
 
+/**
+ * Turns one ticket into the request `solveTicket` runs.
+ *
+ * The repository comes from the ticket's own `svc:` label, checked against `SOLVE_REPOS`.
+ * `repoFromLabels` returns `null` for any ambiguous reading; `SOLVE_REPOS` says which repos may
+ * be written to at all — kept as two checks so a missing label and a forbidden repository are
+ * reported as the two different problems they are.
+ */
 export function buildSolveRequest(
   settings: Settings,
   detail: IssueDetail,
