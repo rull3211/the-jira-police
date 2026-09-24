@@ -350,6 +350,21 @@ describe("judgePomChange — what it refuses", () => {
       expect(reasonOf(bumpIn(base))).toContain("character references");
     });
 
+    // Found by a review from a fresh context, and confirmed with Maven's effective POM: both resolve to 3.181.
+    it.each([
+      ["a CDATA section", "<argLine>$<![CDATA[{lisa-services-api.version}]]></argLine>"],
+      ["a processing instruction", "<argLine>$<?x y?>{lisa-services-api.version}</argLine>"],
+    ])("refuses a property bump when %s could spell the property's use", (_what, setting) => {
+      expect(reasonOf(bumpIn(withSurefire(setting)))).toContain(
+        "CDATA section or processing instruction",
+      );
+    });
+
+    it("still allows a property bump in a file whose only processing instruction is the XML declaration", () => {
+      expect(BASE.startsWith("<?xml ")).toBe(true);
+      expect(bumpIn(BASE)).toMatchObject({ ok: true });
+    });
+
     it("counts surefire's late-bound @{name} as a use", () => {
       const base = withSurefire("<argLine>@{lisa-services-api.version}</argLine>");
       expect(reasonOf(bumpIn(base))).toContain(

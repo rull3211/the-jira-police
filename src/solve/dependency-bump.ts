@@ -6,10 +6,11 @@
  * The diff gate and `verify`'s refusal to grade a changed build file both ask this module, so they
  * cannot disagree about which change is allowed; the plan check leaves `pom.xml` to them.
  *
- * Text, not an XML library: this project has no parser dependency. Where Maven would read the file
- * differently than this text does — an internal DTD subset, a character reference, an unbalanced
- * tag — the change is refused rather than guessed at. Comments are found by the same scan that reads
- * the elements, so the two cannot disagree about where one ends.
+ * Text, not an XML library: this project has no parser dependency. Where this reader knows Maven
+ * would read the file differently — an internal DTD subset, an unbalanced tag, and for a property bump
+ * a character reference, CDATA section or processing instruction a use could be spelled through — the
+ * change is refused rather than guessed at; a difference it does not know of is not. Comments are
+ * found by the same scan that reads the elements, so the two cannot disagree about where one ends.
  */
 
 import { isDependencyBumpPath } from "./diff-gate.ts";
@@ -46,6 +47,9 @@ const VERSION = /^[0-9][0-9A-Za-z._-]*$/u;
 
 /** A version that can change after review is not a version a reviewer approved. */
 const MUTABLE = /snapshot/iu;
+
+/** A CDATA section, or any processing instruction but the XML declaration. */
+const CDATA_OR_PI = /<!\[CDATA\[|<\?(?!xml[\s?])/u;
 
 /** Plugin, parent, profile and extension versions are absent on purpose: each changes the build. */
 const DEPENDENCY_VERSION_CHAINS: ReadonlySet<string> = new Set([
@@ -188,7 +192,7 @@ function scanPom(text: string): PomScan | null {
   return open.length === 0 ? { elements: records, comments } : null;
 }
 
-/** A file with its comments cut out: what Maven reads, since it joins the text either side of one. */
+/** A file with its comments cut out, as Maven joins the text either side of one. */
 interface Bare {
   readonly text: string;
   /** Per line of `text`: the 0-based line of the original holding its first non-blank character. */
@@ -480,6 +484,12 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
     if (texts.base.includes("&#")) {
       return refuse(
         `line ${String(line)} changes the property ${name}, in a file with character references this reader does not decode`,
+      );
+    }
+    // Maven joins text across CDATA and processing instructions as across comments, so `$<![CDATA[{name}]]>` is a use too.
+    if (CDATA_OR_PI.test(base.text)) {
+      return refuse(
+        `line ${String(line)} changes the property ${name}, in a file with a CDATA section or processing instruction a use could be spelled through`,
       );
     }
     if (referencesTo(texts.base, name).length === 0) {

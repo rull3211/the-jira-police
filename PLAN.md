@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3089 tests in 95 files**, no build step.
+> **3092 tests in 95 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -413,9 +413,8 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries
-  is re-judged by every round that changes code, since each gates the whole diff: rounds 2 and 5 on
-  storebrand-digital/insurance-commerce-rest-api#1459 on 2026-09-24 passed it, round 5 on the
-  second gate after its `pom.xml` comment edit was rolled back.
+  is re-judged by every round that changes code, since each gates the whole diff; the rounds on
+  storebrand-digital/insurance-commerce-rest-api#1459 that pushed code on 2026-09-24 passed it.
 
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the

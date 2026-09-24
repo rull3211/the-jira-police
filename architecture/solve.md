@@ -589,9 +589,11 @@ its children set, plugin versions included, and a module's POM need not be named
 parent rule came from running the judge against the real SSX-3918 base: it allowed a
 `jackson.version` bump because this file uses the property once, which is only sound because this
 file has no parent. The reader is text, not an XML library — this project has no parser dependency
-— so wherever Maven would read the file differently than the text does, the change is refused
-rather than guessed at: an internal DTD subset, an unbalanced tag, and, for a property bump, any
-character reference, since Maven decodes `&#36;{name}` to a use the text search cannot see. That
+— so wherever it knows Maven would read the file differently than the text does, the change is
+refused rather than guessed at: an internal DTD subset, an unbalanced tag, and, for a property bump,
+any character reference, since Maven decodes `&#36;{name}` to a use the text search cannot see. A
+difference it does not know of is not refused, and one was found after this was first written;
+see the comment edits below. That
 last one was found by a review from a fresh context, which drove Maven's own effective POM to
 confirm the encoded reference resolves. The pull request names every bump before any model-written line, and says the
 harness checked against the new version without reading what changed in it. The operator's
@@ -627,9 +629,16 @@ inside a processing instruction — Maven refuses to read the file at all, so th
 rather than green. The same drive found a hole older than this change: Maven joins the text either
 side of a comment, so `$<!-- x -->{name}` interpolates, and a property search over the original text
 never saw that use. Property uses are now searched in both — the original, where a use inside a
-comment still refuses as it always did, and the cut text. Driven live on #1459 round 6, 2026-09-24:
-asked to correct that `pom.xml` comment, the round changed its one line, the gate passed it beside
-the pull request's own `lisa-services-api.version` bump, and it pushed as `3a6f897`. What stays
+comment still refuses as it always did, and the cut text. Maven joins text across a CDATA section
+and a processing instruction the same way, which a review from a fresh context found and Maven's
+effective POM confirmed (`$<![CDATA[{name}]]>` and `$<?x y?>{name}` both resolve), so a property
+bump in a file holding either, bar the XML declaration, is refused like one holding a character
+reference: the reader does not place a use spelled through them. That closes the list: element text
+is split only by those, comments, references and child elements, and a child element drops the text
+around it rather than joining it. Driven live on #1459 round 6, 2026-09-24, from a local merge with
+`feat/review-repair` (this branch alone was not run against a real pull request): asked to correct
+that `pom.xml` comment, the round changed its one line, the gate passed it beside the pull
+request's own `lisa-services-api.version` bump, and it pushed as `3a6f897`. What stays
 open: anything that reads
 `pom.xml` as a file rather than as Maven's model, a plugin or a test, sees the edit, and nothing here
 knows of one.
