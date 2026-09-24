@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { PHASES, includes, parseSolveArgs, rank, unavailable, writes } from "./solve-args.ts";
+import {
+  PHASES,
+  includes,
+  parseSolveArgs,
+  rank,
+  repairUnavailable,
+  unavailable,
+  writes,
+} from "./solve-args.ts";
 
 /**
  * The ladder invocation, or a failure that names what went wrong.
@@ -188,6 +196,69 @@ describe("--watch, the flag that is not a rung and may run bare", () => {
 
   it("reports the combination rather than the ladder's keyless refusal", () => {
     expect(error(["--pr", "--watch"])).toContain("cannot be combined");
+  });
+});
+
+/** Whether a ladder parse carries `--repair`, or a thrown assertion naming what came back instead. */
+function repairs(argv: readonly string[]): boolean {
+  const result = parseSolveArgs(argv);
+  if (!result.ok) {
+    throw new Error(`expected a parse, got: ${result.error}`);
+  }
+  if (result.invocation.mode !== "ladder") {
+    throw new Error(`expected a ladder invocation, got ${result.invocation.mode}`);
+  }
+  return result.invocation.repair;
+}
+
+/** Every rung that opens no pull request, `plan` included — the ones `--repair` has nothing to act through. */
+const BELOW_PR = PHASES.filter((phase) => !includes(phase, "pr"));
+
+describe("--repair, the modifier that is not a rung", () => {
+  it.each(RUNG_FLAGS)("is off on %s unless it is typed", (flag) => {
+    // The plausible wrong design — a rung between `--pr` and `--review` — would make `--review`
+    // imply it, since a rung's index is its privilege.
+    expect(repairs(["SSX-3822", flag])).toBe(false);
+  });
+
+  it.each(["--pr", "--review"])("arms %s without moving the rung", (flag) => {
+    expect(repairs(["SSX-3822", flag, "--repair"])).toBe(true);
+    expect(parsed(["SSX-3822", flag, "--repair"]).phase).toBe(flag.slice(2));
+  });
+
+  it("does not care where the flag sits", () => {
+    expect(repairs(["--repair", "SSX-3822", "--pr"])).toBe(true);
+  });
+
+  it.each(BELOW_PR)("refuses to arm the %s rung, which opens no pull request", (phase) => {
+    const argv =
+      phase === "plan" ? ["SSX-3822", "--repair"] : ["SSX-3822", `--${phase}`, "--repair"];
+    const reason = error(argv);
+    expect(reason).toContain("--repair");
+    expect(reason).toContain("--pr");
+    // Found by running it: `plan` is the absence of a flag, and the refusal once named `--plan`.
+    expect(reason).not.toContain("--plan");
+  });
+
+  it("refuses to be combined with --advance or --watch", () => {
+    // Both act on a pull request an earlier run opened; there is no repair round in either.
+    expect(error(["SSX-3822", "--advance", "--repair"])).toContain("--repair");
+    expect(error(["SSX-3822", "--watch", "--repair"])).toContain("--repair");
+  });
+});
+
+describe("repairUnavailable", () => {
+  it("refuses when REPAIR_ROUND=false, since no round would run for it to act on", () => {
+    // Otherwise the flag is accepted and silently does nothing — the run reads as armed.
+    expect(repairUnavailable({ REPAIR_ROUND: "false" })).toContain("REPAIR_ROUND");
+    expect(repairUnavailable({ REPAIR_ROUND: " FALSE " })).toContain("REPAIR_ROUND");
+  });
+
+  it("lets it through whenever the round runs, including on a typo", () => {
+    // `REPAIR_ROUND` fails open, and this reads it through the same reader rather than a copy.
+    for (const value of ["true", "", "fasle"]) {
+      expect(repairUnavailable({ REPAIR_ROUND: value })).toBeNull();
+    }
   });
 });
 

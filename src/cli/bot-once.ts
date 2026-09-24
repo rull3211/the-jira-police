@@ -114,7 +114,8 @@ async function main(): Promise<void> {
   }
 
   // `null` cycle: there is no queue here, distinct from reporting the ticket absent from one.
-  await runWriteRungs(settings, createJiraClient(settings), issueKey, phase, null, "named");
+  // `false`: `parseBotArgs` refuses `--repair`.
+  await runWriteRungs(settings, createJiraClient(settings), issueKey, phase, null, "named", false);
 }
 
 await withConfigErrors(main);

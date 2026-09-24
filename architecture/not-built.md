@@ -112,7 +112,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
   this list when the repair round began reading it — and `VerificationPlan.toolchain` is the
   reason that round cannot name a build tool's report directory, since `VerificationResult` never
   carries it out of `verify`. Clean by
-  the same sweep: **all 53 settings are read**, and there are no orphan files.
+  the same sweep: **all 54 settings are read**, and there are no orphan files.
 
 ### The solve feature, from the claim onward
 

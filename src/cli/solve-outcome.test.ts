@@ -255,8 +255,51 @@ describe("describeSolveOutcome", () => {
     // The tree no longer reproduces the reason printed directly above it, which is the one thing
     // an operator reading a kept worktree cannot be left to infer.
     expect(line).toContain("no longer reproduces");
-    expect(line).toContain(`git -C ${worktree.path} diff ${worktree.branch}`);
+    // `diff HEAD`, not `diff <branch>` taken on trust: the two agree only because the fix is
+    // committed on that branch, and the command should say which delta it shows.
+    expect(line).toContain(`git -C ${worktree.path} diff HEAD`);
+    expect(line).toContain(`git -C ${worktree.path} show HEAD`);
     expect(line).toContain("REPAIR_ROUND=false");
+  });
+
+  it("names what a discarded green round would have needed to be acted on", () => {
+    const line = describeSolveOutcome({
+      kind: "failed",
+      reason: "test did not pass (exit 1)",
+      fix: FIX_REPORT,
+      repair: FIX_REPORT,
+      repairOutcome: "verified",
+      verification: {} as never,
+      devLens: lens,
+      worktree,
+    });
+
+    expect(line).toContain("--repair");
+  });
+
+  it("says a verified run was finished by a repair round, and splits the diff at the commit", () => {
+    // On this path the fix is committed on the branch, so the ordinary `diff <branch>` shows the
+    // repair alone while reading as the whole change.
+    const line = describeSolveOutcome({
+      ...(verified as Extract<SolveOutcome, { kind: "verified" }>),
+      fix: FIX_REPORT,
+      repair: { ...FIX_REPORT, commitSubject: "test(advisor): restore the test's premise" },
+      repairedFailure: "test did not pass (exit 1)",
+      commit: { subject: "test(advisor): restore the test's premise", body: "" },
+    });
+
+    expect(line).toContain("repair");
+    expect(line).toContain("test did not pass (exit 1)");
+    expect(line).toContain(`git -C ${worktree.path} diff HEAD`);
+    expect(line).toContain(`git -C ${worktree.path} show HEAD`);
+    expect(line).not.toContain(`diff ${worktree.branch}`);
+  });
+
+  it("prints an ordinary verified run's diff command as before", () => {
+    expect(describeSolveOutcome(verified)).toContain(
+      `git -C ${worktree.path} diff ${worktree.branch}`,
+    );
+    expect(describeSolveOutcome(verified)).not.toMatch(/repair/iu);
   });
 
   it("prints the failed outcome exactly as before when no round ran", () => {

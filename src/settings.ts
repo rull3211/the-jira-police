@@ -322,8 +322,14 @@ export const SETTINGS = [
   {
     name: "REPAIR_ROUND",
     description:
-      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK — but read the difference before copying the reasoning: that one writes nothing, and this one runs a write pass. It arms a model session holding Write and Edit, in a worktree the run is already writing, and buys a re-verification and sometimes a fail-first probe. What it does not do is let anything act on the result. The outcome stays `failed` whatever the round concludes, because the pass has never been watched working and a green re-verification is reachable by deleting the failing assertion, which no exit code tells from a fix. So the thing a typo would withdraw is the measurement, not a guard on the writing — concretely, rows stop appearing in repair-rounds.md and `pnpm repair:ledger` has nothing new to read. On the day a phase acts on the verdict, this becomes a privilege switch and belongs on `flag`. Set it to false for cost.",
+      "Whether a solve whose verification failed also runs one repair pass, which is shown the harness's captured failure and tries to correct the diff. On by default, the same shape as FAIL_FIRST_CHECK — but read the difference before copying the reasoning: that one writes nothing, and this one runs a write pass. It arms a model session holding Write and Edit, in a worktree the run is already writing, and buys a re-verification and sometimes a fail-first probe. What it does not do on its own is let anything act on the result. The outcome stays `failed` whatever the round concludes unless the run was also armed — `--repair` typed by hand, or REPAIR_PUBLISH for the daemon — because a green re-verification is reachable by deleting the failing assertion, which no exit code tells from a fix. Those are the half of the privilege that fails closed, so this one stays the mirror of `flag` even now that a verdict can be acted on: the thing a typo here would withdraw is still the measurement, not a guard on the writing — concretely, rows stop appearing in repair-rounds.md and `pnpm repair:ledger` has nothing new to read. A setting that let a round act with nothing typed would be a privilege switch and belong on `flag`; this is not that setting — REPAIR_PUBLISH is. Set it to false for cost.",
     fallback: "true",
+  },
+  {
+    name: "REPAIR_PUBLISH",
+    description:
+      "Whether the daemon may open a pull request from a repair round that turned a failed verification green — the loop's copy of `solve:once <KEY> --pr --repair`, which a person types per run and reads the result of. Off by default, and it is the switch that most needs to be: a repair is the one change this service opens that was written by a pass shown the red output, and a check made green by weakening the assertion that failed looks exactly like a fix. What a reviewer then sees is a draft pull request with every check passing and a plausible diff, which is the configuration in which review is weakest. The body names the repair above everything else and it arrives as its own commit, but with this on nobody stands between the round and the pull request. Off, the daemon records every round in repair-rounds.md and discards the verdict, exactly as it did before this setting existed. Only `true` arms it, in any case, so a typo fails closed. Separate from REPAIR_ROUND rather than that one moved onto `flag`: REPAIR_ROUND decides whether a round is bought and defaults on because alone it only measures, while this decides whether an unattended round may act. The privilege is the two together, so REPAIR_PUBLISH=true with REPAIR_ROUND=false arms nothing, and the daemon says so at startup.",
+    fallback: "false",
   },
   {
     name: "LOG_LEVEL",
@@ -468,15 +474,16 @@ export function failFirstCheck(settings: Settings): boolean {
 }
 
 /**
- * Whether a failed verification also buys one repair round. Only "false" turns it off.
- *
- * The mirror of `flag` for the same reason as `failFirstCheck`, and it is only the mirror while
- * the round stays untrusted: the outcome is `failed` whatever the round returns, so this withdraws
- * a measurement rather than arming a privilege. A phase that lets a repair decide the run must
- * move this to `flag`.
+ * Whether a failed verification also buys one repair round. Only "false" turns it off — the mirror
+ * of `flag` only while it cannot decide a run alone; anything letting it do so must move it to `flag`.
  */
-export function repairRound(settings: Settings): boolean {
+export function repairRound(settings: Pick<Settings, "REPAIR_ROUND">): boolean {
   return settings["REPAIR_ROUND"].trim().toLowerCase() !== "false";
+}
+
+/** Whether the daemon lets a green repair round open the pull request: `REPAIR_PUBLISH` through `flag`, and a round to act on. */
+export function daemonPromotesRepair(settings: Settings): boolean {
+  return flag(settings, "REPAIR_PUBLISH") && repairRound(settings);
 }
 
 export function list(settings: Settings, name: SettingName): readonly string[] {

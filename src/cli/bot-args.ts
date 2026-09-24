@@ -43,5 +43,13 @@ export function parseBotArgs(argv: readonly string[]): ParsedLadderArgs {
         "--advance is not a bot:once flag — this command triages a ticket and then solves it, so there is no pull request to advance yet. Use --review to open one and work it in the same run, or solve:once <ISSUE-KEY> --advance to act on one that already exists.",
     };
   }
+  // Refused rather than threaded through: nothing has yet asked for a fresh triage and an armed repair in one unwatched run.
+  if (parsed.invocation.repair) {
+    return {
+      ok: false,
+      error:
+        "--repair is not a bot:once flag — arm a repair with solve:once <ISSUE-KEY> --pr --repair once the ticket is triaged",
+    };
+  }
   return { ok: true, invocation: parsed.invocation };
 }

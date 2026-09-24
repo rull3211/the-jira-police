@@ -217,10 +217,13 @@ Things that look like details and are not:
 
 15. **The pull request body is composed from what the harness measured, not from the model's
     account of itself.** The model writes the commit subject and body — it just made the change
-    and is the only thing that knows why — and that prose is the only model-authored text in the
-    document. It is quoted under a heading naming whose words they are, and neutralised by
-    `asProse`. Everything else is harness-established fact: exit codes it read, file and line
-    counts it measured, the recon verdict it parsed.
+    and is the only thing that knows why — and each pass's own account of what it did: the fix's
+    summary and residual risk, the simplify pass's changes, and on a promoted repair the repair
+    pass's. That is the only model-authored text in the document. Each piece is quoted under a
+    heading naming whose words they are, and neutralised by `asProse`. Everything else is
+    harness-established fact: exit codes it read, file and line counts it measured, the recon
+    verdict it parsed, and on a promoted repair that the fix alone failed and which reason it
+    failed with — the notice saying so is the harness's, placed above every model-written line.
 
     This matters more here than anywhere else in the pipeline, because the pull request body is
     the most widely-read artifact the service produces and the one most likely to be believed. A

@@ -205,6 +205,7 @@ describe("attachReconImages", () => {
     repoPath: "/repos/buy-insurance-advisor-web",
     parentDirectory: "/repos",
     baseRef: "origin/main",
+    identity: { name: "jira-police", email: "jira-police@example.invalid" },
     gitTimeoutMs: 1000,
     stepTimeoutMs: 1000,
     installTimeoutMs: 1000,
@@ -659,6 +660,21 @@ describe("buildSolveRequest", () => {
     expect(request.issueKey).toBe("SSX-3822");
     expect(request.ticket).toBe("ticket text");
     expect(request.baseRef).toBe("origin/main");
+  });
+
+  it("commits as the configured identity", () => {
+    // The commit ahead of a repair round is made inside the pipeline, before `publish` runs.
+    const request = buildSolveRequest(
+      settingsWith({
+        ...SOLVE_ENV,
+        SOLVE_BOT_NAME: "jira-police",
+        SOLVE_BOT_EMAIL: "jp@x.invalid",
+      }),
+      detailWith(["svc:buy-insurance-advisor-web"]),
+      "ticket text",
+    );
+
+    expect(request.identity).toEqual({ name: "jira-police", email: "jp@x.invalid" });
   });
 
   it("refuses a repository that is not on the allowlist", () => {

@@ -11,6 +11,7 @@
  */
 
 import type { SolveOutcome } from "./orchestrator.ts";
+import { type CommitMessage, composeCommitMessage } from "./runner.ts";
 
 export interface PullRequestText {
   readonly title: string;
@@ -77,9 +78,19 @@ function details(summary: string, text: string): string {
     : `<details>\n<summary>${summary}</summary>\n\n${content}\n\n</details>`;
 }
 
-/** The PR title: commit subject (what was actually done) plus the issue key, not the ticket summary. */
+/**
+ * The change the pull request is for. On an ordinary solve that is `commit`; on a promoted repair
+ * `commit` is the repair's, committed on top of the fix, and the pull request is still the fix.
+ */
+function changeOf(outcome: Verified, issueKey: string): CommitMessage {
+  return outcome.repair === undefined
+    ? outcome.commit
+    : composeCommitMessage(outcome.fix, issueKey);
+}
+
+/** The PR title: the change's subject (what was actually done) plus the issue key, not the ticket summary. */
 export function composeTitle(outcome: Verified, issueKey: string): string {
-  return `${outcome.commit.subject} (${issueKey})`;
+  return `${changeOf(outcome, issueKey).subject} (${issueKey})`;
 }
 
 function browseUrl(base: string, issueKey: string): string {
@@ -120,12 +131,31 @@ function failFirstLine(outcome: Verified): string {
   );
 }
 
+/**
+ * What a promoted repair owes the reviewer, harness-composed and above every model-written line:
+ * a green check reached by weakening a test looks exactly like one reached by a fix.
+ */
+function repairBanner(outcome: Verified): string {
+  if (outcome.repair === undefined) {
+    return "";
+  }
+  const failure = asProse(outcome.repairedFailure ?? "") || "the reason was not recorded";
+  return (
+    `⚠️ **A repair pass finished this change after it failed verification — read the second commit ` +
+    `on its own.** The first commit is the fix, and alone it did not pass this repository's checks ` +
+    `(${failure}). A second agent was shown that failure and wrote the second commit, and only then ` +
+    `did every check below pass. Correcting the code and weakening the assertion that failed come ` +
+    `back equally green, and nothing here tells them apart: look for an assertion removed, loosened, ` +
+    `or no longer reached.`
+  );
+}
+
 export function composePullRequest(
   outcome: Verified,
   context: PullRequestContext,
 ): PullRequestText {
   const { issueKey, jiraBaseUrl, maxReviewRounds } = context;
-  const { recon, fix, simplify } = outcome;
+  const { recon, fix, simplify, repair } = outcome;
 
   // On the page, not in a disclosure: it's the only feedback triage's `agent:solvable`
   // call ever gets, since triage never reads a line of source.
@@ -137,7 +167,9 @@ export function composePullRequest(
     `🤖 **A bot wrote this.** It is a draft; a human reviews and merges — this service has no ` +
       `merge path. Ticket: [${issueKey}](${browseUrl(jiraBaseUrl, issueKey)})`,
 
-    prose(withoutTrailer(outcome.commit.body)),
+    repairBanner(outcome),
+
+    prose(withoutTrailer(changeOf(outcome, issueKey).body)),
 
     `**${String(outcome.files)} file(s), ${String(outcome.lines)} line(s)** · ${checkLine(outcome)}`,
 
@@ -149,8 +181,10 @@ export function composePullRequest(
     failFirstLine(outcome),
 
     details("What a reviewer should check by hand", fix.residualRisk),
+    details("What a reviewer should check about the repair", repair?.residualRisk ?? ""),
     recon.devLensAccurate ? "" : details("Where triage was wrong", recon.devLensCorrection),
     details("What the fix pass says it did", fix.summary),
+    details("What the repair pass says it did", repair?.summary ?? ""),
     // Reported, not omitted: "looked and left it alone" and "never ran" are different facts.
     details(
       simplify.changed ? "What the simplify pass changed" : "Why the simplify pass changed nothing",

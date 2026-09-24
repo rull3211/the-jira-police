@@ -40,7 +40,7 @@ import {
 } from "./base-sync.ts";
 import { checkDiff, parseNumstat } from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
-import type { BotIdentity } from "./pr.ts";
+import { type BotIdentity, type CommitResult, commitAll } from "./pr.ts";
 import {
   type AbandonCause,
   type FixReport,
@@ -121,14 +121,15 @@ export interface SolveRequest {
    * regression test that is green against the bug it names.
    */
   readonly failFirstCheck?: boolean;
-  /**
-   * Whether a failed verification buys one repair round, `REPAIR_ROUND`.
-   *
-   * Defaults on for `failFirstCheck`'s reason and only while the round is
-   * untrusted: the run stays `failed` whatever the round concludes, so this
-   * withdraws a measurement rather than arming a privilege.
-   */
+  /** Whether a failed verification buys one repair round, `REPAIR_ROUND`. Alone it only measures; the privilege is this and `promoteRepair` together. */
   readonly repairRound?: boolean;
+  /**
+   * `--repair` typed per run, or `REPAIR_PUBLISH` under the daemon: a green repair round becomes the
+   * outcome. Off unless set, and must be — green is reachable by weakening the assertion that failed.
+   */
+  readonly promoteRepair?: boolean;
+  /** Whose name goes on the commits a run makes before `publish`: a merge round's, and the fix's ahead of a repair round. */
+  readonly identity: BotIdentity;
   readonly gitTimeoutMs: number;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
@@ -177,8 +178,8 @@ export type SolveOutcome =
    *
    * The only outcome that cleans up its worktree: recon has no `Write` and no
    * `Edit`, so a bailed worktree holds nothing. Every other outcome keeps its
-   * worktree, since it's the only copy of any work done and nothing in this
-   * phase commits.
+   * worktree, since it's the only copy of any work done — the one commit this
+   * phase can make, ahead of a repair round, is local and never pushed here.
    */
   | {
       readonly kind: "bailed";
@@ -269,10 +270,8 @@ export type SolveOutcome =
       /**
        * What the repair round concluded, discarded as a verdict and kept as a measurement.
        *
-       * `SolveOutcome["kind"]`, the shape `escaped.would` uses for the same job. Phase two does
-       * not trust this pass (PLAN.md §45), so `verified` here means the round **would** have
-       * rescued the run and the outcome stayed `failed` anyway — the point of the phase. Absent
-       * means no round ran, whether `REPAIR_ROUND` is off or the run never reached one.
+       * `SolveOutcome["kind"]`, as `escaped.would` uses it. `verified` means a green round that was not
+       * promoted (see `unpromotable`, and `architecture/solve.md` §15); absent means no round ran.
        *
        * Where the measurement lands: `repair-ledger.ts` turns this into a row in
        * `repair-rounds.md`, which is the only place it outlives the run.
@@ -296,16 +295,12 @@ export type SolveOutcome =
       readonly fix: FixReport;
       readonly simplify: SimplifyReport;
       /**
-       * Set only when a repair round produced this outcome — `fix` and `simplify` stay the
-       * original passes' own reports, unedited, and this carries what the repair round did on top.
-       *
-       * Still `undefined` on every outcome that leaves `solveTicket`, for a new reason: phase two
-       * calls `runRepairRound` but discards its verdict (PLAN.md §45), so a round that verifies
-       * green is reported as `failed` with `repairOutcome: "verified"`. Only `runRepairRound`'s
-       * own return value sets this, and only its tests read it. A phase that trusts the round is
-       * what makes this field reachable.
+       * Set only by a promoted repair round, on top of the unedited `fix` and `simplify`; `commit` is then the repair's.
+       * `repairRow` keys on this, not on `repairOutcome` — a promoted round has no other ledger signal.
        */
       readonly repair?: FixReport;
+      /** The pre-repair verification's `reason`, which `verification` no longer holds. Set exactly when `repair` is. */
+      readonly repairedFailure?: string;
       readonly verification: VerificationResult;
       /**
        * Whether the run's own tests notice when its fix is taken away.
@@ -695,12 +690,8 @@ function renderVerificationFailure(
 /**
  * One repair attempt after a failed verification.
  *
- * Called from {@link runPipeline}'s `failed` branch, once, and **its verdict is discarded** — the
- * run stays `failed` whatever this returns, carrying only the round's report and `repairOutcome`
- * for a human to read (PLAN.md §45, phase two). So the `verified` this can return is a
- * measurement, not a result: nobody has yet watched this pass work, and PLAN.md §45 records the
- * measured case where green is reachable by deleting the assertion that failed. Do not promote it
- * to a result without the phase that watches it first.
+ * Called once, from {@link runPipeline}'s `failed` branch. **Its verdict is discarded unless the run
+ * is armed**, and even then only a `verified` is promoted — do not widen that; `architecture/solve.md` §15 has why.
  *
  * Grants no new privilege: `repair` is a `WRITE_PASSES` member in `runner.ts` and gets exactly
  * `FIX_ALLOWED_TOOLS` — no `Bash`. `verify`'s `CommandRunner` remains the only thing that ever
@@ -823,12 +814,38 @@ export async function runRepairRound(
     fix,
     simplify,
     repair,
+    repairedFailure: verification.reason,
     verification: reverified,
     failFirst,
     devLens,
     files: verdict.files,
     lines: verdict.lines,
   };
+}
+
+/**
+ * Why a green repair round cannot become the outcome, or `null`. `publish` must find the repair as
+ * a commit of its own on top of the fix, so both the fix's commit and an uncommitted delta are required.
+ */
+async function unpromotable(
+  commands: CommandRunner,
+  worktree: Worktree,
+  boundary: CommitResult,
+  timeoutMs: number,
+): Promise<string | null> {
+  if (boundary.outcome === "failed") {
+    return `the fix could not be committed ahead of the round, so both would ship as one commit (${boundary.reason})`;
+  }
+  const status = await commands.run(["git", "-C", worktree.path, "status", "--porcelain"], {
+    cwd: worktree.path,
+    timeoutMs,
+  });
+  if (failed(status)) {
+    return `could not read what the round left on top of the fix (${why(status)})`;
+  }
+  return status.stdout.trim() === ""
+    ? "the round left nothing on top of the fix, so there is no second commit to push"
+    : null;
 }
 
 async function runPipeline(
@@ -1009,9 +1026,23 @@ async function runPipeline(
       return failure;
     }
 
-    // ---- the repair round, whose verdict is thrown away --------------------
-    // One attempt: a second multiplies the cost of a verdict nothing acts on.
-    // Its writes stay in the worktree — nothing downstream reads a failed one.
+    // ---- the repair round, whose verdict is thrown away unless armed ------
+    // One attempt, never a loop: a second buys another unauditable green at full price.
+    // Its writes stay in the worktree, on top of this commit, so `git diff HEAD` there is the repair alone.
+    const boundary = await commitAll(commands, {
+      worktreePath: worktree.path,
+      ...composeCommitMessage(fix, issueKey),
+      identity: request.identity,
+      timeoutMs: request.gitTimeoutMs,
+    });
+    if (boundary.outcome === "failed") {
+      // Not a reason to skip the round: the measurement stands without it, only the diff blends.
+      log.warn("solve.repair.boundary_failed", {
+        issueKey,
+        reason: boundary.reason,
+        worktreePath: worktree.path,
+      });
+    }
     const round = await runRepairRound(
       deps,
       request,
@@ -1023,6 +1054,14 @@ async function runPipeline(
       devLens,
       verification,
     );
+    if (request.promoteRepair === true && round.kind === "verified") {
+      const blocked = await unpromotable(commands, worktree, boundary, request.gitTimeoutMs);
+      if (blocked === null) {
+        log.info("solve.repair.promoted", { issueKey, branch: worktree.branch });
+        return round;
+      }
+      log.warn("solve.repair.not_promoted", { issueKey, reason: blocked });
+    }
     // `crashed`, `abandoned` and `refused` rounds carry no report at all; `repairOutcome` is what
     // says a round ran in those cases, and dropping it would make them look like no round.
     const report = round.kind === "failed" || round.kind === "verified" ? round.repair : undefined;
@@ -1111,8 +1150,6 @@ export type ConflictRoundOutcome =
 
 export interface ConflictRoundRequest extends SolveRequest {
   readonly worktree: Worktree;
-  /** Whose name goes on the merge commit. */
-  readonly identity: BotIdentity;
 }
 
 /**

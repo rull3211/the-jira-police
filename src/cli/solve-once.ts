@@ -31,7 +31,7 @@ import { describeSettings, readSettings, solveMode, withConfigErrors } from "../
 import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
-import { USAGE, parseSolveArgs, unavailable, writes } from "./solve-args.ts";
+import { USAGE, parseSolveArgs, repairUnavailable, unavailable, writes } from "./solve-args.ts";
 import { runAdvance, runWatch, runWriteRungs } from "./solve-run.ts";
 
 const log = createLogger("solve-once");
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { issueKey, phase } = args.invocation;
+  const { issueKey, phase, repair } = args.invocation;
 
   // Checked before the board is read: a rung that cannot run should not cost a Jira round trip,
   // let alone claim and solve a ticket before discovering it was never configured to open a pull request.
@@ -95,8 +95,15 @@ async function main(): Promise<void> {
     process.exitCode = 3;
     return;
   }
+  const unrepairable = repair ? repairUnavailable(settings) : null;
+  if (unrepairable !== null) {
+    process.stderr.write(`refusing --repair: ${unrepairable}\n`);
+    log.warn("solve-once.refused", { phase, issueKey, repair, reason: unrepairable });
+    process.exitCode = 3;
+    return;
+  }
 
-  log.info("solve-once.settings", { ...describeSettings(settings), phase });
+  log.info("solve-once.settings", { ...describeSettings(settings), phase, repair });
 
   const client = createJiraClient(settings);
   const deps = createSolveDeps(settings, client);
@@ -121,7 +128,7 @@ async function main(): Promise<void> {
   // narrowing a type rather than guarding.
   const attemptedWrites = writes(phase) && issueKey !== null;
   if (attemptedWrites) {
-    await runWriteRungs(settings, client, issueKey, phase, outcome, solveMode(settings));
+    await runWriteRungs(settings, client, issueKey, phase, outcome, solveMode(settings), repair);
   }
 
   // Named `cycleDryRun`, not `dryRun`: it's true of the planning pass only, and every write this

@@ -98,6 +98,22 @@ describe("parseBotArgs", () => {
     });
   });
 
+  describe("--repair is not one of this command's flags", () => {
+    it("refuses it on the rungs solve:once would accept it on, rather than dropping it", () => {
+      // The shared parser accepts it there; passing the invocation on would read as armed and
+      // then solve with it ignored.
+      for (const flag of ["--pr", "--review"]) {
+        const reason = error(["SSX-3822", flag, "--repair"]);
+        expect(reason).toContain("--repair");
+        expect(reason).toContain("solve:once");
+      }
+    });
+
+    it("does not offer it in the usage text", () => {
+      expect(USAGE).not.toContain("--repair");
+    });
+  });
+
   it("documents every rung it accepts", () => {
     for (const flag of RUNG_FLAGS) {
       expect(USAGE).toContain(flag);

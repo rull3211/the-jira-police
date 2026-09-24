@@ -175,14 +175,17 @@ describe("renderSolveComment", () => {
       worktree,
     });
 
-    expect(failed).toContain("being acted on");
+    expect(failed).toContain("**not** being acted on");
     // The reader's first wrong inference is that a green repair means a pull request exists.
     expect(failed).toContain("no pull request");
+    // And the second, now that some runs do act on one: that this run chose not to for a reason
+    // about this ticket.
+    expect(failed).toContain("separate decision a person has to make");
   });
 
   it("surfaces what the repair flagged about its own edit, not only the fix's", () => {
     // Where "I edited the failing assertion because it encoded the old behaviour" lands — the one
-    // self-reported tell for the dishonest green PLAN.md §45 records.
+    // self-reported tell for the dishonest green `architecture/solve.md` §15 records.
     const failed = renderSolveComment("SSX-1", {
       kind: "failed",
       reason: "2 tests failed",

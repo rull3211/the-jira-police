@@ -157,6 +157,7 @@ export async function runSolver(
   client: JiraClient,
   issueKey: string,
   cycle: SolveCycleOutcome | null,
+  promoteRepair: boolean,
 ): Promise<SolveOutcome | null> {
   process.stdout.write(queueNote(issueKey, cycle));
 
@@ -168,12 +169,18 @@ export async function runSolver(
       `${omitted.length > 0 ? `, omitted ${omitted.length}` : ""}\n`,
   );
 
-  const request = requestOrRefusal(settings, detail, text, "--solve");
-  if (request === null) {
+  const built = requestOrRefusal(settings, detail, text, "--solve");
+  if (built === null) {
     return null;
   }
+  const request = { ...built, promoteRepair };
 
   process.stdout.write(`Repository: ${request.repoPath} @ ${request.baseRef}\n\n`);
+  if (promoteRepair) {
+    process.stdout.write(
+      `Armed to act on a repair round (--repair, or REPAIR_PUBLISH under the daemon): one that turns a failed verification green opens the pull request.\n\n`,
+    );
+  }
 
   // `solveWithRetry`, not `solveTicket` — the difference only shows on one outcome: a fix pass
   // stopped by the machine rather than by the code gets one clean rerun.
@@ -225,7 +232,7 @@ export async function runSolver(
       `${feedback.posted ? "" : ` — ${feedback.reason ?? "not posted"}`}\n`,
   );
   if (feedback.repairRecordPath !== undefined) {
-    // The round's verdict is discarded, so this page is the only thing that will still know.
+    // Every round lands here, promoted or not — a discarded verdict survives nowhere else.
     process.stdout.write(
       `Repair round recorded in ${feedback.repairRecordPath} — read it with: pnpm repair:ledger\n`,
     );
@@ -916,6 +923,7 @@ export async function runWriteRungs(
   phase: SolvePhase,
   cycle: SolveCycleOutcome | null,
   authority: ClaimAuthority,
+  promoteRepair: boolean,
 ): Promise<void> {
   const receipt = await runClaim(client, issueKey, authority);
   if (receipt === null) {
@@ -942,7 +950,7 @@ export async function runWriteRungs(
       return;
     }
 
-    const outcome = await runSolver(settings, client, issueKey, cycle);
+    const outcome = await runSolver(settings, client, issueKey, cycle, promoteRepair);
     // Read before the early return: the outcomes that decide a ticket's fate are exactly the
     // ones that never reach a pull request.
     terminal = outcome === null ? null : terminalLabelAfter(outcome);
@@ -1007,6 +1015,8 @@ export async function runSolveClaims(
   queueDeps: SolveDeps,
   client: JiraClient,
   ledger: AttemptLedger,
+  /** Decided once by `createReviewLoop`, which logs it, so the startup report is the value acted on. */
+  promoteRepair: boolean,
 ): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
   const cycle = await runSolveCycle(queueDeps);
   const authority = queueDeps.mode;
@@ -1034,7 +1044,7 @@ export async function runSolveClaims(
 
     const before = process.exitCode;
     try {
-      await runWriteRungs(settings, client, key, "pr", cycle, authority);
+      await runWriteRungs(settings, client, key, "pr", cycle, authority, promoteRepair);
       started += 1;
     } catch (error) {
       // One ticket's failure is not the tick's — `runWriteRungs` releases in a `finally`, so the

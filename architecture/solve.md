@@ -99,7 +99,7 @@ Of the two defects that were left open when the above was written, one is now fi
 The second is fixed too, though not in the shape it was filed in:
 
 - **`removeWorktree` was never called.** Filed as "call it on success". That would have been data
-  loss — nothing in this phase commits, so a successful run's worktree is the only copy of the
+  loss — a successful run commits nothing in this phase, so its worktree is the only copy of the
   work. It is now called on `bailed` only, which is the one outcome whose worktree is provably
   empty. The full reasoning, and what is still not cleaned up, is under "Never a protected branch".
 
@@ -267,29 +267,73 @@ quietly turn the second into the first.
 
 `recon` → `fix` → `simplify`, then `review` once per round of reviewer feedback, plus `merge` when
 a branch will not take its base. **`repair` is the sixth, and the only one whose answer is thrown
-away** — `runPipeline`'s `failed` branch runs one round, keeps its report and its verdict on the
-outcome as `repair` and `repairOutcome`, and still returns `failed`, so a repair that re-verifies
-green opens no pull request; `REPAIR_ROUND=false` skips the round entirely. PLAN.md §45 holds the
-phasing and why the verdict is not trusted.
+away by default** — `runPipeline`'s `failed` branch commits the fix under its own message, runs one
+round, keeps its report and its verdict on the outcome as `repair` and `repairOutcome`, and still
+returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely.
+
+**A run typed with `--repair`, or the daemon with `REPAIR_PUBLISH`, acts on a green round and on
+nothing else.** `promoteRepair` on the request is set by that flag, which `solve-args.ts` refuses
+below `--pr` and with `REPAIR_ROUND=false`, or for the daemon by `daemonPromotesRepair`, which
+needs `REPAIR_PUBLISH=true` through `flag()` and a round to act on; the daemon reports which at
+startup.
+Armed, a round that re-verifies `verified` is
+returned as the outcome — carrying `repair`, `repairedFailure` and the round's own green
+verification — and `publish` commits the repair as a **second commit** on top of the fix, since
+the fix is already committed and the repair's edits are the only uncommitted delta. A red,
+crashed, abandoned or refused round is never promoted, and neither is a green one whose fix could
+not be committed first, since that would push both as one commit under the repair's message, nor
+one that left nothing uncommitted on top of the fix — a flaky re-verification of an unchanged
+tree, which `publish` would report as a verified tree holding no change. Both are logged as
+`solve.repair.not_promoted`. `pr-text.ts` titles the pull request by the fix and puts a
+harness-written notice second on the page, above every model-written line, naming the failure the
+fix alone hit and telling the reviewer to read the second commit on its own.
+
+**Why an exit code cannot audit a green round, measured rather than argued.** SSX-3944's
+`CustomerCmHelperTest.testThatUpdateContactsInCMHandlesNoEmail` holds a Mockito stub that only the
+_buggy_ behaviour ever exercised, so every correct fix strands it. Deleting that stub makes the
+build pass and leaves the test vacuous: under any correct fix `updateContactsInCM` is never
+reached, so its `assertNull(…getEmail())` passes against the object set up three lines above it.
+The honest repair asks what the test should assert now that its premise is gone. `checkFailFirst`
+looks only at tests the run itself wrote, so nothing downstream tells the two apart either.
+
+**Acted on before the evidence asked for it, and the argument is recorded rather than
+retired.** The plan that phased this pass withheld the third and fourth rungs until
+`repair-rounds.md` read as a distribution from tickets the pass was not designed for, every
+`verified` among them read as a diff. Both shipped on two observations, both on SSX-3944, by the
+operator's decision: a human merges every pull request a repair can open, the reasoning travels on
+each one, and a pass that could only ever be measured was blocking the tool. The counter-argument
+still stands and is why the compensations above are not optional — the failure feared is a
+vacuous test, and green CI beside a plausible diff is where review is weakest. **What withdraws
+it:** one promoted repair merged and later read as `cheap` switches `REPAIR_PUBLISH` off, and a
+ledger showing the pass usually reaching for the cheap repair deletes the pass and the page. The
+mechanical bound that suggests itself — _a repair touching a test must also touch the non-test
+file the failure traces to_ — is disproved on SSX-3944, whose only correct repair touches a test
+alone; it would reject the repair wanted and read as enforcement while doing it.
 
 **Thrown away as a verdict, kept as a measurement.** `reportOutcome` appends one row per round to
 `<OUTPUT_DIR>/repair-rounds.md` (`repair-ledger.ts`), a sibling of `dev-lens.md` rather than a
-column on it, and `pnpm repair:ledger` reads it back as a distribution. The harness writes every
-column but `Read`, which stays `unread` on a green round until a person opens the worktree the row
-names and replaces the cell by hand — a passing re-verification is reachable both by correcting
-the code and by weakening the assertion that failed, and no exit code here tells those apart. One
+column on it, and `pnpm repair:ledger` reads it back as a distribution. A promoted round writes a
+row too, `verified` and `unread`: it reaches the ledger as a `verified` outcome carrying `repair`
+rather than a `failed` one carrying `repairOutcome`, and `repairRow` reads both shapes. Its edits
+are then the commit at `HEAD` rather than `git diff HEAD`, which is empty. The harness writes every
+column but `Read`, which stays `unread` on a green round until a person reads the round's edits
+and replaces the cell by hand — a passing re-verification is reachable both by correcting the code
+and by weakening the assertion that failed, and no exit code here tells those apart. **The edits
+are `git diff HEAD` in the worktree the row names**, because the fix is committed underneath them
+before the round runs; a worktree whose `HEAD` is still the base means that commit failed
+(`solve.repair.boundary_failed`), and the diff there holds fix and repair together. One
 case never reaches the page: `escapeVerdict` replaces the outcome with `escaped`, which carries
 `would` and not `repairOutcome`, so a round followed by a write-escape leaves no row.
 
 **Measured on its first real run, SSX-3944 on 2026-09-22.** Five sessions, $3.03, 15m19s wall
 clock, of which the repair round was $0.76 — a third again on top of a run that would otherwise
-have stopped at `failed`, for an answer nothing acts on. It came back `verified` and was discarded
+have stopped at `failed`, for an answer nothing then acted on. It came back `verified` and was discarded
 as designed. Reading the diff is what the phase is for, and the diff was honest: the fix removed
 `CustomerDto`'s auto-vivification, which stranded a Mockito stub in `CustomerCmHelperTest` that
 only the buggy behaviour had ever exercised, and the round **restored the test's premise instead of
 deleting the stub** — three lines setting a `ContactInfoDto` with a phone and deliberately no
 email, so the path is reached on purpose. The failing assertion and the stub are untouched. That is
-the outcome §45 hoped for and the opposite of the cheap one it predicted; one case, on the ticket
+the outcome the plan hoped for and the opposite of the cheap one it predicted; one case, on the ticket
 this pass was designed against, so it establishes that the honest repair is reachable and nothing
 about the rate.
 
@@ -415,9 +459,11 @@ there should be none.
 `removeWorktree` used to be called by nothing at all; the obvious fix — call it whenever the run
 succeeded — is wrong, and working out why produced the better rule.
 
-Nothing in this phase commits. `composeCommitMessage` composes a message and no `git commit` ever
-consumes it, so the worktree of a `verified` run holds uncommitted work that exists in exactly one
-place. Removing it on success would delete the artifact the run was for, and `describeSolveOutcome`
+Nothing in this phase pushes, and on the ordinary path nothing commits either: `composeCommitMessage`
+composes a message that only `publish` consumes, so the worktree of a `verified` run holds work
+that exists in exactly one place. The one commit made here is the fix's own, on a run that already
+failed verification, immediately before a repair round — local, and there to put a boundary
+between the fix and the round's edits. Removing it on success would delete the artifact the run was for, and `describeSolveOutcome`
 would still be telling the operator to go and read it. "Clean up on success" reads as tidiness and
 would have been data loss.
 
@@ -1029,7 +1075,9 @@ command and reading the output before the loop was given it. What the loop added
 at all: by then the bot could already do everything, and the daemon only changed who asks.
 
 So this heading is now doubly historical, and both halves are worth keeping for the same reason.
-There is no inert code left, and there is no unwatched stage left either. What remains from the
+There is no inert code left, and one unwatched stage, knowingly: `REPAIR_PUBLISH` lets the loop
+open a pull request from a repair round before anyone has watched `--repair` promote one by hand,
+and it is off until someone decides otherwise (§15 has the argument). What remains from the
 argument is the standard the next capability will be held to: **built, reviewed, driven by hand
 against a named ticket, and granted in a commit a reviewer can see.** The one item that did _not_
 clear that bar before the loop was switched on is cost per ticket per day, which §13 now carries as
