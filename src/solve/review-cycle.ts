@@ -124,6 +124,11 @@ const NOTHING: ReviewCycleOutcome = {
   deferred: [],
 };
 
+/** Where the reason for a round that landed nothing went, for a log line. */
+function told(spoken: { readonly outcome: string } | undefined): string {
+  return spoken === undefined ? "" : ` told=${spoken.outcome}`;
+}
+
 /**
  * One `AdvanceOutcome` as one log line: the field that discriminates within each arm, not a full dump.
  *
@@ -136,7 +141,7 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
     case "ready":
       return `ready rounds=${String(outcome.rounds)}`;
     case "iterated":
-      return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
+      return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)}${outcome.repaired === undefined ? "" : ` repaired=${outcome.repaired.notice.outcome}`}${outcome.dropped === undefined ? "" : ` dropped=${String(outcome.dropped.paths.length)}${told(outcome.dropped.notice)}`} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
     case "reviewer-exhausted":
       return `reviewer-exhausted rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
     case "capped":
@@ -146,11 +151,11 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
     case "synced":
       return `synced round=${String(outcome.round)} behind=${String(outcome.behind)} conflicts=${outcome.conflicts.length === 0 ? "none" : outcome.conflicts.join(",")}`;
     case "abandoned":
-      return `abandoned: ${outcome.reason}`;
+      return `abandoned: ${outcome.reason}${told(outcome.told)}`;
     case "refused":
-      return `refused at ${outcome.stage}: ${outcome.reasons.join("; ")}`;
+      return `refused at ${outcome.stage}: ${outcome.reasons.join("; ")}${told(outcome.told)}`;
     case "failed":
-      return `failed at ${outcome.stage}: ${outcome.reason}`;
+      return `failed at ${outcome.stage}: ${outcome.reason}${outcome.repairOutcome === undefined ? "" : ` repair=${outcome.repairOutcome}`}${told(outcome.told)}`;
   }
 }
 

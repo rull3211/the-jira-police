@@ -1,9 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { runReviewSweep, runSolveClaims } from "./cli/solve-run.ts";
 import type { JiraClient } from "./jira/client.ts";
 import { createReviewLoop } from "./review-loop.ts";
 import { type Settings, SettingsError, readSettings } from "./settings.ts";
 import type { AttemptLedger } from "./solve/attempts.ts";
+
+// Pass-through spies: every other test here runs the real sweep and claims; one reads what they were handed.
+vi.mock("./cli/solve-run.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./cli/solve-run.ts")>();
+  return {
+    ...actual,
+    runReviewSweep: vi.fn(actual.runReviewSweep),
+    runSolveClaims: vi.fn(actual.runSolveClaims),
+  };
+});
 
 /** Minimum environment that satisfies the required settings. */
 const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
@@ -164,6 +175,34 @@ describe("what the daemon says about repair rounds when it starts", () => {
     for (const overrides of [{}, { REPAIR_PUBLISH: "true" }, { REPAIR_ROUND: "false" }]) {
       expect(said(startupLog(overrides), "review.loop.repair_publish_inert")).toBeUndefined();
     }
+  });
+});
+
+describe("what the daemon's tick is armed with", () => {
+  // The startup line reports the arming; this is the value a tick actually acts on.
+  it.each([
+    ["unset", {}, false],
+    ["REPAIR_PUBLISH=true", { REPAIR_PUBLISH: "true" }, true],
+    [
+      "REPAIR_PUBLISH=true with no round to act on",
+      { REPAIR_PUBLISH: "true", REPAIR_ROUND: "false" },
+      false,
+    ],
+  ])("hands the review sweep and the claims what %s arms", async (_label, overrides, armed) => {
+    vi.mocked(runReviewSweep).mockClear();
+    vi.mocked(runSolveClaims).mockClear();
+    const loop = createReviewLoop(
+      settingsWith({ ...ARMED, ...overrides }),
+      recordingClient([]),
+      new AbortController().signal,
+      900_000,
+      UNUSED_LEDGER,
+    );
+
+    await loop?.runCycle();
+
+    expect(vi.mocked(runReviewSweep).mock.calls[0]?.[4]).toBe(armed);
+    expect(vi.mocked(runSolveClaims).mock.calls[0]?.[4]).toBe(armed);
   });
 });
 

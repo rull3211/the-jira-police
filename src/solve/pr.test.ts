@@ -20,7 +20,9 @@ import {
   findPullRequest,
   formatReviewFeedback,
   formatThreads,
+  isMemberComment,
   markReady,
+  memberSources,
   parsePrUrl,
   postComment,
   push,
@@ -144,13 +146,18 @@ const comment = (
   body: string,
   author = "copilot",
   origin: ReviewOrigin = "reviewer",
+  member = false,
 ): ReviewComment => ({
   author,
   body,
   createdAt: "",
   id: "",
   origin,
+  member,
 });
+
+/** A per-round token as `advance` would mint one. */
+const TOKEN = "a1b2c3d4e5f6";
 
 describe("commitAll", () => {
   it("stages the whole worktree before committing", async () => {
@@ -668,6 +675,7 @@ describe("readReview", () => {
           createdAt: "2026-09-05T11:00:49Z",
           id: "PRR_1",
           origin: "reviewer",
+          member: false,
         },
         {
           author: "copilot",
@@ -675,6 +683,7 @@ describe("readReview", () => {
           createdAt: "2026-09-05T11:04:00Z",
           id: "IC_1",
           origin: "reviewer",
+          member: false,
         },
       ],
       createdAt: "2026-09-05T08:00:00Z",
@@ -790,7 +799,14 @@ describe("readReview", () => {
     expect(result.outcome === "read" ? result.review.reviewerErrored : null).toBe(false);
     // A human quoting the failure text is still kept as a real comment.
     expect(result.outcome === "read" ? result.review.comments : []).toEqual([
-      { author: "a-human", body: COPILOT_ERROR, createdAt: "", id: "", origin: "human" },
+      {
+        author: "a-human",
+        body: COPILOT_ERROR,
+        createdAt: "",
+        id: "",
+        origin: "human",
+        member: false,
+      },
     ]);
   });
 
@@ -850,7 +866,7 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "d", body: "real feedback", createdAt: "", id: "", origin: "human" },
+      { author: "d", body: "real feedback", createdAt: "", id: "", origin: "human", member: false },
     ]);
   });
 
@@ -1073,7 +1089,14 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "unknown", body: "still feedback", createdAt: "", id: "", origin: "human" },
+      {
+        author: "unknown",
+        body: "still feedback",
+        createdAt: "",
+        id: "",
+        origin: "human",
+        member: false,
+      },
     ]);
   });
 
@@ -1200,6 +1223,73 @@ describe("readReview", () => {
   });
 });
 
+describe("readReview's repository members", () => {
+  it("marks the member who asked, and not the reviewer or this service's own reply", async () => {
+    // The shape PR #2688 came back in on 2026-09-24: `gh` posts as the operator, so ours reads MEMBER too.
+    const runner = fakeRunner(
+      view(
+        payload({
+          reviews: [
+            {
+              author: { login: "copilot-pull-request-reviewer" },
+              authorAssociation: "NONE",
+              body: "Two things below.",
+              submittedAt: "2026-09-24T09:35:13Z",
+              id: "PRR_1",
+            },
+          ],
+          comments: [
+            {
+              author: { login: "rull3211" },
+              authorAssociation: "MEMBER",
+              body: "Do the driveby cleanup on these exports.",
+              createdAt: "2026-09-24T09:55:04Z",
+              id: "IC_1",
+            },
+            {
+              author: { login: "rull3211" },
+              authorAssociation: "MEMBER",
+              body: `${BOT_PREFIX}round 5\n\n- Declined.`,
+              createdAt: "2026-09-24T09:57:04Z",
+              id: "IC_2",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    const comments = result.outcome === "read" ? result.review.comments : [];
+    expect(comments.map((entry) => [entry.id, entry.member])).toEqual([
+      ["PRR_1", false],
+      ["IC_1", true],
+      ["IC_2", false],
+    ]);
+  });
+
+  it("gives no authority to a comment that came back without an association", async () => {
+    const runner = fakeRunner(
+      view(
+        payload({
+          comments: [
+            {
+              author: { login: "rull3211" },
+              body: "Do the driveby cleanup.",
+              createdAt: "2026-09-24T09:48:40Z",
+              id: "IC_1",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await readReview(runner, reviewRequest());
+
+    expect(result.outcome === "read" ? result.review.comments[0]?.member : undefined).toBe(false);
+  });
+});
+
 /** One thread node, with every field present unless a test removes it. */
 function thread(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -1256,11 +1346,48 @@ describe("readReviewThreads", () => {
               body: "not idempotent",
               createdAt: "2026-09-04T23:05:36Z",
               origin: "reviewer",
+              member: false,
             },
           ],
         },
       ],
     });
+  });
+
+  it("asks GraphQL for each comment's association, and marks a member's", async () => {
+    const runner = fakeRunner(
+      graphql(
+        threadsPayload([
+          thread({
+            comments: {
+              pageInfo: { hasNextPage: false },
+              nodes: [
+                {
+                  author: { login: "copilot-pull-request-reviewer" },
+                  authorAssociation: "NONE",
+                  body: "not idempotent",
+                  createdAt: "2026-09-04T23:05:36Z",
+                },
+                {
+                  author: { login: "rull3211" },
+                  authorAssociation: "MEMBER",
+                  body: "agreed, and drop the unused import while you are here",
+                  createdAt: "2026-09-04T23:09:00Z",
+                },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    const result = await readReviewThreads(runner, reviewRequest());
+
+    expect(runner.calls[0]?.find((part) => part.startsWith("query="))).toContain(
+      "authorAssociation",
+    );
+    const comments = result.outcome === "read" ? (result.threads[0]?.comments ?? []) : [];
+    expect(comments.map((entry) => entry.member)).toEqual([false, true]);
   });
 
   /** The `quiet` option on the one `solve.pr.threads_read` line a read emits. */
@@ -1874,19 +2001,34 @@ describe("markReady", () => {
 
 describe("formatReviewFeedback", () => {
   it("says so plainly when there is nothing to feed back", () => {
-    expect(formatReviewFeedback([])).toBe("No review comments.");
+    expect(formatReviewFeedback([], TOKEN)).toBe("No review comments.");
   });
 
   it("renders each comment with its author and position", () => {
-    const block = formatReviewFeedback([comment("first thing"), comment("second thing", "human")]);
+    const block = formatReviewFeedback(
+      [comment("first thing"), comment("second thing", "human")],
+      TOKEN,
+    );
 
     expect(block).toContain("Review feedback (2 comments):");
     expect(block).toContain("--- comment 1 of 2, by copilot ---\nfirst thing");
     expect(block).toContain("--- comment 2 of 2, by human ---\nsecond thing");
   });
 
+  it("labels a member's comment with this round's token, and nobody else's", () => {
+    const block = formatReviewFeedback(
+      [comment("drop the unused exports", "rull3211", "human", true), comment("rename this")],
+      TOKEN,
+    );
+
+    expect(block).toContain(
+      `--- comment 1 of 2, by rull3211 · repository member ${TOKEN} ---\ndrop the unused exports`,
+    );
+    expect(block).toContain("--- comment 2 of 2, by copilot ---\nrename this");
+  });
+
   it("uses the singular for one comment", () => {
-    expect(formatReviewFeedback([comment("just the one")])).toContain("(1 comment):");
+    expect(formatReviewFeedback([comment("just the one")], TOKEN)).toContain("(1 comment):");
   });
 
   it("stays inside the cap and says that it truncated", () => {
@@ -1894,7 +2036,7 @@ describe("formatReviewFeedback", () => {
       comment(`${String(index)} `.repeat(400)),
     );
 
-    const block = formatReviewFeedback(long);
+    const block = formatReviewFeedback(long, TOKEN);
 
     expect(block.length).toBeLessThanOrEqual(MAX_FEEDBACK_CHARS);
     expect(block).toContain("truncated");
@@ -1902,7 +2044,7 @@ describe("formatReviewFeedback", () => {
   });
 
   it("leaves a block that fits exactly as it is", () => {
-    const block = formatReviewFeedback([comment("short")]);
+    const block = formatReviewFeedback([comment("short")], TOKEN);
 
     expect(block.length).toBeLessThan(MAX_FEEDBACK_CHARS);
     expect(block).not.toContain("truncated");
@@ -1916,46 +2058,93 @@ const inlineThread = (overrides: Partial<ReviewThread> = {}): ReviewThread => ({
   path: "src/setNonProductionFavicon.ts",
   line: 19,
   comments: [
-    { author: "copilot", body: "this is not idempotent", createdAt: "", origin: "reviewer" },
+    {
+      author: "copilot",
+      body: "this is not idempotent",
+      createdAt: "",
+      origin: "reviewer",
+      member: false,
+    },
   ],
   ...overrides,
 });
 
 describe("formatThreads", () => {
   it("says so plainly when there are no threads", () => {
-    expect(formatThreads([])).toBe("No inline review threads.");
+    expect(formatThreads([], TOKEN)).toBe("No inline review threads.");
   });
 
   it("quotes the id the answer has to name back", () => {
-    expect(formatThreads([inlineThread()])).toContain("id PRRT_1");
+    expect(formatThreads([inlineThread()], TOKEN)).toContain("id PRRT_1");
   });
 
   it("gives the location a reader can go to", () => {
-    expect(formatThreads([inlineThread()])).toContain("src/setNonProductionFavicon.ts:19");
+    expect(formatThreads([inlineThread()], TOKEN)).toContain("src/setNonProductionFavicon.ts:19");
   });
 
   it("says the diff moved rather than inventing a line", () => {
-    const block = formatThreads([inlineThread({ line: null, isOutdated: true })]);
+    const block = formatThreads([inlineThread({ line: null, isOutdated: true })], TOKEN);
 
     expect(block).toContain("the diff has moved; no line");
     expect(block).not.toContain(":null");
   });
 
+  it("labels a member's words in a thread with this round's token", () => {
+    const block = formatThreads(
+      [
+        inlineThread({
+          comments: [
+            {
+              author: "copilot",
+              body: "this is not idempotent",
+              createdAt: "",
+              origin: "reviewer",
+              member: false,
+            },
+            {
+              author: "rull3211",
+              body: "and drop the unused import",
+              createdAt: "",
+              origin: "human",
+              member: true,
+            },
+          ],
+        }),
+      ],
+      TOKEN,
+    );
+
+    expect(block).toContain("copilot wrote:\nthis is not idempotent");
+    expect(block).toContain(
+      `rull3211 (repository member ${TOKEN}) wrote:\nand drop the unused import`,
+    );
+  });
+
   it("includes our own earlier replies, not only the reviewer's words", () => {
     // Seeing its own answer is how a round knows the point was already made and declines to repeat it.
-    const block = formatThreads([
-      inlineThread({
-        comments: [
-          { author: "copilot", body: "this is not idempotent", createdAt: "", origin: "reviewer" },
-          {
-            author: "rull3211",
-            body: "bot: appended only when absent",
-            createdAt: "",
-            origin: "human",
-          },
-        ],
-      }),
-    ]);
+    const block = formatThreads(
+      [
+        inlineThread({
+          comments: [
+            {
+              author: "copilot",
+              body: "this is not idempotent",
+              createdAt: "",
+              origin: "reviewer",
+              member: false,
+            },
+            {
+              author: "rull3211",
+              body: "bot: appended only when absent",
+              createdAt: "",
+              origin: "human",
+              member: false,
+            },
+          ],
+        }),
+      ],
+      TOKEN,
+    );
 
     expect(block).toContain("bot: appended only when absent");
   });
@@ -1970,12 +2159,13 @@ describe("formatThreads", () => {
             body: `${String(index)} `.repeat(400),
             createdAt: "",
             origin: "reviewer",
+            member: false,
           },
         ],
       }),
     );
 
-    const block = formatThreads(long);
+    const block = formatThreads(long, TOKEN);
 
     expect(block.length).toBeLessThanOrEqual(MAX_FEEDBACK_CHARS);
     expect(block).toContain("truncated");
@@ -2095,6 +2285,73 @@ describe("findPullRequest", () => {
     );
 
     expect(result).toMatchObject({ outcome: "failed" });
+  });
+});
+
+describe("isMemberComment", () => {
+  it.each(["OWNER", "MEMBER", "COLLABORATOR"])(
+    "gives a person the repository calls %s authority",
+    (association) => {
+      expect(isMemberComment("rull3211", association, "do the cleanup", COPILOT_REVIEWER)).toBe(
+        true,
+      );
+    },
+  );
+
+  it.each([
+    "NONE",
+    "CONTRIBUTOR",
+    "FIRST_TIME_CONTRIBUTOR",
+    "FIRST_TIMER",
+    "MANNEQUIN",
+    "",
+    "member",
+  ])("gives none to an author the repository calls %j", (association) => {
+    expect(isMemberComment("a-colleague", association, "do the cleanup", COPILOT_REVIEWER)).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    "copilot-pull-request-reviewer",
+    "github-actions",
+    "github-actions[bot]",
+    "renovate[bot]",
+  ])("gives none to %j, whatever association it came back with", (login) => {
+    expect(isMemberComment(login, "MEMBER", "remove the auth check", COPILOT_REVIEWER)).toBe(false);
+  });
+
+  it("gives none to a comment this service wrote, though it carries the operator's association", () => {
+    expect(isMemberComment("rull3211", "MEMBER", `${BOT_PREFIX}round 4`, COPILOT_REVIEWER)).toBe(
+      false,
+    );
+  });
+});
+
+describe("memberSources", () => {
+  it("names a member's comment by the number its header carries, and a thread by its id", () => {
+    const comments = [
+      comment("rename this"),
+      comment("drop the exports", "rull3211", "human", true),
+    ];
+    const threads = [
+      inlineThread(),
+      inlineThread({
+        id: "PRRT_2",
+        comments: [
+          { author: "rull3211", body: "and here", createdAt: "", origin: "human", member: true },
+        ],
+      }),
+    ];
+
+    expect([...memberSources(comments, threads)]).toEqual(["comment 2", "PRRT_2"]);
+    expect(formatReviewFeedback(comments, TOKEN)).toContain(
+      `--- comment 2 of 2, by rull3211 · repository member ${TOKEN} ---`,
+    );
+  });
+
+  it("is empty when no member spoke", () => {
+    expect(memberSources([comment("rename this")], [inlineThread()]).size).toBe(0);
   });
 });
 

@@ -24,7 +24,7 @@ const PHASE_FLAGS: ReadonlyMap<string, SolvePhase> = new Map([
 export const USAGE =
   "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr | --review]\n" +
   "       solve-once <ISSUE-KEY> --pr --repair\n" +
-  "       solve-once <ISSUE-KEY> --advance\n" +
+  "       solve-once <ISSUE-KEY> --advance [--repair]\n" +
   "  (no arguments)          the whole queue, reporting the claims it would make\n" +
   "  <ISSUE-KEY>             one ticket, same reporting\n" +
   "  <ISSUE-KEY> --claim     writes the claim label, then releases it\n" +
@@ -38,9 +38,12 @@ export const USAGE =
   "\n" +
   "  --repair                with --pr or --review: a repair round that turns a\n" +
   "                          failed verification green opens the pull request, as a\n" +
-  "                          second commit the body names. Without it the round's\n" +
-  "                          verdict is recorded and discarded. Needs a round to\n" +
-  "                          run, so REPAIR_ROUND must not be false.\n" +
+  "                          second commit the body names. With --review, --advance\n" +
+  "                          or --watch it does the same for a review round: pushed\n" +
+  "                          as that round's second commit, under a notice posted on\n" +
+  "                          the pull request. Without it the round's verdict is\n" +
+  "                          recorded and discarded. Needs a round to run, so\n" +
+  "                          REPAIR_ROUND must not be false.\n" +
   "\n" +
   "  <ISSUE-KEY> --advance   one review round on the pull request that already\n" +
   "                          exists; does not claim, solve, or open anything\n" +
@@ -78,8 +81,8 @@ const ADVANCE_FLAG = "--advance";
 const WATCH_FLAG = "--watch";
 
 /**
- * A modifier on `--pr` and above, never a rung: a rung's index is its privilege, so one between
- * `pr` and `review` would make `--review` imply it. Decides what a green repair round may do, not whether one runs.
+ * A modifier on `--pr` and above and on the two review modes, never a rung: a rung's index is its privilege, so one
+ * between `pr` and `review` would make `--review` imply it. Decides what a green repair round may do, not whether one runs.
  */
 const REPAIR_FLAG = "--repair";
 
@@ -89,12 +92,13 @@ export type SolveInvocation =
       /** `null` means the whole queue. Only ever null at the `plan` phase. */
       readonly issueKey: string | null;
       readonly phase: SolvePhase;
-      /** `--repair`. Only ever true at a phase that includes `pr`. */
+      /** `--repair`. Only ever true at a phase that includes `pr`; the review modes carry their own. */
       readonly repair: boolean;
     }
-  | { readonly mode: "advance"; readonly issueKey: string }
+  /** `repair`: a green repair round of a failed review round may push. */
+  | { readonly mode: "advance"; readonly issueKey: string; readonly repair: boolean }
   /** `null` means every ticket the review query returns. See `WATCH_FLAG`. */
-  | { readonly mode: "watch"; readonly issueKey: string | null };
+  | { readonly mode: "watch"; readonly issueKey: string | null; readonly repair: boolean };
 
 /** The ladder half, for the commands that have no review mode at all. */
 export type LadderInvocation = Extract<SolveInvocation, { mode: "ladder" }>;
@@ -216,13 +220,6 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
 
   const issueKey = positional[0] ?? null;
 
-  if (repair && (watch || advance)) {
-    return {
-      ok: false,
-      error: `${REPAIR_FLAG} cannot be combined with ${watch ? WATCH_FLAG : ADVANCE_FLAG} — that acts on a pull request an earlier run opened, and no repair round runs in it`,
-    };
-  }
-
   if (watch) {
     // `--advance --watch` reads fine as "watch" but is refused anyway: the two differ by whether
     // the command ever returns, and an operator who typed both should be told which they meant.
@@ -238,7 +235,7 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
         error: `${WATCH_FLAG} cannot be combined with ${ADVANCE_FLAG} — one looks once and returns, the other keeps looking, so say which`,
       };
     }
-    return { ok: true, invocation: { mode: "watch", issueKey } };
+    return { ok: true, invocation: { mode: "watch", issueKey, repair } };
   }
 
   if (advance) {
@@ -255,7 +252,7 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
         error: `${ADVANCE_FLAG} needs an issue key — it would otherwise push a commit to every open pull request the queue knows about`,
       };
     }
-    return { ok: true, invocation: { mode: "advance", issueKey } };
+    return { ok: true, invocation: { mode: "advance", issueKey, repair } };
   }
 
   if (issueKey === null && writes(phase)) {
@@ -268,7 +265,7 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   if (repair && !includes(phase, "pr")) {
     return {
       ok: false,
-      error: `${REPAIR_FLAG} needs --pr or --review — it lets a green repair round open the pull request, and ${phase === "plan" ? "a run with no rung" : `--${phase}`} opens none`,
+      error: `${REPAIR_FLAG} needs --pr, --review, --advance or --watch — it lets a green repair round reach a pull request, and ${phase === "plan" ? "a run with no rung" : `--${phase}`} reaches none`,
     };
   }
 

@@ -8,10 +8,10 @@ narrow one: where a rule names its evidence, the evidence is here, and `pnpm doc
 link stops resolving.
 
 **Both directions are written, and only one of them is complete.** `STARTING.md`, `BUILDING.md`,
-`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — 45 of the 55
-entries below are cited that way, and the other ten each say in their own text that no rule has
-been written yet. Those two figures are printed by `pnpm docs:check` on every run, which is the only
-reason they are safe to state. Most entries also link the other way, from a closing `**The rule**`,
+`PROVING.md` and `FINISHING.md` cite this file from the rule an incident produced — most entries
+below are cited that way, and the rest each say in their own text that no rule has been written
+yet. `pnpm docs:check` prints both figures on every run, so they are not given here: this sentence
+used to state them, and they went stale while the check stayed green. Most entries also link the other way, from a closing `**The rule**`,
 so that [a rule being deleted](FINISHING.md#keeping-it-honest-as-it-grows) can be checked against
 what it rested on — **how many is deliberately not given here.** It used to say 28, nothing derived
 it, and by the time anyone noticed, the figure matched no definition of the thing it counted.
@@ -1755,6 +1755,66 @@ adding an unrelated plan entry.
 has not yet seen a second instance of, and `unrelated-repair` at 2.
 
 ## 2026-09-24
+
+### The rounds thrown away after they were paid for, because a rule lived only in the parser
+
+**2026-09-24.** A pass's JSON is checked twice. The CLI checks it during the session, against the
+schema handed over with `--json-schema`, and a rejection there sends the model back to correct its
+answer before it exits. The harness's parser checks it again afterwards, and all a parser can do is
+throw. So a consistency rule held only by the parser does not correct a pass; it discards one that
+has finished and been paid for.
+
+Recon on SSX-3918 lost two correct plans that way in one day, over filler in a field that had to be
+empty (`architecture/solve.md`, the recon and review schemas paragraph). The same day #2688's
+round 6, the first live run of the member widening, made the cleanup correctly and cited the right
+comment, then left `responses` empty and put its whole answer in `widened`. `parseReview` threw on
+"answered none of the reviewer's comments", and the round was abandoned after $0.51.
+
+The second was fixed by copying the first — `REVIEW_SCHEMA` gained the answered-nothing rule as an
+`if`/`then`, the way `RECON_SCHEMA` already carried `parseRecon`'s — and the change being fixed had
+already repeated the shape: `widened` arrived with parser-only refusals for a blank field and for a
+widening on a round that changed nothing, so a round could be discarded for leaving blank a field
+nothing read. Both moved into the schema before the pull request merged. One cannot: a `widened`
+path must be in `filesTouched`, and draft-07 cannot compare two arrays, so that refusal still costs
+a finished round.
+
+**Found by** round 6 on a real pull request, for the first half; a review from a fresh context,
+handed only the diff and these rules, for the repetition.
+
+**No rule yet** — both sightings came on one day and the second was fixed by copying the first, so
+they count as one instance, and `parser-only` at 2.
+
+### The doc comments left above a function inserted beneath them
+
+**2026-09-24.** Three helpers added on `feat/review-repair` — `told` in `review-cycle.ts`,
+`toldLine` in `solve-outcome.ts`, `keepsEvidence` in `solve-run.ts` — were each written directly
+under the doc comment of the function beside them. The old comment now opened onto the new helper,
+and the function it described had none. The third landed under `createReviewAct`'s _"Exported only
+so its refusal branch can be tested"_, and `keepsEvidence` is exported and does have a refusal
+branch, so the stray sentence read as its own. The widening branch did the same once in
+`pr.test.ts`.
+
+The tree already held three from earlier days: two in `wiring.ts`, one in `watch-args.ts`. One of
+the `wiring.ts` pair had been rewritten in place by `849591a`, the sweep that cut prose comments to
+one or two lines across the tree — a pass that read every comment for its wording and did not
+notice this one described nothing where it sat. The two in `wiring.ts` are moved back in the commit
+that adds this entry, since the branch edits that file; the one in `watch-args.ts` is left, in a
+file it does not touch.
+
+**It is the defect class in a form its three bullets did not name:** the sentence is true, of a
+function one declaration further down. Types, lint and tests pass, and a reviewer checking whether
+the sentence is true finds that it is. FINISHING.md's first question asks about exactly this, and
+the commit hook printed it at every one of these commits.
+
+**It is also the one form a tool can see.** A doc block followed directly by another doc block is
+always this, so a check in `docs:check` would find every instance by construction where these seven
+were found by reading. That check is proposed, not built.
+
+**Found by** a review from a fresh context, handed only the diff and these rules, for the four on
+the two branches; the same reviewer's sweep of the tree for the older three.
+
+**The rule** — the defect class, now with this as its fourth form.
+[→](BUILDING.md#the-defect-class)
 
 ### The property-use search patched one spelling at a time
 

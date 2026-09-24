@@ -271,13 +271,29 @@ quietly turn the second into the first.
 a branch will not take its base. **`repair` is the sixth, and the only one whose answer is thrown
 away by default** — `runPipeline`'s `failed` branch commits the fix under its own message, runs one
 round, keeps its report and its verdict on the outcome as `repair` and `repairOutcome`, and still
-returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely.
+returns `failed`; `REPAIR_ROUND=false` skips the round, and the commit, entirely. **A review round
+that fails verification gets the same round**, from `repairReviewRound`: the round's own edits are
+committed as the boundary, the pass is given that round's account of itself in place of a recon
+brief, and `attemptRepair` — the pass, the diff gate and `verify`, shared with `runRepairRound` —
+decides it. Unarmed, the round still returns `failed`, now carrying `repairOutcome`; the local
+boundary commit is never pushed, and the next attach finds the checkout ahead of its remote and
+salvages it.
 
 **A run typed with `--repair`, or the daemon with `REPAIR_PUBLISH`, acts on a green round and on
 nothing else.** `promoteRepair` on the request is set by that flag, which `solve-args.ts` refuses
 below `--pr` and with `REPAIR_ROUND=false`, or for the daemon by `daemonPromotesRepair`, which
 needs `REPAIR_PUBLISH=true` through `flag()` and a round to act on; the daemon reports which at
-startup.
+startup. The review modes are armed the same way — `--repair` on `--review`, `--advance` and
+`--watch`, `REPAIR_PUBLISH` for the daemon's review sweep — through `buildAdvanceRequest`'s
+`promoteRepair` parameter, never a field a base request carries in. Armed, a green review-round
+repair returns as the round's `resolved` outcome carrying `repair`; `delivery.ts` commits it as the
+round's second commit, pushes, and posts a harness-written `bot:` comment naming the failure,
+telling the reader to take that commit on its own, and quoting the repair's `summary` and its
+`residualRisk` — the field where it would admit weakening a check — the review round's counterpart of the banner
+below, since a pull request already open has no body left to put it in. That notice is all the
+compensation there is, and it is needed more here than for a solve: a solve's repair opens a pull
+request nobody has read, a review round's lands in one a person is already reading, where the cheap
+repair — the assertion weakened — sits in a diff the reviewer may think they have seen.
 Armed, a round that re-verifies `verified` is
 returned as the outcome — carrying `repair`, `repairedFailure` and the round's own green
 verification — and `publish` commits the repair as a **second commit** on top of the fix, since
@@ -344,14 +360,14 @@ sets — and `PASSES` in `runner.ts` is the list, iterated by the tests rather t
 because three hand-copied copies of this membership all stopped testing anything on the day it
 changed.
 
-| Pass       | Tools                              | Shown                                                                    | Must return                                                                                                             |
-| ---------- | ---------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `recon`    | `Read` `Grep` `Glob`               | the ticket                                                               | proceed or a bail reason; a dev-lens correction                                                                         |
-| `fix`      | the above, plus `Write` and `Edit` | the ticket and recon's brief                                             | files touched, a commit subject, a test story                                                                           |
-| `simplify` | same as `fix`, plus `Skill`        | the ticket and the real diff                                             | changes made, or why it declined                                                                                        |
-| `review`   | same as `fix`                      | the ticket, the review comments and every open inline thread with its id | a response to every comment, plus a `threadAnswers` entry per thread carrying a reply, a `basis` and whether to resolve |
-| `merge`    | same as `fix`                      | the conflicted files                                                     | the resolution, and `took` — which side each hunk came from                                                             |
-| `repair`   | same as `fix`                      | the failing verification step's own captured output                      | the same report `fix` returns — a repair is a correction to the same change, not a different kind of report             |
+| Pass       | Tools                              | Shown                                                                                                                              | Must return                                                                                                                                                                                             |
+| ---------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recon`    | `Read` `Grep` `Glob`               | the ticket                                                                                                                         | proceed or a bail reason; a dev-lens correction                                                                                                                                                         |
+| `fix`      | the above, plus `Write` and `Edit` | the ticket and recon's brief                                                                                                       | files touched, a commit subject, a test story                                                                                                                                                           |
+| `simplify` | same as `fix`, plus `Skill`        | the ticket and the real diff                                                                                                       | changes made, or why it declined                                                                                                                                                                        |
+| `review`   | same as `fix`                      | the ticket, the review comments — a repository member's labelled with the round's token — and every open inline thread with its id | a response to every comment, plus a `threadAnswers` entry per thread carrying a reply, a `basis` and whether to resolve, and a `widened` entry per file changed beyond the ticket at a member's request |
+| `merge`    | same as `fix`                      | the conflicted files                                                                                                               | the resolution, and `took` — which side each hunk came from                                                                                                                                             |
+| `repair`   | same as `fix`                      | the failing verification step's own captured output                                                                                | the same report `fix` returns — a repair is a correction to the same change, not a different kind of report                                                                                             |
 
 Separate sessions rather than one, and the reason differs each time. **Recon must not be able to
 write**, or "should this be attempted" and "here is the attempt" collapse into one answer, and any
@@ -382,7 +398,7 @@ Recon's denials are the union of the solve denylist and `DENIED_BUILTIN_TOOLS` �
 list — rather than a hand-written `Write`/`Edit` pair, so a future finding that denies a tool in
 triage denies it in recon without anyone remembering to.
 
-**The parsers carry the rules the harness acts on; the recon schema repeats its own.** `parseRecon`
+**The parsers carry the rules the harness acts on; the recon and review schemas repeat theirs.** `parseRecon`
 refuses a verdict that both proceeds and bails — the run contradicted itself, so neither reading
 is safe to act on — and one that declines without saying why, because the reason is the only
 calibration the fitness assessment ever gets. A draft-07 `if`/`then`/`else` expresses the same
@@ -394,13 +410,18 @@ what `str` reads as empty, quote marks alone included — and a note in a field 
 discarding a correct plan, as it did twice on SSX-3918 that day. `parseRecon` keeps every check as
 the net, and adds one the schema cannot: a verdict whose written fields all say the same thing is a
 placeholder, the "Test" verdict SSX-3918 produced after three rejections for omitting
-`plannedFiles`. `parseFix` refuses a report where `testAdded` and
+`plannedFiles`. `REVIEW_SCHEMA` does the same for `parseReview`, since #2688's round 6 was discarded
+after its work was done for answering nothing: it carries the answered-nothing rule, a `widened`
+entry on a round that changed nothing, and a blank `widened` field, as an `allOf` of conditionals.
+The one `parseReview` rule it cannot carry — a `widened` path missing from `filesTouched` — needs two
+fields compared, which draft-07 cannot say. `parseFix` refuses a report where `testAdded` and
 `testOmittedReason` agree: exactly one of "a test was added" and "here is why not" must hold.
 `parseSimplify` is handed the fix pass's file list and refuses anything outside it, because
 simplification reaching a file the fix never touched is a second, unreviewed change riding inside
 a diff a human approved for a different reason. `parseReview` refuses a round that answered
 nothing, because a round with no responses is indistinguishable from the loop having quietly
-stopped working. Each is the same shape as `assertDorCoherent` in triage.
+stopped working. It also refuses a `widened` entry naming a file the round says it did not touch,
+or declared on a round that changed nothing. Each is the same shape as `assertDorCoherent` in triage.
 
 **`parseSimplify` is the one exception to "refuse rather than guess", and deliberately so.** Every
 parser above throws on a `changed`/`proceed`/`testAdded`-shaped self-contradiction because a real
@@ -547,12 +568,34 @@ Two refusal families, and a third that was deleted:
   public. Four of the six files were one line each. The prose the cap shipped with claimed the
   recovery path was that _"a human looks, and either widens the cap for that ticket or agrees the
   ticket was mis-assessed"_ — there was no way to widen it for a ticket, and a `refused` round
-  writes nothing to the pull request, so nobody looked.
+  wrote nothing to the pull request then, so nobody looked. One now replies to whoever asked; see
+  "A round that lands nothing says why" under Delivery.
 
 An empty diff is refused too. A run that edits a file and reverts it, or writes only to an ignored
 path, otherwise reaches the end looking exactly like success and opens an empty pull request.
 Every reason is collected rather than the first, for the same reason the triage gate collects
 them.
+
+**In a review round one refused edit no longer costs every other.** Round 4 on #1459 did all four
+things Jacob's review asked, in files the pull request already changed, and was discarded whole
+because one of them edited a comment inside `pom.xml`. The gate now names the paths it refused
+(`refusedPaths`, `null` when a reason belongs to no ordinary path), and `dropRefusedEdits`
+(`orchestrator.ts`) restores them with `git checkout HEAD --` when every one is a file the round
+changed and `HEAD` already had, then gates what is left again. The round continues to verification
+with `dropped` on its outcome, and `delivery.ts` tells whoever asked — the comment a `widened` entry
+names for that file, or the comments that asked anything, and always an inline thread on a dropped
+file — which edit was dropped and which rule dropped it. A drop nobody could be told is logged as
+`solve.review.drop_untold` and printed as such, since the pass's replies then stand uncorrected. The pass wrote its commit message before the rollback, so round 5 on #1459 pushed one
+saying the stale `pom.xml` comment was fixed; `droppedNote` now adds a harness line above the
+`Refs:` trailer naming each path not in the commit. The pass's replies can make the same claim, and
+the drop notice posted after them is what corrects it. An edit that depended on the dropped one
+fails verification like any other, and the round's repair round takes it from there. A path the
+round created, a path the pull
+request's own commits already break, a path outside the worktree, or a second gate that still
+refuses: the round is refused whole, as before.
+The rules themselves are unchanged — nothing here lets an edit to a refused path through, it only
+stops that edit taking its neighbours with it. A solve run gets none of this: it has no pull request
+yet, so there is nothing to have landed the rest on.
 
 **The same path rules run once earlier, over recon's plan.** `plannedPathRefusals` asks of each
 `plannedFiles` entry the question `checkDiff` asks of each changed path, from the same two lists,
@@ -1082,13 +1125,78 @@ inbox costs nothing. The real reason is that the wait is unbounded: on a pull re
 still commenting on, the draft flag never clears, and a human reviews something whose own flag says
 it is unfinished.
 
+#### A repository member may widen a round, and the harness decides who that is
+
+A review comment cannot extend what the ticket asked for unless GitHub says a repository member
+wrote it. PR #2688 is why: the operator asked three times for five unused exports to go, in a file
+the pull request already changed, and three rounds declined on the skill's rule against drive-by
+refactors. The pass had nothing it was allowed to trust about who was asking — the operator and
+Copilot rendered identically, as `by <login>` inside one forgeable block.
+
+- **Who.** `isMemberComment` (`pr.ts`) reads `authorAssociation` from both transports and grants
+  `OWNER`, `MEMBER` and `COLLABORATOR`, never the requested reviewer, automation, a `[bot]` login,
+  or a body carrying the `bot: ` prefix. The prefix check is not redundant: `gh` posts as the
+  operator, so everything this service writes comes back `MEMBER`. A missing association is no
+  authority. It is a separate field from `origin`, which answers what a round costs against
+  `MAX_REVIEW_ITERATIONS` — there a deleted account reads `human`, the safe direction for that
+  question and the wrong one for this.
+- **Telling the pass.** Those comments' headers carry `repository member <token>`, and the prompt
+  names the token outside the fence. `advance` mints one per round, so a comment written before
+  the round cannot carry a label that passes: the one piece of structure in the review block a
+  comment body cannot forge.
+- **Bounding what it did.** The pass declares each widening in `widened`, and `boundWidening`
+  (`orchestrator.ts`) refuses the round at stage `widening`, before verification, when an entry
+  cites anything `memberSources` did not list or a path `<base>...HEAD` had not changed. Three dots,
+  so a base that moved since does not lend the pull request its files; `HEAD` rather than the
+  worktree, which already holds the round's own edits.
+
+**What it does not do.** It reads a declaration, so a round that widens without declaring passes,
+as it would have before. A refused round replies with the harness's reason, but its reservation
+has already moved the cursor past the comment that asked, so another round needs another comment. And the authority is only as good as the prefix on everything this service
+posts: replies from before `replyToThread` stamped it read as the operator's, with a member's
+authority, on any pull request still open from then.
+
+#### A round that lands nothing says why, to whoever asked
+
+A round that ends `abandoned`, `refused` or `failed` at verification used to post nothing, and its
+reservation had already moved the cursor past the comments it read — so the person who asked saw
+silence and had no reason to ask again. Rounds 6 and 7 on #2688 and round 4 on #1459 all ended that
+way on 2026-09-24. `tellWhoAsked` (`delivery.ts`) now replies before the outcome is returned: in the
+thread for each inline thread, and for the top-level comments, which GitHub gives no way to reply
+to, one `bot:` comment quoting the first visible line of each — past any HTML comment, which
+GitHub renders as nothing: quoting Jacob's review on #1459 by its `<!-- gh-pr-review -->` marker
+posted an empty quote.
+
+- **What is posted is the harness's reason, never the pass's replies.** A failed round's "Done —"
+  describes a change that was discarded. `whyNothingLanded` writes the stage and the reasons, and a
+  repair round's verdict when one ran; the one model-written text is a decline's own `abandoned`
+  reason, which is the decline.
+- **Only a member is mentioned.** Mentioning `@copilot` asks GitHub's agent to act, so a bot is
+  quoted and never mentioned. Every `@` in text anyone else wrote is broken with a zero-width
+  space: inside a quote, in the reason, which can carry a decline or a `requestedBy` the pass
+  wrote, and in a repair notice's quoted `summary` and `residualRisk`.
+- **A comment that asked for nothing is told nothing.** The review schema's `silent` lists
+  top-level comments that ask nothing of the pass — people talking among themselves — and they get
+  no entry in `responses` and no reply here. A thread cannot be `silent`: one whose last comment is
+  not ours is unanswered by `unansweredThreads`' definition and would buy a round every tick.
+  `parseReview` refuses a thread id there, and counts `silent` as an answer so a round of pure
+  chatter is not discarded for answering nothing.
+- **A pass that returned no report tells every comment**, since nothing says which asked.
+- **Infrastructure failures stay off the pull request.** `commit`, `push`, `cursor` and the rest
+  are the operator's problem, and a persistent one would repeat the same reply every tick.
+
+A thread replied to this way now ends with our comment, so the next survey no longer reads it as
+unanswered and does not retry it. That is deliberate: every ending that reaches here is
+deterministic or needs a person, and retrying bought the same refusal until `MAX_PR_ROUNDS_TOTAL`.
+
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is
 model-written, the review bot reads it, the comments and the inline threads come back through
-`formatReviewFeedback` and `formatThreads` into one block and reach the model verbatim — delimiters and all, and those delimiters are forgeable by any comment
-containing the same string. The containment is structural and lives elsewhere: the denied tool
-set, the diff gate, verification from the pristine manifest, and a draft with a human on the other
-end. A keyword filter there would be worse than useless, because it would suggest the loop is
+`formatReviewFeedback` and `formatThreads` into one block and reach the model verbatim, delimiters
+and all. A comment containing the same string forges a delimiter, or a whole header; the member
+label's per-round token, above, is the one part of that block it cannot forge. The containment is
+structural and lives elsewhere: the denied tool set, `boundWidening`, the diff gate, verification
+from the pristine manifest, and a draft with a human on the other end. A keyword filter there would be worse than useless, because it would suggest the loop is
 contained at that layer when it is not. This is a known and accepted limitation of running the
 review loop at all.
 
@@ -1177,7 +1285,8 @@ at all: by then the bot could already do everything, and the daemon only changed
 
 So this heading is now doubly historical, and both halves are worth keeping for the same reason.
 There is no inert code left, and one unwatched stage, knowingly: `REPAIR_PUBLISH` lets the loop
-open a pull request from a repair round before anyone has watched `--repair` promote one by hand,
+open a pull request from a repair round, or push one to a pull request already open, before anyone
+has watched `--repair` promote one by hand,
 and it is off until someone decides otherwise (§15 has the argument). What remains from the
 argument is the standard the next capability will be held to: **built, reviewed, driven by hand
 against a named ticket, and granted in a commit a reviewer can see.** The one item that did _not_

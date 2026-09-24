@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3092 tests in 95 files**, no build step.
+> **3204 tests in 96 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -406,15 +406,23 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   above the fold exist only in their tests until
   `REPAIR_ROUND=true pnpm solve:once <KEY> --pr --repair` runs on a ticket that fails verification
   — not SSX-3944, which now solves cleanly. **`REPAIR_PUBLISH` should stay off until that pull
-  request has been opened and read**: the loop only removes the person, and nobody has yet been
-  the person. Re-driving a ticket the solver has already tried means
+  request has been opened and read, and a review round's repair pushed by hand**: it arms the
+  daemon's claims and its review sweep alike, the loop only removes the person, and nobody has yet
+  been the person. Re-driving a ticket the solver has already tried means
   adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
   so on the way out.
+- **A review round's repair has never run, armed or not, and neither has the reply for a round
+  that lands nothing.** Only a partial round's drop notice has reached a real pull request: #1459 round 5 on
+  2026-09-24. #2688 round 8 went green on its first try, so `repairReviewRound` never started, and
+  no abandoned, refused or failed round has posted `whyNothingLanded`. **What would show it:**
+  `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails lint, and a
+  round refused at the diff gate or `widening`.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries
-  is re-judged by every round that changes code, since each gates the whole diff; the rounds on
-  storebrand-digital/insurance-commerce-rest-api#1459 that pushed code on 2026-09-24 passed it.
+  is re-judged by every round that changes code, since each gates the whole diff: rounds 2 and 5 on
+  storebrand-digital/insurance-commerce-rest-api#1459 on 2026-09-24 passed it, round 5 on the
+  second gate after its `pom.xml` comment edit was rolled back.
 
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the
@@ -426,6 +434,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 - **The mixed-batch rule.** No round has yet read a human and a reviewer comment in the same batch.
   Both origins have been driven individually and the `some` → `every` mutation is caught, so this is
   a live-run gap rather than a coverage one.
+- **`boundWidening` has never refused a real round.** Its refusals are tested, not watched: on #2688
+  on 2026-09-24, round 6 was discarded inside `parseReview` before reaching it, and rounds 7 and 8
+  were not refused by it. A member's request aimed at a file the pull request had not changed is the
+  case that would show it.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
   daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket
@@ -553,7 +565,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **125 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **127 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

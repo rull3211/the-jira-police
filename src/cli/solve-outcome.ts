@@ -9,7 +9,7 @@
  * driving the harness by hand. Both must refuse to let a refusal read like a verdict.
  */
 
-import type { AdvanceOutcome, ReRequest, Undraft } from "../solve/delivery.ts";
+import type { AdvanceOutcome, ReRequest, Spoken, Undraft } from "../solve/delivery.ts";
 import type { ReviewStage, SolveOutcomeLabel } from "../solve/labels.ts";
 import { hasGoneQuiet } from "../solve/silence.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
@@ -419,6 +419,13 @@ const UNDRAFT_LINE = {
   "still-drafting": `\nStill a draft: there is something new for the reviewer to read first.`,
 } as const satisfies Record<Undraft, string>;
 
+/** Only a failure is worth a line: a reason that reached the pull request is the ordinary case. */
+function toldLine(told: Spoken | undefined): string {
+  return told?.outcome === "failed"
+    ? `\nThe reason did NOT reach the comments that asked — ${told.reason}. Nobody on the pull request knows why nothing landed.`
+    : "";
+}
+
 /** One line an operator can act on, per review-round outcome. */
 export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
   switch (outcome.kind) {
@@ -437,6 +444,20 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
         (outcome.pushed
           ? `ITERATED — round ${String(outcome.round)} pushed.`
           : `ITERATED — round ${String(outcome.round)} answered without changing code, so nothing was pushed.`) +
+        (outcome.dropped === undefined
+          ? ""
+          : ` The gate refused its edits to ${outcome.dropped.paths.join(", ")}, so those were rolled back and the rest pushed.` +
+            (outcome.dropped.notice.outcome === "failed"
+              ? ` The notice saying so did NOT reach the pull request — ${outcome.dropped.notice.reason}.`
+              : outcome.dropped.notice.outcome === "nothing-to-say"
+                ? ` Nobody was told: no comment or thread on this round could be, so the pass's own replies stand uncorrected.`
+                : "")) +
+        (outcome.repaired === undefined
+          ? ""
+          : ` Its own change failed (${outcome.repaired.failure}); a repair round corrected it and was pushed as the round's second commit — read that commit on its own.` +
+            (outcome.repaired.notice.outcome === "failed"
+              ? ` The notice saying so did NOT reach the pull request — ${outcome.repaired.notice.reason}.`
+              : "")) +
         ` Responses:\n` +
         outcome.responses.map((response) => `  - ${response}`).join("\n") +
         REREQUEST_LINE[outcome.reviewerRequested] +
@@ -494,13 +515,27 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
       );
     }
     case "abandoned": {
-      return `ABANDONED (this is not a failure) — a pass read the review and declined: ${outcome.reason}`;
+      return (
+        `ABANDONED (this is not a failure) — a pass read the review and declined: ${outcome.reason}` +
+        toldLine(outcome.told)
+      );
     }
     case "refused": {
-      return `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nNothing was pushed.`;
+      return (
+        `REFUSED at the ${outcome.stage} — ${outcome.reasons.join("; ")}\nNothing was pushed.` +
+        toldLine(outcome.told)
+      );
     }
     case "failed": {
-      return `FAILED at the ${outcome.stage} stage — ${outcome.reason}`;
+      return (
+        `FAILED at the ${outcome.stage} stage — ${outcome.reason}` +
+        toldLine(outcome.told) +
+        (outcome.repairOutcome === undefined
+          ? ""
+          : outcome.repairOutcome === "verified"
+            ? `\nA repair round ran and its correction passed. That verdict is DISCARDED, not pushed — the run was not armed (--repair, or REPAIR_PUBLISH under the daemon), or it was and the round's own change could not be committed underneath it (solve.repair.not_promoted above). Recorded in repair-rounds.md; read it with: pnpm repair:ledger`
+            : `\nA repair round ran and ended ${outcome.repairOutcome}, so it did not rescue the round either. Recorded in repair-rounds.md.`)
+      );
     }
   }
 }

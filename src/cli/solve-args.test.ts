@@ -240,10 +240,24 @@ describe("--repair, the modifier that is not a rung", () => {
     expect(reason).not.toContain("--plan");
   });
 
-  it("refuses to be combined with --advance or --watch", () => {
-    // Both act on a pull request an earlier run opened; there is no repair round in either.
-    expect(error(["SSX-3822", "--advance", "--repair"])).toContain("--repair");
-    expect(error(["SSX-3822", "--watch", "--repair"])).toContain("--repair");
+  it("arms --advance and --watch too, since a review round now gets a repair round", () => {
+    expect(parseSolveArgs(["SSX-3822", "--advance", "--repair"])).toEqual({
+      ok: true,
+      invocation: { mode: "advance", issueKey: "SSX-3822", repair: true },
+    });
+    expect(parseSolveArgs(["--watch", "--repair"])).toEqual({
+      ok: true,
+      invocation: { mode: "watch", issueKey: null, repair: true },
+    });
+  });
+
+  it("leaves --advance and --watch unarmed without it", () => {
+    expect(parseSolveArgs(["SSX-3822", "--advance"])).toMatchObject({
+      invocation: { repair: false },
+    });
+    expect(parseSolveArgs(["SSX-3822", "--watch"])).toMatchObject({
+      invocation: { repair: false },
+    });
   });
 });
 

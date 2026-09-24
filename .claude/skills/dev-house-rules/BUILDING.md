@@ -17,7 +17,7 @@ Previous: [STARTING.md](STARTING.md) · Next: [PROVING.md](PROVING.md) · Eviden
 It is worth naming precisely because it is _invisible to every tool_. Types, lint and tests all
 pass; the comment is the only thing that is wrong, and it is the thing the next reader trusts most.
 
-Three forms, hardest last:
+Four forms — the third the hardest, the fourth the only one a tool could be built to see:
 
 - **Plainly false.** Five files said the Jira credential was "discovery only" long after
   `updateLabels` shipped — including `wiring.ts`, the module that calls it.
@@ -30,6 +30,11 @@ Three forms, hardest last:
   deleted as a bug; the sentence stayed true and still reads as coverage of it. **This form survives
   review indefinitely,** because a reviewer checks whether the sentence is true.
   [→](INCIDENTS.md#the-unref-that-killed-the-only-loop-whose-job-is-waiting)
+- **Moved off its subject.** A function inserted directly under another's doc comment inherits it,
+  and the function it described is left with none. Three helpers on one branch landed that way in
+  a day, one under a sentence that happened to be true of it too. Unlike the three above, a tool
+  could see this one — a doc block followed directly by another is always one — and none does yet.
+  [→](INCIDENTS.md#the-doc-comments-left-above-a-function-inserted-beneath-them)
 
 ---
 

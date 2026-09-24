@@ -110,6 +110,11 @@ export type DiffVerdict =
       readonly ok: false;
       /** Every reason, not the first — a run that trips three rules should say so once. */
       readonly reasons: readonly string[];
+      /**
+       * The paths a rule refused, each one a reason names, or `null` when a reason belongs to no
+       * ordinary path — an empty diff, or a path outside the worktree — so none could be rolled back.
+       */
+      readonly refusedPaths: readonly string[] | null;
     };
 
 export class DiffParseError extends Error {
@@ -257,11 +262,14 @@ export function checkDiff(
 ): DiffVerdict {
   const reasons: string[] = [];
   const bumps: DependencyBump[] = [];
+  const refused = new Set<string>();
+  let unattributable = false;
 
   if (changes.length === 0) {
     return {
       ok: false,
       reasons: ["the diff is empty — nothing was changed, so nothing was fixed"],
+      refusedPaths: null,
     };
   }
 
@@ -270,10 +278,12 @@ export function checkDiff(
       reasons.push(
         `${JSON.stringify(change.path)}: not a path inside the worktree, so it is refused without being interpreted`,
       );
+      unattributable = true;
       // The pattern checks below assume a normal relative path; running them
       // on one that escaped would report a reason implying it was understood.
       continue;
     }
+    const before = reasons.length;
     if (change.added === null || change.removed === null) {
       reasons.push(
         `${change.path}: binary change — a diff nobody can read in a review is not a diff this service opens a PR for`,
@@ -292,6 +302,9 @@ export function checkDiff(
     if (forbidden !== undefined) {
       reasons.push(`${change.path}: ${forbidden.why}`);
     }
+    if (reasons.length > before) {
+      refused.add(change.path);
+    }
   }
 
   // Measured for the report; never compared against anything — see the module header.
@@ -302,7 +315,7 @@ export function checkDiff(
   );
 
   if (reasons.length > 0) {
-    return { ok: false, reasons };
+    return { ok: false, reasons, refusedPaths: unattributable ? null : [...refused] };
   }
   return { ok: true, files, lines, bumps };
 }

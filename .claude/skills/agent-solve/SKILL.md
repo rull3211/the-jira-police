@@ -51,9 +51,10 @@ saying "do not edit" would be a description of intent, not a control.
    on purpose. Its scope is git's list of conflicted files, exactly.
 6. **`--repair`** — runs after a failed verification. **Its verdict is discarded unless a person
    armed the run for it, and then it lands as its own commit, read on its own; see `architecture/solve.md` §15.**
-   Same tools as `--fix`. Given the fix pass's recon brief, the worktree
-   holding that change, and the harness's own captured output from the verification step that
-   failed — the one thing `--fix` can never see. Fixes the code the failure points at, never the
+   Same tools as `--fix`. Given the fix pass's recon brief — or, when the change that failed is a
+   review round's, that round's own account of it — the worktree holding that change, and the
+   harness's own captured output from the verification step that failed — the one thing the pass
+   that wrote the change can never see. Fixes the code the failure points at, never the
    test it failed, unless the test itself encoded the old behaviour.
 
 Each pass is its own session rather than six turns of one, so a pass cannot carry a capability
@@ -102,7 +103,8 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
   runs the verification and its exit codes are the only evidence anyone will act on. A claim here
   is unfalsifiable noise at best and a false record at worst.
 - **Stay inside the stated scope.** The harness refuses a list of paths outright — including
-  anything that would change what "passing" means — and those refusals discard the whole run. It
+  anything that would change what "passing" means — and those refusals discard the whole run, or
+  in a review round at least the refused edit. It
   does **not** refuse on size: there is no file cap and no line cap, and there has not been one
   since 2026-09-06. `SOLVE_INSTRUCTIONS.md` §4 has the list, and is the only place it is written
   down. If the honest fix needs a refused path, return `proceed: false` and explain; do not deliver
@@ -123,7 +125,10 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
 - **Match the repository, not your preferences.** Read the surrounding code and follow its
   conventions, naming and test style. This is somebody's codebase and the change will be reviewed
   by the people who own it. No drive-by refactors, no reformatting, no tidying of adjacent code —
-  each one spends the diff budget and buries the actual change in a review.
+  each one buries the actual change in a review. **The one exception is a review round**, when a
+  comment the harness labels as a repository member's asks for exactly that in a file the pull
+  request already changes: the person who owns the code is the one asking.
+  `SOLVE_INSTRUCTIONS.md` §2b.
 - **Prefer a test that fails without the fix.** Where the repository has a test suite and the
   change is testable, add or extend one so the fix is demonstrated rather than asserted. If a
   meaningful test is not possible, say which and why in the summary.
