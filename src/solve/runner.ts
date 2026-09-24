@@ -600,6 +600,24 @@ export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
     injectionNoticed: str(record, "injectionNoticed"),
   };
 
+  // Checked first, since it passes every rule below: SSX-3918 once returned "Test" in every field after three schema rejections.
+  const written = [
+    verdict.rootCause,
+    verdict.devLensCorrection,
+    verdict.approach,
+    verdict.testPlan,
+    verdict.bailReason,
+    verdict.bailRemedy,
+    ...verdict.bailBlockers,
+  ]
+    .map((field) => field.trim())
+    .filter((field) => field !== "");
+  if (written.length >= 3 && written.every((field) => field === written[0])) {
+    throw new SolveParseError(
+      `${issueKey}: every written field says ${JSON.stringify(written[0])} — a placeholder, not a verdict`,
+    );
+  }
+
   const bailed = verdict.bailReason.trim() !== "";
   if (verdict.proceed && bailed) {
     // The value, not just the contradiction: the first of these cost a session transcript to
