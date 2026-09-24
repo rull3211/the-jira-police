@@ -10,11 +10,7 @@
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
-> gated only on `SOLVE_ENABLED`. Earlier revisions of this header said the
-> solve half was "still a person typing a command" and that "nothing loops". Both were false, and
-> they were the two most important facts in the file. A third revision cited `review-loop.ts:114` in
-> a file 77 lines long — the same sentence, wrong a third way, which is why it now names the function
-> instead.
+> gated only on `SOLVE_ENABLED`.
 >
 > **A human always merges. The bot has no merge path.**
 >
@@ -55,103 +51,32 @@ every file that cited them has been repointed there, and what is still open from
 <!-- refs:off -->
 
 **The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52 and §53, and this line names them rather than
-citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
-repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
-still and would be holding entries nobody could ever pay. That its docstring once said the debt
-"goes to zero" is no longer part of this argument: the claim is withdrawn in `docs-check.ts`, on
-the evidence that the number has not moved once in forty-one commits.
+citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
+never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
+holds a debt still and would be holding entries nobody could ever pay.
 
-**Only §18 was ever actually counted, and finding out why shipped as §19.** Adding the first four
-names raised the dangling count by two, not by four: the resolver of the time pooled section ids
-from every document into one set, so a dead `PLAN.md §12` matched `ARCHITECTURE.md`'s live §12, and
-the same for §15 and §16. §18 dangled only because no document here has an eighteenth section. The
-region is still right — a hole list should not be checked — but at the time it was buying much less
-than it looked like it was buying.
+**Each of them shipped and was deleted, except as noted here.** `git log -- PLAN.md` holds every
+entry and the commit that deleted it, so what follows is only what that history cannot say alone.
 
-§12 and §15 were the guardrail entries; §16 was the audit branch and shipped whole; §20 was the
-scaffolding-audit skill, shipped in `7237af5` and retired here rather than left standing as an open
-entry; §18 was opened and shipped inside a single session — the shortest-lived entry here, and still
-worth a permanent number, because the session was compacted once while it was open; §19 was the
-per-document resolver itself, shipped whole — the story is `INCIDENTS.md`'s 2026-09-18 entry, "The
-`§N` checker that resolved a citation against any document that happened to define it"; §25 was the
-fitness block owning the region it writes, shipped in PR #37; §26 and §27 were the closed-ticket
-clause and the status allowlist that narrowed it, and each is a hole one commit after it was written
-— opened and deleted inside the branch that built it, which is what the rule now asks for. **§24 is
-absent from that list and is not a hole** — it was skipped rather than spent, for the reason recorded
-in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an unrelated edit
-repaired nothing." §28 was `TRIAGE_STATUS_PRIORITY` and the cursor decoupling under it, opened and deleted
-inside the branch that built it. **§29 is the first of the two exceptions the paragraph above
-flags** — the handed-off
-unsubscribe, deleted without shipping when the operator deferred it, and the decision it recorded
-(unsubscribe rather than a quiet state, chosen knowing it is one-way) survives only in `1f8a3f4`'s
-parent. Nothing in the tree carries it, which is the cost of deferring by deletion and is why it is
-written down here. §30 was the daemon check and the rule it put in `STARTING.md`, opened and deleted
-inside the branch that built it, and §32 was the untagged thread reply that let the service argue
-with itself on PR #548 — same shape, opened and deleted inside its own branch. §7 was the
-transient/deterministic split: `terminalLabelAfter` (`src/cli/solve-outcome.ts`) now routes a
-deterministic verification failure to `agent:failed` the same way it already did a bail, closing the
-reclaim loop `MAX_SOLVE_ATTEMPTS_PER_TICKET` could only slow, not stop. Opened in an earlier session (`7e99804`) and
-closed here, on a real ticket looping live (SSX-3954), rather than opened and shipped in one branch
-like its neighbours above. §4 was recon reading
-staged images and §22 the age-based sweep its own last phase deferred; both shipped once that phase
-built `sweep-once` and `staging-sweep.ts`, walking the skill-root and image-staging parents alike
-rather than leaving the sweep narrowed to the one §22 was opened for. §36 was `branch-stack.sh`
-counting commit identity instead of commit content, opened and deleted inside the branch that built
-it — the story is `INCIDENTS.md`'s 2026-09-18 entry. §37 was the log viewer, shipped as `pnpm logs`
-and deleted inside the branch that built it; what it left unbuilt is §39, which is a new entry
-rather than a survival of the old one. §34 was the sweep that cut every prose comment in `src/` to a
-line or two, opened in `b7faa73` and deleted in `849591a` that shipped it; §35 was the catch-up that
-brought `CLAUDE.md`, `STARTING.md` and `FINISHING.md` to the standard §34 had just imposed on the
-code, opened in `5d42002` and deleted in `24341f6` — both the ordinary shape. §38 was
-`branch-guard.sh` resolving the session's project directory rather than the worktree the write
-lands in, shipped as `targetBranch` in `57f6923`.
+- **§29 did not ship.** It was the handed-off unsubscribe, deleted when the operator deferred it. The
+  decision it recorded — unsubscribe rather than a quiet state, chosen knowing it is one-way —
+  survives only in `1f8a3f4`'s parent, which is the cost of deferring by deletion.
+- **§40 was issued twice, and its first use did not ship.** That first use was a supervisor process
+  to run the daemon and the viewer together, abandoned mid-branch when the operator chose a
+  `package.json` pipeline instead; no commit ever held it, and what it would have argued for is in
+  `feat/daemon-log-tui`'s pull request. The reuse was opened in `2fb66e7` against a hole line that
+  already named §40, and closed in `82d6079`, a deletion-only commit that removed the §38 and §40
+  entries without adding either to this list. Both numbers had been picked by reading the last
+  heading rather than this line.
+- **No revision ever held §50.** It entered this list in `6e78ce7`, the fix for a literal `""` in a
+  recon field, with no entry committed before it; the work shipped, and its plan was never written
+  down where a commit could keep it.
+- **§24 is absent from the list and is not a hole** — it was skipped rather than spent, for the
+  reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
+  unrelated edit repaired nothing."
 
-**§40 was issued twice, which this file says never happens, and the second issue is how all three of
-§34, §35 and §38 came to be missing from the line above.** Its first use is the second of the two
-exceptions the paragraph above flags: a supervisor process to run the daemon and the viewer
-together, abandoned mid-branch when the operator chose a `package.json` pipeline instead — written
-into a working tree and deleted from one, so no commit ever held it and there is nothing to recover.
-What it would have argued for is in `feat/daemon-log-tui`'s pull request; the sentence is here
-because a hole with no entry behind it sends the next reader through a history that does not contain
-one. **§40's number was reused**, which is the one hole here that records a defect rather than a
-feature: it was opened in `2fb66e7` against a hole line that _already named §40_, and closed in
-`82d6079`. That closing commit is 78 deletions and no insertions — it removed the §38 and §40
-entries without touching the list that was supposed to gain them, and its message reasoned that
-"nothing else in the tree cited either number", which was true of every other file and not of the
-paragraph it was editing. **A deletion-only commit cannot update a list, and nothing here checks
-that it did**; both numbers were picked by reading the last heading rather than this line, which is
-how one of them came to be issued twice. §41 was the audit that found it and repaired this list,
-opened and closed inside the branch that ran it — the shape §26, §27, §28, §30 and §32 have. Its own
-commits are deliberately not cited by hash: a stacked branch is rebased whenever its base moves, and
-a hash it wrote about itself is dangling the moment that happens. A concurrently open sibling reached
-for §41 as well before checking `git log --all`, so this document's own "next entry" pointer is a
-per-branch guess, good only until whichever of two open branches merges second finds it already
-wrong. §42 was every
-non-`verified`, non-`escaped` solve outcome — `unusable-base`, `refused`, `crashed`, `no-worktree`
-and an environment `abandoned`, alongside the `failed` §7 already handled — routed to `agent:failed`
-so a ticket that cannot currently be judged stops looping silently and a human has to clear it,
-opened and closed inside the branch that built it. §43 was
-`.git/info/exclude` listing `.claude/` and `.storecode/` for every worktree cut from a repository,
-so a stray write to either (SSX-3954) is never untracked and never reaches the diff gate to be
-refused there alongside the real work beside it — opened and closed inside the branch that built
-it. §44 was the simplify pass invoking Claude Code's own `/simplify` for the judgement it used to
-re-derive by hand, plus `parseSimplify` no longer crashing the run over a self-report contradiction
-nothing downstream reads (SSX-3944) — opened and closed inside the branch that built it, stacked on
-top of §43's, since both came out of the same session and §44's doc updates touch lines §43's
-already moved. §49 was the repair round's ledger — `repair-rounds.md`, `pnpm repair:ledger` and the
-`Read` column no code may write — opened and deleted inside the branch that built it, the ordinary
-shape. **It was the first hole here that is a prerequisite rather than a feature:** §45's phase
-three was blocked on it, and clearing that blocker did not ship the phase — the next line does.
-§45 was the repair pass, phased from inert (#67) through the untrusted dry run (#68) to the
-typed `--repair` rung and the `REPAIR_PUBLISH` loop. The last two were claimed before the
-evidence §45 itself asked for, by the operator's decision, and that argument — with its
-counter-argument and what withdraws it — now lives in `architecture/solve.md` §15 rather than
-being deleted with the entry. §51 stopped a recon plan naming a path the diff gate refuses before
-the fix pass, and was opened and deleted inside the branch that built it. §52 let a run change a
-`pom.xml` when the only change is a dependency version, behind `DEPENDENCY_BUMPS`; its Node half is
-§54. §53 put the recon verdict's coherence rules into its output schema, so the model is
-corrected in-session, and was opened and deleted inside the branch that built it. The next entry
-is §55.
+The next entry is §55. The pointer is a per-branch guess: two branches open at once each read it
+from their own base, so check `git log --all -- PLAN.md` before taking a number.
 
 <!-- refs:on -->
 
