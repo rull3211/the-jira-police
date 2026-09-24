@@ -132,6 +132,8 @@ export interface SolveRequest {
   readonly failFirstCheck?: boolean;
   /** Whether a failed verification buys one repair round, `REPAIR_ROUND`. Alone it only measures; the privilege is this and `promoteRepair` together. */
   readonly repairRound?: boolean;
+  /** `DEPENDENCY_BUMPS`: whether a pom.xml change that only moves a dependency version is allowed. Absent means no. */
+  readonly dependencyBumps?: boolean;
   /**
    * `--repair` typed per run, or `REPAIR_PUBLISH` under the daemon: a green repair round becomes the
    * outcome. Off unless set, and must be — green is reachable by weakening the assertion that failed.
@@ -368,14 +370,16 @@ async function readNumstat(
 /** The gate over `changes`, with each changed `pom.xml` judged first — the one exception `checkDiff` cannot decide from paths. */
 async function gateDiff(
   runner: CommandRunner,
+  request: Pick<SolveRequest, "baseRef" | "gitTimeoutMs" | "dependencyBumps">,
   worktreePath: string,
-  baseRef: string,
-  timeoutMs: number,
   changes: readonly FileChange[],
 ): Promise<DiffVerdict> {
+  if (request.dependencyBumps !== true) {
+    return checkDiff(changes);
+  }
   const bumps = await judgeBumps(
     runner,
-    { worktreePath, baseRef, timeoutMs },
+    { worktreePath, baseRef: request.baseRef, timeoutMs: request.gitTimeoutMs },
     changes.map((change) => change.path),
   );
   return checkDiff(changes, bumps);
@@ -686,7 +690,9 @@ export async function runReconOnly(
       devLensAccurate: recon.devLensAccurate,
     });
 
-    const refusedPlan = recon.proceed ? plannedPathRefusals(recon.plannedFiles, worktree.path) : [];
+    const refusedPlan = recon.proceed
+      ? plannedPathRefusals(recon.plannedFiles, worktree.path, request.dependencyBumps === true)
+      : [];
     if (refusedPlan.length > 0) {
       log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
     }
@@ -705,7 +711,10 @@ export async function runReconOnly(
 
 /** The only place a {@link VerifyRequest} is built, so the base check and the post-fix check cannot drift apart on timeout or base ref. */
 function verifyRequestOf(
-  request: Pick<SolveRequest, "repoPath" | "baseRef" | "stepTimeoutMs" | "installTimeoutMs">,
+  request: Pick<
+    SolveRequest,
+    "repoPath" | "baseRef" | "stepTimeoutMs" | "installTimeoutMs" | "dependencyBumps"
+  >,
   worktree: Worktree,
 ): VerifyRequest {
   return {
@@ -714,6 +723,7 @@ function verifyRequestOf(
     baseRef: request.baseRef,
     stepTimeoutMs: request.stepTimeoutMs,
     installTimeoutMs: request.installTimeoutMs,
+    dependencyBumps: request.dependencyBumps === true,
   };
 }
 
@@ -812,13 +822,7 @@ export async function runRepairRound(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = await gateDiff(
-    commands,
-    worktree.path,
-    request.baseRef,
-    request.gitTimeoutMs,
-    changes,
-  );
+  const verdict = await gateDiff(commands, request, worktree.path, changes);
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -981,7 +985,11 @@ async function runPipeline(
   }
 
   // Before the fix pass, so a plan the gate was always going to refuse costs no `Write` and no spend.
-  const refusedPlan = plannedPathRefusals(recon.plannedFiles, worktree.path);
+  const refusedPlan = plannedPathRefusals(
+    recon.plannedFiles,
+    worktree.path,
+    request.dependencyBumps === true,
+  );
   if (refusedPlan.length > 0) {
     log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
     const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
@@ -1066,13 +1074,7 @@ async function runPipeline(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = await gateDiff(
-    commands,
-    worktree.path,
-    request.baseRef,
-    request.gitTimeoutMs,
-    changes,
-  );
+  const verdict = await gateDiff(commands, request, worktree.path, changes);
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -1527,13 +1529,7 @@ async function runReviewRound(
       reasons: ["could not read the diff, so there is nothing to bound"],
     };
   }
-  const verdict = await gateDiff(
-    commands,
-    worktree.path,
-    request.baseRef,
-    request.gitTimeoutMs,
-    parseNumstat(diffText),
-  );
+  const verdict = await gateDiff(commands, request, worktree.path, parseNumstat(diffText));
   if (!verdict.ok) {
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
   }

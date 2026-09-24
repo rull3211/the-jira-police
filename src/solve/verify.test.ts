@@ -350,7 +350,10 @@ describe("unverifiableChanges", () => {
         "--name-only": changed,
       });
 
-      expect(await unverifiableChanges(runner, request())).toEqual([]);
+      expect(await unverifiableChanges(runner, request({ dependencyBumps: true }))).toEqual([]);
+      // Off, the same bump is a changed build file like any other, and the judge is never asked.
+      expect(await unverifiableChanges(runner, request())).toEqual(["pom.xml"]);
+      expect(runner.calls.filter((argv) => argv.includes("ls-tree"))).toHaveLength(1);
     });
 
     it("still counts one changed in any other way", async () => {
@@ -362,7 +365,9 @@ describe("unverifiableChanges", () => {
         "--name-only": changed,
       });
 
-      expect(await unverifiableChanges(runner, request())).toEqual(["pom.xml"]);
+      expect(await unverifiableChanges(runner, request({ dependencyBumps: true }))).toEqual([
+        "pom.xml",
+      ]);
     });
   });
 

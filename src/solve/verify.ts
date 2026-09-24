@@ -135,6 +135,8 @@ export interface VerifyRequest {
   readonly baseRef: string;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
+  /** `DEPENDENCY_BUMPS`: whether a pom.xml changed only by a dependency bump may still be graded. Absent means no. */
+  readonly dependencyBumps?: boolean;
 }
 
 const MAX_OUTPUT = 4000;
@@ -345,7 +347,7 @@ function nodePlan(raw: string): PlanResult {
 /** Uses `--name-only -z` for the same reason the diff gate does: without it, a filename containing a newline becomes two entries. */
 export async function unverifiableChanges(
   runner: CommandRunner,
-  request: Pick<VerifyRequest, "worktreePath" | "baseRef" | "stepTimeoutMs">,
+  request: Pick<VerifyRequest, "worktreePath" | "baseRef" | "stepTimeoutMs" | "dependencyBumps">,
 ): Promise<readonly string[] | null> {
   const { worktreePath, baseRef, stepTimeoutMs } = request;
 
@@ -361,6 +363,9 @@ export async function unverifiableChanges(
   const touched = paths.filter((path) =>
     VERIFICATION_PATHS.some((rule) => rule.pattern.test(path)),
   );
+  if (request.dependencyBumps !== true) {
+    return touched;
+  }
   // The same judge the diff gate asks, so the two cannot disagree about which build change is allowed.
   const bumps = await judgeBumps(
     runner,

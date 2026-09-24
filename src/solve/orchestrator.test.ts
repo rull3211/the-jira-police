@@ -840,13 +840,15 @@ describe("solveTicket, and what each pass is given", () => {
 });
 
 describe("solveTicket, and a dependency version bump", () => {
+  const bumpsOn: SolveRequest = { ...request, dependencyBumps: true };
+
   it("runs the fix pass for a plan naming pom.xml, and verifies a bump with the bump on the outcome", async () => {
     const { h } = harness(
       { ...FULL, recon: recon({ plannedFiles: ["pom.xml", "src/app/head.tsx"] }) },
       bumped(),
     );
 
-    const outcome = await solveTicket(h.deps, request);
+    const outcome = await solveTicket(h.deps, bumpsOn);
 
     expect(outcome).toMatchObject({
       kind: "verified",
@@ -859,13 +861,35 @@ describe("solveTicket, and a dependency version bump", () => {
   it("refuses at the gate a pom.xml change that is not a bump, and says why", async () => {
     const { h } = harness(FULL, notABump());
 
-    const outcome = await solveTicket(h.deps, request);
+    const outcome = await solveTicket(h.deps, bumpsOn);
 
     expect(outcome).toMatchObject({
       kind: "refused",
       stage: "diff-gate",
       reasons: [expect.stringContaining("more than a dependency version")],
     });
+  });
+
+  it("with DEPENDENCY_BUMPS off, stops a plan naming pom.xml before the fix pass", async () => {
+    const { h } = harness({ recon: recon({ plannedFiles: ["pom.xml"] }) }, bumped());
+
+    const outcome = await solveTicket(h.deps, { ...request, dependencyBumps: false });
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      refusedPlan: [expect.stringMatching(/^pom\.xml: /u)],
+    });
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
+  });
+
+  it("with DEPENDENCY_BUMPS unset, refuses a real bump at the gate without asking the judge", async () => {
+    // Unset in the request means off: only wiring.ts sets it, from a setting that defaults on.
+    const { h } = harness(FULL, bumped());
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+    expect(h.calls.some((argv) => argv.some((arg) => arg.startsWith("--unified=")))).toBe(false);
   });
 });
 
@@ -1279,9 +1303,17 @@ describe("resolveReview", () => {
     // The gate reads the cumulative diff, so a bump from the first round is in every later one.
     const { h } = harness({ review: review() }, bumped());
 
-    const outcome = await resolveReview(h.deps, reviewRequest);
+    const outcome = await resolveReview(h.deps, { ...reviewRequest, dependencyBumps: true });
 
     expect(outcome.kind).not.toBe("refused");
+  });
+
+  it("refuses that same round when DEPENDENCY_BUMPS is off", async () => {
+    const { h } = harness({ review: review() }, bumped());
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
   });
 
   it("returns failed when the round breaks a test", async () => {
@@ -1416,11 +1448,12 @@ const runRepair = (
     recon?: ReturnType<typeof parseRecon>;
     fix?: ReturnType<typeof parseFix>;
     simplify?: ReturnType<typeof parseSimplify>;
+    request?: SolveRequest;
   } = {},
 ) =>
   runRepairRound(
     h.deps,
-    request,
+    overrides.request ?? request,
     worktree,
     repairBase,
     overrides.recon ?? parseRecon(recon(), request.issueKey),
@@ -1489,7 +1522,7 @@ describe("runRepairRound", () => {
   it("carries a dependency bump through to a green repair's outcome", async () => {
     const { h } = harness({ repair: repair() }, bumped());
 
-    const outcome = await runRepair(h);
+    const outcome = await runRepair(h, { request: { ...request, dependencyBumps: true } });
 
     expect(outcome).toMatchObject({ kind: "verified", bumps: [{ to: "1.1" }] });
   });

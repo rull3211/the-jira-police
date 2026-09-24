@@ -224,6 +224,8 @@ export function isDependencyBumpPath(path: string): boolean {
 export function plannedPathRefusals(
   plannedFiles: readonly string[],
   worktreePath: string,
+  /** `DEPENDENCY_BUMPS`. Off, a path with an exception is refused by name like any other. */
+  allowExceptions: boolean,
 ): readonly string[] {
   const prefix = `${worktreePath.replace(/\/+$/u, "")}/`;
   const reasons: string[] = [];
@@ -236,7 +238,7 @@ export function plannedPathRefusals(
     }
     for (const rule of [match(VERIFICATION_PATHS, path), match(FORBIDDEN_PATHS, path)]) {
       // A path alone cannot say whether its change will be a dependency bump, so that rule waits for the diff.
-      if (rule !== undefined && rule.unless === undefined) {
+      if (rule !== undefined && (rule.unless === undefined || !allowExceptions)) {
         reasons.push(`${path}: ${rule.why}`);
       }
     }

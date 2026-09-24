@@ -299,10 +299,17 @@ describe("plannedPathRefusals", () => {
         "docs/integrations/f2100.md",
       ],
       worktreePath,
+      true,
     );
 
     expect(reasons).toHaveLength(1);
     expect(reasons[0]).toMatch(/^mvnw: the Maven wrapper/u);
+  });
+
+  it("refuses pom.xml by name when DEPENDENCY_BUMPS is off, as before the exception existed", () => {
+    expect(plannedPathRefusals(["pom.xml"], worktreePath, false)).toEqual([
+      expect.stringMatching(/^pom\.xml: the Maven build is defined here/u),
+    ]);
   });
 
   it("leaves pom.xml to the gate, since only its diff can show a dependency bump", () => {
@@ -311,6 +318,7 @@ describe("plannedPathRefusals", () => {
       plannedPathRefusals(
         ["pom.xml", "src/main/java/no/storebrand/orders/f2100/adapter/F2100Service.java"],
         worktreePath,
+        true,
       ),
     ).toEqual([]);
     expect(checkDiff([ok("pom.xml")]).ok).toBe(false);
@@ -318,7 +326,7 @@ describe("plannedPathRefusals", () => {
 
   it("refuses nothing in an ordinary plan", () => {
     expect(
-      plannedPathRefusals(["src/app/head.tsx", "src/app/head.test.tsx"], worktreePath),
+      plannedPathRefusals(["src/app/head.tsx", "src/app/head.test.tsx"], worktreePath, true),
     ).toEqual([]);
   });
 
@@ -348,15 +356,19 @@ describe("plannedPathRefusals", () => {
     }
     for (const sample of samples) {
       const gate = checkDiff([ok(sample)]);
-      expect(plannedPathRefusals([sample], worktreePath)).toEqual(gate.ok ? [] : gate.reasons);
+      expect(plannedPathRefusals([sample], worktreePath, true)).toEqual(
+        gate.ok ? [] : gate.reasons,
+      );
     }
   });
 
   it("reads a path under the worktree the same as the relative one", () => {
     // Models name a file by the absolute path they read it at; that is the same file, not an escape.
-    expect(plannedPathRefusals([`${worktreePath}/src/app/head.tsx`], worktreePath)).toEqual([]);
-    expect(plannedPathRefusals([`${worktreePath}/mvnw`], `${worktreePath}/`)).toEqual(
-      plannedPathRefusals(["mvnw"], worktreePath),
+    expect(plannedPathRefusals([`${worktreePath}/src/app/head.tsx`], worktreePath, true)).toEqual(
+      [],
+    );
+    expect(plannedPathRefusals([`${worktreePath}/mvnw`], `${worktreePath}/`, true)).toEqual(
+      plannedPathRefusals(["mvnw"], worktreePath, true),
     );
   });
 
@@ -366,7 +378,7 @@ describe("plannedPathRefusals", () => {
       "../lisa-services-api/src/Reason.java",
       `${worktreePath}-salvaged/src/app/head.tsx`,
     ]) {
-      expect(plannedPathRefusals([planned], worktreePath)).toEqual([
+      expect(plannedPathRefusals([planned], worktreePath, true)).toEqual([
         `${JSON.stringify(planned)}: not a path inside the worktree`,
       ]);
     }
