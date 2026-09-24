@@ -1249,9 +1249,6 @@ you cannot._ Inverting is only available when the vocabulary is enumerable and t
 enough to maintain, which is why it stops at `git`. The entry above waited until seven instances, so
 this one comes with an instruction attached: at instance two, write it.
 
-**No rule yet** — inverting a denylist over a vocabulary you do not control is a candidate at one
-instance and the paragraph above says what writing it would take, and `denylist` at 2.
-
 ### The lesson store that was the incident it was written to fix
 
 The entry above — [four lessons filed where nothing loads
@@ -1756,3 +1753,39 @@ adding an unrelated plan entry.
 
 **No rule yet** — a ratchet moving for a reason unrelated to what it measures is a shape this file
 has not yet seen a second instance of, and `unrelated-repair` at 2.
+
+## 2026-09-24
+
+### The property-use search patched one spelling at a time
+
+**2026-09-24.** `dependency-bump.ts` allows a property bump only when nothing but dependency
+versions uses the property, and it finds the uses by searching the file's text for `${name}`.
+Maven reads XML, not text, so every construct that lets a use be spelled around that search is a
+way to bump a property a plugin also reads. They were found one at a time, all on one day:
+
+- **A character reference.** Maven decodes `&#36;{name}` before it interpolates. Found by a review
+  from a fresh context that drove Maven's effective POM; `24c538e` refuses a property bump in any
+  file holding one.
+- **A comment.** Maven joins element text across one, so `$<!-- x -->{name}` interpolates. Found
+  by driving Maven while building the comment-edit change, after the gap had been on `main` since
+  the judge shipped; `f54545b` searched the comment-free text as well.
+- **CDATA and a processing instruction,** joined the same way. Found by a review from a fresh
+  context of that change; `6adf63e` refuses a property bump in a file holding either, bar the XML
+  declaration.
+
+**The shape is the finding.** Each fix answered the spelling in front of it, and the second, by
+searching one more view of the text, patched a spelling rather than the derivation — which is how
+the third got past it. Only the last stopped listing spellings. Element text is split only by
+comments, references, CDATA, processing instructions and child elements, and a child element
+drops the text around it rather than joining it — driven, `$<x/>{name}` leaves nothing to
+interpolate — so refusing whatever the search cannot see through closes the list.
+
+This is the second instance of the candidate in
+[the denylist that named thirteen of git's write verbs](#the-denylist-that-named-thirteen-of-gits-write-verbs),
+which said to write its rule at the second.
+
+**Found by** driving Maven, for the comment; a review from a fresh context, handed only the diff
+and these rules, for CDATA and processing instructions.
+
+**The rule** — a denylist over a vocabulary you do not control is behind by construction; invert
+it, or say in the code why you cannot. [→](BUILDING.md#fail-closed-except-guards-which-fail-open)

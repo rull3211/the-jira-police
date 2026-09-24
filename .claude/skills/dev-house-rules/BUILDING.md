@@ -135,6 +135,18 @@ than one copy per arm: a name refused by one hatch and accepted by another is th
 exists to close.
 [→](INCIDENTS.md#the-escape-hatch-audited-on-the-arm-being-added-while-its-two-siblings-stayed-wide)
 
+**A denylist over a vocabulary you do not control is behind by construction: invert it, or say in
+the code why you cannot.** A guard that lists the spellings of an act allows every spelling it has
+not met, so each patch buys one spelling and the next is already through. `branch-guard.sh` refused
+13 of git's 163 verbs after two rounds of patching, and was inverted to an allowlist of reads.
+`dependency-bump.ts`'s property-use search was patched three times in one day — a character
+reference, a comment, then CDATA and a processing instruction — and only the last patch stopped
+naming spellings: it refuses a file holding any construct the search cannot see through, which
+closes the list because element text has no other way to be split. Inverting needs a vocabulary
+you can enumerate; where you cannot, the code says so beside the list.
+[→](INCIDENTS.md#the-denylist-that-named-thirteen-of-gits-write-verbs) ·
+[→](INCIDENTS.md#the-property-use-search-patched-one-spelling-at-a-time)
+
 ---
 
 ## State lives in the remote system

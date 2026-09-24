@@ -51,7 +51,7 @@ export const PHASE_FILES: readonly string[] = [
  */
 export const RULE_PARAGRAPHS: Record<string, number> = {
   ".claude/skills/dev-house-rules/STARTING.md": 16,
-  ".claude/skills/dev-house-rules/BUILDING.md": 15,
+  ".claude/skills/dev-house-rules/BUILDING.md": 16,
   ".claude/skills/dev-house-rules/PROVING.md": 27,
   ".claude/skills/dev-house-rules/FINISHING.md": 16,
 };
@@ -66,7 +66,7 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
  * Deliberately no grandfather list — a path exemption never expires the way a dated declaration
  * does.
  */
-export const UNRESOLVED_ON_PURPOSE = 10;
+export const UNRESOLVED_ON_PURPOSE = 9;
 
 /** How stale a dated `**No rule yet**` is allowed to get. */
 export const UNRESOLVED_DAYS = 30;
