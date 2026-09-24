@@ -146,9 +146,36 @@ three was blocked on it, and clearing that blocker did not ship the phase — th
 typed `--repair` rung and the `REPAIR_PUBLISH` loop. The last two were claimed before the
 evidence §45 itself asked for, by the operator's decision, and that argument — with its
 counter-argument and what withdraws it — now lives in `architecture/solve.md` §15 rather than
-being deleted with the entry. The next entry is §50.
+being deleted with the entry. The next entry is §52.
 
 <!-- refs:on -->
+
+### 51. A plan naming a path the gate refuses is paid for twice before the gate reads it
+
+**Branch:** `fix/refuse-at-recon`
+
+**What is being attempted.** When recon says `proceed`, check its `plannedFiles` against the diff
+gate's own path rules before the fix pass starts. A plan that names a refused path becomes a bail
+the harness wrote: the worktree is discarded as for any bail, no model gets `Write`, and the ticket
+comment lists each refused path with the gate's reason and says what a person does next — make that
+change on the base branch and re-run, or accept that the plan overreached.
+
+**Why now.** SSX-3918, 2026-09-24. Recon planned `pom.xml` (a dependency version bump the ticket
+genuinely needs), the fix and simplify passes both ran, and the gate then refused the diff. The
+comment said only that nothing was judged. The list of refused paths is written down in one place,
+`SOLVE_INSTRUCTIONS.md` §4, and **none of the five passes on that ticket opened the file** — nor
+did 32 of the 34 recon and fix passes run since 2026-09-21, the day every pass moved from
+`claude-opus-5` to `claude-sonnet-5` with no change in this tree (§1). An instruction the pass
+does not read is not a bound; a check on its structured plan is.
+
+**What it lets the service do.** Stop a doomed run at the cheapest point, with a reason a person
+can act on, whichever model wrote the plan.
+
+**What would make it the wrong idea.** `plannedFiles` is the model's account, so this is a cost
+saver and never a guard: the gate still reads the real diff, and nothing here may allow a path.
+It refuses in one direction only, which is safe — but a recon that lists a file it only means to
+read would lose a solvable ticket. If that shows up, the plan field's contract is what needs
+tightening, not this check loosening.
 
 ### 46. Nothing can say which code a running daemon is executing
 
@@ -252,6 +279,15 @@ nothing and should not wait for the choosing. Every cost figure in this file —
 $0.45, recon $1.58, the ticket comment $0.40, a review round $0.94 — is a measurement of an unnamed
 model. None of them can be reproduced, compared, or defended, and the cost-per-ticket-per-day
 number in §2 would inherit that at a larger scale and with nobody watching.
+
+**The default has already moved once, and nothing recorded it.** Measured from the session
+transcripts: every solve pass through 2026-09-17 ran on `claude-opus-5`, and every pass from
+2026-09-21 on `claude-sonnet-5`, with no change in this tree. The likeliest cause is the operator's
+own global CLI setting, `opusplan`, which is Opus only in plan mode — inferred, not proven. The
+effect is measured: recon and fix passes stopped opening `SOLVE_INSTRUCTIONS.md` — 2 of 34 since,
+against nearly every one before — so its proceed criteria and the gate's path list stopped reaching
+the model, and SSX-3918 paid a fix pass for a `pom.xml` edit the gate was always going to refuse.
+"Unset means today's behaviour" below is a behaviour nobody in this repository controls.
 
 **Where a cheaper model is safe is decided by the gate, not by the price.** The rule: downgrade
 where a mechanical gate checks the whole output, and do not downgrade where the gate only bounds a
