@@ -133,7 +133,7 @@ export interface SolveRequest {
   readonly failFirstCheck?: boolean;
   /** Whether a failed verification buys one repair round, `REPAIR_ROUND`. Alone it only measures; the privilege is this and `promoteRepair` together. */
   readonly repairRound?: boolean;
-  /** `DEPENDENCY_BUMPS`: whether a pom.xml change that only moves a dependency version is allowed. Absent means no. */
+  /** `DEPENDENCY_BUMPS`: whether a pom.xml change that only moves dependency versions and edits comments is allowed. Absent means no. */
   readonly dependencyBumps?: boolean;
   /**
    * `--repair` typed per run, or `REPAIR_PUBLISH` under the daemon: a green repair round becomes the

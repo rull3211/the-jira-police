@@ -112,8 +112,9 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
 - **Add no dependencies.** Not to the manifest, not to a lockfile. If the task cannot be done with
   what the repository already has, that is a bail. **A newer version of a dependency the `pom.xml`
   already declares is not a new dependency**: change that version — or, in the repository's only
-  `pom.xml`, with no parent or modules, the property only it uses — and nothing else in the file, and the harness allows it and
-  names it in the pull request. A
+  `pom.xml`, with no parent or modules, the property only it uses — and nothing else in the file
+  but the text of a comment already in it, and the harness allows it, naming the version in the
+  pull request. A
   Node repository's version bump is still a bail, because it rewrites a lockfile you cannot produce.
 - **Readable is not writable.** The prompt may list other checkouts on this machine — the services
   this repository talks to. Read them, and prefer reading them to guessing: a claim about another

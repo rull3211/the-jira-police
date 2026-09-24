@@ -105,7 +105,8 @@ honestly: **is this task actually safe for an agent to do?**
    - the requirement has exactly one reasonable reading
    - the change is one coherent piece of work: you can name every file it touches and say why
    - it needs no new dependency and no change to build, test or lint configuration — except a
-     newer version of a dependency the `pom.xml` already declares, which §4 allows
+     newer version of a dependency the `pom.xml` already declares, or the text of a comment in it,
+     which §4 allows
    - a test can demonstrate it, or you can say precisely why not
 
 Anything else is `proceed: false`. See §5.
@@ -648,8 +649,13 @@ Refused on any change of any size, whatever else the ticket asks for.
   is the one category where the refusal is about the signal rather than the code. **One exception,
   for `pom.xml` alone:** moving the version of a dependency the file already declares — a version
   element directly inside a dependency, or a property used nowhere but as such versions — is
-  allowed, and the pull request names it. Plugin, parent and profile versions, a version that ends
-  in SNAPSHOT, a new dependency, and any other line of the file stay refused, and so does a
+  allowed, and the pull request names it. **So is editing the text of a comment already in the
+  file** (`<!-- … -->`), alone or beside such a version — keeping a comment true to the version it
+  describes, say — rewrapped onto more lines if need be. Everything outside the comment stays
+  byte-for-byte as it was, so a new comment on a line of its own, deleting a comment with its line,
+  or closing one early to leave markup behind it is refused like any other change. Plugin, parent
+  and profile versions, a version that ends in SNAPSHOT, a new dependency, and any other line of
+  the file stay refused, and so does a
   property bump in a file that has a parent, declares modules or holds a character reference, or
   in a repository with any other pom.xml; bump the dependency's
   own version element there instead.

@@ -546,7 +546,7 @@ Two refusal families, and a third that was deleted:
   lint config, the vitest config, `pom.xml` and the Maven wrapper are refused **at any size**,
   because they define what passing means. A one-line edit there is the dangerous size, not the
   safe one. All but `pom.xml` are refused unconditionally; `pom.xml` carries the one exception,
-  a dependency version bump, described below. It is a separate list from the forbidden paths only so the refusal can
+  a dependency version bump and the text of its comments, described below. It is a separate list from the forbidden paths only so the refusal can
   say why in the terms that matter: not "you touched a config file" but "you edited the scoreboard
   you are being scored on".
 - **~~Size~~** — five files, two hundred lines, hardcoded, with no setting. **Deleted
@@ -611,30 +611,32 @@ of that run's passes — `PLAN.md` §1 has how rarely it has been opened since t
 `pom.xml` is no longer refused by name at all, so the plan check leaves it to the gate: only the
 diff can show whether its change is the one exception below.
 
-**The one exception: a dependency version bump in `pom.xml`.** `dependency-bump.ts` judges a
+**The one exception: a dependency version bump in `pom.xml`, and its comments.** `dependency-bump.ts` judges a
 changed `pom.xml` from its content, and the gate and `verify`'s refusal to grade a changed build
 file both ask it, so the two cannot disagree; the plan check leaves `pom.xml` to them. It reads the
 whole file on both sides from one `git diff --unified=1000000 --no-ext-diff --no-textconv` — one
 hunk holding the file, with no external diff driver deciding what it says, and `.gitattributes` is
 a refused path because git's own `ident` attribute can hide text inside a `$Id: … $` from that
-diff — and allows a change only when every changed line is one element whose value moved from one
-version to another: a `<version>` directly inside a dependency under `<dependencies>` or
+diff — and allows a change only when every changed line outside a comment is one element whose
+value moved from one version to another: a `<version>` directly inside a dependency under `<dependencies>` or
 `<dependencyManagement>`, or a property under `<properties>` that the file uses somewhere, and
 nowhere but as the whole of such a `<version>` (surefire's late-bound `@{name}` counts as a use).
 Everything else is refused, each for a reason: plugin, parent and profile versions, and a
 dependency inside a plugin, because each changes the build rather than the code; a property nothing
 names, because that is exactly how a setting only a plugin reads looks; a value that does not start
 with a digit, so a `maven.test.skip` cannot be flipped to `true` on this path; a `SNAPSHOT` target,
-which can change after review; any line added or removed; any bump in a file holding a `$Id`
-keyword; and a property bump in a repository with a second `pom.xml`, or in a `pom.xml` that
+which can change after review; any line outside a comment added or removed; any change to a file
+holding a `$Id` keyword on either side; and a property bump in a repository with a second `pom.xml`, or in a `pom.xml` that
 declares a `<parent>` or `<modules>`, since only this file is read — a parent reads the properties
 its children set, plugin versions included, and a module's POM need not be named `pom.xml`. The
 parent rule came from running the judge against the real SSX-3918 base: it allowed a
 `jackson.version` bump because this file uses the property once, which is only sound because this
 file has no parent. The reader is text, not an XML library — this project has no parser dependency
-— so wherever Maven would read the file differently than the text does, the change is refused
-rather than guessed at: an internal DTD subset, an unbalanced tag, and, for a property bump, any
-character reference, since Maven decodes `&#36;{name}` to a use the text search cannot see. That
+— so wherever it knows Maven would read the file differently than the text does, the change is
+refused rather than guessed at: an internal DTD subset, an unbalanced tag, and, for a property bump,
+any character reference, since Maven decodes `&#36;{name}` to a use the text search cannot see. A
+difference it does not know of is not refused, and one was found after this was first written;
+see the comment edits below. That
 last one was found by a review from a fresh context, which drove Maven's own effective POM to
 confirm the encoded reference resolves. The pull request names every bump before any model-written line, and says the
 harness checked against the new version without reading what changed in it. The operator's
@@ -649,6 +651,40 @@ storebrand-digital/insurance-commerce-rest-api#1459 on 2026-09-24. `DEPENDENCY_B
 on by default by the operator's decision, and read through `flag()`. A Node repository has no
 counterpart: the lockfile a bump rewrites is one the pass cannot produce, which `PLAN.md` §54
 records.
+
+**A comment in `pom.xml` may change with a bump, or alone.** #1459's review asked for the stale
+`commons-lang` pin comment near `pom.xml:101`, "lisa-services-api 3.190 (latest)", to name 3.203,
+the version the pull request bumps to, and round 4's edit was refused with the whole round: the gate
+judges `pom.xml` against the pull request's base, so it saw the comment line beside the bump. The
+judge now cuts every comment out of both sides — exactly its own characters, `<!--` to `-->`, and no
+whitespace around it — and runs the line-by-line judgement above over what is left, so a change
+inside a comment never reaches it and everything outside one must still be byte-identical but for
+the versions allowed. The comments come from the same scan that reads the elements, which skips
+CDATA, processing instructions and quoted attribute values, so the two cannot disagree about where
+a comment is; the elements are translated into the cut text rather than scanned again, and every
+line a bump or a refusal names is the base file's own. A line holding nothing but a new comment, or
+a comment deleted with its line, changes the lines outside comments and is refused; so is an edit
+that closes a comment early and leaves markup behind it, and a `$Id` on either side, since a comment
+edit is now a way to add one. Maven 3.9.16 was driven against it: a reworded, rewrapped comment
+leaves the effective POM byte-identical, and at each boundary where this scan and XML could
+disagree — `--` inside a comment, a comment never closed, `<!--` inside an attribute value, `-->`
+inside a processing instruction — Maven refuses to read the file at all, so the build goes red
+rather than green. The same drive found a hole older than this change: Maven joins the text either
+side of a comment, so `$<!-- x -->{name}` interpolates, and a property search over the original text
+never saw that use. Property uses are now searched in both — the original, where a use inside a
+comment still refuses as it always did, and the cut text. Maven joins text across a CDATA section
+and a processing instruction the same way, which a review from a fresh context found and Maven's
+effective POM confirmed (`$<![CDATA[{name}]]>` and `$<?x y?>{name}` both resolve), so a property
+bump in a file holding either, bar the XML declaration, is refused like one holding a character
+reference: the reader does not place a use spelled through them. That closes the list: element text
+is split only by those, comments, references and child elements, and a child element drops the text
+around it rather than joining it. Driven live on #1459 round 6, 2026-09-24, from a local merge with
+`feat/review-repair` (this branch alone was not run against a real pull request): asked to correct
+that `pom.xml` comment, the round changed its one line, the gate passed it beside the pull
+request's own `lisa-services-api.version` bump, and it pushed as `3a6f897`. What stays
+open: anything that reads
+`pom.xml` as a file rather than as Maven's model, a plugin or a test, sees the edit, and nothing here
+knows of one.
 
 The gate is a backstop, not the only defence: `createWorktree` and `attachWorktree`
 (`worktree.ts`) call `CommandRunner.excludeAgentPaths` once the worktree exists, which lists
@@ -672,8 +708,8 @@ part it would be easy to stop at: knowing the base said `"test": "vitest run"` d
 command executes in a worktree where `package.json` now says something else, because the package
 manager reads the manifest on disk and not the one we consulted. So there are two halves, and the
 second is that verification **refuses to run at all** unless the files defining what passing means
-are still byte-identical to the base, but for a `pom.xml` whose change `dependency-bump.ts` judges a
-dependency version bump. That list and that exception are shared with the diff gate on purpose: the
+are still byte-identical to the base, but for a `pom.xml` whose change `dependency-bump.ts` judges
+nothing but dependency version bumps and comment edits. That list and that exception are shared with the diff gate on purpose: the
 gate refuses such a diff after the fact, this refuses to produce a verdict about it, and if either
 grows it grows for both.
 

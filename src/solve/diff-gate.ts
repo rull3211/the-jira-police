@@ -103,7 +103,7 @@ export type DiffVerdict =
       readonly ok: true;
       readonly files: number;
       readonly lines: number;
-      /** Every dependency version the diff moved; empty for a diff that touched no build file. */
+      /** Every dependency version the diff moved; empty when it moved none, a `pom.xml` whose comments alone changed included. */
       readonly bumps: readonly DependencyBump[];
     }
   | {
@@ -217,7 +217,7 @@ function match(rules: readonly Rule[], path: string): Rule | undefined {
   return rules.find((rule) => rule.pattern.test(path));
 }
 
-/** Whether only a dependency bump could excuse a change to this path, so its content must be read. */
+/** Whether only a dependency bump or a comment edit could excuse a change to this path, so its content must be read. */
 export function isDependencyBumpPath(path: string): boolean {
   return match(VERIFICATION_PATHS, path)?.unless === "dependency-bump";
 }
@@ -242,7 +242,7 @@ export function plannedPathRefusals(
       continue;
     }
     for (const rule of [match(VERIFICATION_PATHS, path), match(FORBIDDEN_PATHS, path)]) {
-      // A path alone cannot say whether its change will be a dependency bump, so that rule waits for the diff.
+      // A path alone cannot say whether its change will be a dependency bump or a comment edit, so that rule waits for the diff.
       if (rule !== undefined && (rule.unless === undefined || !allowExceptions)) {
         reasons.push(`${path}: ${rule.why}`);
       }
@@ -295,7 +295,7 @@ export function checkDiff(
       bumps.push(...bump.bumps);
     } else if (verification !== undefined) {
       reasons.push(
-        `${change.path}: ${verification.why}${bump === undefined ? "" : ` — and this change is more than a dependency version: ${bump.reason}`}`,
+        `${change.path}: ${verification.why}${bump === undefined ? "" : ` — and this change is more than a dependency version or a comment: ${bump.reason}`}`,
       );
     }
     const forbidden = match(FORBIDDEN_PATHS, change.path);

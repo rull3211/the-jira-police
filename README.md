@@ -773,7 +773,7 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none              |
 | `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed |
 | `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                 |
-| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change that only moves a dependency version. Only `true` arms it            |
+| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it              |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull

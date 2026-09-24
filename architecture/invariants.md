@@ -180,8 +180,9 @@ Things that look like details and are not:
     worth anything if the thing being verified cannot move the goalposts — and the harness reads
     its test, typecheck and lint commands out of the repository it is checking. So the diff gate
     refuses `package.json`, `tsconfig*.json` and the lint and test configs unconditionally, on a
-    change of any size. `pom.xml` is refused the same way except for one change decided from its
-    content, a dependency version bump — an operator's decision that trades some of this invariant
+    change of any size. `pom.xml` is refused the same way except for what its content shows to be
+    a dependency version bump or an edit to the text of a comment, which Maven never reads — the
+    bump is an operator's decision that trades some of this invariant
     for tickets that need a newer library, argued in `architecture/solve.md` §15. The reasoning generalises to anything later that discovers
     behaviour from data an agent can write: **discover from the pristine base, not from what the
     run produced**, and treat "the check passed" as meaningless until you know the check was the

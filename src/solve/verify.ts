@@ -4,7 +4,7 @@
  *
  * Commands are discovered from the base manifest (`git show <base>:package.json`), never the
  * worktree, and `verify` refuses to run unless `VERIFICATION_PATHS` are unchanged from the base but
- * for a dependency version bump `dependency-bump.ts` allows — see architecture/solve.md §15, which
+ * for the version bumps and comment edits `dependency-bump.ts` allows — see architecture/solve.md §15, which
  * also has why a base declaring both `package.json` and `pom.xml` is refused.
  */
 
@@ -135,7 +135,7 @@ export interface VerifyRequest {
   readonly baseRef: string;
   readonly stepTimeoutMs: number;
   readonly installTimeoutMs: number;
-  /** `DEPENDENCY_BUMPS`: whether a pom.xml changed only by a dependency bump may still be graded. Absent means no. */
+  /** `DEPENDENCY_BUMPS`: whether a pom.xml changed only by dependency bumps and comment edits may still be graded. Absent means no. */
   readonly dependencyBumps?: boolean;
 }
 

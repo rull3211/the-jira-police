@@ -314,13 +314,6 @@ describe("judgePomChange — what it refuses", () => {
     );
   });
 
-  it("refuses a change inside a comment rather than reading it as an element", () => {
-    const line = "        <version>0.1</version>";
-    expect(reasonOf(judge(changed(line, "        <version>0.2</version>")))).toContain(
-      "could not be placed",
-    );
-  });
-
   it("refuses when the base cannot be read, rather than guessing its structure", () => {
     const unbalanced = BASE.replace("    </properties>\n", "");
     expect(unbalanced).not.toBe(BASE);
@@ -355,6 +348,21 @@ describe("judgePomChange — what it refuses", () => {
         "<skipAfterFailureCount>&#36;{lisa-services-api.version}</skipAfterFailureCount>",
       );
       expect(reasonOf(bumpIn(base))).toContain("character references");
+    });
+
+    // Found by a review from a fresh context, and confirmed with Maven's effective POM: both resolve to 3.181.
+    it.each([
+      ["a CDATA section", "<argLine>$<![CDATA[{lisa-services-api.version}]]></argLine>"],
+      ["a processing instruction", "<argLine>$<?x y?>{lisa-services-api.version}</argLine>"],
+    ])("refuses a property bump when %s could spell the property's use", (_what, setting) => {
+      expect(reasonOf(bumpIn(withSurefire(setting)))).toContain(
+        "CDATA section or processing instruction",
+      );
+    });
+
+    it("still allows a property bump in a file whose only processing instruction is the XML declaration", () => {
+      expect(BASE.startsWith("<?xml ")).toBe(true);
+      expect(bumpIn(BASE)).toMatchObject({ ok: true });
     });
 
     it("counts surefire's late-bound @{name} as a use", () => {
@@ -415,6 +423,191 @@ describe("judgePomChange — what it refuses", () => {
 
   it("refuses a change to the final newline alone", () => {
     expect(judge(BASE.slice(0, -1)).ok).toBe(false);
+  });
+});
+
+/** BASE with a one-line comment above its properties, the shape of the pin comment on #1459. */
+const PINNED = BASE.replace(
+  "    <properties>\n",
+  "    <!-- commons-lang pinned: lisa-services-api 3.190 (latest) still uses it -->\n    <properties>\n",
+);
+
+const LISA = "        <lisa-services-api.version>3.181</lisa-services-api.version>";
+
+describe("judgePomChange — comments", () => {
+  const pinned = (current: string) => judgePomChange("pom.xml", { base: PINNED, current }, false);
+  const pinLine =
+    "    <!-- commons-lang pinned: lisa-services-api 3.190 (latest) still uses it -->";
+
+  it("allows an edit to a comment's text alone, and names no bump for it", () => {
+    const current = changed(pinLine, pinLine.replace("3.190", "3.203"), PINNED);
+    expect(pinned(current)).toEqual({ ok: true, bumps: [] });
+  });
+
+  it("allows a comment edit beside a version bump, as #1459's review asked, and places the bump on its base line", () => {
+    const edited = changed(pinLine, pinLine.replace("3.190", "3.203"), PINNED);
+    const current = changed(LISA, LISA.replace("3.181", "3.203"), edited);
+
+    expect(pinned(current)).toEqual({
+      ok: true,
+      bumps: [
+        {
+          path: "pom.xml",
+          line: PINNED.split("\n").indexOf(LISA) + 1,
+          property: "lisa-services-api.version",
+          dependencies: ["storebrand.lisa.services:lisa-services-api"],
+          from: "3.181",
+          to: "3.203",
+        },
+      ],
+    });
+  });
+
+  it("allows a comment rewrapped onto more lines, and still reports the bump below it on its base line", () => {
+    const rewrapped = changed(
+      pinLine,
+      [
+        "    <!--",
+        "        commons-lang pinned: lisa-services-api 3.203 (latest)",
+        "        still uses it, through its generated DO classes",
+        "    -->",
+      ].join("\n"),
+      PINNED,
+    );
+    const current = changed(LISA, LISA.replace("3.181", "3.203"), rewrapped);
+
+    expect(pinned(current)).toMatchObject({
+      ok: true,
+      bumps: [{ line: PINNED.split("\n").indexOf(LISA) + 1, to: "3.203" }],
+    });
+  });
+
+  it("allows a comment on the bumped version's own line to change with it", () => {
+    const base = changed(LISA, `${LISA} <!-- LISA-12: 3.181 -->`);
+    const current = changed(
+      `${LISA} <!-- LISA-12: 3.181 -->`,
+      `${LISA.replace("3.181", "3.203")} <!-- LISA-12: 3.203 -->`,
+      base,
+    );
+    expect(judgePomChange("pom.xml", { base, current }, false)).toMatchObject({
+      ok: true,
+      bumps: [{ line: lineOf(LISA), property: "lisa-services-api.version" }],
+    });
+  });
+
+  it("places a bump on its element's line when a comment spanning lines ends just before it", () => {
+    const line = "            <version>5.11.0</version>";
+    const base = changed(
+      line,
+      "            <!-- pinned for\n                 JDK 25 --><version>5.11.0</version>",
+    );
+    const current = base.replace("--><version>5.11.0<", "--><version>5.12.0<");
+    expect(judgePomChange("pom.xml", { base, current }, false)).toMatchObject({
+      ok: true,
+      bumps: [{ line: lineOf(line) + 1, from: "5.11.0", to: "5.12.0" }],
+    });
+  });
+
+  it("reads a change inside a comment as a comment edit, never as a version bump", () => {
+    const line = "        <version>0.1</version>";
+    expect(judge(changed(line, "        <version>0.2</version>"))).toEqual({ ok: true, bumps: [] });
+  });
+
+  it("refuses an edit that closes the comment early and leaves live XML behind it", () => {
+    const current = changed(
+      pinLine,
+      "    <!-- commons-lang pinned --> <maven.test.skip>true</maven.test.skip> <!-- 3.203 -->",
+      PINNED,
+    );
+    expect(reasonOf(pinned(current))).toContain(
+      `line ${String(PINNED.split("\n").indexOf(pinLine) + 1)} changes more than the value of one element`,
+    );
+  });
+
+  it("refuses a line that holds only a new comment, since the lines outside comments no longer match", () => {
+    const current = PINNED.replace("    <build>\n", "    <!-- new -->\n    <build>\n");
+    expect(reasonOf(pinned(current))).toContain("lines outside comments were added or removed");
+  });
+
+  it("refuses a whitespace change outside a comment", () => {
+    const current = changed("    <properties>", "  <properties>", PINNED);
+    expect(reasonOf(pinned(current))).toContain("changes more than the value of one element");
+  });
+
+  it("refuses a comment edit that adds a $Id keyword, which git can fill with text the diff never shows", () => {
+    const current = changed(pinLine, pinLine.replace("3.190", "$Id$"), PINNED);
+    expect(reasonOf(pinned(current))).toContain("$Id");
+  });
+
+  it("refuses a changed file whose comment is never closed", () => {
+    const current = changed(pinLine, "    <!-- commons-lang pinned: 3.203", PINNED);
+    expect(reasonOf(pinned(current))).toContain("the changed file could not be read as XML");
+  });
+
+  it("refuses a file that did not change at all, rather than allowing nothing", () => {
+    expect(reasonOf(judge(BASE))).toContain("nothing in the file changed");
+  });
+
+  describe("text that only looks like a comment", () => {
+    it("reads <!-- inside CDATA as text, so a change there is not a comment edit", () => {
+      const base = BASE.replace(
+        "    <properties>\n",
+        "    <description><![CDATA[ <!-- lisa 3.190 --> ]]></description>\n    <properties>\n",
+      );
+      const current = base.replace("<!-- lisa 3.190 -->", "<!-- lisa 3.203 -->");
+      expect(reasonOf(judgePomChange("pom.xml", { base, current }, false))).toContain(
+        "changes more than the value of one element",
+      );
+    });
+
+    it("places no element inside CDATA, even one shaped like a version", () => {
+      const base = BASE.replace(
+        "    <properties>\n",
+        "    <description><![CDATA[\n        <version>0.7</version>\n    ]]></description>\n    <properties>\n",
+      );
+      const current = base.replace("<version>0.7</version>", "<version>0.8</version>");
+      expect(reasonOf(judgePomChange("pom.xml", { base, current }, false))).toContain(
+        "could not be placed",
+      );
+    });
+
+    it("reads <!-- inside a quoted attribute as the attribute's text", () => {
+      const base = BASE.replace(
+        "    <properties>\n",
+        '    <marker note="<!-- 3.190 -->"/>\n    <properties>\n',
+      );
+      const current = base.replace('note="<!-- 3.190 -->"', 'note="<!-- 3.203 -->"');
+      expect(reasonOf(judgePomChange("pom.xml", { base, current }, false))).toContain(
+        "changes more than the value of one element",
+      );
+    });
+  });
+
+  describe("a property whose other use a comment touches", () => {
+    const bumpIn = (base: string) =>
+      judgePomChange(
+        "pom.xml",
+        { base, current: changed(LISA, LISA.replace("3.181", "3.203"), base) },
+        false,
+      );
+
+    it("still refuses a property bump when a comment names the property", () => {
+      const base = BASE.replace(
+        "    <properties>\n",
+        "    <!-- see ${lisa-services-api.version} -->\n    <properties>\n",
+      );
+      expect(reasonOf(bumpIn(base))).toContain("which is also used in project,");
+    });
+
+    it("refuses a property bump when a comment splits another use of it, which Maven joins and interpolates", () => {
+      const base = BASE.replace(
+        "                <version>3.2.5</version>\n",
+        "                <version>3.2.5</version>\n                <configuration>\n                    <argLine>$<!-- x -->{lisa-services-api.version}</argLine>\n                </configuration>\n",
+      );
+      expect(reasonOf(bumpIn(base))).toContain(
+        "project>build>plugins>plugin>configuration>argLine",
+      );
+    });
   });
 });
 
