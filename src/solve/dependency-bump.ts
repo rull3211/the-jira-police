@@ -1,13 +1,15 @@
 /**
- * Whether a change to a `pom.xml` is nothing but a dependency version bump — the one change to a
- * file that defines what passing means which a run may make. See architecture/solve.md §15.
+ * Whether a change to a `pom.xml` is nothing but dependency version bumps and edits to the text of
+ * its comments — the one change to a file that defines what passing means which a run may make.
+ * See architecture/solve.md §15.
  *
  * The diff gate and `verify`'s refusal to grade a changed build file both ask this module, so they
  * cannot disagree about which change is allowed; the plan check leaves `pom.xml` to them.
  *
  * Text, not an XML library: this project has no parser dependency. Where Maven would read the file
  * differently than this text does — an internal DTD subset, a character reference, an unbalanced
- * tag — the change is refused rather than guessed at.
+ * tag — the change is refused rather than guessed at. Comments are found by the same scan that reads
+ * the elements, so the two cannot disagree about where one ends.
  */
 
 import { isDependencyBumpPath } from "./diff-gate.ts";
@@ -65,8 +67,19 @@ interface ElementRecord {
   readonly chain: readonly string[];
   /** 0-based line of the start tag. */
   readonly line: number;
+  /** Offset of the start tag's `<`. */
+  readonly start: number;
   readonly contentStart: number;
   contentEnd: number;
+}
+
+/** `[start, end)` of one comment, its `<!--` and `-->` included. */
+type Span = readonly [start: number, end: number];
+
+interface PomScan {
+  readonly elements: readonly ElementRecord[];
+  /** In file order, so none overlaps the next. */
+  readonly comments: readonly Span[];
 }
 
 /** Index of the `>` closing the tag that opens at `lt`, skipping any inside a quoted attribute. */
@@ -87,13 +100,12 @@ function tagEnd(text: string, lt: number): number {
   return -1;
 }
 
-/** Every element and where its content sits, or `null` for anything this reader does not understand. */
-function scanElements(text: string): readonly ElementRecord[] | null {
+function lineIndex(text: string): (offset: number) => number {
   const newlines: number[] = [];
   for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) {
     newlines.push(index);
   }
-  const lineOf = (offset: number): number => {
+  return (offset) => {
     let low = 0;
     let high = newlines.length;
     while (low < high) {
@@ -106,12 +118,18 @@ function scanElements(text: string): readonly ElementRecord[] | null {
     }
     return low;
   };
+}
+
+/** Every element, where its content sits, and every comment, or `null` for anything this reader does not understand. */
+function scanPom(text: string): PomScan | null {
+  const lineOf = lineIndex(text);
   const after = (terminator: string, from: number): number => {
     const end = text.indexOf(terminator, from);
     return end === -1 ? -1 : end + terminator.length;
   };
 
   const records: ElementRecord[] = [];
+  const comments: Span[] = [];
   const open: ElementRecord[] = [];
   let cursor = 0;
   for (;;) {
@@ -121,6 +139,9 @@ function scanElements(text: string): readonly ElementRecord[] | null {
     }
     if (text.startsWith("<!--", lt)) {
       cursor = after("-->", lt + 4);
+      if (cursor !== -1) {
+        comments.push([lt, cursor]);
+      }
     } else if (text.startsWith("<![CDATA[", lt)) {
       cursor = after("]]>", lt);
     } else if (text.startsWith("<?", lt)) {
@@ -149,6 +170,7 @@ function scanElements(text: string): readonly ElementRecord[] | null {
         const record: ElementRecord = {
           chain: [...(open.at(-1)?.chain ?? []), name],
           line: lineOf(lt),
+          start: lt,
           contentStart: gt + 1,
           contentEnd: gt + 1,
         };
@@ -163,7 +185,60 @@ function scanElements(text: string): readonly ElementRecord[] | null {
       return null;
     }
   }
-  return open.length === 0 ? records : null;
+  return open.length === 0 ? { elements: records, comments } : null;
+}
+
+/** A file with its comments cut out: what Maven reads, since it joins the text either side of one. */
+interface Bare {
+  readonly text: string;
+  /** Per line of `text`: the 0-based line of the original holding its first non-blank character. */
+  readonly lines: readonly number[];
+  /** The original's elements, in the same order, at their offsets and lines in `text`. */
+  readonly elements: readonly ElementRecord[];
+}
+
+/**
+ * Cuts each comment out whole and nothing around it, so no text outside a comment changes unseen.
+ * Elements are translated, not rescanned: cutting a comment the scan found moves nothing else it read.
+ */
+function withoutComments(text: string, scan: PomScan): Bare {
+  const pieces: string[] = [];
+  const origins: number[] = [];
+  let from = 0;
+  for (const [start, end] of [...scan.comments, [text.length, text.length] as const]) {
+    pieces.push(text.slice(from, start));
+    for (let offset = from; offset < start; offset += 1) {
+      origins.push(offset);
+    }
+    from = end;
+  }
+  const bare = pieces.join("");
+
+  const lineOf = lineIndex(text);
+  const lines: number[] = [];
+  let lineStart = 0;
+  for (const line of bare.split("\n")) {
+    const lead = line.length - line.trimStart().length;
+    const origin = origins[lineStart + (lead < line.length ? lead : 0)];
+    lines.push(lineOf(origin ?? text.length));
+    lineStart += line.length + 1;
+  }
+
+  // Never called on an offset inside a comment: every one it gets is a tag's edge.
+  const shift = (offset: number): number =>
+    scan.comments.reduce(
+      (cut, [start, end]) => (end <= offset ? cut - (end - start) : cut),
+      offset,
+    );
+  const bareLineOf = lineIndex(bare);
+  const elements = scan.elements.map((element) => ({
+    chain: element.chain,
+    line: bareLineOf(shift(element.start)),
+    start: shift(element.start),
+    contentStart: shift(element.contentStart),
+    contentEnd: shift(element.contentEnd),
+  }));
+  return { text: bare, lines, elements };
 }
 
 /** The deepest element whose content holds `offset`. */
@@ -281,23 +356,57 @@ export function textsFromFullDiff(diff: string): PomTexts | string {
   };
 }
 
+/** A text and the elements scanned from it, at offsets into that text. */
+interface View {
+  readonly text: string;
+  readonly elements: readonly ElementRecord[];
+}
+
+/** Where `name` is used other than as the whole of a dependency's `<version>`, or `null` when it is not. */
+function strayUse(view: View, name: string): string | null {
+  for (const offset of referencesTo(view.text, name)) {
+    const user = enclosing(view.elements, offset);
+    const used = user === undefined ? "" : user.chain.join(">");
+    const whole =
+      user !== undefined &&
+      view.text.slice(user.contentStart, user.contentEnd).trim() === `\${${name}}`;
+    if (user === undefined || !DEPENDENCY_VERSION_CHAINS.has(used) || !whole) {
+      return used === "" ? "outside any element" : `in ${used}`;
+    }
+  }
+  return null;
+}
+
 /**
  * The judgement itself, pure. `otherPoms` refuses a property bump when another `pom.xml` in the
  * repository could use the same property, since only this file is read.
  */
 export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean): BumpVerdict {
-  const baseLines = texts.base.split("\n");
-  const currentLines = texts.current.split("\n");
-  if (baseLines.length !== currentLines.length) {
-    return refuse("lines were added or removed, and only a version value may change");
-  }
-  const records = scanElements(texts.base);
-  if (records === null) {
+  const baseScan = scanPom(texts.base);
+  if (baseScan === null) {
     return refuse("the base file could not be read as XML");
   }
-  // Under git's `ident` attribute, text inside `$Id: … $` never reaches the diff this judgement is made from.
-  if (texts.base.includes("$Id")) {
+  const currentScan = scanPom(texts.current);
+  if (currentScan === null) {
+    return refuse("the changed file could not be read as XML");
+  }
+  // Under git's `ident` attribute, text inside `$Id: … $` never reaches the diff this judgement is made from — and a comment edit can add one.
+  if (texts.base.includes("$Id") || texts.current.includes("$Id")) {
     return refuse("the file holds a $Id keyword, and git can hide text from the diff inside one");
+  }
+  if (texts.base === texts.current) {
+    return refuse("nothing in the file changed, so there is no change to allow");
+  }
+
+  // Comments are judged by leaving them out: a change inside one never reaches the loop below.
+  const base = withoutComments(texts.base, baseScan);
+  const current = withoutComments(texts.current, currentScan);
+  const baseLines = base.text.split("\n");
+  const currentLines = current.text.split("\n");
+  if (baseLines.length !== currentLines.length) {
+    return refuse(
+      "lines outside comments were added or removed, and outside a comment only a version value may change",
+    );
   }
 
   const bumps: DependencyBump[] = [];
@@ -306,7 +415,7 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
     if (before === after) {
       continue;
     }
-    const line = index + 1;
+    const line = (base.lines[index] ?? index) + 1;
     const was = ONE_ELEMENT_LINE.exec(before);
     const now = ONE_ELEMENT_LINE.exec(after);
     if (
@@ -330,7 +439,9 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
       return refuse(`line ${String(line)} moves to ${to}, which can change after review`);
     }
 
-    const element = records.find((record) => record.line === index && record.chain.at(-1) === name);
+    const element = base.elements.find(
+      (record) => record.line === index && record.chain.at(-1) === name,
+    );
     if (element === undefined) {
       return refuse(`line ${String(line)} could not be placed in the file's structure`);
     }
@@ -341,7 +452,7 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
         path,
         line,
         property: null,
-        dependencies: [coordinatesOf(records, element, texts.base)],
+        dependencies: [coordinatesOf(base.elements, element, base.text)],
         from,
         to,
       });
@@ -357,7 +468,7 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
       );
     }
     // A parent reads the properties its children set, and a module's POM need not be named pom.xml; neither is in this file.
-    const outside = records.find((record) =>
+    const outside = base.elements.find((record) =>
       ["project>parent", "project>modules"].includes(record.chain.join(">")),
     );
     if (outside !== undefined) {
@@ -371,31 +482,24 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
         `line ${String(line)} changes the property ${name}, in a file with character references this reader does not decode`,
       );
     }
-    const references = referencesTo(texts.base, name);
-    if (references.length === 0) {
+    if (referencesTo(texts.base, name).length === 0) {
       // Nothing in the file names it, which is exactly how a property only a plugin reads looks.
       return refuse(`line ${String(line)} changes the property ${name}, which nothing here uses`);
     }
-    const dependencies: string[] = [];
-    for (const offset of references) {
-      const user = enclosing(records, offset);
-      const used = user === undefined ? "" : user.chain.join(">");
-      const whole =
-        user === undefined
-          ? ""
-          : texts.base.slice(user.contentStart, user.contentEnd).trim() === `\${${name}}`;
-      if (user === undefined || !DEPENDENCY_VERSION_CHAINS.has(used) || !whole) {
+    // The original still refuses a use inside a comment; the bare text catches `$<!-- -->{name}`, which Maven joins and interpolates.
+    for (const view of [{ text: texts.base, elements: baseScan.elements }, base]) {
+      const stray = strayUse(view, name);
+      if (stray !== null) {
         return refuse(
-          `line ${String(line)} changes the property ${name}, which is also used ${used === "" ? "outside any element" : `in ${used}`}, not only as a dependency version`,
+          `line ${String(line)} changes the property ${name}, which is also used ${stray}, not only as a dependency version`,
         );
       }
-      dependencies.push(coordinatesOf(records, user, texts.base));
     }
+    const dependencies = referencesTo(base.text, name).flatMap((offset) => {
+      const user = enclosing(base.elements, offset);
+      return user === undefined ? [] : [coordinatesOf(base.elements, user, base.text)];
+    });
     bumps.push({ path, line, property: name, dependencies, from, to });
-  }
-
-  if (bumps.length === 0) {
-    return refuse("no version changed, so the change is something else");
   }
   return { ok: true, bumps };
 }
@@ -407,8 +511,8 @@ export interface BumpRequest {
 }
 
 /**
- * Judges every changed path that only a dependency bump could excuse; every other path is absent
- * from the answer. Anything that cannot be read is refused, never assumed to be a bump.
+ * Judges every changed path that only a dependency bump or a comment edit could excuse; every other
+ * path is absent from the answer. Anything that cannot be read is refused, never assumed allowed.
  */
 export async function judgeBumps(
   runner: CommandRunner,

@@ -206,7 +206,7 @@ describe("checkDiff — the dependency-bump exception", () => {
     );
 
     expect(verdict.ok ? "" : verdict.reasons.join("\n")).toBe(
-      "pom.xml: the Maven build is defined here — a skipped test, a dropped module or a relaxed plugin makes the build pass without making the code correct — and this change is more than a dependency version: line 7 is project>parent>version",
+      "pom.xml: the Maven build is defined here — a skipped test, a dropped module or a relaxed plugin makes the build pass without making the code correct — and this change is more than a dependency version or a comment: line 7 is project>parent>version",
     );
   });
 

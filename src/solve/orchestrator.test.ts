@@ -866,7 +866,7 @@ describe("solveTicket, and a dependency version bump", () => {
     expect(outcome).toMatchObject({
       kind: "refused",
       stage: "diff-gate",
-      reasons: [expect.stringContaining("more than a dependency version")],
+      reasons: [expect.stringContaining("more than a dependency version or a comment")],
     });
   });
 
