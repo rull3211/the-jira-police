@@ -78,10 +78,38 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §57. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §62. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
+
+### 61. A `pom.xml` edit that only touches a comment is refused like any other build change
+
+**Branch:** feat/pom-comment-edits
+
+**What is being attempted.** `dependency-bump.ts` allows a changed `pom.xml` only when every
+changed line moves one dependency version. This entry lets it also allow a change to the text of
+XML comments, alone or alongside those version moves: outside comments the file stays
+byte-identical except for the versions already allowed. The comment boundaries come from the same
+scanner that reads the elements, so the two cannot disagree about where a comment is.
+
+**Why now.** #1459 in `storebrand-digital/insurance-commerce-rest-api`: Jacob Biørn's review asked
+for the stale `commons-lang` pin comment near `pom.xml:101`, "lisa-services-api 3.190 (latest)", to
+say 3.203 — the version the pull request bumps to. Round 4 made that edit along with his other
+fixes, and the gate refused the whole round over it: the gate judges `pom.xml` against the pull
+request's base, so it saw the pull request's own `lisa-services-api.version` bump and the comment
+edit together, and a comment line is not a version line. Keeping a comment true to the version
+beside it is exactly the edit a reviewer should be able to ask for.
+
+**What it would let the service do.** Answer a review that asks for a `pom.xml` comment to be
+corrected, and keep a comment beside a version it bumps accurate, where today either one discards
+the run.
+
+**What would make it the wrong idea.** Anything in the build reading comment text — Maven discards
+comments when it reads the model, but a plugin or a test that reads `pom.xml` as a file would see
+the edit. Or the scanner disagreeing with Maven about where a comment starts and ends: text the
+scanner calls a comment that Maven reads as markup would let a real build change through as a
+comment edit.
 
 ### 56. Documents outside this file still say a declined run leaves the board as it found it
 
