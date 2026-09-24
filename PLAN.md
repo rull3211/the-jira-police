@@ -55,8 +55,8 @@ citing them.** A catalogue of deleted sections dangles by construction — the t
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
 
-**Each of them shipped and was deleted, except as noted here.** `git log -- PLAN.md` holds every
-entry and the commit that deleted it, so what follows is only what that history cannot say alone.
+**Each of them shipped and was deleted, except as noted here.** For the rest, `git log -- PLAN.md`
+holds the entry and the commit that deleted it, so what follows is only what that history cannot say.
 
 - **§29 did not ship.** It was the handed-off unsubscribe, deleted when the operator deferred it. The
   decision it recorded — unsubscribe rather than a quiet state, chosen knowing it is one-way —
@@ -68,17 +68,47 @@ entry and the commit that deleted it, so what follows is only what that history 
   already named §40, and closed in `82d6079`, a deletion-only commit that removed the §38 and §40
   entries without adding either to this list. Both numbers had been picked by reading the last
   heading rather than this line.
-- **No revision ever held §50.** It entered this list in `6e78ce7`, the fix for a literal `""` in a
-  recon field, with no entry committed before it; the work shipped, and its plan was never written
-  down where a commit could keep it.
+- **No revision reachable by `git log --all` holds §30, §36, §42, §43 or §50 as a heading**, so for
+  these five the history has no entry to show. §30 was the daemon check and the rule it put in
+  `STARTING.md`; §36 was `branch-stack.sh` counting commit identity instead of commit content; §42
+  routed every non-`verified`, non-`escaped` outcome to `agent:failed`; §43 had every worktree's
+  `.git/info/exclude` list `.claude/` and `.storecode/`; §50 was the fix for a literal `""` in a
+  recon field, `6e78ce7`.
 - **§24 is absent from the list and is not a hole** — it was skipped rather than spent, for the
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
 The next entry is §55. The pointer is a per-branch guess: two branches open at once each read it
-from their own base, so check `git log --all -- PLAN.md` before taking a number.
+from their own base.
 
 <!-- refs:on -->
+
+### 56. Documents outside this file still say a declined run leaves the board as it found it
+
+**Branch:** none yet.
+
+**What is not built.** The correction of statements that the 2026-09-24 read of this file found false
+elsewhere and left alone, because each rewords an invariant, an architecture argument or a house
+rule rather than a plan:
+
+- `architecture/invariants.md` invariant 14 says a crash, a bail, a failed verification and a
+  refused push "leave the board exactly as they found it". Since `65a9143`, `terminalLabelAfter`
+  gives every outcome but `verified` and `escaped` the `agent:failed` label, which the solve queue
+  excludes.
+- `architecture/overview.md`'s failure table, and the paragraph under it that opens "Three outcomes
+  deliberately write no terminal label", say the same of `refused`, `failed` and a transient
+  `abandoned`.
+- `architecture/module-map.md` and `daemon:status`'s message say the skill root is staged per pass;
+  `prepareSkillRoot` runs once per run or round.
+- In the house rules, which change only by proposal: `INCIDENTS.md`'s "Thirty-nine citations to
+  sections that were never written", and the example `STARTING.md` draws from it, rest on the
+  reading §14 held until today, that the dangling sites were never written. 23 of the 40 were
+  `PLAN.md` headings that `96998cc` deleted. §14's own heading still says it.
+
+**What would make it the wrong idea.** The overview paragraph is the argument the attempt ledger
+exists for: those outcomes release the ticket unlabelled, so something has to count claims. If every
+one of them is labelled now, the ledger's reason may have gone with the sentence, and the fix is a
+design question rather than a wording one.
 
 ### 55. This file describes some things that are built, and cites lines that have moved
 
@@ -610,10 +640,8 @@ not a plan item. What is left below is only what is still missing.
 **A checklist item that cannot be satisfied by the check a reader would reach for.** _"Any merged
 branch deleted, including the local ref"_ — the mechanical way to find one is `git branch --merged`,
 which is **blind to every squash- and rebase-merged branch**. `chore/agent-guardrails` had an
-identical patch-id and tree to `6a8cba7` and `--merged` could not see it, so it needed `-D`; on
-2026-09-24 `fix/worktree-rule-and-guard-scope`, which landed rebased as `57f6923` and `d0295b6`, was
-listed as merged and would have been refused by `-d`. That is how these accumulate, and it is two
-instances of a possible rule rather than a rule.
+identical patch-id and tree to `6a8cba7` and `--merged` could not see it, so it needed `-D`. That is how
+these accumulate, and it is one instance of a possible rule rather than a rule.
 
 **What would make this the wrong idea.** Every item above is a check on documents, and this
 repository's own evidence is that checks on documents catch less than driving a command does. The
@@ -653,9 +681,8 @@ without requiring the constant to be falsified first.** That flag is not built.
 **40 dangling `§N` citations**, regenerated from the checker on 2026-09-18 rather than searched for.
 The first diagnosis — that this file's own deletions stranded them — was right for 23 of them, and
 this entry said the opposite until 2026-09-24. `§3a`, `§5b`, `§6.1`, `§6.1c`, `§6.2` and `§6.3` were
-`PLAN.md` headings until `96998cc` deleted them on 2026-09-08. A search of the history for the token
-as cited, `§3a`, finds only this entry's own write-ups, because the headings were written `#### 3a.`.
-Only `§7b`, `§7c`, `§3c` and `§24` were never written down anywhere. `architecture/overview.md:200`
+`PLAN.md` headings until `96998cc` deleted them on 2026-09-08, written `#### 3a.`, without the `§` a
+citation uses. Only `§7b`, `§7c`, `§3c` and `§24` were never written down anywhere. `architecture/overview.md:200`
 says "See PLAN.md §5b", the one citation naming its target, and the name was right: the deleted §5b
 argued for the `PreToolUse` hook that sentence is about. `architecture/overview.md:356` cites `§24`
 in a document whose own headings stop well short of it.
@@ -741,8 +768,8 @@ table was written against `ARCHITECTURE.md` before it was split into `architectu
 which is the argument for not keeping it by hand.
 
 Dangling, grouped by the token they cite. `§7b`, `§7c`, `§3c` and `§24` have never been a heading
-anywhere; the rest were `PLAN.md` headings until `96998cc`, and `§12` still is one in
-`architecture/triage.md`:
+anywhere. The rest were `PLAN.md` headings — `§12` until `2531bbb`, the others until `96998cc` — and
+`§12` is still one in `architecture/triage.md`:
 
 | token   | sites                                                                                                                                                                                  |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
