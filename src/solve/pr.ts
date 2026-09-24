@@ -1498,9 +1498,9 @@ const TRUNCATION_NOTE = `\n\n[Feedback truncated at ${String(MAX_FEEDBACK_CHARS)
 /**
  * Renders review comments as a plain-text block for the next model pass.
  *
- * Plain text, not JSON or markdown, since either structured format would
- * invite the reader to trust structure that untrusted comment bodies can
- * forge; the `---` delimiters are a debugging aid only. The count is in the
+ * Plain text, not JSON or markdown, which would invite trusting structure a
+ * body can forge; a body can forge a whole `---` header, but not the member
+ * label's per-round token, minted after it was written. The count is in the
  * header so a truncated block still says how much of the total it holds.
  */
 export function formatReviewFeedback(

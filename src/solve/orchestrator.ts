@@ -1658,7 +1658,11 @@ async function runReviewRound(
     if (refusal !== null) {
       return refusal;
     }
-    log.info("solve.review.widened", { issueKey, files: report.widened.length });
+    // Each entry rather than a count: this line is the harness's only record of a change beyond the ticket, and on whose word.
+    log.info("solve.review.widened", {
+      issueKey,
+      widened: report.widened.map(({ path, requestedBy, what }) => ({ path, requestedBy, what })),
+    });
   }
 
   const diffText = await readNumstat(
