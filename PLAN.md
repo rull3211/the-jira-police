@@ -5,7 +5,7 @@
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
 > ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
 > and staged images its own abandoned runs left behind, and renders its log to a reader.
-> **3033 tests in 95 files**, no build step.
+> **3039 tests in 95 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -289,7 +289,7 @@ own global CLI setting, `opusplan`, which is Opus only in plan mode — inferred
 effect is measured: recon and fix passes mostly stopped opening `SOLVE_INSTRUCTIONS.md` — 2 of the
 34 run from 2026-09-21 to SSX-3918's failure on 2026-09-24, against nearly every one before — so
 its proceed criteria and the gate's path list stopped reaching the model, and SSX-3918 paid a fix
-pass for a `pom.xml` edit the gate was always going to refuse.
+pass for a `pom.xml` edit the gate then refused unconditionally.
 "Unset means today's behaviour" below is a behaviour nobody in this repository controls.
 
 **Where a cheaper model is safe is decided by the gate, not by the price.** The rule: downgrade

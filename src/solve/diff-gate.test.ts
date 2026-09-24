@@ -327,6 +327,7 @@ describe("plannedPathRefusals", () => {
     const samples = [
       ".git/config",
       ".github/workflows/ci.yml",
+      "src/.gitattributes",
       ".circleci/config.yml",
       "Jenkinsfile",
       ".env.local",

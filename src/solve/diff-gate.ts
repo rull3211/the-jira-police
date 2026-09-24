@@ -47,6 +47,10 @@ export const FORBIDDEN_PATHS: readonly Rule[] = [
     why: "CI configuration — same reasoning as .github",
   },
   {
+    pattern: /(^|\/)\.gitattributes$/u,
+    why: "git attributes decide what git reports about every other file — the `ident` filter alone hides text from the very diff this gate reads",
+  },
+  {
     pattern: /(^|\/)\.env($|\.)/u,
     why: "environment files hold credentials; nothing this service does requires editing one",
   },

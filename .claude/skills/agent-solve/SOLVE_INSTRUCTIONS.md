@@ -580,6 +580,8 @@ Refused on any change of any size, whatever else the ticket asks for.
   rather than code
 - `.circleci/config.yml`, `.gitlab-ci.yml`, `.travis.yml`, `Jenkinsfile`, `azure-pipelines.yml` —
   CI configuration, for the same reason
+- `.gitattributes` — it decides what git reports about every other file, so a change to it can
+  hide text from the diff the gate reads
 - `.env`, `.env.local` — environment files hold credentials, and nothing you are asked to do
   requires editing one
 - `.claude/settings.json`, `.storecode/config.json` — the agent's own instructions, skills and
@@ -596,7 +598,8 @@ Refused on any change of any size, whatever else the ticket asks for.
   element directly inside a dependency, or a property used nowhere but as such versions — is
   allowed, and the pull request names it. Plugin, parent and profile versions, a version that ends
   in SNAPSHOT, a new dependency, and any other line of the file stay refused, and so does a
-  property bump in a file that has a parent or sits beside another pom.xml; bump the dependency's
+  property bump in a file that has a parent, declares modules or holds a character reference, or
+  in a repository with any other pom.xml; bump the dependency's
   own version element there instead.
 
 **This list is complete about the gate, and about nothing else.** It is not a list of everything you

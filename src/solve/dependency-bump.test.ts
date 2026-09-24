@@ -335,6 +335,84 @@ describe("judgePomChange — what it refuses", () => {
     expect(judgePomChange("pom.xml", { base: subset, current: withSubset }, false).ok).toBe(false);
   });
 
+  describe("where Maven would read the file differently than this text does", () => {
+    const line = "        <lisa-services-api.version>3.181</lisa-services-api.version>";
+    const bumpIn = (base: string) =>
+      judgePomChange(
+        "pom.xml",
+        { base, current: changed(line, line.replace("3.181", "3.203"), base) },
+        false,
+      );
+    const withSurefire = (setting: string) =>
+      BASE.replace(
+        "                <version>3.2.5</version>\n",
+        `                <version>3.2.5</version>\n                <configuration>\n                    ${setting}\n                </configuration>\n`,
+      );
+
+    it("refuses a property bump when a character reference could spell the property's use", () => {
+      // Found by a review from a fresh context: Maven decodes &#36; to $ before it interpolates.
+      const base = withSurefire(
+        "<skipAfterFailureCount>&#36;{lisa-services-api.version}</skipAfterFailureCount>",
+      );
+      expect(reasonOf(bumpIn(base))).toContain("character references");
+    });
+
+    it("counts surefire's late-bound @{name} as a use", () => {
+      const base = withSurefire("<argLine>@{lisa-services-api.version}</argLine>");
+      expect(reasonOf(bumpIn(base))).toContain(
+        "project>build>plugins>plugin>configuration>argLine",
+      );
+    });
+
+    it("refuses a property bump in a pom that declares modules, whose files need not be named pom.xml", () => {
+      const base = BASE.replace(
+        "    <properties>\n",
+        "    <modules>\n        <module>child</module>\n    </modules>\n    <properties>\n",
+      );
+      expect(reasonOf(bumpIn(base))).toContain("modules could use it too");
+      const literal = changed(
+        "            <version>5.11.0</version>",
+        "            <version>5.12.0</version>",
+        base,
+      );
+      expect(judgePomChange("pom.xml", { base, current: literal }, false).ok).toBe(true);
+    });
+
+    it("refuses any bump in a file holding a $Id keyword, which git can fill with text the diff never shows", () => {
+      const base = BASE.replace("    <!--\n", "    <!-- $Id$ -->\n    <!--\n");
+      const literal = changed(
+        "            <version>5.11.0</version>",
+        "            <version>5.12.0</version>",
+        base,
+      );
+      expect(reasonOf(judgePomChange("pom.xml", { base, current: literal }, false))).toContain(
+        "$Id",
+      );
+    });
+  });
+
+  it("reads a quoted > inside an attribute as part of the attribute", () => {
+    // Without quote handling this self-closing tag reads as an element that is never closed.
+    const base = BASE.replace("    <properties>\n", '    <marker note=">"/>\n    <properties>\n');
+    const line = "            <version>5.11.0</version>";
+    const current = changed(line, "            <version>5.12.0</version>", base);
+    expect(judgePomChange("pom.xml", { base, current }, false).ok).toBe(true);
+  });
+
+  it("refuses a base whose close tag names a different element, or that never closes one", () => {
+    const line = "            <version>5.11.0</version>";
+    for (const base of [
+      BASE.replace("    </dependencyManagement>\n", "    </dependencies>\n"),
+      BASE.replace("</project>\n", ""),
+    ]) {
+      expect(base).not.toBe(BASE);
+      const current = changed(line, "            <version>5.12.0</version>", base);
+      expect(reasonOf(judgePomChange("pom.xml", { base, current }, false))).toContain(
+        "could not be read as XML",
+      );
+    }
+  });
+
   it("refuses a change to the final newline alone", () => {
     expect(judge(BASE.slice(0, -1)).ok).toBe(false);
   });

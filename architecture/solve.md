@@ -561,24 +561,31 @@ of that run's passes — `PLAN.md` §1 has how rarely it has been opened since t
 diff can show whether its change is the one exception below.
 
 **The one exception: a dependency version bump in `pom.xml`.** `dependency-bump.ts` judges a
-changed `pom.xml` from its content, and the gate, `verify`'s refusal to grade a changed build file,
-and the plan check all ask it, so the three cannot disagree. It reads the whole file on both sides
-from one `git diff --unified=1000000 --no-ext-diff --no-textconv` — one hunk holding the file, with
-no external diff driver deciding what it says — and allows a change only when every changed line
-is one element whose value moved from one version to another: a `<version>` directly inside a
-dependency under `<dependencies>` or `<dependencyManagement>`, or a property under `<properties>`
-that the file uses somewhere, and nowhere but as the whole of such a `<version>`. Everything else
-is refused, each for a reason: plugin, parent and profile versions, and a dependency inside a
-plugin, because each changes the build rather than the code; a property nothing names, because
-that is exactly how a setting only a plugin reads looks; a value that does not start with a digit,
-so a `maven.test.skip` cannot be flipped to `true` on this path; a `SNAPSHOT` target, which can
-change after review; any line added or removed; and a property bump in a repository with a second
-`pom.xml`, or in a `pom.xml` that declares a `<parent>`, since only this file is read and a parent
-reads the properties its children set, plugin versions included. That last rule came from running
-the judge against the real SSX-3918 base: it allowed a `jackson.version` bump because this file
-uses the property once, which is only sound because this file has no parent. The reader is text, not an XML library — this project has
-no parser dependency — and it refuses what it cannot follow, such as an internal DTD subset,
-rather than guessing. The pull request names every bump before any model-written line, and says the
+changed `pom.xml` from its content, and the gate and `verify`'s refusal to grade a changed build
+file both ask it, so the two cannot disagree; the plan check leaves `pom.xml` to them. It reads the
+whole file on both sides from one `git diff --unified=1000000 --no-ext-diff --no-textconv` — one
+hunk holding the file, with no external diff driver deciding what it says, and `.gitattributes` is
+a refused path because git's own `ident` attribute can hide text inside a `$Id: … $` from that
+diff — and allows a change only when every changed line is one element whose value moved from one
+version to another: a `<version>` directly inside a dependency under `<dependencies>` or
+`<dependencyManagement>`, or a property under `<properties>` that the file uses somewhere, and
+nowhere but as the whole of such a `<version>` (surefire's late-bound `@{name}` counts as a use).
+Everything else is refused, each for a reason: plugin, parent and profile versions, and a
+dependency inside a plugin, because each changes the build rather than the code; a property nothing
+names, because that is exactly how a setting only a plugin reads looks; a value that does not start
+with a digit, so a `maven.test.skip` cannot be flipped to `true` on this path; a `SNAPSHOT` target,
+which can change after review; any line added or removed; any bump in a file holding a `$Id`
+keyword; and a property bump in a repository with a second `pom.xml`, or in a `pom.xml` that
+declares a `<parent>` or `<modules>`, since only this file is read — a parent reads the properties
+its children set, plugin versions included, and a module's POM need not be named `pom.xml`. The
+parent rule came from running the judge against the real SSX-3918 base: it allowed a
+`jackson.version` bump because this file uses the property once, which is only sound because this
+file has no parent. The reader is text, not an XML library — this project has no parser dependency
+— so wherever Maven would read the file differently than the text does, the change is refused
+rather than guessed at: an internal DTD subset, an unbalanced tag, and, for a property bump, any
+character reference, since Maven decodes `&#36;{name}` to a use the text search cannot see. That
+last one was found by a review from a fresh context, which drove Maven's own effective POM to
+confirm the encoded reference resolves. The pull request names every bump before any model-written line, and says the
 harness checked against the new version without reading what changed in it. The operator's
 position, taken as given: bumping a dependency to get what a ticket needs is ordinary work. What it
 costs: a bump is code nobody in the repository wrote, and a test-scope dependency is part of what

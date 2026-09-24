@@ -2,11 +2,12 @@
  * Whether a change to a `pom.xml` is nothing but a dependency version bump — the one change to a
  * file that defines what passing means which a run may make. See architecture/solve.md §15.
  *
- * The diff gate, `verify`'s refusal to grade a changed build file, and the plan check all ask this
- * module, so the three cannot disagree about which change is allowed.
+ * The diff gate and `verify`'s refusal to grade a changed build file both ask this module, so they
+ * cannot disagree about which change is allowed; the plan check leaves `pom.xml` to them.
  *
- * Text, not an XML library: this project has no parser dependency. The reader refuses anything it
- * does not understand — a DOCTYPE with an internal subset, an unbalanced tag — rather than guess.
+ * Text, not an XML library: this project has no parser dependency. Where Maven would read the file
+ * differently than this text does — an internal DTD subset, a character reference, an unbalanced
+ * tag — the change is refused rather than guessed at.
  */
 
 import { isDependencyBumpPath } from "./diff-gate.ts";
@@ -198,14 +199,15 @@ function coordinatesOf(
   return `${child("groupId")}:${child("artifactId")}`;
 }
 
-/** Offsets of every `${name}` in the text, comments included. */
+/** Offsets of every `${name}`, and surefire's late-bound `@{name}`, in the text, comments included. */
 function referencesTo(text: string, name: string): readonly number[] {
-  const needle = `\${${name}}`;
   const found: number[] = [];
-  for (let index = text.indexOf(needle); index !== -1; index = text.indexOf(needle, index + 1)) {
-    found.push(index);
+  for (const needle of [`\${${name}}`, `@{${name}}`]) {
+    for (let index = text.indexOf(needle); index !== -1; index = text.indexOf(needle, index + 1)) {
+      found.push(index);
+    }
   }
-  return found;
+  return found.toSorted((left, right) => left - right);
 }
 
 /**
@@ -293,6 +295,10 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
   if (records === null) {
     return refuse("the base file could not be read as XML");
   }
+  // Under git's `ident` attribute, text inside `$Id: … $` never reaches the diff this judgement is made from.
+  if (texts.base.includes("$Id")) {
+    return refuse("the file holds a $Id keyword, and git can hide text from the diff inside one");
+  }
 
   const bumps: DependencyBump[] = [];
   for (const [index, before] of baseLines.entries()) {
@@ -350,10 +356,19 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
         `line ${String(line)} changes the property ${name}, and another pom.xml here could use it too`,
       );
     }
-    // A parent reads the properties its children set, plugin versions included, and it is not in this file.
-    if (records.some((record) => record.chain.join(">") === "project>parent")) {
+    // A parent reads the properties its children set, and a module's POM need not be named pom.xml; neither is in this file.
+    const outside = records.find((record) =>
+      ["project>parent", "project>modules"].includes(record.chain.join(">")),
+    );
+    if (outside !== undefined) {
       return refuse(
-        `line ${String(line)} changes the property ${name}, and this pom's parent could use it too`,
+        `line ${String(line)} changes the property ${name}, and this pom's ${outside.chain.at(-1) ?? ""} could use it too`,
+      );
+    }
+    // A character reference is decoded before Maven interpolates, so `&#36;{name}` is a use this text search cannot see.
+    if (texts.base.includes("&#")) {
+      return refuse(
+        `line ${String(line)} changes the property ${name}, in a file with character references this reader does not decode`,
       );
     }
     const references = referencesTo(texts.base, name);

@@ -102,7 +102,7 @@ inheritance.
 | `src/solve/passes.ts`          | The real `PassRunner`. Working directory is the worktree; no MCP server required                                                                        |
 | `src/solve/exec.ts`            | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                                                                 |
 | `src/solve/diff-gate.ts`       | The bound on what a solve run may have changed. Pure — no git, no fs                                                                                    |
-| `src/solve/dependency-bump.ts` | Whether a changed `pom.xml` is only a dependency version bump: the diff gate's one exception, asked by the gate, `verify` and the plan check alike      |
+| `src/solve/dependency-bump.ts` | Whether a changed `pom.xml` is only a dependency version bump: the diff gate's one exception, asked by the gate and `verify` alike                      |
 | `src/solve/escape.ts`          | Notices when a pass wrote somewhere it was never meant to reach                                                                                         |
 | `src/solve/verify.ts`          | Mechanical verification. `passed` / `failed` / `refused`, never collapsed. Plus `checkFailFirst`                                                        |
 | `src/solve/orchestrator.ts`    | The sequence: worktree → recon → plan check → fix → simplify → gate → verify. `resolveReview`'s round-trip lives here too, run later, once a PR is open |
