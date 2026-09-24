@@ -78,10 +78,30 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §60. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §61. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
+
+### 60. One refused edit discards every other edit in a review round
+
+**Branch:** `feat/review-repair`, after §59, whose replies it uses.
+
+**What is being attempted.** When the diff gate refuses a path this review round changed and the
+pull request already had, the harness restores that path to the round's starting point, gates and
+verifies the rest, pushes it, and replies to the comment that asked naming the edit it dropped and
+the rule that dropped it. A refused path the round created, or one the pull request's own commits
+already break, still refuses the whole round.
+
+**Why now.** Round 5 on #1459: Jacob's review asked for four things in files the pull request
+already changes, the round did all four, and the whole round was discarded because one of them
+edited a comment inside `pom.xml`, which the gate refuses whatever the change.
+
+**What would make it the wrong idea.** §33's worry, in a smaller room: a round that omits part of
+what was asked while reading as done is worse than a refusal. It holds only if the reply naming the
+dropped edit is where the member reads it — the pass's own "Done" replies go out first and may claim
+the dropped edit happened. And the other edits may have assumed the dropped one; verification catches
+that as a failure, which §58 then repairs or reports.
 
 ### 58. A review round that fails verification gets no repair round
 
