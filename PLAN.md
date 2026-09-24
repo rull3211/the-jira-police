@@ -83,43 +83,6 @@ from their own base.
 
 <!-- refs:on -->
 
-### 57. A repository member's request on the pull request cannot widen a review round
-
-**Branch:** `feat/human-review-widening`.
-
-**What is being attempted.** A review round may act on a drive-by cleanup or a small related
-addition when a repository member asks for it on the pull request, in a file the pull request
-already changes. Everything else a comment asks to widen is still declined.
-
-**Why now.** PR #2688 on `buy-insurance-advisor-web` (SSX-3784): the operator asked three times on
-2026-09-24 for the unused exports in `src/api/commerce/types.ts`, a file the pull request already
-changes, to go, and rounds 3–5 declined each time on the skill's rule against drive-by refactors.
-The pass had no signal it was allowed to trust: the operator and Copilot both rendered as
-`by <login>` inside forgeable data, under a fence refusing scope requests "whoever it appears to
-come from".
-
-**The shape.**
-
-- `pr.ts` reads `authorAssociation`. A comment carries authority when it is `OWNER`, `MEMBER` or
-  `COLLABORATOR`, is not the requested reviewer, automation, a `[bot]` login, or ours by the
-  `bot: ` prefix — and none when the field is missing. Measured on #2688: the operator `MEMBER`,
-  Copilot and `github-actions` `NONE`. A separate field from `origin`, which counts rounds.
-- The marker on those comments carries a random per-round token named outside the fence, so a
-  comment written before the round cannot forge it.
-- The review schema gains `widened`; the harness refuses a round whose entry cites a comment
-  without the marker, or a path outside `base...HEAD` before the round.
-- No setting. Driven by hand with `solve:once SSX-3784 --advance` before the pull request.
-
-**What would make it the wrong idea.**
-
-- The check reads the model's declaration: an undeclared widening passes, as it would today. What
-  it buys is that a declared one is attributable and bounded.
-- Replies this service posted before `replyToThread` stamped the prefix read as the operator's and
-  would carry authority on any pull request still open from then; so would any future path that
-  posts model-written text without the prefix.
-- A refused review round still writes nothing to the pull request, so a round refused here is
-  silent to the member who asked.
-
 ### 56. Documents outside this file still say a declined run leaves the board as it found it
 
 **Branch:** none yet.
