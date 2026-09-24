@@ -202,6 +202,32 @@ function match(rules: readonly Rule[], path: string): Rule | undefined {
 }
 
 /**
+ * Every path in recon's plan that `checkDiff` would refuse by name, with why — empty when none.
+ * The plan is the model's account, so this may only ever refuse: an empty answer allows nothing,
+ * and `checkDiff` still reads the real diff. An absolute path under `worktreePath` is read relative
+ * to it, because a model naming the file it read by its full path means the same file.
+ */
+export function plannedPathRefusals(
+  plannedFiles: readonly string[],
+  worktreePath: string,
+): readonly string[] {
+  const prefix = `${worktreePath.replace(/\/+$/u, "")}/`;
+  const reasons: string[] = [];
+  for (const planned of plannedFiles) {
+    const path = planned.startsWith(prefix) ? planned.slice(prefix.length) : planned;
+    if (pathEscapes(path)) {
+      reasons.push(`${JSON.stringify(planned)}: not a path inside the worktree`);
+      continue;
+    }
+    const rule = match(VERIFICATION_PATHS, path) ?? match(FORBIDDEN_PATHS, path);
+    if (rule !== undefined) {
+      reasons.push(`${path}: ${rule.why}`);
+    }
+  }
+  return reasons;
+}
+
+/**
  * Collects every refusal reason rather than stopping at the first, and refuses an empty diff
  * outright — a run that edits a file and reverts it would otherwise look like success.
  */

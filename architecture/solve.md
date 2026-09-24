@@ -543,6 +543,18 @@ path, otherwise reaches the end looking exactly like success and opens an empty 
 Every reason is collected rather than the first, for the same reason the triage gate collects
 them.
 
+**The same path rules run once earlier, over recon's plan.** `plannedPathRefusals` asks of each
+`plannedFiles` entry the question `checkDiff` asks of each changed path, from the same two lists,
+and a `proceed` naming a refused path becomes a `bailed` outcome carrying `refusedPlan`, before the
+fix pass — so no model gets `Write` and nothing is paid for past recon. It can only refuse: the
+plan is the model's account, so an empty answer allows nothing and the gate still reads the real
+diff. The outcome's `recon` is left as the model gave it, `proceed: true`; the ticket comment says
+the harness stopped the run and gives both remedies, because the gate cannot tell a change the
+ticket needs from a plan that overreached. The case was SSX-3918 on 2026-09-24: a plan naming
+`pom.xml` bought a fix pass and a simplify pass for a diff this gate was always going to refuse,
+and the one document listing refused paths, `SOLVE_INSTRUCTIONS.md` §4, had not been opened by that
+run's passes or by 32 of the 34 recon and fix passes before them.
+
 The gate is a backstop, not the only defence: `createWorktree` and `attachWorktree`
 (`worktree.ts`) call `CommandRunner.excludeAgentPaths` once the worktree exists, which lists
 `.claude/` and `.storecode/` in `.git/info/exclude` — a checkout of that file shared by every

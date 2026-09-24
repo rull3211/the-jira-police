@@ -102,6 +102,10 @@ function headline(outcome: SolveOutcome): string {
       )}`;
     }
     case "bailed": {
+      // Not "the agent stopped": recon said proceed, and whoever acts next needs to know the harness overruled it.
+      if (outcome.refusedPlan !== undefined) {
+        return "An agent read the code and planned a change to files no run of this pipeline may edit, so it was stopped before changing anything.";
+      }
       // Capped as well as sectioned: `bailReason` is one sentence here, and detail lives below.
       return `An agent read the code and stopped before changing anything: ${shorten(
         safeText(outcome.reason),
@@ -206,6 +210,9 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
   if (outcome.kind !== "bailed") {
     return [];
   }
+  if (outcome.refusedPlan !== undefined) {
+    return refusedPlanDetail(outcome.refusedPlan);
+  }
   // Defensively read, like `lensOf`: a renderer that throws here would discard the headline that
   // was already composed, not just this section.
   const recon = outcome.recon as Partial<typeof outcome.recon> | undefined;
@@ -231,6 +238,27 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
     ...(remedy === ""
       ? []
       : ["", "**To make this agent-solvable**", "", shorten(remedy, LIMITS.remedy)]),
+  ];
+}
+
+/**
+ * The same two headings as a bail recon wrote, filled by the harness: recon's own bail fields are
+ * empty when it said proceed. Two remedies because the gate cannot tell a change the ticket needs
+ * from a plan that overreached, and only a person reading the ticket can.
+ */
+function refusedPlanDetail(refusedPlan: readonly string[]): readonly string[] {
+  const reasons = refusedPlan.map((reason) => safeText(reason)).filter((reason) => reason !== "");
+  const extra = reasons.length - LIMITS.blockers;
+  return [
+    "",
+    "**What is in the way**",
+    "",
+    ...reasons.slice(0, LIMITS.blockers).map((reason) => `* ${shorten(reason, LIMITS.blocker)}`),
+    ...(extra > 0 ? [`* …and ${String(extra)} more, in the run's own report.`] : []),
+    "",
+    "**To make this agent-solvable**",
+    "",
+    "If the ticket really needs that change, a person makes it on the base branch and re-runs this ticket; the agent can then do the rest. If it does not, the plan overreached, and a re-run may plan differently.",
   ];
 }
 

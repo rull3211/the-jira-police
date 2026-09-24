@@ -108,6 +108,17 @@ export function formatReport(issueKey: string, outcome: ReconOnlyOutcome, now: D
     );
   } else {
     lines.push(...reconSection(outcome.recon));
+    // Last in the body, since it overrules the plan printed above it.
+    if (outcome.kind === "bailed" && outcome.refusedPlan !== undefined) {
+      lines.push(
+        "",
+        "## Stopped by the harness",
+        "",
+        "Recon said proceed, but the plan names paths the diff gate refuses, so `solve:once` would stop here before the fix pass:",
+        "",
+        ...outcome.refusedPlan.map((reason) => `- ${oneLine(reason)}`),
+      );
+    }
   }
 
   lines.push(

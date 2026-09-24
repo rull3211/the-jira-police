@@ -388,6 +388,24 @@ describe("describeSolveOutcome", () => {
     expect(line).not.toContain(worktree.path);
   });
 
+  it("does not call a refused plan recon's decision, and names each refused path", () => {
+    const line = describeSolveOutcome({
+      kind: "bailed",
+      reason: "recon planned a change to a path no run may make",
+      refusedPlan: ["pom.xml: the Maven build is defined here"],
+      devLens: lens,
+      worktree,
+      recon: {} as never,
+      cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
+    });
+
+    expect(line).toMatch(/^STOPPED AT THE PLAN — recon said proceed/u);
+    expect(line).not.toContain("recon declined");
+    expect(line).toContain("\n  pom.xml: the Maven build is defined here\n");
+    expect(line).toContain("make it on the base branch and re-run");
+    expect(line).toContain("Worktree removed");
+  });
+
   it("warns that the kept worktree is kept, not held", () => {
     // The next run for this ticket salvages the directory to a `-salvaged-<timestamp>` sibling
     // and puts a fresh checkout at the same path — it can be renamed out from under you mid-command.

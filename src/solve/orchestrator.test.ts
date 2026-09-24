@@ -7,6 +7,7 @@ import type { Pass, SolveRunOptions } from "./runner.ts";
 import { parseFix, parseRecon, parseSimplify } from "./runner.ts";
 import {
   type ConflictRoundRequest,
+  PLAN_REFUSED_REASON,
   type PassRunner,
   type SolveDependencies,
   type SolveRequest,
@@ -413,6 +414,70 @@ describe("solveTicket, when recon declines", () => {
       kind: "bailed",
       devLens: { accurate: false, correction: expect.stringContaining("no such file") },
     });
+  });
+});
+
+describe("solveTicket, when recon's plan names a path the gate refuses", () => {
+  // SSX-3918's shape: recon said proceed, and one planned file is one the diff gate refuses by name.
+  const planned = { recon: recon({ plannedFiles: ["src/app/head.tsx", "pom.xml"] }) };
+
+  it("never starts the fix pass", async () => {
+    // The fix pass is unscripted, so reaching it throws.
+    const { h } = harness(planned);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("bailed");
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
+  });
+
+  it("says the harness stopped it, and leaves recon's own verdict as recon gave it", async () => {
+    const { h } = harness(planned);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      reason: PLAN_REFUSED_REASON,
+      refusedPlan: [expect.stringMatching(/^pom\.xml: /u)],
+      recon: { proceed: true, plannedFiles: ["src/app/head.tsx", "pom.xml"] },
+    });
+  });
+
+  it("removes the worktree, since no pass that can write has run", async () => {
+    const { h } = harness(planned);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("removed");
+  });
+
+  it("stops a plan that names the refused file by its path in the worktree", async () => {
+    const { h } = harness({ recon: recon({ plannedFiles: [`${worktree.path}/pom.xml`] }) });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      refusedPlan: [expect.stringMatching(/^pom\.xml: /u)],
+    });
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
+  });
+
+  it("leaves refusedPlan unset on a bail recon wrote itself", async () => {
+    const { h } = harness({
+      recon: recon({
+        proceed: false,
+        bailReason: "two readings",
+        bailBlockers: ["AK1 has two readings."],
+        bailRemedy: "Pick one.",
+        plannedFiles: [],
+      }),
+    });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind === "bailed" ? outcome.refusedPlan : "not a bail").toBeUndefined();
   });
 });
 
@@ -2174,6 +2239,20 @@ describe("runReconOnly", () => {
 
     expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
     expect(outcome.kind).toBe("proceed");
+  });
+
+  it("reports the stop the full pipeline would make at a refused plan", async () => {
+    const { h } = harness({ recon: recon({ plannedFiles: ["src/app/head.tsx", "pom.xml"] }) });
+
+    const outcome = await runReconOnly(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      reason: PLAN_REFUSED_REASON,
+      refusedPlan: [expect.stringMatching(/^pom\.xml: /u)],
+      recon: { proceed: true },
+    });
+    expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("removed");
   });
 
   it("discards the worktree on proceed, unlike the full pipeline", async () => {

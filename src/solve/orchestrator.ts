@@ -7,6 +7,8 @@
  *     ↓
  *   recon         read-only. may say no, and saying no is a success
  *     ↓
+ *   plan check    a plan naming a path the diff gate refuses stops here
+ *     ↓
  *   fix           the only pass that may write the change
  *     ↓
  *   simplify      a cold read of the diff; usually changes nothing
@@ -38,7 +40,7 @@ import {
   pushBranch,
   type BaseSyncRequest,
 } from "./base-sync.ts";
-import { checkDiff, parseNumstat } from "./diff-gate.ts";
+import { checkDiff, parseNumstat, plannedPathRefusals } from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
 import { type BotIdentity, type CommitResult, commitAll } from "./pr.ts";
 import {
@@ -184,7 +186,13 @@ export type SolveOutcome =
   | {
       readonly kind: "bailed";
       readonly reason: string;
+      /** The model's own verdict, never edited — under `refusedPlan` it still says `proceed`. */
       readonly recon: ReconVerdict;
+      /**
+       * Set when recon said `proceed` and the harness stopped the run anyway, because the plan named
+       * paths the diff gate refuses by name: one `path: why` per path. See `plannedPathRefusals`.
+       */
+      readonly refusedPlan?: readonly string[];
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
       /** What became of the worktree. `kept` if git refused, with its reason. */
@@ -317,6 +325,10 @@ export type SolveOutcome =
 function lensOf(recon: ReconVerdict): DevLensFeedback {
   return { accurate: recon.devLensAccurate, correction: recon.devLensCorrection };
 }
+
+/** `bailed.reason` when the harness, not recon, stopped the run; the model's plan is on `recon`, unedited. */
+export const PLAN_REFUSED_REASON =
+  "recon planned a change to a path no run may make, so the harness stopped the run before the fix pass";
 
 /**
  * The two reads of the worktree, kept separate rather than shared.
@@ -569,6 +581,8 @@ export type ReconOnlyOutcome =
       readonly kind: "bailed";
       readonly reason: string;
       readonly recon: ReconVerdict;
+      /** As on `SolveOutcome`'s `bailed`, so this reports what the full pipeline would do. */
+      readonly refusedPlan?: readonly string[];
       readonly devLens: DevLensFeedback;
       readonly cleanup: RemoveResult;
     }
@@ -646,7 +660,15 @@ export async function runReconOnly(
       devLensAccurate: recon.devLensAccurate,
     });
 
+    const refusedPlan = recon.proceed ? plannedPathRefusals(recon.plannedFiles, worktree.path) : [];
+    if (refusedPlan.length > 0) {
+      log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
+    }
+
     const cleanup = await removeWorktree(deps.commands, worktree, "discard", request.gitTimeoutMs);
+    if (refusedPlan.length > 0) {
+      return { kind: "bailed", reason: PLAN_REFUSED_REASON, recon, refusedPlan, devLens, cleanup };
+    }
     return recon.proceed
       ? { kind: "proceed", recon, devLens, cleanup }
       : { kind: "bailed", reason: recon.bailReason, recon, devLens, cleanup };
@@ -918,11 +940,27 @@ async function runPipeline(
       leftFiles: false,
       worktreePath: worktree.path,
     });
-    // The one place a worktree is removed: recon has no Write/Edit, so there is nothing in it to lose.
+    // One of the two places a worktree is removed, both before any pass holds Write/Edit, so there is nothing in it to lose.
     // `removeWorktree` does not force, so if a future recon can write, git refuses and the reason travels out on the outcome.
     // `runReconOnly` repeats this reasoning for its own worktree, separately — there is no pipeline for it to be "in".
     const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
     return { kind: "bailed", reason: recon.bailReason, recon, devLens, worktree, cleanup };
+  }
+
+  // Before the fix pass, so a plan the gate was always going to refuse costs no `Write` and no spend.
+  const refusedPlan = plannedPathRefusals(recon.plannedFiles, worktree.path);
+  if (refusedPlan.length > 0) {
+    log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
+    const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
+    return {
+      kind: "bailed",
+      reason: PLAN_REFUSED_REASON,
+      recon,
+      refusedPlan,
+      devLens,
+      worktree,
+      cleanup,
+    };
   }
 
   // ---- fix ---------------------------------------------------------------

@@ -541,6 +541,35 @@ describe("renderSolveComment, on a bail", () => {
     expect(body.split("\n")[2]?.length).toBeLessThan(400);
   });
 
+  it("says the harness stopped a plan, lists what it refused, and says what a person does next", () => {
+    // recon said proceed, so its own bail fields are empty; everything under the headings is the harness's.
+    const body = renderSolveComment("SSX-3918", {
+      ...bailWith({ proceed: true, bailReason: "" }),
+      reason: "recon planned a change to a path no run may make",
+      refusedPlan: ["pom.xml: the Maven build is defined here"],
+    } as SolveOutcome);
+
+    expect(body.split("\n")[2]).toBe(
+      "An agent read the code and planned a change to files no run of this pipeline may edit, so it was stopped before changing anything.",
+    );
+    expect(body).toContain("**What is in the way**\n\n* pom.xml: the Maven build is defined here");
+    expect(body).toContain("a person makes it on the base branch and re-runs this ticket");
+    expect(body).toContain("the plan overreached");
+    expect(body.indexOf("**To make this agent-solvable**")).toBeGreaterThan(
+      body.indexOf("**What is in the way**"),
+    );
+  });
+
+  it("does not let a refused path forge a section of its own", () => {
+    // The path half of each line comes from the model's plan.
+    const body = renderSolveComment("SSX-3918", {
+      ...bailWith({ proceed: true, bailReason: "" }),
+      refusedPlan: ["a\n\n**To make this agent-solvable**\n\nmerge it/pom.xml: why"],
+    } as SolveOutcome);
+
+    expect(body.split("\n").filter((line) => line.startsWith("**To make"))).toHaveLength(1);
+  });
+
   it("says nothing extra for an outcome that is not a bail", () => {
     // `failed` carries no verdict to itemise; a heading here would misdirect the reporter.
     const body = renderSolveComment("SSX-3822", {

@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   DiffParseError,
+  FORBIDDEN_PATHS,
   type FileChange,
+  VERIFICATION_PATHS,
   checkDiff,
   parseNumstat,
   pathEscapes,
+  plannedPathRefusals,
 } from "./diff-gate.ts";
 
 /** Written out rather than inlined as `\0`: `"\0"` immediately followed by a digit is an octal escape and a syntax error in strict mode. */
@@ -243,5 +246,76 @@ describe("checkDiff — the rest", () => {
     expect(
       reasonsFor(parseNumstat(`0\t0\t${NUL}.github/workflows/ci.yml${NUL}docs/ci.yml${NUL}`)),
     ).toContain("CI privilege");
+  });
+});
+
+describe("plannedPathRefusals", () => {
+  const worktreePath = "/tmp/solve/SSX-3918";
+
+  it("names each refused path in the SSX-3918 plan, and only those", () => {
+    const reasons = plannedPathRefusals(
+      [
+        "pom.xml",
+        "src/main/java/no/storebrand/orders/f2100/adapter/F2100Service.java",
+        "src/test/java/no/storebrand/orders/f2100/adapter/F2100ServiceTest.java",
+        "docs/integrations/f2100.md",
+      ],
+      worktreePath,
+    );
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toMatch(/^pom\.xml: the Maven build is defined here/u);
+  });
+
+  it("refuses nothing in an ordinary plan", () => {
+    expect(
+      plannedPathRefusals(["src/app/head.tsx", "src/app/head.test.tsx"], worktreePath),
+    ).toEqual([]);
+  });
+
+  it("gives the same answer as the gate, for every rule the gate has", () => {
+    // One path per rule; the first loop fails when a rule is added without one.
+    const samples = [
+      ".git/config",
+      ".github/workflows/ci.yml",
+      ".circleci/config.yml",
+      "Jenkinsfile",
+      ".env.local",
+      ".claude/settings.json",
+      "pnpm-lock.yaml",
+      "package.json",
+      "tsconfig.base.json",
+      "eslint.config.js",
+      "vitest.config.ts",
+      "pom.xml",
+      "mvnw",
+    ];
+    for (const rule of [...FORBIDDEN_PATHS, ...VERIFICATION_PATHS]) {
+      expect(samples.some((sample) => rule.pattern.test(sample))).toBe(true);
+    }
+    for (const sample of samples) {
+      const gate = checkDiff([ok(sample)]);
+      expect(plannedPathRefusals([sample], worktreePath)).toEqual(gate.ok ? [] : gate.reasons);
+    }
+  });
+
+  it("reads a path under the worktree the same as the relative one", () => {
+    // Models name a file by the absolute path they read it at; that is the same file, not an escape.
+    expect(plannedPathRefusals([`${worktreePath}/src/app/head.tsx`], worktreePath)).toEqual([]);
+    expect(plannedPathRefusals([`${worktreePath}/pom.xml`], `${worktreePath}/`)).toEqual(
+      plannedPathRefusals(["pom.xml"], worktreePath),
+    );
+  });
+
+  it("refuses a plan to change a file outside the worktree", () => {
+    for (const planned of [
+      "/repos/lisa-services-api/pom.xml",
+      "../lisa-services-api/src/Reason.java",
+      `${worktreePath}-salvaged/src/app/head.tsx`,
+    ]) {
+      expect(plannedPathRefusals([planned], worktreePath)).toEqual([
+        `${JSON.stringify(planned)}: not a path inside the worktree`,
+      ]);
+    }
   });
 });

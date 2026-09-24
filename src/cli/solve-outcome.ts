@@ -119,11 +119,19 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
       // The one outcome whose worktree may be gone, so this reads the cleanup result rather than
       // assuming it — printing "kept at <path>" for a directory that no longer exists would send
       // an operator to an empty path.
-      return `BAILED (this is a success) — recon declined: ${outcome.reason}\n${
+      const cleanup =
         outcome.cleanup.outcome === "removed"
           ? `Worktree removed — recon writes nothing, so there was nothing in it`
-          : `Worktree kept at ${outcome.cleanup.path} — ${outcome.cleanup.reason}`
-      }`;
+          : `Worktree kept at ${outcome.cleanup.path} — ${outcome.cleanup.reason}`;
+      if (outcome.refusedPlan !== undefined) {
+        return [
+          `STOPPED AT THE PLAN — recon said proceed, but its plan names paths no run may change, so no fix pass ran:`,
+          ...outcome.refusedPlan.map((reason) => `  ${reason}`),
+          `If the ticket needs that change, make it on the base branch and re-run; if not, the plan overreached.`,
+          cleanup,
+        ].join("\n");
+      }
+      return `BAILED (this is a success) — recon declined: ${outcome.reason}\n${cleanup}`;
     }
     case "abandoned": {
       // The operator's next move differs by cause: `judgement` means read the reason and decide

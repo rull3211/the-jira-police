@@ -610,6 +610,11 @@ happily allow is a question for §5, not a permission.
 If the honest change needs any of these, that is a bail with a clear reason, not a smaller change
 that avoids the check.
 
+**A plan naming a path the gate refuses never reaches the fix pass.** When recon says `proceed`,
+the harness checks `plannedFiles` against the list above and stops the run there, posting a comment
+of its own. If the honest change needs one of those paths, say so in the bail yourself: you know
+why the ticket needs it, and the harness does not.
+
 ---
 
 ## 5. When to bail — and how to do it well

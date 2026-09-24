@@ -61,7 +61,8 @@ past the point it was granted for, and so a pass that dies cannot leave a later 
 from half a conversation.
 
 Recon runs first and its verdict is honoured: if it says stop, the fix pass never starts and no
-model ever gets write access for that ticket. That ordering covers the first four. `--merge`
+model ever gets write access for that ticket. A `proceed` whose `plannedFiles` names a path the
+gate refuses is stopped there too, by the harness. That ordering covers the first four. `--merge`
 belongs to none of it — it runs when the base has moved under a pull request that already exists,
 which is a fact about two histories rather than a stage of solving a ticket. `--repair` belongs to
 none of it either, for the opposite reason: it exists only after a verification failure, which is
