@@ -102,6 +102,14 @@ export function reportsToTicket(outcome: SolveOutcome): boolean {
   return outcome.kind !== "verified";
 }
 
+/** The dependency versions a verified run moved, one line each; the checks ran against them and nothing read what they change. */
+function bumpLines(outcome: Extract<SolveOutcome, { kind: "verified" }>): readonly string[] {
+  return outcome.bumps.map(
+    (bump) =>
+      `MOVES A DEPENDENCY VERSION: ${bump.property ?? "<version>"} ${bump.from} → ${bump.to} in ${bump.path} (${bump.dependencies.join(", ")}) — checked against, not read`,
+  );
+}
+
 /** One line an operator can act on, per outcome. */
 export function describeSolveOutcome(outcome: SolveOutcome): string {
   switch (outcome.kind) {
@@ -188,6 +196,7 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
         const { path } = outcome.worktree;
         return [
           `VERIFIED AFTER A REPAIR ROUND — ${outcome.files} file(s), ${outcome.lines} line(s) changed.`,
+          ...bumpLines(outcome),
           `The fix alone failed (${outcome.repairedFailure ?? "reason not recorded"}); a repair round was shown that failure and its correction passed.`,
           `Committed: ${outcome.fix.commitSubject}. Commit would be, on top of it: ${outcome.commit.subject}`,
           `Nothing was pushed and nothing was written to Jira.`,
@@ -197,6 +206,7 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
       }
       return [
         `VERIFIED — ${outcome.files} file(s), ${outcome.lines} line(s) changed.`,
+        ...bumpLines(outcome),
         `Commit would be: ${outcome.commit.subject}`,
         `Nothing was pushed and nothing was written to Jira.`,
         `Read the diff yourself: git -C ${outcome.worktree.path} diff ${outcome.worktree.branch}`,

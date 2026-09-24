@@ -104,7 +104,8 @@ honestly: **is this task actually safe for an agent to do?**
    - you found the exact place to change and understood it
    - the requirement has exactly one reasonable reading
    - the change is one coherent piece of work: you can name every file it touches and say why
-   - it needs no new dependency and no change to build, test or lint configuration
+   - it needs no new dependency and no change to build, test or lint configuration — except a
+     newer version of a dependency the `pom.xml` already declares, which §4 allows
    - a test can demonstrate it, or you can say precisely why not
 
 Anything else is `proceed: false`. See §5.
@@ -589,8 +590,12 @@ Refused on any change of any size, whatever else the ticket asks for.
 - `package.json`, `tsconfig.json`, `.oxlintrc.json`, `eslint.config.js`, `vitest.config.ts`,
   `vite.config.ts`, `pom.xml`, `mvnw`, `.mvn/wrapper/maven-wrapper.properties` — **these define what
   verification means.** The harness reads the test, typecheck and lint commands out of them, so a
-  run that may edit them may edit the definition of whether it passed. Refused unconditionally, and
-  it is the one category where the refusal is about the signal rather than the code.
+  run that may edit them may edit the definition of whether it passed. Refused at any size, and it
+  is the one category where the refusal is about the signal rather than the code. **One exception,
+  for `pom.xml` alone:** moving the version of a dependency the file already declares — a version
+  element directly inside a dependency, or a property used nowhere but as such versions — is
+  allowed, and the pull request names it. Plugin, parent and profile versions, a version that ends
+  in SNAPSHOT, a new dependency, and any other line of the file stay refused.
 
 **This list is complete about the gate, and about nothing else.** It is not a list of everything you
 must not touch. It is the set of paths a mechanism will stop, and the mechanism is narrow on

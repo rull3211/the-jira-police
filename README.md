@@ -135,7 +135,7 @@ Separate sessions rather than five turns is the safety property: a pass cannot c
 past the point it was granted for, and a pass that dies cannot leave a later one reasoning from
 half a conversation. Recon runs first and its verdict is honoured — if it says stop, the fix pass
 never starts and **no model gets write access for that ticket at all**. The same happens when it
-says proceed with a plan naming a file the diff gate refuses, such as `pom.xml`: the harness stops
+says proceed with a plan naming a file the diff gate refuses by name, such as a lockfile: the harness stops
 the run there and says so on the ticket. `--simplify` is given the
 diff and not the ticket deliberately: showing it the requirement would invite it to reconsider the
 change instead of the way the change is written.

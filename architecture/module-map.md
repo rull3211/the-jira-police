@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-106 production modules, 94 test files. Grouped by what they belong to rather than alphabetically,
+107 production modules, 95 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -85,26 +85,27 @@ inheritance.
 
 **Solve — selection, claim and the model passes**
 
-| Path                        | Role                                                                                                                                                    |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/solve/labels.ts`       | The `agent:` state machine as pure functions; `repoFromLabels`                                                                                          |
-| `src/solve/poller.ts`       | One solve cycle: selection, capacity, and the planned claim                                                                                             |
-| `src/solve/report.ts`       | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                                                                      |
-| `src/solve/claim.ts`        | The claim and its release. Read, re-check, write, read back                                                                                             |
-| `src/solve/attempts.ts`     | How often the **daemon** has claimed each ticket, so it stops claiming one that keeps coming back                                                       |
-| `src/solve/branch.ts`       | What may be written to: a work-prefix allowlist and a protected-name denylist                                                                           |
-| `src/solve/worktree.ts`     | The throwaway worktree, the branch name, and the `CommandRunner` interface                                                                              |
-| `src/solve/ticket.ts`       | The ticket rendered as the text a pass is given — description, comments, attachments                                                                    |
-| `src/solve/read-scope.ts`   | Which other checkouts on this machine a pass may read for context                                                                                       |
-| `src/solve/skill-root.ts`   | A throwaway read-only copy of the `agent-solve` skill, staged per pass                                                                                  |
-| `src/solve/schema.ts`       | The draft-07 contracts handed to `agent-solve`, one per pass                                                                                            |
-| `src/solve/runner.ts`       | The pass command lines and their parsers. Where `Write` is granted — and everything withheld                                                            |
-| `src/solve/passes.ts`       | The real `PassRunner`. Working directory is the worktree; no MCP server required                                                                        |
-| `src/solve/exec.ts`         | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                                                                 |
-| `src/solve/diff-gate.ts`    | The bound on what a solve run may have changed. Pure — no git, no fs                                                                                    |
-| `src/solve/escape.ts`       | Notices when a pass wrote somewhere it was never meant to reach                                                                                         |
-| `src/solve/verify.ts`       | Mechanical verification. `passed` / `failed` / `refused`, never collapsed. Plus `checkFailFirst`                                                        |
-| `src/solve/orchestrator.ts` | The sequence: worktree → recon → plan check → fix → simplify → gate → verify. `resolveReview`'s round-trip lives here too, run later, once a PR is open |
+| Path                           | Role                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/solve/labels.ts`          | The `agent:` state machine as pure functions; `repoFromLabels`                                                                                          |
+| `src/solve/poller.ts`          | One solve cycle: selection, capacity, and the planned claim                                                                                             |
+| `src/solve/report.ts`          | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                                                                      |
+| `src/solve/claim.ts`           | The claim and its release. Read, re-check, write, read back                                                                                             |
+| `src/solve/attempts.ts`        | How often the **daemon** has claimed each ticket, so it stops claiming one that keeps coming back                                                       |
+| `src/solve/branch.ts`          | What may be written to: a work-prefix allowlist and a protected-name denylist                                                                           |
+| `src/solve/worktree.ts`        | The throwaway worktree, the branch name, and the `CommandRunner` interface                                                                              |
+| `src/solve/ticket.ts`          | The ticket rendered as the text a pass is given — description, comments, attachments                                                                    |
+| `src/solve/read-scope.ts`      | Which other checkouts on this machine a pass may read for context                                                                                       |
+| `src/solve/skill-root.ts`      | A throwaway read-only copy of the `agent-solve` skill, staged per pass                                                                                  |
+| `src/solve/schema.ts`          | The draft-07 contracts handed to `agent-solve`, one per pass                                                                                            |
+| `src/solve/runner.ts`          | The pass command lines and their parsers. Where `Write` is granted — and everything withheld                                                            |
+| `src/solve/passes.ts`          | The real `PassRunner`. Working directory is the worktree; no MCP server required                                                                        |
+| `src/solve/exec.ts`            | The real `CommandRunner`. No shell, executable allowlist, killing timeout, scrubbed env                                                                 |
+| `src/solve/diff-gate.ts`       | The bound on what a solve run may have changed. Pure — no git, no fs                                                                                    |
+| `src/solve/dependency-bump.ts` | Whether a changed `pom.xml` is only a dependency version bump: the diff gate's one exception, asked by the gate, `verify` and the plan check alike      |
+| `src/solve/escape.ts`          | Notices when a pass wrote somewhere it was never meant to reach                                                                                         |
+| `src/solve/verify.ts`          | Mechanical verification. `passed` / `failed` / `refused`, never collapsed. Plus `checkFailFirst`                                                        |
+| `src/solve/orchestrator.ts`    | The sequence: worktree → recon → plan check → fix → simplify → gate → verify. `resolveReview`'s round-trip lives here too, run later, once a PR is open |
 
 **Solve — delivery and the review round-trip**
 

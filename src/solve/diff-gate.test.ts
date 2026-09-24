@@ -119,13 +119,13 @@ describe("checkDiff — the plan's named refusals", () => {
       ok(`src/f${String(index)}.ts`, 200),
     );
 
-    expect(checkDiff(wide)).toEqual({ ok: true, files: 40, lines: 8040 });
+    expect(checkDiff(wide)).toEqual({ ok: true, files: 40, lines: 8040, bumps: [] });
   });
 
   it("still measures what it no longer refuses", () => {
     const verdict = checkDiff([ok("src/a.ts", 10, 5), ok("src/b.ts", 1, 0)]);
 
-    expect(verdict).toEqual({ ok: true, files: 2, lines: 16 });
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 16, bumps: [] });
   });
 });
 
@@ -182,6 +182,45 @@ describe("checkDiff — verification integrity", () => {
   });
 });
 
+describe("checkDiff — the dependency-bump exception", () => {
+  const bump = {
+    path: "pom.xml",
+    line: 15,
+    property: "lisa-services-api.version",
+    dependencies: ["storebrand.lisa.services:lisa-services-api"],
+    from: "3.181",
+    to: "3.203",
+  };
+  const allowed = (path: string) => new Map([[path, { ok: true, bumps: [bump] } as const]]);
+
+  it("passes a pom.xml the judge found to be only a bump, and carries the bump out", () => {
+    const verdict = checkDiff([ok("src/Main.java"), ok("pom.xml")], allowed("pom.xml"));
+
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 4, bumps: [bump] });
+  });
+
+  it("refuses a pom.xml the judge refused, and says why in both voices", () => {
+    const verdict = checkDiff(
+      [ok("pom.xml")],
+      new Map([["pom.xml", { ok: false, reason: "line 7 is project>parent>version" } as const]]),
+    );
+
+    expect(verdict.ok ? "" : verdict.reasons.join("\n")).toBe(
+      "pom.xml: the Maven build is defined here — a skipped test, a dropped module or a relaxed plugin makes the build pass without making the code correct — and this change is more than a dependency version: line 7 is project>parent>version",
+    );
+  });
+
+  it("lends the exception to no rule but the one that carries it", () => {
+    for (const path of ["package.json", "mvnw", "tsconfig.json"]) {
+      expect(checkDiff([ok(path)], allowed(path)).ok).toBe(false);
+    }
+  });
+
+  it("still refuses a pom.xml somewhere no file may be, whatever the judge said", () => {
+    expect(checkDiff([ok(".claude/pom.xml")], allowed(".claude/pom.xml")).ok).toBe(false);
+  });
+});
+
 describe("checkDiff — the rest", () => {
   it("accepts a small, ordinary fix", () => {
     const verdict = checkDiff([
@@ -189,7 +228,7 @@ describe("checkDiff — the rest", () => {
       ok("src/app/favicon.test.ts", 20, 0),
     ]);
 
-    expect(verdict).toEqual({ ok: true, files: 2, lines: 26 });
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 26, bumps: [] });
   });
 
   it("refuses an empty diff", () => {
@@ -239,7 +278,7 @@ describe("checkDiff — the rest", () => {
   it("counts both halves of a rename, via the parser", () => {
     const verdict = checkDiff(parseNumstat(`40\t10\t${NUL}src/old.ts${NUL}src/new.ts${NUL}`));
 
-    expect(verdict).toEqual({ ok: true, files: 2, lines: 50 });
+    expect(verdict).toEqual({ ok: true, files: 2, lines: 50, bumps: [] });
   });
 
   it("catches a forbidden file being renamed out of the way", () => {
@@ -252,19 +291,29 @@ describe("checkDiff — the rest", () => {
 describe("plannedPathRefusals", () => {
   const worktreePath = "/tmp/solve/SSX-3918";
 
-  it("names each refused path in the SSX-3918 plan, and only those", () => {
+  it("names each path refused by name in a plan, and only those", () => {
     const reasons = plannedPathRefusals(
       [
-        "pom.xml",
+        "mvnw",
         "src/main/java/no/storebrand/orders/f2100/adapter/F2100Service.java",
-        "src/test/java/no/storebrand/orders/f2100/adapter/F2100ServiceTest.java",
         "docs/integrations/f2100.md",
       ],
       worktreePath,
     );
 
     expect(reasons).toHaveLength(1);
-    expect(reasons[0]).toMatch(/^pom\.xml: the Maven build is defined here/u);
+    expect(reasons[0]).toMatch(/^mvnw: the Maven wrapper/u);
+  });
+
+  it("leaves pom.xml to the gate, since only its diff can show a dependency bump", () => {
+    // SSX-3918's plan: the pom change it needed is a bump, which a path cannot reveal.
+    expect(
+      plannedPathRefusals(
+        ["pom.xml", "src/main/java/no/storebrand/orders/f2100/adapter/F2100Service.java"],
+        worktreePath,
+      ),
+    ).toEqual([]);
+    expect(checkDiff([ok("pom.xml")]).ok).toBe(false);
   });
 
   it("refuses nothing in an ordinary plan", () => {
@@ -273,7 +322,7 @@ describe("plannedPathRefusals", () => {
     ).toEqual([]);
   });
 
-  it("gives the same answer as the gate, for every rule the gate has", () => {
+  it("gives the same answer as the gate, for every rule that refuses by name alone", () => {
     // One path per rule; the first loop fails when a rule is added without one.
     const samples = [
       ".git/config",
@@ -287,13 +336,14 @@ describe("plannedPathRefusals", () => {
       "tsconfig.base.json",
       "eslint.config.js",
       "vitest.config.ts",
-      "pom.xml",
       "mvnw",
       // Both lists at once, so a plan reports both reasons exactly as the gate does.
       ".claude/package.json",
     ];
     for (const rule of [...FORBIDDEN_PATHS, ...VERIFICATION_PATHS]) {
-      expect(samples.some((sample) => rule.pattern.test(sample))).toBe(true);
+      if (rule.unless === undefined) {
+        expect(samples.some((sample) => rule.pattern.test(sample))).toBe(true);
+      }
     }
     for (const sample of samples) {
       const gate = checkDiff([ok(sample)]);
@@ -304,8 +354,8 @@ describe("plannedPathRefusals", () => {
   it("reads a path under the worktree the same as the relative one", () => {
     // Models name a file by the absolute path they read it at; that is the same file, not an escape.
     expect(plannedPathRefusals([`${worktreePath}/src/app/head.tsx`], worktreePath)).toEqual([]);
-    expect(plannedPathRefusals([`${worktreePath}/pom.xml`], `${worktreePath}/`)).toEqual(
-      plannedPathRefusals(["pom.xml"], worktreePath),
+    expect(plannedPathRefusals([`${worktreePath}/mvnw`], `${worktreePath}/`)).toEqual(
+      plannedPathRefusals(["mvnw"], worktreePath),
     );
   });
 

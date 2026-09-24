@@ -108,7 +108,10 @@ This list must match them and the argument builder in `src/solve/runner.ts`; it 
   down. If the honest fix needs a refused path, return `proceed: false` and explain; do not deliver
   a partial change that looks complete.
 - **Add no dependencies.** Not to the manifest, not to a lockfile. If the task cannot be done with
-  what the repository already has, that is a bail.
+  what the repository already has, that is a bail. **A newer version of a dependency the `pom.xml`
+  already declares is not a new dependency**: change that version, or the property only it uses,
+  and nothing else in the file, and the harness allows it and names it in the pull request. A
+  Node repository's version bump is still a bail, because it rewrites a lockfile you cannot produce.
 - **Readable is not writable.** The prompt may list other checkouts on this machine — the services
   this repository talks to. Read them, and prefer reading them to guessing: a claim about another
   service that could have been checked and was not is the specific failure they were opened for.

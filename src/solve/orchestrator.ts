@@ -40,7 +40,14 @@ import {
   pushBranch,
   type BaseSyncRequest,
 } from "./base-sync.ts";
-import { checkDiff, parseNumstat, plannedPathRefusals } from "./diff-gate.ts";
+import { type DependencyBump, judgeBumps } from "./dependency-bump.ts";
+import {
+  type DiffVerdict,
+  type FileChange,
+  checkDiff,
+  parseNumstat,
+  plannedPathRefusals,
+} from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
 import { type BotIdentity, type CommitResult, commitAll } from "./pr.ts";
 import {
@@ -321,6 +328,8 @@ export type SolveOutcome =
       readonly devLens: DevLensFeedback;
       readonly files: number;
       readonly lines: number;
+      /** Every dependency version the run moved, which the pull request names before any model's text. */
+      readonly bumps: readonly DependencyBump[];
     };
 
 function lensOf(recon: ReconVerdict): DevLensFeedback {
@@ -354,6 +363,22 @@ async function readNumstat(
   timeoutMs: number,
 ): Promise<string | null> {
   return await gitDiff(runner, worktreePath, timeoutMs, ["--numstat", "-z", baseRef]);
+}
+
+/** The gate over `changes`, with each changed `pom.xml` judged first — the one exception `checkDiff` cannot decide from paths. */
+async function gateDiff(
+  runner: CommandRunner,
+  worktreePath: string,
+  baseRef: string,
+  timeoutMs: number,
+  changes: readonly FileChange[],
+): Promise<DiffVerdict> {
+  const bumps = await judgeBumps(
+    runner,
+    { worktreePath, baseRef, timeoutMs },
+    changes.map((change) => change.path),
+  );
+  return checkDiff(changes, bumps);
 }
 
 /** The human-readable read, for a prompt. No `-z`: nothing here is parsed, so the gate's newline-in-filename defense does not apply. */
@@ -787,7 +812,13 @@ export async function runRepairRound(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = checkDiff(changes);
+  const verdict = await gateDiff(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+    changes,
+  );
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -843,6 +874,7 @@ export async function runRepairRound(
     devLens,
     files: verdict.files,
     lines: verdict.lines,
+    bumps: verdict.bumps,
   };
 }
 
@@ -1034,7 +1066,13 @@ async function runPipeline(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = checkDiff(changes);
+  const verdict = await gateDiff(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+    changes,
+  );
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };
@@ -1161,6 +1199,7 @@ async function runPipeline(
     devLens,
     files: verdict.files,
     lines: verdict.lines,
+    bumps: verdict.bumps,
   };
 }
 
@@ -1488,7 +1527,13 @@ async function runReviewRound(
       reasons: ["could not read the diff, so there is nothing to bound"],
     };
   }
-  const verdict = checkDiff(parseNumstat(diffText));
+  const verdict = await gateDiff(
+    commands,
+    worktree.path,
+    request.baseRef,
+    request.gitTimeoutMs,
+    parseNumstat(diffText),
+  );
   if (!verdict.ok) {
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
   }

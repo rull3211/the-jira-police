@@ -46,6 +46,56 @@ const PATCH = [
 /** A diff the gate refuses — a forbidden path (the lockfile), not a size cap, since these tests are about behavior around a refusal. */
 const REFUSED_DIFF = ["1\t0\tsrc/app.ts", "8\t2\tpnpm-lock.yaml", ""].join(NUL);
 
+/** A one-dependency POM; the rules below answer every command `judgeBumps` runs about it. */
+const POM_LINES = [
+  "<project>",
+  "  <properties>",
+  "    <x.version>1.0</x.version>",
+  "  </properties>",
+  "  <dependencies>",
+  "    <dependency>",
+  "      <groupId>g</groupId>",
+  "      <artifactId>a</artifactId>",
+  "      <version>${x.version}</version>",
+  "    </dependency>",
+  "  </dependencies>",
+  "</project>",
+];
+
+/** The pom.xml and a source file changed, and git's whole-file diff of the pom with one line replaced. */
+function pomRules(line: string, replacement: string): readonly Rule[] {
+  const diff = [
+    "diff --git a/pom.xml b/pom.xml",
+    "index 1111111..2222222 100644",
+    "--- a/pom.xml",
+    "+++ b/pom.xml",
+    `@@ -1,${String(POM_LINES.length)} +1,${String(POM_LINES.length)} @@`,
+    ...POM_LINES.flatMap((each) =>
+      each === line ? [`-${each}`, `+${replacement}`] : [` ${each}`],
+    ),
+    "",
+  ].join("\n");
+  return [
+    { match: (argv) => argv.some((arg) => arg.startsWith("--unified=")), reply: { stdout: diff } },
+    { match: saw("ls-tree"), reply: { stdout: `pom.xml${NUL}` } },
+    {
+      match: saw("--numstat"),
+      reply: { stdout: ["1\t1\tpom.xml", "3\t0\tsrc/app/head.tsx", ""].join(NUL) },
+    },
+    // After the base check, which runs on a worktree nothing has touched yet.
+    {
+      match: afterBase(saw("--name-only")),
+      reply: { stdout: `pom.xml${NUL}src/app/head.tsx${NUL}` },
+    },
+  ];
+}
+
+// Functions, not constants: `saw` is declared further down and is not initialised at this line.
+const bumped = (): readonly Rule[] =>
+  pomRules("    <x.version>1.0</x.version>", "    <x.version>1.1</x.version>");
+const notABump = (): readonly Rule[] =>
+  pomRules("      <artifactId>a</artifactId>", "      <artifactId>b</artifactId>");
+
 const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   proceed: true,
   confidence: "high",
@@ -418,8 +468,8 @@ describe("solveTicket, when recon declines", () => {
 });
 
 describe("solveTicket, when recon's plan names a path the gate refuses", () => {
-  // SSX-3918's shape: recon said proceed, and one planned file is one the diff gate refuses by name.
-  const planned = { recon: recon({ plannedFiles: ["src/app/head.tsx", "pom.xml"] }) };
+  // Recon said proceed, and one planned file is one the diff gate refuses by name alone.
+  const planned = { recon: recon({ plannedFiles: ["src/app/head.tsx", "mvnw"] }) };
 
   it("never starts the fix pass", async () => {
     // The fix pass is unscripted, so reaching it throws.
@@ -439,8 +489,8 @@ describe("solveTicket, when recon's plan names a path the gate refuses", () => {
     expect(outcome).toMatchObject({
       kind: "bailed",
       reason: PLAN_REFUSED_REASON,
-      refusedPlan: [expect.stringMatching(/^pom\.xml: /u)],
-      recon: { proceed: true, plannedFiles: ["src/app/head.tsx", "pom.xml"] },
+      refusedPlan: [expect.stringMatching(/^mvnw: /u)],
+      recon: { proceed: true, plannedFiles: ["src/app/head.tsx", "mvnw"] },
     });
   });
 
@@ -453,13 +503,13 @@ describe("solveTicket, when recon's plan names a path the gate refuses", () => {
   });
 
   it("stops a plan that names the refused file by its path in the worktree", async () => {
-    const { h } = harness({ recon: recon({ plannedFiles: [`${worktree.path}/pom.xml`] }) });
+    const { h } = harness({ recon: recon({ plannedFiles: [`${worktree.path}/mvnw`] }) });
 
     const outcome = await solveTicket(h.deps, request);
 
     expect(outcome).toMatchObject({
       kind: "bailed",
-      refusedPlan: [expect.stringMatching(/^pom\.xml: /u)],
+      refusedPlan: [expect.stringMatching(/^mvnw: /u)],
     });
     expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
   });
@@ -469,10 +519,10 @@ describe("solveTicket, when recon's plan names a path the gate refuses", () => {
     const { h } = harness({
       recon: recon({
         proceed: false,
-        bailReason: "the fix needs a newer lisa-services-api, and pom.xml is refused",
-        bailBlockers: ["KONV_ALIS exists only from 3.203."],
-        bailRemedy: "Land the bump on main, then re-run.",
-        plannedFiles: ["pom.xml"],
+        bailReason: "the build needs a newer Maven wrapper, and mvnw is refused",
+        bailBlockers: ["The wrapper pins Maven 3.6."],
+        bailRemedy: "Update the wrapper on main, then re-run.",
+        plannedFiles: ["mvnw"],
       }),
     });
 
@@ -480,7 +530,7 @@ describe("solveTicket, when recon's plan names a path the gate refuses", () => {
 
     expect(outcome).toMatchObject({
       kind: "bailed",
-      reason: expect.stringContaining("newer lisa"),
+      reason: expect.stringContaining("newer Maven wrapper"),
     });
     expect(outcome.kind === "bailed" ? outcome.refusedPlan : "not a bail").toBeUndefined();
   });
@@ -786,6 +836,36 @@ describe("solveTicket, and what each pass is given", () => {
     const outcome = await solveTicket(h.deps, request);
 
     expect(outcome).not.toHaveProperty("devLens");
+  });
+});
+
+describe("solveTicket, and a dependency version bump", () => {
+  it("runs the fix pass for a plan naming pom.xml, and verifies a bump with the bump on the outcome", async () => {
+    const { h } = harness(
+      { ...FULL, recon: recon({ plannedFiles: ["pom.xml", "src/app/head.tsx"] }) },
+      bumped(),
+    );
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "verified",
+      bumps: [
+        { path: "pom.xml", property: "x.version", dependencies: ["g:a"], from: "1.0", to: "1.1" },
+      ],
+    });
+  });
+
+  it("refuses at the gate a pom.xml change that is not a bump, and says why", async () => {
+    const { h } = harness(FULL, notABump());
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: [expect.stringContaining("more than a dependency version")],
+    });
   });
 });
 
@@ -1195,6 +1275,15 @@ describe("resolveReview", () => {
     expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
   });
 
+  it("does not refuse a round on a pull request that already carries a dependency bump", async () => {
+    // The gate reads the cumulative diff, so a bump from the first round is in every later one.
+    const { h } = harness({ review: review() }, bumped());
+
+    const outcome = await resolveReview(h.deps, reviewRequest);
+
+    expect(outcome.kind).not.toBe("refused");
+  });
+
   it("returns failed when the round breaks a test", async () => {
     const { h } = harness({ review: review() }, [
       { match: saw("run", "test"), reply: { exitCode: 1 } },
@@ -1395,6 +1484,14 @@ describe("runRepairRound", () => {
     const outcome = await runRepair(h);
 
     expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+  });
+
+  it("carries a dependency bump through to a green repair's outcome", async () => {
+    const { h } = harness({ repair: repair() }, bumped());
+
+    const outcome = await runRepair(h);
+
+    expect(outcome).toMatchObject({ kind: "verified", bumps: [{ to: "1.1" }] });
   });
 
   it("returns failed again when the repair still does not pass verification", async () => {
@@ -2263,14 +2360,14 @@ describe("runReconOnly", () => {
   });
 
   it("reports the stop the full pipeline would make at a refused plan", async () => {
-    const { h } = harness({ recon: recon({ plannedFiles: ["src/app/head.tsx", "pom.xml"] }) });
+    const { h } = harness({ recon: recon({ plannedFiles: ["src/app/head.tsx", "mvnw"] }) });
 
     const outcome = await runReconOnly(h.deps, request);
 
     expect(outcome).toMatchObject({
       kind: "bailed",
       reason: PLAN_REFUSED_REASON,
-      refusedPlan: [expect.stringMatching(/^pom\.xml: /u)],
+      refusedPlan: [expect.stringMatching(/^mvnw: /u)],
       recon: { proceed: true },
     });
     expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("removed");
@@ -2280,10 +2377,10 @@ describe("runReconOnly", () => {
     const { h } = harness({
       recon: recon({
         proceed: false,
-        bailReason: "the fix needs a newer lisa-services-api, and pom.xml is refused",
-        bailBlockers: ["KONV_ALIS exists only from 3.203."],
-        bailRemedy: "Land the bump on main, then re-run.",
-        plannedFiles: ["pom.xml"],
+        bailReason: "the build needs a newer Maven wrapper, and mvnw is refused",
+        bailBlockers: ["The wrapper pins Maven 3.6."],
+        bailRemedy: "Update the wrapper on main, then re-run.",
+        plannedFiles: ["mvnw"],
       }),
     });
 
@@ -2291,7 +2388,7 @@ describe("runReconOnly", () => {
 
     expect(outcome).toMatchObject({
       kind: "bailed",
-      reason: expect.stringContaining("newer lisa"),
+      reason: expect.stringContaining("newer Maven wrapper"),
     });
     expect(outcome.kind === "bailed" ? outcome.refusedPlan : "not a bail").toBeUndefined();
   });

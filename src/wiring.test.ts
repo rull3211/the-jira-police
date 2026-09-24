@@ -918,6 +918,7 @@ function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
     devLens: { accurate: true, correction: "" },
     files: 1,
     lines: 4,
+    bumps: [],
   };
 }
 

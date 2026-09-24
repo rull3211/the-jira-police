@@ -514,9 +514,10 @@ Two refusal families, and a third that was deleted:
   refused rather than normalised, because a normalised path is a different string from the one git
   will act on.
 - **Verification integrity** — the subtle one, and §14.13. `package.json`, `tsconfig*.json`, the
-  lint config, the vitest config, `pom.xml` and the Maven wrapper are refused **unconditionally,
-  at any size**, because they define what passing means. A one-line edit there is the dangerous
-  size, not the safe one. It is a separate list from the forbidden paths only so the refusal can
+  lint config, the vitest config, `pom.xml` and the Maven wrapper are refused **at any size**,
+  because they define what passing means. A one-line edit there is the dangerous size, not the
+  safe one. All but `pom.xml` are refused unconditionally; `pom.xml` carries the one exception,
+  a dependency version bump, described below. It is a separate list from the forbidden paths only so the refusal can
   say why in the terms that matter: not "you touched a config file" but "you edited the scoreboard
   you are being scored on".
 - **~~Size~~** — five files, two hundred lines, hardcoded, with no setting. **Deleted
@@ -553,9 +554,36 @@ plan is the model's account, so an empty answer allows nothing and the gate stil
 diff. The outcome's `recon` is left as the model gave it, `proceed: true`; the ticket comment says
 the harness stopped the run and gives both remedies, because the gate cannot tell a change the
 ticket needs from a plan that overreached. The case was SSX-3918 on 2026-09-24: a plan naming
-`pom.xml` bought a fix pass and a simplify pass for a diff this gate was always going to refuse,
+`pom.xml` bought a fix pass and a simplify pass for a diff this gate was then certain to refuse,
 and the one document listing refused paths, `SOLVE_INSTRUCTIONS.md` §4, had not been opened by any
 of that run's passes — `PLAN.md` §1 has how rarely it has been opened since the model changed.
+`pom.xml` is no longer refused by name at all, so the plan check leaves it to the gate: only the
+diff can show whether its change is the one exception below.
+
+**The one exception: a dependency version bump in `pom.xml`.** `dependency-bump.ts` judges a
+changed `pom.xml` from its content, and the gate, `verify`'s refusal to grade a changed build file,
+and the plan check all ask it, so the three cannot disagree. It reads the whole file on both sides
+from one `git diff --unified=1000000 --no-ext-diff --no-textconv` — one hunk holding the file, with
+no external diff driver deciding what it says — and allows a change only when every changed line
+is one element whose value moved from one version to another: a `<version>` directly inside a
+dependency under `<dependencies>` or `<dependencyManagement>`, or a property under `<properties>`
+that the file uses somewhere, and nowhere but as the whole of such a `<version>`. Everything else
+is refused, each for a reason: plugin, parent and profile versions, and a dependency inside a
+plugin, because each changes the build rather than the code; a property nothing names, because
+that is exactly how a setting only a plugin reads looks; a value that does not start with a digit,
+so a `maven.test.skip` cannot be flipped to `true` on this path; a `SNAPSHOT` target, which can
+change after review; any line added or removed; and a property bump in a repository with a second
+`pom.xml`, since only this file is read. The reader is text, not an XML library — this project has
+no parser dependency — and it refuses what it cannot follow, such as an internal DTD subset,
+rather than guessing. The pull request names every bump before any model-written line, and says the
+harness checked against the new version without reading what changed in it. The operator's
+position, taken as given: bumping a dependency to get what a ticket needs is ordinary work. What it
+costs: a bump is code nobody in the repository wrote, and a test-scope dependency is part of what
+the tests do, so this exception can change what passing means — the thing the rule was written
+against. The notice and the human who merges are the only defences; if a bump is ever found to
+have made verification pass without the code being right, narrow this to non-test scopes or
+withdraw it. SSX-3918 is the case: `lisa-services-api` 3.181 to 3.203 for one enum constant, 22
+releases the harness reads none of.
 
 The gate is a backstop, not the only defence: `createWorktree` and `attachWorktree`
 (`worktree.ts`) call `CommandRunner.excludeAgentPaths` once the worktree exists, which lists
@@ -579,8 +607,9 @@ part it would be easy to stop at: knowing the base said `"test": "vitest run"` d
 command executes in a worktree where `package.json` now says something else, because the package
 manager reads the manifest on disk and not the one we consulted. So there are two halves, and the
 second is that verification **refuses to run at all** unless the files defining what passing means
-are still byte-identical to the base. That list is shared with the diff gate on purpose: the gate
-refuses such a diff after the fact, this refuses to produce a verdict about it, and if the list
+are still byte-identical to the base, but for a `pom.xml` whose change `dependency-bump.ts` judges a
+dependency version bump. That list and that exception are shared with the diff gate on purpose: the
+gate refuses such a diff after the fact, this refuses to produce a verdict about it, and if either
 grows it grows for both.
 
 For a Node base, the package manager comes from an allowlist keyed with `Object.hasOwn` rather than `in` — `in`
