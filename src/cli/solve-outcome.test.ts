@@ -747,6 +747,22 @@ describe("describeAdvanceOutcome", () => {
     }
   });
 
+  it("says nobody was told when a dropped edit reached no comment or thread", () => {
+    const text = describeAdvanceOutcome({
+      kind: "iterated",
+      round: 6,
+      responses: [],
+      reviewerRequested: "asked",
+      pushed: true,
+      spoken: { outcome: "nothing-to-say" },
+      undrafted: "still-drafting",
+      threads: { answered: 1, resolved: 1, failures: [] },
+      unresolved: "",
+      dropped: { paths: ["pom.xml"], notice: { outcome: "nothing-to-say" } },
+    });
+    expect(text).toContain("Nobody was told");
+  });
+
   it("names the edits the gate dropped when the rest of the round landed", () => {
     const text = describeAdvanceOutcome({
       kind: "iterated",

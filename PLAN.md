@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3175 tests in 96 files**, no build step.
+> **3185 tests in 96 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -406,10 +406,17 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   above the fold exist only in their tests until
   `REPAIR_ROUND=true pnpm solve:once <KEY> --pr --repair` runs on a ticket that fails verification
   — not SSX-3944, which now solves cleanly. **`REPAIR_PUBLISH` should stay off until that pull
-  request has been opened and read**: the loop only removes the person, and nobody has yet been
-  the person. Re-driving a ticket the solver has already tried means
+  request has been opened and read, and a review round's repair pushed by hand**: it arms the
+  daemon's claims and its review sweep alike, the loop only removes the person, and nobody has yet
+  been the person. Re-driving a ticket the solver has already tried means
   adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
   so on the way out.
+- **A review round's repair has never run, armed or not, and neither has the reply for a round
+  that lands nothing.** Only a partial round's drop notice has reached a real pull request: #1459 round 5 on
+  2026-09-24. #2688 round 8 went green on its first try, so `repairReviewRound` never started, and
+  no abandoned, refused or failed round has posted `whyNothingLanded`. **What would show it:**
+  `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails lint, and a
+  round refused at the diff gate or `widening`.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries

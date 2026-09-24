@@ -124,16 +124,16 @@ const NOTHING: ReviewCycleOutcome = {
   deferred: [],
 };
 
-/**
- * One `AdvanceOutcome` as one log line: the field that discriminates within each arm, not a full dump.
- *
- * No `default` arm — an outcome added to the union is a type error here rather than a round that logs `undefined`.
- */
 /** Where the reason for a round that landed nothing went, for a log line. */
 function told(spoken: { readonly outcome: string } | undefined): string {
   return spoken === undefined ? "" : ` told=${spoken.outcome}`;
 }
 
+/**
+ * One `AdvanceOutcome` as one log line: the field that discriminates within each arm, not a full dump.
+ *
+ * No `default` arm — an outcome added to the union is a type error here rather than a round that logs `undefined`.
+ */
 export function outcomeNote(outcome: AdvanceOutcome): string {
   switch (outcome.kind) {
     case "waiting":
@@ -141,7 +141,7 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
     case "ready":
       return `ready rounds=${String(outcome.rounds)}`;
     case "iterated":
-      return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)}${outcome.repaired === undefined ? "" : ` repaired=${outcome.repaired.notice.outcome}`}${outcome.dropped === undefined ? "" : ` dropped=${String(outcome.dropped.paths.length)}`} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
+      return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)}${outcome.repaired === undefined ? "" : ` repaired=${outcome.repaired.notice.outcome}`}${outcome.dropped === undefined ? "" : ` dropped=${String(outcome.dropped.paths.length)}${told(outcome.dropped.notice)}`} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
     case "reviewer-exhausted":
       return `reviewer-exhausted rounds=${String(outcome.rounds)} unresolved=${outcome.unresolved}`;
     case "capped":

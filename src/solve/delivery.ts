@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 
 import { createLogger } from "../logger.ts";
+import { shorten } from "../text.ts";
 import {
   type BotIdentity,
   type ReviewComment,
@@ -1169,7 +1170,8 @@ interface DroppedRequest {
 /**
  * The edits the gate refused, told to whoever asked for them: the comment or thread a `widened`
  * entry names for that file, or, when none does, the top-level comments that asked anything —
- * the pass's own replies went out first and may say the dropped edit was made.
+ * and always an inline thread on a dropped file. The pass's own replies went out first and may
+ * say the dropped edit was made.
  */
 async function announceDropped(
   commands: SolveDependencies["commands"],
@@ -1184,7 +1186,10 @@ async function announceDropped(
   const named = request.comments.filter((_comment, index) =>
     sources.has(`comment ${String(index + 1)}`),
   );
-  const threads = request.threads.filter((thread) => sources.has(thread.id.toLowerCase()));
+  // A thread on the dropped file asked for an edit there whatever `widened` says, and is where its "Done" reply sits.
+  const threads = request.threads.filter(
+    (thread) => sources.has(thread.id.toLowerCase()) || paths.has(thread.path),
+  );
   const silent = new Set(request.report.silent);
   const comments =
     named.length > 0 || threads.length > 0
@@ -1196,7 +1201,7 @@ async function announceDropped(
         `\`${edit.path}\` was not changed: ${edit.reasons.join("; ") || "the gate refused it"}.`,
     )
     .join(" ");
-  return await tellWhoAsked(commands, {
+  const told = await tellWhoAsked(commands, {
     cwd: request.cwd,
     repo: request.repo,
     number: request.number,
@@ -1207,6 +1212,14 @@ async function announceDropped(
     why: `The rest of this round was pushed, without some of what was asked. ${why} A person can make that change; this service is not allowed to.`,
     timeoutMs: request.timeoutMs,
   });
+  if (told.outcome === "nothing-to-say") {
+    log.warn("solve.review.drop_untold", {
+      number: request.number,
+      paths: [...paths],
+      note: "no comment or thread on this round could be told, so the pass's replies stand uncorrected",
+    });
+  }
+  return told;
 }
 
 /** Harness-written, so a member reads the reason nothing landed rather than the pass's own replies, which described a change that was discarded. */
@@ -1249,13 +1262,20 @@ interface TellRequest {
   readonly timeoutMs: number;
 }
 
-/** A comment's first visible line, quoted, with every `@` broken so quoting a mention does not summon anyone. */
+/** Every `@` broken, so text a model or a commenter wrote cannot mention anyone; `@copilot` summons GitHub's agent. */
+function unmentioned(text: string): string {
+  return text.replaceAll("@", "@\u200b");
+}
+
+/** Enough of a comment to say which one is meant; the reader has the comment itself on the page. */
+const QUOTE_CHARS = 120;
+
+/** A comment's first visible line, quoted. */
 function quoted(body: string): string {
   // GitHub renders an HTML comment as nothing, so quoting one reads as an empty quote.
   const visible = body.replace(/<!--[\s\S]*?(?:-->|$)/gu, "");
   const line = visible.split("\n").find((candidate) => candidate.trim() !== "") ?? "";
-  const cut = line.length > 120 ? `${line.slice(0, 117).trimEnd()}...` : line;
-  return `> ${cut.trim().replaceAll("@", "@\u200b")}`;
+  return `> ${unmentioned(shorten(line.trim(), QUOTE_CHARS))}`;
 }
 
 /**
@@ -1271,6 +1291,8 @@ async function tellWhoAsked(
   const asked = request.comments.filter(
     (_comment, index) => !silent.has(`comment ${String(index + 1)}`),
   );
+  // The reasons can carry what the pass wrote — a decline, a `requestedBy` — so only `mentions` below is live.
+  const why = unmentioned(request.why);
   const failures: string[] = [];
   let posted = false;
 
@@ -1278,7 +1300,7 @@ async function tellWhoAsked(
     const replied = await replyToThread(commands, {
       cwd: request.cwd,
       threadId: thread.id,
-      body: request.why,
+      body: why,
       timeoutMs: request.timeoutMs,
     });
     if (replied.outcome === "failed") {
@@ -1298,7 +1320,7 @@ async function tellWhoAsked(
       number: request.number,
       body:
         `${BOT_PREFIX}round ${String(request.round)} — ${request.headline ?? "nothing from this round was pushed"}\n\n` +
-        `${mentions.length === 0 ? "" : `${mentions.join(" ")} — `}${request.why}\n\n` +
+        `${mentions.length === 0 ? "" : `${mentions.join(" ")} — `}${why}\n\n` +
         `In answer to:\n${asked.map((comment) => quoted(comment.body)).join("\n")}`,
       timeoutMs: request.timeoutMs,
     });
@@ -1333,7 +1355,9 @@ async function announceRepair(
   commands: SolveDependencies["commands"],
   request: AnnounceRequest,
 ): Promise<Spoken> {
-  const said = request.repair.report.summary.trim();
+  const said = unmentioned(request.repair.report.summary.trim());
+  // Where a repair would admit weakening an assertion to turn the check green.
+  const risk = unmentioned(request.repair.report.residualRisk.trim());
   const posted = await postComment(commands, {
     cwd: request.cwd,
     repo: request.repo,
@@ -1343,7 +1367,8 @@ async function announceRepair(
       `The round's own change failed verification: ${request.repair.failure}. A repair pass was shown ` +
       `that failure and corrected it in the second of this round's two commits — read that commit on ` +
       `its own. The replies to this round describe its change as it was written, before the repair.` +
-      (said === "" ? "" : `\n\nWhat the repair pass says it did: ${said}`),
+      (said === "" ? "" : `\n\nWhat the repair pass says it did: ${said}`) +
+      (risk === "" ? "" : `\n\nWhat it says could still be wrong: ${risk}`),
     timeoutMs: request.timeoutMs,
   });
   return posted.outcome === "failed"

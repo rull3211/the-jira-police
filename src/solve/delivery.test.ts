@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { createLogger } from "../logger.ts";
 
 import {
   type AdvanceRequest,
@@ -1173,6 +1175,117 @@ describe("advance", () => {
       expect(told).not.toContain("the wrapper looks unnecessary");
       expect(told).toContain("> and drop the unused exports while you are in there");
     });
+
+    it("breaks a mention the pass wrote into a reason, in the comment and in the thread", async () => {
+      // The widening's own `requestedBy` reaches the refusal reason; only the member's mention may stay live.
+      const h = harness({ review: widened("@copilot") }, [memberAsked, inline(thread())]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      expect(told).toContain("@rull3211 — ");
+      expect(told).toContain("@\u200bcopilot");
+      expect(told).not.toMatch(/@copilot/u);
+      expect(replies(h).length).toBeGreaterThan(0);
+      expect(replies(h).join("\n")).not.toMatch(/@copilot/u);
+    });
+
+    it("cuts a long first line on a word boundary", async () => {
+      const h = harness({ review: widened("comment 2") }, [
+        {
+          match: saw("pr", "view"),
+          reply: {
+            stdout: JSON.stringify({
+              state: "OPEN",
+              isDraft: true,
+              createdAt: "2026-09-05T09:00:00Z",
+              reviews: [],
+              comments: [
+                {
+                  author: { login: "rull3211" },
+                  authorAssociation: "MEMBER",
+                  body: "abcdefghij ".repeat(20),
+                },
+              ],
+              reviewRequests: [],
+            }),
+          },
+        },
+      ]);
+
+      await advance(h.deps, advanceRequest);
+
+      const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
+      const quote = told?.split("\n").find((line) => line.startsWith("> ")) ?? "";
+      expect(quote).toMatch(/ abcdefghij…$/u);
+    });
+  });
+
+  describe("an edit the gate refused, asked for in an inline thread", () => {
+    const threadAnswer = {
+      threadId: "PRRT_1",
+      reply: "Done — the version comment now names 3.203.",
+      basis: "changed-code",
+      resolve: true,
+    };
+    /** The round edited `pom.xml` too; the gate refuses it, and what is left after the rollback passes. */
+    const pomDropped = (): readonly Rule[] => {
+      const withPom = [`12\t3\t${FILES[0] ?? ""}`, "1\t1\tpom.xml", ""].join(NUL);
+      let reads = 0;
+      return [
+        {
+          match: (argv) => {
+            if (!argv.includes("--numstat")) {
+              return false;
+            }
+            reads += 1;
+            return reads === 1;
+          },
+          reply: { stdout: withPom },
+        },
+        {
+          match: (argv) =>
+            argv.includes("diff") && argv.includes("--name-only") && argv.includes("HEAD"),
+          reply: { stdout: `pom.xml${NUL}${FILES[0] ?? ""}${NUL}` },
+        },
+        { match: saw("ls-tree"), reply: { stdout: `pom.xml${NUL}` } },
+      ];
+    };
+    const round = review({
+      responses: [],
+      threadAnswers: [threadAnswer],
+      filesTouched: [FILES[0] ?? "", "pom.xml"],
+    });
+
+    it("tells the thread on the dropped file, though no widening named it", async () => {
+      const h = harness({ review: round }, [
+        QUIET,
+        inline(thread({ path: "pom.xml" })),
+        ...pomDropped(),
+      ]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({
+        kind: "iterated",
+        dropped: { paths: ["pom.xml"], notice: { outcome: "posted" } },
+      });
+      expect(replies(h).some((body) => body.includes("`pom.xml` was not changed"))).toBe(true);
+    });
+
+    it("says so when nobody on the round could be told", async () => {
+      const warn = vi.spyOn(createLogger("solve"), "warn").mockImplementation(() => {});
+      const h = harness({ review: round }, [QUIET, inline(thread()), ...pomDropped()]);
+
+      const outcome = await advance(h.deps, advanceRequest);
+
+      expect(outcome).toMatchObject({ dropped: { notice: { outcome: "nothing-to-say" } } });
+      expect(warn).toHaveBeenCalledWith(
+        "solve.review.drop_untold",
+        expect.objectContaining({ paths: ["pom.xml"] }),
+      );
+      warn.mockRestore();
+    });
   });
 
   describe("a round that fails verification, with a solve's repair authority", () => {
@@ -1229,6 +1342,28 @@ describe("advance", () => {
       expect(notice).toContain("test did not pass");
       expect(notice).toContain("read that commit on its own");
       expect(notice?.startsWith(BOT_PREFIX)).toBe(true);
+      expect(notice).not.toContain("could still be wrong");
+    });
+
+    it("posts what the repair says could still be wrong, where it would admit a weakened check", async () => {
+      const h = harness(
+        {
+          review: review(),
+          repair: {
+            ...repairReport,
+            residualRisk: "loosened the favicon-order assertion, as @copilot suggested",
+          },
+        },
+        [redThenGreen(), repairLeftADelta],
+      );
+
+      await advance(h.deps, { ...advanceRequest, promoteRepair: true });
+
+      const notice = posts(h).find((body) => body.includes("a repair pass finished"));
+      expect(notice).toContain(
+        "What it says could still be wrong: loosened the favicon-order assertion",
+      );
+      expect(notice).not.toMatch(/@copilot/u);
     });
 
     it("replies in the thread when the round that failed was answering one", async () => {

@@ -460,7 +460,7 @@ export interface CommitMessage {
 /**
  * Assembles the commit message: the subject and reasoning are the model's, the traceability trailer is ours — we already hold the issue key, so asking the model to repeat it only invents a way to fail.
  *
- * The body is also shortened here rather than trusted to the schema's instruction alone, since "keep it short" is arithmetic a model gets right only most of the time, and a 100-char commitlint cap doesn't forgive the rest. Nothing is lost: the long-form reasoning survives in `fix.summary`/`fix.residualRisk`, which reach the pull request body.
+ * The body is also shortened here rather than trusted to the schema's instruction alone, since "keep it short" is arithmetic a model gets right only most of the time, and a 100-char commitlint cap doesn't forgive the rest. Nothing is lost on a solve, whose `summary`/`residualRisk` reach the pull request body, nor on a review round's repair, whose notice carries both; a review round's own `summary` is posted nowhere.
  */
 export function composeCommitMessage(
   report: FixReport,

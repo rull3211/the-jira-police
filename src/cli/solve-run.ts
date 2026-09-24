@@ -727,16 +727,6 @@ function createReviewLook(
 }
 
 /**
- * The expensive half: attach, run the round, put the checkout back.
- *
- * Spelled out here rather than by calling `advance`, which would survey again — a second survey
- * between the look and the round could read a comment posted in between and run against a batch
- * the cycle's bound never counted.
- *
- * Exported only so its refusal branch can be tested: this is the daemon's copy of `advance`'s
- * tail, and a duplicated branch nothing constructs is where the two copies drift.
- */
-/**
  * Whether a round's checkout is kept for a person to read: a refusal's diff is how an operator tells
  * a bad gate from a bad pass, and a repair round's row in `repair-rounds.md` names this checkout.
  */
@@ -746,6 +736,16 @@ export function keepsEvidence(result: AdvanceOutcome): boolean {
   );
 }
 
+/**
+ * The expensive half: attach, run the round, put the checkout back.
+ *
+ * Spelled out here rather than by calling `advance`, which would survey again — a second survey
+ * between the look and the round could read a comment posted in between and run against a batch
+ * the cycle's bound never counted.
+ *
+ * Exported only so its refusal branch can be tested: this is the daemon's copy of `advance`'s
+ * tail, and a duplicated branch nothing constructs is where the two copies drift.
+ */
 export function createReviewAct(
   deps: SolveDependencies,
   targets: Map<string, ReviewTarget>,

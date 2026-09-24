@@ -287,8 +287,9 @@ startup. The review modes are armed the same way — `--repair` on `--review`, `
 `--watch`, `REPAIR_PUBLISH` for the daemon's review sweep — through `buildAdvanceRequest`'s
 `promoteRepair` parameter, never a field a base request carries in. Armed, a green review-round
 repair returns as the round's `resolved` outcome carrying `repair`; `delivery.ts` commits it as the
-round's second commit, pushes, and posts a harness-written `bot:` comment naming the failure and
-telling the reader to take that commit on its own — the review round's counterpart of the banner
+round's second commit, pushes, and posts a harness-written `bot:` comment naming the failure,
+telling the reader to take that commit on its own, and quoting the repair's `summary` and its
+`residualRisk` — the field where it would admit weakening a check — the review round's counterpart of the banner
 below, since a pull request already open has no body left to put it in. That notice is all the
 compensation there is, and it is needed more here than for a solve: a solve's repair opens a pull
 request nobody has read, a review round's lands in one a person is already reading, where the cheap
@@ -582,8 +583,9 @@ because one of them edited a comment inside `pom.xml`. The gate now names the pa
 (`orchestrator.ts`) restores them with `git checkout HEAD --` when every one is a file the round
 changed and `HEAD` already had, then gates what is left again. The round continues to verification
 with `dropped` on its outcome, and `delivery.ts` tells whoever asked — the comment a `widened` entry
-names for that file, or the comments that asked anything — which edit was dropped and which rule
-dropped it. The pass wrote its commit message before the rollback, so round 5 on #1459 pushed one
+names for that file, or the comments that asked anything, and always an inline thread on a dropped
+file — which edit was dropped and which rule dropped it. A drop nobody could be told is logged as
+`solve.review.drop_untold` and printed as such, since the pass's replies then stand uncorrected. The pass wrote its commit message before the rollback, so round 5 on #1459 pushed one
 saying the stale `pom.xml` comment was fixed; `droppedNote` now adds a harness line above the
 `Refs:` trailer naming each path not in the commit. The pass's replies can make the same claim, and
 the drop notice posted after them is what corrects it. An edit that depended on the dropped one
@@ -1134,7 +1136,9 @@ posted an empty quote.
   repair round's verdict when one ran; the one model-written text is a decline's own `abandoned`
   reason, which is the decline.
 - **Only a member is mentioned.** Mentioning `@copilot` asks GitHub's agent to act, so a bot is
-  quoted and never mentioned, and every `@` inside a quote is broken with a zero-width space.
+  quoted and never mentioned. Every `@` in text anyone else wrote is broken with a zero-width
+  space: inside a quote, in the reason, which can carry a decline or a `requestedBy` the pass
+  wrote, and in a repair notice's quoted `summary` and `residualRisk`.
 - **A comment that asked for nothing is told nothing.** The review schema's `silent` lists
   top-level comments that ask nothing of the pass — people talking among themselves — and they get
   no entry in `responses` and no reply here. A thread cannot be `silent`: one whose last comment is

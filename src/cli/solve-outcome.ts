@@ -419,7 +419,6 @@ const UNDRAFT_LINE = {
   "still-drafting": `\nStill a draft: there is something new for the reviewer to read first.`,
 } as const satisfies Record<Undraft, string>;
 
-/** One line an operator can act on, per review-round outcome. */
 /** Only a failure is worth a line: a reason that reached the pull request is the ordinary case. */
 function toldLine(told: Spoken | undefined): string {
   return told?.outcome === "failed"
@@ -427,6 +426,7 @@ function toldLine(told: Spoken | undefined): string {
     : "";
 }
 
+/** One line an operator can act on, per review-round outcome. */
 export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
   switch (outcome.kind) {
     case "waiting": {
@@ -449,7 +449,9 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
           : ` The gate refused its edits to ${outcome.dropped.paths.join(", ")}, so those were rolled back and the rest pushed.` +
             (outcome.dropped.notice.outcome === "failed"
               ? ` The notice saying so did NOT reach the pull request — ${outcome.dropped.notice.reason}.`
-              : "")) +
+              : outcome.dropped.notice.outcome === "nothing-to-say"
+                ? ` Nobody was told: no comment or thread on this round could be, so the pass's own replies stand uncorrected.`
+                : "")) +
         (outcome.repaired === undefined
           ? ""
           : ` Its own change failed (${outcome.repaired.failure}); a repair round corrected it and was pushed as the round's second commit — read that commit on its own.` +
