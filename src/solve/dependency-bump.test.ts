@@ -338,6 +338,31 @@ describe("textsFromFullDiff", () => {
     });
   });
 
+  it("gives the missing final newline to the one side that lost it, not to both", () => {
+    const lastLine = (marked: "-" | "+"): string =>
+      [
+        "diff --git a/pom.xml b/pom.xml",
+        "index b9ea0a898e..8fa9bfcdcc 100644",
+        "--- a/pom.xml",
+        "+++ b/pom.xml",
+        "@@ -1,2 +1,2 @@",
+        " <project>",
+        ...(marked === "+"
+          ? ["-</project>", "+</project>", "\\ No newline at end of file"]
+          : ["-</project>", "\\ No newline at end of file", "+</project>"]),
+        "",
+      ].join("\n");
+
+    expect(textsFromFullDiff(lastLine("+"))).toEqual({
+      base: "<project>\n</project>\n",
+      current: "<project>\n</project>",
+    });
+    expect(textsFromFullDiff(lastLine("-"))).toEqual({
+      base: "<project>\n</project>",
+      current: "<project>\n</project>\n",
+    });
+  });
+
   it("refuses anything but one modification of a file present on both sides", () => {
     for (const refused of [
       diff.replace("index b9ea0a898e..8fa9bfcdcc 100644", "new file mode 100644"),
