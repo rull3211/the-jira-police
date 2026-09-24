@@ -284,9 +284,10 @@ number in §2 would inherit that at a larger scale and with nobody watching.
 transcripts: every solve pass through 2026-09-17 ran on `claude-opus-5`, and every pass from
 2026-09-21 on `claude-sonnet-5`, with no change in this tree. The likeliest cause is the operator's
 own global CLI setting, `opusplan`, which is Opus only in plan mode — inferred, not proven. The
-effect is measured: recon and fix passes stopped opening `SOLVE_INSTRUCTIONS.md` — 2 of 34 since,
-against nearly every one before — so its proceed criteria and the gate's path list stopped reaching
-the model, and SSX-3918 paid a fix pass for a `pom.xml` edit the gate was always going to refuse.
+effect is measured: recon and fix passes mostly stopped opening `SOLVE_INSTRUCTIONS.md` — 2 of the
+34 run from 2026-09-21 to SSX-3918's failure on 2026-09-24, against nearly every one before — so
+its proceed criteria and the gate's path list stopped reaching the model, and SSX-3918 paid a fix
+pass for a `pom.xml` edit the gate was always going to refuse.
 "Unset means today's behaviour" below is a behaviour nobody in this repository controls.
 
 **Where a cheaper model is safe is decided by the gate, not by the price.** The rule: downgrade

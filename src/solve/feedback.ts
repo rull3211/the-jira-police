@@ -199,7 +199,7 @@ function correctionBlock(outcome: SolveOutcome): readonly string[] {
 /**
  * The two sections a bail owes the person holding the ticket: what blocks it and what would fix
  * it, from separate schema fields rather than one string that `safeText` would flatten into a
- * wall of text.
+ * wall of text — or, for a plan the harness stopped, from `refusedPlanDetail`.
  * §5 of the plan records the pattern this closes: the remedy is the only actionable part, so it
  * gets the most room and the last word before the footer. Absent fields render nothing rather
  * than an empty heading.

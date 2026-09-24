@@ -21,7 +21,7 @@
  * ```
  *
  * Three shapes of "no", kept apart because they call for different action:
- * **bailed** (recon declined, nothing written, a human picks it up), **failed**
+ * **bailed** (recon declined, or planned a path the gate refuses; nothing written, a human picks it up), **failed**
  * (the change was made and tests say it's wrong), and **refused** (the harness
  * declines to have an opinion — never report it as a statement about the code).
  *
