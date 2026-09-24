@@ -519,6 +519,60 @@ describe("parseRecon", () => {
     expect(() => parseRecon(placeholder, "SSX-3918")).toThrow(/every written field says "Test"/u);
   });
 
+  describe("the placeholder check, field by field", () => {
+    const fields = [
+      "rootCause",
+      "devLensCorrection",
+      "approach",
+      "testPlan",
+      "bailReason",
+      "bailRemedy",
+    ];
+    /** A bail with every written field set to `word`, the blocker included. */
+    const allSaying = (word: string): Record<string, unknown> => ({
+      ...recon({ proceed: false, plannedFiles: [] }),
+      ...Object.fromEntries(fields.map((field) => [field, word])),
+      bailBlockers: [word],
+    });
+
+    it.each([...fields, "bailBlockers"])(
+      "counts %s, so a verdict differing only there is not a placeholder",
+      (field) => {
+        const differs = field === "bailBlockers" ? ["a real finding"] : "a real finding";
+        expect(parseRecon({ ...allSaying("Test"), [field]: differs }, "SSX-1").proceed).toBe(false);
+      },
+    );
+
+    it("reads fields as equal once trimmed", () => {
+      expect(() => parseRecon({ ...allSaying("Test"), rootCause: "  Test \n" }, "SSX-1")).toThrow(
+        /placeholder/u,
+      );
+    });
+
+    it("needs three equal fields, not two", () => {
+      // A bail needs its three bail fields, so exactly three written fields is the smallest placeholder a bail can be.
+      const three = {
+        ...allSaying(""),
+        bailReason: "Test",
+        bailRemedy: "Test",
+        bailBlockers: ["Test"],
+      };
+      expect(() => parseRecon(three, "SSX-1")).toThrow(/placeholder/u);
+      const two = recon({ rootCause: "Test", approach: "Test", testPlan: "" });
+      expect(parseRecon(two, "SSX-1").proceed).toBe(true);
+    });
+
+    it("catches a proceed filled with the same word too", () => {
+      const proceeding = recon({
+        rootCause: "Test",
+        approach: "Test",
+        testPlan: "Test",
+        plannedFiles: ["Test"],
+      });
+      expect(() => parseRecon(proceeding, "SSX-1")).toThrow(/placeholder/u);
+    });
+  });
+
   it("does not mistake a bail whose headline repeats its first blocker for a placeholder", () => {
     // The schema asks for exactly that repetition, so two equal fields are ordinary.
     const verdict = parseRecon(
@@ -605,6 +659,12 @@ describe("RECON_SCHEMA's conditional, against parseRecon", () => {
     "a bail with no reason": bail({ bailReason: "" }),
     "a bail with only whitespace as its remedy": bail({ bailRemedy: " \n" }),
     "a bail with no blockers": bail({ bailBlockers: [] }),
+    // `str` reads quote marks alone as empty, so the schema must too, in both branches.
+    'a proceed with "" as its bail reason': recon({ bailReason: '""' }),
+    "a proceed with '' as its remedy": recon({ bailRemedy: " '' " }),
+    'a bail with "" as its reason': bail({ bailReason: '""' }),
+    "a bail with '' as its remedy": bail({ bailRemedy: "''" }),
+    "a bail whose reason is quoted, which is still a reason": bail({ bailReason: '"too big"' }),
   };
 
   for (const [name, verdict] of Object.entries(cases)) {

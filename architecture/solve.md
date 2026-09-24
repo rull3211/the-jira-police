@@ -385,12 +385,12 @@ triage denies it in recon without anyone remembering to.
 **The parsers carry the rules the harness acts on; the recon schema repeats its own.** `parseRecon`
 refuses a verdict that both proceeds and bails — the run contradicted itself, so neither reading
 is safe to act on — and one that declines without saying why, because the reason is the only
-calibration the fitness assessment ever gets. This paragraph used to say JSON Schema cannot
-express that; a draft-07 `if`/`then`/`else` can, and a probe on 2026-09-24 measured the CLI
-enforcing one in-session: the model's `"n/a — proceeding"` in `bailReason` was rejected and it
-resent `""`, where the control schema without the conditional let the filler through. So
-`RECON_SCHEMA` carries exactly `parseRecon`'s coherence rules — no more, since each rejection is a
-capped re-prompt — and a note in a field that must be empty is corrected by the model instead of
+calibration the fitness assessment ever gets. A draft-07 `if`/`then`/`else` expresses the same
+rule, and a probe on 2026-09-24 measured the CLI enforcing one in-session: the model's
+`"n/a — proceeding"` in `bailReason` was rejected and it resent `""`, where the control schema
+without the conditional let the filler through. So `RECON_SCHEMA` carries exactly `parseRecon`'s
+coherence rules — no more, since each rejection is a capped re-prompt, and with "empty" meaning
+what `str` reads as empty, quote marks alone included — and a note in a field that must be empty is corrected by the model instead of
 discarding a correct plan, as it did twice on SSX-3918 that day. `parseRecon` keeps every check as
 the net, and adds one the schema cannot: a verdict whose written fields all say the same thing is a
 placeholder, the "Test" verdict SSX-3918 produced after three rejections for omitting

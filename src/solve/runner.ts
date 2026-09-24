@@ -572,7 +572,7 @@ function strings(record: Record<string, unknown>, key: string): readonly string[
   return value as readonly string[];
 }
 
-/** Validates a recon verdict, including the coherence JSON Schema cannot express: `bailReason` must be non-empty exactly when `proceed` is false. Same shape as `assertDorCoherent` in triage. */
+/** Validates a recon verdict, coherence included: `RECON_SCHEMA` repeats these rules so the model is corrected in-session, and this is the net. Same shape as `assertDorCoherent` in triage. */
 export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
   const record = asRecord(value, `recon verdict for ${issueKey}`);
   const confidence = str(record, "confidence");
@@ -790,7 +790,7 @@ function normaliseSimplifyReport(report: SimplifyReport): SimplifyReport {
  *
  * Unlike `parseRecon`, `parseFix` and `parseReview` — which throw on the same
  * `changed`/`declined` contradiction because a real decision rests on the answer
- * (architecture/solve.md, "the parsers carry the rules the schema cannot express") — a
+ * (architecture/solve.md, "the parsers carry the rules the harness acts on") — a
  * contradictory simplify report is normalised rather than thrown on: nothing downstream branches
  * on `changed` or `declined` (`orchestrator.ts` only logs it), so refusing here would discard an
  * otherwise-complete, possibly-successful run to protect a fact nobody consults. SSX-3944 crashed
