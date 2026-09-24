@@ -289,6 +289,8 @@ describe("plannedPathRefusals", () => {
       "vitest.config.ts",
       "pom.xml",
       "mvnw",
+      // Both lists at once, so a plan reports both reasons exactly as the gate does.
+      ".claude/package.json",
     ];
     for (const rule of [...FORBIDDEN_PATHS, ...VERIFICATION_PATHS]) {
       expect(samples.some((sample) => rule.pattern.test(sample))).toBe(true);

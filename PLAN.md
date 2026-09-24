@@ -5,7 +5,7 @@
 > opens a pull request, answers the reviewer, keeps the branch current with its base, labels the
 > ticket for whatever happened, watches the ones it sent back for an answer, sweeps the skill roots
 > and staged images its own abandoned runs left behind, and renders its log to a reader.
-> **2980 tests in 94 files**, no build step.
+> **2984 tests in 94 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -53,7 +53,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §49 and §50, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50 and §51, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -146,46 +146,20 @@ three was blocked on it, and clearing that blocker did not ship the phase — th
 typed `--repair` rung and the `REPAIR_PUBLISH` loop. The last two were claimed before the
 evidence §45 itself asked for, by the operator's decision, and that argument — with its
 counter-argument and what withdraws it — now lives in `architecture/solve.md` §15 rather than
-being deleted with the entry. The next entry is §53.
+being deleted with the entry. §51 stopped a recon plan naming a path the diff gate refuses before
+the fix pass, and was opened and deleted inside the branch that built it. The next entry is §53.
 
 <!-- refs:on -->
 
-### 51. A plan naming a path the gate refuses is paid for twice before the gate reads it
-
-**Branch:** `fix/refuse-at-recon`
-
-**What is being attempted.** When recon says `proceed`, check its `plannedFiles` against the diff
-gate's own path rules before the fix pass starts. A plan that names a refused path becomes a bail
-the harness wrote: the worktree is discarded as for any bail, no model gets `Write`, and the ticket
-comment lists each refused path with the gate's reason and says what a person does next — make that
-change on the base branch and re-run, or accept that the plan overreached.
-
-**Why now.** SSX-3918, 2026-09-24. Recon planned `pom.xml` (a dependency version bump the ticket
-genuinely needs), the fix and simplify passes both ran, and the gate then refused the diff. The
-comment said only that nothing was judged. The list of refused paths is written down in one place,
-`SOLVE_INSTRUCTIONS.md` §4, and **none of the five passes on that ticket opened the file** — nor
-did 32 of the 34 recon and fix passes run since 2026-09-21, the day every pass moved from
-`claude-opus-5` to `claude-sonnet-5` with no change in this tree (§1). An instruction the pass
-does not read is not a bound; a check on its structured plan is.
-
-**What it lets the service do.** Stop a doomed run at the cheapest point, with a reason a person
-can act on, whichever model wrote the plan.
-
-**What would make it the wrong idea.** `plannedFiles` is the model's account, so this is a cost
-saver and never a guard: the gate still reads the real diff, and nothing here may allow a path.
-It refuses in one direction only, which is safe — but a recon that lists a file it only means to
-read would lose a solvable ticket. If that shows up, the plan field's contract is what needs
-tightening, not this check loosening.
-
 ### 52. A ticket that needs a newer version of a dependency cannot be solved at all
 
-**Branch:** `feat/maven-dependency-bump`, stacked on `fix/refuse-at-recon` (§51), because §51's
+**Branch:** `feat/maven-dependency-bump`, stacked on `fix/refuse-at-recon`, because that branch's
 plan check must stop refusing `pom.xml` by name the moment a `pom.xml` change can be allowed.
 
 **What is being attempted.** Let a run change `pom.xml` when the only change is the version of a
 dependency the file already declares: a literal `<version>` inside a `<dependency>`, or a property
 used nowhere but as dependency versions. One judge decides it, and the diff gate, `verify`'s
-refusal to grade a changed build file, and §51's plan check all ask it rather than keeping copies.
+refusal to grade a changed build file, and the plan check all ask it rather than keeping copies.
 Anything else in `pom.xml` stays refused, as do plugin and parent versions, profiles, `mvnw` and
 `.mvn/`. The pull request names each bump at the top, written by the harness.
 
@@ -629,7 +603,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **122 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **123 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that have never existed** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

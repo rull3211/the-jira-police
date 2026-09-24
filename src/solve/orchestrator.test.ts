@@ -464,6 +464,27 @@ describe("solveTicket, when recon's plan names a path the gate refuses", () => {
     expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
   });
 
+  it("keeps recon's own bail when that bail names the refused path, as the instructions ask", async () => {
+    // Checking the plan before `proceed` is read, or regardless of it, would replace recon's reason with the harness's.
+    const { h } = harness({
+      recon: recon({
+        proceed: false,
+        bailReason: "the fix needs a newer lisa-services-api, and pom.xml is refused",
+        bailBlockers: ["KONV_ALIS exists only from 3.203."],
+        bailRemedy: "Land the bump on main, then re-run.",
+        plannedFiles: ["pom.xml"],
+      }),
+    });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      reason: expect.stringContaining("newer lisa"),
+    });
+    expect(outcome.kind === "bailed" ? outcome.refusedPlan : "not a bail").toBeUndefined();
+  });
+
   it("leaves refusedPlan unset on a bail recon wrote itself", async () => {
     const { h } = harness({
       recon: recon({
@@ -2253,6 +2274,26 @@ describe("runReconOnly", () => {
       recon: { proceed: true },
     });
     expect(outcome.kind === "bailed" ? outcome.cleanup.outcome : null).toBe("removed");
+  });
+
+  it("keeps recon's own bail when that bail names the refused path", async () => {
+    const { h } = harness({
+      recon: recon({
+        proceed: false,
+        bailReason: "the fix needs a newer lisa-services-api, and pom.xml is refused",
+        bailBlockers: ["KONV_ALIS exists only from 3.203."],
+        bailRemedy: "Land the bump on main, then re-run.",
+        plannedFiles: ["pom.xml"],
+      }),
+    });
+
+    const outcome = await runReconOnly(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      reason: expect.stringContaining("newer lisa"),
+    });
+    expect(outcome.kind === "bailed" ? outcome.refusedPlan : "not a bail").toBeUndefined();
   });
 
   it("discards the worktree on proceed, unlike the full pipeline", async () => {

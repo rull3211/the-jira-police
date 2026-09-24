@@ -560,6 +560,22 @@ describe("renderSolveComment, on a bail", () => {
     );
   });
 
+  it("caps the refused paths the way it caps recon's blockers, and says so", () => {
+    const body = renderSolveComment("SSX-3918", {
+      ...bailWith({ proceed: true, bailReason: "" }),
+      refusedPlan: Array.from(
+        { length: 8 },
+        (_, index) => `path${String(index)}: ${"why ".repeat(100)}`,
+      ),
+    } as SolveOutcome);
+
+    expect(body).toContain("* path5: ");
+    expect(body).not.toContain("* path6: ");
+    expect(body).toContain("* …and 2 more, in the run's own report.");
+    expect(body).toContain("…");
+    expect(body.length).toBeLessThan(3500);
+  });
+
   it("does not let a refused path forge a section of its own", () => {
     // The path half of each line comes from the model's plan.
     const body = renderSolveComment("SSX-3918", {
@@ -601,6 +617,17 @@ describe("calibrationRow", () => {
     const row = calibrationRow("SSX-1", bailed(true), NOW);
 
     expect(row).toContain("| ok |");
+  });
+
+  it("does not score a plan the harness stopped as recon declining", () => {
+    const stopped = calibrationRow(
+      "SSX-1",
+      { ...bailed(true), refusedPlan: ["pom.xml: why"] } as SolveOutcome,
+      NOW,
+    );
+
+    expect(stopped).toContain("| bailed (plan refused) |");
+    expect(calibrationRow("SSX-1", bailed(true), NOW)).toContain("| bailed |");
   });
 
   it("distinguishes no reading from an accurate one", () => {

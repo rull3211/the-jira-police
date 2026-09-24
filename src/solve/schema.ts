@@ -57,7 +57,7 @@ export const RECON_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "Repository-relative paths the fix pass would change, including any test file. Empty when `proceed` is false. The harness bounds the eventual diff, so an honest list here that looks too long is a reason to return false rather than to shorten the list.",
+        "Repository-relative paths the fix pass would change, including any test file. Empty when `proceed` is false. The harness bounds the eventual diff, so an honest list here that looks too long is a reason to return false rather than to shorten the list. A path the diff gate refuses by name (SOLVE_INSTRUCTIONS.md §4) stops the run before the fix pass, so if the honest change needs one, return false and say why.",
     },
     approach: {
       type: "string",

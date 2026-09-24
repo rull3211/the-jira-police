@@ -242,9 +242,8 @@ function bailDetail(outcome: SolveOutcome): readonly string[] {
 }
 
 /**
- * The same two headings as a bail recon wrote, filled by the harness: recon's own bail fields are
- * empty when it said proceed. Two remedies because the gate cannot tell a change the ticket needs
- * from a plan that overreached, and only a person reading the ticket can.
+ * The two headings a recon bail gets, filled by the harness. Two remedies, because the gate cannot
+ * tell a change the ticket needs from a plan that overreached, and a person reading the ticket can.
  */
 function refusedPlanDetail(refusedPlan: readonly string[]): readonly string[] {
   const reasons = refusedPlan.map((reason) => safeText(reason)).filter((reason) => reason !== "");
@@ -305,12 +304,17 @@ const HEADER = [
 ].join("\n");
 
 /**
- * The `Outcome` column, read down the page as a scoreboard.
- * `abandoned` is the one kind meaning two incompatible things; the cause is appended rather than
- * folded into a second column so old rows stay readable.
+ * The `Outcome` column, read down the page as a scoreboard. `abandoned` and `bailed` each cover two
+ * incompatible things; the difference is appended rather than a second column, so old rows stay readable.
  */
 function outcomeLabel(outcome: SolveOutcome): string {
-  return outcome.kind === "abandoned" ? `abandoned (${outcome.cause})` : outcome.kind;
+  if (outcome.kind === "abandoned") {
+    return `abandoned (${outcome.cause})`;
+  }
+  // Recon said proceed here, so counting this as recon declining would score the wrong judgement.
+  return outcome.kind === "bailed" && outcome.refusedPlan !== undefined
+    ? "bailed (plan refused)"
+    : outcome.kind;
 }
 
 /** One table row. Pure. */

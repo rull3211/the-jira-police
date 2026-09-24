@@ -214,10 +214,8 @@ export function isDependencyBumpPath(path: string): boolean {
 }
 
 /**
- * Every path in recon's plan that `checkDiff` would refuse by name, with why — empty when none.
- * The plan is the model's account, so this may only ever refuse: an empty answer allows nothing,
- * and `checkDiff` still reads the real diff. An absolute path under `worktreePath` is read relative
- * to it, because a model naming the file it read by its full path means the same file.
+ * What `checkDiff` would refuse by name in recon's plan, with why. The plan is the model's account,
+ * so this may only refuse: an empty answer allows nothing, and the gate still reads the real diff.
  */
 export function plannedPathRefusals(
   plannedFiles: readonly string[],
@@ -226,15 +224,17 @@ export function plannedPathRefusals(
   const prefix = `${worktreePath.replace(/\/+$/u, "")}/`;
   const reasons: string[] = [];
   for (const planned of plannedFiles) {
+    // Models name a file by the absolute path they read it at, which is the same file.
     const path = planned.startsWith(prefix) ? planned.slice(prefix.length) : planned;
     if (pathEscapes(path)) {
       reasons.push(`${JSON.stringify(planned)}: not a path inside the worktree`);
       continue;
     }
-    const rule = match(VERIFICATION_PATHS, path) ?? match(FORBIDDEN_PATHS, path);
-    // A path alone cannot say whether its change will be a dependency bump, so that rule waits for the diff.
-    if (rule !== undefined && rule.unless === undefined) {
-      reasons.push(`${path}: ${rule.why}`);
+    for (const rule of [match(VERIFICATION_PATHS, path), match(FORBIDDEN_PATHS, path)]) {
+      // A path alone cannot say whether its change will be a dependency bump, so that rule waits for the diff.
+      if (rule !== undefined && rule.unless === undefined) {
+        reasons.push(`${path}: ${rule.why}`);
+      }
     }
   }
   return reasons;
