@@ -53,7 +53,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51 and §52, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52 and §53, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can never be
 repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which holds a debt
 still and would be holding entries nobody could ever pay. That its docstring once said the debt
@@ -149,7 +149,9 @@ counter-argument and what withdraws it — now lives in `architecture/solve.md` 
 being deleted with the entry. §51 stopped a recon plan naming a path the diff gate refuses before
 the fix pass, and was opened and deleted inside the branch that built it. §52 let a run change a
 `pom.xml` when the only change is a dependency version, behind `DEPENDENCY_BUMPS`; its Node half is
-§54. §53 is taken by a branch open alongside it. The next entry is §55.
+§54. §53 put the recon verdict's coherence rules into its output schema, so the model is
+corrected in-session, and was opened and deleted inside the branch that built it. The next entry
+is §55.
 
 <!-- refs:on -->
 
@@ -174,36 +176,6 @@ entry rather than a line in the Maven one.
 version asked for — every transitive range resolves afresh — and no reviewer reads a lockfile
 diff. If that is the cost, a narrower form updates only the named package's entries in the
 lockfile and refuses when anything else would move.
-
-### 53. Recon fills fields that must be empty, and the harness finds out after the pass
-
-**Branch:** `fix/recon-bail-filler`
-
-**What is being attempted.** Put the recon verdict's coherence rules into `RECON_SCHEMA` as a
-draft-07 `if`/`then`/`else`: a `proceed` must leave the three bail fields empty and name at least
-one file; a bail must fill all three. The CLI validates structured output in the session, so the
-model is told and corrects itself before the pass ends, instead of `parseRecon` discarding the
-whole verdict afterwards. `parseRecon` keeps every check, as the net. Separately, `parseRecon`
-refuses a verdict whose written fields all say the same thing, which is a placeholder and not an
-answer.
-
-**Why now.** Three runs lost to the same class in two days, all recon. 2026-09-23: `""` written as
-two quote characters, normalised in `str`. 2026-09-24, SSX-3918: a real bail rejected three times
-for omitting `plannedFiles`, then a verdict with every field set to "Test", which the parser
-accepted — under `solve:once` it would have posted "Test" to the ticket. Same day, SSX-3918 again:
-`proceed: true` with `bailReason` and `bailRemedy` both "n/a — proceeding.", which threw away a
-correct plan for $0.52. A probe measured that the CLI enforces a draft-07 conditional: with it,
-that exact filler was rejected in-session and the model corrected itself to `""`; the control
-without it accepted the filler.
-
-**What it lets the service do.** Keep a correct plan whose only fault is a note in a field that
-must be empty.
-
-**What would make it the wrong idea.** Every schema rejection is a re-prompt, and the schema's own
-header warns that re-prompts are capped. The "Test" verdict came out of exactly such a loop, so a
-constraint the model struggles with can turn a crash into garbage. That is why the rules mirror
-`parseRecon` and add nothing, why the descriptions say what an empty field is, and why the
-placeholder check exists.
 
 ### 46. Nothing can say which code a running daemon is executing
 
