@@ -851,16 +851,10 @@ message that merely _discusses_ pushing to `main` is refused as though it were o
 times now, twice on this repository's own commits and again on 2026-09-18 — `git commit -m "docs:
 explain why git push to main is refused"` is still denied by the running script.
 
-**Three rewrites of this hook have landed since and none touched it**, which is the part worth
-recording: `57f6923` put 146 lines into `branch-guard.sh` and `d0295b6` another 55, both in the
-adjacent blocks, and `0bc643c` then trimmed their comments; the four-line push check sat between
-them unchanged throughout. A defect survives edits to
-the file it lives in when nothing fails.
-
-**It has a second half, found on 2026-09-18 and worse than the first.** `d0295b6` introduced
-`isProtected` to end exactly this class, replacing what it counted as three copies of the list, and
-its comment still says "One list: a name refused by one hatch and accepted by another is the hole
-this guard exists to close." **There were four copies.** The push check keeps its own inline `(main|master|develop)`, and
+**It has a second half, found on 2026-09-18 and worse than the first.** `isProtected` was written to
+end exactly this class, replacing what it counted as three copies of the list, and its comment says
+"One list: a name refused by one hatch and accepted by another is the hole this guard exists to
+close." **There were four copies.** The push check keeps its own inline `(main|master|develop)`, and
 `isProtected` also protects `release/*`, so `git push origin release/1.2` is allowed — measured,
 silent, from a feature branch. The false positive is embarrassing; this one is a hole, and it is in
 the check whose comment claims the holes are closed.
