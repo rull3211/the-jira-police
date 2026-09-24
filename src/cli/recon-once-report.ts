@@ -12,8 +12,9 @@ import { oneLine } from "../text.ts";
 
 /**
  * Exit codes. `bailed` gets its own rather than folding into `ok`: a human
- * scripting this command wants to tell "recon says no" apart from "recon
- * says yes" without parsing the report.
+ * scripting this command wants to tell "the run stops here" apart from "it
+ * would go on to the fix pass" without parsing the report — and recon saying
+ * yes to a plan the harness refuses is the first of those.
  */
 export const EXIT = { ok: 0, bailed: 1, usage: 2, failed: 3 } as const;
 

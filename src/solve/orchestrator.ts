@@ -176,7 +176,8 @@ export type SolveOutcome =
       readonly worktree: Worktree;
     }
   /**
-   * Recon read the code and declined. Not a failure.
+   * Recon read the code and declined, or the harness declined for it at a plan naming a refused
+   * path (`refusedPlan`). Not a failure.
    *
    * The only outcome that cleans up its worktree: recon has no `Write` and no
    * `Edit`, so a bailed worktree holds nothing. Every other outcome keeps its

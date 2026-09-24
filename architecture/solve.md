@@ -114,6 +114,8 @@ about the model has to survive that.
     ↓
   recon         read-only. may say no, and saying no is a success
     ↓
+  plan check    a plan naming a path the diff gate refuses stops here
+    ↓
   fix           the only pass that makes the change
     ↓
   simplify      a cold read of the diff; usually changes nothing
@@ -552,8 +554,8 @@ diff. The outcome's `recon` is left as the model gave it, `proceed: true`; the t
 the harness stopped the run and gives both remedies, because the gate cannot tell a change the
 ticket needs from a plan that overreached. The case was SSX-3918 on 2026-09-24: a plan naming
 `pom.xml` bought a fix pass and a simplify pass for a diff this gate was always going to refuse,
-and the one document listing refused paths, `SOLVE_INSTRUCTIONS.md` §4, had not been opened by that
-run's passes or by 32 of the 34 recon and fix passes before them.
+and the one document listing refused paths, `SOLVE_INSTRUCTIONS.md` §4, had not been opened by any
+of that run's passes — `PLAN.md` §1 has how rarely it has been opened since the model changed.
 
 The gate is a backstop, not the only defence: `createWorktree` and `attachWorktree`
 (`worktree.ts`) call `CommandRunner.excludeAgentPaths` once the worktree exists, which lists

@@ -19,7 +19,8 @@ import type { ReviewCycleOutcome } from "../solve/review-cycle.ts";
  * Whether the shell should hear about this.
  *
  * A bail is a success and must not set a code — recon declining is the honest answer to a
- * fitness call made without source access. `crashed` does set one: nothing was learned and the
+ * fitness call made without source access, and a plan stopped before any write is the same answer
+ * given by the harness. `crashed` does set one: nothing was learned and the
  * run cost real money, even though it is not a verdict about the code. `unusable-base` fails by
  * the same rule even though it is the cheapest outcome — no question was answered.
  *
@@ -53,7 +54,7 @@ export function isFailureExit(outcome: SolveOutcome): boolean {
  * name the wrong culprit.
  *
  * Every other outcome now writes `agent:failed` — `bailed` (§5's case: recon read the code and
- * declined) and bad diffs, but also every "no verdict reached" outcome (`refused`, `crashed`,
+ * declined, or planned a path the gate refuses) and bad diffs, but also every "no verdict reached" outcome (`refused`, `crashed`,
  * `unusable-base`, `no-worktree`, an environment `abandoned`) that used to release just like this
  * one. That used to be the more careful answer:
  * `architecture/solve.md`'s outcome table argues at length that `refused` must never be *reported*
