@@ -83,68 +83,6 @@ from their own base.
 
 <!-- refs:on -->
 
-### 60. One refused edit discards every other edit in a review round
-
-**Branch:** `feat/review-repair`, after §59, whose replies it uses.
-
-**What is being attempted.** When the diff gate refuses a path this review round changed and the
-pull request already had, the harness restores that path to the round's starting point, gates and
-verifies the rest, pushes it, and replies to the comment that asked naming the edit it dropped and
-the rule that dropped it. A refused path the round created, or one the pull request's own commits
-already break, still refuses the whole round.
-
-**Why now.** Round 4 on #1459: Jacob's review asked for four things in files the pull request
-already changes, the round did all four, and the whole round was discarded because one of them
-edited a comment inside `pom.xml`, which the gate refuses whatever the change.
-
-**What would make it the wrong idea.** §33's worry, in a smaller room: a round that omits part of
-what was asked while reading as done is worse than a refusal. It holds only if the reply naming the
-dropped edit is where the member reads it — the pass's own "Done" replies go out first and may claim
-the dropped edit happened. And the other edits may have assumed the dropped one; verification catches
-that as a failure, which §58 then repairs or reports.
-
-### 58. A review round that fails verification gets no repair round
-
-**Branch:** `feat/review-repair`, stacked on §57's `feat/human-review-widening`.
-
-**What is being attempted.** The repair authority a solve run has, given to a review round: a
-failed verification buys one repair pass under `REPAIR_ROUND`, its verdict recorded in
-`repair-rounds.md`, and a green one pushed only when armed — `--repair` by hand on `--advance`,
-`--review` and `--watch`, `REPAIR_PUBLISH` for the daemon.
-
-**Why now.** Round 7 on #2688, 2026-09-24: the member widening worked, the edit left `Address`
-declared and unused, `lint` failed, and the round ended `failed` with nothing posted. A repair pass
-handed eslint's one line would have deleted it. `runReviewRound` returns straight from `verify`.
-
-**The shape.** The round's edits are committed locally as the boundary, as the fix is before a
-solve's repair; a promoted green repair is pushed as a second commit with a harness-written notice
-on the pull request naming the failure; an unpromoted one leaves a local commit the next attach
-salvages and never pushes.
-
-**What would make it the wrong idea.** A review round's green repair reaches a pull request a
-person is already reading, where a solve's opens one nobody has read yet: the cheap repair — the
-assertion weakened — lands in a diff the reviewer thinks they have seen. The notice is the only
-compensation, as it is for solves.
-
-### 59. A review round that declines, fails or is refused says so nowhere
-
-**Branch:** `feat/review-repair`, as a separate commit from §58.
-
-**What is being attempted.** A round that ends `abandoned`, `refused` or `failed` replies to the
-comments that asked with why — in the thread for an inline thread, and for a review body or a
-plain comment, which GitHub cannot reply to, a `bot:` comment mentioning the author and quoting
-what it answers. A top-level comment that asks for nothing may be marked as needing no reply, and
-gets none.
-
-**Why now.** Rounds 6 and 7 on #2688 and round 4 on #1459 (Jacob's review, refused over a
-`pom.xml` comment edit) all did real work and posted nothing, and each round's reservation had
-already moved the cursor past the comment that asked, so nobody knew to ask again.
-
-**What would make it the wrong idea.** Only top-level comments can go unanswered: a thread whose
-last comment is not ours is unanswered by `unansweredThreads`' definition and would buy a round
-every tick. And a failed round's model-written "Done" replies are false once its change is
-discarded, so what is posted there is the harness's reason, not the pass's answers.
-
 ### 56. Documents outside this file still say a declined run leaves the board as it found it
 
 **Branch:** none yet.
@@ -473,12 +411,11 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
   so on the way out.
 
-- **A review round on a pull request that carries a dependency bump has never run.** The first
-  such pull request exists, storebrand-digital/insurance-commerce-rest-api#1459, opened 2026-09-24
-  with the notice above everything the model wrote. Every later round gates the pull request's
-  whole diff, so the bump reaches the judge again on each one; that path is tested, not watched.
-  The pull request body is written once, so a bump a later round introduces would not be named in
-  it.
+- **A bump a review round introduces would not be named anywhere.** The pull request body is
+  written once, and it is the only place the notice goes. A bump the pull request already carries
+  is re-judged by every round that changes code, since each gates the whole diff: rounds 2 and 5 on
+  storebrand-digital/insurance-commerce-rest-api#1459 on 2026-09-24 passed it, round 5 on the
+  second gate after its `pom.xml` comment edit was rolled back.
 
 - **Nobody has looked at `pnpm logs` on a terminal that is not mine.** The screen has been driven
   headlessly and under a pty, and the restore path verified by the bytes it leaves — but the

@@ -289,7 +289,10 @@ startup. The review modes are armed the same way — `--repair` on `--review`, `
 repair returns as the round's `resolved` outcome carrying `repair`; `delivery.ts` commits it as the
 round's second commit, pushes, and posts a harness-written `bot:` comment naming the failure and
 telling the reader to take that commit on its own — the review round's counterpart of the banner
-below, since a pull request already open has no body left to put it in.
+below, since a pull request already open has no body left to put it in. That notice is all the
+compensation there is, and it is needed more here than for a solve: a solve's repair opens a pull
+request nobody has read, a review round's lands in one a person is already reading, where the cheap
+repair — the assertion weakened — sits in a diff the reviewer may think they have seen.
 Armed, a round that re-verifies `verified` is
 returned as the outcome — carrying `repair`, `repairedFailure` and the round's own green
 verification — and `publish` commits the repair as a **second commit** on top of the fix, since
@@ -578,7 +581,9 @@ names for that file, or the comments that asked anything — which edit was drop
 dropped it. The pass wrote its commit message before the rollback, so round 5 on #1459 pushed one
 saying the stale `pom.xml` comment was fixed; `droppedNote` now adds a harness line above the
 `Refs:` trailer naming each path not in the commit. The pass's replies can make the same claim, and
-the drop notice posted after them is what corrects it. A path the round created, a path the pull
+the drop notice posted after them is what corrects it. An edit that depended on the dropped one
+fails verification like any other, and the round's repair round takes it from there. A path the
+round created, a path the pull
 request's own commits already break, a path outside the worktree, or a second gate that still
 refuses: the round is refused whole, as before.
 The rules themselves are unchanged — nothing here lets an edit to a refused path through, it only
