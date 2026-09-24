@@ -146,7 +146,7 @@ three was blocked on it, and clearing that blocker did not ship the phase — th
 typed `--repair` rung and the `REPAIR_PUBLISH` loop. The last two were claimed before the
 evidence §45 itself asked for, by the operator's decision, and that argument — with its
 counter-argument and what withdraws it — now lives in `architecture/solve.md` §15 rather than
-being deleted with the entry. The next entry is §52.
+being deleted with the entry. The next entry is §53.
 
 <!-- refs:on -->
 
@@ -176,6 +176,34 @@ saver and never a guard: the gate still reads the real diff, and nothing here ma
 It refuses in one direction only, which is safe — but a recon that lists a file it only means to
 read would lose a solvable ticket. If that shows up, the plan field's contract is what needs
 tightening, not this check loosening.
+
+### 52. A ticket that needs a newer version of a dependency cannot be solved at all
+
+**Branch:** `feat/maven-dependency-bump`, stacked on `fix/refuse-at-recon` (§51), because §51's
+plan check must stop refusing `pom.xml` by name the moment a `pom.xml` change can be allowed.
+
+**What is being attempted.** Let a run change `pom.xml` when the only change is the version of a
+dependency the file already declares: a literal `<version>` inside a `<dependency>`, or a property
+used nowhere but as dependency versions. One judge decides it, and the diff gate, `verify`'s
+refusal to grade a changed build file, and §51's plan check all ask it rather than keeping copies.
+Anything else in `pom.xml` stays refused, as do plugin and parent versions, profiles, `mvnw` and
+`.mvn/`. The pull request names each bump at the top, written by the harness.
+
+**Why now.** SSX-3918, 2026-09-24: the fix needs `ReasonForPolicyCancellation.KONV_ALIS`, which
+exists only from `lisa-services-api` 3.203, and no run may write the one-line bump that gets it.
+The operator's position, which this entry takes as given: bumping a dependency to get what the task
+needs is an ordinary part of solving a ticket, not an exception to it.
+
+**What it lets the service do.** Solve a ticket whose fix needs a newer version of a dependency the
+repository already uses, with the bump in the same pull request as the code that needs it.
+
+**What would make it the wrong idea.** A bump is code nobody in the repository wrote: 3.181 to
+3.203 is 22 releases, and the harness reads none of them. A test-scope dependency is part of what
+the tests do, so bumping one can change what "passing" means — the thing `pom.xml` was refused to
+prevent. The only defences are the notice and the human who merges. If a bump is ever found to have
+made verification pass without the code being right, narrow this to non-test scopes, or withdraw
+it. Not covered: a Node repository, where the bump also rewrites a lockfile the pass cannot
+produce.
 
 ### 46. Nothing can say which code a running daemon is executing
 
