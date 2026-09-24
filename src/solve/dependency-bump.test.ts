@@ -8,11 +8,6 @@ const BASE = [
   '<?xml version="1.0" encoding="UTF-8"?>',
   '<project xmlns="http://maven.apache.org/POM/4.0.0">',
   "    <modelVersion>4.0.0</modelVersion>",
-  "    <parent>",
-  "        <groupId>org.springframework.boot</groupId>",
-  "        <artifactId>spring-boot-starter-parent</artifactId>",
-  "        <version>3.3.1</version>",
-  "    </parent>",
   "    <artifactId>insurance-commerce-rest-api</artifactId>",
   "    <version>1.321.0</version>",
   "    <!--",
@@ -103,6 +98,20 @@ const BASE = [
   "",
 ].join("\n");
 
+/** BASE under a parent, which can read any property BASE sets. SSX-3918's pom has none. */
+const WITH_PARENT = BASE.replace(
+  "    <modelVersion>4.0.0</modelVersion>\n",
+  [
+    "    <modelVersion>4.0.0</modelVersion>",
+    "    <parent>",
+    "        <groupId>org.springframework.boot</groupId>",
+    "        <artifactId>spring-boot-starter-parent</artifactId>",
+    "        <version>3.3.1</version>",
+    "    </parent>",
+    "",
+  ].join("\n"),
+);
+
 /** BASE with one exact, unique line replaced. */
 function changed(line: string, replacement: string, base = BASE): string {
   expect(base.split("\n").filter((candidate) => candidate === line)).toHaveLength(1);
@@ -185,12 +194,33 @@ describe("judgePomChange — what it refuses", () => {
   });
 
   it("refuses the parent's version and the project's own", () => {
-    for (const [line, replacement] of [
-      ["        <version>3.3.1</version>", "        <version>3.4.0</version>"],
-      ["    <version>1.321.0</version>", "    <version>1.322.0</version>"],
-    ] as const) {
-      expect(reasonOf(judge(changed(line, replacement)))).toContain("not a dependency version");
-    }
+    const parent = changed(
+      "        <version>3.3.1</version>",
+      "        <version>3.4.0</version>",
+      WITH_PARENT,
+    );
+    expect(
+      reasonOf(judgePomChange("pom.xml", { base: WITH_PARENT, current: parent }, false)),
+    ).toContain("project>parent>version");
+    const own = changed("    <version>1.321.0</version>", "    <version>1.322.0</version>");
+    expect(reasonOf(judge(own))).toContain("project>version");
+  });
+
+  it("refuses a property bump under a parent, which can read the property too", () => {
+    const line = "        <lisa-services-api.version>3.181</lisa-services-api.version>";
+    const current = changed(line, line.replace("3.181", "3.203"), WITH_PARENT);
+    expect(reasonOf(judgePomChange("pom.xml", { base: WITH_PARENT, current }, false))).toContain(
+      "parent could use it too",
+    );
+  });
+
+  it("still allows a literal bump under a parent, since it names no property", () => {
+    const current = changed(
+      "            <version>5.11.0</version>",
+      "            <version>5.12.0</version>",
+      WITH_PARENT,
+    );
+    expect(judgePomChange("pom.xml", { base: WITH_PARENT, current }, false).ok).toBe(true);
   });
 
   it("refuses a dependency inside a plugin or a profile", () => {
@@ -292,7 +322,8 @@ describe("judgePomChange — what it refuses", () => {
   });
 
   it("refuses when the base cannot be read, rather than guessing its structure", () => {
-    const unbalanced = BASE.replace("    </parent>\n", "");
+    const unbalanced = BASE.replace("    </properties>\n", "");
+    expect(unbalanced).not.toBe(BASE);
     const line = "            <version>5.11.0</version>";
     const current = changed(line, "            <version>5.12.0</version>", unbalanced);
     expect(reasonOf(judgePomChange("pom.xml", { base: unbalanced, current }, false))).toContain(
@@ -308,6 +339,21 @@ describe("judgePomChange — what it refuses", () => {
     expect(judge(BASE.slice(0, -1)).ok).toBe(false);
   });
 });
+
+/** A two-line file whose last line lost or gained its final newline on the `marked` side. */
+const lastLineDiff = (marked: "-" | "+"): string =>
+  [
+    "diff --git a/pom.xml b/pom.xml",
+    "index b9ea0a898e..8fa9bfcdcc 100644",
+    "--- a/pom.xml",
+    "+++ b/pom.xml",
+    "@@ -1,2 +1,2 @@",
+    " <project>",
+    ...(marked === "+"
+      ? ["-</project>", "+</project>", "\\ No newline at end of file"]
+      : ["-</project>", "\\ No newline at end of file", "+</project>"]),
+    "",
+  ].join("\n");
 
 describe("textsFromFullDiff", () => {
   const diff = [
@@ -339,25 +385,11 @@ describe("textsFromFullDiff", () => {
   });
 
   it("gives the missing final newline to the one side that lost it, not to both", () => {
-    const lastLine = (marked: "-" | "+"): string =>
-      [
-        "diff --git a/pom.xml b/pom.xml",
-        "index b9ea0a898e..8fa9bfcdcc 100644",
-        "--- a/pom.xml",
-        "+++ b/pom.xml",
-        "@@ -1,2 +1,2 @@",
-        " <project>",
-        ...(marked === "+"
-          ? ["-</project>", "+</project>", "\\ No newline at end of file"]
-          : ["-</project>", "\\ No newline at end of file", "+</project>"]),
-        "",
-      ].join("\n");
-
-    expect(textsFromFullDiff(lastLine("+"))).toEqual({
+    expect(textsFromFullDiff(lastLineDiff("+"))).toEqual({
       base: "<project>\n</project>\n",
       current: "<project>\n</project>",
     });
-    expect(textsFromFullDiff(lastLine("-"))).toEqual({
+    expect(textsFromFullDiff(lastLineDiff("-"))).toEqual({
       base: "<project>\n</project>",
       current: "<project>\n</project>\n",
     });

@@ -573,7 +573,10 @@ plugin, because each changes the build rather than the code; a property nothing 
 that is exactly how a setting only a plugin reads looks; a value that does not start with a digit,
 so a `maven.test.skip` cannot be flipped to `true` on this path; a `SNAPSHOT` target, which can
 change after review; any line added or removed; and a property bump in a repository with a second
-`pom.xml`, since only this file is read. The reader is text, not an XML library — this project has
+`pom.xml`, or in a `pom.xml` that declares a `<parent>`, since only this file is read and a parent
+reads the properties its children set, plugin versions included. That last rule came from running
+the judge against the real SSX-3918 base: it allowed a `jackson.version` bump because this file
+uses the property once, which is only sound because this file has no parent. The reader is text, not an XML library — this project has
 no parser dependency — and it refuses what it cannot follow, such as an internal DTD subset,
 rather than guessing. The pull request names every bump before any model-written line, and says the
 harness checked against the new version without reading what changed in it. The operator's

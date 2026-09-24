@@ -595,7 +595,9 @@ Refused on any change of any size, whatever else the ticket asks for.
   for `pom.xml` alone:** moving the version of a dependency the file already declares — a version
   element directly inside a dependency, or a property used nowhere but as such versions — is
   allowed, and the pull request names it. Plugin, parent and profile versions, a version that ends
-  in SNAPSHOT, a new dependency, and any other line of the file stay refused.
+  in SNAPSHOT, a new dependency, and any other line of the file stay refused, and so does a
+  property bump in a file that has a parent or sits beside another pom.xml; bump the dependency's
+  own version element there instead.
 
 **This list is complete about the gate, and about nothing else.** It is not a list of everything you
 must not touch. It is the set of paths a mechanism will stop, and the mechanism is narrow on

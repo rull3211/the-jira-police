@@ -350,6 +350,12 @@ export function judgePomChange(path: string, texts: PomTexts, otherPoms: boolean
         `line ${String(line)} changes the property ${name}, and another pom.xml here could use it too`,
       );
     }
+    // A parent reads the properties its children set, plugin versions included, and it is not in this file.
+    if (records.some((record) => record.chain.join(">") === "project>parent")) {
+      return refuse(
+        `line ${String(line)} changes the property ${name}, and this pom's parent could use it too`,
+      );
+    }
     const references = referencesTo(texts.base, name);
     if (references.length === 0) {
       // Nothing in the file names it, which is exactly how a property only a plugin reads looks.
