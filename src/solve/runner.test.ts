@@ -21,7 +21,7 @@ import {
   parseReview as parseReviewAllowing,
   parseSimplify,
 } from "./runner.ts";
-import { RECON_SCHEMA, reviewSchema } from "./schema.ts";
+import { FIX_SCHEMA, RECON_SCHEMA, reviewSchema } from "./schema.ts";
 
 /** The comment the `silent` tests' rounds may leave unanswered; every other test's round allows none. */
 const QUIET = "comment 2";
@@ -649,6 +649,34 @@ function satisfies(value: unknown, rule: Rule): boolean {
   throw new Error(`a keyword this test does not evaluate: ${String(keyword)}`);
 }
 
+const holds = (report: Record<string, unknown>, properties: Readonly<Record<string, Rule>>) =>
+  Object.entries(properties).every(([field, rule]) => satisfies(report[field], rule));
+
+interface Conditional {
+  readonly properties?: Readonly<Record<string, Rule>>;
+  readonly if?: { readonly properties: Readonly<Record<string, Rule>> };
+  readonly then?: Conditional;
+  readonly else?: Conditional;
+}
+
+/** Its own `properties`, then whichever branch its `if` picks, recursively; any other keyword throws, so a new rule cannot pass untested. */
+function conditionalHolds(report: Record<string, unknown>, schema: Conditional): boolean {
+  const unknown = Object.keys(schema).filter(
+    (keyword) => !["properties", "if", "then", "else"].includes(keyword),
+  );
+  if (unknown.length > 0) {
+    throw new Error(`a keyword this test does not evaluate: ${unknown.join(", ")}`);
+  }
+  if (schema.properties !== undefined && !holds(report, schema.properties)) {
+    return false;
+  }
+  if (schema.if === undefined) {
+    return true;
+  }
+  const branch = holds(report, schema.if.properties) ? schema.then : schema.else;
+  return branch === undefined || conditionalHolds(report, branch);
+}
+
 function parserAccepts(verdict: Record<string, unknown>): boolean {
   try {
     parseRecon(verdict, "SSX-1");
@@ -717,6 +745,98 @@ describe("RECON_SCHEMA's conditional, against parseRecon", () => {
   });
 });
 
+function fixParserAccepts(report: Record<string, unknown>): boolean {
+  try {
+    parseFix(report, "SSX-1");
+    return true;
+  } catch (error) {
+    if (error instanceof SolveParseError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+describe("FIX_SCHEMA's conditional, against parseFix", () => {
+  function schemaAccepts(report: Record<string, unknown>): boolean {
+    const branch = holds(report, FIX_SCHEMA.if.properties) ? FIX_SCHEMA.then : FIX_SCHEMA.else;
+    return conditionalHolds(report, branch);
+  }
+
+  // SSX-3980's report: three test files written, and the one criterion covered by a unit test instead of an integration test explained in the wrong field.
+  const ssx3980 = fix({
+    testAdded: true,
+    testOmittedReason:
+      "For the @Cacheable `unless` condition, I did not add a new case to RedisCacheSerializationITest.",
+  });
+
+  const abandonedRun = (overrides: Record<string, unknown> = {}) =>
+    fix({
+      changed: false,
+      filesTouched: [],
+      testAdded: false,
+      testOmittedReason: "",
+      abandoned: "the brief names a method this branch no longer has",
+      abandonedCause: "judgement",
+      ...overrides,
+    });
+
+  const cases: Record<string, Record<string, unknown>> = {
+    "a fix with a test": fix(),
+    "a fix with no test and a reason": fix({
+      testAdded: false,
+      testOmittedReason: "no suite in this package",
+    }),
+    "a fix with a test and a reason for none (SSX-3980)": ssx3980,
+    "a fix with no test and no reason": fix({ testAdded: false }),
+    "a fix with no test and only whitespace as its reason": fix({
+      testAdded: false,
+      testOmittedReason: " \n",
+    }),
+    // `str` reads quote marks alone as empty, so the schema must too, in both branches.
+    'a fix with a test and "" as its reason': fix({ testOmittedReason: '""' }),
+    "a fix with no test and '' as its reason": fix({ testAdded: false, testOmittedReason: " '' " }),
+    "a fix with no test and a quoted reason, which is still a reason": fix({
+      testAdded: false,
+      testOmittedReason: '"no suite"',
+    }),
+    "a run not abandoned that changed nothing": fix({ changed: false }),
+    "a run not abandoned naming no files": fix({ filesTouched: [] }),
+    "a run not abandoned giving a cause": fix({ abandonedCause: "environment" }),
+    'a run whose abandoned is "" alone, which is not abandoned': fix({ abandoned: '""' }),
+    "a run whose abandoned is only whitespace, giving a cause": fix({
+      abandoned: "  ",
+      abandonedCause: "environment",
+    }),
+    "an abandoned run": abandonedRun(),
+    "an abandoned run with no cause": abandonedRun({ abandonedCause: "none" }),
+    "an abandoned run that left files": abandonedRun({
+      changed: true,
+      filesTouched: ["src/app/head.tsx"],
+      abandonedCause: "environment",
+    }),
+    // The parser returns before the test rule on an abandoned run, so the schema must not reach it either.
+    "an abandoned run with a test and a reason for none": abandonedRun({
+      testAdded: true,
+      testOmittedReason: "stopped before writing one",
+    }),
+  };
+
+  for (const [name, report] of Object.entries(cases)) {
+    it(`agrees about ${name}`, () => {
+      expect(schemaAccepts(report)).toBe(fixParserAccepts(report));
+    });
+  }
+
+  it("rejects SSX-3980's report", () => {
+    expect(schemaAccepts(ssx3980)).toBe(false);
+  });
+
+  it("mentions residualRisk in testOmittedReason's description", () => {
+    expect(FIX_SCHEMA.properties.testOmittedReason.description).toContain("`residualRisk`");
+  });
+});
+
 function reviewParserAccepts(report: Record<string, unknown>): boolean {
   try {
     parseReview(report, "SSX-1", new Set([QUIET]));
@@ -733,9 +853,6 @@ describe("the review schema's rules, against parseReview", () => {
   /** A round whose `silent` may name only `QUIET`, as `reviewSchema` builds one per round. */
   const SCHEMA = reviewSchema([QUIET]);
 
-  const holds = (report: Record<string, unknown>, properties: Readonly<Record<string, Rule>>) =>
-    Object.entries(properties).every(([field, rule]) => satisfies(report[field], rule));
-
   /** Every constraint a list's item fields state; one with none left constrains nothing, as the CLI would read it. */
   function itemsFilled(report: Record<string, unknown>, list: "widened" | "silent"): boolean {
     const fields: Readonly<Record<string, Rule>> = SCHEMA.properties[list].items.properties;
@@ -749,31 +866,6 @@ describe("the review schema's rules, against parseReview", () => {
         );
       }),
     );
-  }
-
-  interface Conditional {
-    readonly properties?: Readonly<Record<string, Rule>>;
-    readonly if?: { readonly properties: Readonly<Record<string, Rule>> };
-    readonly then?: Conditional;
-    readonly else?: Conditional;
-  }
-
-  /** Its own `properties`, then whichever branch its `if` picks, recursively; any other keyword throws, so a new rule cannot pass untested. */
-  function conditionalHolds(report: Record<string, unknown>, schema: Conditional): boolean {
-    const unknown = Object.keys(schema).filter(
-      (keyword) => !["properties", "if", "then", "else"].includes(keyword),
-    );
-    if (unknown.length > 0) {
-      throw new Error(`a keyword this test does not evaluate: ${unknown.join(", ")}`);
-    }
-    if (schema.properties !== undefined && !holds(report, schema.properties)) {
-      return false;
-    }
-    if (schema.if === undefined) {
-      return true;
-    }
-    const branch = holds(report, schema.if.properties) ? schema.then : schema.else;
-    return branch === undefined || conditionalHolds(report, branch);
   }
 
   function schemaAccepts(report: Record<string, unknown>): boolean {
