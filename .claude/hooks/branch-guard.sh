@@ -40,8 +40,8 @@ branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown
 # a file names a path that does not.
 targetBranch() {
   local path="$1" dir
-  # A relative path has no worktree we can name: the tool's cwd is not in the
-  # payload, so resolving it against `$repo` would be a guess. Refuse instead.
+  # Refused rather than resolved against the payload's `cwd`: the file tools
+  # take only absolute paths, so a relative one is malformed, not ambiguous.
   case "$path" in
     /*) ;;
     *) return 1 ;;
@@ -56,46 +56,50 @@ targetBranch() {
   git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null
 }
 
+# The branch checked out where a `Bash` command starts. `symbolic-ref`, not
+# `rev-parse`, so a detached HEAD names no branch instead of one called `HEAD`.
+cwdBranch() {
+  case "$1" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  [ -d "$1" ] || return 1
+  git -C "$1" symbolic-ref --short -q HEAD 2>/dev/null
+}
+
 # `node` rather than `jq`: this project already requires Node, and jq is not a
-# stated dependency. A parse failure yields an empty string and the guard falls
+# stated dependency. A parse failure yields empty fields and the guard falls
 # through to the branch check, which is the safe direction.
 #
-# Two fields come back, path then command, because a command may contain
-# newlines and a path may not — a newline in the path is flattened to a space,
-# so it fails the absolute-path test below and fails closed.
+# Path, cwd and command, and only the command keeps its newlines. The trailing
+# `.` stops `$(...)` eating a separator, which once read a path as the command.
 parsed="$(
   printf '%s' "$payload" | node -e '
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const flat = (v) => String(v || "").replace(/[\r\n]/gu, " ");
       try {
         const j = JSON.parse(s);
         const ti = j.tool_input || {};
-        const p = String(ti.file_path || ti.notebook_path || "").replace(/[\r\n]/gu, " ");
-        process.stdout.write(p + "\n" + String(ti.command || ""));
+        const p = flat(ti.file_path || ti.notebook_path);
+        process.stdout.write(p + "\n" + flat(j.cwd) + "\n" + String(ti.command || "") + ".");
       } catch {
-        process.stdout.write("\n");
+        process.stdout.write("\n\n.");
       }
     });
   ' 2>/dev/null || true
 )"
-# Split on the *first* newline, and only if there is one: `$(...)` strips
-# trailing newlines, so a path with no command arrives as a single line, and
-# `${parsed#*$'\n'}` on a string with no newline returns it unchanged — reading
-# the path as the command, which fails open on every write.
 case "$parsed" in
-  *$'\n'*)
-    target_path="${parsed%%$'\n'*}"
-    command_text="${parsed#*$'\n'}"
-    ;;
-  *)
-    target_path="$parsed"
-    command_text=""
-    ;;
+  *.) parsed="${parsed%.}" ;;
+  *) parsed=$'\n\n' ;;
 esac
+target_path="${parsed%%$'\n'*}"
+parsed="${parsed#*$'\n'}"
+payload_cwd="${parsed%%$'\n'*}"
+command_text="${parsed#*$'\n'}"
 
 # Precedence, not a second opinion: a file inside a worktree is judged against
-# that worktree; anything less specific (a `Bash` call, an unresolvable path, no
-# repository at all) falls back to the project directory.
+# that worktree; a `Bash` write is placed further down, after `mutates`.
 #
 # Ordering is load-bearing: this reads `target_path`, so it must sit below the
 # parse — above it, `set -u` kills the script before any refusal prints, and a
@@ -279,9 +283,9 @@ worktreeAddIsEscape() {
   return 0
 }
 
-gitSegmentWrites() {
-  local verb rest
-
+# Sets `seg_verb` and `seg_rest` from one simple command, or fails if it is not
+# git with a verb.
+gitSegmentParse() {
   # Word-split the segment. Globbing is off around it so that a `*` in a
   # pathspec is not expanded against the working directory mid-guard.
   set -f
@@ -317,9 +321,17 @@ gitSegmentWrites() {
 
   # A bare `git`, or git with only options, prints usage and writes nothing.
   [ $# -gt 0 ] || return 1
-  verb="$1"
+  seg_verb="$1"
   shift
-  rest="$*"
+  seg_rest="$*"
+}
+
+gitSegmentWrites() {
+  local verb rest
+
+  gitSegmentParse "$1" || return 1
+  verb="$seg_verb"
+  rest="$seg_rest"
 
   case "$verb" in
     # Reads, unconditionally. Anything not here is a write by default, which is
@@ -392,42 +404,155 @@ gitSegmentWrites() {
   return 0
 }
 
+# A protected branch as a ref argument spells it: quoted, forced or qualified.
+protectedRef() {
+  local ref="$1"
+  ref="${ref//\"/}"
+  ref="${ref//\'/}"
+  ref="${ref#+}"
+  ref="${ref#refs/heads/}"
+  ref="${ref#heads/}"
+  isProtected "$ref"
+}
+
+# Whether the write `gitSegmentParse` last read can change only the branch
+# checked out where it runs. An unlisted verb may write another ref, so fails.
+gitWriteStaysOnHead() {
+  local word positional=0
+
+  set -f
+  # shellcheck disable=SC2086
+  set -- $seg_rest
+  set +f
+
+  case "$seg_verb" in
+    # Any ref these name is only read.
+    add | commit | rm | mv | clean | am | apply | restore | reset | merge | cherry-pick | revert)
+      return 0
+      ;;
+
+    # A name here can be the branch rewritten: `rebase <up> <branch>`, `checkout -B`.
+    checkout | rebase)
+      hatchNamesProtected "$seg_rest" && return 1
+      for word in "$@"; do
+        [ "$word" = -- ] && break
+        protectedRef "$word" && return 1
+      done
+      return 0
+      ;;
+
+    stash)
+      [ "${1:-}" = branch ] && protectedRef "${2:-}" && return 1
+      return 0
+      ;;
+
+    # Only a refspec's destination is written, and a glob can name every branch.
+    pull)
+      for word in "$@"; do
+        case "$word" in
+          *'*'*) return 1 ;;
+          *:*) protectedRef "${word#*:}" && return 1 ;;
+        esac
+      done
+      return 0
+      ;;
+
+    # With no refspec a push goes wherever `push.default` sends it, and `:`, a
+    # glob, `--all` or `--mirror` names every branch at once.
+    push)
+      for word in "$@"; do
+        case "$word" in
+          --all | --mirror | --branches | --prune | -o | --push-option | --repo | --receive-pack | --exec)
+            return 1
+            ;;
+          -*) ;;
+          *'*'* | : | +:) return 1 ;;
+          *)
+            protectedRef "${word#*:}" && return 1
+            positional=$((positional + 1))
+            ;;
+        esac
+      done
+      [ "$positional" -ge 2 ]
+      return
+      ;;
+  esac
+
+  return 1
+}
+
+# Anything that can point git at another checkout, matched anywhere in the text
+# so that it is still seen inside quotes.
+relocation_re='(^|[^[:alnum:]_.-])(cd|pushd|popd)([^[:alnum:]_-]|$)|(^|[;&|(`{"'"'"'])[[:space:]]*(source|\.)[[:space:]]|(^|[^[:alnum:]_-])(-C|--git-dir|--work-tree)|GIT_(DIR|WORK_TREE|COMMON_DIR)'
+
+cwd_refusal=""
+
+# Whether every write in the command lands on the branch checked out where it
+# starts. On failure `cwd_refusal` says why, for the refusal to repeat.
+writesStayInCwd() {
+  local segment
+
+  if printf '%s' "$command_text" | grep -Eq "$relocation_re"; then
+    cwd_refusal="it can point git at another checkout: a cd, pushd, popd, source, -C, --git-dir, --work-tree or GIT_DIR appears in it, quoted or not"
+    return 1
+  fi
+
+  # Backticks split here as well, so a substitution is read as the command it runs.
+  while IFS= read -r segment; do
+    if gitSegmentParse "$segment"; then
+      gitSegmentWrites "$segment" || continue
+      if ! gitWriteStaysOnHead; then
+        cwd_refusal="'git $seg_verb' in that form can write a branch other than the one checked out there"
+        return 1
+      fi
+    elif printf '%s' "$segment" | grep -Eq "$floor_re"; then
+      cwd_refusal="it has a git write this guard cannot place, inside another command or a string: sh -c, xargs, or a message broken up by a bracket, semicolon or newline"
+      return 1
+    fi
+  done <<EOF
+$(printf '%s' "$command_text" | tr ';&|()`' '\n\n\n\n\n\n')
+EOF
+
+  return 0
+}
+
+# The floor: the original substring list, which sees into `sh -c '...'` and
+# into quoting that command-position analysis cannot parse.
+#
+# The terminator is load-bearing and was wrong. It read `([[:space:]]|$)`,
+# which stops `pull` swallowing `git pull-request` — the same class as the
+# bare `main` match that once refused `fix/domain` — but a quote is neither a
+# space nor end-of-string, so `bash -lc "git push"` did not match. The verb
+# sat flush against the closing quote, and that is the *only* shape the floor
+# exists to catch: command-position analysis sees `bash` and stops. The
+# command was allowed on `main`, which is rule 1 unguarded by both halves at
+# once.
+#
+# It had an assertion, and for the hundred minutes it existed — 4d5ef49 to
+# cbb5be0, one afternoon, not the four days cbb5be0's own message claims — it
+# passed on a defect in the test harness rather than on the guard:
+# `bash_payload` interpolated the command into JSON without escaping, so a
+# fixture containing a double quote produced a payload the hook could not
+# parse, and an unreadable command is treated as a write. The guard denied —
+# for the one reason the assertion was not testing. Found while writing
+# commit-brief.sh, the first hook here whose behaviour on an unparseable
+# payload differs from its behaviour on a command it does not care about.
+#
+# Now terminated by `[^[:alnum:]_-]`, so a quote, a full stop or a bracket
+# ends the verb while `pull-request` and `applypatch-msg` still do not match.
+# What that widens: the floor is a substring pass over the whole command text,
+# so prose ending "...then git push." now reads as a write. That is bounded —
+# the result is only ever consulted to refuse work on a protected branch,
+# where nearly everything is refused anyway, and the escape hatch verbs are
+# not on this list — and it is the fail-closed direction for the rule CLAUDE.md
+# says is not advisory.
+floor_re='git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|pull|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([^[:alnum:]_-]|$)'
+
 mutates=yes
 if [ -n "$command_text" ]; then
   mutates=no
 
-  # The floor: the original substring list, which sees into `sh -c '...'` and
-  # into quoting that command-position analysis cannot parse.
-  #
-  # The terminator is load-bearing and was wrong. It read `([[:space:]]|$)`,
-  # which stops `pull` swallowing `git pull-request` — the same class as the
-  # bare `main` match that once refused `fix/domain` — but a quote is neither a
-  # space nor end-of-string, so `bash -lc "git push"` did not match. The verb
-  # sat flush against the closing quote, and that is the *only* shape the floor
-  # exists to catch: command-position analysis sees `bash` and stops. The
-  # command was allowed on `main`, which is rule 1 unguarded by both halves at
-  # once.
-  #
-  # It had an assertion, and for the hundred minutes it existed — 4d5ef49 to
-  # cbb5be0, one afternoon, not the four days cbb5be0's own message claims — it
-  # passed on a defect in the test harness rather than on the guard:
-  # `bash_payload` interpolated the command into JSON without escaping, so a
-  # fixture containing a double quote produced a payload the hook could not
-  # parse, and an unreadable command is treated as a write. The guard denied —
-  # for the one reason the assertion was not testing. Found while writing
-  # commit-brief.sh, the first hook here whose behaviour on an unparseable
-  # payload differs from its behaviour on a command it does not care about.
-  #
-  # Now terminated by `[^[:alnum:]_-]`, so a quote, a full stop or a bracket
-  # ends the verb while `pull-request` and `applypatch-msg` still do not match.
-  # What that widens: the floor is a substring pass over the whole command text,
-  # so prose ending "...then git push." now reads as a write. That is bounded —
-  # the result is only ever consulted to refuse work on a protected branch,
-  # where nearly everything is refused anyway, and the escape hatch verbs are
-  # not on this list — and it is the fail-closed direction for the rule CLAUDE.md
-  # says is not advisory.
-  if printf '%s' "$command_text" | grep -Eq \
-    'git[[:space:]]+(-[^[:space:]]+[[:space:]]+([^-][^[:space:]]*[[:space:]]+)?)*(commit|push|pull|merge|rebase|cherry-pick|revert|am|apply|reset|restore|rm|mv|stash[[:space:]]+(pop|apply|drop))([^[:alnum:]_-]|$)'; then
+  if printf '%s' "$command_text" | grep -Eq "$floor_re"; then
     mutates=yes
   fi
 
@@ -445,14 +570,27 @@ EOF
   fi
 fi
 
+# `CLAUDE_PROJECT_DIR` stays on the primary checkout after a session enters a
+# worktree; the payload's `cwd` is what follows it there.
+cwd_branch=""
+if [ "$mutates" = yes ] && [ -z "$target_path" ] && [ -n "$command_text" ]; then
+  cwd_branch="$(cwdBranch "$payload_cwd" || true)"
+  if [ -n "$cwd_branch" ] && { writesStayInCwd || isProtected "$cwd_branch"; }; then
+    effective_branch="$cwd_branch"
+  fi
+fi
+
 if [ "$mutates" = yes ] && isProtected "$effective_branch"; then
-  # Two refusals because they are two different mistakes, and the remedy
-  # differs: one is standing in the wrong place, the other is reaching into
-  # it from a worktree that is perfectly fine.
+  # Three refusals because they are three different mistakes, and the remedy
+  # differs: standing in the wrong place, reaching into it from a worktree that
+  # is fine, and a command from a fine worktree that this guard cannot place.
   if [ -n "$target_branch" ] && [ "$target_branch" != "$branch" ]; then
     deny "This writes into a checkout that is on protected branch '$target_branch' ($target_path), even though this session's project directory is on '$branch'. The checkout the write lands in is the one that counts, not the one you are standing in. Write inside a worktree that is on an implementation branch instead. See CLAUDE.md."
   fi
-  deny "On protected branch '$effective_branch', where this repository never accepts agent work. Cut a worktree and work there, which is rule 3: git worktree add -b fix/<slug> ../<dir> origin/main (or feat/, chore/, docs/, refactor/). To move this checkout instead: git switch -c fix/<slug>. Do not work around this guard — if branching is genuinely wrong here, ask. See CLAUDE.md."
+  if [ -n "$cwd_branch" ] && ! isProtected "$cwd_branch"; then
+    deny "This starts in $payload_cwd, on '$cwd_branch', but $cwd_refusal, so it was judged against the project directory instead, which is on protected branch '$branch'. Run git as a command of its own from inside the checkout it should change: no cd, -C or wrapper around it, a commit message given as a file (git commit -F <file>) when it would break up the command, and a push that names its branch (git push -u origin <branch>). A cd out of the project directory does not persist, so enter a worktree with EnterWorktree. If the command has to run as written, ask. See CLAUDE.md."
+  fi
+  deny "On protected branch '$effective_branch', where this repository never accepts agent work. Cut a worktree and work there, which is rule 3: git worktree add -b fix/<slug> ../<dir> origin/main (or feat/, chore/, docs/, refactor/), then enter it with EnterWorktree so that git runs inside it. To move this checkout instead: git switch -c fix/<slug>. Do not work around this guard — if branching is genuinely wrong here, ask. See CLAUDE.md."
 fi
 
 exit 0

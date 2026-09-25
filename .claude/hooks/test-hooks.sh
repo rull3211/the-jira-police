@@ -75,6 +75,13 @@ expect() {
   fi
 }
 
+contains() {
+  case "$1" in
+  *"$2"*) printf 'yes' ;;
+  *) printf 'no' ;;
+  esac
+}
+
 # A scratch repository whose HEAD is whatever the caller asks for.
 scratch() {
   local dir
@@ -355,8 +362,8 @@ for w in "git switch -c fix/x" "git checkout -b fix/x" "git checkout -B fix/x" \
 done
 
 # Which checkout a write is judged against, rather than the project directory —
-# needs a real second worktree, since every `Bash` payload above has no
-# `file_path` to resolve one from.
+# needs a real second worktree, since every payload above carries neither a
+# `file_path` nor a `cwd` to resolve one from.
 write_payload() {
   node -e '
     process.stdout.write(
@@ -397,14 +404,115 @@ nb_payload() {
 expect "notebook_path is resolved the same way" DENY \
   "$(nb_payload "$pair_main/n.ipynb" | CLAUDE_PROJECT_DIR="$pair_feat" "$HOOKS/branch-guard.sh" | decision)"
 
-# Fail closed on anything that cannot name a worktree: a relative path is a
-# guess (the payload's cwd is not in it), so both this and a path under no
-# repository fall back to the project directory rather than to "allow".
+# Fail closed on anything that cannot name a worktree: a relative path is
+# malformed (the file tools take absolute paths), so both this and a path under
+# no repository fall back to the project directory rather than to "allow".
 expect "a relative path falls back to the project directory" DENY \
   "$(write_payload "f.txt" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
 
 expect "a path under no repository falls back too" DENY \
   "$(write_payload "/tmp" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+
+# A `Bash` write names no file, so its checkout is the payload's `cwd`: the
+# runtime keeps `CLAUDE_PROJECT_DIR` on the primary checkout inside a worktree.
+cwd_payload() {
+  node -e '
+    process.stdout.write(
+      JSON.stringify({ tool_name: "Bash", tool_input: { command: process.argv[1] }, cwd: process.argv[2] }),
+    );
+  ' "$1" "$2"
+}
+
+# The defect, reproduced live on 2026-09-25: every one of these was refused from
+# a feature worktree because the project directory, on main, was all it read.
+for ok in "git add ." "git commit -m x" "git add -A && git commit -m 'fix main loop'" \
+  "git commit -m 'release/1.2 notes'" "git push -u origin feat/elsewhere" "git push origin HEAD" \
+  "git restore --staged f.ts" "git rm f.ts" "git mv a b" "git reset --hard origin/main" \
+  "git stash" "git stash pop" "git merge origin/main" "git rebase origin/main" "git pull" \
+  "git pull --rebase origin main" "git cherry-pick abc123" "git revert HEAD" "git checkout f.ts" \
+  "git clean -fd" "pnpm test && git add . && git commit -m x" \
+  "GIT_EDITOR=true git rebase --continue" "git -c user.name=x commit -m y"; do
+  expect "from a feature worktree allows: $ok" SILENT \
+    "$(cwd_payload "$ok" "$pair_feat" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+mkdir -p "$pair_feat/deep/er"
+expect "from a feature worktree's subdirectory allows a commit" SILENT \
+  "$(cwd_payload "git commit -m x" "$pair_feat/deep/er" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+
+# Rule 1 itself: the same commands from the checkout on main are still refused.
+for w in "git commit -m x" "git add ." "git rm f.ts" "git push -u origin feat/elsewhere"; do
+  expect "from the main checkout refuses: $w" DENY \
+    "$(cwd_payload "$w" "$pair_main" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# Standing in a protected checkout is refused whatever the project directory is,
+# including a write the guard cannot place.
+for w in "git commit -m x" "git -C $pair_feat commit -m x" "git update-ref refs/heads/x HEAD"; do
+  expect "in a main checkout, from a feature project, refuses: $w" DENY \
+    "$(cwd_payload "$w" "$pair_main" | CLAUDE_PROJECT_DIR="$pair_feat" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# What judging by `cwd` alone would open: each of these can land on a protected
+# branch from a feature worktree, so each is left to the project directory.
+for w in "cd $pair_main && git commit -m x" "git -C $pair_main commit -m x" \
+  "git --git-dir=$pair_main/.git commit -m x" "GIT_DIR=$pair_main/.git git commit -m x" \
+  "git --work-tree=$pair_main commit -m x" "pushd $pair_main && git commit -m x" \
+  "(cd .. && git commit -m x)" "bash -c 'cd $pair_main && git commit -m x'" \
+  "source ./env.sh && git commit -m x" ". ./env.sh; git commit -m x" \
+  "env --chdir=$pair_main git commit -m x" "git -C . commit -m x" "sh -c 'git commit -m x'" \
+  "git add . && sh -c 'git push origin HEAD:release/1'" \
+  "git commit -m \"\`git update-ref refs/heads/main HEAD\`\"" \
+  "git branch -f main HEAD" "git update-ref refs/heads/main HEAD" "git branch -D main" \
+  "git fetch origin main:main" "git worktree add ../d main" "git symbolic-ref HEAD refs/heads/main" \
+  "git push" "git push origin" "git push --all origin" "git push --mirror origin" \
+  "git push origin 'refs/heads/*:refs/heads/*'" "git push origin :" "git push origin +:" \
+  "git push origin HEAD:release/1" "git push origin release/1" \
+  "git push origin +HEAD:refs/heads/release/1" "git push -o ci.skip origin" \
+  "git pull origin main:main" "git pull origin 'refs/heads/*:refs/heads/*'" \
+  "git rebase origin/main main" "git rebase -x 'git branch -f main HEAD' origin/main" \
+  "git stash branch release/x" "git checkout -B main" "git checkout -Bmain" "git checkout main" \
+  "git tag v1" "git config user.email x@y"; do
+  expect "from a feature worktree, judged by main: $w" DENY \
+    "$(cwd_payload "$w" "$pair_feat" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# A `cwd` that names no branch is no evidence, so the project directory decides.
+# `rev-parse` would name a detached HEAD `HEAD`, which is not a protected name.
+detached="$(mktemp -d)/det"
+git -C "$pair_main" worktree add -q --detach "$detached" HEAD
+for label in empty relative missing newline no-repo detached; do
+  case "$label" in
+    empty) c="" ;;
+    relative) c="wt/deep" ;;
+    missing) c="$pair_feat/not-there" ;;
+    newline) c="$pair_feat"$'\n' ;;
+    no-repo) c="$(mktemp -d)" ;;
+    detached) c="$detached" ;;
+  esac
+  expect "a $label cwd falls back to the project directory" DENY \
+    "$(cwd_payload "git commit -m x" "$c" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+done
+
+# The hook's own directory is wherever it was started from, so it is never read.
+expect "the hook process's directory is not the command's" DENY \
+  "$(cd "$pair_feat" && bash_payload "git commit -m x" |
+    CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+
+fallback="$(cwd_payload "git -C $pair_main commit -m x" "$pair_feat" |
+  CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh")"
+expect "the fallback refusal names the worktree's branch" yes \
+  "$(contains "$fallback" "on 'feat/elsewhere'")"
+expect "the fallback refusal says what moved the judgement" yes \
+  "$(contains "$fallback" "point git at another checkout")"
+
+# The refusal interpolates the `cwd`, and a path may hold a double quote.
+quoted_feat="$(mktemp -d)/wt\"q"
+git -C "$pair_main" worktree add -q -b feat/quoted "$quoted_feat" HEAD
+expect "a quote in the cwd still parses" DENY \
+  "$(cwd_payload "git -C . commit -m x" "$quoted_feat" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
+expect "a quoted cwd is still judged where it is" SILENT \
+  "$(cwd_payload "git commit -m x" "$quoted_feat" | CLAUDE_PROJECT_DIR="$pair_main" "$HOOKS/branch-guard.sh" | decision)"
 
 git -C "$main_repo" switch -q feat/ordinary
 expect "off main: a commit is fine" SILENT \
@@ -612,13 +720,6 @@ cp "$ROOT/.claude/skills/dev-house-rules/FINISHING.md" \
 
 brief_out() {
   printf '%s' "$1" | CLAUDE_PROJECT_DIR="$brief_repo" "$HOOKS/session-brief.sh"
-}
-
-contains() {
-  case "$1" in
-  *"$2"*) printf 'yes' ;;
-  *) printf 'no' ;;
-  esac
 }
 
 compact="$(brief_out '{"trigger":"compact"}')"
@@ -844,6 +945,25 @@ expect "the payload is valid JSON with context" yes \
   "$(contains "$(commit_out 'git commit' | context)" 'no command behind them')"
 expect "names the branch it is about to commit on" yes \
   "$(contains "$(commit_out 'git commit' | context)" "on 'main'")"
+
+# CLAUDE_PROJECT_DIR stays on the primary checkout once a session enters a
+# worktree, so before this fix a commit actually landing on the worktree's own
+# branch was always narrated as landing on the project directory's — the
+# display-only sibling of branch-guard.sh's decision defect
+# (architecture/guardrails.md).
+commit_feat="$(mktemp -d)/wt"
+git -C "$commit_repo" worktree add -q -b feat/commit-elsewhere "$commit_feat" HEAD
+mkdir -p "$commit_feat/.claude/skills/dev-house-rules"
+cp "$ROOT/.claude/skills/dev-house-rules/FINISHING.md" \
+  "$commit_feat/.claude/skills/dev-house-rules/FINISHING.md"
+
+expect "names the worktree's branch when cwd names one" yes \
+  "$(contains "$(cwd_payload 'git commit' "$commit_feat" |
+    CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh" | context)" "on 'feat/commit-elsewhere'")"
+
+expect "falls back to the project directory when cwd names no branch" yes \
+  "$(contains "$(cwd_payload 'git commit' "$(mktemp -d)" |
+    CLAUDE_PROJECT_DIR="$commit_repo" "$HOOKS/commit-brief.sh" | context)" "on 'main'")"
 
 # DERIVED, not pasted — the same split as the compact brief above. A copy of the
 # checklist living in a shell script would pass the "contains" assertion and

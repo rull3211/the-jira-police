@@ -66,7 +66,8 @@ about itself.
 **Two commands the guard classifies as writes and that do nothing if they run.** That is the whole
 trick, and it is why this is safe to make routine: if the hook is live you get its refusal, and if it
 is not you get a no-op and a clean tree. Run them from a protected branch, which is the only place
-the guard has an opinion.
+the guard has an opinion, with the session standing in that checkout: a `Bash` write is judged where
+it starts, so from a feature worktree `git rm` runs, as it should.
 
 ```
 git rm                       # no pathspec: prints usage, changes nothing

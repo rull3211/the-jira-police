@@ -71,20 +71,24 @@ fi
 # point. It cannot collide with a real command: the gate below only ever fires
 # on a string containing `git ... commit`.
 command_text=""
+payload_cwd=""
 if [ -n "$payload" ]; then
-  command_text="$(
+  parsed="$(
     printf '%s' "$payload" | node -e '
       let s = "";
       process.stdin.on("data", (d) => (s += d)).on("end", () => {
         try {
           const j = JSON.parse(s);
-          process.stdout.write(String((j.tool_input && j.tool_input.command) || ""));
+          const cwd = String(j.cwd || "").replace(/[\r\n]/gu, " ");
+          process.stdout.write(cwd + "\n" + String((j.tool_input && j.tool_input.command) || ""));
         } catch {
-          process.stdout.write("PARSE_ERROR");
+          process.stdout.write("\nPARSE_ERROR");
         }
       });
-    ' 2>/dev/null || printf 'PARSE_ERROR'
+    ' 2>/dev/null || printf '\nPARSE_ERROR'
   )"
+  payload_cwd="${parsed%%$'\n'*}"
+  command_text="${parsed#*$'\n'}"
 
   # Anchored to command position, not grepped out of the whole string. That is
   # branch-guard.sh's rule for `gh pr merge` — "the difference between guarding
@@ -126,6 +130,19 @@ checklist="$(awk '/^## The checklist/{f=1;next} f&&/^\*\*And the rules/{exit}
   "$repo/.claude/skills/dev-house-rules/FINISHING.md" 2>/dev/null || true)"
 
 branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+
+# `$repo` is `CLAUDE_PROJECT_DIR`, which stays on the primary checkout once a
+# session enters a worktree (architecture/guardrails.md); the payload's `cwd`
+# is what actually moved. `symbolic-ref`, not `rev-parse`, so a detached HEAD
+# there leaves `branch` as `$repo`'s rather than reporting one called `HEAD`.
+case "$payload_cwd" in
+  /*)
+    if [ -d "$payload_cwd" ]; then
+      cwd_branch="$(git -C "$payload_cwd" symbolic-ref --short -q HEAD 2>/dev/null || true)"
+      [ -n "$cwd_branch" ] && branch="$cwd_branch"
+    fi
+    ;;
+esac
 
 # When the extraction finds nothing the hook says so, loudly, instead of going
 # quiet. session-brief.sh's equivalent prints nothing and relies on test-hooks.sh
