@@ -407,7 +407,7 @@ Recon's denials are the union of the solve denylist and `DENIED_BUILTIN_TOOLS` �
 list — rather than a hand-written `Write`/`Edit` pair, so a future finding that denies a tool in
 triage denies it in recon without anyone remembering to.
 
-**The parsers carry the rules the harness acts on; the recon and review schemas repeat theirs.** `parseRecon`
+**The parsers carry the rules the harness acts on; the recon, fix and review schemas repeat theirs.** `parseRecon`
 refuses a verdict that both proceeds and bails — the run contradicted itself, so neither reading
 is safe to act on — and one that declines without saying why, because the reason is the only
 calibration the fitness assessment ever gets. A draft-07 `if`/`then`/`else` expresses the same
@@ -431,8 +431,17 @@ sits at the root and the changed-false rule is repeated inside both its `then` a
 a probe on 2026-09-25 measured the API accepting and the CLI enforcing in-session from either
 branch; `src/json-schema-root.test.ts` refuses a root combinator in any schema a builder passes.
 The one `parseReview` rule it cannot carry — a `widened` path missing from `filesTouched` — needs two
-fields compared, which draft-07 cannot say. `parseFix` refuses a report where `testAdded` and
-`testOmittedReason` agree: exactly one of "a test was added" and "here is why not" must hold.
+fields compared, which draft-07 cannot say. `FIX_SCHEMA` does the same for `parseFix`, since
+SSX-3980's fix, three test files included, was discarded for a `testOmittedReason` on a report
+saying it had added tests: a report not abandoned is `changed`, names a file, gives cause `none`,
+and holds exactly one of "a test was added" and "here is why not"; an abandoned one gives a cause
+and is held to nothing else, because `parseFix` returns before its other rules. A probe on
+2026-09-25 handed the CLI SSX-3980's report five ways: against the conditional every submission
+arrived coherent and none was refused, because the model conformed before submitting, where the
+control schema let the report through for `parseFix` to discard — so the CLI's own refusal of this
+schema is still unobserved. `testOmittedReason`'s description names `residualRisk`, the one of the
+two a reviewer is shown, as the place for partial coverage; the probe did not show it moving a
+note, and a model handed the drafted report dropped it.
 `parseSimplify` is handed the fix pass's file list and refuses anything outside it, because
 simplification reaching a file the fix never touched is a second, unreviewed change riding inside
 a diff a human approved for a different reason. `parseReview` refuses a round that answered

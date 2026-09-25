@@ -171,7 +171,7 @@ export const FIX_SCHEMA = {
     testOmittedReason: {
       type: "string",
       description:
-        "Why no test was added. Non-empty if and only if `testAdded` is false. A change with no test is not automatically wrong, but it is always worth a sentence.",
+        "Why no test was added. Non-empty if and only if `testAdded` is false. A change with no test is not automatically wrong, but it is always worth a sentence. When you did add a test and part of the change is still untested, this stays empty and that part goes in `residualRisk`, the field a reviewer is shown.",
     },
     residualRisk: {
       type: "string",
@@ -190,6 +190,21 @@ export const FIX_SCHEMA = {
         "Why the run was abandoned. `none` if and only if `abandoned` is empty. `judgement` means you read the code and concluded the change should not be made as briefed — that is a verdict about the ticket, and it is fed back to the triage assessment that called this ticket solvable. `environment` means you were prevented from working: a tool call denied by a safety hook, a file you could not open, a missing dependency. Choose `environment` whenever the obstacle was not about the code, even if you are unsure — an environment cause is retried on a clean worktree and costs only a rerun, whereas a `judgement` cause is recorded as evidence that the ticket was misjudged, and a wrong entry there quietly corrupts a record nobody can audit afterwards.",
     },
   },
+  // `parseFix`'s coherence rules and no others, with empty meaning what `str` reads as empty; an abandoned run is held only to its cause, as the parser holds it.
+  if: { properties: { abandoned: { pattern: EMPTY } } },
+  // oxlint-disable-next-line unicorn/no-thenable
+  then: {
+    properties: {
+      changed: { const: true },
+      filesTouched: { minItems: 1 },
+      abandonedCause: { const: "none" },
+    },
+    if: { properties: { testAdded: { const: true } } },
+    // oxlint-disable-next-line unicorn/no-thenable
+    then: { properties: { testOmittedReason: { pattern: EMPTY } } },
+    else: { properties: { testOmittedReason: { pattern: FILLED } } },
+  },
+  else: { properties: { abandonedCause: { enum: ["judgement", "environment"] } } },
 } as const;
 
 /**
