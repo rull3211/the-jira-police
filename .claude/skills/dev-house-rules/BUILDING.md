@@ -141,6 +141,14 @@ than one copy per arm: a name refused by one hatch and accepted by another is th
 exists to close.
 [→](INCIDENTS.md#the-escape-hatch-audited-on-the-arm-being-added-while-its-two-siblings-stayed-wide)
 
+**An exception a model may take is a hatch too, and the harness bounds it, never the prompt.** A
+carve-out from something every pass must do — `silent`, cut from "answer every comment" — is as wide
+as the judgement of whoever decides when it applies. A sentence telling the model when that is
+bounds nothing, because the model weighs it against everything else it read. So the width is set
+where the harness can refuse: a list built per round, an `enum` the CLI enforces in-session, the
+parser refusing the rest. Whatever is left to judgement is written down as judgement.
+[→](INCIDENTS.md#the-answer-every-asker-was-promised-shipped-with-two-ways-to-give-none)
+
 **A denylist over a vocabulary you do not control is behind by construction: invert it, or say in
 the code why you cannot.** A guard that lists the spellings of an act allows every spelling it has
 not met, so each patch buys one spelling and the next is already through. `branch-guard.sh` refused

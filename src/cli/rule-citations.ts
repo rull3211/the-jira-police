@@ -51,8 +51,8 @@ export const PHASE_FILES: readonly string[] = [
  */
 export const RULE_PARAGRAPHS: Record<string, number> = {
   ".claude/skills/dev-house-rules/STARTING.md": 16,
-  ".claude/skills/dev-house-rules/BUILDING.md": 16,
-  ".claude/skills/dev-house-rules/PROVING.md": 27,
+  ".claude/skills/dev-house-rules/BUILDING.md": 17,
+  ".claude/skills/dev-house-rules/PROVING.md": 28,
   ".claude/skills/dev-house-rules/FINISHING.md": 16,
 };
 

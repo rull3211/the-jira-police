@@ -2,8 +2,8 @@
 
 **The evidence base for the house rules.** Nothing in those rules was designed against a theory;
 every entry here is something that got through, and the rules that cite one are the generalisation
-of it. Not every rule cites one — 42 of the 72 bold paragraphs in the four phase files name no
-incident, and a good share of those are section prose rather than rules — so the honest claim is the
+of it. Not every rule cites one — `pnpm docs:check` prints how many of the bold paragraphs in the
+four phase files name no incident, and a good share of those are section prose rather than rules — so the honest claim is the
 narrow one: where a rule names its evidence, the evidence is here, and `pnpm docs:check` fails if the
 link stops resolving.
 
@@ -1929,3 +1929,38 @@ one poll interval after each failed round.
 **The rule** — [write the brake before doing the work](BUILDING.md#fail-closed-except-guards-which-fail-open),
 now applied to a second decision reading the same reservation; this entry is its evidence, not a
 new rule.
+
+### The answer every asker was promised, shipped with two ways to give none
+
+**2026-09-25.** `b4610b2`, merged in #81 on 2026-09-24, promised that whoever asks a review round
+for something hears back, even from a round that lands nothing. Its first real rounds broke that
+twice within a day. The failure reply closed Copilot's thread on #1461 and #1462 with the bot's own
+last word, and the survey read that as answered and undrafted both
+([the entry above](#the-pull-request-undrafted-by-the-round-that-did-nothing)). Then, with the pass
+running again, round 2 on #1462 read Copilot's overview — "Findings: None", no inline threads —
+checked the code, and listed it in `silent`, the exception the same commit had cut for people
+talking among themselves: no commit, no reply, nothing on the pull request to say a round had run.
+#1459's round 1 had answered the same kind of overview the day before, when there was no `silent`
+to take.
+
+**The mechanism, not the excuse.** The exception was bounded in two places, and only one was code.
+The width everyone considered — a thread marked silent, which would buy a round every tick — was
+refused by `parseReview`. The rest was a sentence to the model, "never a comment that asks for
+anything", and whether a review reporting no findings asks for anything is a judgement the model
+made the other way. #81 named the risk under "Review these first": "`silent` is the model's
+judgement that a comment asked for nothing." The disclosure was accurate and bounded nothing. The
+same pull request shipped the reply path "tested, not watched", and its sibling #80 shipped
+`77a9f61` "not probed" after a hook blocked the one-call probe and it was skipped rather than handed
+to the operator ([the schema the API refused](#the-review-schema-the-api-refused-merged-with-not-probed-in-its-own-commit-message)).
+Seventy-two mutations across the two went red as intended. All three defects sat where nobody had a
+model to test against: the API's rules for a schema, two features meeting across stacked branches,
+and a model's judgement.
+
+**Found by** the operator, three times in one day and each time on GitHub: two pull requests failing
+"in a weird way", then both undrafted, then a round that "didn't produce any comment once again".
+The suite found none of them.
+
+**The rule** — two, both amended from this: [an exception a model may take is an escape hatch, and
+the harness bounds it](BUILDING.md#fail-closed-except-guards-which-fail-open), where `silent` is now
+narrowed per round by a schema the CLI enforces in-session; and
+[a probe a guard blocks is handed over as a command, never dropped](PROVING.md#ask-for-it--and-nudge-never-refuse).

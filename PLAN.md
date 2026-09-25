@@ -420,14 +420,13 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   show it:** `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails
   lint; and `pnpm solve:once <KEY> --advance` run twice on one whose round is refused at the diff
   gate or `widening`, where the second run must print `UNLANDED` and leave the draft flag set.
-- **No real round has run under the per-round `silent` schema, and no marker carries a silence.**
-  The two probes on 2026-09-25 (`architecture/solve.md`, "A review is never silent") drove the real
-  CLI with the built schema but no review round: the first had a model rename a refused silence to
-  the allowed comment, the second showed the field's description steering it to answer instead.
-  #1462 will not repeat the case — its cursor is past that review. **What would show it:** the next
-  round whose only new feedback is a Copilot overview with no findings must post a `bot: round N`
-  reply, and one with a colleague's thank-you beside it must add a `no reply to comment M` line to
-  the marker.
+- **No marker carries a silence yet.** One real round has run under the per-round `silent`
+  schema: #1461's round 1 on the evening of 2026-09-25 answered both of Copilot's overviews, the
+  "Findings: None" one included, where #1462's round 2 had left the same kind silent. That round
+  had no plain comment from a person, so the silence path itself rests on the two probes
+  (`architecture/solve.md`, "A review is never silent"), one of which had a model rename a refused
+  silence to the allowed comment. **What would show it:** a round with a colleague's thank-you beside
+  a review must answer the review and add a `no reply to comment M` line to the marker.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries

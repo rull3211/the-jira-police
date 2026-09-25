@@ -1201,7 +1201,9 @@ posted an empty quote.
   on 2026-09-25: both shapes are accepted by the API and enforced in-session, and a pass told only
   "must be equal to one of the allowed values" renamed its entry to the allowed comment rather than
   answering the refused one. The field's description now says to answer it instead, and a second
-  probe on the built schema did: one refusal, then the overview answered in `responses`. The cost
+  probe on the built schema did: one refusal, then the overview answered in `responses`. The first
+  real round under it, #1461's on the evening of 2026-09-25, answered both of Copilot's overviews,
+  the no-findings one included. The cost
   is chosen, not missed: a person's approving review with a line of text in it now gets a reply
   too, where an empty approval and Copilot's green light never reach the pass at all.
 - **A thread cannot be `silent`**: one whose last comment is not ours is unanswered by

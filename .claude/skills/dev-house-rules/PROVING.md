@@ -250,6 +250,14 @@ real target filled in, what would falsify it, and what it has never done.
 The person may have reasons to skip it, and skipping it deliberately with the risk stated is a
 legitimate decision. Skipping it because nobody mentioned it is not.
 
+**A probe a guard blocks is handed over as a command, never dropped.** When a hook refuses the one
+command that would measure a risk, that command goes to the person as the next thing to run, with
+what it costs and what would falsify it. It does not go into the pull request as "not probed". #80's
+one-call schema probe was blocked and skipped, and merged as a disclosure. The first real round
+became the probe, and every round failed it.
+[→](INCIDENTS.md#the-review-schema-the-api-refused-merged-with-not-probed-in-its-own-commit-message)
+· [→](INCIDENTS.md#the-answer-every-asker-was-promised-shipped-with-two-ways-to-give-none)
+
 ### Step 5 is where it compounds
 
 A run that is not written up is a run paid for twice. The output of step 5 is concrete:
