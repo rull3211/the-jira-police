@@ -21,6 +21,15 @@ nothing on the solve path is moved by hand any more. A ticket goes
 `agent:solving → agent:reviewing → agent:review-done` and ends on `agent:done`, `agent:closed` or
 `agent:failed`, and every outcome that spent a claim says so on the ticket.
 
+**A confirmed move into `agent:review-done` optionally mirrors onto the Jira status field too**,
+since a later change: `moveReviewStage` (`src/cli/solve-run.ts`) calls `JiraClient.moveToCodeReview`
+after the label write lands, never before and never on a no-op re-application. Unconfigured
+(`SOLVE_CODE_REVIEW_STATUS` unset), the call is a guaranteed no-op — see `architecture/
+configuration.md` §10. This is the one deliberate narrowing of invariant 11
+(`architecture/invariants.md` §14), and it is a harness write, never one a model session can reach:
+nothing gave any pass or the poster a transition tool, and this call site takes no ticket text as
+input, only the `AdvanceOutcome` `gh` itself reported.
+
 **Nothing structural is left here, and this paragraph used to name two things that are now
 false.** It said human reviewers were collected and then dropped by the `waiting` gate: they are
 not, since that gate asks whether anyone actionable spoke rather than whether the requested

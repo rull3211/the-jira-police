@@ -1,10 +1,21 @@
 /**
- * Minimal Jira Cloud client — discovery reads, and one narrow write (`updateLabels`).
+ * Minimal Jira Cloud client — discovery reads, and two narrow writes (`updateLabels`,
+ * `moveToCodeReview`).
  *
  * `updateLabels` exists because the MCP tool surface only offers `fields` (set semantics), so
  * adding one label means read-all-N/append/write-all-N-back — destroying any label a human added
- * in between. This credential may touch only `agent:`-namespaced labels (`assertOwnedLabel`), never
- * a status, field or comment; comments stay on the MCP path since ADF conversion lives there.
+ * in between. This credential may touch `agent:`-namespaced labels (`assertOwnedLabel`) and exactly
+ * one Jira status, named once at construction and never per call; nothing else — never a field or a
+ * comment, which stay on the MCP path since ADF conversion lives there.
+ *
+ * `moveToCodeReview` is the status write, and it is a workflow **transition**, not a field edit —
+ * Jira does not accept `status` as a settable field. Unconfigured (`codeReviewStatus` unset at
+ * construction), it is a guaranteed no-op: the capability ships inert until an operator names a
+ * target. This is the one deliberate narrowing of the "never a status" guarantee invariant 11
+ * (`architecture/invariants.md` §14) used to state unconditionally; touching status from a headless
+ * model session is still refused everywhere else — `src/triage/poster.ts` denies
+ * `mcp__atlassian__transitionJiraIssue` for exactly that reason — and this is a different write
+ * because nothing but this deterministic harness code ever calls it.
  *
  * `search` uses `/rest/api/3/search/jql`, paginated by opaque `nextPageToken` with no total count
  * or numeric offset, and asks a narrow `FIELDS` list since it runs on a timer over every ticket;
@@ -89,6 +100,13 @@ export interface JiraClientOptions {
   /** Atlassian API credential for the account above. */
   readonly auth: string;
   readonly timeoutMs?: number;
+  /**
+   * The one status `moveToCodeReview` may transition a ticket to, by id or by name. Fixed here
+   * rather than accepted as a call argument, the same way `WRITABLE_LABEL_PREFIX` is fixed rather
+   * than passed in — a caller cannot aim this write anywhere but the one place the operator named.
+   * Unset means the method is inert.
+   */
+  readonly codeReviewStatus?: string;
 }
 
 /** One comment, with its body left as raw ADF for `renderAdf` to deal with. */
@@ -126,6 +144,12 @@ export interface IssueDetail {
   readonly comments: readonly JiraComment[];
   readonly attachments: readonly JiraAttachment[];
   readonly url: string;
+}
+
+/** What `moveToCodeReview` did, or why it did nothing; `from` is the status found before the attempt. */
+export interface CodeReviewMoveResult {
+  readonly outcome: "moved" | "already-there" | "unreachable" | "disabled";
+  readonly from: string;
 }
 
 /** One changelog entry, flattened to the fields it touched. */
@@ -176,11 +200,13 @@ export class JiraClient {
   readonly #baseUrl: string;
   readonly #authHeader: string;
   readonly #timeoutMs: number;
+  readonly #codeReviewStatus: string | undefined;
 
   constructor(options: JiraClientOptions) {
     this.#baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.#authHeader = `Basic ${Buffer.from(`${options.email}:${options.auth}`).toString("base64")}`;
     this.#timeoutMs = options.timeoutMs ?? 30_000;
+    this.#codeReviewStatus = options.codeReviewStatus?.trim() || undefined;
   }
 
   async #post(path: string, body: unknown): Promise<unknown> {
@@ -226,12 +252,18 @@ export class JiraClient {
     throw new JiraError(response.status, `Jira returned ${response.status}: ${detail}`);
   }
 
-  /** The one verb that changes anything, kept separate from `#post` so every write can be found by grepping one method name. */
-  async #put(path: string, body: unknown): Promise<void> {
+  /**
+   * The only path anything is actually changed through, kept separate from `#post` — which reads a
+   * body back — so every mutating call can be found by grepping one method name. `updateLabels`
+   * sends `PUT` (a field edit); `moveToCodeReview` sends `POST` (a workflow transition, the only
+   * shape Jira accepts for a status change). Both return 204 with no body on success, which is why
+   * this never attempts `.json()` the way `#post` does.
+   */
+  async #write(method: "PUT" | "POST", path: string, body: unknown): Promise<void> {
     let response: Response;
     try {
       response = await fetch(`${this.#baseUrl}${path}`, {
-        method: "PUT",
+        method,
         headers: {
           Authorization: this.#authHeader,
           Accept: "application/json",
@@ -247,7 +279,7 @@ export class JiraClient {
     if (!response.ok) {
       await this.#raise(response);
     }
-    // A successful issue edit is 204 with no body; reading one would throw.
+    // A successful issue edit or transition is 204 with no body; reading one would throw.
   }
 
   async #get(path: string, accept: string): Promise<Response> {
@@ -475,7 +507,7 @@ export class JiraClient {
       return;
     }
 
-    await this.#put(`/rest/api/3/issue/${key}`, {
+    await this.#write("PUT", `/rest/api/3/issue/${key}`, {
       update: {
         labels: [
           ...add.map((label) => ({ add: label })),
@@ -484,6 +516,51 @@ export class JiraClient {
       },
     });
     log.info("jira.labels_updated", { key, add, remove });
+  }
+
+  /**
+   * Moves an issue to the configured code-review status via a workflow **transition** — the only
+   * shape Jira accepts for a status change; `fields.status` cannot be set directly like a label can.
+   * Unconfigured (`codeReviewStatus` unset at construction), this is a guaranteed no-op, so the
+   * capability ships inert until an operator names a target.
+   *
+   * Tolerant by design, on both ends. An issue already at the target status is left alone rather
+   * than sent a redundant transition — including one another actor (a human, or the board's own
+   * "Automation for Jira" rule) already moved there. One with no transition to the target from its
+   * current status — moved somewhere the workflow does not connect from, or the workflow's shape
+   * changed since this was configured — is reported rather than thrown: a Jira hiccup here must
+   * never be the failure that stops a pull request from being marked ready.
+   */
+  async moveToCodeReview(key: string): Promise<CodeReviewMoveResult> {
+    if (this.#codeReviewStatus === undefined) {
+      return { outcome: "disabled", from: "" };
+    }
+    assertIssueKey(key);
+    const target = this.#codeReviewStatus;
+
+    const current = await this.#get(`/rest/api/3/issue/${key}?fields=status`, "application/json");
+    const currentPayload = (await current.json()) as DetailPayload;
+    const status = currentPayload.fields?.status;
+    const from = status?.name ?? "";
+    if (from === target || status?.id === target) {
+      return { outcome: "already-there", from };
+    }
+
+    const response = await this.#get(`/rest/api/3/issue/${key}/transitions`, "application/json");
+    const payload = (await response.json()) as TransitionsPayload;
+    const match = (payload.transitions ?? []).find(
+      (candidate) => candidate.to?.name === target || candidate.to?.id === target,
+    );
+    if (match?.id === undefined) {
+      log.warn("jira.status_unreachable", { key, from, target });
+      return { outcome: "unreachable", from };
+    }
+
+    await this.#write("POST", `/rest/api/3/issue/${key}/transitions`, {
+      transition: { id: match.id },
+    });
+    log.info("jira.status_moved", { key, from, to: target });
+    return { outcome: "moved", from };
   }
 
   /** One attachment decoded as text, or `null` if too large; `null` rather than a truncated string, since half an SVG is a broken one. */
@@ -538,6 +615,7 @@ interface DetailPayload {
     readonly summary?: string;
     readonly issuetype?: { readonly name?: string };
     readonly status?: {
+      readonly id?: string;
       readonly name?: string;
       readonly statusCategory?: { readonly key?: string };
     };
@@ -552,6 +630,14 @@ interface DetailPayload {
 interface RawHistory {
   readonly created?: string;
   readonly items?: readonly { readonly field?: string }[];
+}
+
+/** `GET .../issue/{key}/transitions`: the workflow moves available from the issue's current status. */
+interface TransitionsPayload {
+  readonly transitions?: readonly {
+    readonly id?: string;
+    readonly to?: { readonly id?: string; readonly name?: string };
+  }[];
 }
 
 /** The two shapes Jira uses for a paged list: `comment` names its array `comments`, `changelog` names it `values`. */

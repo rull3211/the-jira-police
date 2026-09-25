@@ -6,11 +6,12 @@ import { JiraClient, JiraError, assertOwnedLabel, isInlineable } from "./client.
 /** A value standing in for the credential, so leak assertions have a needle. */
 const NEEDLE = "needle-value-do-not-echo";
 
-function client(): JiraClient {
+function client(codeReviewStatus?: string): JiraClient {
   return new JiraClient({
     baseUrl: "https://example.invalid",
     email: "someone@example.com",
     auth: NEEDLE,
+    ...(codeReviewStatus === undefined ? {} : { codeReviewStatus }),
   });
 }
 
@@ -496,7 +497,7 @@ function putMock(status = 204): FetchMock {
   return vi.fn<typeof fetch>(async () => new Response(null, { status }));
 }
 
-/** The one write this credential can make, a deliberately-narrow amendment to a discovery-only rule. */
+/** The first of two writes this credential can make, a deliberately-narrow amendment to a discovery-only rule. */
 describe("JiraClient.updateLabels", () => {
   it("sends add and remove as a delta, not as a field", async () => {
     // `fields: { labels: [...] }` would clobber anything a human added between the read and this call.
@@ -607,6 +608,142 @@ describe("JiraClient.updateLabels", () => {
     await expect(client().updateLabels("SSX-3822", { add: ["agent:done"] })).rejects.toThrow(
       JiraError,
     );
+  });
+});
+
+/** `GET .../issue/{key}?fields=status`'s response shape. */
+function statusResponse(name: string, id = "10165"): Response {
+  return jsonResponse({ key: "SSX-3822", fields: { status: { id, name } } });
+}
+
+/** `GET .../issue/{key}/transitions`'s response shape. */
+function transitionsResponse(
+  transitions: readonly { id: string; to: { id?: string; name?: string } }[],
+): Response {
+  return jsonResponse({ transitions });
+}
+
+/** The second write this credential can make — a workflow transition, unlike `updateLabels`'s field edit. */
+describe("JiraClient.moveToCodeReview", () => {
+  it("is a guaranteed no-op when no target status was configured", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client().moveToCodeReview("SSX-3822")).resolves.toEqual({
+      outcome: "disabled",
+      from: "",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op, not a redundant write, when the issue is already at the target status by name", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("In Code Review", "10232"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("In Code Review").moveToCodeReview("SSX-3822")).resolves.toEqual({
+      outcome: "already-there",
+      from: "In Code Review",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches the target status by id as well as by name", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("In Code Review", "10232"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("10232").moveToCodeReview("SSX-3822")).resolves.toEqual({
+      outcome: "already-there",
+      from: "In Code Review",
+    });
+  });
+
+  it("transitions to the target status when the workflow offers one, matched by name", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("In Progress", "10004"))
+      .mockResolvedValueOnce(
+        transitionsResponse([
+          { id: "21", to: { id: "10165", name: "Backlog" } },
+          { id: "31", to: { id: "10232", name: "In Code Review" } },
+        ]),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("In Code Review").moveToCodeReview("SSX-3822")).resolves.toEqual({
+      outcome: "moved",
+      from: "In Progress",
+    });
+
+    const { url, init } = callArgs(fetchMock, 2);
+    expect(url).toBe("https://example.invalid/rest/api/3/issue/SSX-3822/transitions");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ transition: { id: "31" } });
+  });
+
+  it("transitions to the target status when the workflow offers one, matched by id", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("In Progress", "10004"))
+      .mockResolvedValueOnce(transitionsResponse([{ id: "31", to: { id: "10232" } }]))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("10232").moveToCodeReview("SSX-3822")).resolves.toEqual({
+      outcome: "moved",
+      from: "In Progress",
+    });
+  });
+
+  it("reports unreachable rather than throwing when the workflow offers no transition there", async () => {
+    // A ticket moved somewhere the workflow does not connect from, or the workflow changed shape —
+    // this must never be the failure that blocks a pull request from being marked ready.
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("Done", "10099"))
+      .mockResolvedValueOnce(transitionsResponse([{ id: "1", to: { name: "Reopened" } }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("In Code Review").moveToCodeReview("SSX-3822")).resolves.toEqual({
+      outcome: "unreachable",
+      from: "Done",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses an issue key that is not an issue key", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("In Code Review").moveToCodeReview("SSX-1/comment")).rejects.toThrow(
+      JiraError,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("raises on a rejected read rather than reporting success", async () => {
+    vi.stubGlobal("fetch", putMock(403));
+
+    await expect(client("In Code Review").moveToCodeReview("SSX-3822")).rejects.toThrow(JiraError);
+  });
+
+  it("raises on a rejected transition rather than reporting success", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("In Progress", "10004"))
+      .mockResolvedValueOnce(transitionsResponse([{ id: "31", to: { name: "In Code Review" } }]))
+      .mockResolvedValueOnce(new Response(null, { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("In Code Review").moveToCodeReview("SSX-3822")).rejects.toThrow(JiraError);
+  });
+
+  it("does not put the credential in the error when the request fails", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new Error(`connect ECONNREFUSED ${NEEDLE}`);
+    });
+
+    await expect(client("In Code Review").moveToCodeReview("SSX-3822")).rejects.toThrow(JiraError);
   });
 });
 

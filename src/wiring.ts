@@ -406,10 +406,15 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
 }
 
 export function createJiraClient(settings: Settings): JiraClient {
+  // Blank means unset (`resolveDeclared` has no fallback for it), which leaves
+  // `moveToCodeReview` a guaranteed no-op — the capability ships inert until named. The key is
+  // omitted rather than set to `undefined`: `exactOptionalPropertyTypes` treats the two differently.
+  const codeReviewStatus = settings.SOLVE_CODE_REVIEW_STATUS.trim();
   return new JiraClient({
     baseUrl: settings.JIRA_BASE_URL,
     email: settings.JIRA_EMAIL,
     auth: settings.JIRA_AUTH,
+    ...(codeReviewStatus === "" ? {} : { codeReviewStatus }),
   });
 }
 
