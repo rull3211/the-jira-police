@@ -140,6 +140,8 @@ export function outcomeNote(outcome: AdvanceOutcome): string {
       return `waiting quiet=${outcome.quietMs === null ? "unknown" : `${String(outcome.quietMs)}ms`}`;
     case "ready":
       return `ready rounds=${String(outcome.rounds)}`;
+    case "unlanded":
+      return `unlanded round=${String(outcome.round)}`;
     case "iterated":
       return `iterated round=${String(outcome.round)} pushed=${String(outcome.pushed)}${outcome.repaired === undefined ? "" : ` repaired=${outcome.repaired.notice.outcome}`}${outcome.dropped === undefined ? "" : ` dropped=${String(outcome.dropped.paths.length)}${told(outcome.dropped.notice)}`} spoken=${outcome.spoken.outcome} undrafted=${outcome.undrafted} reviewer=${outcome.reviewerRequested}`;
     case "reviewer-exhausted":
@@ -165,7 +167,7 @@ function noteFor(entry: ActedReview | SettledReview): string {
 }
 
 /**
- * Does this settle recur forever (`waiting`, `ready`), or is it news exactly once?
+ * Does this settle recur forever (`waiting`, `ready`, `unlanded`), or is it news exactly once?
  *
  * No `default`: an arm must be argued into one pile or the other, since defaulting to quiet
  * is the dangerous direction. `stalled` is deliberately loud despite recurring like `waiting` —
@@ -175,6 +177,8 @@ function settleIsQuiet(outcome: AdvanceOutcome): boolean {
   switch (outcome.kind) {
     case "waiting":
     case "ready":
+    // Recurs until someone comments; the round it follows was loud when it failed, and told whoever asked.
+    case "unlanded":
       return true;
     case "iterated":
     case "reviewer-exhausted":

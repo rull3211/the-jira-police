@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3221 tests in 97 files**, no build step.
+> **3237 tests in 97 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55 and §62, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62 and §63, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -411,12 +411,15 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   been the person. Re-driving a ticket the solver has already tried means
   adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
   so on the way out.
-- **A review round's repair has never run, armed or not, and neither has the reply for a round
-  that lands nothing.** Only a partial round's drop notice has reached a real pull request: #1459 round 5 on
-  2026-09-24. #2688 round 8 went green on its first try, so `repairReviewRound` never started, and
-  no abandoned, refused or failed round has posted `whyNothingLanded`. **What would show it:**
-  `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails lint, and a
-  round refused at the diff gate or `widening`.
+- **A review round's repair has never run, armed or not, and nothing has shown a pull request held
+  in draft as `unlanded`.** The reply for a round that lands nothing has been seen: #1461 and #1462
+  on 2026-09-25, both `abandoned` with no report, each telling its thread and the review overview —
+  and each undrafted one tick later, which is what `Last landed:` now stops, so far only in tests.
+  A partial round's drop notice has reached a real pull request once, #1459 round 5 on 2026-09-24.
+  #2688 round 8 went green on its first try, so `repairReviewRound` never started. **What would
+  show it:** `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails
+  lint; and `pnpm solve:once <KEY> --advance` run twice on one whose round is refused at the diff
+  gate or `widening`, where the second run must print `UNLANDED` and leave the draft flag set.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries
@@ -990,43 +993,6 @@ and the run is gone.
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
-
-### 63. Every review round since #80 is refused by the API, and a round that lands nothing undrafts its pull request
-
-**Branch:** `fix/review-schema-and-failed-round`
-
-**What is not built.** Two fixes, one commit each.
-
-1. **`REVIEW_SCHEMA` the API accepts.** `77a9f61` (merged in #80, 2026-09-24) wrapped the review
-   schema's conditionals in a top-level `allOf`, unprobed. The API refuses a tool whose
-   `input_schema` has `oneOf`, `allOf` or `anyOf` at its root, so every review pass since dies on its
-   first request — insurance-commerce-rest-api #1461 and #1462 on 2026-09-25, both
-   `review pass of … failed: success`. That message is the second half: `runSession` fails on
-   `is_error: true` but prints only `subtype`, so the `result` text naming the 400 is discarded and
-   the only record was the session transcript. The attempt: keep both conditionals with no root
-   combinator (the second nested in the first's `then` and `else`), probe that shape and the broken
-   one against the real CLI, add a test refusing a root combinator in any pass schema, and put the
-   `result` text in the failure.
-2. **A round that landed nothing stays in draft.** The reservation moves `Last read` past the
-   feedback and the failed round tells whoever asked — in the thread, for an inline one — which is
-   deliberate and stays: a person who asked is always answered. But the next survey then finds
-   nothing unread and every thread's last word ours, returns `ready`, and undrafts: #1461 and #1462
-   were both marked ready one tick after a round that did nothing, and every reviewer was requested.
-   A commit or push failure takes the same road without telling anyone. The attempt: the marker
-   records the newest round that landed; the reservation carries it forward, so a reserved round is
-   unlanded until a landed one writes it; the survey refuses to undraft while the newest round is
-   unlanded, reporting a new `unlanded` outcome instead.
-
-**What would make it the wrong idea:**
-
-- **A top-level `if`/`then`/`else` may be refused too.** Only a bare top-level `if`/`then` has been
-  measured, on recon and on the pre-#80 review schema; `else` and a conditional nested in one have
-  not. If the probe refuses it, the fallback is the pre-#80 shape — one conditional — with the
-  changed-false rule left to `parseReview` alone.
-- **Staying in draft may strand a pull request nobody comments on again.** After an unlanded round
-  the pull request waits for a new comment. If people read the "could not finish" reply and never
-  ask again, draft is where it stays, and the operator may prefer the handover the old behaviour
-  gave by accident.
 
 ## Verification
 

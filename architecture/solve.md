@@ -1195,6 +1195,18 @@ A thread replied to this way now ends with our comment, so the next survey no lo
 unanswered and does not retry it. That is deliberate: every ending that reaches here is
 deterministic or needs a person, and retrying bought the same refusal until `MAX_PR_ROUNDS_TOTAL`.
 
+**And the next survey does not read that quiet as agreement.** With the cursor past the feedback
+and every thread ending in our reply, a survey finds nothing left to answer, and that used to return
+`ready` and undraft: insurance-commerce-rest-api #1461 and #1462 were handed to every reviewer one
+tick after a round that did no work. The marker now carries `Last landed:`, the newest round whose
+work reached the pull request. A reservation writes it unchanged while the count moves, so a round
+is unlanded from the moment it reserves, and `recordLanded` moves it up only after an `iterated`
+round's answers are public or a merge round has synced. While it lags the count the survey returns
+`unlanded` instead of `ready`, leaving the draft flag and the label alone until a new comment starts
+a round. That holds on the paths no reply reaches as well — a `commit` or `push` failure, a process
+killed mid-round, a landing write that failed (`solve.review.landing_unrecorded`) — and a marker
+from before the line existed reads as landed, since nothing then recorded a landing to read.
+
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is
 model-written, the review bot reads it, the comments and the inline threads come back through

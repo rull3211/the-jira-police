@@ -111,6 +111,7 @@ const pending: PendingRound = {
     count: 1,
     reviewerCount: 1,
     failedStarts: 1,
+    landed: 1,
     lastRead: "2026-09-05T08:00:00Z",
     rounds: ["failed to start — the worktree has uncommitted changes"],
   },

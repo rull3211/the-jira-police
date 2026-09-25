@@ -493,6 +493,7 @@ const ADVANCE_KINDS: Record<AdvanceOutcome["kind"], null> = {
   refused: null,
   failed: null,
   synced: null,
+  unlanded: null,
 };
 
 /** One of every review-round kind, so the tables below are about all of them. */
@@ -532,6 +533,7 @@ const ADVANCE_OUTCOMES: readonly AdvanceOutcome[] = [
   { kind: "refused", stage: "diff-gate", reasons: ["lockfile touched"] },
   { kind: "failed", stage: "push", reason: "the remote rejected the push" },
   { kind: "synced", round: 4, behind: 7, conflicts: ["src/utils/DateUtils.ts"] },
+  { kind: "unlanded", round: 2 },
 ];
 
 describe("the review-round fixture", () => {
@@ -608,6 +610,8 @@ describe("reviewStageAfter", () => {
       // A merge round touches the branch, not the pull request, so the draft flag — and this
       // label — must not move, even though the round did work.
       ["synced", null],
+      // Nothing moved the draft flag this tick; the label stays wherever the failed round left it.
+      ["unlanded", null],
     ]);
   });
 });
@@ -651,6 +655,8 @@ describe("isAdvanceFailureExit", () => {
       // A merge round reaching this outcome did what it set out to do — failures on that path
       // are `failed`/`merge` and `refused`, already non-zero above.
       synced: false,
+      // The round that failed exited non-zero on its own tick; this one only looked.
+      unlanded: false,
     });
   });
 });
@@ -680,6 +686,7 @@ describe("chainDecision", () => {
       // The merge answered the base, not the review — stopping here would end the chain one
       // round before the round that reads the still-waiting feedback.
       ["synced", false],
+      ["unlanded", true],
     ]);
   });
 

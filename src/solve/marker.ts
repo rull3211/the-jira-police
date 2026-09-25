@@ -32,6 +32,9 @@ const REVIEWER_ROUNDS = "Reviewer rounds: ";
 /** Attempts that never became rounds; omitted when zero so a healthy pull request's marker carries no line saying nothing went wrong. */
 const FAILED_STARTS = "Failed starts: ";
 
+/** Always written, so an absent line can only mean a marker from before rounds were counted as landed. */
+const LAST_LANDED = "Last landed: ";
+
 export interface Marker {
   /** Rounds already spent on this pull request, whoever asked for them. Never decreases; what `MAX_PR_ROUNDS_TOTAL` reads. */
   readonly count: number;
@@ -56,6 +59,11 @@ export interface Marker {
    * Bounded by `MAX_FAILED_STARTS`. Absent from a marker means zero.
    */
   readonly failedStarts: number;
+  /**
+   * The newest round whose work reached the pull request. A reservation leaves it behind `count`
+   * until that round lands, so a round that failed or died cannot be undrafted on top of.
+   */
+  readonly landed: number;
   /**
    * The high-water mark: the newest comment this loop has already handled.
    *
@@ -97,6 +105,7 @@ export function renderMarker(marker: Marker): string {
     `${LAST_READ}${marker.lastRead}`,
     `${REVIEWER_ROUNDS}${String(marker.reviewerCount)}`,
     ...(marker.failedStarts === 0 ? [] : [`${FAILED_STARTS}${String(marker.failedStarts)}`]),
+    `${LAST_LANDED}${String(marker.landed)}`,
     "",
     ...marker.rounds.map((round) => `- ${round}`),
   ];
@@ -198,6 +207,34 @@ export function parseMarker(body: string): ParseMarkerResult {
     }
   }
 
+  // Absent means landed (= count), for `failedStarts`' reason: an older marker recorded no landing
+  // because nothing did, and reading its rounds as failed would hold correct handovers in draft.
+  const landedLine = lines.find((line) => line.startsWith(LAST_LANDED));
+  let landed = count;
+  if (landedLine !== undefined) {
+    const landedText = landedLine.slice(LAST_LANDED.length).trim();
+    if (!COUNT.test(landedText)) {
+      return {
+        outcome: "unreadable",
+        reason: `"${landedText}" is not a whole round number for the last landed round`,
+      };
+    }
+    landed = Number.parseInt(landedText, 10);
+    if (!Number.isSafeInteger(landed)) {
+      return {
+        outcome: "unreadable",
+        reason: `${landedText} is too large to be a round number`,
+      };
+    }
+    // Refused rather than clamped, like `reviewerCount`: only an edit that misunderstood the marker writes this.
+    if (landed > count) {
+      return {
+        outcome: "unreadable",
+        reason: `the marker says round ${String(landed)} landed out of ${String(count)} rounds`,
+      };
+    }
+  }
+
   const rounds = lines
     .slice(2)
     .map((line) => line.trim())
@@ -206,7 +243,7 @@ export function parseMarker(body: string): ParseMarkerResult {
 
   return {
     outcome: "parsed",
-    marker: { count, reviewerCount, failedStarts, lastRead, rounds },
+    marker: { count, reviewerCount, failedStarts, landed, lastRead, rounds },
   };
 }
 

@@ -264,6 +264,11 @@ export type AdvanceOutcome =
     }
   /** The reviewer responded with nothing to act on. Undrafted. */
   | { readonly kind: "ready"; readonly rounds: number }
+  /**
+   * Nothing new to answer, but round `round` never landed, so the pull request stays in draft.
+   * Whoever asked was told when it failed; a new comment starts the next round.
+   */
+  | { readonly kind: "unlanded"; readonly round: number }
   /** A round of feedback was resolved and pushed. */
   | {
       readonly kind: "iterated";
@@ -401,6 +406,39 @@ async function reserve(
   return request.commentId === undefined
     ? postComment(runner, { ...shared, repo: request.repo, number: request.number })
     : editComment(runner, { ...shared, commentId: request.commentId });
+}
+
+interface LandingRequest extends Omit<ReserveRequest, "commentId"> {
+  readonly issueKey: string;
+  /** What the reservation wrote; re-rendered whole, so a landing can never move any other field. */
+  readonly marker: Marker;
+  /** The reservation's own result, which carries the id even when the reservation posted the marker. */
+  readonly reserved: Extract<WriteCommentResult, { outcome: "written" }>;
+}
+
+/**
+ * Records that the reserved round landed — the only write that lets a later survey undraft.
+ * A failed write is logged, not returned: the round's work is public, and the cost is a draft held until the next comment.
+ */
+async function recordLanded(
+  runner: SolveDependencies["commands"],
+  request: LandingRequest,
+): Promise<void> {
+  const { issueKey, marker, reserved, ...target } = request;
+  const written = await reserve(runner, {
+    ...target,
+    marker: { ...marker, landed: marker.count },
+    commentId: reserved.commentId,
+  });
+  if (written.outcome === "failed") {
+    log.warn("solve.review.landing_unrecorded", {
+      issueKey,
+      number: request.number,
+      round: marker.count,
+      reason: written.reason,
+      note: "the round's work is on the pull request; it stays in draft until a new comment starts a round",
+    });
+  }
 }
 
 /**
@@ -558,6 +596,7 @@ export async function recordFailedStart(
       count: marker?.count ?? 0,
       reviewerCount: marker?.reviewerCount ?? 0,
       failedStarts: attempts,
+      landed: marker?.landed ?? 0,
       // Not advanced either, so comments this tick decided to answer are still
       // unanswered next tick.
       lastRead: marker?.lastRead ?? NEVER_READ,
@@ -695,6 +734,11 @@ export async function surveyReview(
     (comment) => marker === null || isNewer(comment.createdAt, marker.lastRead),
   );
   if (comments.length === 0 && threads.length === 0) {
+    // A round that reserved and never landed also leaves nothing to answer — its reservation
+    // moved the cursor and its failure note answered the threads — so this is not "ready".
+    if (marker !== null && marker.landed < marker.count) {
+      return settled({ kind: "unlanded", round: marker.count });
+    }
     // Both halves load-bearing: an open inline thread nobody has answered is an
     // unaddressed review even when the comment list is empty.
     return settled(await undraft({ kind: "ready", rounds: round }));
@@ -817,21 +861,26 @@ export async function runMergeRound(
   const { repo, number, issueKey } = request;
   const { marker, round, reviewerRound } = pending;
 
-  const reserved = await reserve(commands, {
+  const target = {
     worktreePath: conflict.worktree.path,
     repo,
     number,
     timeoutMs: request.ghTimeoutMs,
-    marker: {
-      count: round + 1,
-      reviewerCount: reviewerRound,
-      failedStarts: 0,
-      lastRead: marker?.lastRead ?? NEVER_READ,
-      rounds: [
-        ...(marker?.rounds ?? []),
-        `round ${String(round + 1)} — merge, ${String(conflict.behind)} commit(s) behind ${request.baseRef} and conflicting in ${conflict.files.join(", ")}`,
-      ],
-    },
+  };
+  const reservation: Marker = {
+    count: round + 1,
+    reviewerCount: reviewerRound,
+    failedStarts: 0,
+    landed: marker?.landed ?? 0,
+    lastRead: marker?.lastRead ?? NEVER_READ,
+    rounds: [
+      ...(marker?.rounds ?? []),
+      `round ${String(round + 1)} — merge, ${String(conflict.behind)} commit(s) behind ${request.baseRef} and conflicting in ${conflict.files.join(", ")}`,
+    ],
+  };
+  const reserved = await reserve(commands, {
+    ...target,
+    marker: reservation,
     ...(pending.markerId === null ? {} : { commentId: pending.markerId }),
   });
   if (reserved.outcome === "failed") {
@@ -843,20 +892,18 @@ export async function runMergeRound(
   }
 
   const resolved = await resolveConflict(deps, { ...request, worktree: conflict.worktree });
-  const synced = (behind: number, conflicts: readonly string[]): AdvanceOutcome => ({
-    kind: "synced",
-    round: round + 1,
-    behind,
-    conflicts,
-  });
+  const synced = async (behind: number, conflicts: readonly string[]): Promise<AdvanceOutcome> => {
+    await recordLanded(commands, { ...target, issueKey, marker: reservation, reserved });
+    return { kind: "synced", round: round + 1, behind, conflicts };
+  };
 
   switch (resolved.kind) {
     case "current": {
       // The base moved between the attach and here; reported as a sync of zero commits.
-      return synced(0, []);
+      return await synced(0, []);
     }
     case "merged": {
-      return synced(resolved.behind, []);
+      return await synced(resolved.behind, []);
     }
     case "resolved": {
       log.info("solve.review.merged", {
@@ -866,7 +913,7 @@ export async function runMergeRound(
         behind: resolved.behind,
         files: resolved.report.resolutions.map((resolution) => resolution.path),
       });
-      return synced(
+      return await synced(
         resolved.behind,
         resolved.report.resolutions.map((resolution) => resolution.path),
       );
@@ -928,29 +975,34 @@ export async function runRound(
     return "asked";
   };
 
+  const reservation: Marker = {
+    count: round + 1,
+    // Both numbers are written together, so a round can never advance one and lose
+    // the other to a second failed write.
+    reviewerCount: humanRound ? reviewerRound : reviewerRound + 1,
+    // Reaching here is the reset: a reservation proves the machinery works on this
+    // pull request right now, so failures before it are history, not a trend.
+    failedStarts: 0,
+    // Not moved here: this round is unlanded until `landed()` says otherwise.
+    landed: marker?.landed ?? 0,
+    lastRead: newestOf(comments, marker?.lastRead ?? NEVER_READ),
+    rounds: [
+      ...(marker?.rounds ?? []),
+      `round ${String(round + 1)} — ${humanRound ? "human" : "reviewer"}, reading ${String(comments.length)} comment(s) and ${String(threads.length)} thread(s)`,
+    ],
+  };
   // The reservation comes before the pass on purpose: writing it afterwards means a
   // failed write hands back a free round every tick, the runaway this mechanism closes.
   const reserved = await reserve(commands, {
     ...gh,
-    marker: {
-      count: round + 1,
-      // Both numbers are written together, so a round can never advance one and lose
-      // the other to a second failed write.
-      reviewerCount: humanRound ? reviewerRound : reviewerRound + 1,
-      // Reaching here is the reset: a reservation proves the machinery works on this
-      // pull request right now, so failures before it are history, not a trend.
-      failedStarts: 0,
-      lastRead: newestOf(comments, marker?.lastRead ?? NEVER_READ),
-      rounds: [
-        ...(marker?.rounds ?? []),
-        `round ${String(round + 1)} — ${humanRound ? "human" : "reviewer"}, reading ${String(comments.length)} comment(s) and ${String(threads.length)} thread(s)`,
-      ],
-    },
+    marker: reservation,
     ...(pending.markerId === null ? {} : { commentId: pending.markerId }),
   });
   if (reserved.outcome === "failed") {
     return cursorFailed(`the round was not reserved, so it did not run — ${reserved.reason}`);
   }
+  const landed = async (): Promise<void> =>
+    recordLanded(commands, { ...gh, issueKey, marker: reservation, reserved });
 
   const memberToken = randomBytes(6).toString("hex");
   const resolved = await resolveReview(deps, {
@@ -1054,6 +1106,7 @@ export async function runRound(
     // request leaves draft: there is nothing more this loop can do.
     const threadOutcome = await answer();
     const spoken = await say();
+    await landed();
     return {
       kind: "iterated",
       round: round + 1,
@@ -1136,6 +1189,7 @@ export async function runRound(
       worktreePath: worktree.path,
     });
   }
+  await landed();
   const reviewerRequested = await reRequest(pushed);
   return {
     kind: "iterated",

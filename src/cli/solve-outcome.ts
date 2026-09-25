@@ -233,7 +233,7 @@ export function isAdvanceFailureExit(outcome: AdvanceOutcome): boolean {
  * Whether `--review` should run another round, and what to call the ending.
  *
  * The chain's termination logic as a pure function over one outcome, so the loop that consumes
- * it only sleeps, counts, and obeys. Only `waiting` and `iterated` continue; every other outcome
+ * it only sleeps, counts, and obeys. Only `waiting`, `iterated` and `synced` continue; every other outcome
  * stops, with the default arm written to stop so a new outcome must be argued into the loop
  * rather than fall into it.
  *
@@ -302,6 +302,14 @@ export function chainDecision(outcome: AdvanceOutcome, silenceMs: number): Chain
     }
     case "ready": {
       return { stop: true, silent: false, why: "nothing left to act on — undrafted" };
+    }
+    case "unlanded": {
+      // Stops, and not `silent`: the reviewer spoke and this side failed, so only a new comment moves it.
+      return {
+        stop: true,
+        silent: false,
+        why: `round ${String(outcome.round)} landed nothing and nothing new has been said — left in draft`,
+      };
     }
     case "reviewer-exhausted": {
       return {
@@ -434,6 +442,9 @@ export function describeAdvanceOutcome(outcome: AdvanceOutcome): string {
     }
     case "ready": {
       return `READY — the reviewer left nothing to act on after ${String(outcome.rounds)} round(s); the pull request is out of draft`;
+    }
+    case "unlanded": {
+      return `UNLANDED — round ${String(outcome.round)} landed nothing and nobody has asked since, so the pull request stays in draft; a new comment starts the next round`;
     }
     case "iterated": {
       // The re-request is reported on its own line, since the round succeeding and a reviewer

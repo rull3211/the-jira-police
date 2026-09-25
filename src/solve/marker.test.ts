@@ -17,6 +17,7 @@ function marker(overrides: Partial<Marker> = {}): Marker {
     count: 3,
     reviewerCount: 3,
     failedStarts: 0,
+    landed: 3,
     lastRead: "2026-09-05T10:22:31Z",
     rounds: ["narrowed the type", "answered without changing code", "split the helper"],
     ...overrides,
@@ -59,7 +60,7 @@ describe("renderMarker", () => {
   });
 
   it("round-trips a marker with no rounds on it yet", () => {
-    const empty = marker({ count: 0, reviewerCount: 0, rounds: [] });
+    const empty = marker({ count: 0, reviewerCount: 0, landed: 0, rounds: [] });
     expect(parseMarker(renderMarker(empty))).toEqual({ outcome: "parsed", marker: empty });
   });
 
@@ -91,11 +92,21 @@ describe("renderMarker", () => {
     const mixed = marker({ count: 5, reviewerCount: 2 });
     expect(parseMarker(renderMarker(mixed))).toEqual({ outcome: "parsed", marker: mixed });
   });
+
+  it("round-trips a marker whose newest round has not landed", () => {
+    const reserved = marker({ count: 4, reviewerCount: 4, landed: 3 });
+    expect(parseMarker(renderMarker(reserved))).toEqual({ outcome: "parsed", marker: reserved });
+  });
+
+  it("writes the last landed round even when every round landed", () => {
+    // Omitted when equal to the count, an absent line could mean "all landed" or "written before this existed".
+    expect(renderMarker(marker({ count: 3, landed: 3 }))).toContain("\nLast landed: 3\n");
+  });
 });
 
 describe("parseMarker", () => {
   it("reads back a marker written by an earlier process", () => {
-    // Predates the reviewer count; a missing line reads as `count`, the conservative direction.
+    // Predates the reviewer count and the landed round; each missing line reads as `count`.
     const result = parseMarker(
       "bot: iteration count 2\nLast read: 2026-09-05T10:22:31Z\n\n- narrowed the type\n- split the helper",
     );
@@ -105,6 +116,7 @@ describe("parseMarker", () => {
         count: 2,
         reviewerCount: 2,
         failedStarts: 0,
+        landed: 2,
         lastRead: "2026-09-05T10:22:31Z",
         rounds: ["narrowed the type", "split the helper"],
       },
@@ -218,6 +230,29 @@ describe("parseMarker", () => {
     expect(
       unreadable("bot: iteration count 2\nLast read: 2026-09-05T10:00:00Z\nReviewer rounds: 3"),
     ).toContain("3 reviewer rounds out of 2 rounds");
+  });
+
+  it("reads a missing last-landed line as every round landed", () => {
+    // An older marker never recorded a landing; reading its rounds as failed would hold correct handovers in draft.
+    const result = parseMarker("bot: iteration count 4\nLast read: 2026-09-05T10:00:00Z");
+    expect(result.outcome === "parsed" && result.marker.landed).toBe(4);
+  });
+
+  it("refuses a last landed round that is not a whole number, rather than reading it as landed", () => {
+    expect(
+      unreadable("bot: iteration count 3\nLast read: 2026-09-05T10:00:00Z\nLast landed: two"),
+    ).toContain("not a whole round number");
+    expect(
+      unreadable(
+        "bot: iteration count 3\nLast read: 2026-09-05T10:00:00Z\nLast landed: 99999999999999999999",
+      ),
+    ).toContain("too large");
+  });
+
+  it("refuses a landed round the marker never reserved rather than clamping it", () => {
+    expect(
+      unreadable("bot: iteration count 2\nLast read: 2026-09-05T10:00:00Z\nLast landed: 3"),
+    ).toContain("round 3 landed out of 2 rounds");
   });
 
   it("keeps only the round lines, so trailing prose cannot become a round", () => {

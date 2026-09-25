@@ -1905,3 +1905,27 @@ came out of the storecode transcripts, not the service's own output.
 did](PROVING.md#the-tests-did-not-catch-the-interesting-bugs-running-it-did), already written and
 skipped with the reason recorded; this entry is a row in its table. `src/json-schema-root.test.ts`
 now encodes this one restriction, and nothing encodes the next one.
+
+### The pull request undrafted by the round that did nothing
+
+**2026-09-25.** The same two pull requests, one tick later. Round 1 on #1461 reserved — moving
+`Last read` past Copilot's review — died before its pass produced a report, and told the inline
+thread it could not finish, as `tellWhoAsked` is meant to. One `REVIEW_POLL_MS` later the survey
+found nothing newer than the cursor and no thread whose last word was not ours, returned `ready`,
+and ran `gh pr ready`; GitHub requested every reviewer on a pull request whose one finding nobody
+had addressed. #1462 did the same two minutes after it.
+
+**The mechanism, not the excuse.** The brake rule was applied to the counter and not to the
+decision beside it. The reservation is written before the pass, so a failure cannot hand back a free
+round — but the undraft decision read the same state as a receipt, "nothing left to answer", and
+every way a round fails leaves nothing left to answer: the reservation has consumed the feedback,
+and the reply that a person who asked is always given closes the threads. The reply was the correct
+half and stays. What was missing was a record that the round had landed, written only by a round
+that did; a `commit` or `push` failure took the same road without even the reply.
+
+**Found by** the operator, reading the same two timelines: `ready_for_review` by the bot's account
+one poll interval after each failed round.
+
+**The rule** — [write the brake before doing the work](BUILDING.md#fail-closed-except-guards-which-fail-open),
+now applied to a second decision reading the same reservation; this entry is its evidence, not a
+new rule.

@@ -107,6 +107,7 @@ solving, two label lists genuinely became one and staying separate would have be
 - **Write the brake before doing the work.** The round counter is a _reservation, not a receipt_:
   bump and persist it before the pass runs. Post it afterwards and a failed write hands back a free
   round, every tick, forever.
+  [→](INCIDENTS.md#the-pull-request-undrafted-by-the-round-that-did-nothing)
 - **A check that cannot fail the run reports rather than guards.** No `continue-on-error` in CI, and
   a red check is left red rather than softened. [→](INCIDENTS.md#the-nine-merged-pull-requests-with-zero-reviews)
 
