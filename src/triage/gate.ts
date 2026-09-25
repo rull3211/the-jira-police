@@ -213,17 +213,42 @@ function checkLabels(payload: TriagePayload): readonly string[] {
 }
 
 /**
+ * `.claude/skills/intake-triage/INTAKE_INSTRUCTIONS.md` §11's delta legitimately omits a label
+ * already on the issue, so an owned label present in `labels` but missing from `labelsAdd` is not
+ * on its own a defect — except on a `"create"` run, where nothing already wrote the label:
+ * `checkLabels` above restricts every other writer out of the `agent:` namespace, so
+ * `commentAction: "create"` (no prior triage comment matched) means the label cannot already be on
+ * the issue. On that shape the omission is the two fields of one payload disagreeing, and the label
+ * would reach the comment body but never the board.
+ */
+function checkOwnedLabelReachesDelta(payload: TriagePayload, label: string): readonly string[] {
+  if (payload.mutation.commentAction !== "create") {
+    return [];
+  }
+
+  if (payload.labels.includes(label) && !payload.mutation.labelsAdd.includes(label)) {
+    return [
+      `the verdict's labels include "${label}" but labelsAdd omits it, and commentAction is "create" — with no prior triage comment there is nothing already on the issue to excuse the omission`,
+    ];
+  }
+
+  return [];
+}
+
+/**
  * The fitness call has to agree with the rest of the payload: only `ready-ish` has passed DoR, so
  * a `dor:gaps` ticket is never agent-solvable (this falls out of `assertDorCoherent` plus the
  * skill's dev-lens evidence being ACCEPT-only, not a rule invented here).
  *
- * Reads `labels`, never `labelsAdd` — `labelsAdd` is a delta that legitimately omits a label
- * already on the issue from a re-triage, so keying on it would false-positive on exactly those re-runs.
+ * The label checks below read `labels`, never `labelsAdd` — `labelsAdd` is a delta that
+ * legitimately omits a label already on the issue from a re-triage, so keying on it would
+ * false-positive on exactly those re-runs. `checkOwnedLabelReachesDelta` is the exception, for the
+ * one run shape where that allowance cannot apply.
  */
 function checkAgentFitness(payload: TriagePayload): readonly string[] {
   const fitness = payload.agentFitness;
   const violations: string[] = [];
-  const labelled = payload.labels.includes("agent:solvable");
+  const labelled = payload.labels.includes(AGENT_LABELS.solvable);
 
   if (fitness.solvable && payload.verdict !== "ready-ish") {
     violations.push(
@@ -260,6 +285,7 @@ function checkAgentFitness(payload: TriagePayload): readonly string[] {
     );
   }
 
+  violations.push(...checkOwnedLabelReachesDelta(payload, AGENT_LABELS.solvable));
   violations.push(...checkPlausible(payload));
 
   return violations;
@@ -302,6 +328,8 @@ function checkPlausible(payload: TriagePayload): readonly string[] {
       `the verdict's labels include "${AGENT_LABELS.watching}" while agentFitness.plausible is false — the label would put the ticket on a paid watch list the assessment did not ask for`,
     );
   }
+
+  violations.push(...checkOwnedLabelReachesDelta(payload, AGENT_LABELS.watching));
 
   return violations;
 }

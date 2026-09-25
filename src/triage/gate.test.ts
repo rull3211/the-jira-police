@@ -383,12 +383,13 @@ describe("the agent: namespace, which triage only partly owns", () => {
 });
 
 describe("agent fitness", () => {
-  /** A coherent yes: ready-ish, labelled, no blockers, repo named. */
+  /** A coherent yes: ready-ish, labelled, no blockers, repo named, the label in the delta too. */
   function ok(overrides: Partial<TriagePayload> = {}): TriagePayload {
     return payload({
       verdict: "ready-ish",
       labels: ["dor:pass", "route:ours", "agent:solvable"],
       agentFitness: solvable(),
+      mutation: mutation({ labelsAdd: ["agent:solvable"] }),
       ...overrides,
     });
   }
@@ -403,6 +404,14 @@ describe("agent fitness", () => {
     expect(
       violations(ok({ mutation: mutation({ labelsAdd: [], commentAction: "update" }) })),
     ).toEqual([]);
+  });
+
+  it("refuses a first-run payload that lists the label but leaves it out of the delta", () => {
+    // The SSX-3940 shape, 2026-09-24: `commentAction: "create"` means no prior triage comment
+    // matched, so nothing already on the issue excuses `labelsAdd` omitting what `labels` asserts.
+    expect(violations(ok({ mutation: mutation({ labelsAdd: [] }) })).join(" ")).toContain(
+      'commentAction is "create"',
+    );
   });
 
   it.each(["needs-info", "duplicate", "not-our-team", "out-of-scope"] as const)(
@@ -448,12 +457,13 @@ describe("agent fitness", () => {
 });
 
 describe("plausible, the send-back watch", () => {
-  /** A coherent watch: not solvable, blockers named, labelled on the board. */
+  /** A coherent watch: not solvable, blockers named, labelled on the board, the label in the delta too. */
   function watched(overrides: Partial<TriagePayload> = {}): TriagePayload {
     return payload({
       verdict: "needs-info",
       labels: ["dor:gaps", "route:ours", "agent:watching"],
       agentFitness: fitness({ plausible: true, blockers: ["no reproduction steps"] }),
+      mutation: mutation({ labelsAdd: ["agent:watching"] }),
       ...overrides,
     });
   }
@@ -502,6 +512,14 @@ describe("plausible, the send-back watch", () => {
     expect(
       violations(watched({ mutation: mutation({ labelsAdd: [], commentAction: "update" }) })),
     ).toEqual([]);
+  });
+
+  it("refuses a first-run payload that lists the label but leaves it out of the delta", () => {
+    // The `agent:watching` twin of the SSX-3940 shape: `commentAction: "create"` means nothing
+    // already on the issue excuses `labelsAdd` omitting what `labels` asserts.
+    expect(violations(watched({ mutation: mutation({ labelsAdd: [] }) })).join(" ")).toContain(
+      'commentAction is "create"',
+    );
   });
 
   it("lets triage retire its own agent:watching", () => {
