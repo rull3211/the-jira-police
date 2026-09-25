@@ -828,11 +828,11 @@ describe("FIX_SCHEMA's conditional, against parseFix", () => {
     });
   }
 
-  it("rejects SSX-3980's report, so the model is told in-session rather than the fix discarded after", () => {
+  it("rejects SSX-3980's report", () => {
     expect(schemaAccepts(ssx3980)).toBe(false);
   });
 
-  it("names residualRisk in testOmittedReason's description as the place for partial coverage", () => {
+  it("mentions residualRisk in testOmittedReason's description", () => {
     expect(FIX_SCHEMA.properties.testOmittedReason.description).toContain("`residualRisk`");
   });
 });

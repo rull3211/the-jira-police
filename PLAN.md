@@ -544,6 +544,15 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   file itself, which is exactly the check that caught this entry claiming a first run that was
   actually the third, the last time this bullet was wrong. A session starting fresh still cannot see
   any of this from the repository alone.
+- **`FIX_SCHEMA`'s conditional has never refused anything, and a pass that runs out of retries
+  would not say which rule it kept breaking.** Five probes on 2026-09-25 pushed a report toward a
+  contradiction and every one arrived coherent before it was submitted (`architecture/solve.md`),
+  so the CLI's refusal of this schema is unseen. If a pass exhausted the retries, its crash would
+  read `fix pass of <KEY> failed: error_max_structured_output_retries`, from
+  `describeFailedResult` in `src/triage/session.ts`; the refusal text naming the rule reaches only
+  the session transcript, and recon and review share that gap. **What would show it:** a fix pass's
+  transcript holding a `does not match required schema` tool result, or a probe that gets a
+  violating submission past the model.
 
 ### 11. Loose ends recorded in no other file
 
