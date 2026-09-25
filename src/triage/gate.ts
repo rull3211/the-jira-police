@@ -213,17 +213,31 @@ function checkLabels(payload: TriagePayload): readonly string[] {
 }
 
 /**
- * The fitness call has to agree with the rest of the payload: only `ready-ish` has passed DoR, so
- * a `dor:gaps` ticket is never agent-solvable (this falls out of `assertDorCoherent` plus the
- * skill's dev-lens evidence being ACCEPT-only, not a rule invented here).
- *
- * Reads `labels`, never `labelsAdd` — `labelsAdd` is a delta that legitimately omits a label
- * already on the issue from a re-triage, so keying on it would false-positive on exactly those re-runs.
+ * On a `"create"` run nothing already holds the label, so `labels` asserting it while `labelsAdd`
+ * omits it is a real gap, not a legitimate re-triage skip.
+ */
+function checkOwnedLabelReachesDelta(payload: TriagePayload, label: string): readonly string[] {
+  if (payload.mutation.commentAction !== "create") {
+    return [];
+  }
+
+  if (payload.labels.includes(label) && !payload.mutation.labelsAdd.includes(label)) {
+    return [
+      `the verdict's labels include "${label}" but labelsAdd omits it, and commentAction is "create" — with no prior triage comment there is nothing already on the issue to excuse the omission`,
+    ];
+  }
+
+  return [];
+}
+
+/**
+ * Only `ready-ish` has passed DoR, so a `dor:gaps` ticket is never agent-solvable — this follows
+ * from `assertDorCoherent`, not a rule invented here.
  */
 function checkAgentFitness(payload: TriagePayload): readonly string[] {
   const fitness = payload.agentFitness;
   const violations: string[] = [];
-  const labelled = payload.labels.includes("agent:solvable");
+  const labelled = payload.labels.includes(AGENT_LABELS.solvable);
 
   if (fitness.solvable && payload.verdict !== "ready-ish") {
     violations.push(
@@ -260,6 +274,7 @@ function checkAgentFitness(payload: TriagePayload): readonly string[] {
     );
   }
 
+  violations.push(...checkOwnedLabelReachesDelta(payload, AGENT_LABELS.solvable));
   violations.push(...checkPlausible(payload));
 
   return violations;
@@ -302,6 +317,8 @@ function checkPlausible(payload: TriagePayload): readonly string[] {
       `the verdict's labels include "${AGENT_LABELS.watching}" while agentFitness.plausible is false — the label would put the ticket on a paid watch list the assessment did not ask for`,
     );
   }
+
+  violations.push(...checkOwnedLabelReachesDelta(payload, AGENT_LABELS.watching));
 
   return violations;
 }

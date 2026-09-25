@@ -1849,3 +1849,27 @@ and these rules, for CDATA and processing instructions.
 
 **The rule** — a denylist over a vocabulary you do not control is behind by construction; invert
 it, or say in the code why you cannot. [→](BUILDING.md#fail-closed-except-guards-which-fail-open)
+
+## 2026-09-25
+
+### The docstring that argued its own exception past the two-line rule
+
+**2026-09-25.** Fixing SSX-3940's dropped `agent:solvable` label added `checkOwnedLabelReachesDelta`
+to `gate.ts` with a 7-line docstring explaining the exception it implements, and stretched the
+neighbouring `checkAgentFitness` docstring from two lines to four to name it — both past `CLAUDE.md`'s
+own "one line, at most two." Neither was hard to see: caught on a read-through of the diff, not by a
+tool. `oxlint` and `docs:check` check types, facts and citations obsessively; neither checks a
+comment's length, so nothing here would have caught it unassisted.
+
+**The mechanism, not the excuse.** Every neighbouring docstring in `gate.ts` —
+`checkPlausible`, `checkAgentFitness`'s own original, `OWNED_LABEL_NAMESPACES`,
+`REVISABLE_LABEL_NAMESPACES` — was already multi-paragraph "why" prose, unrelated to this change.
+Writing a new function in that file copied the file's lived convention rather than the written rule.
+Editing `checkAgentFitness`'s comment made the same mistake from the other side: extended an
+already-too-long block instead of compressing it, because the review pass checked staleness
+(`FINISHING.md`'s first question) and never re-measured length against the rule as its own step.
+
+**Found by** the operator reading the pull request.
+
+**The rule** — a comment already past the rule is simplified where editing touches it, not left, and
+never licenses a second violation beside it, added to `CLAUDE.md`'s Code comments section.

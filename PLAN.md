@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3204 tests in 96 files**, no build step.
+> **3206 tests in 96 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53 and §55, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55 and §62, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §62. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §63. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->

@@ -43,9 +43,8 @@ defects that already got through.** **Load the phase you are in**, or
 | committing, or amending the rules themselves | [FINISHING.md](.claude/skills/dev-house-rules/FINISHING.md)                                                 |
 | asking _why_ a rule exists                   | [INCIDENTS.md](.claude/skills/dev-house-rules/INCIDENTS.md) — cited from the rules that have one            |
 
-**The first row is the one that gets skipped, because nothing announces that it applies.** A compacted
-context inherits an account of the work, not the work itself. Find out where you are before matching
-a row.
+**The first row gets skipped because nothing announces that it applies** — a compacted context
+inherits an account of the work, not the work itself. Find where you are before matching a row.
 
 **Every rule in there is provisional**, amended from incidents, not theory; if one is wrong, say so.
 
@@ -53,8 +52,8 @@ a row.
 
 **They have no command behind them, and this file is what survives a compaction; `pnpm docs:check`
 fails once the copy drifts from
-[`FINISHING.md`](.claude/skills/dev-house-rules/FINISHING.md#the-checklist),** which has both in
-full. Ask them before every commit.
+[`FINISHING.md`](.claude/skills/dev-house-rules/FINISHING.md#the-checklist).** Ask them before every
+commit.
 
 - [ ] **Any comment _near_ the change that is now true of something else?**
 - [ ] **If this fails at 3am, what does it leave behind?**
@@ -64,7 +63,7 @@ full. Ask them before every commit.
 **If you cannot remember reading `FINISHING.md` in this session, you have not read it.** `pnpm
 hooks:brief` prints these four in full, the three rules above, and your branch and stack depth;
 `commit-brief.sh` prints them at a `git commit`, if the operator registered it — watched by hand,
-never by the suite ([§16](architecture/guardrails.md)). Neither can check. Read the four here.
+never by the suite ([§16](architecture/guardrails.md)). Read the four here.
 
 ## Where the truth lives
 
@@ -81,18 +80,21 @@ enforces the mechanical part.
 
 **Write it into `PLAN.md` first** — what is being attempted, why now, and what would make it the
 wrong idea, opening with a bold `Branch:` label naming the branch; the entry is deleted **in the
-last commit before you push**, not at merge: the reviewer is the one misled. Then pick the branch:
+last commit before you push**, not at merge: the reviewer is the one misled. Then branch:
 [STARTING.md](.claude/skills/dev-house-rules/STARTING.md#the-plan-is-written-before-the-work-not-after-it).
 
 ## Code comments
 
 A comment holds a constraint or a non-obvious warning, one line, at most two. The argument and
 measurement belong in the commit, `PLAN.md`, or `architecture/*.md`/`INCIDENTS.md` — never the comment.
+A violating comment met while editing nearby is simplified where possible and needed; no existing
+violation licenses another.
+[→](.claude/skills/dev-house-rules/INCIDENTS.md#the-docstring-that-argued-its-own-exception-past-the-two-line-rule)
 
 ## Working style
 
 - **Run it.** A green suite is a statement about the tests; every defect of consequence here was found by
-  driving a command at a real target.
-- **Say what you want to change, and why, before you change it** — house rules included.
+  running a real target.
+- **Say what you want to change, and why, first** — house rules included.
 - **Leave nothing orphaned** — a symbol, a setting, a merged branch. Cleanup belongs to the change
   that caused it.

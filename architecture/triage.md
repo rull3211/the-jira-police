@@ -102,7 +102,7 @@ label `agent:solvable` goes on the board and a future solver acts on it.
   A wrong `true` costs an unasked-for pull request.
 
 **The `plausible` rules guard a different cost, which is why they are their own function**
-(`checkPlausible`, `gate.ts:277`) rather than four more lines in `checkAgentFitness`. Every
+(`checkPlausible`, `gate.ts:303`) rather than four more lines in `checkAgentFitness`. Every
 `solvable` rule protects against a bot editing source. These protect against a ticket joining a
 list that buys a paid triage run every time somebody touches it — F's watch, §4. Two risks, so
 two paragraphs, and both worth refusing a post over.
