@@ -78,10 +78,43 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §67. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §68. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
+
+### 67. A fix report that contradicts itself is discarded after the pass, not corrected during it
+
+**Branch:** `fix/fix-schema-test-iff`
+
+**What is not built.** `FIX_SCHEMA` carries none of `parseFix`'s coherence rules, so the CLI accepts
+a report that breaks one and the harness discards it once the pass has done its work. SSX-3980 lost
+a paid recon and fix that way on 2026-09-25: `testAdded and testOmittedReason disagree`. Its
+transcript shows a complete fix with three test files, reported as `testAdded: true` with
+`testOmittedReason` holding the one criterion it covered by a unit test instead of an integration
+test — a partial-coverage note, which belongs in `residualRisk`, the only one of the two fields a
+reviewer is ever shown. The recon and review schemas already repeat their parsers' rules as a
+conditional the CLI enforces in-session (`architecture/solve.md`). The change: `FIX_SCHEMA` carries
+exactly `parseFix`'s four — a run not abandoned is `changed`, names a file, gives cause `none`, and
+holds exactly one of a test and a reason for none; an abandoned run gives a cause other than `none`
+and is held to nothing else — with empty meaning what `str` reads as empty. `testOmittedReason`'s
+description names `residualRisk` as the place for partial coverage, so a refused report moves the
+note instead of dropping it. `parseFix` stays the net. The repair pass shares both the schema and
+the parser, so it is covered by the same change.
+
+**What would make it the wrong idea.** A schema stricter than `parseFix` rejects a report the
+harness would accept, and each rejection spends one of a capped number of re-prompts — so the
+conditional must match the parser case for case, above all on an abandoned run, where `parseFix`
+checks only the cause. If the probe shows the CLI does not enforce the test rule nested inside the
+not-abandoned branch, that rule stays parser-only and the entry says so.
+
+**Predicted, before running anything.** A probe against `storecode` with the new schema, told to
+return SSX-3980's report, is refused once and resends it with `testOmittedReason` empty and the note
+in `residualRisk`; the control, `origin/main`'s schema, accepts the contradiction as sent and
+`parseFix` throws. An abandoned report with no test and
+no reason is accepted first time. `pnpm solve:once SSX-3980 --solve` from this worktree proceeds past
+recon, and its fix pass does not end in a `SolveParseError`; whether verification passes is not
+predicted.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
