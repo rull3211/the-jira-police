@@ -217,6 +217,12 @@ export const SETTINGS = [
     // No fallback: a guessed owner (from the checkout's remote) breaks the day a fork is added as `origin`.
   },
   {
+    name: "SOLVE_CODE_REVIEW_STATUS",
+    description:
+      "The Jira status (id or name) a ticket is moved to when a round takes its pull request out of draft. No fallback: unset, the move is never attempted, which is the safe default for a write this narrow but still real — a workflow transition, not a label. Read once at startup and baked into the one JiraClient the service holds (`createJiraClient`), so the target cannot vary per call. If the ticket is already at this status the move is a no-op rather than a redundant write, and if the current workflow offers no transition there — moved by a human, or the workflow's shape changed — the attempt is reported and swallowed, never thrown, because a Jira hiccup here must not be the thing that blocks marking a pull request ready.",
+    // No fallback, deliberately: this is a status write, not a label, and every other privilege setting in this table defaults off.
+  },
+  {
     name: "SOLVE_WORKTREE_ROOT",
     description:
       "Directory the solver cuts its worktrees into, one per issue key. Defaults to the system temp directory, which is where a temporary checkout belongs — deliberately nowhere near the repository, so a failed run leaves its evidence somewhere obviously not the working copy. Configurable because a run that fails keeps its worktree for a human to read, and on macOS the default lands under /private/var, which some tooling cannot open; pointing this at a readable directory is the difference between a diff that can be reviewed by hand and one that can only be described.",

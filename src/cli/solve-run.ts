@@ -265,12 +265,16 @@ export async function runSolver(
  * Every outcome is logged rather than printed: since Phase E one caller is the daemon, whose
  * stdout is its log, and a prose line there is unparseable in the stream an operator reads when
  * the board and the pull requests disagree. Repair instructions are in the `note` field.
+ *
+ * Returns whether the labels actually changed — confirmed by the read-back, not merely attempted —
+ * so a caller with a second, rarer write to make (`moveReviewStage`'s Jira-status move) can gate it
+ * on a real transition rather than firing every time this is called with the same target stage.
  */
 async function moveLabels(
   client: JiraClient,
   issueKey: string,
   plan: (labels: readonly string[]) => LabelEdit,
-): Promise<void> {
+): Promise<boolean> {
   const capabilities = createClaimCapabilities(client);
 
   let change: LabelEdit;
@@ -279,13 +283,13 @@ async function moveLabels(
   } catch (error) {
     if (error instanceof LabelStateError) {
       labelsLog.info("labels.left_alone", { issueKey, reason: error.message });
-      return;
+      return false;
     }
     throw error;
   }
 
   if (isNoopEdit(change)) {
-    return;
+    return false;
   }
 
   const wanted = `+${change.add.join(", +")}${change.remove.length === 0 ? "" : ` -${change.remove.join(", -")}`}`;
@@ -298,7 +302,7 @@ async function moveLabels(
       error,
       note: "move them by hand; the pull request is unaffected",
     });
-    return;
+    return false;
   }
 
   const after = await capabilities.readLabels(issueKey);
@@ -311,14 +315,25 @@ async function moveLabels(
       labels: after,
       note: "fix them by hand — the queue reads these",
     });
-    return;
+    return false;
   }
 
   labelsLog.info("labels.moved", { issueKey, labels: after });
+  return true;
 }
 
-/** The label half of a finished round: mirror the pull request's draft flag. */
-async function moveReviewStage(
+/**
+ * The label half of a finished round: mirror the pull request's draft flag.
+ *
+ * Also the Jira-status half, gated tightly on purpose: only a *confirmed* move into
+ * `review-done` — the ticket was not already there — attempts `moveToCodeReview`. Without that
+ * gate this would re-attempt the status move on every tick a ticket happens to already be
+ * `agent:review-done`, which is most of its lifetime in that stage (`labels.ts`'s own header: the
+ * longest-lived state in the machine). `moveToCodeReview` is itself idempotent and inert when
+ * unconfigured, so the gate is a courtesy against log noise and redundant requests, not a
+ * correctness requirement.
+ */
+export async function moveReviewStage(
   client: JiraClient,
   issueKey: string,
   stage: ReviewStage | null,
@@ -326,7 +341,30 @@ async function moveReviewStage(
   if (stage === null) {
     return;
   }
-  await moveLabels(client, issueKey, (labels) => reviewStageTransition(labels, stage));
+  const changed = await moveLabels(client, issueKey, (labels) =>
+    reviewStageTransition(labels, stage),
+  );
+  if (!changed || stage !== "review-done") {
+    return;
+  }
+
+  try {
+    const result = await client.moveToCodeReview(issueKey);
+    if (result.outcome === "moved") {
+      labelsLog.info("labels.code_review_status_moved", { issueKey, from: result.from });
+    } else if (result.outcome === "unreachable") {
+      labelsLog.warn("labels.code_review_status_unreachable", { issueKey, from: result.from });
+    }
+    // "already-there" and "disabled" need no log line: the first is the expected steady state
+    // once something else has moved the ticket, the second is every deployment that hasn't
+    // configured SOLVE_CODE_REVIEW_STATUS.
+  } catch (error) {
+    labelsLog.error("labels.code_review_status_failed", {
+      issueKey,
+      error,
+      note: "move the Jira status by hand; the pull request and its labels are unaffected",
+    });
+  }
 }
 
 /**

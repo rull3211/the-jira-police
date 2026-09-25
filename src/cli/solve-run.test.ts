@@ -1,18 +1,23 @@
 /**
- * Three functions from `solve-run.ts`, tested here because `solve-run.ts` has no general test
+ * Four functions from `solve-run.ts`, tested here because `solve-run.ts` has no general test
  * harness for the rest of its dependencies.
  *
  * `sleep` runs as a child process because a unit test cannot observe "the event loop stayed
  * alive" from inside a runner that is itself holding the loop open. `createReviewAct`'s
  * refused-checkout branch is a duplicate of one `advance` already has, tested separately since
- * nothing else constructs it.
+ * nothing else constructs it. `moveReviewStage` is exported for exactly this file's benefit — a
+ * fake `JiraClient` covering the three methods it calls is far cheaper than driving it through
+ * `runAdvance`'s full `gh`/worktree harness for a question that is entirely about label and status
+ * bookkeeping.
  */
 
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 
-import { createReviewAct, keepsEvidence } from "./solve-run.ts";
+import { createReviewAct, keepsEvidence, moveReviewStage } from "./solve-run.ts";
+import type { CodeReviewMoveResult, JiraClient } from "../jira/client.ts";
+import { AGENT_LABELS } from "../solve/labels.ts";
 import type { AdvanceRequest, PendingRound } from "../solve/delivery.ts";
 import type { SolveDependencies } from "../solve/orchestrator.ts";
 import type { WatchedTicket } from "../solve/review-cycle.ts";
@@ -295,5 +300,120 @@ describe("keepsEvidence", () => {
         reason: "lint did not pass (exit 1)",
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * A fake covering only the three `JiraClient` methods `moveReviewStage` reaches: `fetchDetail`
+ * (read, via `createClaimCapabilities`), `updateLabels` (write) and `moveToCodeReview` (the new
+ * write this file exists to cover). `updateLabels` mutates the same array `fetchDetail` reads, so
+ * the read-back `moveLabels` does after a write sees the change, the way the real API would.
+ */
+function fakeClient(
+  initialLabels: readonly string[],
+  moveToCodeReview: (key: string) => Promise<CodeReviewMoveResult> = async () => ({
+    outcome: "disabled",
+    from: "",
+  }),
+): {
+  client: JiraClient;
+  updateLabelsCalls: { add: readonly string[]; remove: readonly string[] }[];
+  moveToCodeReviewCalls: string[];
+} {
+  let labels = [...initialLabels];
+  const updateLabelsCalls: { add: readonly string[]; remove: readonly string[] }[] = [];
+  const moveToCodeReviewCalls: string[] = [];
+
+  const client = {
+    fetchDetail: async () => ({ labels: [...labels] }),
+    updateLabels: async (
+      _key: string,
+      change: { readonly add?: readonly string[]; readonly remove?: readonly string[] },
+    ) => {
+      const add = change.add ?? [];
+      const remove = change.remove ?? [];
+      updateLabelsCalls.push({ add, remove });
+      labels = [...labels.filter((label) => !remove.includes(label)), ...add];
+    },
+    moveToCodeReview: async (key: string) => {
+      moveToCodeReviewCalls.push(key);
+      return moveToCodeReview(key);
+    },
+  } as unknown as JiraClient;
+
+  return { client, updateLabelsCalls, moveToCodeReviewCalls };
+}
+
+describe("moveReviewStage", () => {
+  it("does nothing when there is no stage to move to", async () => {
+    const { client, updateLabelsCalls, moveToCodeReviewCalls } = fakeClient([
+      AGENT_LABELS.reviewing,
+    ]);
+
+    await moveReviewStage(client, "SSX-1", null);
+
+    expect(updateLabelsCalls).toEqual([]);
+    expect(moveToCodeReviewCalls).toEqual([]);
+  });
+
+  it("attempts the Jira status move only on a confirmed move into review-done", async () => {
+    const { client, updateLabelsCalls, moveToCodeReviewCalls } = fakeClient([
+      AGENT_LABELS.reviewing,
+    ]);
+
+    await moveReviewStage(client, "SSX-1", "review-done");
+
+    expect(updateLabelsCalls).toEqual([
+      { add: [AGENT_LABELS.reviewDone], remove: [AGENT_LABELS.reviewing] },
+    ]);
+    expect(moveToCodeReviewCalls).toEqual(["SSX-1"]);
+  });
+
+  it("does not re-attempt the Jira status move when the ticket was already in the target stage", async () => {
+    // review-done is the longest-lived stage in the machine; without this gate every tick of a
+    // long-idle pull request would re-request the same transition.
+    const { client, updateLabelsCalls, moveToCodeReviewCalls } = fakeClient([
+      AGENT_LABELS.reviewDone,
+    ]);
+
+    await moveReviewStage(client, "SSX-1", "review-done");
+
+    expect(updateLabelsCalls).toEqual([]);
+    expect(moveToCodeReviewCalls).toEqual([]);
+  });
+
+  it("does not attempt the Jira status move for the opposite direction", async () => {
+    // A round that pushed again moves the labels back to `agent:reviewing`; nothing here should
+    // read as "now in code review".
+    const { client, updateLabelsCalls, moveToCodeReviewCalls } = fakeClient([
+      AGENT_LABELS.reviewDone,
+    ]);
+
+    await moveReviewStage(client, "SSX-1", "reviewing");
+
+    expect(updateLabelsCalls).toEqual([
+      { add: [AGENT_LABELS.reviewing], remove: [AGENT_LABELS.reviewDone] },
+    ]);
+    expect(moveToCodeReviewCalls).toEqual([]);
+  });
+
+  it("does not throw when the Jira status move reports the target unreachable", async () => {
+    const { client, moveToCodeReviewCalls } = fakeClient([AGENT_LABELS.reviewing], async () => ({
+      outcome: "unreachable",
+      from: "Done",
+    }));
+
+    await expect(moveReviewStage(client, "SSX-1", "review-done")).resolves.toBeUndefined();
+    expect(moveToCodeReviewCalls).toEqual(["SSX-1"]);
+  });
+
+  it("does not throw when the Jira status move itself throws", async () => {
+    // A Jira hiccup on this write must never read as the round having failed — the pull request
+    // and its labels are unaffected either way.
+    const { client } = fakeClient([AGENT_LABELS.reviewing], async () => {
+      throw new Error("Jira is down");
+    });
+
+    await expect(moveReviewStage(client, "SSX-1", "review-done")).resolves.toBeUndefined();
   });
 });
