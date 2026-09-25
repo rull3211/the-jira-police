@@ -78,10 +78,36 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §65. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §66. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
+
+### 65. A review round's answers are not tied to the comments and threads they answer
+
+**Branch:** none yet — deferred by the operator until a real round shows the gap.
+
+**What is not built.** Coverage by reference. `responses` is a flat list, so a round that read two
+reviews can answer one and leave the other with neither an answer nor a silence; `parseReview`'s
+answered-nothing rule needs only one. `answerThreads` posts whatever `threadAnswers` holds, so a
+skipped thread stays unanswered and buys a round every tick until `MAX_PR_ROUNDS_TOTAL`. The shape
+that closes both: answers keyed by `comment N` and by thread id in the per-round schema, every one
+required, and a plain comment from a person allowed a silence with a reason instead. The
+answered-nothing conditional then goes, and each posted bullet quotes what it answers.
+
+**Why it waits.** No round has done either yet. #1462's silence is closed by `silenceable`, and
+#1461's round on 2026-09-25 answered both of Copilot's overviews. The operator's call the same day:
+raise it when a real round shows one of the two.
+
+**What would show it, and what it costs.** A `bot: round N` comment answering fewer reviews than its
+marker line says the round read, or a thread still ending in the reviewer's comment after a landed
+round. The build is about the size of `50097a7`, and starts with a probe of a nested `oneOf` —
+refused at a tool schema's root, unmeasured below it — run or handed over, never skipped
+(`PROVING.md`, "A probe a guard blocks is handed over as a command, never dropped").
+
+**What would make it the wrong idea.** A required key per comment grows the schema with the batch;
+a round reading a long human discussion could spend its structured-output retries on coverage
+rather than on the change.
 
 ### 56. Documents outside this file still say a declined run leaves the board as it found it
 
