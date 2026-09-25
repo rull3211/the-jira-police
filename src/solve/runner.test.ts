@@ -715,13 +715,36 @@ describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
     );
   }
 
-  function schemaAccepts(report: Record<string, unknown>): boolean {
-    return (
-      itemsFilled(report) &&
-      REVIEW_SCHEMA.allOf.every(
-        (branch) => !holds(report, branch.if.properties) || holds(report, branch.then.properties),
-      )
+  interface Conditional {
+    readonly properties?: Readonly<Record<string, Rule>>;
+    readonly if?: { readonly properties: Readonly<Record<string, Rule>> };
+    readonly then?: Conditional;
+    readonly else?: Conditional;
+  }
+
+  /** Its own `properties`, then whichever branch its `if` picks, recursively; any other keyword throws, so a new rule cannot pass untested. */
+  function conditionalHolds(report: Record<string, unknown>, schema: Conditional): boolean {
+    const unknown = Object.keys(schema).filter(
+      (keyword) => !["properties", "if", "then", "else"].includes(keyword),
     );
+    if (unknown.length > 0) {
+      throw new Error(`a keyword this test does not evaluate: ${unknown.join(", ")}`);
+    }
+    if (schema.properties !== undefined && !holds(report, schema.properties)) {
+      return false;
+    }
+    if (schema.if === undefined) {
+      return true;
+    }
+    const branch = holds(report, schema.if.properties) ? schema.then : schema.else;
+    return branch === undefined || conditionalHolds(report, branch);
+  }
+
+  function schemaAccepts(report: Record<string, unknown>): boolean {
+    const branch = holds(report, REVIEW_SCHEMA.if.properties)
+      ? REVIEW_SCHEMA.then
+      : REVIEW_SCHEMA.else;
+    return itemsFilled(report) && conditionalHolds(report, branch);
   }
 
   const threadAnswer = {
@@ -749,6 +772,14 @@ describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
     "a widening on a round that changed nothing": review({
       changed: false,
       filesTouched: [],
+      widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
+    }),
+    // The same rule reached through the other branch of the answered-nothing conditional.
+    "a widening on a round that changed nothing and answered only a thread": review({
+      changed: false,
+      filesTouched: [],
+      responses: [],
+      threadAnswers: [{ ...threadAnswer, basis: "checked", resolve: false }],
       widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
     }),
     "a widening naming no file": review({

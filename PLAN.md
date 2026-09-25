@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3206 tests in 96 files**, no build step.
+> **3221 tests in 97 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §63. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §64. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
@@ -990,6 +990,43 @@ and the run is gone.
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
+
+### 63. Every review round since #80 is refused by the API, and a round that lands nothing undrafts its pull request
+
+**Branch:** `fix/review-schema-and-failed-round`
+
+**What is not built.** Two fixes, one commit each.
+
+1. **`REVIEW_SCHEMA` the API accepts.** `77a9f61` (merged in #80, 2026-09-24) wrapped the review
+   schema's conditionals in a top-level `allOf`, unprobed. The API refuses a tool whose
+   `input_schema` has `oneOf`, `allOf` or `anyOf` at its root, so every review pass since dies on its
+   first request — insurance-commerce-rest-api #1461 and #1462 on 2026-09-25, both
+   `review pass of … failed: success`. That message is the second half: `runSession` fails on
+   `is_error: true` but prints only `subtype`, so the `result` text naming the 400 is discarded and
+   the only record was the session transcript. The attempt: keep both conditionals with no root
+   combinator (the second nested in the first's `then` and `else`), probe that shape and the broken
+   one against the real CLI, add a test refusing a root combinator in any pass schema, and put the
+   `result` text in the failure.
+2. **A round that landed nothing stays in draft.** The reservation moves `Last read` past the
+   feedback and the failed round tells whoever asked — in the thread, for an inline one — which is
+   deliberate and stays: a person who asked is always answered. But the next survey then finds
+   nothing unread and every thread's last word ours, returns `ready`, and undrafts: #1461 and #1462
+   were both marked ready one tick after a round that did nothing, and every reviewer was requested.
+   A commit or push failure takes the same road without telling anyone. The attempt: the marker
+   records the newest round that landed; the reservation carries it forward, so a reserved round is
+   unlanded until a landed one writes it; the survey refuses to undraft while the newest round is
+   unlanded, reporting a new `unlanded` outcome instead.
+
+**What would make it the wrong idea:**
+
+- **A top-level `if`/`then`/`else` may be refused too.** Only a bare top-level `if`/`then` has been
+  measured, on recon and on the pre-#80 review schema; `else` and a conditional nested in one have
+  not. If the probe refuses it, the fallback is the pre-#80 shape — one conditional — with the
+  changed-false rule left to `parseReview` alone.
+- **Staying in draft may strand a pull request nobody comments on again.** After an unlanded round
+  the pull request waits for a new comment. If people read the "could not finish" reply and never
+  ask again, draft is where it stays, and the operator may prefer the handover the old behaviour
+  gave by accident.
 
 ## Verification
 

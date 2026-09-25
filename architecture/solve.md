@@ -412,7 +412,13 @@ the net, and adds one the schema cannot: a verdict whose written fields all say 
 placeholder, the "Test" verdict SSX-3918 produced after three rejections for omitting
 `plannedFiles`. `REVIEW_SCHEMA` does the same for `parseReview`, since #2688's round 6 was discarded
 after its work was done for answering nothing: it carries the answered-nothing rule, a `widened`
-entry on a round that changed nothing, and a blank `widened` field, as an `allOf` of conditionals.
+entry on a round that changed nothing, and a blank `widened` field. **The two conditionals are
+nested, never an `allOf`**: the CLI hands the schema to the API as a tool's `input_schema`, and the
+API refuses `oneOf`, `allOf` or `anyOf` at its root — every review pass from #80's merge failed on
+its first request that way, reported only as `failed: success`. So the answered-nothing `if`/`then`
+sits at the root and the changed-false rule is repeated inside both its `then` and its `else`, which
+a probe on 2026-09-25 measured the API accepting and the CLI enforcing in-session from either
+branch; `src/json-schema-root.test.ts` refuses a root combinator in any schema a builder passes.
 The one `parseReview` rule it cannot carry — a `widened` path missing from `filesTouched` — needs two
 fields compared, which draft-07 cannot say. `parseFix` refuses a report where `testAdded` and
 `testOmittedReason` agree: exactly one of "a test was added" and "here is why not" must hold.

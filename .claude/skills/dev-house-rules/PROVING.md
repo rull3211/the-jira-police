@@ -162,13 +162,14 @@ because everything before it looks like the mechanism and is not.**
 
 Not an opinion — the record is one-sided:
 
-| defect                                                                                                                                    | the suite said                          | what actually caught it                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------- |
-| [`.unref()` killed the one loop whose job is waiting](INCIDENTS.md#the-unref-that-killed-the-only-loop-whose-job-is-waiting)              | green, all of it                        | running it once; the process exited 13 immediately |
-| [`attachWorktree` refused the reuse every real run needs](INCIDENTS.md#the-worktree-reuse-that-every-real-run-needs-and-the-code-refused) | green                                   | the first `--advance` against a real pull request  |
-| [the tool allowlist restricts nothing](INCIDENTS.md#the-allowlist-that-restricted-nothing)                                                | green for the project's life            | a four-probe experiment with a control             |
-| [a local hook vetoing `Write`, silently](INCIDENTS.md#the-hook-that-vetoed-write-silently)                                                | green                                   | a $4.50 run that produced nothing                  |
-| [an icon reconstructed from an adjective](INCIDENTS.md#the-favicon-reconstructed-from-an-adjective)                                       | green, **plus two reviews and a human** | comparing the artifact to the ticket, days later   |
+| defect                                                                                                                                            | the suite said                          | what actually caught it                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------- |
+| [`.unref()` killed the one loop whose job is waiting](INCIDENTS.md#the-unref-that-killed-the-only-loop-whose-job-is-waiting)                      | green, all of it                        | running it once; the process exited 13 immediately |
+| [`attachWorktree` refused the reuse every real run needs](INCIDENTS.md#the-worktree-reuse-that-every-real-run-needs-and-the-code-refused)         | green                                   | the first `--advance` against a real pull request  |
+| [the tool allowlist restricts nothing](INCIDENTS.md#the-allowlist-that-restricted-nothing)                                                        | green for the project's life            | a four-probe experiment with a control             |
+| [a local hook vetoing `Write`, silently](INCIDENTS.md#the-hook-that-vetoed-write-silently)                                                        | green                                   | a $4.50 run that produced nothing                  |
+| [an icon reconstructed from an adjective](INCIDENTS.md#the-favicon-reconstructed-from-an-adjective)                                               | green, **plus two reviews and a human** | comparing the artifact to the ticket, days later   |
+| [a review schema the API refused on every round](INCIDENTS.md#the-review-schema-the-api-refused-merged-with-not-probed-in-its-own-commit-message) | green, **fifteen mutations caught**     | two real pull requests, the next morning           |
 
 Every one of those shipped with tests passing and mutations caught. A green suite means **no test
 disagrees with the code**, which is a statement about the tests. It is not evidence about reality,

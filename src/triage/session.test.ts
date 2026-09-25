@@ -4,6 +4,7 @@ import { createLogger } from "../logger.ts";
 import {
   SessionError,
   SessionTimeoutError,
+  describeFailedResult,
   runSession,
   sessionCost,
   sessionDenials,
@@ -429,5 +430,46 @@ describe("runSession denial reporting", () => {
       expect.objectContaining({ count: 1, tools: ["Edit"] }),
     );
     warn.mockRestore();
+  });
+});
+
+/** The result event a review pass ended with on insurance-commerce-rest-api #1461, from its transcript. */
+const API_REFUSAL = {
+  type: "result",
+  subtype: "success",
+  is_error: true,
+  result:
+    "API Error: 400 tools.17.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level",
+} as const;
+
+describe("runSession failure messages", () => {
+  // #1461 and #1462 said "failed: success" on the pull request, and the only record of the 400 was the transcript.
+  it("names what the API refused, not the subtype that calls it a success", async () => {
+    await expect(runSession(fakeSession([API_REFUSAL]), () => "parsed")).rejects.toThrow(
+      "fake pass of SSX-1234 failed: API Error: 400 tools.17.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level (is_error, subtype success)",
+    );
+  });
+
+  it("keeps the subtype alone when the run did not mark itself an error", () => {
+    expect(describeFailedResult({ subtype: "error_max_turns", result: "partial answer" })).toBe(
+      "error_max_turns",
+    );
+  });
+
+  it("still says is_error when there is no text to carry", () => {
+    expect(describeFailedResult({ subtype: "success", is_error: true })).toBe(
+      "is_error, subtype success",
+    );
+  });
+
+  it("carries one bounded line, since it can land in a pull request comment", () => {
+    const said = describeFailedResult({
+      subtype: "success",
+      is_error: true,
+      result: `API Error: 500\n\n## heading\n${"word ".repeat(200)}`,
+    });
+    expect(said).not.toContain("\n");
+    expect(said.length).toBeLessThan(360);
+    expect(said).toMatch(/^API Error: 500 ## heading word .*… \(is_error, subtype success\)$/u);
   });
 });

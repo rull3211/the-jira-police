@@ -229,6 +229,13 @@ export const SIMPLIFY_SCHEMA = {
   },
 } as const;
 
+/** `parseReview` refuses a widening declared on a round that changed nothing. */
+const WIDENED_NEEDS_A_CHANGE = {
+  if: { required: ["changed"], properties: { changed: { const: false } } },
+  // oxlint-disable-next-line unicorn/no-thenable
+  then: { properties: { widened: { maxItems: 0 } } },
+} as const;
+
 /**
  * The review pass: resolving what the reviewer asked for.
  *
@@ -370,19 +377,12 @@ export const REVIEW_SCHEMA = {
     },
   },
   // `parseReview`'s rules a schema can say, told in-session so a round is corrected rather than discarded after its work is done.
-  allOf: [
-    {
-      if: { properties: { responses: { maxItems: 0 }, silent: { maxItems: 0 } } },
-      // A JSON Schema keyword holding an object, never a function, so nothing can treat this as a promise.
-      // oxlint-disable-next-line unicorn/no-thenable
-      then: { properties: { threadAnswers: { minItems: 1 } } },
-    },
-    {
-      if: { required: ["changed"], properties: { changed: { const: false } } },
-      // oxlint-disable-next-line unicorn/no-thenable
-      then: { properties: { widened: { maxItems: 0 } } },
-    },
-  ],
+  // Never an `allOf`: the API refuses `oneOf`, `allOf` and `anyOf` at a tool schema's root, so a second rule nests in both branches of the first.
+  if: { properties: { responses: { maxItems: 0 }, silent: { maxItems: 0 } } },
+  // A JSON Schema keyword holding an object, never a function, so nothing can treat this as a promise.
+  // oxlint-disable-next-line unicorn/no-thenable
+  then: { properties: { threadAnswers: { minItems: 1 } }, ...WIDENED_NEEDS_A_CHANGE },
+  else: WIDENED_NEEDS_A_CHANGE,
 } as const;
 
 /**

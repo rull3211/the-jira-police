@@ -1873,3 +1873,35 @@ already-too-long block instead of compressing it, because the review pass checke
 
 **The rule** — a comment already past the rule is simplified where editing touches it, not left, and
 never licenses a second violation beside it, added to `CLAUDE.md`'s Code comments section.
+
+### The review schema the API refused, merged with "not probed" in its own commit message
+
+**2026-09-25.** `77a9f61` moved `REVIEW_SCHEMA`'s two conditionals into a root `allOf`, and #80
+merged it on 2026-09-24. The CLI hands `--json-schema` to the API as a tool's `input_schema`, and the
+API refuses `oneOf`, `allOf` or `anyOf` at a tool schema's root — so from that merge every review
+pass died on its first request. insurance-commerce-rest-api #1461 and #1462 each spent round 1 on
+it the next morning, and each pull request was told `review pass of … failed: success`.
+
+**The mechanism, not the excuse.** The commit knew it was unmeasured and wrote so: _"Not probed
+against the CLI itself: the recon probe measured it enforcing a top-level if/then, and allOf is older
+than if/then in the draft."_ That argues from the JSON Schema specification about a restriction the
+specification does not make — the API's, a second consumer of the same text. Everything the branch
+did measure was measured against a model of draft-07: `runner.test.ts` evaluates the conditionals
+with a hand-written walker, and fifteen mutations went red against it. All fifteen answered _does the
+suite notice a rule unplugged_; none asked _will anything accept this schema_. `FINISHING.md`'s
+"driven against a real target, not only its tests" was the line that would have caught it, skipped
+with the reason recorded.
+
+**The failure also destroyed its own diagnosis.** A refusal arrives as `subtype: "success"`,
+`is_error: true`, the reason only in `result`; `runSession` failed on the flag and printed the
+subtype. The 400 survived in exactly one place, the session transcript under `~/.claude/projects/`,
+which is the shape `BUILDING.md`'s table of failures that "already had the information and threw it
+away" describes.
+
+**Found by** the operator, who saw two bot pull requests fail "in a weird way" on GitHub; the cause
+came out of the storecode transcripts, not the service's own output.
+
+**The rule** — [the tests did not catch the interesting bugs; running it
+did](PROVING.md#the-tests-did-not-catch-the-interesting-bugs-running-it-did), already written and
+skipped with the reason recorded; this entry is a row in its table. `src/json-schema-root.test.ts`
+now encodes this one restriction, and nothing encodes the next one.
