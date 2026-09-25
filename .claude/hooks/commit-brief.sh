@@ -132,9 +132,9 @@ checklist="$(awk '/^## The checklist/{f=1;next} f&&/^\*\*And the rules/{exit}
 branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 
 # `$repo` is `CLAUDE_PROJECT_DIR`, which stays on the primary checkout once a
-# session enters a worktree (PLAN.md §62); the payload's `cwd` is what actually
-# moved. `symbolic-ref`, not `rev-parse`, so a detached HEAD there leaves
-# `branch` as `$repo`'s rather than reporting one called `HEAD`.
+# session enters a worktree (architecture/guardrails.md); the payload's `cwd`
+# is what actually moved. `symbolic-ref`, not `rev-parse`, so a detached HEAD
+# there leaves `branch` as `$repo`'s rather than reporting one called `HEAD`.
 case "$payload_cwd" in
   /*)
     if [ -d "$payload_cwd" ]; then

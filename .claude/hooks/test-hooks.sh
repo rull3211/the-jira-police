@@ -948,9 +948,9 @@ expect "names the branch it is about to commit on" yes \
 
 # CLAUDE_PROJECT_DIR stays on the primary checkout once a session enters a
 # worktree, so before this fix a commit actually landing on the worktree's own
-# branch was always narrated as landing on the project directory's. PLAN.md
-# §62 fixed branch-guard.sh's decision the same way; this is the display-only
-# sibling of that defect.
+# branch was always narrated as landing on the project directory's — the
+# display-only sibling of branch-guard.sh's decision defect
+# (architecture/guardrails.md).
 commit_feat="$(mktemp -d)/wt"
 git -C "$commit_repo" worktree add -q -b feat/commit-elsewhere "$commit_feat" HEAD
 mkdir -p "$commit_feat/.claude/skills/dev-house-rules"
