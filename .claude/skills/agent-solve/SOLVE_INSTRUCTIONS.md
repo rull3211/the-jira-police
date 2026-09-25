@@ -324,10 +324,13 @@ resolved; say plainly what should not.
 
 1. **Read every comment.** Answer each one in `responses` — including the ones you decline.
    Disagreeing with a reviewer is allowed. Ignoring one silently is not: a comment considered and
-   rejected must be distinguishable from one that was missed. The one exception is a top-level
-   comment that asks nothing of you — colleagues talking among themselves, a thank-you: list it in
-   `silent` as `comment N`, and nothing is posted for it. A request you decline is never `silent`,
-   and an inline thread always gets a `threadAnswers` entry.
+   rejected must be distinguishable from one that was missed. The one exception is a plain comment
+   from a person that asks nothing of you — colleagues talking among themselves, a thank-you: list
+   it in `silent` as `comment N` with one line saying why, and no reply is posted; the reason goes
+   on the pull request's marker comment. Your schema allows only those comments there. A submitted
+   review — the requested reviewer's or anyone's — is never silent, even one reporting no findings:
+   say what you checked and why nothing changes. A request you decline is never `silent`, and an
+   inline thread always gets a `threadAnswers` entry.
 2. **Check the claim before you act on it.** A review comment is a claim _about the code_, and you
    have the code. Grep for the thing it says exists. Open the file it says is affected. Say in the
    reply what you checked and what you found, so a reader can repeat it. This is usually one

@@ -252,6 +252,15 @@ const asLaterRoundSees = async (...nodes: readonly unknown[]): Promise<readonly 
 const marker = (bodies: readonly string[]): boolean =>
   bodies.some((body) => body.startsWith(MARKER_PREFIX));
 
+/** Every marker body the run wrote, reservation first. */
+const markerWrites = (h: Harness): readonly string[] =>
+  h.calls
+    .filter((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv))
+    .map((argv) =>
+      (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length),
+    )
+    .filter((body) => body.startsWith(MARKER_PREFIX));
+
 /** Did the run write the marker at all — either the first post or a later edit? */
 const markerWritten = (h: Harness): boolean =>
   h.calls.some((argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv));
@@ -1165,15 +1174,39 @@ describe("advance", () => {
     });
 
     it("tells nothing to a comment the round marked as asking nothing", async () => {
-      const h = harness({ review: { ...widened("comment 1"), silent: ["comment 1"] } }, [
-        memberAsked,
-      ]);
+      const withThanks: Rule = {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            reviews: [{ author: { login: "copilot" }, body: "the wrapper looks unnecessary" }],
+            comments: [
+              {
+                author: { login: "rull3211" },
+                authorAssociation: "MEMBER",
+                body: "and drop the unused exports while you are in there",
+              },
+              fromHuman("thanks, nice catch"),
+            ],
+          } as never),
+        },
+      };
+      const h = harness(
+        {
+          review: {
+            ...widened("comment 1"),
+            silent: [{ comment: "comment 3", reason: "a thank-you" }],
+          },
+        },
+        [withThanks],
+      );
 
       await advance(h.deps, advanceRequest);
 
       const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
-      expect(told).not.toContain("the wrapper looks unnecessary");
+      expect(told).not.toContain("thanks, nice catch");
       expect(told).toContain("> and drop the unused exports while you are in there");
+      // A review is never silent, so it is told too.
+      expect(told).toContain("> the wrapper looks unnecessary");
     });
 
     it("breaks a mention the pass wrote into a reason, in the comment and in the thread", async () => {
@@ -1891,8 +1924,14 @@ describe("advance's review cursor", () => {
   it("posts a marker on a pull request that has none, and edits the one that has", async () => {
     const first = harness({ review: review() });
     await advance(first.deps, advanceRequest);
-    expect(ran(first, "graphql")).toBe(true);
-    expect(first.calls.some((argv) => asked("updateIssueComment")(argv))).toBe(false);
+    const writes = first.calls.filter(
+      (argv) => asked("addComment")(argv) || asked("updateIssueComment")(argv),
+    );
+    // The reservation posts; the only edit is the landing, of the comment that post created.
+    expect(asked("addComment")(writes[0] ?? [])).toBe(true);
+    const edits = writes.filter((argv) => asked("updateIssueComment")(argv));
+    expect(edits.length).toBeGreaterThan(0);
+    expect(edits.every((argv) => argv.includes(`id=${POSTED}`))).toBe(true);
 
     const later = harness({ review: review() }, [spent(1)]);
     await advance(later.deps, advanceRequest);
@@ -1939,7 +1978,9 @@ describe("advance's review cursor", () => {
 
     await advance(h.deps, advanceRequest);
 
-    expect(h.calls.some((argv) => asked("updateIssueComment")(argv))).toBe(false);
+    // The only edit is the landing, of the marker this round posted.
+    const edits = h.calls.filter((argv) => asked("updateIssueComment")(argv));
+    expect(edits.every((argv) => argv.includes(`id=${POSTED}`))).toBe(true);
     for (const argv of h.calls) {
       expect(argv).not.toContain("id=IC_human");
     }
@@ -2235,6 +2276,7 @@ const said = (author: string, body: string, origin: ReviewOrigin = "reviewer"): 
   id: "IC_1",
   origin,
   member: false,
+  review: false,
 });
 
 const stateWith = (...comments: readonly ReviewComment[]): ReviewState => ({
@@ -2500,5 +2542,316 @@ describe("advance's merge round", () => {
     const outcome = await advance(h.deps, conflicted);
 
     expect(outcome).toMatchObject({ kind: "failed", stage: "merge" });
+  });
+
+  it("records a merge round that synced as landed", async () => {
+    const h = harness({}, [
+      board({ count: 2, reviewerCount: 1, reviews: [WAITING_REVIEWER] }),
+      BEHIND,
+    ]);
+
+    await advance(h.deps, conflicted);
+
+    const writes = markerWrites(h);
+    expect(writes[0]).toContain("Last landed: 2");
+    expect(writes.at(-1)).toContain("Last landed: 3");
+  });
+
+  it("leaves a merge that would not push unlanded", async () => {
+    const h = harness({}, [
+      board({ count: 0, reviewerCount: 0, reviews: [WAITING_REVIEWER] }),
+      BEHIND,
+      { match: saw("push"), reply: { exitCode: 1, stderr: "! [rejected]" } },
+    ]);
+
+    await advance(h.deps, conflicted);
+
+    expect(markerWrites(h)).toEqual([expect.stringContaining("Last landed: 0")]);
+  });
+});
+
+/** A pull request whose round 1 reserved and then told its one thread it could not finish — #1461's shape. */
+const afterRoundOne = (landed: number): readonly Rule[] => [
+  {
+    match: saw("pr", "view"),
+    reply: {
+      stdout: reviewJson({
+        reviews: [{ author: { login: "copilot" }, body: "" }],
+        comments: [
+          {
+            author: { login: "rull3211" },
+            body: `${MARKER_PREFIX}1\nLast read: 2026-09-05T09:00:00Z\nReviewer rounds: 1\nLast landed: ${String(landed)}\n\n- round 1 — reviewer, reading 0 comment(s) and 1 thread(s)`,
+            createdAt: "2026-09-05T09:30:00Z",
+            id: POSTED,
+          },
+        ],
+      } as never),
+    },
+  },
+  inline(
+    talking(
+      spoke("copilot", "this is not idempotent"),
+      spoke("rull3211", `${BOT_PREFIX}This round could not finish, so nothing from it was pushed`),
+    ),
+  ),
+];
+
+describe("what a round leaves for the next look", () => {
+  it("keeps a pull request in draft after a round that landed nothing (#1461)", async () => {
+    // The reservation moved the cursor and the failure note answered the thread, so nothing is left to answer — which is not the same as answered.
+    const h = harness({}, afterRoundOne(0));
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toEqual({ kind: "unlanded", round: 1 });
+    expect(ran(h, "pr", "ready")).toBe(false);
+    expect(h.seen).toEqual([]);
+  });
+
+  it("undrafts the same pull request once its round has landed", async () => {
+    // The control for the test above: one line of the marker separates them.
+    const h = harness({}, afterRoundOne(1));
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "ready" });
+    expect(ran(h, "pr", "ready")).toBe(true);
+  });
+
+  it("reserves a round unlanded and records it once it has pushed", async () => {
+    const h = harness({ review: review() });
+
+    await advance(h.deps, advanceRequest);
+
+    const writes = markerWrites(h);
+    expect(writes[0]).toContain("Last landed: 0");
+    expect(writes.at(-1)).toContain("Last landed: 1");
+    // After the push: a landing recorded first would outlive a push that then failed.
+    const landing = h.calls.findLastIndex((argv) => asked("updateIssueComment")(argv));
+    expect(at(h, saw("push"))).toBeLessThan(landing);
+  });
+
+  it("records a round that answered without changing code as landed", async () => {
+    const h = harness({
+      review: review({
+        changed: false,
+        filesTouched: [],
+        commitSubject: "",
+        commitBody: "",
+        responses: ["the null check is unreachable; the caller guarantees a value"],
+      }),
+    });
+
+    await advance(h.deps, advanceRequest);
+
+    expect(markerWrites(h).at(-1)).toContain("Last landed: 1");
+  });
+
+  it("still tells whoever asked when the pass never answered, and records nothing as landed", async () => {
+    // #1461: the pass died before producing a report. Replying is deliberate and stays; only the landing must not happen.
+    const h = harness({}, [inline(thread())]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "abandoned" });
+    expect(h.calls.some((argv) => asked("addPullRequestReviewThreadReply")(argv))).toBe(true);
+    expect(markerWrites(h)).toEqual([expect.stringContaining("Last landed: 0")]);
+  });
+
+  it("leaves a round that failed verification unlanded", async () => {
+    const h = harness({ review: review() }, [
+      { match: saw("run", "test"), reply: { exitCode: 1 } },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "verification" });
+    expect(markerWrites(h)).toEqual([expect.stringContaining("Last landed: 0")]);
+  });
+
+  it("leaves a round whose push was rejected unlanded", async () => {
+    // Nobody is told on this path, which makes the draft the only signal left.
+    const h = harness({ review: review() }, [
+      { match: saw("push"), reply: { exitCode: 1, stderr: "! [rejected]" } },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "push" });
+    expect(markerWrites(h)).toEqual([expect.stringContaining("Last landed: 0")]);
+  });
+
+  it("carries an unlanded round through a failed start rather than landing it", async () => {
+    const h = harness({}, [
+      {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            comments: [
+              {
+                author: { login: "rull3211" },
+                body: `${MARKER_PREFIX}1\nLast read: 2026-09-05T09:00:00Z\nReviewer rounds: 1\nLast landed: 0\n`,
+                createdAt: "2026-09-05T09:30:00Z",
+                id: POSTED,
+              },
+              dated("please handle the empty case too", "2026-09-05T10:00:00Z"),
+            ],
+          } as never),
+        },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, {
+      ...advanceRequest,
+      attach: () => Promise.resolve(refusedCheckout),
+    });
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "worktree" });
+    expect(markerWrites(h)).toEqual([expect.stringContaining("Last landed: 0")]);
+  });
+
+  it("keeps the round's outcome when its landing cannot be recorded, and says so", async () => {
+    const warn = vi.spyOn(createLogger("solve"), "warn").mockImplementation(() => {});
+    const h = harness({ review: review() }, [
+      spent(1),
+      {
+        match: (argv) =>
+          asked("updateIssueComment")(argv) && argv.some((arg) => arg.includes("Last landed: 2")),
+        reply: { exitCode: 1, stderr: "HTTP 502" },
+      },
+    ]);
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "iterated", pushed: true });
+    expect(warn).toHaveBeenCalledWith(
+      "solve.review.landing_unrecorded",
+      expect.objectContaining({ round: 2, reason: expect.stringContaining("HTTP 502") }),
+    );
+    warn.mockRestore();
+  });
+});
+
+/** #1462's one comment: Copilot's overview, with nothing in it to act on. */
+const NO_FINDINGS = { author: { login: "copilot" }, body: "Findings: None" };
+
+/** The same, with a colleague's thank-you beside it, which asks nothing. */
+const reviewAndThanks = (thanks = "thanks, nice catch"): Rule => ({
+  match: saw("pr", "view"),
+  reply: {
+    stdout: reviewJson({ reviews: [NO_FINDINGS], comments: [fromHuman(thanks)] } as never),
+  },
+});
+
+const answeredNoChange = (silent: readonly unknown[], responses: readonly string[]) =>
+  review({
+    changed: false,
+    filesTouched: [],
+    commitSubject: "",
+    commitBody: "",
+    responses,
+    silent,
+  });
+
+const CHECKED = "Checked: the overview reports no findings, and the diff matches the ticket.";
+
+describe("a comment left unanswered", () => {
+  it("does not let a round leave a review silent, even one reporting no findings (#1462)", async () => {
+    // The pass's report on #1462, round 2. The schema now refuses it in-session; this is the net behind that.
+    const h = harness(
+      {
+        review: answeredNoChange(
+          [{ comment: "comment 1", reason: "an automated overview that asks nothing" }],
+          [],
+        ),
+      },
+      [
+        {
+          match: saw("pr", "view"),
+          reply: { stdout: reviewJson({ reviews: [NO_FINDINGS] } as never) },
+        },
+      ],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(h.seen[0]?.options.silenceable).toEqual([]);
+    expect(outcome).toMatchObject({ kind: "abandoned" });
+    expect(posts(h).some((body) => body.includes("> Findings: None"))).toBe(true);
+  });
+
+  it("answers the review, and puts the thank-you's silence and its reason on the marker", async () => {
+    const h = harness(
+      { review: answeredNoChange([{ comment: "comment 2", reason: "a thank-you" }], [CHECKED]) },
+      [reviewAndThanks()],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(h.seen[0]?.options.silenceable).toEqual(["comment 2"]);
+    expect(outcome).toMatchObject({ kind: "iterated", pushed: false });
+    expect(posts(h).find((body) => body.startsWith(`${BOT_PREFIX}round 1`))).toContain(CHECKED);
+    const written = markerWrites(h).at(-1) ?? "";
+    expect(written).toContain("\n- round 1 — no reply to comment 2 by a-colleague: a thank-you");
+    expect(parseMarker(written)).toMatchObject({ outcome: "parsed", marker: { landed: 1 } });
+  });
+
+  it("records a silence on a round that landed nothing, without landing it", async () => {
+    // `tellWhoAsked` skips the silent comment, so nothing else says why it got no reply.
+    const h = harness(
+      { review: review({ silent: [{ comment: "comment 2", reason: "a thank-you" }] }) },
+      [reviewAndThanks(), { match: saw("run", "test"), reply: { exitCode: 1 } }],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "verification" });
+    const written = markerWrites(h).at(-1) ?? "";
+    expect(written).toContain("no reply to comment 2 by a-colleague: a thank-you");
+    expect(written).toContain("Last landed: 0");
+    expect(posts(h).join("\n")).not.toContain("> thanks, nice catch");
+  });
+
+  it("keeps the pass's reason on one line and breaks a mention in it", async () => {
+    const h = harness(
+      {
+        review: answeredNoChange(
+          [{ comment: "comment 2", reason: "a thank-you to\n@rull3211 and the team" }],
+          [CHECKED],
+        ),
+      },
+      [reviewAndThanks()],
+    );
+
+    await advance(h.deps, advanceRequest);
+
+    expect(markerWrites(h).at(-1)).toContain(
+      "no reply to comment 2 by a-colleague: a thank-you to @\u200brull3211 and the team",
+    );
+  });
+
+  it("keeps a failed round's outcome when its silences cannot be recorded, and says so", async () => {
+    const warn = vi.spyOn(createLogger("solve"), "warn").mockImplementation(() => {});
+    const h = harness(
+      { review: review({ silent: [{ comment: "comment 2", reason: "a thank-you" }] }) },
+      [
+        reviewAndThanks(),
+        { match: saw("run", "test"), reply: { exitCode: 1 } },
+        {
+          match: (argv) =>
+            asked("updateIssueComment")(argv) && argv.some((arg) => arg.includes("no reply to")),
+          reply: { exitCode: 1, stderr: "HTTP 502" },
+        },
+      ],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "verification" });
+    expect(warn).toHaveBeenCalledWith(
+      "solve.review.silence_unrecorded",
+      expect.objectContaining({ round: 1, reason: expect.stringContaining("HTTP 502") }),
+    );
+    warn.mockRestore();
   });
 });

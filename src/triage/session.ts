@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process";
 
 import { createLogger } from "../logger.ts";
+import { oneLine, shorten } from "../text.ts";
 
 const log = createLogger("session");
 
@@ -241,6 +242,24 @@ export function sessionDenials(event: Record<string, unknown>): readonly Session
   });
 }
 
+/** Longest `result` text carried into a failure, which can reach a pull request comment verbatim. */
+const FAILED_RESULT_CHARS = 300;
+
+/**
+ * Why a `result` event is a failure. An API refusal arrives as `subtype: "success"` with
+ * `is_error: true` and its reason only in `result`, so the subtype alone reads "failed: success".
+ */
+export function describeFailedResult(event: Record<string, unknown>): string {
+  const subtype = String(event["subtype"]);
+  if (event["is_error"] !== true) {
+    return subtype;
+  }
+  const said = typeof event["result"] === "string" ? oneLine(event["result"]) : "";
+  return said === ""
+    ? `is_error, subtype ${subtype}`
+    : `${shorten(said, FAILED_RESULT_CHARS)} (is_error, subtype ${subtype})`;
+}
+
 /**
  * Runs the child and hands its `structured_output` to `parse`. A throw from `parse` — how the
  * analyst refuses an incoherent verdict — is preserved as the run's failure rather than wrapped.
@@ -370,7 +389,7 @@ export async function runSession<T>(
         }
 
         if (event["subtype"] !== "success" || event["is_error"] === true) {
-          failure ??= new SessionError(`${options.label} failed: ${String(event["subtype"])}`);
+          failure ??= new SessionError(`${options.label} failed: ${describeFailedResult(event)}`);
           return;
         }
         try {

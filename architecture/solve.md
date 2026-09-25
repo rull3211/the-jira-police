@@ -412,7 +412,15 @@ the net, and adds one the schema cannot: a verdict whose written fields all say 
 placeholder, the "Test" verdict SSX-3918 produced after three rejections for omitting
 `plannedFiles`. `REVIEW_SCHEMA` does the same for `parseReview`, since #2688's round 6 was discarded
 after its work was done for answering nothing: it carries the answered-nothing rule, a `widened`
-entry on a round that changed nothing, and a blank `widened` field, as an `allOf` of conditionals.
+entry on a round that changed nothing, and a blank `widened` field, and `reviewSchema` narrows its
+`silent` per round to the comments that may go unanswered, each with a reason — see "A review is
+never silent" below. **The two conditionals are
+nested, never an `allOf`**: the CLI hands the schema to the API as a tool's `input_schema`, and the
+API refuses `oneOf`, `allOf` or `anyOf` at its root — every review pass from #80's merge failed on
+its first request that way, reported only as `failed: success`. So the answered-nothing `if`/`then`
+sits at the root and the changed-false rule is repeated inside both its `then` and its `else`, which
+a probe on 2026-09-25 measured the API accepting and the CLI enforcing in-session from either
+branch; `src/json-schema-root.test.ts` refuses a root combinator in any schema a builder passes.
 The one `parseReview` rule it cannot carry — a `widened` path missing from `filesTouched` — needs two
 fields compared, which draft-07 cannot say. `parseFix` refuses a report where `testAdded` and
 `testOmittedReason` agree: exactly one of "a test was added" and "here is why not" must hold.
@@ -1175,12 +1183,33 @@ posted an empty quote.
   quoted and never mentioned. Every `@` in text anyone else wrote is broken with a zero-width
   space: inside a quote, in the reason, which can carry a decline or a `requestedBy` the pass
   wrote, and in a repair notice's quoted `summary` and `residualRisk`.
-- **A comment that asked for nothing is told nothing.** The review schema's `silent` lists
-  top-level comments that ask nothing of the pass — people talking among themselves — and they get
-  no entry in `responses` and no reply here. A thread cannot be `silent`: one whose last comment is
-  not ours is unanswered by `unansweredThreads`' definition and would buy a round every tick.
-  `parseReview` refuses a thread id there, and counts `silent` as an answer so a round of pure
-  chatter is not discarded for answering nothing.
+- **A comment that asked for nothing is told nothing, and the marker says why.** The review
+  schema's `silent` lists plain comments from people that ask nothing of the pass — people talking
+  among themselves — each with a one-line reason, and they get no entry in `responses` and no reply
+  here. The reason goes on the marker as its own line — the round, the comment, its author, then
+  the reason — written with the landing, or alone on a round that did not land, where a failed write
+  is logged as `solve.review.silence_unrecorded` and the outcome stands. It is an edit, so nobody is
+  notified, and whoever wrote the comment can see the call and disagree with it.
+- **A review is never silent.** Round 2 on insurance-commerce-rest-api #1462 (2026-09-25) read
+  Copilot's overview, "Findings: None", checked the code, and listed it in `silent`: no commit, no
+  reply, nothing on the pull request to say a round ran, where #1459's round 1 had answered the
+  same kind of overview before `silent` existed. `silenceable` (`pr.ts`) now names only a plain
+  comment from a person — never a submitted review, whoever wrote it, nor anything from the
+  requested reviewer — and the review schema is built per round with `silent` narrowed to that
+  list, an `enum`, or `maxItems: 0` when it is empty, so the CLI refuses the rest in-session;
+  `parseReview` refuses them again after the pass from the same list. Probed against the real CLI
+  on 2026-09-25: both shapes are accepted by the API and enforced in-session, and a pass told only
+  "must be equal to one of the allowed values" renamed its entry to the allowed comment rather than
+  answering the refused one. The field's description now says to answer it instead, and a second
+  probe on the built schema did: one refusal, then the overview answered in `responses`. The first
+  real round under it, #1461's on the evening of 2026-09-25, answered both of Copilot's overviews,
+  the no-findings one included. The cost
+  is chosen, not missed: a person's approving review with a line of text in it now gets a reply
+  too, where an empty approval and Copilot's green light never reach the pass at all.
+- **A thread cannot be `silent`**: one whose last comment is not ours is unanswered by
+  `unansweredThreads`' definition and would buy a round every tick. `parseReview` refuses a thread
+  id there, and counts `silent` as an answer so a round of pure chatter is not discarded for
+  answering nothing.
 - **A pass that returned no report tells every comment**, since nothing says which asked.
 - **Infrastructure failures stay off the pull request.** `commit`, `push`, `cursor` and the rest
   are the operator's problem, and a persistent one would repeat the same reply every tick.
@@ -1188,6 +1217,18 @@ posted an empty quote.
 A thread replied to this way now ends with our comment, so the next survey no longer reads it as
 unanswered and does not retry it. That is deliberate: every ending that reaches here is
 deterministic or needs a person, and retrying bought the same refusal until `MAX_PR_ROUNDS_TOTAL`.
+
+**And the next survey does not read that quiet as agreement.** With the cursor past the feedback
+and every thread ending in our reply, a survey finds nothing left to answer, and that used to return
+`ready` and undraft: insurance-commerce-rest-api #1461 and #1462 were handed to every reviewer one
+tick after a round that did no work. The marker now carries `Last landed:`, the newest round whose
+work reached the pull request. A reservation writes it unchanged while the count moves, so a round
+is unlanded from the moment it reserves, and `recordLanded` moves it up only after an `iterated`
+round's answers are public or a merge round has synced. While it lags the count the survey returns
+`unlanded` instead of `ready`, leaving the draft flag and the label alone until a new comment starts
+a round. That holds on the paths no reply reaches as well — a `commit` or `push` failure, a process
+killed mid-round, a landing write that failed (`solve.review.landing_unrecorded`) — and a marker
+from before the line existed reads as landed, since nothing then recorded a landing to read.
 
 And the paragraph most likely to be forgotten, so it is repeated here: **the review loop is a
 closed loop carrying untrusted text, and nothing in `pr.ts` breaks it.** The PR body is

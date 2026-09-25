@@ -32,6 +32,7 @@ import {
   reviewOrigin,
   requestReview,
   resolveThread,
+  silenceable,
 } from "./pr.ts";
 import { BOT_PREFIX, isOurs } from "./marker.ts";
 import type { CommandResult, CommandRunner } from "./worktree.ts";
@@ -147,6 +148,7 @@ const comment = (
   author = "copilot",
   origin: ReviewOrigin = "reviewer",
   member = false,
+  review = true,
 ): ReviewComment => ({
   author,
   body,
@@ -154,6 +156,7 @@ const comment = (
   id: "",
   origin,
   member,
+  review,
 });
 
 /** A per-round token as `advance` would mint one. */
@@ -676,6 +679,7 @@ describe("readReview", () => {
           id: "PRR_1",
           origin: "reviewer",
           member: false,
+          review: true,
         },
         {
           author: "copilot",
@@ -684,6 +688,7 @@ describe("readReview", () => {
           id: "IC_1",
           origin: "reviewer",
           member: false,
+          review: false,
         },
       ],
       createdAt: "2026-09-05T08:00:00Z",
@@ -806,6 +811,7 @@ describe("readReview", () => {
         id: "",
         origin: "human",
         member: false,
+        review: false,
       },
     ]);
   });
@@ -866,7 +872,15 @@ describe("readReview", () => {
     const result = await readReview(runner, reviewRequest());
 
     expect(result.outcome === "read" ? result.review.comments : null).toEqual([
-      { author: "d", body: "real feedback", createdAt: "", id: "", origin: "human", member: false },
+      {
+        author: "d",
+        body: "real feedback",
+        createdAt: "",
+        id: "",
+        origin: "human",
+        member: false,
+        review: false,
+      },
     ]);
   });
 
@@ -1096,6 +1110,7 @@ describe("readReview", () => {
         id: "",
         origin: "human",
         member: false,
+        review: false,
       },
     ]);
   });
@@ -2352,6 +2367,25 @@ describe("memberSources", () => {
 
   it("is empty when no member spoke", () => {
     expect(memberSources([comment("rename this")], [inlineThread()]).size).toBe(0);
+  });
+});
+
+describe("silenceable", () => {
+  it("allows only a plain comment from a person, numbered as the feedback header numbers it", () => {
+    const comments = [
+      // #1462: Copilot's overview, "Findings: None", which the pass left unanswered.
+      comment("Findings: None"),
+      comment("thanks, looks good", "rull3211", "human", true, false),
+      comment("LGTM, one question below", "rull3211", "human", true, true),
+      comment("I will re-review after lunch", "copilot", "reviewer", false, false),
+    ];
+
+    expect(silenceable(comments)).toEqual(["comment 2"]);
+    expect(formatReviewFeedback(comments, TOKEN)).toContain("--- comment 2 of 4, by rull3211");
+  });
+
+  it("allows nothing when every comment is a review", () => {
+    expect(silenceable([comment("Findings: None")])).toEqual([]);
   });
 });
 

@@ -162,13 +162,14 @@ because everything before it looks like the mechanism and is not.**
 
 Not an opinion — the record is one-sided:
 
-| defect                                                                                                                                    | the suite said                          | what actually caught it                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------- |
-| [`.unref()` killed the one loop whose job is waiting](INCIDENTS.md#the-unref-that-killed-the-only-loop-whose-job-is-waiting)              | green, all of it                        | running it once; the process exited 13 immediately |
-| [`attachWorktree` refused the reuse every real run needs](INCIDENTS.md#the-worktree-reuse-that-every-real-run-needs-and-the-code-refused) | green                                   | the first `--advance` against a real pull request  |
-| [the tool allowlist restricts nothing](INCIDENTS.md#the-allowlist-that-restricted-nothing)                                                | green for the project's life            | a four-probe experiment with a control             |
-| [a local hook vetoing `Write`, silently](INCIDENTS.md#the-hook-that-vetoed-write-silently)                                                | green                                   | a $4.50 run that produced nothing                  |
-| [an icon reconstructed from an adjective](INCIDENTS.md#the-favicon-reconstructed-from-an-adjective)                                       | green, **plus two reviews and a human** | comparing the artifact to the ticket, days later   |
+| defect                                                                                                                                            | the suite said                          | what actually caught it                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------- |
+| [`.unref()` killed the one loop whose job is waiting](INCIDENTS.md#the-unref-that-killed-the-only-loop-whose-job-is-waiting)                      | green, all of it                        | running it once; the process exited 13 immediately |
+| [`attachWorktree` refused the reuse every real run needs](INCIDENTS.md#the-worktree-reuse-that-every-real-run-needs-and-the-code-refused)         | green                                   | the first `--advance` against a real pull request  |
+| [the tool allowlist restricts nothing](INCIDENTS.md#the-allowlist-that-restricted-nothing)                                                        | green for the project's life            | a four-probe experiment with a control             |
+| [a local hook vetoing `Write`, silently](INCIDENTS.md#the-hook-that-vetoed-write-silently)                                                        | green                                   | a $4.50 run that produced nothing                  |
+| [an icon reconstructed from an adjective](INCIDENTS.md#the-favicon-reconstructed-from-an-adjective)                                               | green, **plus two reviews and a human** | comparing the artifact to the ticket, days later   |
+| [a review schema the API refused on every round](INCIDENTS.md#the-review-schema-the-api-refused-merged-with-not-probed-in-its-own-commit-message) | green, **fifteen mutations caught**     | two real pull requests, the next morning           |
 
 Every one of those shipped with tests passing and mutations caught. A green suite means **no test
 disagrees with the code**, which is a statement about the tests. It is not evidence about reality,
@@ -248,6 +249,14 @@ real target filled in, what would falsify it, and what it has never done.
 
 The person may have reasons to skip it, and skipping it deliberately with the risk stated is a
 legitimate decision. Skipping it because nobody mentioned it is not.
+
+**A probe a guard blocks is handed over as a command, never dropped.** When a hook refuses the one
+command that would measure a risk, that command goes to the person as the next thing to run, with
+what it costs and what would falsify it. It does not go into the pull request as "not probed". #80's
+one-call schema probe was blocked and skipped, and merged as a disclosure. The first real round
+became the probe, and every round failed it.
+[→](INCIDENTS.md#the-review-schema-the-api-refused-merged-with-not-probed-in-its-own-commit-message)
+· [→](INCIDENTS.md#the-answer-every-asker-was-promised-shipped-with-two-ways-to-give-none)
 
 ### Step 5 is where it compounds
 

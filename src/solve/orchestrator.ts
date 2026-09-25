@@ -1520,6 +1520,8 @@ export interface ReviewRoundRequest extends SolveRequest {
   readonly memberToken: string;
   /** What a `widened` entry may cite; `memberSources` over the same comments and threads `reviewFeedback` rendered. */
   readonly members: ReadonlySet<string>;
+  /** What `silent` may name; `silenceable` over the same comments. Builds the pass's schema, and bounds its report. */
+  readonly silenceable: readonly string[];
 }
 
 /**
@@ -1620,11 +1622,12 @@ async function runReviewRound(
       ticket: request.ticket,
       reviewFeedback: request.reviewFeedback,
       memberToken: request.memberToken,
+      silenceable: request.silenceable,
       skillRootPath,
       ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
       ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
     },
-    (output) => parseReview(output, issueKey),
+    (output) => parseReview(output, issueKey, new Set(request.silenceable)),
   );
   if (!reviewRun.ok) {
     // `abandoned` rather than its own kind: unlike the passes in solveTicket, a pull request already exists to carry the reason.

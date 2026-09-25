@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3206 tests in 96 files**, no build step.
+> **3255 tests in 97 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55 and §62, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63 and §64, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,10 +78,36 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §63. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §66. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
+
+### 65. A review round's answers are not tied to the comments and threads they answer
+
+**Branch:** none yet — deferred by the operator until a real round shows the gap.
+
+**What is not built.** Coverage by reference. `responses` is a flat list, so a round that read two
+reviews can answer one and leave the other with neither an answer nor a silence; `parseReview`'s
+answered-nothing rule needs only one. `answerThreads` posts whatever `threadAnswers` holds, so a
+skipped thread stays unanswered and buys a round every tick until `MAX_PR_ROUNDS_TOTAL`. The shape
+that closes both: answers keyed by `comment N` and by thread id in the per-round schema, every one
+required, and a plain comment from a person allowed a silence with a reason instead. The
+answered-nothing conditional then goes, and each posted bullet quotes what it answers.
+
+**Why it waits.** No round has done either yet. #1462's silence is closed by `silenceable`, and
+#1461's round on 2026-09-25 answered both of Copilot's overviews. The operator's call the same day:
+raise it when a real round shows one of the two.
+
+**What would show it, and what it costs.** A `bot: round N` comment answering fewer reviews than its
+marker line says the round read, or a thread still ending in the reviewer's comment after a landed
+round. The build is about the size of `50097a7`, and starts with a probe of a nested `oneOf` —
+refused at a tool schema's root, unmeasured below it — run or handed over, never skipped
+(`PROVING.md`, "A probe a guard blocks is handed over as a command, never dropped").
+
+**What would make it the wrong idea.** A required key per comment grows the schema with the batch;
+a round reading a long human discussion could spend its structured-output retries on coverage
+rather than on the change.
 
 ### 56. Documents outside this file still say a declined run leaves the board as it found it
 
@@ -411,12 +437,22 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   been the person. Re-driving a ticket the solver has already tried means
   adding `agent:start` and clearing `agent:failed` first; both refusals are free, and the CLI says
   so on the way out.
-- **A review round's repair has never run, armed or not, and neither has the reply for a round
-  that lands nothing.** Only a partial round's drop notice has reached a real pull request: #1459 round 5 on
-  2026-09-24. #2688 round 8 went green on its first try, so `repairReviewRound` never started, and
-  no abandoned, refused or failed round has posted `whyNothingLanded`. **What would show it:**
-  `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails lint, and a
-  round refused at the diff gate or `widening`.
+- **A review round's repair has never run, armed or not, and nothing has shown a pull request held
+  in draft as `unlanded`.** The reply for a round that lands nothing has been seen: #1461 and #1462
+  on 2026-09-25, both `abandoned` with no report, each telling its thread and the review overview —
+  and each undrafted one tick later, which is what `Last landed:` now stops, so far only in tests.
+  A partial round's drop notice has reached a real pull request once, #1459 round 5 on 2026-09-24.
+  #2688 round 8 went green on its first try, so `repairReviewRound` never started. **What would
+  show it:** `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails
+  lint; and `pnpm solve:once <KEY> --advance` run twice on one whose round is refused at the diff
+  gate or `widening`, where the second run must print `UNLANDED` and leave the draft flag set.
+- **No marker carries a silence yet.** One real round has run under the per-round `silent`
+  schema: #1461's round 1 on the evening of 2026-09-25 answered both of Copilot's overviews, the
+  "Findings: None" one included, where #1462's round 2 had left the same kind silent. That round
+  had no plain comment from a person, so the silence path itself rests on the two probes
+  (`architecture/solve.md`, "A review is never silent"), one of which had a model rename a refused
+  silence to the allowed comment. **What would show it:** a round with a colleague's thank-you beside
+  a review must answer the review and add a `no reply to comment M` line to the marker.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries

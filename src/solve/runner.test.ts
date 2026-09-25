@@ -18,16 +18,30 @@ import {
   parseFix,
   parseMerge,
   parseRecon,
-  parseReview,
+  parseReview as parseReviewAllowing,
   parseSimplify,
 } from "./runner.ts";
-import { RECON_SCHEMA, REVIEW_SCHEMA } from "./schema.ts";
+import { RECON_SCHEMA, reviewSchema } from "./schema.ts";
+
+/** The comment the `silent` tests' rounds may leave unanswered; every other test's round allows none. */
+const QUIET = "comment 2";
+
+const quiet = (comment: string, reason = "a thank-you to a colleague") => ({ comment, reason });
+
+const parseReview = (value: unknown, issueKey: string, silenceable = new Set<string>()) =>
+  parseReviewAllowing(value, issueKey, silenceable);
 
 const options: SolveRunOptions = {
   issueKey: "SSX-3822",
   worktreePath: "/tmp/solve/SSX-3822",
   ticket: "Favicon is missing on the advisor page",
 };
+
+/** The part of the review schema's `silent` a round narrows. */
+interface SilentRule {
+  readonly maxItems?: number;
+  readonly items: { readonly properties: { readonly comment: { readonly enum?: string[] } } };
+}
 
 /** The value of a named flag in an argv array. */
 function flag(argv: readonly string[], name: string): string {
@@ -136,6 +150,23 @@ describe("buildSolveArgs", () => {
   it("gives each pass its own schema", () => {
     expect(flag(buildSolveArgs("recon", options), "--json-schema")).toContain("proceed");
     expect(flag(buildSolveArgs("fix", options), "--json-schema")).toContain("commitSubject");
+  });
+
+  it("narrows the review pass's silent to this round's list, so the CLI refuses the rest in-session", () => {
+    const silent = (silenceable?: readonly string[]) => {
+      const argv = buildSolveArgs("review", {
+        ...options,
+        ...(silenceable === undefined ? {} : { silenceable }),
+      });
+      return (JSON.parse(flag(argv, "--json-schema")) as { properties: { silent: SilentRule } })
+        .properties.silent;
+    };
+
+    expect(silent(["comment 2"]).items.properties.comment.enum).toEqual(["comment 2"]);
+    expect(silent(["comment 2"]).maxItems).toBeUndefined();
+    // An empty `enum` is not valid JSON Schema, so allowing none is said with `maxItems`.
+    expect(silent([]).maxItems).toBe(0);
+    expect(silent().maxItems).toBe(0);
   });
 
   it("denies writing in recon and permits it in fix", () => {
@@ -612,6 +643,9 @@ function satisfies(value: unknown, rule: Rule): boolean {
   if (keyword === "const") {
     return value === bound;
   }
+  if (keyword === "enum") {
+    return Array.isArray(bound) && bound.includes(value);
+  }
   throw new Error(`a keyword this test does not evaluate: ${String(keyword)}`);
 }
 
@@ -685,7 +719,7 @@ describe("RECON_SCHEMA's conditional, against parseRecon", () => {
 
 function reviewParserAccepts(report: Record<string, unknown>): boolean {
   try {
-    parseReview(report, "SSX-1");
+    parseReview(report, "SSX-1", new Set([QUIET]));
     return true;
   } catch (error) {
     if (error instanceof SolveParseError) {
@@ -695,15 +729,17 @@ function reviewParserAccepts(report: Record<string, unknown>): boolean {
   }
 }
 
-describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
+describe("the review schema's rules, against parseReview", () => {
+  /** A round whose `silent` may name only `QUIET`, as `reviewSchema` builds one per round. */
+  const SCHEMA = reviewSchema([QUIET]);
+
   const holds = (report: Record<string, unknown>, properties: Readonly<Record<string, Rule>>) =>
     Object.entries(properties).every(([field, rule]) => satisfies(report[field], rule));
 
-  /** Every constraint a `widened` field states; one with none left constrains nothing, as the CLI would read it. */
-  function itemsFilled(report: Record<string, unknown>): boolean {
-    const fields: Readonly<Record<string, Rule>> =
-      REVIEW_SCHEMA.properties.widened.items.properties;
-    const entries = Array.isArray(report["widened"]) ? (report["widened"] as unknown[]) : [];
+  /** Every constraint a list's item fields state; one with none left constrains nothing, as the CLI would read it. */
+  function itemsFilled(report: Record<string, unknown>, list: "widened" | "silent"): boolean {
+    const fields: Readonly<Record<string, Rule>> = SCHEMA.properties[list].items.properties;
+    const entries = Array.isArray(report[list]) ? (report[list] as unknown[]) : [];
     return entries.every((entry) =>
       Object.entries(fields).every(([field, rule]) => {
         const { type: _type, description: _description, ...constraint } = rule;
@@ -715,12 +751,37 @@ describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
     );
   }
 
+  interface Conditional {
+    readonly properties?: Readonly<Record<string, Rule>>;
+    readonly if?: { readonly properties: Readonly<Record<string, Rule>> };
+    readonly then?: Conditional;
+    readonly else?: Conditional;
+  }
+
+  /** Its own `properties`, then whichever branch its `if` picks, recursively; any other keyword throws, so a new rule cannot pass untested. */
+  function conditionalHolds(report: Record<string, unknown>, schema: Conditional): boolean {
+    const unknown = Object.keys(schema).filter(
+      (keyword) => !["properties", "if", "then", "else"].includes(keyword),
+    );
+    if (unknown.length > 0) {
+      throw new Error(`a keyword this test does not evaluate: ${unknown.join(", ")}`);
+    }
+    if (schema.properties !== undefined && !holds(report, schema.properties)) {
+      return false;
+    }
+    if (schema.if === undefined) {
+      return true;
+    }
+    const branch = holds(report, schema.if.properties) ? schema.then : schema.else;
+    return branch === undefined || conditionalHolds(report, branch);
+  }
+
   function schemaAccepts(report: Record<string, unknown>): boolean {
+    const branch = holds(report, SCHEMA.if.properties) ? SCHEMA.then : SCHEMA.else;
     return (
-      itemsFilled(report) &&
-      REVIEW_SCHEMA.allOf.every(
-        (branch) => !holds(report, branch.if.properties) || holds(report, branch.then.properties),
-      )
+      itemsFilled(report, "widened") &&
+      itemsFilled(report, "silent") &&
+      conditionalHolds(report, branch)
     );
   }
 
@@ -740,8 +801,19 @@ describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
       filesTouched: [],
       responses: [],
       threadAnswers: [],
-      silent: ["comment 1"],
+      silent: [{ comment: QUIET, reason: "a thank-you to a colleague" }],
     }),
+    // #1462 round 2: Copilot's "Findings: None" overview, left unanswered.
+    "a silence on a comment the round does not allow": review({
+      changed: false,
+      filesTouched: [],
+      responses: [],
+      threadAnswers: [],
+      silent: [{ comment: "comment 1", reason: "an automated overview that asks nothing" }],
+    }),
+    "a silence with no reason": review({ silent: [{ comment: QUIET, reason: " " }] }),
+    'a silence whose reason is "" alone': review({ silent: [{ comment: QUIET, reason: '""' }] }),
+    "a silence written as a bare reference": review({ silent: [QUIET] }),
     "a widening on a round that changed something": review({
       filesTouched: ["src/a.ts"],
       widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
@@ -749,6 +821,14 @@ describe("REVIEW_SCHEMA's conditionals, against parseReview", () => {
     "a widening on a round that changed nothing": review({
       changed: false,
       filesTouched: [],
+      widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
+    }),
+    // The same rule reached through the other branch of the answered-nothing conditional.
+    "a widening on a round that changed nothing and answered only a thread": review({
+      changed: false,
+      filesTouched: [],
+      responses: [],
+      threadAnswers: [{ ...threadAnswer, basis: "checked", resolve: false }],
       widened: [{ path: "src/a.ts", requestedBy: "comment 1", what: "dropped an export" }],
     }),
     "a widening naming no file": review({
@@ -1448,19 +1528,40 @@ describe("parseReview", () => {
   });
 
   describe("silent", () => {
-    it("reads a comment that asked nothing as considered, and posts nothing for it", () => {
+    const allowing = new Set([QUIET]);
+
+    it("reads a comment that asked nothing as considered, and keeps the reason for the marker", () => {
       const report = parseReview(
-        review({ changed: false, filesTouched: [], responses: [], silent: ["Comment 2"] }),
+        review({ changed: false, filesTouched: [], responses: [], silent: [quiet("Comment  2")] }),
         "SSX-3784",
+        allowing,
       );
 
-      expect(report.silent).toEqual(["comment 2"]);
+      expect(report.silent).toEqual([quiet(QUIET)]);
+    });
+
+    it("refuses a silence on a comment the round's list leaves out — #1462's Copilot review", () => {
+      expect(() =>
+        parseReview(review({ silent: [quiet("comment 1")] }), "SSX-3973", allowing),
+      ).toThrow(/comment 1, which must be answered/u);
+    });
+
+    it("refuses every silence when the round allows none", () => {
+      expect(() => parseReview(review({ silent: [quiet(QUIET)] }), "SSX-3973")).toThrow(
+        /must be answered/u,
+      );
+    });
+
+    it("refuses a silence with no reason, which is the only trace of why nothing was said", () => {
+      expect(() =>
+        parseReview(review({ silent: [quiet(QUIET, '""')] }), "SSX-3784", allowing),
+      ).toThrow(/no reason/u);
     });
 
     it("refuses a thread id, since a thread whose last word is not ours comes back every round", () => {
-      expect(() => parseReview(review({ silent: ["PRRT_kwDOE4J7MM6lhZi7"] }), "SSX-3784")).toThrow(
-        /inline thread always gets an answer/u,
-      );
+      expect(() =>
+        parseReview(review({ silent: [quiet("PRRT_kwDOE4J7MM6lhZi7")] }), "SSX-3784", allowing),
+      ).toThrow(/inline thread always gets an answer/u);
     });
 
     it("refuses a report with no silent list at all", () => {

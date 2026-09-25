@@ -142,6 +142,8 @@ export interface ReviewComment {
    * comment instead, which would overwrite a human's words after they commented.
    */
   readonly id: string;
+  /** Whether this is a submitted review's body rather than a plain comment; see `silenceable`. */
+  readonly review: boolean;
 }
 
 export interface ReviewState {
@@ -572,6 +574,8 @@ interface RawEntry {
   readonly createdAt: string | null;
   /** The GraphQL node id, `""` when absent. Only an issue comment can be edited. */
   readonly id: string;
+  /** Whether gh listed this under `reviews` rather than `comments`. */
+  readonly review: boolean;
 }
 
 /**
@@ -597,7 +601,7 @@ function dateOf(record: Record<string, unknown>): string | null {
  *    rather than reading an unrecognised shape as "no reviews".
  *  - a non-object element → skipped, so one bad entry doesn't discard the rest.
  */
-function entriesOf(value: unknown): readonly RawEntry[] | null {
+function entriesOf(value: unknown, review: boolean): readonly RawEntry[] | null {
   if (value === undefined || value === null) {
     return [];
   }
@@ -620,6 +624,7 @@ function entriesOf(value: unknown): readonly RawEntry[] | null {
       body: typeof body === "string" ? body : null,
       createdAt: dateOf(record),
       id: typeof id === "string" ? id : "",
+      review,
     });
   }
   return entries;
@@ -811,8 +816,8 @@ export async function readReview(
     return { outcome: "failed", reason: "the review payload is not a JSON object" };
   }
 
-  const reviews = entriesOf(root["reviews"]);
-  const comments = entriesOf(root["comments"]);
+  const reviews = entriesOf(root["reviews"], true);
+  const comments = entriesOf(root["comments"], false);
   if (reviews === null || comments === null) {
     return {
       outcome: "failed",
@@ -880,6 +885,7 @@ export async function readReview(
                 member: isMemberComment(entry.login, entry.association, body, reviewer),
                 createdAt: entry.createdAt ?? "",
                 id: entry.id,
+                review: entry.review,
               },
             ];
       }),
@@ -1591,4 +1597,14 @@ export function memberSources(
       thread.comments.some((comment) => comment.member) ? [thread.id] : [],
     ),
   ]);
+}
+
+/**
+ * What a review round's `silent` may name: a plain comment from a person, numbered as the formatter numbered it.
+ * A submitted review, or anything the requested reviewer wrote, is answered even when it asks for nothing.
+ */
+export function silenceable(comments: readonly ReviewComment[]): readonly string[] {
+  return comments.flatMap((comment, index) =>
+    !comment.review && comment.origin === "human" ? [commentSource(index)] : [],
+  );
 }
