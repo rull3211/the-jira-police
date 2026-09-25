@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3237 tests in 97 files**, no build step.
+> **3255 tests in 97 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62 and §63, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63 and §64, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §64. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §65. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
@@ -420,6 +420,14 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   show it:** `pnpm solve:once <KEY> --advance --repair` on a pull request whose next round fails
   lint; and `pnpm solve:once <KEY> --advance` run twice on one whose round is refused at the diff
   gate or `widening`, where the second run must print `UNLANDED` and leave the draft flag set.
+- **No real round has run under the per-round `silent` schema, and no marker carries a silence.**
+  The two probes on 2026-09-25 (`architecture/solve.md`, "A review is never silent") drove the real
+  CLI with the built schema but no review round: the first had a model rename a refused silence to
+  the allowed comment, the second showed the field's description steering it to answer instead.
+  #1462 will not repeat the case — its cursor is past that review. **What would show it:** the next
+  round whose only new feedback is a Copilot overview with no findings must post a `bot: round N`
+  reply, and one with a colleague's thank-you beside it must add a `no reply to comment M` line to
+  the marker.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries

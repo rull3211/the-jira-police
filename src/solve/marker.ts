@@ -72,7 +72,7 @@ export interface Marker {
    * returns `createdAt` and nothing that moves on an edit.
    */
   readonly lastRead: string;
-  /** One line per round, oldest first. */
+  /** One line per round, oldest first, each followed by one per comment that round left unanswered. */
   readonly rounds: readonly string[];
 }
 

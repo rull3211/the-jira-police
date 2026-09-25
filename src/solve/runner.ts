@@ -38,8 +38,8 @@ import {
   FIX_SCHEMA_JSON,
   MERGE_SCHEMA_JSON,
   RECON_SCHEMA_JSON,
-  REVIEW_SCHEMA_JSON,
   SIMPLIFY_SCHEMA_JSON,
+  reviewSchema,
 } from "./schema.ts";
 
 /** Withheld from every pass; denying `Bash` is what makes "the harness runs the verification" structural rather than a convention. */
@@ -129,6 +129,8 @@ export interface SolveRunOptions {
   readonly reviewFeedback?: string;
   /** This round's token in the repository-member label `reviewFeedback` carries; without it the prompt names no one who may widen the change. */
   readonly memberToken?: string;
+  /** The `comment N` a `review` pass may leave unanswered, from `silenceable`; absent allows none. */
+  readonly silenceable?: readonly string[];
   /** The conflict a `merge` pass resolves; paths are git's, but the contents are as untrusted as any branch anyone with write access pushed. */
   readonly conflict?: string;
   /** A failed review round's own account of its change, given to its `repair` pass in place of a recon brief. */
@@ -331,14 +333,15 @@ export function buildSolvePrompt(pass: Pass, options: SolveRunOptions): string {
   ].join("\n");
 }
 
-const SCHEMA_FOR: Record<Pass, string> = {
-  recon: RECON_SCHEMA_JSON,
-  fix: FIX_SCHEMA_JSON,
-  simplify: SIMPLIFY_SCHEMA_JSON,
-  review: REVIEW_SCHEMA_JSON,
-  merge: MERGE_SCHEMA_JSON,
+const SCHEMA_FOR: Record<Pass, (options: SolveRunOptions) => string> = {
+  recon: () => RECON_SCHEMA_JSON,
+  fix: () => FIX_SCHEMA_JSON,
+  simplify: () => SIMPLIFY_SCHEMA_JSON,
+  // Per round, so the CLI refuses a silence on a comment that must be answered before the pass ends, not after.
+  review: (options) => JSON.stringify(reviewSchema(options.silenceable ?? [])),
+  merge: () => MERGE_SCHEMA_JSON,
   // Same shape as fix: a repair round is a correction to the same change, not a different kind of report.
-  repair: FIX_SCHEMA_JSON,
+  repair: () => FIX_SCHEMA_JSON,
 };
 
 /** The command line for one pass. */
@@ -350,7 +353,7 @@ export function buildSolveArgs(pass: Pass, options: SolveRunOptions): string[] {
     pass === "simplify" ? SIMPLIFY_ALLOWED_TOOLS : writes ? FIX_ALLOWED_TOOLS : RECON_ALLOWED_TOOLS;
   const denied = writes ? FIX_DENIED_TOOLS : RECON_DENIED_TOOLS;
   // A `Record<Pass, …>` rather than a ternary chain: adding a pass fails to compile instead of silently inheriting the wrong schema.
-  const schema = SCHEMA_FOR[pass];
+  const schema = SCHEMA_FOR[pass](options);
   const vaultPath = options.vaultPath ?? "";
   const skillRootPath = options.skillRootPath ?? "";
   const readDirs = options.readDirs ?? [];
@@ -900,20 +903,51 @@ export interface ReviewReport {
   readonly abandoned: string;
   readonly injectionNoticed: string;
   readonly widened: readonly WidenedChange[];
-  /** `comment N` for each top-level comment that asked nothing; nothing is posted for these. */
-  readonly silent: readonly string[];
+  /** The top-level comments that asked nothing; no reply is posted, and the reason goes on the marker. */
+  readonly silent: readonly SilentComment[];
 }
 
-/** A top-level comment's reference, as the header numbers it; a thread cannot go unanswered, so its id is refused here. */
-function silentComments(record: Record<string, unknown>, issueKey: string): readonly string[] {
-  return strings(record, "silent").map((entry) => {
-    const numbered = /^comment\s+(\d+)$/iu.exec(entry.trim());
+export interface SilentComment {
+  /** `comment N`, normalised. */
+  readonly comment: string;
+  readonly reason: string;
+}
+
+/**
+ * Refuses a silence on anything but the round's `silenceable` comments, which the schema also told the CLI.
+ * A thread id is refused the same way: a thread whose last word is not ours is read again every round.
+ */
+function silentComments(
+  record: Record<string, unknown>,
+  issueKey: string,
+  silenceable: ReadonlySet<string>,
+): readonly SilentComment[] {
+  const value = record["silent"];
+  if (!Array.isArray(value)) {
+    throw new SolveParseError(`${issueKey}: silent was not an array`);
+  }
+  return value.map((item) => {
+    const entry = asRecord(item, `${issueKey}: a silent entry`);
+    const named = str(entry, "comment");
+    const numbered = /^comment\s+(\d+)$/iu.exec(named.trim());
     if (numbered === null) {
       throw new SolveParseError(
-        `${issueKey}: silent named ${JSON.stringify(entry)}, which is not a \`comment N\` — an inline thread always gets an answer, since one whose last word is not ours is read again every round`,
+        `${issueKey}: silent named ${JSON.stringify(named)}, which is not a \`comment N\` — an inline thread always gets an answer, since one whose last word is not ours is read again every round`,
       );
     }
-    return `comment ${String(Number(numbered[1]))}`;
+    const comment = `comment ${String(Number(numbered[1]))}`;
+    if (!silenceable.has(comment)) {
+      throw new SolveParseError(
+        `${issueKey}: silent named ${comment}, which must be answered — a submitted review, or anything the requested reviewer wrote, gets a reply in \`responses\` even when nothing changes`,
+      );
+    }
+    const reason = str(entry, "reason");
+    if (reason.trim() === "") {
+      throw new SolveParseError(
+        `${issueKey}: ${comment} was left unanswered with no reason, which is the only trace a person has of why nothing was said`,
+      );
+    }
+    return { comment, reason };
   });
 }
 
@@ -1069,8 +1103,12 @@ export function parseMerge(value: unknown, issueKey: string): MergeReport {
   return report;
 }
 
-/** Validates one round of review resolution. */
-export function parseReview(value: unknown, issueKey: string): ReviewReport {
+/** Validates one round of review resolution; `silenceable` is the list the round's schema was built from. */
+export function parseReview(
+  value: unknown,
+  issueKey: string,
+  silenceable: ReadonlySet<string>,
+): ReviewReport {
   const record = asRecord(value, `review report for ${issueKey}`);
   const report: ReviewReport = {
     changed: bool(record, "changed"),
@@ -1084,7 +1122,7 @@ export function parseReview(value: unknown, issueKey: string): ReviewReport {
     abandoned: str(record, "abandoned"),
     injectionNoticed: str(record, "injectionNoticed"),
     widened: widenedChanges(record, issueKey),
-    silent: silentComments(record, issueKey),
+    silent: silentComments(record, issueKey, silenceable),
   };
 
   // Abandoning after touching something is legal here too (see `parseFix`). Unlike the fix pass, "no change" with nothing abandoned is also legitimate — a review can raise only questions.

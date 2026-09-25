@@ -10,7 +10,7 @@
 import { randomBytes } from "node:crypto";
 
 import { createLogger } from "../logger.ts";
-import { shorten } from "../text.ts";
+import { oneLine, shorten } from "../text.ts";
 import {
   type BotIdentity,
   type ReviewComment,
@@ -32,6 +32,7 @@ import {
   replyToThread,
   requestReview,
   resolveThread,
+  silenceable,
 } from "./pr.ts";
 import {
   type Marker,
@@ -55,7 +56,7 @@ import {
   resolveReview,
 } from "./orchestrator.ts";
 import { type ReviewRepairRecord, recordReviewRepairRound } from "./repair-ledger.ts";
-import type { CommitMessage, ReviewReport, ThreadAnswer } from "./runner.ts";
+import type { CommitMessage, ReviewReport, SilentComment, ThreadAnswer } from "./runner.ts";
 import { quietFor } from "./silence.ts";
 import type { Worktree } from "./worktree.ts";
 
@@ -210,7 +211,10 @@ export interface SurveyRequest {
 export interface AdvanceRequest
   extends
     SurveyRequest,
-    Omit<ReviewRoundRequest, "reviewFeedback" | "worktree" | "memberToken" | "members"> {
+    Omit<
+      ReviewRoundRequest,
+      "reviewFeedback" | "worktree" | "memberToken" | "members" | "silenceable"
+    > {
   readonly identity: BotIdentity;
   readonly reviewer?: string;
   /** See `WorktreeSource`. Not called on a look that finds nothing to do. */
@@ -410,7 +414,7 @@ async function reserve(
 
 interface LandingRequest extends Omit<ReserveRequest, "commentId"> {
   readonly issueKey: string;
-  /** What the reservation wrote; re-rendered whole, so a landing can never move any other field. */
+  /** What the reservation wrote, plus the round's silences; re-rendered whole, so a landing can never move any other field. */
   readonly marker: Marker;
   /** The reservation's own result, which carries the id even when the reservation posted the marker. */
   readonly reserved: Extract<WriteCommentResult, { outcome: "written" }>;
@@ -439,6 +443,39 @@ async function recordLanded(
       note: "the round's work is on the pull request; it stays in draft until a new comment starts a round",
     });
   }
+}
+
+/** A round that did not land still records why it left comments unanswered; a failed write is logged, since the outcome stands either way. */
+async function recordSilences(
+  runner: SolveDependencies["commands"],
+  request: LandingRequest,
+): Promise<void> {
+  const { issueKey, marker, reserved, ...target } = request;
+  const written = await reserve(runner, { ...target, marker, commentId: reserved.commentId });
+  if (written.outcome === "failed") {
+    log.warn("solve.review.silence_unrecorded", {
+      issueKey,
+      number: request.number,
+      round: marker.count,
+      reason: written.reason,
+      note: "the comments this round left unanswered have no reason on the pull request",
+    });
+  }
+}
+
+/** Enough of the pass's reason to read in the marker's list. */
+const SILENCE_REASON_CHARS = 160;
+
+/** One marker line per comment left unanswered, `@` broken like any text the pass wrote; an edit, so it notifies nobody. */
+function silenceLines(
+  round: number,
+  silent: readonly SilentComment[],
+  comments: readonly ReviewComment[],
+): readonly string[] {
+  return silent.map(({ comment, reason }) => {
+    const author = comments[Number(comment.slice("comment ".length)) - 1]?.author ?? "unknown";
+    return `round ${String(round)} — no reply to ${comment} by ${author}: ${unmentioned(shorten(oneLine(reason), SILENCE_REASON_CHARS))}`;
+  });
 }
 
 /**
@@ -1001,9 +1038,6 @@ export async function runRound(
   if (reserved.outcome === "failed") {
     return cursorFailed(`the round was not reserved, so it did not run — ${reserved.reason}`);
   }
-  const landed = async (): Promise<void> =>
-    recordLanded(commands, { ...gh, issueKey, marker: reservation, reserved });
-
   const memberToken = randomBytes(6).toString("hex");
   const resolved = await resolveReview(deps, {
     ...request,
@@ -1013,7 +1047,12 @@ export async function runRound(
     reviewFeedback: `${formatReviewFeedback(comments, memberToken)}\n\n${formatThreads(threads, memberToken)}`,
     memberToken,
     members: memberSources(comments, threads),
+    silenceable: silenceable(comments),
   });
+  const silences = silenceLines(round + 1, resolved.report?.silent ?? [], comments);
+  const closing: Marker = { ...reservation, rounds: [...reservation.rounds, ...silences] };
+  const landed = async (): Promise<void> =>
+    recordLanded(commands, { ...gh, issueKey, marker: closing, reserved });
   if (resolved.kind === "abandoned" || resolved.kind === "refused" || resolved.kind === "failed") {
     // Before anything else is returned: the reservation has already moved the cursor past these
     // comments, so this reply is the only way the people who asked learn to ask again.
@@ -1028,6 +1067,10 @@ export async function runRound(
       why: whyNothingLanded(resolved),
       timeoutMs: request.ghTimeoutMs,
     });
+    // `tellWhoAsked` skips a silent comment, so the marker is the only place its reason reaches.
+    if (silences.length > 0) {
+      await recordSilences(commands, { ...gh, issueKey, marker: closing, reserved });
+    }
     if (resolved.kind === "abandoned") {
       return { kind: "abandoned", reason: resolved.reason, told };
     }
@@ -1244,7 +1287,7 @@ async function announceDropped(
   const threads = request.threads.filter(
     (thread) => sources.has(thread.id.toLowerCase()) || paths.has(thread.path),
   );
-  const silent = new Set(request.report.silent);
+  const silent = new Set(request.report.silent.map((entry) => entry.comment));
   const comments =
     named.length > 0 || threads.length > 0
       ? named
@@ -1341,7 +1384,7 @@ async function tellWhoAsked(
   commands: SolveDependencies["commands"],
   request: TellRequest,
 ): Promise<Spoken> {
-  const silent = new Set(request.report?.silent ?? []);
+  const silent = new Set((request.report?.silent ?? []).map((entry) => entry.comment));
   const asked = request.comments.filter(
     (_comment, index) => !silent.has(`comment ${String(index + 1)}`),
   );

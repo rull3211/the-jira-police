@@ -1231,6 +1231,7 @@ const reviewRequest = {
   reviewFeedback: "Copilot: the wrapper element looks unnecessary here.",
   memberToken: "a1b2c3d4e5f6",
   members: new Set<string>(),
+  silenceable: [] as readonly string[],
 };
 
 /** The pre-round read `boundWidening` makes: the pull request's own commits, not the worktree. */
@@ -1418,6 +1419,35 @@ describe("resolveReview", () => {
     await resolveReview(h.deps, reviewRequest);
 
     expect(h.seen[0]?.options.memberToken).toBe(reviewRequest.memberToken);
+  });
+
+  describe("silent, bounded by the round's own list", () => {
+    const quiet = { comment: "comment 2", reason: "a thank-you to a colleague" };
+
+    it("hands the pass the comments it may leave unanswered, which its schema is built from", async () => {
+      const { h } = harness({ review: review() });
+
+      await resolveReview(h.deps, { ...reviewRequest, silenceable: ["comment 2"] });
+
+      expect(h.seen[0]?.options.silenceable).toEqual(["comment 2"]);
+    });
+
+    it("keeps a silence on a comment the list allows", async () => {
+      const { h } = harness({ review: review({ silent: [quiet] }) });
+
+      const outcome = await resolveReview(h.deps, { ...reviewRequest, silenceable: ["comment 2"] });
+
+      expect(outcome.kind).toBe("resolved");
+    });
+
+    it("discards a round that went silent on a comment the list leaves out — #1462's Copilot review", async () => {
+      const { h } = harness({ review: review({ silent: [quiet] }) });
+
+      const outcome = await resolveReview(h.deps, { ...reviewRequest, silenceable: ["comment 1"] });
+
+      expect(outcome).toMatchObject({ kind: "abandoned" });
+      expect(outcome.kind === "abandoned" ? outcome.reason : "").toContain("must be answered");
+    });
   });
 
   it("keeps a widening a member asked for, in a file the pull request already changed", async () => {

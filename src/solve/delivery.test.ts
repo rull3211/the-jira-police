@@ -1174,15 +1174,39 @@ describe("advance", () => {
     });
 
     it("tells nothing to a comment the round marked as asking nothing", async () => {
-      const h = harness({ review: { ...widened("comment 1"), silent: ["comment 1"] } }, [
-        memberAsked,
-      ]);
+      const withThanks: Rule = {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: reviewJson({
+            reviews: [{ author: { login: "copilot" }, body: "the wrapper looks unnecessary" }],
+            comments: [
+              {
+                author: { login: "rull3211" },
+                authorAssociation: "MEMBER",
+                body: "and drop the unused exports while you are in there",
+              },
+              fromHuman("thanks, nice catch"),
+            ],
+          } as never),
+        },
+      };
+      const h = harness(
+        {
+          review: {
+            ...widened("comment 1"),
+            silent: [{ comment: "comment 3", reason: "a thank-you" }],
+          },
+        },
+        [withThanks],
+      );
 
       await advance(h.deps, advanceRequest);
 
       const told = posts(h).find((body) => body.includes("nothing from this round was pushed"));
-      expect(told).not.toContain("the wrapper looks unnecessary");
+      expect(told).not.toContain("thanks, nice catch");
       expect(told).toContain("> and drop the unused exports while you are in there");
+      // A review is never silent, so it is told too.
+      expect(told).toContain("> the wrapper looks unnecessary");
     });
 
     it("breaks a mention the pass wrote into a reason, in the comment and in the thread", async () => {
@@ -2252,6 +2276,7 @@ const said = (author: string, body: string, origin: ReviewOrigin = "reviewer"): 
   id: "IC_1",
   origin,
   member: false,
+  review: false,
 });
 
 const stateWith = (...comments: readonly ReviewComment[]): ReviewState => ({
@@ -2702,6 +2727,130 @@ describe("what a round leaves for the next look", () => {
     expect(warn).toHaveBeenCalledWith(
       "solve.review.landing_unrecorded",
       expect.objectContaining({ round: 2, reason: expect.stringContaining("HTTP 502") }),
+    );
+    warn.mockRestore();
+  });
+});
+
+/** #1462's one comment: Copilot's overview, with nothing in it to act on. */
+const NO_FINDINGS = { author: { login: "copilot" }, body: "Findings: None" };
+
+/** The same, with a colleague's thank-you beside it, which asks nothing. */
+const reviewAndThanks = (thanks = "thanks, nice catch"): Rule => ({
+  match: saw("pr", "view"),
+  reply: {
+    stdout: reviewJson({ reviews: [NO_FINDINGS], comments: [fromHuman(thanks)] } as never),
+  },
+});
+
+const answeredNoChange = (silent: readonly unknown[], responses: readonly string[]) =>
+  review({
+    changed: false,
+    filesTouched: [],
+    commitSubject: "",
+    commitBody: "",
+    responses,
+    silent,
+  });
+
+const CHECKED = "Checked: the overview reports no findings, and the diff matches the ticket.";
+
+describe("a comment left unanswered", () => {
+  it("does not let a round leave a review silent, even one reporting no findings (#1462)", async () => {
+    // The pass's report on #1462, round 2. The schema now refuses it in-session; this is the net behind that.
+    const h = harness(
+      {
+        review: answeredNoChange(
+          [{ comment: "comment 1", reason: "an automated overview that asks nothing" }],
+          [],
+        ),
+      },
+      [
+        {
+          match: saw("pr", "view"),
+          reply: { stdout: reviewJson({ reviews: [NO_FINDINGS] } as never) },
+        },
+      ],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(h.seen[0]?.options.silenceable).toEqual([]);
+    expect(outcome).toMatchObject({ kind: "abandoned" });
+    expect(posts(h).some((body) => body.includes("> Findings: None"))).toBe(true);
+  });
+
+  it("answers the review, and puts the thank-you's silence and its reason on the marker", async () => {
+    const h = harness(
+      { review: answeredNoChange([{ comment: "comment 2", reason: "a thank-you" }], [CHECKED]) },
+      [reviewAndThanks()],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(h.seen[0]?.options.silenceable).toEqual(["comment 2"]);
+    expect(outcome).toMatchObject({ kind: "iterated", pushed: false });
+    expect(posts(h).find((body) => body.startsWith(`${BOT_PREFIX}round 1`))).toContain(CHECKED);
+    const written = markerWrites(h).at(-1) ?? "";
+    expect(written).toContain("\n- round 1 — no reply to comment 2 by a-colleague: a thank-you");
+    expect(parseMarker(written)).toMatchObject({ outcome: "parsed", marker: { landed: 1 } });
+  });
+
+  it("records a silence on a round that landed nothing, without landing it", async () => {
+    // `tellWhoAsked` skips the silent comment, so nothing else says why it got no reply.
+    const h = harness(
+      { review: review({ silent: [{ comment: "comment 2", reason: "a thank-you" }] }) },
+      [reviewAndThanks(), { match: saw("run", "test"), reply: { exitCode: 1 } }],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "verification" });
+    const written = markerWrites(h).at(-1) ?? "";
+    expect(written).toContain("no reply to comment 2 by a-colleague: a thank-you");
+    expect(written).toContain("Last landed: 0");
+    expect(posts(h).join("\n")).not.toContain("> thanks, nice catch");
+  });
+
+  it("keeps the pass's reason on one line and breaks a mention in it", async () => {
+    const h = harness(
+      {
+        review: answeredNoChange(
+          [{ comment: "comment 2", reason: "a thank-you to\n@rull3211 and the team" }],
+          [CHECKED],
+        ),
+      },
+      [reviewAndThanks()],
+    );
+
+    await advance(h.deps, advanceRequest);
+
+    expect(markerWrites(h).at(-1)).toContain(
+      "no reply to comment 2 by a-colleague: a thank-you to @\u200brull3211 and the team",
+    );
+  });
+
+  it("keeps a failed round's outcome when its silences cannot be recorded, and says so", async () => {
+    const warn = vi.spyOn(createLogger("solve"), "warn").mockImplementation(() => {});
+    const h = harness(
+      { review: review({ silent: [{ comment: "comment 2", reason: "a thank-you" }] }) },
+      [
+        reviewAndThanks(),
+        { match: saw("run", "test"), reply: { exitCode: 1 } },
+        {
+          match: (argv) =>
+            asked("updateIssueComment")(argv) && argv.some((arg) => arg.includes("no reply to")),
+          reply: { exitCode: 1, stderr: "HTTP 502" },
+        },
+      ],
+    );
+
+    const outcome = await advance(h.deps, advanceRequest);
+
+    expect(outcome).toMatchObject({ kind: "failed", stage: "verification" });
+    expect(warn).toHaveBeenCalledWith(
+      "solve.review.silence_unrecorded",
+      expect.objectContaining({ round: 1, reason: expect.stringContaining("HTTP 502") }),
     );
     warn.mockRestore();
   });
