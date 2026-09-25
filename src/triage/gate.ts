@@ -213,13 +213,8 @@ function checkLabels(payload: TriagePayload): readonly string[] {
 }
 
 /**
- * `.claude/skills/intake-triage/INTAKE_INSTRUCTIONS.md` §11's delta legitimately omits a label
- * already on the issue, so an owned label present in `labels` but missing from `labelsAdd` is not
- * on its own a defect — except on a `"create"` run, where nothing already wrote the label:
- * `checkLabels` above restricts every other writer out of the `agent:` namespace, so
- * `commentAction: "create"` (no prior triage comment matched) means the label cannot already be on
- * the issue. On that shape the omission is the two fields of one payload disagreeing, and the label
- * would reach the comment body but never the board.
+ * On a `"create"` run nothing already holds the label, so `labels` asserting it while `labelsAdd`
+ * omits it is a real gap, not a legitimate re-triage skip.
  */
 function checkOwnedLabelReachesDelta(payload: TriagePayload, label: string): readonly string[] {
   if (payload.mutation.commentAction !== "create") {
@@ -236,14 +231,8 @@ function checkOwnedLabelReachesDelta(payload: TriagePayload, label: string): rea
 }
 
 /**
- * The fitness call has to agree with the rest of the payload: only `ready-ish` has passed DoR, so
- * a `dor:gaps` ticket is never agent-solvable (this falls out of `assertDorCoherent` plus the
- * skill's dev-lens evidence being ACCEPT-only, not a rule invented here).
- *
- * The label checks below read `labels`, never `labelsAdd` — `labelsAdd` is a delta that
- * legitimately omits a label already on the issue from a re-triage, so keying on it would
- * false-positive on exactly those re-runs. `checkOwnedLabelReachesDelta` is the exception, for the
- * one run shape where that allowance cannot apply.
+ * Only `ready-ish` has passed DoR, so a `dor:gaps` ticket is never agent-solvable — this follows
+ * from `assertDorCoherent`, not a rule invented here.
  */
 function checkAgentFitness(payload: TriagePayload): readonly string[] {
   const fitness = payload.agentFitness;
