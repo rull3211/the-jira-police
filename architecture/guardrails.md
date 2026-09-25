@@ -24,12 +24,12 @@ after a compaction — is the case where they matter most.
 
 ### What is built
 
-| script             | fires on                                                | what it does                                                                                                                                                                                                                                                                                          |
-| ------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `branch-guard.sh`  | `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit` | refuses a write on a protected branch (`main`, `master`, `develop`, `release/*`) — judged against the worktree the target file sits in, falling back to the project directory when the payload names no path — refuses a push naming one from any branch, and refuses `gh pr merge` from every branch |
-| `branch-stack.sh`  | `PreToolUse` on `Bash`                                  | returns `ask` when a new branch would take the stack past `BRANCH_STACK_MAX` (default 3)                                                                                                                                                                                                              |
-| `session-brief.sh` | `SessionStart`                                          | prints the contract; on `trigger=compact` it also inlines the three rules and `FINISHING.md`'s four questions                                                                                                                                                                                         |
-| `commit-brief.sh`  | `PreToolUse` on `Bash`                                  | prints `FINISHING.md`'s four questions when the command is a `git commit`; carries no permission decision at all                                                                                                                                                                                      |
+| script             | fires on                                                | what it does                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `branch-guard.sh`  | `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit` | refuses a write on a protected branch (`main`, `master`, `develop`, `release/*`) — judged against the worktree the target file sits in, or for a `Bash` git write the checkout its `cwd` names when nothing in the command can point git elsewhere, and otherwise against the project directory — refuses a push naming one from any branch, and refuses `gh pr merge` from every branch |
+| `branch-stack.sh`  | `PreToolUse` on `Bash`                                  | returns `ask` when a new branch would take the stack past `BRANCH_STACK_MAX` (default 3)                                                                                                                                                                                                                                                                                                 |
+| `session-brief.sh` | `SessionStart`                                          | prints the contract; on `trigger=compact` it also inlines the three rules and `FINISHING.md`'s four questions                                                                                                                                                                                                                                                                            |
+| `commit-brief.sh`  | `PreToolUse` on `Bash`                                  | prints `FINISHING.md`'s four questions when the command is a `git commit`, naming whichever branch the payload's `cwd` resolves to when it names one, and the project directory's otherwise; carries no permission decision at all                                                                                                                                                       |
 
 `lib.sh` holds what they share. `test-hooks.sh` is the suite, behind `pnpm test:hooks`, which you run
 if you change a script; `pnpm hooks:brief` and `pnpm hooks:commit-brief` render the two briefs on
@@ -128,6 +128,29 @@ assertions existed it broke nothing the suite could see. **The same audit was ow
 already there and was paid late** — `checkout -B main` and `switch -C main` were allowed from a
 protected branch until `hatchNamesProtected` closed them.
 
+**A `Bash` git write is judged in the checkout its payload's `cwd` names, so the worktree has to be
+where the session is.** Claude Code keeps `CLAUDE_PROJECT_DIR` on the primary checkout when a session
+enters a worktree, and the registration reaches the script through it, so the guard that runs is the
+primary checkout's copy and the project directory it reads stays on `main`. The `cwd` field is what
+follows the session into the worktree and through each `cd`. Both are what Claude Code's worktree
+documentation says, and the first was measured on 2026-09-25: with the worktree's copy reworded, the
+live refusal kept the old wording. Enter the worktree with `EnterWorktree`, which asks first for a
+path outside `.claude/worktrees/`, because a `cd` that leaves the project directory is reset rather
+than kept.
+
+**What the guard cannot place, it leaves to the project directory**: a `cd`, `pushd`, `source`, `-C`,
+`--git-dir`, `--work-tree` or `GIT_DIR` anywhere in the command, a verb that can write a branch other
+than the checked-out one (`branch -f`, `update-ref`, a refspec or a glob, a push naming no refspec),
+or a floor verb inside another command. From a worktree with the primary checkout on `main`, each of
+those is refused as it was before, and the refusal says which it was. The converse holds as well: a
+write that starts in a protected checkout is refused whatever the project directory is.
+
+**`commit-brief.sh` had the same defect, for display rather than for a decision.** It named
+`CLAUDE_PROJECT_DIR`'s branch unconditionally, so a commit that landed cleanly inside a worktree was
+still narrated as landing on `main`. It now prefers the branch its payload's `cwd` names, the project
+directory's otherwise — no escape-hatch analysis, because nothing here refuses; a wrong name here
+misleads and a wrong refusal in `branch-guard.sh` blocks.
+
 **One consequence is left unfixed because it over-asks rather than under-refuses.**
 `unmergedBranches` (`lib.sh:62`) drops the project directory's own HEAD from the stack count, which
 assumed the agent stands on the branch it is working on. With the primary checkout parked on `main`
@@ -163,8 +186,10 @@ zero-risk probes an agent can run on itself.
 ### Where the residual risk sits
 
 **`.claude/hooks/*.sh` is not protected.** The agent can edit every script the settings file points
-at, and `CLAUDE.md` positively expects it to. Neutering `branch-guard.sh` is a one-line diff. What
-stops it is what stops any bad change: it must be made on a branch, it lands in a pull request a human
+at, and `CLAUDE.md` positively expects it to. Neutering `branch-guard.sh` is a one-line diff, live
+only once it reaches the primary checkout: the registration names the script through
+`CLAUDE_PROJECT_DIR`, which entering a worktree does not move. What stops it is what stops any bad
+change: it must be made on a branch, it lands in a pull request a human
 reads, and CI runs the hook suite against it. **Review is the protection.** The write ban protects the
 wiring, not the wire.
 
