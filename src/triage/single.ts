@@ -11,6 +11,11 @@ import type { TicketRef } from "../jira/types.ts";
 import type { TriageResult } from "../output/sink.ts";
 import type { TriagePayload } from "./runner.ts";
 
+/** Exported so a caller can tell this placeholder from a real title and refuse to show it as one. */
+export function syntheticSummary(issueKey: string): string {
+  return `${issueKey} (summary not fetched in single-run mode)`;
+}
+
 /**
  * A ticket reference for a key somebody typed, with the fields discovery would have filled in
  * left honestly empty. The summary says so in words rather than being blank, since it is the one
@@ -20,7 +25,7 @@ import type { TriagePayload } from "./runner.ts";
 export function syntheticTicket(issueKey: string, baseUrl: string): TicketRef {
   return {
     key: issueKey,
-    summary: `${issueKey} (summary not fetched in single-run mode)`,
+    summary: syntheticSummary(issueKey),
     url: `${baseUrl}/browse/${issueKey}`,
     created: new Date().toISOString(),
     updated: "",

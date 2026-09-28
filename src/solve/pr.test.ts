@@ -2213,12 +2213,28 @@ describe("findPullRequest", () => {
     expect(argv.join(" ")).toContain("--state all");
   });
 
-  it("finds the open pull request", async () => {
-    expect(await find([{ number: 12, state: "OPEN", isDraft: true }])).toEqual({
+  it("finds the open pull request, with the URL gh was asked for", async () => {
+    const url = "https://github.com/storebrand-digital/buy-insurance-advisor-web/pull/12";
+    const runner = fakeRunner({
+      "pr list": { stdout: JSON.stringify([{ number: 12, state: "OPEN", isDraft: true, url }]) },
+    });
+
+    const found = await findPullRequest(runner, {
+      cwd: "/repos/buy-insurance-advisor-web",
+      repo: REPO,
+      branch: BRANCH,
+      timeoutMs: 30_000,
+    });
+
+    expect(found).toEqual({ outcome: "found", number: 12, state: "OPEN", isDraft: true, url });
+    expect(runner.calls[0]?.join(" ")).toContain("--json number,state,isDraft,url");
+  });
+
+  it("finds a pull request whose row carries no URL, since the URL is only ever shown", async () => {
+    expect(await find([{ number: 12, state: "OPEN", isDraft: true }])).toMatchObject({
       outcome: "found",
       number: 12,
-      state: "OPEN",
-      isDraft: true,
+      url: null,
     });
   });
 

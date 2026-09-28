@@ -201,7 +201,7 @@ somebody is actively working. **It cannot be a status category.** Measured again
 the eligible set straddles the taxonomy and the columns have to be named one by one. In the component
 scope this narrows 106 eligible tickets to 65.
 
-**`TRIAGE_STATUS_PRIORITY` is the second status setting and reads its blank the other way round.**
+**`TRIAGE_STATUS_PRIORITY` is the second status setting, and its blank means "change nothing".**
 It does not select, it orders: an ordered list of statuses, leftmost column first, unlisted last,
 applied in JavaScript after the query rather than as JQL. The query stays `ORDER BY created ASC`,
 but no longer because the cursor needs it — the poller re-sorts and derives the cursor from that
@@ -210,9 +210,9 @@ newest issues rather than the oldest (`jira/jql.ts`). Blank means the
 order the daemon has always used — strict oldest-first — so this cannot arrive by upgrade, which is
 deliberate: the wrong order starves whatever the leftmost column is used for, and only a real
 backlog can say. `poll.order` prints the resulting queue, at `info`, and only when an operator has
-configured one. **The two settings taking a blank in opposite directions is the trap here** —
-a blank widens what `TRIAGE_ONLY_STATUS` admits, and makes `TRIAGE_STATUS_PRIORITY` do nothing at
-all.
+configured one. **Neither blank meaning "none" is the trap here** — a blank `TRIAGE_ONLY_STATUS`
+brings its default back rather than lifting the restriction, and a blank
+`TRIAGE_STATUS_PRIORITY` does nothing at all.
 
 **Measured against the real backlog, 2026-09-10, and the result argues for leaving it unset.** A
 139-day discovery window over the component scope returns 35 tickets — **not the 65 above, which is

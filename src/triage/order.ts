@@ -56,8 +56,7 @@ function matches(entry: string, ticket: TicketRef): boolean {
 
 /**
  * The order to spend model runs in: by column, then oldest first within a column. An empty
- * `priority` returns created-ascending unchanged — see `TRIAGE_STATUS_PRIORITY` in `settings.ts`
- * for why blank means "today's behaviour" here but "no restriction" in `TRIAGE_ONLY_STATUS`.
+ * `priority` returns created-ascending unchanged.
  */
 export function byStatusPriority(
   priority: readonly string[],

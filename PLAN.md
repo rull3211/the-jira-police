@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3307 tests in 98 files**, no build step.
+> **3429 tests in 105 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §71 and §73, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §71 and §73, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,10 +78,61 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §72. The pointer is a per-branch guess: two branches open at once each read it
-from their own base. §68–70 were taken by `feat/slack-audit-thread`, open when §71 was written.
+The next entry is §75. The pointer is a per-branch guess: two branches open at once each read it
+from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
+`feat/slack-audit-thread`, open when §71 was written; §69 and §70 are the Slack work that follows it.
 
 <!-- refs:on -->
+
+### 69. Nobody is told when a ticket they care about crashes or opens a pull request
+
+**Branch:** none yet — cut from `main` after `feat/slack-audit-thread` merges.
+
+**What is not built.** `/bencebot subscribe|unsubscribe tags|dm`, and the two lists behind it.
+`tags` are mentioned in each new parent as it is posted; `dm` get a direct message on each major
+event. Slack sends no notification for a mention added by editing a message — reported
+consistently, not measured here — so a tag in the parent pings once, and the DM list is the answer
+for every later event. That was written before each major entry became a broadcast reply, which is
+a new message: a tag carried on the broadcast would ping on every major event, so the two lists may
+collapse into one. Where the lists live is open: they were to be the metadata of a bot-owned roster
+message, which the audit thread's first probe refuted (`README.md`, `slack:probe`). The counterpart
+of the thread's store, a property on the ticket, is a property on the Jira project, under the same
+`jira-police.` prefix.
+
+Inbound needs Socket Mode, because the daemon has no public URL, and Node 24's own `WebSocket` is
+enough — no dependency. `apps.connections.open` with the `xapp-` token, the command's reply sent in
+the envelope's ack, a reconnect on `disconnect`. **The subscriber is the envelope's `user_id`,
+never anything in the command's text.** `pnpm slack:listen` drives it by hand; `src/slack-loop.ts`
+puts it in the daemon under invariant 17 — built before the loops, `null` when off, and unable to
+reject the daemon's `Promise.all`.
+
+**Why its own branch.** It is the first inbound channel this service has — something outside it can
+now cause a write — which is a different privilege from posting.
+
+**What would make it the wrong idea.** A roster that cannot be read must stop the listener from
+writing, never be taken as empty: an empty list written over an unreadable one is every subscriber
+silently dropped. A DM per major event per subscriber is noise at scale; at one team it should not
+be.
+
+### 70. The pull request channel's announcement is written by hand every time
+
+**Branch:** none yet — cut from `main` after `feat/slack-audit-thread` merges.
+
+**What is not built.** When a pull request opens, a direct message to `SLACK_OPERATOR_USER_ID`
+holding one line to copy into the team's pull request channel: `<url|PR-Bencebot>` and one
+Norwegian sentence describing the change, like _Fiks på cache eviction på vellykket customer write
+slik at vi tømmer cachen på utdaterte personer_. Nothing writes that sentence today:
+`commitSubject` is an English Conventional Commits line and `summary` an English paragraph for the
+reviewer. So `FIX_SCHEMA` gains a required `teamChannelLine` — one bokmål sentence, no ticket key,
+no claim that anything passes — which `parseFix` reads and the harness one-lines and caps.
+
+**Why its own branch.** It changes the contract of the paid fix pass, whose `if` conditional has
+already needed a fix of its own (`2ed3049`), so it is watched on one real `solve:once <KEY> --pr`
+before anything relies on it.
+
+**What would make it the wrong idea.** Norwegian written by a model for a channel is prose nothing
+checks mechanically. If the line needs rewriting every time, the ticket's own summary is the free
+alternative.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
@@ -474,6 +525,15 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   on 2026-09-24, round 6 was discarded inside `parseReview` before reaching it, and rounds 7 and 8
   were not refused by it. A member's request aimed at a file the pull request had not changed is the
   case that would show it.
+- **The audit thread has never broadcast.** Each major entry on a ticket that already has a thread
+  is posted as a reply with `reply_broadcast`, and the ticket's previous broadcast deleted, so a
+  ticket resurfaces at the bottom of the channel once. The collapsed card it sits beside has been
+  looked at: the operator saw six redrawn on 2026-09-28 render collapsed, with the title a working
+  link. No broadcast has been posted. What deletion leaves is the open question: a "This message was
+  deleted" marker in the channel or the thread would make the bump litter, and the deletion should
+  go. **What would show it:** `pnpm slack:once SSX-3986 --post --bump`, run twice, looking at the
+  channel and the thread after each. The first posts a broadcast; the second posts another and
+  deletes the first.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
   daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket

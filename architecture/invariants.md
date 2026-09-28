@@ -16,9 +16,12 @@ Things that look like details and are not:
    fine and then crash at startup. This bit twice for real before the flag went on.
 2. **The analyst never gets a write tool**, and there is no `--yes` path. A second way to post
    would be a second way to post unchecked.
-3. **The REST credential never leaves discovery.** `childEnv` is the enforcement; the test
-   asserting its absence is the proof. A credential written `keychain:<name>` is resolved into the
-   settings object only, so `process.env` — which every child inherits — never holds it at all.
+3. **Neither the Jira REST credential nor the Slack token ever reaches a model session.**
+   `childEnv` in `triage/runner.ts` withholds every `JIRA_` and `SLACK_` variable from each model
+   session, triage and solve passes alike, and the tests asserting their absence are the proof —
+   one per name Slack's own tooling injects, because a denylist naming one token leaks the others.
+   A credential written `keychain:<name>` is resolved into the settings object only, so
+   `process.env` — which every child inherits — never holds it at all.
 4. **The gate reads structured fields, never prose.** See §3.
 5. **Labels are a delta, unioned against live** — never a replacement array.
 6. **The footer sentinel is verbatim and load-bearing.** Change it and every existing comment
@@ -312,3 +315,30 @@ Things that look like details and are not:
     import, so anything decided there cannot be asserted about without starting a service. That is
     not tidiness either — the ordering above is the whole of the safety property, and a safety
     property with no test is a comment.
+
+18. **An issue-property write names a key under `jira-police.`, and nothing else.** The REST
+    credential reads and writes a ticket's properties only through `getIssueProperty`,
+    `setIssueProperty` and `deleteIssueProperty` in `jira/client.ts`, and each refuses a key
+    failing `/^jira-police\.[a-z][a-z0-9-]{0,60}$/` before a request is built, so another app's
+    property is out of reach by construction. A value over Jira's 32 768-character limit is refused
+    the same way, naming its size. The property holds the service's own bookkeeping — the audit
+    thread's Slack message, its latest broadcast reply, and the record they show — and never
+    anything the messages do not already show, since anyone who can see the ticket can read it
+    through the API.
+
+19. **Slack never fails the work it reports on.** The audit thread is a reporting channel, and
+    `AuditNotifier` in `slack/notifier.ts` never throws: a Slack refusal, a Jira property failure or
+    a record it cannot read comes back as an outcome and a `slack.audit_failed` or
+    `slack.record_unreadable` warning naming the remote system's own reason, and the triage, solve
+    or review it was reporting carries on. A failed broadcast costs only the bump: `slack.bump_failed`
+    or `slack.unbump_failed`, and the edited record is saved regardless. The one configuration error
+    it can raise, a live mode it cannot build, is raised by `pipelineAuditNotifier` at startup and
+    before any claim, where it stops a start rather than strands work. What this costs is that a
+    thread can fall silent while the pipeline runs on; the warning is the only signal. Three
+    residues are left unguarded:
+    - A daemon and a CLI updating one ticket in the same second can drop a timeline entry, since
+      only one process's updates are serialised.
+    - A record save that fails after a thread's first post leaves the record without its `ts`, so
+      the next event opens a second thread for the ticket.
+    - A record save that fails after a broadcast leaves that broadcast in the channel, recorded
+      nowhere, so it is never deleted.

@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-109 production modules, 98 test files. Grouped by what they belong to rather than alphabetically,
+118 production modules, 105 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -142,34 +142,36 @@ inheritance.
 
 **Entry points and their argument parsing**
 
-| Path                             | Role                                                                                                                                                        |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/cli/poll-once.ts`           | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                                                 |
-| `src/cli/triage-once.ts`         | One triage against a named key, no discovery. `--write` to post it                                                                                          |
-| `src/cli/solve-once.ts`          | The solve ladder. Dry by default; every write is a typed flag                                                                                               |
-| `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                                        |
-| `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                                          |
-| `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                                              |
-| `src/cli/recon-once.ts`          | Recon alone against one real ticket: a worktree, a skill root, one pass, always discarded. No fix, no diff, no PR                                           |
-| `src/cli/recon-once-report.ts`   | Its report and exit code, split out for the reason `attach-stage-report.ts` gives                                                                           |
-| `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                                                 |
-| `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                                          |
-| `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                                         |
-| `src/cli/watch-args.ts`          | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                                         |
-| `src/cli/attach-stage.ts`        | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session                      |
-| `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                                                 |
-| `src/cli/sweep-once.ts`          | `pnpm sweep:once [--write]`. Reports, and with `--write` removes, stale skill roots and staged-image directories. Dry by default, not on any automatic path |
-| `src/cli/sweep-once-report.ts`   | Its report, kept where a test can import it without running the command                                                                                     |
-| `src/cli/repair-ledger.ts`       | `pnpm repair:ledger`. Reads `repair-rounds.md` back as a distribution. Needs no credential, writes nothing                                                  |
-| `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                     |
-| `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                    |
-| `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                               |
-| `src/cli/section-refs.ts`        | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                                         |
-| `src/cli/count-phrases.ts`       | Count-noun phrases in tracked markdown: declared fact, or listed history                                                                                    |
-| `src/cli/pinned-prose.ts`        | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                                                |
-| `src/cli/length-budget.ts`       | Word bands for the mandatory-reading path, and the ratchet on raising one                                                                                   |
-| `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                                     |
-| `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                                              |
+| Path                             | Role                                                                                                                                                                                                                            |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/cli/poll-once.ts`           | One poll cycle, then exit. The daemon minus the loop, from the same factory                                                                                                                                                     |
+| `src/cli/triage-once.ts`         | One triage against a named key, no discovery. `--write` to post it                                                                                                                                                              |
+| `src/cli/solve-once.ts`          | The solve ladder. Dry by default; every write is a typed flag                                                                                                                                                                   |
+| `src/cli/solve-args.ts`          | The ladder and the `--advance` mode, and which rungs the settings can actually reach                                                                                                                                            |
+| `src/cli/solve-run.ts`           | The rungs themselves. **The one module that writes to Jira, a worktree or GitHub**                                                                                                                                              |
+| `src/cli/solve-outcome.ts`       | Outcomes to an operator's terminal, and the rule deciding `$?`                                                                                                                                                                  |
+| `src/cli/recon-once.ts`          | Recon alone against one real ticket: a worktree, a skill root, one pass, always discarded. No fix, no diff, no PR                                                                                                               |
+| `src/cli/recon-once-report.ts`   | Its report and exit code, split out for the reason `attach-stage-report.ts` gives                                                                                                                                               |
+| `src/cli/bot-once.ts`            | The whole bot against one ticket: triage, fitness, claim, solve, PR, review                                                                                                                                                     |
+| `src/cli/bot-args.ts`            | The same ladder, with an issue key always required                                                                                                                                                                              |
+| `src/cli/watch-once.ts`          | What the sendback watch would do; `--write` does it                                                                                                                                                                             |
+| `src/cli/watch-args.ts`          | Its argument and output shapes, kept out of a file that ends in a top-level `await`                                                                                                                                             |
+| `src/cli/attach-stage.ts`        | `pnpm attach:stage <KEY> [--keep]`. Stages one ticket's images and prints what a pass would be given. Posts nothing, starts no session                                                                                          |
+| `src/cli/attach-stage-report.ts` | Its report and its exit rule, kept where a test can import them without running the command                                                                                                                                     |
+| `src/cli/sweep-once.ts`          | `pnpm sweep:once [--write]`. Reports, and with `--write` removes, stale skill roots and staged-image directories. Dry by default, not on any automatic path                                                                     |
+| `src/cli/sweep-once-report.ts`   | Its report, kept where a test can import it without running the command                                                                                                                                                         |
+| `src/cli/repair-ledger.ts`       | `pnpm repair:ledger`. Reads `repair-rounds.md` back as a distribution. Needs no credential, writes nothing                                                                                                                      |
+| `src/cli/slack-probe.ts`         | `pnpm slack:probe <KEY> [--keep]`. A message posted, edited, deleted; a full-size record written to the ticket's property, read back, deleted. A verdict per step in `slack-probe.md`                                           |
+| `src/cli/slack-once.ts`          | `pnpm slack:once <KEY> [--post] [--bump]`. Draws one ticket's audit thread from its record; `--bump` broadcasts its latest major entry again. Dry by default: the record and the exact Slack requests under `OUTPUT_DIR/slack/` |
+| `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                                                                                         |
+| `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                                                                                        |
+| `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                                                                                                   |
+| `src/cli/section-refs.ts`        | Resolving a `§N` against the headings that define one. Read by `docs-check.ts` only                                                                                                                                             |
+| `src/cli/count-phrases.ts`       | Count-noun phrases in tracked markdown: declared fact, or listed history                                                                                                                                                        |
+| `src/cli/pinned-prose.ts`        | The checklist `CLAUDE.md` is allowed to copy, and what makes copying it safe                                                                                                                                                    |
+| `src/cli/length-budget.ts`       | Word bands for the mandatory-reading path, and the ratchet on raising one                                                                                                                                                       |
+| `src/cli/rule-citations.ts`      | Every `INCIDENTS.md` entry reachable from a rule, and the authoring gap                                                                                                                                                         |
+| `src/cli/scope-bounds.ts`        | The solver's scope prose against `diff-gate.ts`'s rule tables, both directions                                                                                                                                                  |
 
 **The log viewer — the only consumer of this service's own log**
 
@@ -192,6 +194,27 @@ inheritance.
 | -------------------- | ------------------------------------------------ |
 | `src/output/sink.ts` | `FileSink` (reports) and the rejection artifacts |
 
+**Slack — the audit thread, outbound only**
+
+| Path                    | Role                                                                                                                                                                                                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/slack/client.ts`   | The Web API over `fetch`, and the only holder of the bot token. Success is `ok: true`, never the HTTP status; warnings handed back                                                                                                                                                      |
+| `src/slack/probe.ts`    | Whether both halves of the thread's store work: a message posted, edited, deleted, and a full-size record round-tripped through a ticket's `jira-police.slack-probe` property. Pure over two clients                                                                                    |
+| `src/slack/audit.ts`    | One ticket's audit record and the events that move it: status fields, major entries, a timeline, and the caps that keep it under Jira's property limit. Pure                                                                                                                            |
+| `src/slack/render.ts`   | A record drawn as its Slack message: one container collapsed to the linked title, holding the status card, major events and the timeline newest first; and a major entry as its one-line broadcast. Escapes every string it did not write, and stays inside Slack's limits              |
+| `src/slack/store.ts`    | Where a record lives and where its messages go: the ticket's `jira-police.slack` property and Slack when live; the real property read and local files written when dry                                                                                                                  |
+| `src/slack/notifier.ts` | Load, apply the event, redraw, post or edit, broadcast a major entry and delete the ticket's previous broadcast, save — one ticket at a time. Never throws: it returns and logs what went wrong, so a Slack failure cannot fail the work it reports. `auditPasses` wraps a `PassRunner` |
+| `src/slack/events.ts`   | The pipeline's own outcomes — a triage verdict, a `SolveOutcome`, an `AdvanceOutcome`, a merge, what a review look found — as audit events, worded from `describeSolveOutcome` and `describeAdvanceOutcome`. Pure                                                                       |
+
+`createSlackTarget` (`wiring.ts`) builds the Slack client and refuses any token but a plain `xoxb-`
+bot token; `auditNotifierFor` builds a notifier, dry or live, for `slack:once`; and
+`pipelineAuditNotifier` is the pipeline's — one per process, `null` while `SLACK_MODE` is off, built
+by `createGroom` at startup so a live misconfiguration stops the daemon there. It is read at five
+places: `createGroom` (triage), `createSolveRunDeps` (every model pass, through `auditPasses`),
+`runWriteRungs` (claim, outcome, pull request, crash — before the claim, since a configuration error
+after it would strand the claim), `runReviewSweep` and `runAdvance` (what each look found, recorded
+first, then rounds, undraft, merge).
+
 `wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same
 pipeline would be a bug
@@ -205,7 +228,8 @@ what would quietly falsify it.
 "wiring.ts".** It does read settings and does call `createJiraClient`, so it is an eighth caller of
 that module — but it composes no deps object, runs no pass, and its whole output is a report. Seven
 is still the number of entry points that could diverge from one another in production.
-`attach-stage-report.ts` is a library and not an entry point either, split off for the reason
+`slack:probe` is the same kind: it builds a `SlackClient` through `createSlackTarget` and a
+`JiraClient` through `createJiraClient`, composes nothing, and reports. `attach-stage-report.ts` is a library and not an entry point either, split off for the reason
 `watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
 check the report or the exit code would run the command instead. **`logs.ts` is the fourth kind**,
 and it is the one the paragraph above predicted: a `src/cli/` file with a `pnpm` command that reads

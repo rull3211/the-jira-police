@@ -34,6 +34,16 @@ import type { TicketRef } from "./jira/types.ts";
 import { createLogger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
+import { SlackClient } from "./slack/client.ts";
+import { triageVerdictEvent } from "./slack/events.ts";
+import {
+  type AuditNotifier,
+  type TicketFacts,
+  auditPasses,
+  createAuditNotifier,
+} from "./slack/notifier.ts";
+import { syntheticSummary } from "./triage/single.ts";
+import { dryPublisher, dryStore, propertyStore, slackPublisher } from "./slack/store.ts";
 import {
   type Settings,
   SettingsError,
@@ -42,6 +52,7 @@ import {
   list,
   numeric,
   repairRound,
+  slackMode,
   solveMode,
 } from "./settings.ts";
 import type { ClaimCapabilities } from "./solve/claim.ts";
@@ -334,8 +345,9 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
   // there is no client to make it with.
   const imageClient = flag(settings, "TRIAGE_IMAGES") ? createJiraClient(settings) : null;
   const imageOptions = imageStageOptions(settings);
+  const audit = pipelineAuditNotifier(settings);
 
-  return async (ticket: TicketRef) => {
+  const triageOne = async (ticket: TicketRef): Promise<TriagePayload> => {
     // Only the key crosses over; the skill reads everything else over its own session.
     const staged =
       imageClient === null ? null : await stageForTriage(imageClient, ticket.key, imageOptions);
@@ -366,6 +378,7 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
     const payload = withFitnessNote(analysed);
 
     if (!posting) {
+      await audit?.record(ticket.key, triageVerdictEvent(payload, false));
       return payload;
     }
 
@@ -384,6 +397,10 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
           dorPlaceholders: payload.dorPlaceholders,
           mutation: { ...payload.mutation },
         });
+        await audit?.record(ticket.key, {
+          kind: "triage-refused",
+          reason: error.violations.join("; "),
+        });
       }
       throw error;
     }
@@ -400,9 +417,34 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
       idleMs: template.idleMs,
       maxRunMs: template.maxRunMs,
     });
+    await audit?.record(ticket.key, triageVerdictEvent(payload, true));
 
     return payload;
   };
+
+  return async (ticket: TicketRef) => {
+    await audit?.record(ticket.key, { kind: "triage-started" }, ticketFacts(ticket));
+    try {
+      return await triageOne(ticket);
+    } catch (error) {
+      // A gate refusal is already its own entry; anything else stopped triage partway.
+      if (!(error instanceof UnpostableError)) {
+        await audit?.record(ticket.key, {
+          kind: "crashed",
+          where: "triage",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    }
+  };
+}
+
+/** A key somebody typed carries a placeholder summary, which must not become the thread's title. */
+function ticketFacts(ticket: TicketRef): TicketFacts | undefined {
+  return ticket.summary === syntheticSummary(ticket.key)
+    ? undefined
+    : { summary: ticket.summary, url: ticket.url };
 }
 
 export function createJiraClient(settings: Settings): JiraClient {
@@ -416,6 +458,78 @@ export function createJiraClient(settings: Settings): JiraClient {
     auth: settings.JIRA_AUTH,
     ...(codeReviewStatus === "" ? {} : { codeReviewStatus }),
   });
+}
+
+/**
+ * Only a plain `xoxb-` bot token: an `xoxe.` token expires in twelve hours and nothing here refreshes
+ * it, and a user token would post as whoever generated it.
+ */
+export function createSlackTarget(settings: Settings): {
+  readonly client: SlackClient;
+  readonly channel: string;
+} {
+  const token = settings.SLACK_BOT_TOKEN.trim();
+  const channel = settings.SLACK_CHANNEL_ID.trim();
+  const problems: string[] = [];
+  if (token === "") {
+    problems.push("SLACK_BOT_TOKEN (the bot token, xoxb-…, from OAuth & Permissions)");
+  } else if (!token.startsWith("xoxb-")) {
+    problems.push(
+      `SLACK_BOT_TOKEN (expected a bot token starting xoxb-, got one starting ${token.slice(0, 5)}…)`,
+    );
+  }
+  if (channel === "") {
+    problems.push("SLACK_CHANNEL_ID (the channel's ID, C…, not its name)");
+  }
+  if (problems.length > 0) {
+    throw new SettingsError(problems);
+  }
+  return { client: new SlackClient({ token }), channel };
+}
+
+/**
+ * `dry` reads the ticket's real record and writes the record and the Slack request under
+ * `OUTPUT_DIR/slack/`; `live` writes the ticket's property and Slack itself.
+ */
+export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): AuditNotifier {
+  const jira = createJiraClient(settings);
+  const directory = join(settings.OUTPUT_DIR, "slack");
+  const lookup = async (key: string): Promise<TicketFacts> => {
+    const detail = await jira.fetchDetail(key);
+    return { summary: detail.summary, url: detail.url };
+  };
+  if (mode === "dry") {
+    return createAuditNotifier({
+      store: dryStore(jira, directory),
+      publisher: dryPublisher(directory),
+      jiraBaseUrl: settings.JIRA_BASE_URL,
+      lookup,
+    });
+  }
+  const { client, channel } = createSlackTarget(settings);
+  return createAuditNotifier({
+    store: propertyStore(jira),
+    publisher: slackPublisher(client, channel),
+    jiraBaseUrl: settings.JIRA_BASE_URL,
+    lookup,
+  });
+}
+
+let pipelineAudit: { readonly key: string; readonly notifier: AuditNotifier | null } | undefined;
+
+/**
+ * The pipeline's notifier, `null` when SLACK_MODE is off, and one per process so every call site
+ * shares one per-ticket queue. Built by `createGroom` at startup, so a live misconfiguration fails there.
+ */
+export function pipelineAuditNotifier(settings: Settings): AuditNotifier | null {
+  const mode = slackMode(settings);
+  const key = [mode, settings.SLACK_CHANNEL_ID, settings.OUTPUT_DIR, settings.JIRA_BASE_URL].join(
+    "|",
+  );
+  if (pipelineAudit?.key !== key) {
+    pipelineAudit = { key, notifier: mode === "off" ? null : auditNotifierFor(settings, mode) };
+  }
+  return pipelineAudit.notifier;
 }
 
 /**
@@ -636,14 +750,16 @@ export function createSolveRunDeps(settings: Settings): SolveDependencies {
     throw new SettingsError(["VAULT_PATH"]);
   }
 
+  const passes = createPassRunner({
+    executable: settings.STORECODE_PATH,
+    // Same floor as the triage budget: zero isn't "no timeout", it's one already expired.
+    idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+    maxRunMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
+  });
+  const audit = pipelineAuditNotifier(settings);
   return {
     commands: createCommandRunner(),
-    passes: createPassRunner({
-      executable: settings.STORECODE_PATH,
-      // Same floor as the triage budget: zero isn't "no timeout", it's one already expired.
-      idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
-      maxRunMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
-    }),
+    passes: audit === null ? passes : auditPasses(passes, audit),
   };
 }
 

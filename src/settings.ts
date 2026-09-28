@@ -55,13 +55,13 @@ export const SETTINGS = [
   {
     name: "TRIAGE_ONLY_STATUS",
     description:
-      'Comma-separated statuses discovery is allowed to triage, by id or by name. Blank triages anything not closed. The default is this board\'s untouched columns, measured 2026-09-10: 10165 Mottatt, 10025 Backlog, 10194 On Hold, 10179 In Progress Concept. A ticket somebody has already moved into "In Code Review" or "Test" does not want a paid triage comment on it. Cannot be expressed as a status category — "In Progress Concept" is `indeterminate` and belongs here, while "Prioritized" is `new` and does not. **Ids, not names, and that is not a preference**: `status = "Mottatt"` matches zero issues on this instance while `status = 10165` matches all 51, so the readable spelling of the default silently dropped the largest column. Names still work for statuses that resolve; check one before relying on it. Blanking this does not disable the restriction, because a blank is indistinguishable from unset; to widen, list the statuses you want.',
+      'Comma-separated statuses discovery is allowed to triage, by id or by name. The default is this board\'s untouched columns, measured 2026-09-10: 10165 Mottatt, 10025 Backlog, 10194 On Hold, 10179 In Progress Concept. A ticket somebody has already moved into "In Code Review" or "Test" does not want a paid triage comment on it. Cannot be expressed as a status category — "In Progress Concept" is `indeterminate` and belongs here, while "Prioritized" is `new` and does not. **Ids, not names, and that is not a preference**: `status = "Mottatt"` matches zero issues on this instance while `status = 10165` matches all 51, so the readable spelling of the default silently dropped the largest column. Names still work for statuses that resolve; check one before relying on it. Blanking this does not disable the restriction, because a blank is indistinguishable from unset; to widen, list the statuses you want.',
     fallback: "10165,10025,10194,10179",
   },
   {
     name: "TRIAGE_STATUS_PRIORITY",
     description:
-      "Comma-separated statuses in the order triage should work them, leftmost column first, by id or by name. A status not listed is triaged after every status that is. **Blank means today's order — strictly oldest first — and that is the opposite of how blank reads in `TRIAGE_ONLY_STATUS` one setting up**: there a blank widens what may be triaged, here it declines to reorder anything. Deliberately unset, because the right order is a fact about how a particular board is worked and the wrong one starves whatever the leftmost column is used for; set it after reading the queue it produces against a real backlog, which `poll:once --dry-run` prints for free and the daemon logs every cycle as `poll.order`. Ids and names both work here, unlike `TRIAGE_ONLY_STATUS` — this list is matched in JavaScript against what the API returned rather than rendered into JQL, so the name that fails to resolve there is sound here.",
+      "Comma-separated statuses in the order triage should work them, leftmost column first, by id or by name. A status not listed is triaged after every status that is. **Blank means today's order — strictly oldest first — and like blank in `TRIAGE_ONLY_STATUS` one setting up, it does not mean 'none'**: there a blank keeps the restriction, here it declines to reorder anything. Deliberately unset, because the right order is a fact about how a particular board is worked and the wrong one starves whatever the leftmost column is used for; set it after reading the queue it produces against a real backlog, which `poll:once --dry-run` prints for free and the daemon logs as `poll.order` in every cycle with new tickets. Ids and names both work here, unlike `TRIAGE_ONLY_STATUS` — this list is matched in JavaScript against what the API returned rather than rendered into JQL, so the name that fails to resolve there is sound here.",
     fallback: "",
   },
   {
@@ -346,6 +346,23 @@ export const SETTINGS = [
     fallback: "true",
   },
   {
+    name: "SLACK_MODE",
+    description:
+      "Whether the pipeline draws each ticket's audit thread in Slack. `off`, the default; `dry`, which reads the ticket's real record and writes the record and the exact Slack request under OUTPUT_DIR/slack/, changing nothing remote; or `live`, which posts and edits the thread and saves the record on the ticket as its `jira-police.slack` property. An unrecognised value is a startup error rather than a fallback, like SOLVE_MODE. `slack:once` ignores it: that command is dry unless `--post` is typed.",
+    fallback: "off",
+  },
+  {
+    name: "SLACK_BOT_TOKEN",
+    description:
+      "The Slack app's bot token, `xoxb-…`, from OAuth & Permissions once the app from docs/slack-app-manifest.json is installed. Unset, nothing reaches Slack. Only a bot token is accepted: a configuration token (`xoxe.xoxp-…`) drives the manifest API and cannot post, and a rotating one (`xoxe.xoxb-…`) expires in twelve hours with nothing here to refresh it. Best written `keychain:<name>` (README, Setup). Withheld from every model session along with the Jira credential.",
+    sensitive: true,
+  },
+  {
+    name: "SLACK_CHANNEL_ID",
+    description:
+      "The ID (`C…`) of the channel the audit threads go to, not its name, so a rename cannot move them. The bot has to be a member: `/invite @Bencebot` in the channel, or every post fails with `not_in_channel`.",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",
@@ -559,6 +576,19 @@ export function list(settings: Settings, name: SettingName): readonly string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
+}
+
+export type SlackMode = "off" | "dry" | "live";
+
+/** Reads `SLACK_MODE`, refusing anything it does not recognise, for the reason `solveMode` gives. */
+export function slackMode(settings: Settings): SlackMode {
+  const raw = settings.SLACK_MODE.trim().toLowerCase();
+  if (raw === "off" || raw === "dry" || raw === "live") {
+    return raw;
+  }
+  throw new SettingsError([
+    `SLACK_MODE (expected "off", "dry" or "live", got "${settings.SLACK_MODE}")`,
+  ]);
 }
 
 /**

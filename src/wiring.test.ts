@@ -25,6 +25,8 @@ import {
   createDiscover,
   createPollDeps,
   createReviewCycleDeps,
+  createSlackTarget,
+  pipelineAuditNotifier,
   createSolveDeps,
   createSolveRunDeps,
   githubRepoFor,
@@ -1407,4 +1409,51 @@ describe("createReviewCycleDeps", () => {
 
     expect(deps.signal).toBe(controller.signal);
   });
+});
+
+describe("pipelineAuditNotifier", () => {
+  it("builds nothing while SLACK_MODE is off, so nothing can reach Slack by accident", () => {
+    expect(pipelineAuditNotifier(settingsWith({}))).toBeNull();
+  });
+
+  it("refuses a live mode it cannot configure, at the call that happens at startup", () => {
+    expect(() => pipelineAuditNotifier(settingsWith({ SLACK_MODE: "live" }))).toThrow(
+      /SLACK_BOT_TOKEN.*SLACK_CHANNEL_ID/su,
+    );
+  });
+
+  it("hands every call site the same notifier, so they share one queue per ticket", () => {
+    const settings = settingsWith({ SLACK_MODE: "dry" });
+
+    expect(pipelineAuditNotifier(settings)).not.toBeNull();
+    expect(pipelineAuditNotifier({ ...settings })).toBe(pipelineAuditNotifier(settings));
+  });
+});
+
+describe("createSlackTarget", () => {
+  it("builds the client for a bot token and a channel", () => {
+    const target = createSlackTarget(
+      settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc", SLACK_CHANNEL_ID: "C0123" }),
+    );
+
+    expect(target.channel).toBe("C0123");
+  });
+
+  it("names both settings when neither is set", () => {
+    expect(() => createSlackTarget(settingsWith({}))).toThrow(
+      /SLACK_BOT_TOKEN.*SLACK_CHANNEL_ID/su,
+    );
+  });
+
+  it.each(["xoxe.xoxb-1-rotating", "xoxe.xoxp-1-config", "xoxp-1-user"])(
+    "refuses %s, which is not a plain bot token, without echoing more than its prefix",
+    (token) => {
+      const attempt = (): unknown =>
+        createSlackTarget(settingsWith({ SLACK_BOT_TOKEN: token, SLACK_CHANNEL_ID: "C0123" }));
+
+      expect(attempt).toThrow(SettingsError);
+      expect(attempt).toThrow(/expected a bot token starting xoxb-/u);
+      expect(attempt).not.toThrow(token);
+    },
+  );
 });

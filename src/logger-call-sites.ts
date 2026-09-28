@@ -202,7 +202,8 @@ export function scanLogCallSites(text: string): Scan {
   }
 
   for (const [name, source] of aliases) {
-    const calledAsFunction = new RegExp(String.raw`\b${name}\s*\(`, "gu");
+    // Not after a `.`: `audit.record(` is a method on another object, never a call to the alias.
+    const calledAsFunction = new RegExp(String.raw`(?<![.\w$])${name}\s*\(`, "gu");
     for (const match of masked.matchAll(calledAsFunction)) {
       const at = match.index ?? 0;
       const line = lineOf(masked, at);

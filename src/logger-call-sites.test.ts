@@ -86,6 +86,16 @@ describe("scanLogCallSites", () => {
     expect(scan.disagreements[0]?.message).toBe("watch.chain.finished");
   });
 
+  it("does not take a method of the alias's name, on some other object, for the alias", () => {
+    const scan = scanLogCallSites(
+      'const log = createLogger("solve");\nconst record = quiet ? log.warn : log.info;\n' +
+        'audit?.record(key, event);\nnotifier.record(key, event);\nrecord("solve.chain.finished", {});',
+    );
+
+    expect(scan.unchecked).toEqual([]);
+    expect(scan.calls.map((call) => call.message)).toEqual(["solve.chain.finished"]);
+  });
+
   it("reports rather than guesses when a message is not a literal", () => {
     const scan = scanLogCallSites(
       'const log = createLogger("solve");\nlog.info(`solve.${kind}`, {});',

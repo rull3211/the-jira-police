@@ -1,7 +1,13 @@
 import { type Mock, afterEach, describe, expect, it, vi } from "vitest";
 
 import { AGENT_LABELS } from "../solve/labels.ts";
-import { JiraClient, JiraError, assertOwnedLabel, isInlineable } from "./client.ts";
+import {
+  JiraClient,
+  JiraError,
+  MAX_PROPERTY_CHARS,
+  assertOwnedLabel,
+  isInlineable,
+} from "./client.ts";
 
 /** A value standing in for the credential, so leak assertions have a needle. */
 const NEEDLE = "needle-value-do-not-echo";
@@ -765,5 +771,98 @@ describe("assertOwnedLabel", () => {
     expect(() => {
       assertOwnedLabel("agent:Solving");
     }).toThrow(/malformed/);
+  });
+});
+
+describe("JiraClient issue properties", () => {
+  const record = { slack: { channel: "C1", ts: "1.2" }, timeline: [{ at: "t", what: "claimed" }] };
+
+  it("writes the value as the PUT body, at the ticket's own property path", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client().setIssueProperty("SSX-1", "jira-police.slack", record);
+
+    const { url, init } = callArgs(fetchMock, 0);
+    expect(url).toBe("https://example.invalid/rest/api/3/issue/SSX-1/properties/jira-police.slack");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual(record);
+  });
+
+  it.each([
+    ["getIssueProperty", (c: JiraClient) => c.getIssueProperty("SSX-1", "other-app.data")],
+    ["setIssueProperty", (c: JiraClient) => c.setIssueProperty("SSX-1", "other-app.data", {})],
+    ["deleteIssueProperty", (c: JiraClient) => c.deleteIssueProperty("SSX-1", "other-app.data")],
+  ])("%s refuses a property another app owns, before any request", async (_name, call) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(call(client())).rejects.toThrow(/may only touch jira-police\.\*/u);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a prefix without its dot", "jira-policeman.data"],
+    ["the namespace inside another key", "other.jira-police.slack"],
+    ["a path out of the property", "jira-police.slack/../other-app.data"],
+    ["the bare namespace", "jira-police."],
+  ])("refuses %s, which a looser key check would let through", async (_name, key) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client().setIssueProperty("SSX-1", key, {})).rejects.toThrow(
+      /may only touch jira-police\.\*/u,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a value over Jira's limit before the request, saying how big it was", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      client().setIssueProperty("SSX-1", "jira-police.slack", {
+        text: "x".repeat(MAX_PROPERTY_CHARS),
+      }),
+    ).rejects.toThrow(/over Jira's 32768/u);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads the value back, and reads an absent property as null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(jsonResponse({ key: "jira-police.slack", value: record }))
+        .mockResolvedValueOnce(jsonResponse({ errorMessages: ["not found"] }, 404)),
+    );
+
+    expect(await client().getIssueProperty("SSX-1", "jira-police.slack")).toEqual(record);
+    expect(await client().getIssueProperty("SSX-1", "jira-police.slack")).toBeNull();
+  });
+
+  it("does not read a server error as an absent property", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => jsonResponse({}, 500)),
+    );
+
+    await expect(client().getIssueProperty("SSX-1", "jira-police.slack")).rejects.toThrow(
+      JiraError,
+    );
+  });
+
+  it("deletes with no body, and says when there was nothing to delete", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse({}, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await client().deleteIssueProperty("SSX-1", "jira-police.slack")).toBe(true);
+    expect(await client().deleteIssueProperty("SSX-1", "jira-police.slack")).toBe(false);
+    const { init } = callArgs(fetchMock, 0);
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBeUndefined();
   });
 });

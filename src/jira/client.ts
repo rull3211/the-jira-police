@@ -1,12 +1,14 @@
 /**
- * Minimal Jira Cloud client — discovery reads, and two narrow writes (`updateLabels`,
- * `moveToCodeReview`).
+ * Minimal Jira Cloud client — discovery reads, and three narrow writes (`updateLabels`,
+ * `moveToCodeReview`, and issue properties under `jira-police.`, which `assertOwnedPropertyKey`
+ * holds to the service's own bookkeeping).
  *
  * `updateLabels` exists because the MCP tool surface only offers `fields` (set semantics), so
  * adding one label means read-all-N/append/write-all-N-back — destroying any label a human added
- * in between. This credential may touch `agent:`-namespaced labels (`assertOwnedLabel`) and exactly
- * one Jira status, named once at construction and never per call; nothing else — never a field or a
- * comment, which stay on the MCP path since ADF conversion lives there.
+ * in between. This credential may touch `agent:`-namespaced labels (`assertOwnedLabel`), exactly
+ * one Jira status, named once at construction and never per call, and `jira-police.*` issue
+ * properties; nothing else — never a field or a comment, which stay on the MCP path since ADF
+ * conversion lives there.
  *
  * `moveToCodeReview` is the status write, and it is a workflow **transition**, not a field edit —
  * Jira does not accept `status` as a settable field. Unconfigured (`codeReviewStatus` unset at
@@ -62,6 +64,21 @@ export function assertOwnedLabel(label: string): void {
   }
   if (!LABEL_PATTERN.test(label)) {
     throw new JiraError(0, `Refusing to write a malformed label: ${JSON.stringify(label)}`);
+  }
+}
+
+/** Issue properties this credential may read or write: the service's own bookkeeping and nothing else. */
+const PROPERTY_KEY_PATTERN = /^jira-police\.[a-z][a-z0-9-]{0,60}$/;
+
+/** Jira's own limit on a property value, checked here so an oversize record fails before the request. */
+export const MAX_PROPERTY_CHARS = 32_768;
+
+export function assertOwnedPropertyKey(property: string): void {
+  if (!PROPERTY_KEY_PATTERN.test(property)) {
+    throw new JiraError(
+      0,
+      `Refusing issue property ${JSON.stringify(property)}: this credential may only touch jira-police.* properties, and every other one belongs to another app`,
+    );
   }
 }
 
@@ -253,13 +270,10 @@ export class JiraClient {
   }
 
   /**
-   * The only path anything is actually changed through, kept separate from `#post` — which reads a
-   * body back — so every mutating call can be found by grepping one method name. `updateLabels`
-   * sends `PUT` (a field edit); `moveToCodeReview` sends `POST` (a workflow transition, the only
-   * shape Jira accepts for a status change). Both return 204 with no body on success, which is why
-   * this never attempts `.json()` the way `#post` does.
+   * The only path anything is changed through, so every mutating call is found by grepping one name.
+   * Never reads a body: Jira answers these with 204, or with a 200/201 nobody here needs.
    */
-  async #write(method: "PUT" | "POST", path: string, body: unknown): Promise<void> {
+  async #write(method: "PUT" | "POST" | "DELETE", path: string, body?: unknown): Promise<void> {
     let response: Response;
     try {
       response = await fetch(`${this.#baseUrl}${path}`, {
@@ -269,7 +283,7 @@ export class JiraClient {
           Accept: "application/json",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
     } catch (error) {
@@ -279,7 +293,6 @@ export class JiraClient {
     if (!response.ok) {
       await this.#raise(response);
     }
-    // A successful issue edit or transition is 204 with no body; reading one would throw.
   }
 
   async #get(path: string, accept: string): Promise<Response> {
@@ -516,6 +529,56 @@ export class JiraClient {
       },
     });
     log.info("jira.labels_updated", { key, add, remove });
+  }
+
+  /** `null` when the ticket carries no such property, which is the ordinary state of a new ticket. */
+  async getIssueProperty(key: string, property: string): Promise<unknown> {
+    assertIssueKey(key);
+    assertOwnedPropertyKey(property);
+    let response: Response;
+    try {
+      response = await this.#get(
+        `/rest/api/3/issue/${key}/properties/${property}`,
+        "application/json",
+      );
+    } catch (error) {
+      if (error instanceof JiraError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+    const body = (await response.json()) as { readonly value?: unknown };
+    return body.value ?? null;
+  }
+
+  async setIssueProperty(key: string, property: string, value: unknown): Promise<void> {
+    assertIssueKey(key);
+    assertOwnedPropertyKey(property);
+    const chars = JSON.stringify(value).length;
+    if (chars > MAX_PROPERTY_CHARS) {
+      throw new JiraError(
+        0,
+        `Refusing to write ${property} on ${key}: ${String(chars)} characters, over Jira's ${String(MAX_PROPERTY_CHARS)}`,
+      );
+    }
+    await this.#write("PUT", `/rest/api/3/issue/${key}/properties/${property}`, value);
+    log.info("jira.property_written", { key, property, chars });
+  }
+
+  /** `false` when there was nothing to delete. */
+  async deleteIssueProperty(key: string, property: string): Promise<boolean> {
+    assertIssueKey(key);
+    assertOwnedPropertyKey(property);
+    try {
+      await this.#write("DELETE", `/rest/api/3/issue/${key}/properties/${property}`);
+    } catch (error) {
+      if (error instanceof JiraError && error.status === 404) {
+        return false;
+      }
+      throw error;
+    }
+    log.info("jira.property_deleted", { key, property });
+    return true;
   }
 
   /**

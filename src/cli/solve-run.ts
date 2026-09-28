@@ -52,7 +52,7 @@ import {
   solveWithRetry,
 } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, type SolveDeps, runSolveCycle } from "../solve/poller.ts";
-import { findPullRequest } from "../solve/pr.ts";
+import { type FindPrResult, findPullRequest } from "../solve/pr.ts";
 import {
   type ReviewCycleOutcome,
   type ReviewLook,
@@ -76,7 +76,16 @@ import {
   createSolveRunDeps,
   botIdentityOf,
   createTicketReader,
+  pipelineAuditNotifier,
 } from "../wiring.ts";
+import type { AuditEvent } from "../slack/audit.ts";
+import {
+  observedEvent,
+  prEndedEvent,
+  reviewOutcomeEvents,
+  solveOutcomeEvent,
+} from "../slack/events.ts";
+import type { TicketFacts } from "../slack/notifier.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
 import {
   chainDecision,
@@ -428,25 +437,22 @@ export async function runRelease(client: JiraClient, receipt: ClaimReceipt): Pro
 /**
  * Commits, pushes and opens the draft pull request.
  *
- * Returns whether the pull request exists, since that decides whether the claim is released:
- * `published-unreviewed` counts as yes — the branch is public and a pull request is open, so
- * releasing would let a second solver duplicate solved work. The missing reviewer is a
- * `gh pr edit` away.
+ * Returns the pull request when one exists, since that decides whether the claim is released:
+ * `published-unreviewed` counts — the branch is public and a pull request is open, so releasing
+ * would let a second solver duplicate solved work. The missing reviewer is a `gh pr edit` away.
  */
 export async function runPublish(
   settings: Settings,
   outcome: Extract<SolveOutcome, { kind: "verified" }>,
   issueKey: string,
-): Promise<boolean> {
-  const result = await publish(
-    createSolveRunDeps(settings),
-    buildPublishRequest(settings, outcome, issueKey),
-  );
+): Promise<{ readonly url: string; readonly number: number; readonly title: string } | null> {
+  const request = buildPublishRequest(settings, outcome, issueKey);
+  const result = await publish(createSolveRunDeps(settings), request);
 
   switch (result.kind) {
     case "published": {
       process.stdout.write(`\nDraft pull request opened: ${result.url}\n`);
-      return true;
+      return { url: result.url, number: result.number, title: request.title };
     }
     case "published-unreviewed": {
       process.stdout.write(
@@ -454,17 +460,17 @@ export async function runPublish(
           `The reviewer was not added: ${result.reason}\n` +
           `Add one with: gh pr edit ${String(result.number)} --add-reviewer @copilot\n`,
       );
-      return true;
+      return { url: result.url, number: result.number, title: request.title };
     }
     case "nothing-to-commit": {
       process.stderr.write(`\nNothing to commit — the verified worktree held no change.\n`);
       process.exitCode = 1;
-      return false;
+      return null;
     }
     case "failed": {
       process.stderr.write(`\nNo pull request (${result.stage}): ${result.reason}\n`);
       process.exitCode = 1;
-      return false;
+      return null;
     }
   }
 }
@@ -487,8 +493,10 @@ export async function runAdvance(
   issueKey: string,
   promoteRepair: boolean,
 ): Promise<AdvanceOutcome | null> {
+  const audit = pipelineAuditNotifier(settings);
   const read = createTicketReader(client);
   const { text, detail } = await read(issueKey);
+  const facts = { summary: detail.summary, url: detail.url };
 
   const base = requestOrRefusal(settings, detail, text, "--advance");
   if (base === null) {
@@ -519,6 +527,7 @@ export async function runAdvance(
     process.exitCode = 3;
     return null;
   }
+  const observed = observedEventOf(detail.labels, found);
   if (found.state !== "OPEN") {
     // Reported, not an error — a merged pull request is the happy ending, a closed one is a
     // person's decision; neither is something to push to.
@@ -537,6 +546,9 @@ export async function runAdvance(
         ? labelEdit([], [])
         : completionTransition(labels, completionLabelFor(endedState(found.state))),
     );
+    for (const event of [observed, prEndedEvent(endedState(found.state))]) {
+      await audit?.record(issueKey, event, facts);
+    }
     return null;
   }
 
@@ -576,6 +588,9 @@ export async function runAdvance(
   // belongs to. The stage is `null` for every outcome that left the draft flag alone, which is
   // most of them.
   await moveReviewStage(client, issueKey, reviewStageAfter(result));
+  for (const event of [observed, ...reviewOutcomeEvents(result)]) {
+    await audit?.record(issueKey, event, facts);
+  }
 
   if (worktree !== null) {
     const cleanup = await removeWorktree(
@@ -691,6 +706,19 @@ interface ReviewTarget {
   readonly holder: { worktree: Worktree | null };
 }
 
+/** One look's ticket and what it found, for the audit thread; `observed` is `null` until a PR is. */
+interface Seen {
+  readonly facts: TicketFacts;
+  readonly observed: AuditEvent | null;
+}
+
+function observedEventOf(
+  labels: readonly string[],
+  found: Extract<FindPrResult, { outcome: "found" }>,
+): AuditEvent {
+  return observedEvent(labels, { url: found.url, number: found.number, draft: found.isDraft });
+}
+
 /**
  * The cheap half, for one watched ticket.
  *
@@ -707,10 +735,13 @@ function createReviewLook(
   deps: SolveDependencies,
   targets: Map<string, ReviewTarget>,
   promoteRepair: boolean,
+  seen: Map<string, Seen>,
 ): (ticket: WatchedTicket) => Promise<ReviewLook> {
   const read = createTicketReader(client);
 
   return async (ticket: WatchedTicket): Promise<ReviewLook> => {
+    const facts = { summary: ticket.summary, url: ticket.url };
+    seen.set(ticket.key, { facts, observed: null });
     const { text, detail } = await read(ticket.key);
     // Throws `NotSolvableError` for a repository the operator has not allowed — not caught here,
     // since the cycle records it as a real answer about one ticket.
@@ -729,6 +760,7 @@ function createReviewLook(
     if (found.outcome === "none") {
       return { outcome: "no-pull-request", reason: `no pull request on ${branch}` };
     }
+    seen.set(ticket.key, { facts, observed: observedEventOf(ticket.labels, found) });
     if (found.state !== "OPEN") {
       return { outcome: "ended", number: found.number, state: endedState(found.state) };
     }
@@ -857,10 +889,11 @@ export async function runReviewSweep(
   signal?: AbortSignal,
 ): Promise<ReviewCycleOutcome> {
   const targets = new Map<string, ReviewTarget>();
+  const seen = new Map<string, Seen>();
   const deps = createReviewCycleDeps(
     settings,
     client,
-    createReviewLook(settings, client, runDeps, targets, promoteRepair),
+    createReviewLook(settings, client, runDeps, targets, promoteRepair, seen),
     createReviewAct(runDeps, targets),
     signal,
   );
@@ -878,6 +911,15 @@ export async function runReviewSweep(
         },
   );
 
+  const audit = pipelineAuditNotifier(settings);
+  const tell = async (key: string, events: readonly AuditEvent[]): Promise<void> => {
+    const look = seen.get(key);
+    const observed = look?.observed ?? null;
+    for (const event of observed === null ? events : [observed, ...events]) {
+      await audit?.record(key, event, look?.facts);
+    }
+  };
+
   for (const ended of outcome.ended) {
     // §6.1's terminal, through the same function `--advance` uses — a metric encoded twice is a
     // metric that will eventually be encoded two ways.
@@ -886,10 +928,20 @@ export async function runReviewSweep(
         ? labelEdit([], [])
         : completionTransition(labels, completionLabelFor(ended.state)),
     );
+    await tell(ended.issueKey, [prEndedEvent(ended.state)]);
   }
 
   for (const entry of [...outcome.acted, ...outcome.settled]) {
     await moveReviewStage(client, entry.issueKey, reviewStageAfter(entry.outcome));
+    await tell(entry.issueKey, reviewOutcomeEvents(entry.outcome));
+  }
+
+  for (const failure of outcome.unlooked) {
+    await tell(failure.issueKey, [{ kind: "crashed", where: "review", message: failure.reason }]);
+  }
+
+  for (const key of outcome.deferred) {
+    await tell(key, []);
   }
 
   return outcome;
@@ -979,6 +1031,8 @@ export async function runWriteRungs(
   authority: ClaimAuthority,
   promoteRepair: boolean,
 ): Promise<void> {
+  // Before the claim: a live-mode misconfiguration throws here, and after the claim it would strand it.
+  const audit = pipelineAuditNotifier(settings);
   const receipt = await runClaim(client, issueKey, authority);
   if (receipt === null) {
     return;
@@ -1004,16 +1058,25 @@ export async function runWriteRungs(
       return;
     }
 
+    await audit?.record(issueKey, {
+      kind: "claimed",
+      repo: cycle?.planned.find((candidate) => candidate.issueKey === issueKey)?.repo ?? null,
+    });
     const outcome = await runSolver(settings, client, issueKey, cycle, promoteRepair);
     // Read before the early return: the outcomes that decide a ticket's fate are exactly the
     // ones that never reach a pull request.
     terminal = outcome === null ? null : terminalLabelAfter(outcome);
+    if (outcome !== null) {
+      await audit?.record(issueKey, solveOutcomeEvent(outcome));
+    }
     if (outcome === null || !includes(phase, "pr") || outcome.kind !== "verified") {
       return;
     }
 
-    keepClaim = await runPublish(settings, outcome, issueKey);
-    if (keepClaim) {
+    const published = await runPublish(settings, outcome, issueKey);
+    keepClaim = published !== null;
+    if (published !== null) {
+      await audit?.record(issueKey, { kind: "pr-opened", ...published });
       // Handed in here rather than released: `runRelease` restores the labels this run found,
       // including `agent:start`, which would put a solved ticket back in the queue with a
       // human's go-ahead still on it. `keepClaim` means "do not release, and move on instead of
@@ -1027,6 +1090,13 @@ export async function runWriteRungs(
         await runReviewChain(settings, client, issueKey, promoteRepair);
       }
     }
+  } catch (error) {
+    await audit?.record(issueKey, {
+      kind: "crashed",
+      where: "solve",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   } finally {
     // Three endings: a run that reached a verdict about the ticket must not be released —
     // `runRelease` would restore `agent:solvable` among other labels, leaving a declined ticket

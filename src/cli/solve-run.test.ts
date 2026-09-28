@@ -15,7 +15,8 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 
-import { createReviewAct, keepsEvidence, moveReviewStage } from "./solve-run.ts";
+import { readSettings } from "../settings.ts";
+import { createReviewAct, keepsEvidence, moveReviewStage, runWriteRungs } from "./solve-run.ts";
 import type { CodeReviewMoveResult, JiraClient } from "../jira/client.ts";
 import { AGENT_LABELS } from "../solve/labels.ts";
 import type { AdvanceRequest, PendingRound } from "../solve/delivery.ts";
@@ -273,6 +274,31 @@ describe("createReviewAct", () => {
     expect(written(h)).toContain("bot: iteration count 1");
     expect(written(h)).toContain("Reviewer rounds: 1");
     expect(written(h)).toContain("Last read: 2026-09-05T08:00:00Z");
+  });
+});
+
+describe("runWriteRungs", () => {
+  it("refuses a live Slack mode it cannot build before touching the ticket, where a claim would strand", async () => {
+    const touched: string[] = [];
+    const client = new Proxy(
+      {},
+      {
+        get: (_target, name) => () => {
+          touched.push(String(name));
+          throw new Error("the ticket must not be touched");
+        },
+      },
+    ) as unknown as JiraClient;
+    const settings = readSettings({
+      JIRA_EMAIL: "a@b.c",
+      JIRA_AUTH: "placeholder",
+      SLACK_MODE: "live",
+    });
+
+    await expect(
+      runWriteRungs(settings, client, "SSX-1", "claim", null, "named", false),
+    ).rejects.toThrow(/SLACK_BOT_TOKEN/u);
+    expect(touched).toEqual([]);
   });
 });
 
