@@ -548,6 +548,13 @@ describe("childEnv", () => {
     expect(env["JIRA_EMAIL"]).toBeUndefined();
   });
 
+  it.each(["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_CLI_XOXB", "SLACK_CLI_XAPP"])(
+    "withholds the Slack credential %s, under every name Slack's own tooling uses",
+    (name) => {
+      expect(childEnv({ [name]: "xoxb-placeholder", PATH: "/usr/bin" })).not.toHaveProperty(name);
+    },
+  );
+
   it("passes everything else through, since storecode needs the Vertex config", () => {
     const env = childEnv({ PATH: "/usr/bin", CLAUDE_CODE_USE_VERTEX: "1", HOME: "/home/x" });
 

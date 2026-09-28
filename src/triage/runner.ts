@@ -254,11 +254,10 @@ export class TriageContradictionError extends TriageError {
 }
 
 /**
- * Variables withheld from the triage subprocess. The poller authenticates to Jira with a REST
- * credential to discover which tickets are new; the skill uses the Atlassian MCP session to read
- * what is in them and never needs the REST credential, so it does not get it.
+ * Credentials only this process spends, withheld from every model session — triage and solve
+ * passes alike. A prefix, not a name: Slack's CLI injects its tokens under more than one.
  */
-const WITHHELD_FROM_CHILD = /^JIRA_/;
+const WITHHELD_FROM_CHILD = /^(JIRA|SLACK)_/;
 
 /**
  * Undocumented switch that this service must never be the one to set. It appears in neither the
@@ -270,9 +269,9 @@ const WITHHELD_FROM_CHILD = /^JIRA_/;
 const HOOK_KILL_SWITCH = "CLAUDE_SKIP_HOOKS";
 
 /**
- * The child's environment: ours, minus the Jira REST credential.
+ * The child's environment: ours, minus the Jira and Slack credentials.
  *
- * Exported for testing — that the credential is absent is a property worth
+ * Exported for testing — that the credentials are absent is a property worth
  * asserting, not assuming.
  */
 export function childEnv(

@@ -344,6 +344,17 @@ export const SETTINGS = [
     fallback: "true",
   },
   {
+    name: "SLACK_BOT_TOKEN",
+    description:
+      "The Slack app's bot token, `xoxb-…`, from OAuth & Permissions once the app from docs/slack-app-manifest.json is installed. Unset, nothing reaches Slack. Only a bot token is accepted: a configuration token (`xoxe.xoxp-…`) drives the manifest API and cannot post, and a rotating one (`xoxe.xoxb-…`) expires in twelve hours with nothing here to refresh it. Withheld from every model session along with the Jira credential.",
+    sensitive: true,
+  },
+  {
+    name: "SLACK_CHANNEL_ID",
+    description:
+      "The ID (`C…`) of the channel the audit threads go to, not its name, so a rename cannot move them. The bot has to be a member: `/invite @Bencebot` in the channel, or every post fails with `not_in_channel`.",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",

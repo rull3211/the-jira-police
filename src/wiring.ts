@@ -34,6 +34,7 @@ import type { TicketRef } from "./jira/types.ts";
 import { createLogger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
+import { SlackClient } from "./slack/client.ts";
 import {
   type Settings,
   SettingsError,
@@ -416,6 +417,35 @@ export function createJiraClient(settings: Settings): JiraClient {
     auth: settings.JIRA_AUTH,
     ...(codeReviewStatus === "" ? {} : { codeReviewStatus }),
   });
+}
+
+/**
+ * The Slack client and the one channel it writes to, or a configuration error naming what is missing.
+ *
+ * Only a plain bot token is accepted: `xoxe.` tokens expire in twelve hours and nothing here refreshes
+ * one, and a user token would post as whoever generated it.
+ */
+export function createSlackTarget(settings: Settings): {
+  readonly client: SlackClient;
+  readonly channel: string;
+} {
+  const token = settings.SLACK_BOT_TOKEN.trim();
+  const channel = settings.SLACK_CHANNEL_ID.trim();
+  const problems: string[] = [];
+  if (token === "") {
+    problems.push("SLACK_BOT_TOKEN (the bot token, xoxb-…, from OAuth & Permissions)");
+  } else if (!token.startsWith("xoxb-")) {
+    problems.push(
+      `SLACK_BOT_TOKEN (expected a bot token starting xoxb-, got one starting ${token.slice(0, 5)}…)`,
+    );
+  }
+  if (channel === "") {
+    problems.push("SLACK_CHANNEL_ID (the channel's ID, C…, not its name)");
+  }
+  if (problems.length > 0) {
+    throw new SettingsError(problems);
+  }
+  return { client: new SlackClient({ token }), channel };
 }
 
 /**

@@ -16,8 +16,10 @@ Things that look like details and are not:
    fine and then crash at startup. This bit twice for real before the flag went on.
 2. **The analyst never gets a write tool**, and there is no `--yes` path. A second way to post
    would be a second way to post unchecked.
-3. **The REST credential never leaves discovery.** `childEnv` is the enforcement; the test
-   asserting its absence is the proof.
+3. **The REST credential never leaves discovery, and the Slack token never leaves this process.**
+   `childEnv` in `triage/runner.ts` withholds every `JIRA_` and `SLACK_` variable from each model
+   session, triage and solve passes alike, and the tests asserting their absence are the proof —
+   one per name Slack's own tooling injects, because a denylist naming one token leaks the others.
 4. **The gate reads structured fields, never prose.** See §3.
 5. **Labels are a delta, unioned against live** — never a replacement array.
 6. **The footer sentinel is verbatim and load-bearing.** Change it and every existing comment

@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-108 production modules, 97 test files. Grouped by what they belong to rather than alphabetically,
+111 production modules, 99 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -160,6 +160,7 @@ inheritance.
 | `src/cli/sweep-once.ts`          | `pnpm sweep:once [--write]`. Reports, and with `--write` removes, stale skill roots and staged-image directories. Dry by default, not on any automatic path |
 | `src/cli/sweep-once-report.ts`   | Its report, kept where a test can import it without running the command                                                                                     |
 | `src/cli/repair-ledger.ts`       | `pnpm repair:ledger`. Reads `repair-rounds.md` back as a distribution. Needs no credential, writes nothing                                                  |
+| `src/cli/slack-probe.ts`         | `pnpm slack:probe [--keep]`. One message to `SLACK_CHANNEL_ID`: posted, read back, edited, read back, deleted. A verdict per step in `slack-probe.md`       |
 | `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                     |
 | `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                    |
 | `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                               |
@@ -191,6 +192,16 @@ inheritance.
 | -------------------- | ------------------------------------------------ |
 | `src/output/sink.ts` | `FileSink` (reports) and the rejection artifacts |
 
+**Slack — the audit thread, outbound only**
+
+| Path                  | Role                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/slack/client.ts` | The Web API over `fetch`, and the only holder of the bot token. Success is `ok: true`, never the HTTP status; warnings handed back    |
+| `src/slack/probe.ts`  | Whether a message's metadata survives a post, a read and an edit — the round trip the thread's state will live in. Pure over a client |
+
+`createSlackTarget` (`wiring.ts`) is the one construction site, and it refuses any token but a plain
+`xoxb-` bot token. `src/cli/slack-probe.ts` is its only caller today.
+
 `wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same
 pipeline would be a bug
@@ -204,7 +215,8 @@ what would quietly falsify it.
 "wiring.ts".** It does read settings and does call `createJiraClient`, so it is an eighth caller of
 that module — but it composes no deps object, runs no pass, and its whole output is a report. Seven
 is still the number of entry points that could diverge from one another in production.
-`attach-stage-report.ts` is a library and not an entry point either, split off for the reason
+`slack:probe` is the same kind: it builds a `SlackClient` through `createSlackTarget`, composes
+nothing, and reports. `attach-stage-report.ts` is a library and not an entry point either, split off for the reason
 `watch-args.ts` was: the command file ends in a top-level `await`, so a test that imported it to
 check the report or the exit code would run the command instead. **`logs.ts` is the fourth kind**,
 and it is the one the paragraph above predicted: a `src/cli/` file with a `pnpm` command that reads
