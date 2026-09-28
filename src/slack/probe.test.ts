@@ -1,126 +1,147 @@
 import { describe, expect, it } from "vitest";
 
-import type { SlackMessage, SlackMetadata } from "./client.ts";
+import { MAX_PROPERTY_CHARS } from "../jira/client.ts";
 import { SlackError } from "./client.ts";
-import { EXIT, type ProbeClient, exitCodeFor, formatReport, runProbe } from "./probe.ts";
+import {
+  EXIT,
+  PROBE_PROPERTY,
+  type ProbeJira,
+  type ProbeSlack,
+  type ProbeTarget,
+  exitCodeFor,
+  formatReport,
+  runProbe,
+  sampleRecord,
+} from "./probe.ts";
 
-const NOW = new Date("2026-09-28T10:00:00Z");
-const OPTIONS = { keep: false, nonce: "n-1", now: NOW } as const;
+const TARGET: ProbeTarget = {
+  channel: "C1",
+  issueKey: "SSX-1",
+  keep: false,
+  nonce: "n-1",
+  now: new Date("2026-09-28T10:00:00Z"),
+};
 
-interface FakeChannel {
-  readonly client: ProbeClient;
+function slack(behaviour: { readonly failAuth?: boolean } = {}): {
+  readonly client: ProbeSlack;
   readonly deleted: string[];
-}
-
-/**
- * A channel that stores what it is sent, with two knobs for the two ways Slack could lose metadata:
- * dropping it on the post, and keeping the old copy through an edit.
- */
-function channel(
-  behaviour: {
-    readonly dropOnPost?: boolean;
-    readonly ignoreOnUpdate?: boolean;
-    readonly failAuth?: boolean;
-    readonly failDelete?: boolean;
-  } = {},
-): FakeChannel {
-  let stored: SlackMessage | null = null;
+} {
   const deleted: string[] = [];
-  const client: ProbeClient = {
-    authTest: async () => {
-      if (behaviour.failAuth === true) {
-        throw new SlackError("auth.test", "invalid_auth", "");
-      }
-      return { userId: "U1", botId: "B1", team: "Storebrand" };
-    },
-    post: async (args) => {
-      stored = {
-        ts: "100.1",
-        text: args.text,
-        botId: "B1",
-        metadata: behaviour.dropOnPost === true ? null : (args.metadata ?? null),
-      };
-      return { ts: "100.1", warnings: behaviour.dropOnPost === true ? ["invalid_metadata"] : [] };
-    },
-    update: async (args) => {
-      if (stored === null) {
-        throw new SlackError("chat.update", "message_not_found", "");
-      }
-      const metadata: SlackMetadata | null =
-        behaviour.ignoreOnUpdate === true ? stored.metadata : (args.metadata ?? stored.metadata);
-      stored = { ...stored, text: args.text, metadata };
-      return { ts: args.ts, warnings: [] };
-    },
-    history: async () => ({ messages: stored === null ? [] : [stored], nextCursor: null }),
-    deleteMessage: async (args) => {
-      if (behaviour.failDelete === true) {
-        throw new SlackError("chat.delete", "cant_delete_message", "");
-      }
-      deleted.push(args.ts);
+  return {
+    deleted,
+    client: {
+      authTest: async () => {
+        if (behaviour.failAuth === true) {
+          throw new SlackError("auth.test", "invalid_auth", "");
+        }
+        return { userId: "U1", botId: "B1", team: "Storebrand" };
+      },
+      post: async () => ({ ts: "100.1", warnings: [] }),
+      update: async (args) => ({ ts: args.ts, warnings: [] }),
+      deleteMessage: async (args) => {
+        deleted.push(args.ts);
+      },
     },
   };
-  return { client, deleted };
+}
+
+/** A ticket's properties, with a knob for a Jira that hands back less than it was given. */
+function jira(
+  behaviour: { readonly dropTimeline?: boolean; readonly lostOnDelete?: boolean } = {},
+): {
+  readonly client: ProbeJira;
+  readonly stored: Map<string, unknown>;
+} {
+  const stored = new Map<string, unknown>();
+  return {
+    stored,
+    client: {
+      setIssueProperty: async (key, property, value) => {
+        stored.set(`${key}/${property}`, structuredClone(value));
+      },
+      getIssueProperty: async (key, property) => {
+        const value = stored.get(`${key}/${property}`) ?? null;
+        if (value !== null && behaviour.dropTimeline === true) {
+          const { timeline: _dropped, ...rest } = value as Record<string, unknown>;
+          return rest;
+        }
+        return value;
+      },
+      deleteIssueProperty: async (key, property) => {
+        const had = stored.delete(`${key}/${property}`);
+        return behaviour.lostOnDelete === true ? false : had;
+      },
+    },
+  };
 }
 
 describe("runProbe", () => {
-  it("passes every step when metadata survives the post and the edit, and cleans up", async () => {
-    const fake = channel();
+  it("passes both halves and leaves nothing behind", async () => {
+    const chat = slack();
+    const ticket = jira();
 
-    const result = await runProbe(fake.client, "C1", OPTIONS);
+    const result = await runProbe(chat.client, ticket.client, TARGET);
 
     expect(result.steps.map((step) => [step.name, step.ok])).toEqual([
       ["auth.test", true],
       ["chat.postMessage", true],
-      ["metadata after post", true],
       ["chat.update", true],
-      ["metadata after update", true],
       ["chat.delete", true],
+      ["property write", true],
+      ["property read back", true],
+      ["property delete", true],
+      ["property gone", true],
     ]);
-    expect(fake.deleted).toEqual(["100.1"]);
-    expect(result.leftBehind).toBeNull();
+    expect(chat.deleted).toEqual(["100.1"]);
+    expect(ticket.stored.size).toBe(0);
     expect(exitCodeFor(result)).toBe(EXIT.ok);
   });
 
-  it("fails when an edit keeps the old metadata, which is the case the whole store depends on", async () => {
-    const result = await runProbe(channel({ ignoreOnUpdate: true }).client, "C1", OPTIONS);
+  it("fails when Jira hands back the record without its timeline, the shape Slack could not hold", async () => {
+    const result = await runProbe(slack().client, jira({ dropTimeline: true }).client, TARGET);
 
-    const step = result.steps.find((candidate) => candidate.name === "metadata after update");
-    expect(step?.ok).toBe(false);
+    expect(result.steps.find((step) => step.name === "property read back")?.ok).toBe(false);
     expect(exitCodeFor(result)).toBe(EXIT.failed);
   });
 
-  it("fails when the post drops metadata, and shows the warning Slack gave for it", async () => {
-    const result = await runProbe(channel({ dropOnPost: true }).client, "C1", OPTIONS);
+  it("still measures the Jira half when Slack refuses the token", async () => {
+    const result = await runProbe(slack({ failAuth: true }).client, jira().client, TARGET);
 
-    const post = result.steps.find((candidate) => candidate.name === "chat.postMessage");
-    const read = result.steps.find((candidate) => candidate.name === "metadata after post");
-    expect(post?.detail).toContain("invalid_metadata");
-    expect(read?.ok).toBe(false);
-    expect(exitCodeFor(result)).toBe(EXIT.failed);
-  });
-
-  it("stops at a failed auth.test without posting anything", async () => {
-    const result = await runProbe(channel({ failAuth: true }).client, "C1", OPTIONS);
-
-    expect(result.steps).toEqual([
-      { name: "auth.test", ok: false, detail: "Slack auth.test failed: invalid_auth" },
+    expect(result.steps.map((step) => [step.name, step.ok])).toEqual([
+      ["auth.test", false],
+      ["property write", true],
+      ["property read back", true],
+      ["property delete", true],
+      ["property gone", true],
     ]);
   });
 
-  it("leaves the message and says so under --keep", async () => {
-    const fake = channel();
+  it("fails a delete Jira says found nothing, rather than taking it as done", async () => {
+    const result = await runProbe(slack().client, jira({ lostOnDelete: true }).client, TARGET);
 
-    const result = await runProbe(fake.client, "C1", { ...OPTIONS, keep: true });
-
-    expect(fake.deleted).toEqual([]);
-    expect(result.leftBehind).toBe("100.1");
-    expect(formatReport(result, "C1", NOW)).toContain("still in the channel: ts 100.1");
+    expect(result.steps.find((step) => step.name === "property delete")?.ok).toBe(false);
   });
 
-  it("reports a message it failed to delete as left behind", async () => {
-    const result = await runProbe(channel({ failDelete: true }).client, "C1", OPTIONS);
+  it("leaves both behind under --keep, and the report says where", async () => {
+    const chat = slack();
+    const ticket = jira();
+    const kept = { ...TARGET, keep: true };
 
-    expect(result.leftBehind).toBe("100.1");
-    expect(exitCodeFor(result)).toBe(EXIT.failed);
+    const result = await runProbe(chat.client, ticket.client, kept);
+
+    expect(chat.deleted).toEqual([]);
+    expect(ticket.stored.has(`SSX-1/${PROBE_PROPERTY}`)).toBe(true);
+    const report = formatReport(result, kept);
+    expect(report).toContain("still in the channel: ts 100.1");
+    expect(report).toContain(`${PROBE_PROPERTY} is still on SSX-1`);
+  });
+});
+
+describe("sampleRecord", () => {
+  it("is big enough to measure a full record and small enough to fit Jira's limit", () => {
+    const chars = JSON.stringify(sampleRecord(TARGET, "100.1")).length;
+
+    expect(chars).toBeGreaterThan(10_000);
+    expect(chars).toBeLessThan(MAX_PROPERTY_CHARS);
   });
 });

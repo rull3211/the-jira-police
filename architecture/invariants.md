@@ -314,3 +314,12 @@ Things that look like details and are not:
     import, so anything decided there cannot be asserted about without starting a service. That is
     not tidiness either — the ordering above is the whole of the safety property, and a safety
     property with no test is a comment.
+
+18. **An issue-property write names a key under `jira-police.`, and nothing else.** The REST
+    credential reads and writes a ticket's properties only through `getIssueProperty`,
+    `setIssueProperty` and `deleteIssueProperty` in `jira/client.ts`, and each refuses a key
+    failing `/^jira-police\.[a-z][a-z0-9-]{0,60}$/` before a request is built, so another app's
+    property is out of reach by construction. A value over Jira's 32 768-character limit is refused
+    the same way, naming its size. The property holds the service's own bookkeeping — the audit
+    thread's Slack message and the record it shows — and never anything the message does not
+    already show, since anyone who can see the ticket can read it through the API.

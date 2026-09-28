@@ -58,17 +58,14 @@ describe("SlackClient", () => {
   });
 
   it("names the scope a missing_scope failure wanted, so the first run says what to grant", async () => {
-    slack({
-      ok: false,
-      error: "missing_scope",
-      needed: "channels:history",
-      provided: "chat:write",
-    });
+    slack({ ok: false, error: "missing_scope", needed: "chat:write", provided: "users:read" });
 
-    const error = await caught(new SlackClient({ token: NEEDLE }).history({ channel: "C1" }));
+    const error = await caught(
+      new SlackClient({ token: NEEDLE }).post({ channel: "C1", text: "hi" }),
+    );
 
-    expect(error.message).toContain("needs scope channels:history");
-    expect(error.message).toContain("chat:write");
+    expect(error.message).toContain("needs scope chat:write");
+    expect(error.message).toContain("users:read");
   });
 
   it("reports a rate limit with the pause Slack asked for", async () => {
@@ -97,8 +94,8 @@ describe("SlackClient", () => {
     slack({
       ok: true,
       ts: "1.2",
-      warning: "invalid_metadata_format",
-      response_metadata: { warnings: ["invalid_metadata_format", "missing_charset"] },
+      warning: "superfluous_charset,invalid_metadata_schema",
+      response_metadata: { warnings: ["superfluous_charset", "invalid_metadata_schema"] },
     });
 
     const result = await new SlackClient({ token: NEEDLE }).post({
@@ -106,7 +103,7 @@ describe("SlackClient", () => {
       text: "hi",
     });
 
-    expect(result.warnings).toEqual(["invalid_metadata_format", "missing_charset"]);
+    expect(result.warnings).toEqual(["superfluous_charset", "invalid_metadata_schema"]);
   });
 
   it("sends objects as JSON, omits what was not given, and keeps the token in the header only", async () => {
@@ -116,47 +113,26 @@ describe("SlackClient", () => {
       channel: "C1",
       ts: "1.2",
       text: "hi",
-      metadata: { event_type: "jira_police.probe", event_payload: { stage: "updated" } },
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "hi" } }],
     });
 
     const { url, form, init } = sent(mock);
     expect(url).toBe("https://slack.com/api/chat.update");
-    expect(JSON.parse(form.get("metadata") ?? "")).toEqual({
-      event_type: "jira_police.probe",
-      event_payload: { stage: "updated" },
-    });
-    expect(form.has("blocks")).toBe(false);
+    expect(JSON.parse(form.get("blocks") ?? "")).toEqual([
+      { type: "section", text: { type: "mrkdwn", text: "hi" } },
+    ]);
+    expect(form.has("unfurl_links")).toBe(false);
     expect(String(init.body)).not.toContain(NEEDLE);
     expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${NEEDLE}`);
   });
 
-  it("asks history for metadata and reads it back off each message", async () => {
-    const mock = slack({
-      ok: true,
-      messages: [
-        {
-          ts: "1.2",
-          text: "hi",
-          bot_id: "B1",
-          metadata: { event_type: "jira_police.probe", event_payload: { stage: "posted" } },
-        },
-        { ts: "1.1", text: "a person" },
-      ],
-      response_metadata: { next_cursor: "" },
-    });
+  it("sends a form body with no charset, which Slack answered with superfluous_charset", async () => {
+    const mock = slack({ ok: true, ts: "1.2" });
 
-    const page = await new SlackClient({ token: NEEDLE }).history({ channel: "C1", limit: 2 });
+    await new SlackClient({ token: NEEDLE }).post({ channel: "C1", text: "hi" });
 
-    expect(sent(mock).form.get("include_all_metadata")).toBe("true");
-    expect(page.nextCursor).toBeNull();
-    expect(page.messages).toEqual([
-      {
-        ts: "1.2",
-        text: "hi",
-        botId: "B1",
-        metadata: { event_type: "jira_police.probe", event_payload: { stage: "posted" } },
-      },
-      { ts: "1.1", text: "a person", botId: null, metadata: null },
-    ]);
+    expect(new Headers(sent(mock).init.headers).get("content-type")).toBe(
+      "application/x-www-form-urlencoded",
+    );
   });
 });

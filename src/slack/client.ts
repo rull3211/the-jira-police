@@ -17,29 +17,10 @@ export interface SlackClientOptions {
   readonly timeoutMs?: number;
 }
 
-/** A message's metadata, in the wire shape Slack both accepts and returns. */
-export interface SlackMetadata {
-  readonly event_type: string;
-  readonly event_payload: Readonly<Record<string, unknown>>;
-}
-
-export interface SlackMessage {
-  readonly ts: string;
-  readonly text: string;
-  /** Set on messages a bot posted; a person's message has none. */
-  readonly botId: string | null;
-  readonly metadata: SlackMetadata | null;
-}
-
 export interface SlackWriteResult {
   readonly ts: string;
-  /** Slack's own warning codes, e.g. a metadata payload it accepted the call without. */
+  /** Slack's own warning codes, such as a field it accepted the call without. */
   readonly warnings: readonly string[];
-}
-
-export interface SlackHistoryPage {
-  readonly messages: readonly SlackMessage[];
-  readonly nextCursor: string | null;
 }
 
 export class SlackError extends Error {
@@ -90,33 +71,28 @@ export class SlackClient {
     readonly channel: string;
     readonly text: string;
     readonly blocks?: readonly object[];
-    readonly metadata?: SlackMetadata;
   }): Promise<SlackWriteResult> {
     const body = await this.#call("chat.postMessage", {
       channel: args.channel,
       text: args.text,
       blocks: args.blocks,
-      metadata: args.metadata,
       unfurl_links: false,
       unfurl_media: false,
     });
     return { ts: str(body["ts"]), warnings: warningsOf(body) };
   }
 
-  /** `metadata` omitted keeps the message's existing metadata, which is Slack's rule rather than ours. */
   async update(args: {
     readonly channel: string;
     readonly ts: string;
     readonly text: string;
     readonly blocks?: readonly object[];
-    readonly metadata?: SlackMetadata;
   }): Promise<SlackWriteResult> {
     const body = await this.#call("chat.update", {
       channel: args.channel,
       ts: args.ts,
       text: args.text,
       blocks: args.blocks,
-      metadata: args.metadata,
     });
     return { ts: str(body["ts"]), warnings: warningsOf(body) };
   }
@@ -125,34 +101,7 @@ export class SlackClient {
     await this.#call("chat.delete", { channel: args.channel, ts: args.ts });
   }
 
-  /** Newest first, as Slack returns it. `latest` and `oldest` are message timestamps. */
-  async history(args: {
-    readonly channel: string;
-    readonly latest?: string;
-    readonly oldest?: string;
-    readonly inclusive?: boolean;
-    readonly limit?: number;
-    readonly cursor?: string;
-  }): Promise<SlackHistoryPage> {
-    const body = await this.#call("conversations.history", {
-      channel: args.channel,
-      latest: args.latest,
-      oldest: args.oldest,
-      inclusive: args.inclusive,
-      limit: args.limit,
-      cursor: args.cursor,
-      include_all_metadata: true,
-    });
-    const raw = Array.isArray(body["messages"]) ? (body["messages"] as unknown[]) : [];
-    const meta = record(body["response_metadata"]);
-    const next = optionalStr(meta["next_cursor"]);
-    return { messages: raw.map(toMessage), nextCursor: next === "" ? null : next };
-  }
-
-  /**
-   * Form-encoded for every method, objects as JSON strings: Slack accepts that shape on reads and
-   * writes alike, where a JSON body is accepted on writes only.
-   */
+  /** Form-encoded, objects as JSON strings: the one body shape every Slack method accepts. */
   async #call(method: string, params: Params): Promise<Readonly<Record<string, unknown>>> {
     const form = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -168,7 +117,8 @@ export class SlackClient {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.#token}`,
-          "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+          // No charset: Slack answers one on a form body with `superfluous_charset`, measured.
+          "Content-Type": "application/x-www-form-urlencoded",
         },
         body: form.toString(),
         signal: AbortSignal.timeout(this.#timeoutMs),
@@ -239,21 +189,6 @@ function warningsOf(body: Readonly<Record<string, unknown>>): readonly string[] 
     }
   }
   return [...found];
-}
-
-function toMessage(raw: unknown): SlackMessage {
-  const message = record(raw);
-  const meta = record(message["metadata"]);
-  const eventType = optionalStr(meta["event_type"]);
-  return {
-    ts: str(message["ts"]),
-    text: str(message["text"]),
-    botId: optionalStr(message["bot_id"]),
-    metadata:
-      eventType === null
-        ? null
-        : { event_type: eventType, event_payload: record(meta["event_payload"]) },
-  };
 }
 
 function record(value: unknown): Record<string, unknown> {

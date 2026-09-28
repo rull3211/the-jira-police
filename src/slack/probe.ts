@@ -1,19 +1,36 @@
 /**
- * Whether a message's metadata survives the round trip the audit thread depends on: posted,
- * read back, edited, read back again. Measured against the real app before anything stores state
- * in it, because the documentation does not settle it.
+ * Whether both halves of the audit thread's store work against the real systems: a Slack message
+ * posted, edited and deleted, and a record written to, read back from and deleted on one named
+ * ticket. Measured before anything is built on either.
  */
 
-import type { SlackClient, SlackMessage, SlackMetadata } from "./client.ts";
-import { SlackError } from "./client.ts";
+import { isDeepStrictEqual } from "node:util";
+
+import type { JiraClient } from "../jira/client.ts";
 import { oneLine } from "../text.ts";
+import type { SlackClient } from "./client.ts";
 
-export const PROBE_EVENT_TYPE = "jira_police.probe";
+export const PROBE_PROPERTY = "jira-police.slack-probe";
 
-export type ProbeClient = Pick<
-  SlackClient,
-  "authTest" | "post" | "update" | "history" | "deleteMessage"
+/** At the record's caps, so the write measures the largest record the thread can hold, not a toy. */
+const SAMPLE_TIMELINE_ENTRIES = 40;
+const SAMPLE_MAJOR_ENTRIES = 10;
+const SAMPLE_ENTRY_CHARS = 200;
+
+export type ProbeSlack = Pick<SlackClient, "authTest" | "post" | "update" | "deleteMessage">;
+
+export type ProbeJira = Pick<
+  JiraClient,
+  "getIssueProperty" | "setIssueProperty" | "deleteIssueProperty"
 >;
+
+export interface ProbeTarget {
+  readonly channel: string;
+  readonly issueKey: string;
+  readonly keep: boolean;
+  readonly nonce: string;
+  readonly now: Date;
+}
 
 export interface ProbeStep {
   readonly name: string;
@@ -23,92 +40,169 @@ export interface ProbeStep {
 
 export interface ProbeResult {
   readonly steps: readonly ProbeStep[];
-  /** The probe message's `ts` when it was left in the channel, deliberately or by a failed delete. */
-  readonly leftBehind: string | null;
+  /** The Slack message's `ts`, when it is still in the channel. */
+  readonly messageLeft: string | null;
+  /** Whether the probe property is still on the ticket, deliberately or by a failed delete. */
+  readonly propertyLeft: boolean;
 }
 
 export const EXIT = { ok: 0, failed: 1, usage: 2, threw: 3 } as const;
 
+type Recorder = (name: string, ok: boolean, detail: string) => boolean;
+
 export async function runProbe(
-  client: ProbeClient,
-  channel: string,
-  options: { readonly keep: boolean; readonly nonce: string; readonly now: Date },
+  slack: ProbeSlack,
+  jira: ProbeJira,
+  target: ProbeTarget,
 ): Promise<ProbeResult> {
   const steps: ProbeStep[] = [];
-  const record = (name: string, ok: boolean, detail: string): boolean => {
+  const record: Recorder = (name, ok, detail) => {
     steps.push({ name, ok, detail: oneLine(detail) });
     return ok;
   };
 
+  const messageLeft = await slackHalf(slack, target, record);
+  const propertyLeft = await jiraHalf(jira, target, messageLeft ?? "", record);
+  return { steps, messageLeft, propertyLeft };
+}
+
+async function slackHalf(
+  slack: ProbeSlack,
+  target: ProbeTarget,
+  record: Recorder,
+): Promise<string | null> {
   try {
-    const who = await client.authTest();
+    const who = await slack.authTest();
     record("auth.test", true, `bot user ${who.userId} in ${who.team}`);
   } catch (error) {
     record("auth.test", false, describe(error));
-    return { steps, leftBehind: null };
+    return null;
   }
 
-  const posted = metadataFor(options.nonce, "posted");
   let ts: string;
   try {
-    const result = await client.post({
-      channel,
-      text: `the-jira-police probe, ${options.now.toISOString()} — safe to ignore`,
-      metadata: posted,
+    const posted = await slack.post({
+      channel: target.channel,
+      text: `the-jira-police probe for ${target.issueKey}, ${target.now.toISOString()} — safe to ignore`,
     });
-    ts = result.ts;
-    record("chat.postMessage", true, withWarnings(`ts ${ts}`, result.warnings));
+    ts = posted.ts;
+    record("chat.postMessage", true, withWarnings(`ts ${ts}`, posted.warnings));
   } catch (error) {
     record("chat.postMessage", false, describe(error));
-    return { steps, leftBehind: null };
+    return null;
   }
 
-  const readAfterPost = await readBack(client, channel, ts, posted);
-  record("metadata after post", readAfterPost.ok, readAfterPost.detail);
-
-  const updated = metadataFor(options.nonce, "updated");
-  let updateOk = false;
   try {
-    const result = await client.update({
-      channel,
+    const edited = await slack.update({
+      channel: target.channel,
       ts,
-      text: `the-jira-police probe, ${options.now.toISOString()}, edited — safe to ignore`,
-      metadata: updated,
+      text: `the-jira-police probe for ${target.issueKey}, ${target.now.toISOString()}, edited — safe to ignore`,
     });
-    updateOk = record("chat.update", true, withWarnings(`ts ${result.ts}`, result.warnings));
+    record("chat.update", true, withWarnings(`ts ${edited.ts}`, edited.warnings));
   } catch (error) {
     record("chat.update", false, describe(error));
   }
 
-  if (updateOk) {
-    const readAfterUpdate = await readBack(client, channel, ts, updated);
-    record("metadata after update", readAfterUpdate.ok, readAfterUpdate.detail);
-  }
-
-  if (options.keep) {
-    return { steps, leftBehind: ts };
+  if (target.keep) {
+    return ts;
   }
   try {
-    await client.deleteMessage({ channel, ts });
+    await slack.deleteMessage({ channel: target.channel, ts });
     record("chat.delete", true, `removed ${ts}`);
-    return { steps, leftBehind: null };
+    return null;
   } catch (error) {
     record("chat.delete", false, describe(error));
-    return { steps, leftBehind: ts };
+    return ts;
   }
+}
+
+async function jiraHalf(
+  jira: ProbeJira,
+  target: ProbeTarget,
+  ts: string,
+  record: Recorder,
+): Promise<boolean> {
+  const written = sampleRecord(target, ts);
+  try {
+    await jira.setIssueProperty(target.issueKey, PROBE_PROPERTY, written);
+    record(
+      "property write",
+      true,
+      `${PROBE_PROPERTY} on ${target.issueKey}, ${String(JSON.stringify(written).length)} characters`,
+    );
+  } catch (error) {
+    record("property write", false, describe(error));
+    return false;
+  }
+
+  try {
+    const read = await jira.getIssueProperty(target.issueKey, PROBE_PROPERTY);
+    const same = isDeepStrictEqual(read, written);
+    record(
+      "property read back",
+      same,
+      same
+        ? "identical, timeline included"
+        : `came back different: ${JSON.stringify(read).slice(0, 200)}`,
+    );
+  } catch (error) {
+    record("property read back", false, describe(error));
+  }
+
+  if (target.keep) {
+    return true;
+  }
+  try {
+    const deleted = await jira.deleteIssueProperty(target.issueKey, PROBE_PROPERTY);
+    record(
+      "property delete",
+      deleted,
+      deleted ? "removed" : "Jira said there was nothing to delete",
+    );
+    const after = await jira.getIssueProperty(target.issueKey, PROBE_PROPERTY);
+    record("property gone", after === null, after === null ? "reads as absent" : "still readable");
+    return after !== null;
+  } catch (error) {
+    record("property delete", false, describe(error));
+    return true;
+  }
+}
+
+/** Shaped like the audit record: nested objects and a list of objects, which Slack's metadata could not hold. */
+export function sampleRecord(target: ProbeTarget, ts: string): unknown {
+  const at = target.now.toISOString();
+  return {
+    probe: target.nonce,
+    slack: { channel: target.channel, ts },
+    triage: { verdict: "ready-ish", solvable: true, confidence: "high" },
+    pr: { url: "https://github.com/example/repo/pull/1", state: "draft" },
+    major: entries(SAMPLE_MAJOR_ENTRIES, "major", at),
+    timeline: entries(SAMPLE_TIMELINE_ENTRIES, "timeline", at),
+  };
+}
+
+function entries(count: number, kind: string, at: string): readonly object[] {
+  return Array.from({ length: count }, (_unused, index) => ({
+    at,
+    what: `probe ${kind} entry ${String(index + 1)} of ${String(count)} `.padEnd(
+      SAMPLE_ENTRY_CHARS,
+      ".",
+    ),
+  }));
 }
 
 export function exitCodeFor(result: ProbeResult): number {
   return result.steps.every((step) => step.ok) ? EXIT.ok : EXIT.failed;
 }
 
-export function formatReport(result: ProbeResult, channel: string, now: Date): string {
+export function formatReport(result: ProbeResult, target: ProbeTarget): string {
   const lines = [
     "# Slack probe",
     "",
-    `- **Run:** ${now.toISOString()}`,
-    `- **Channel:** ${channel}`,
-    `- **Verdict:** ${exitCodeFor(result) === EXIT.ok ? "PASS — metadata round-trips" : "FAIL"}`,
+    `- **Run:** ${target.now.toISOString()}`,
+    `- **Channel:** ${target.channel}`,
+    `- **Ticket:** ${target.issueKey}`,
+    `- **Verdict:** ${exitCodeFor(result) === EXIT.ok ? "PASS — both halves of the store work" : "FAIL"}`,
     "",
     "| step | result | detail |",
     "| ---- | ------ | ------ |",
@@ -117,46 +211,13 @@ export function formatReport(result: ProbeResult, channel: string, now: Date): s
         `| ${step.name} | ${step.ok ? "PASS" : "FAIL"} | ${step.detail.replaceAll("|", "\\|")} |`,
     ),
   ];
-  if (result.leftBehind !== null) {
-    lines.push("", `The probe message is still in the channel: ts ${result.leftBehind}.`);
+  if (result.messageLeft !== null) {
+    lines.push("", `The probe message is still in the channel: ts ${result.messageLeft}.`);
+  }
+  if (result.propertyLeft) {
+    lines.push("", `${PROBE_PROPERTY} is still on ${target.issueKey}.`);
   }
   return `${lines.join("\n")}\n`;
-}
-
-function metadataFor(nonce: string, stage: "posted" | "updated"): SlackMetadata {
-  return { event_type: PROBE_EVENT_TYPE, event_payload: { nonce, stage } };
-}
-
-async function readBack(
-  client: ProbeClient,
-  channel: string,
-  ts: string,
-  expected: SlackMetadata,
-): Promise<{ readonly ok: boolean; readonly detail: string }> {
-  let message: SlackMessage | undefined;
-  try {
-    const page = await client.history({ channel, latest: ts, inclusive: true, limit: 1 });
-    message = page.messages.find((candidate) => candidate.ts === ts);
-  } catch (error) {
-    return { ok: false, detail: describe(error) };
-  }
-  if (message === undefined) {
-    return { ok: false, detail: `conversations.history did not return ${ts}` };
-  }
-  if (message.metadata === null) {
-    return { ok: false, detail: "the message came back with no metadata at all" };
-  }
-  const got = message.metadata;
-  const same =
-    got.event_type === expected.event_type &&
-    got.event_payload["nonce"] === expected.event_payload["nonce"] &&
-    got.event_payload["stage"] === expected.event_payload["stage"];
-  return {
-    ok: same,
-    detail: same
-      ? `event_type ${got.event_type}, stage ${String(got.event_payload["stage"])}`
-      : `expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`,
-  };
 }
 
 function withWarnings(detail: string, warnings: readonly string[]): string {
@@ -164,8 +225,5 @@ function withWarnings(detail: string, warnings: readonly string[]): string {
 }
 
 function describe(error: unknown): string {
-  if (error instanceof SlackError) {
-    return error.message;
-  }
   return error instanceof Error ? error.message : String(error);
 }
