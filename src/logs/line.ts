@@ -1,10 +1,8 @@
 /**
  * One raw line in, one entry out — never zero.
  *
- * The daemon's stdout is not pure NDJSON: `watch/sweep.ts` writes `↳` report lines through
- * `deps.report` onto the same descriptor, and a crash writes a stack trace there too. A parser that
- * dropped what it could not parse would eat both, and the trace is the line an operator most needs.
- * So anything that is not a log object becomes a `raw` entry and is displayed verbatim.
+ * The daemon's stdout also carries the solve rungs' plain progress and crash traces, which must
+ * never be dropped, so anything that is not a log object becomes a verbatim `raw` entry.
  */
 
 import type { LogLevel } from "../logger.ts";

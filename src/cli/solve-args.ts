@@ -31,10 +31,11 @@ export const USAGE =
   "  <ISSUE-KEY> --solve     ... and runs the solver; nothing is pushed\n" +
   "  <ISSUE-KEY> --pr        ... and opens the draft pull request\n" +
   "  <ISSUE-KEY> --review    ... and keeps answering the review until it is done,\n" +
-  "                          out of rounds, or out of patience. Unattended, paid\n" +
-  "                          per round, and the only loop in this service.\n" +
+  "                          out of rounds, or out of patience. Unattended and\n" +
+  "                          paid per round.\n" +
   "Each flag does everything the ones above it do. A run that does not reach a\n" +
-  "pull request puts the labels back where it found them.\n" +
+  "pull request writes agent:failed if it reached a verdict on the ticket, and\n" +
+  "otherwise puts the labels back where it found them.\n" +
   "\n" +
   "  --repair                with --pr or --review: a repair round that turns a\n" +
   "                          failed verification green opens the pull request, as a\n" +
