@@ -120,6 +120,11 @@ finding a ticket's thread needs no history search, so `channels:history` and the
 go. Residual risk: a daemon and a CLI updating one ticket in the same second can drop one
 timeline entry.
 
+**The second probe held, 2026-09-28, on SSX-3595.** A message posted, edited and deleted with no
+Slack warning, and a 12 452-character record — nested objects and two lists of objects, at the
+caps' size — written to the property, read back identical, deleted and confirmed gone. Predicted
+exactly that; nothing refuted.
+
 **One more keychain dialog everywhere.** Declaring `SLACK_BOT_TOKEN` sensitive means `readSettings`
 resolves a `keychain:` value for it at every start, so each command and the daemon ask for the
 Slack token as well as `JIRA_AUTH`, whether or not they touch Slack. Resolving it only where a
