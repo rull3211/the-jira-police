@@ -78,10 +78,92 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §68. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §71. The pointer is a per-branch guess: two branches open at once each read it
 from their own base.
 
 <!-- refs:on -->
+
+### 68. Nobody can see what the bot is doing to a ticket without reading its log
+
+**Branch:** `feat/slack-audit-thread`
+
+**What is being attempted.** One Slack thread per ticket, opened when triage picks it up. The bot
+owns the parent message and keeps editing it as an audit log: four status fields (triage, work,
+pull request, state), a prominent entry per major event (triage verdict, gate refusal, crash, pull
+request opened, ready, merged or closed), and a capped timeline of the minor ones (triage started,
+verdict posted, claim, each pass, verify, review rounds). Replies are left to people. Outbound
+only — `chat:write` and `channels:history` — behind `SLACK_MODE=off|dry|live`, off by default.
+
+**Why now.** The operator asked for it on 2026-09-28, and the access that stopped the canvas sink
+(`INCIDENTS.md`, "The Slack canvas sink") exists: the operator can create and install an app in the
+workspace. It lets a person see what happened to a ticket — including the runs that end without a
+label — without reading JSON lines or the board.
+
+**The order.** `SLACK_` joins `JIRA_` in `WITHHELD_FROM_CHILD` before any token exists, so no model
+session inherits one. Then `pnpm slack:probe` measures the single fact the design rests on — that a
+message's `metadata` survives `chat.postMessage`, `conversations.history` and `chat.update` —
+against the real app, before the record exists. Then `dry`, which writes each would-be request
+under `OUTPUT_DIR/slack/`; then `live` on `triage:once <KEY>` and `solve:once <KEY> --advance`; the
+daemon last.
+
+**State lives in Slack.** The record is the parent's own metadata, read back and rewritten on each
+event, and a per-process lock serialises one ticket's updates. Residual risk: a daemon and a CLI
+updating one ticket in the same second can drop one timeline entry.
+
+**What would make it the wrong idea.**
+
+- If the probe shows metadata does not round-trip, the record has nowhere to live in Slack and the
+  store is re-planned before anything depends on it — the reason the probe comes first.
+- A thread per triaged ticket may be a channel nobody reads. At four or five a day it should not
+  be; if it is, opening at the claim instead is one call site.
+- A notifier that swallows every Slack failure can go quiet unnoticed: its warn line is the only
+  signal, in the log this entry exists because nobody reads.
+
+### 69. Nobody is told when a ticket they care about crashes or opens a pull request
+
+**Branch:** none yet — cut from `main` after §68 merges.
+
+**What is not built.** `/bencebot subscribe|unsubscribe tags|dm`, and the two lists behind it.
+`tags` are mentioned in each new parent as it is posted; `dm` get a direct message on each major
+event. Slack sends no notification for a mention added by editing a message — reported
+consistently, not measured here — so a tag in the parent pings once, and the DM list is the answer
+for every later event. Both lists live in one bot-owned roster message in the channel: metadata the
+source of truth, text a person can read.
+
+Inbound needs Socket Mode, because the daemon has no public URL, and Node 24's own `WebSocket` is
+enough — no dependency. `apps.connections.open` with the `xapp-` token, the command's reply sent in
+the envelope's ack, a reconnect on `disconnect`. **The subscriber is the envelope's `user_id`,
+never anything in the command's text.** `pnpm slack:listen` drives it by hand; `src/slack-loop.ts`
+puts it in the daemon under invariant 17 — built before the loops, `null` when off, and unable to
+reject the daemon's `Promise.all`.
+
+**Why its own branch.** It is the first inbound channel this service has — something outside it can
+now cause a write — which is a different privilege from posting.
+
+**What would make it the wrong idea.** A roster found by scanning history can be missed by a scan
+that stops early, and a missed roster is every subscriber silently dropped: the scan must be
+complete, or the listener must refuse to write. A DM per major event per subscriber is noise at
+scale; at one team it should not be.
+
+### 70. The pull request channel's announcement is written by hand every time
+
+**Branch:** none yet — cut from `main` after §68 merges.
+
+**What is not built.** When a pull request opens, a direct message to `SLACK_OPERATOR_USER_ID`
+holding one line to copy into the team's pull request channel: `<url|PR-Bencebot>` and one
+Norwegian sentence describing the change, like _Fiks på cache eviction på vellykket customer write
+slik at vi tømmer cachen på utdaterte personer_. Nothing writes that sentence today:
+`commitSubject` is an English Conventional Commits line and `summary` an English paragraph for the
+reviewer. So `FIX_SCHEMA` gains a required `teamChannelLine` — one bokmål sentence, no ticket key,
+no claim that anything passes — which `parseFix` reads and the harness one-lines and caps.
+
+**Why its own branch.** It changes the contract of the paid fix pass, whose `if` conditional has
+already needed a fix of its own (`2ed3049`), so it is watched on one real `solve:once <KEY> --pr`
+before anything relies on it.
+
+**What would make it the wrong idea.** Norwegian written by a model for a channel is prose nothing
+checks mechanically. If the line needs rewriting every time, the ticket's own summary is the free
+alternative.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
