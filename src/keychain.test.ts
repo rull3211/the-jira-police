@@ -2,7 +2,13 @@ import { userInfo } from "node:os";
 
 import { describe, expect, it } from "vitest";
 
-import { KeychainError, LOOKUP_TIMEOUT_MS, describeFailure, lookupInKeychain } from "./keychain.ts";
+import {
+  KeychainError,
+  LOOKUP_TIMEOUT_MS,
+  describeFailure,
+  lookupInKeychain,
+  runSecurity,
+} from "./keychain.ts";
 
 /** What a failed `execFileSync` throws, stdout included, so a leak of it has something to find. */
 function failed(fields: Record<string, unknown>): Error {
@@ -69,6 +75,17 @@ describe("describeFailure", () => {
     expect(describeFailure(failed({ code: "ETIMEDOUT", signal: "SIGTERM" }), "x", "someone")).toBe(
       `nobody answered the keychain dialog for "x" within ${String(LOOKUP_TIMEOUT_MS / 1000)}s`,
     );
+  });
+
+  it("recognises the error a real runner throws when it kills a lookup at the timeout", () => {
+    let thrown: unknown = null;
+    try {
+      runSecurity("/bin/sleep", ["5"], 100);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(describeFailure(thrown, "x", "someone")).toContain("nobody answered");
   });
 
   it("names a machine without the keychain tool as that", () => {

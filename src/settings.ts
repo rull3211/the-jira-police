@@ -422,9 +422,8 @@ export function readSettings(
 }
 
 /**
- * The resolved value goes into the returned object and nowhere else — never back into `env`, which
- * every child process inherits. Honoured only on a `sensitive` setting, since `describeSettings`
- * prints every other value into the startup log.
+ * Into the returned object only, never back into `env`, which every child inherits; and only for a
+ * `sensitive` setting, because `describeSettings` logs every other value.
  */
 function resolveKeychainReferences(settings: Settings, lookup: SecretLookup): Settings {
   const resolved: Record<string, string> = { ...settings };
@@ -472,12 +471,8 @@ function resolveKeychainReferences(settings: Settings, lookup: SecretLookup): Se
 }
 
 /**
- * The same read, with a required-but-absent setting left empty instead of throwing.
- *
- * **Only for a command that reads a local artifact and reaches nothing**, so it runs in a fresh
- * clone or an unconfigured checkout. Anything talking to a remote system keeps {@link readSettings}:
- * an empty credential fails at the call, a long way from the decision that let it through. A
- * `keychain:` value is left as written, so a command that needs no secret raises no dialog.
+ * The same read with a missing required setting left empty and `keychain:` left unresolved. Only
+ * for a command that reaches nothing remote, so it runs unconfigured and raises no dialog.
  */
 export function readLocalSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   return resolveDeclared(env).settings;

@@ -218,7 +218,8 @@ and write `JIRA_AUTH=keychain:the-jira-police.JIRA_AUTH` in `.env`. `-T ""` trus
 so every read raises a dialog: one per referenced secret each time the daemon or a command starts,
 and it cannot say who asked, so allow it only when you just started something. **Never choose
 "Always Allow"** — it makes every later read silent, an agent's included. A denied or unanswered
-dialog stops the start with exit 78, naming the setting. Store the value without a trailing
+dialog stops the start, naming the setting: exit 78, except from `attach:stage`, which exits 3 on
+any failure. Store the value without a trailing
 newline: `security` prints a value holding one as hex, which then arrives as the wrong secret —
 `security find-generic-password -a "$USER" -s <name> -w | wc -c` should print the token's length
 plus one. Commands that reach nothing

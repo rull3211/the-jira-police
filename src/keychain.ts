@@ -27,7 +27,7 @@ export class KeychainError extends Error {
   }
 }
 
-const runSecurity: SecurityRunner = (file, args, timeoutMs) =>
+export const runSecurity: SecurityRunner = (file, args, timeoutMs) =>
   execFileSync(file, args, {
     encoding: "utf8",
     timeout: timeoutMs,

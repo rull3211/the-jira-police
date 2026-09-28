@@ -330,7 +330,6 @@ describe("RECON_IMAGES", () => {
   });
 });
 
-/** A keychain holding whatever it is given, recording every name asked for. */
 function keychain(items: Readonly<Record<string, string>>): {
   readonly lookup: (name: string) => string;
   readonly asked: string[];
@@ -390,6 +389,15 @@ describe("keychain: references", () => {
 
     expect(attempt).toThrow(SettingsError);
     expect(attempt).toThrow(/Unreadable configuration: JIRA_AUTH \(keychain lookup/u);
+  });
+
+  it("fails the start on a reference naming no item, without asking the keychain", () => {
+    const store = keychain({ "": "ATATT-secret" });
+
+    expect(() => readSettings({ ...MINIMAL, JIRA_AUTH: "keychain:" }, store.lookup)).toThrow(
+      /JIRA_AUTH \(keychain: names no item\)/u,
+    );
+    expect(store.asked).toEqual([]);
   });
 
   it("fails the start on an empty item rather than sending an empty credential", () => {
