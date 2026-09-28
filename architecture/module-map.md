@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-120 production modules, 107 test files. Grouped by what they belong to rather than alphabetically,
+121 production modules, 107 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -163,6 +163,7 @@ inheritance.
 | `src/cli/repair-ledger.ts`       | `pnpm repair:ledger`. Reads `repair-rounds.md` back as a distribution. Needs no credential, writes nothing                                                                                                                      |
 | `src/cli/slack-probe.ts`         | `pnpm slack:probe <KEY> [--keep]`. A message posted, edited, deleted; a full-size record written to the ticket's property, read back, deleted. A verdict per step in `slack-probe.md`                                           |
 | `src/cli/slack-once.ts`          | `pnpm slack:once <KEY> [--post] [--bump]`. Draws one ticket's audit thread from its record; `--bump` broadcasts its latest major entry again. Dry by default: the record and the exact Slack requests under `OUTPUT_DIR/slack/` |
+| `src/cli/slack-listen.ts`        | `pnpm slack:listen`. Holds a Socket Mode connection and answers `/bencebot` until Ctrl-C, dry: the real subscriber list read, the would-be one written to `OUTPUT_DIR/slack/roster.json`, every reply marked                    |
 | `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                                                                                         |
 | `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                                                                                        |
 | `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                                                                                                   |
@@ -215,7 +216,9 @@ by `createGroom` at startup so a live misconfiguration stops the daemon there. I
 places: `createGroom` (triage), `createSolveRunDeps` (every model pass, through `auditPasses`),
 `runWriteRungs` (claim, outcome, pull request, crash — before the claim, since a configuration error
 after it would strand the claim), `runReviewSweep` and `runAdvance` (what each look found, recorded
-first, then rounds, undraft, merge).
+first, then rounds, undraft, merge). Both notifiers read the subscriber list at each broadcast.
+`createListenClient` builds the Socket Mode client and refuses any token but an `xapp-` one, and
+`rosterStoreFor` the list's store; `slack:listen` is the only caller of either.
 
 `wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same

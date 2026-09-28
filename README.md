@@ -554,6 +554,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm slack:once <KEY>`                                | Draw the ticket's audit thread from its record, dry: the record and the exact Slack request                                     | `groomed/slack/`                                     |
 | `pnpm slack:once <KEY> --post`                         | …and post or edit the thread for real, saving the record on the ticket                                                          | Slack + the `jira-police.slack` property             |
 | `pnpm slack:once <KEY> --post --bump`                  | …and broadcast its latest major entry to the channel again, deleting the ticket's previous broadcast                            | Slack + the `jira-police.slack` property             |
+| `pnpm slack:listen`                                    | Answer `/bencebot` until Ctrl-C, dry: the real subscriber list read, what each command would make of it written                 | `groomed/slack/roster.json`                          |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                           | no                                                   |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                        | no                                                   |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                        | no                                                   |
@@ -610,7 +611,7 @@ there is no page, says outright that an absent file is not evidence that no roun
 editing its first message,** drawn collapsed to the ticket's title, with the card inside. An edit
 never moves a message, so each line below that decides the ticket's fate is also posted as a
 one-line reply sent to the channel, and the ticket's previous one is deleted: the ticket resurfaces
-at the bottom once, as its latest event. Triage starting opens it; the verdict, a gate refusal, a claim, each
+at the bottom once, as its latest event, mentioning everyone on the subscriber list below. Triage starting opens it; the verdict, a gate refusal, a claim, each
 model pass, the solve's outcome, the pull request, each review round, the undraft, the merge and
 any crash land on it — the ones that decide the ticket's fate as their own lines, the rest in the
 timeline, newest first. The undraft is one line per handover, however many looks find the pull
@@ -635,6 +636,17 @@ its latest major entry is broadcast again and its previous broadcast deleted, wh
 way to drive a broadcast on a ticket you choose. A record this version cannot read is left as found
 and the command exits 1 saying so: deleting the property starts the thread afresh.
 
+**`slack:listen` answers `/bencebot`, and the subscriber list is what it changes.**
+`/bencebot subscribe` puts you on one list, for every ticket, and each broadcast then mentions you;
+`/bencebot unsubscribe` takes you off, and a bare `/bencebot` says which you are. The reply is only
+visible to you. Who is added is the Slack user who typed it, never a name in the text. The list is
+the `jira-police.slack-subscribers` property on `JIRA_PROJECT`, read at each broadcast, so a change
+applies from the next one; a list this version cannot read is left as found, each command says so,
+and broadcasts go out without mentions and log `slack.subscribers_unread`. The command holds a
+Socket Mode connection, because the daemon has no public URL, and reconnects whenever Slack drops
+it. Dry, it reads the real list and writes what each command would make of it to
+`<OUTPUT_DIR>/slack/roster.json`, and every reply starts `(dry run, nothing written)`.
+
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
 the record it shows — kept on the ticket as the `jira-police.slack` issue property. So before
@@ -650,13 +662,16 @@ declares it, and a declared one cannot hold a list of timeline entries.
 To set it up, create the app from the manifest rather than by hand:
 
 1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**,
-   then paste `docs/slack-app-manifest.json`. It asks for `chat:write` and nothing else, and it
-   turns token rotation off.
+   then paste `docs/slack-app-manifest.json`. It asks for `chat:write` and `commands`, declares
+   `/bencebot`, turns Socket Mode on and token rotation off. An app made from an earlier copy takes
+   the new one under **App Manifest**, then a reinstall.
 2. **Install to Workspace**, then copy **OAuth & Permissions → Bot User OAuth Token** (`xoxb-…`)
    into `SLACK_BOT_TOKEN`. The **App Configuration Token** on the apps page is a different thing: it
    starts `xoxe.xoxp-`, expires in twelve hours, drives only the manifest API, and cannot post.
 3. In a public channel, `/invite @Bencebot`, and copy the channel ID from the bottom of its details
    pane into `SLACK_CHANNEL_ID`.
+4. For `/bencebot` only: **Basic Information → App-Level Tokens → Generate Token and Scopes**, with
+   the `connections:write` scope, into `SLACK_APP_TOKEN` (`xapp-…`), best as `keychain:<name>`.
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch, or with `solve:once --watch`, which polls pull

@@ -8,16 +8,24 @@
     "bot_user": {
       "display_name": "Bencebot",
       "always_online": false
-    }
+    },
+    "slash_commands": [
+      {
+        "command": "/bencebot",
+        "description": "Be mentioned on each major event of every ticket, or stop",
+        "usage_hint": "[subscribe | unsubscribe]",
+        "should_escape": false
+      }
+    ]
   },
   "oauth_config": {
     "scopes": {
-      "bot": ["chat:write"]
+      "bot": ["chat:write", "commands"]
     }
   },
   "settings": {
     "org_deploy_enabled": false,
-    "socket_mode_enabled": false,
+    "socket_mode_enabled": true,
     "token_rotation_enabled": false
   }
 }

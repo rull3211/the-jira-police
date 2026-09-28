@@ -363,6 +363,12 @@ export const SETTINGS = [
       "The ID (`C…`) of the channel the audit threads go to, not its name, so a rename cannot move them. The bot has to be a member: `/invite @Bencebot` in the channel, or every post fails with `not_in_channel`.",
   },
   {
+    name: "SLACK_APP_TOKEN",
+    description:
+      "The Slack app's app-level token, `xapp-…`, from Basic Information → App-Level Tokens with the `connections:write` scope: what opens the Socket Mode connection `/bencebot` arrives on. Unset, nothing listens; only `slack:listen` reads it, and it refuses any other prefix. Best written `keychain:<name>`, like SLACK_BOT_TOKEN. Withheld from every model session.",
+    sensitive: true,
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",

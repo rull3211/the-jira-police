@@ -8,6 +8,7 @@ import { JqlError } from "./jira/jql.ts";
 import type { JiraClient } from "./jira/client.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { type Settings, SettingsError, readSettings } from "./settings.ts";
+import { SlackClient } from "./slack/client.ts";
 import { buildPrompt, toolsFor } from "./triage/runner.ts";
 import { runSolveCycle } from "./solve/poller.ts";
 import type { IssueDetail } from "./jira/client.ts";
@@ -25,6 +26,7 @@ import {
   createDiscover,
   createPollDeps,
   createReviewCycleDeps,
+  createListenClient,
   createSlackTarget,
   pipelineAuditNotifier,
   createSolveDeps,
@@ -1456,4 +1458,27 @@ describe("createSlackTarget", () => {
       expect(attempt).not.toThrow(token);
     },
   );
+});
+
+describe("createListenClient", () => {
+  it("names the setting when it is unset", () => {
+    expect(() => createListenClient(settingsWith({}))).toThrow(/SLACK_APP_TOKEN \(the app-level/u);
+  });
+
+  it.each(["xoxb-1-bot", "xoxe.xoxp-1-config"])(
+    "refuses %s, which cannot open Socket Mode, without echoing more than its prefix",
+    (token) => {
+      const attempt = (): unknown => createListenClient(settingsWith({ SLACK_APP_TOKEN: token }));
+
+      expect(attempt).toThrow(SettingsError);
+      expect(attempt).toThrow(/expected an app-level token starting xapp-/u);
+      expect(attempt).not.toThrow(token);
+    },
+  );
+
+  it("builds a client for an app-level token", () => {
+    expect(createListenClient(settingsWith({ SLACK_APP_TOKEN: "xapp-1-abc" }))).toBeInstanceOf(
+      SlackClient,
+    );
+  });
 });

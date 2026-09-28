@@ -20,6 +20,7 @@
     "repair:ledger": "node --env-file-if-exists=.env src/cli/repair-ledger.ts",
     "slack:once": "node --env-file-if-exists=.env src/cli/slack-once.ts",
     "slack:probe": "node --env-file-if-exists=.env src/cli/slack-probe.ts",
+    "slack:listen": "node --env-file-if-exists=.env src/cli/slack-listen.ts",
     "daemon:status": "node src/cli/daemon-status.ts",
     "logs": "node src/cli/logs.ts",
     "check-types": "tsc --noEmit",
