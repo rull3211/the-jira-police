@@ -139,16 +139,17 @@ describe("buildArgs", () => {
     expect(() => JSON.parse(schema ?? "")).not.toThrow();
   });
 
-  it("makes the CLI refuse a reply without agentFitness, and never invites leaving it out", () => {
+  it("requires agentFitness and its plausible field in the schema it passes, never inviting omission", () => {
     // A reply can drop the fitness call and keep `agent:solvable` (SSX-3986); only the schema stops
     // that before the run is paid for. A description inviting omission would make the retries loop.
     const args = buildArgs(BASE);
     const schema = JSON.parse(args[args.indexOf("--json-schema") + 1] ?? "{}") as {
       required: readonly string[];
-      properties: { agentFitness: { description: string } };
+      properties: { agentFitness: { description: string; required: readonly string[] } };
     };
 
     expect(schema.required).toContain("agentFitness");
+    expect(schema.properties.agentFitness.required).toContain("plausible");
     expect(schema.properties.agentFitness.description).not.toMatch(/\bomit/iu);
   });
 

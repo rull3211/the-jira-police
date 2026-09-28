@@ -128,8 +128,7 @@ export const TRIAGE_SCHEMA = {
     agentFitness: {
       type: "object",
       additionalProperties: false,
-      // `plausible` stays optional: its omission reads as `false`, so nothing is lost by asking.
-      required: ["solvable", "confidence", "repo", "rationale", "blockers"],
+      required: ["solvable", "plausible", "confidence", "repo", "rationale", "blockers"],
       // Required at the top level so the CLI rejects a reply without it while a retry costs a turn;
       // the gate would only refuse it after the run. `parseAgentFitness` still fails closed on absence.
       description:
