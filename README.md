@@ -555,6 +555,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm slack:once <KEY> --post`                         | …and post or edit the thread for real, saving the record on the ticket                                                          | Slack + the `jira-police.slack` property             |
 | `pnpm slack:once <KEY> --post --bump`                  | …and broadcast its latest major entry to the channel again, deleting the ticket's previous broadcast                            | Slack + the `jira-police.slack` property             |
 | `pnpm slack:listen`                                    | Answer `/bencebot` until Ctrl-C, dry: the real subscriber list read, what each command would make of it written                 | `groomed/slack/roster.json`                          |
+| `pnpm slack:listen --write`                            | …and write the list, reading it back after each change                                                                          | the `jira-police.slack-subscribers` project property |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                           | no                                                   |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                        | no                                                   |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                        | no                                                   |
@@ -645,7 +646,9 @@ applies from the next one; a list this version cannot read is left as found, eac
 and broadcasts go out without mentions and log `slack.subscribers_unread`. The command holds a
 Socket Mode connection, because the daemon has no public URL, and reconnects whenever Slack drops
 it. Dry, it reads the real list and writes what each command would make of it to
-`<OUTPUT_DIR>/slack/roster.json`, and every reply starts `(dry run, nothing written)`.
+`<OUTPUT_DIR>/slack/roster.json`, and every reply starts `(dry run, nothing written)`. `--write`
+writes the property and reads it back, and a reply that cannot see its own change says so. The
+credential needs Administer Projects on `JIRA_PROJECT` for that write, and nothing else here does.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
