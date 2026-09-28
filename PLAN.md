@@ -125,6 +125,11 @@ Slack warning, and a 12 452-character record — nested objects and two lists of
 caps' size — written to the property, read back identical, deleted and confirmed gone. Predicted
 exactly that; nothing refuted.
 
+**The first live thread, 2026-09-28, SSX-3595.** `slack:once SSX-3595 --post` posted it and saved a
+365-character record; a second run, a new process with nothing in memory, found the thread through
+the record and edited it rather than posting another. The dry run before them had predicted and
+found one defect: the card called a ticket nothing had happened to "running".
+
 **One more keychain dialog everywhere.** Declaring `SLACK_BOT_TOKEN` sensitive means `readSettings`
 resolves a `keychain:` value for it at every start, so each command and the daemon ask for the
 Slack token as well as `JIRA_AUTH`, whether or not they touch Slack. Resolving it only where a
