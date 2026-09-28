@@ -17,7 +17,8 @@ Things that look like details and are not:
 2. **The analyst never gets a write tool**, and there is no `--yes` path. A second way to post
    would be a second way to post unchecked.
 3. **The REST credential never leaves discovery.** `childEnv` is the enforcement; the test
-   asserting its absence is the proof.
+   asserting its absence is the proof. A credential written `keychain:<name>` is resolved into the
+   settings object only, so `process.env` — which every child inherits — never holds it at all.
 4. **The gate reads structured fields, never prose.** See §3.
 5. **Labels are a delta, unioned against live** — never a replacement array.
 6. **The footer sentinel is verbatim and load-bearing.** Change it and every existing comment

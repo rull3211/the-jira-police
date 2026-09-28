@@ -204,6 +204,23 @@ pnpm install
 cp .env.example .env    # then fill in JIRA_EMAIL, JIRA_AUTH, VAULT_PATH
 ```
 
+**Keep the credential out of the file.** Any sensitive setting may be written `keychain:<name>`,
+and the service reads the named item from your macOS login keychain once, at startup, inside the
+process — never through the file and never through the environment it was launched with, which
+anything running as you can read with `ps -E`. Store the item in your own terminal, not through an
+agent session, since whatever an agent runs lands in its context:
+
+```bash
+security add-generic-password -a "$USER" -s the-jira-police.JIRA_AUTH -T "" -w   # asks for the value
+```
+
+and write `JIRA_AUTH=keychain:the-jira-police.JIRA_AUTH` in `.env`. `-T ""` trusts no application,
+so every read raises a dialog: one per referenced secret each time the daemon or a command starts,
+and it cannot say who asked, so allow it only when you just started something. **Never choose
+"Always Allow"** — it makes every later read silent, an agent's included. A denied or unanswered
+dialog stops the start with exit 78, naming the setting. Commands that reach nothing
+(`repair:ledger`) resolve nothing and ask for nothing.
+
 Those three are all grooming needs. **Solving needs three more with no defaults** —
 `SOLVE_REPO_ROOT`, `SOLVE_REPOS` and `SOLVE_GITHUB_OWNER` — and each one is unset rather than
 guessed because a default there is a privilege that survives being deleted from `.env`. See

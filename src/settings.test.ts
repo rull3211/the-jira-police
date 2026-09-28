@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { KeychainError } from "./keychain.ts";
 import {
   SETTINGS,
   SettingsError,
@@ -326,5 +327,95 @@ describe("RECON_IMAGES", () => {
 
   it("arms only on an explicit true", () => {
     expect(flag(readSettings({ ...MINIMAL, RECON_IMAGES: "true" }), "RECON_IMAGES")).toBe(true);
+  });
+});
+
+/** A keychain holding whatever it is given, recording every name asked for. */
+function keychain(items: Readonly<Record<string, string>>): {
+  readonly lookup: (name: string) => string;
+  readonly asked: string[];
+} {
+  const asked: string[] = [];
+  return {
+    asked,
+    lookup: (name) => {
+      asked.push(name);
+      const item = items[name];
+      if (item === undefined) {
+        throw new KeychainError(`keychain lookup of "${name}" failed (exit 44)`);
+      }
+      return item;
+    },
+  };
+}
+
+describe("keychain: references", () => {
+  const REFERENCED = { ...MINIMAL, JIRA_AUTH: "keychain:the-jira-police.JIRA_AUTH" };
+
+  it("resolves a sensitive setting to the item it names", () => {
+    const store = keychain({ "the-jira-police.JIRA_AUTH": "ATATT-secret" });
+
+    expect(readSettings(REFERENCED, store.lookup).JIRA_AUTH).toBe("ATATT-secret");
+    expect(store.asked).toEqual(["the-jira-police.JIRA_AUTH"]);
+  });
+
+  it("writes the secret back into no environment, since every child inherits one", () => {
+    const env: NodeJS.ProcessEnv = { ...REFERENCED };
+
+    readSettings(env, keychain({ "the-jira-police.JIRA_AUTH": "ATATT-secret" }).lookup);
+
+    expect(env["JIRA_AUTH"]).toBe("keychain:the-jira-police.JIRA_AUTH");
+  });
+
+  it("keeps the resolved secret out of the startup log", () => {
+    const settings = readSettings(
+      REFERENCED,
+      keychain({ "the-jira-police.JIRA_AUTH": "ATATT-secret" }).lookup,
+    );
+
+    expect(JSON.stringify(describeSettings(settings))).not.toContain("ATATT-secret");
+  });
+
+  it("refuses a reference on a setting the log prints, without asking the keychain", () => {
+    const store = keychain({ "somewhere.repos": "buy-insurance-advisor-web" });
+
+    expect(() =>
+      readSettings({ ...MINIMAL, SOLVE_REPOS: "keychain:somewhere.repos" }, store.lookup),
+    ).toThrow(/SOLVE_REPOS \(keychain: is read only for a sensitive setting/u);
+    expect(store.asked).toEqual([]);
+  });
+
+  it("fails the start, naming the setting, when the lookup fails", () => {
+    const attempt = (): unknown => readSettings(REFERENCED, keychain({}).lookup);
+
+    expect(attempt).toThrow(SettingsError);
+    expect(attempt).toThrow(/Unreadable configuration: JIRA_AUTH \(keychain lookup/u);
+  });
+
+  it("fails the start on an empty item rather than sending an empty credential", () => {
+    expect(() =>
+      readSettings(REFERENCED, keychain({ "the-jira-police.JIRA_AUTH": "" }).lookup),
+    ).toThrow(/keychain item "the-jira-police.JIRA_AUTH" is empty/u);
+  });
+
+  it("asks for nothing while a required setting is still missing", () => {
+    const store = keychain({ "the-jira-police.JIRA_AUTH": "ATATT-secret" });
+
+    expect(() => readSettings({ JIRA_AUTH: REFERENCED.JIRA_AUTH }, store.lookup)).toThrow(
+      /Missing required configuration: JIRA_EMAIL/u,
+    );
+    expect(store.asked).toEqual([]);
+  });
+
+  it("asks for nothing when no value is a reference", () => {
+    const store = keychain({});
+
+    readSettings(MINIMAL, store.lookup);
+
+    expect(store.asked).toEqual([]);
+  });
+
+  it("is left as written by the local reader, so a command that needs no secret raises no dialog", () => {
+    expect(readLocalSettings(REFERENCED).JIRA_AUTH).toBe("keychain:the-jira-police.JIRA_AUTH");
   });
 });

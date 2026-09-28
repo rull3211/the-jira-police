@@ -5,6 +5,8 @@
  * with a complete list rather than one error at a time as code paths are reached.
  */
 
+import { KEYCHAIN_PREFIX, KeychainError, type SecretLookup, lookupInKeychain } from "./keychain.ts";
+
 export interface SettingSpec {
   readonly name: string;
   readonly description: string;
@@ -360,10 +362,12 @@ export type Settings = Readonly<Record<SettingName, string>>;
 export class SettingsError extends Error {
   readonly missing: readonly string[];
 
-  constructor(missing: readonly string[]) {
-    super(
-      `Missing required configuration: ${missing.join(", ")}. Copy .env.example to .env and fill it in.`,
-    );
+  constructor(
+    missing: readonly string[],
+    summary = "Missing required configuration",
+    advice = "Copy .env.example to .env and fill it in.",
+  ) {
+    super(`${summary}: ${missing.join(", ")}. ${advice}`);
     this.name = "SettingsError";
     this.missing = missing;
   }
@@ -402,13 +406,69 @@ function resolveDeclared(env: NodeJS.ProcessEnv): {
   return { settings: resolved as Settings, missing };
 }
 
-/** Resolves every declared setting, reporting all missing ones at once. */
-export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
+/**
+ * Resolves every declared setting, reporting all missing ones at once, then every `keychain:`
+ * reference — after the missing check, so an incomplete configuration asks for no secret.
+ */
+export function readSettings(
+  env: NodeJS.ProcessEnv = process.env,
+  lookup: SecretLookup = lookupInKeychain,
+): Settings {
   const { settings, missing } = resolveDeclared(env);
   if (missing.length > 0) {
     throw new SettingsError(missing);
   }
-  return settings;
+  return resolveKeychainReferences(settings, lookup);
+}
+
+/**
+ * The resolved value goes into the returned object and nowhere else — never back into `env`, which
+ * every child process inherits. Honoured only on a `sensitive` setting, since `describeSettings`
+ * prints every other value into the startup log.
+ */
+function resolveKeychainReferences(settings: Settings, lookup: SecretLookup): Settings {
+  const resolved: Record<string, string> = { ...settings };
+  const problems: string[] = [];
+
+  for (const spec of SPECS) {
+    const value = settings[spec.name as SettingName];
+    if (!value.startsWith(KEYCHAIN_PREFIX)) {
+      continue;
+    }
+    if (spec.sensitive !== true) {
+      problems.push(
+        `${spec.name} (keychain: is read only for a sensitive setting, which the log redacts)`,
+      );
+      continue;
+    }
+    const name = value.slice(KEYCHAIN_PREFIX.length).trim();
+    if (name === "") {
+      problems.push(`${spec.name} (keychain: names no item)`);
+      continue;
+    }
+    try {
+      const secret = lookup(name);
+      if (secret === "") {
+        problems.push(`${spec.name} (keychain item "${name}" is empty)`);
+      } else {
+        resolved[spec.name] = secret;
+      }
+    } catch (error) {
+      if (!(error instanceof KeychainError)) {
+        throw error;
+      }
+      problems.push(`${spec.name} (${error.message})`);
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new SettingsError(
+      problems,
+      "Unreadable configuration",
+      "A keychain: value must name an item in your login keychain, and its dialog must be allowed.",
+    );
+  }
+  return resolved as Settings;
 }
 
 /**
@@ -416,7 +476,8 @@ export function readSettings(env: NodeJS.ProcessEnv = process.env): Settings {
  *
  * **Only for a command that reads a local artifact and reaches nothing**, so it runs in a fresh
  * clone or an unconfigured checkout. Anything talking to a remote system keeps {@link readSettings}:
- * an empty credential fails at the call, a long way from the decision that let it through.
+ * an empty credential fails at the call, a long way from the decision that let it through. A
+ * `keychain:` value is left as written, so a command that needs no secret raises no dialog.
  */
 export function readLocalSettings(env: NodeJS.ProcessEnv = process.env): Settings {
   return resolveDeclared(env).settings;
