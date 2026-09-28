@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3398 tests in 105 files**, no build step.
+> **3399 tests in 105 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67 and §71, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §71 and §73, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -1148,6 +1148,38 @@ and the run is gone.
 - **A control socket is a second way in.** Every privilege this service holds is reached through one
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
+
+### 74. The triage gate's label rules are enforced only after the run is paid for
+
+**Branch:** none yet.
+
+**What is not built.** `TRIAGE_SCHEMA` requires `agentFitness` and its `plausible`, so a reply that
+drops the fitness call is refused inside the run. It carries none of the gate's label rules
+(`architecture/triage.md`, the gate table): `agent:solvable` without `solvable: true`, `agent:watching`
+without `plausible: true`, either field true without its label, or, on a first triage, the label in
+`labels` but not in `labelsAdd`. A reply breaking one passes the schema and is refused by the gate
+after the session has been paid for, and the poller buys it again next cycle. SSX-3986's refusal on
+2026-09-28 carried two violations, and the schema change closes only the first; the second, the
+`labelsAdd` one, is held today by a sentence in the field descriptions.
+
+**Why it is buildable, and why it was not built alongside.** `architecture/solve.md` records a
+draft-07 `if`/`then` enforced by the CLI in-session (2026-09-24) and accepted by the API when nested
+rather than combined at the root (2026-09-25), and the recon, fix and review schemas already carry
+their parsers' coherence rules this way. The triage rules are several conditionals across
+`labels`, `agentFitness` and `mutation`, which with no root `allOf` means nesting them inside one
+another's branches, and each needs a probe of its own. That is its own change, not part of a fix wanted the
+night before a demo.
+
+**What would make it the wrong idea:**
+
+- **The description sentence may be enough.** If `groomed/*.rejected.md` stays free of label
+  violations over the next weeks, the nested conditionals buy nothing a reader can see.
+- **Each rejection is a capped re-prompt.** A conditional the model keeps failing ends in
+  `error_max_structured_output_retries`, which leaves a log line where the gate leaves a
+  `rejected.md`. Each added conditional is another way to lose a run with less evidence.
+- **Nesting may stop being readable.** `solve.md` repeats one rule inside both branches of another;
+  several rules nested that way may be a schema nobody can review, which is worse than a gate that
+  can be read.
 
 ## Verification
 

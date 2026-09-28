@@ -36,9 +36,10 @@ Things that look like details and are not:
    survive the round trip and the markup does not**, so identity belongs to the words.
 
 7. **`SKILL_NAME` defaults to the mock.** An unconfigured service must not be able to post.
-8. **Anything that grants privilege fails closed.** `agentFitness` is optional in the schema and
-   every ambiguity in `parseAgentFitness` — absent, malformed, truthy-but-not-`true` — resolves to
-   `solvable: false`. Silence is a refusal, never a default yes.
+8. **Anything that grants privilege fails closed.** The schema requires `agentFitness`, so the CLI
+   refuses a reply that drops it inside the run, and every ambiguity in `parseAgentFitness` —
+   absent, malformed, truthy-but-not-`true` — still resolves to `solvable: false`. Silence is a
+   refusal, never a default yes.
 9. **Triage cannot authorise its own downstream work.** It may set `agent:solvable`; `agent:start`
    belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
    attacker-controlled ticket text, so this is a boundary rather than a convention.
