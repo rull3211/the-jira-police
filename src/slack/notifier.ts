@@ -43,6 +43,8 @@ export interface NotifierDeps {
   readonly publisher: Publisher;
   /** For the link a record gets before any event has named the ticket's URL. */
   readonly jiraBaseUrl: string;
+  /** A title for a titleless record drawn without one; a typed key carries only a placeholder. */
+  readonly lookup?: (key: string) => Promise<TicketFacts>;
   readonly now?: () => Date;
 }
 
@@ -78,6 +80,21 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     return next;
   };
 
+  /** `undefined` when there is nothing better than the key: the event is still drawn, under the key. */
+  const lookUp = async (key: string): Promise<TicketFacts | undefined> => {
+    if (deps.lookup === undefined) {
+      return undefined;
+    }
+    try {
+      const found = await deps.lookup(key);
+      return found.summary.trim() === "" ? undefined : found;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log.warn("slack.title_lookup_failed", { key, reason, note: "drawn under the key" });
+      return undefined;
+    }
+  };
+
   const apply = async (
     key: string,
     change: (record: AuditRecord) => AuditRecord,
@@ -98,7 +115,8 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
             ticket?.summary ?? key,
             ticket?.url ?? `${deps.jiraBaseUrl}/browse/${key}`,
           );
-    const facts = ticket === undefined ? base : retitle(base, ticket.summary, ticket.url);
+    const named = ticket ?? (base.summary === key ? await lookUp(key) : undefined);
+    const facts = named === undefined ? base : retitle(base, named.summary, named.url);
     const changed = change(facts);
     if (draw === "if-changed" && changed === base && changed.slack !== null) {
       return { kind: "skipped", reason: "the event changed nothing" };

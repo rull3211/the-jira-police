@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3412 tests in 105 files**, no build step.
+> **3414 tests in 105 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -144,6 +144,13 @@ lines already there stay. It held on both tickets: one property write on the fir
 the next two. The tests had refuted an assumption first: the notifier's "changed nothing" skip had
 only ever fired for a repeated crash, because `applyEvent` copied every record to clear a crash that
 was not there.
+
+**SSX-3929, triaged by `triage:once` at 20:09 the same day, still had its key for a title.** A typed
+key carries a placeholder summary, which `ticketFacts` rightly refuses as a title, so nothing named
+the ticket. Each caller could fetch it, but the next one added would forget. So the notifier does
+it: a record whose title is still its key, drawn with no ticket facts, reads the title from Jira
+once. A failed read draws the key and says so. Predicted for a dry `record` on SSX-3929 with no
+facts: one lookup, the real title in the dry record, and nothing remote written. It held.
 
 **One more keychain dialog everywhere.** Declaring `SLACK_BOT_TOKEN` sensitive means `readSettings`
 resolves a `keychain:` value for it at every start, so each command and the daemon ask for the

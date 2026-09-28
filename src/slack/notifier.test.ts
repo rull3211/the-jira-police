@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { PassRunner } from "../solve/orchestrator.ts";
 import type { SolveRunOptions } from "../solve/runner.ts";
 import { type AuditRecord, newRecord } from "./audit.ts";
-import { type AuditOutcome, auditPasses, createAuditNotifier } from "./notifier.ts";
+import {
+  type AuditOutcome,
+  type TicketFacts,
+  auditPasses,
+  createAuditNotifier,
+} from "./notifier.ts";
 import type { AuditStore, Loaded, Publisher, Thread } from "./store.ts";
 
 const NOW = new Date("2026-09-28T13:58:00Z");
@@ -65,8 +70,14 @@ function publisher(behaviour: { readonly gone?: boolean; readonly fail?: boolean
   };
 }
 
-function notifier(s: AuditStore, p: Publisher) {
-  return createAuditNotifier({ store: s, publisher: p, jiraBaseUrl: BASE_URL, now: () => NOW });
+function notifier(s: AuditStore, p: Publisher, lookup?: (key: string) => Promise<TicketFacts>) {
+  return createAuditNotifier({
+    store: s,
+    publisher: p,
+    jiraBaseUrl: BASE_URL,
+    now: () => NOW,
+    ...(lookup === undefined ? {} : { lookup }),
+  });
 }
 
 describe("createAuditNotifier", () => {
@@ -176,6 +187,52 @@ describe("createAuditNotifier", () => {
     expect([first.kind, second.kind]).toEqual(["edited", "skipped"]);
     expect(s.saved()?.summary).toBe("Cache");
     expect(p.calls).toEqual(["update ts-0"]);
+  });
+
+  it("reads the title once for a record started from a typed key, and never for a caller that named it", async () => {
+    const s = store();
+    const asked: string[] = [];
+    const lookup = async (key: string): Promise<TicketFacts> => {
+      asked.push(key);
+      return {
+        summary: "Kredittsjekk viser ikke frivillig sperre",
+        url: `${BASE_URL}/browse/${key}`,
+      };
+    };
+    const audit = notifier(s.store, publisher().publisher, lookup);
+
+    await audit.record("SSX-1", { kind: "triage-started" });
+    await audit.record("SSX-1", { kind: "claimed", repo: null });
+    expect(s.saved()?.summary).toBe("Kredittsjekk viser ikke frivillig sperre");
+
+    // Titleless already, as the review sweep's first look finds a record the pipeline started blind.
+    const named = store({ kind: "found", record: newRecord("SSX-2", "SSX-2", BASE_URL) });
+    await notifier(named.store, publisher().publisher, lookup).record(
+      "SSX-2",
+      { kind: "triage-started" },
+      { summary: "Named", url: BASE_URL },
+    );
+
+    expect(asked).toEqual(["SSX-1"]);
+    expect(named.saved()?.summary).toBe("Named");
+  });
+
+  it("draws the event under the key when the title cannot be read, a blank one included", async () => {
+    for (const lookup of [
+      async (): Promise<TicketFacts> => {
+        throw new Error("jira said 403");
+      },
+      async (): Promise<TicketFacts> => ({ summary: "  ", url: BASE_URL }),
+    ]) {
+      const s = store();
+
+      const outcome = await notifier(s.store, publisher().publisher, lookup).record("SSX-1", {
+        kind: "triage-started",
+      });
+
+      expect(outcome.kind).toBe("posted");
+      expect(s.saved()?.summary).toBe("SSX-1");
+    }
   });
 
   it("puts a pass on the timeline as a start and a finish, and a pass that died as a start only", async () => {

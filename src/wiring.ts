@@ -496,11 +496,16 @@ export function createSlackTarget(settings: Settings): {
 export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): AuditNotifier {
   const jira = createJiraClient(settings);
   const directory = join(settings.OUTPUT_DIR, "slack");
+  const lookup = async (key: string): Promise<TicketFacts> => {
+    const detail = await jira.fetchDetail(key);
+    return { summary: detail.summary, url: detail.url };
+  };
   if (mode === "dry") {
     return createAuditNotifier({
       store: dryStore(jira, directory),
       publisher: dryPublisher(directory),
       jiraBaseUrl: settings.JIRA_BASE_URL,
+      lookup,
     });
   }
   const { client, channel } = createSlackTarget(settings);
@@ -508,6 +513,7 @@ export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): Audi
     store: propertyStore(jira),
     publisher: slackPublisher(client, channel),
     jiraBaseUrl: settings.JIRA_BASE_URL,
+    lookup,
   });
 }
 
