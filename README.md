@@ -518,6 +518,8 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm sweep:once`                                      | Report stale skill roots and staged-image directories past `STAGING_SWEEP_MAX_AGE_MS`                                           | a report                                             |
 | `pnpm sweep:once --write`                              | …and remove them. Never a live git worktree — see below                                                                         | filesystem (`tmpdir()`)                              |
 | `pnpm slack:probe <KEY> [--keep]`                      | Post, edit and delete one message in `SLACK_CHANNEL_ID`; write, read back and delete a record on the ticket. A verdict per step | Slack and one Jira property, both removed + a report |
+| `pnpm slack:once <KEY>`                                | Draw the ticket's audit thread from its record, dry: the record and the exact Slack request                                     | `groomed/slack/`                                     |
+| `pnpm slack:once <KEY> --post`                         | …and post or edit the thread for real, saving the record on the ticket                                                          | Slack + the `jira-police.slack` property             |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                           | no                                                   |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                        | no                                                   |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                        | no                                                   |
@@ -560,8 +562,17 @@ nothing mechanical here separates them. So an untouched page means rounds happen
 them were honest. Needs no credential, which is deliberate: a command that reaches nothing should
 require nothing, so this one runs in a fresh clone and in a checkout nobody has configured.
 
-**`slack:probe <KEY>` is the whole of the Slack integration so far, and all it does is measure.**
-The audit thread will be a Slack message the bot keeps editing, with its state — which message, and
+**`slack:once <KEY>` draws one ticket's audit thread; nothing in the pipeline calls Slack yet.** It
+reads the ticket and its `jira-police.slack` record — a record that does not exist yet is started
+fresh — and draws the message: a status card, one line per major event, the timeline newest first.
+Dry by default, writing the record to `<OUTPUT_DIR>/slack/<KEY>.record.json` and the exact Slack
+request to `<KEY>.message.json` and changing nothing remote. `--post` posts the thread, or edits it
+if the ticket already has one, and saves the record on the ticket. A record this version cannot
+read is left as found and the command exits 1 saying so: deleting the property starts the thread
+afresh.
+
+**`slack:probe <KEY>` measures what that rests on.**
+The audit thread is a Slack message the bot keeps editing, with its state — which message, and
 the record it shows — kept on the ticket as the `jira-police.slack` issue property. So before
 anything relies on either, this command checks both against the real systems: one message posted,
 edited and deleted in `SLACK_CHANNEL_ID`, and a record the size of a full one written to the named

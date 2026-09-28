@@ -35,6 +35,8 @@ import { createLogger } from "./logger.ts";
 import { FileSink, clearRejection, writeRejection } from "./output/sink.ts";
 import type { PollDeps } from "./poller.ts";
 import { SlackClient } from "./slack/client.ts";
+import { type AuditNotifier, createAuditNotifier } from "./slack/notifier.ts";
+import { dryPublisher, dryStore, propertyStore, slackPublisher } from "./slack/store.ts";
 import {
   type Settings,
   SettingsError,
@@ -446,6 +448,28 @@ export function createSlackTarget(settings: Settings): {
     throw new SettingsError(problems);
   }
   return { client: new SlackClient({ token }), channel };
+}
+
+/**
+ * `dry` reads the ticket's real record and writes the record and the Slack request under
+ * `OUTPUT_DIR/slack/`; `live` writes the ticket's property and Slack itself.
+ */
+export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): AuditNotifier {
+  const jira = createJiraClient(settings);
+  const directory = join(settings.OUTPUT_DIR, "slack");
+  if (mode === "dry") {
+    return createAuditNotifier({
+      store: dryStore(jira, directory),
+      publisher: dryPublisher(directory),
+      jiraBaseUrl: settings.JIRA_BASE_URL,
+    });
+  }
+  const { client, channel } = createSlackTarget(settings);
+  return createAuditNotifier({
+    store: propertyStore(jira),
+    publisher: slackPublisher(client, channel),
+    jiraBaseUrl: settings.JIRA_BASE_URL,
+  });
 }
 
 /**
