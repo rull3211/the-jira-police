@@ -126,6 +126,19 @@ describe("SlackClient", () => {
     expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${NEEDLE}`);
   });
 
+  it("broadcasts only a reply, since reply_broadcast means nothing without a thread", async () => {
+    const mock = slack({ ok: true, ts: "1.3" });
+    const client = new SlackClient({ token: NEEDLE });
+
+    await client.post({ channel: "C1", text: "hi", threadTs: "1.2", broadcast: true });
+    await client.post({ channel: "C1", text: "hi", broadcast: true });
+
+    const reply = new URLSearchParams(String(mock.mock.calls[0]?.[1]?.body));
+    const top = new URLSearchParams(String(mock.mock.calls[1]?.[1]?.body));
+    expect([reply.get("thread_ts"), reply.get("reply_broadcast")]).toEqual(["1.2", "true"]);
+    expect([top.has("thread_ts"), top.has("reply_broadcast")]).toEqual([false, false]);
+  });
+
   it("sends a form body with no charset, which Slack answered with superfluous_charset", async () => {
     const mock = slack({ ok: true, ts: "1.2" });
 

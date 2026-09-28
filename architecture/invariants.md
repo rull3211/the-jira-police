@@ -322,14 +322,16 @@ Things that look like details and are not:
     failing `/^jira-police\.[a-z][a-z0-9-]{0,60}$/` before a request is built, so another app's
     property is out of reach by construction. A value over Jira's 32 768-character limit is refused
     the same way, naming its size. The property holds the service's own bookkeeping — the audit
-    thread's Slack message and the record it shows — and never anything the message does not
-    already show, since anyone who can see the ticket can read it through the API.
+    thread's Slack message, its latest broadcast reply, and the record they show — and never
+    anything the messages do not already show, since anyone who can see the ticket can read it
+    through the API.
 
 19. **Slack never fails the work it reports on.** The audit thread is a reporting channel, and
     `AuditNotifier` in `slack/notifier.ts` never throws: a Slack refusal, a Jira property failure or
     a record it cannot read comes back as an outcome and a `slack.audit_failed` or
     `slack.record_unreadable` warning naming the remote system's own reason, and the triage, solve
-    or review it was reporting carries on. The one configuration error it can raise, a live mode it
+    or review it was reporting carries on. A failed broadcast costs only the bump: `slack.bump_failed`
+    or `slack.unbump_failed`, and the edited record is saved regardless. The one configuration error it can raise, a live mode it
     cannot build, is raised by `pipelineAuditNotifier` at startup and before any claim, where it
     stops a start rather than strands work. What this costs is that a thread can fall silent while
     the pipeline runs on; the warning is the only signal.

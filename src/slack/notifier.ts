@@ -1,6 +1,6 @@
 /**
  * The one way the pipeline tells Slack what happened to a ticket: load its record, apply the event,
- * redraw the message, post or edit it, save the record.
+ * redraw the message, post or edit it, broadcast a major entry, save the record.
  *
  * Never throws. Slack is a reporting channel, and a Slack or property failure must not fail the paid
  * work it reports on; it is logged with the remote system's own reason, and returned.
@@ -12,12 +12,14 @@ import {
   AUDIT_PROPERTY,
   type AuditEvent,
   type AuditRecord,
+  type Entry,
+  addedMajor,
   applyEvent,
   newRecord,
   retitle,
 } from "./audit.ts";
-import { renderRecord } from "./render.ts";
-import type { AuditStore, Publisher } from "./store.ts";
+import { renderBump, renderRecord } from "./render.ts";
+import type { AuditStore, Publisher, Thread } from "./store.ts";
 
 const log = createLogger("slack");
 
@@ -95,6 +97,35 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     }
   };
 
+  /**
+   * An edit never moves a message, so a major entry is also broadcast, and the ticket's previous
+   * broadcast deleted. Failures cost only the bump: the record is saved either way.
+   */
+  const resurface = async (
+    key: string,
+    record: AuditRecord,
+    thread: Thread,
+    entry: Entry,
+  ): Promise<AuditRecord> => {
+    let bump: string;
+    try {
+      bump = await deps.publisher.broadcast(key, thread, renderBump(record, entry));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log.warn("slack.bump_failed", { key, reason, note: "the card was edited; not resurfaced" });
+      return record;
+    }
+    if (record.bump !== null) {
+      try {
+        await deps.publisher.remove(key, thread, record.bump);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        log.warn("slack.unbump_failed", { key, ts: record.bump, reason });
+      }
+    }
+    return { ...record, bump };
+  };
+
   const apply = async (
     key: string,
     change: (record: AuditRecord) => AuditRecord,
@@ -126,7 +157,11 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     if (changed.slack !== null) {
       const result = await deps.publisher.update(key, changed.slack, message);
       if (result === "updated") {
-        await deps.store.save(key, changed);
+        const entry = addedMajor(facts, changed);
+        await deps.store.save(
+          key,
+          entry === null ? changed : await resurface(key, changed, changed.slack, entry),
+        );
         return { kind: "edited" };
       }
       log.warn("slack.thread_gone", { key, ts: changed.slack.ts, note: "posting a fresh message" });

@@ -1,5 +1,5 @@
 /**
- * Where an audit record lives, and where its message goes: the ticket's property and Slack when live,
+ * Where an audit record lives, and where its messages go: the ticket's property and Slack when live,
  * and local files when dry — a dry run still reads the real record, so it shows what would happen.
  */
 
@@ -31,6 +31,10 @@ export interface Publisher {
   post(key: string, message: RenderedMessage): Promise<Thread>;
   /** `gone` when the message no longer exists, so the caller can post a fresh one. */
   update(key: string, thread: Thread, message: RenderedMessage): Promise<"updated" | "gone">;
+  /** A reply in `thread` that also lands at the bottom of the channel; resolves to its `ts`. */
+  broadcast(key: string, thread: Thread, message: RenderedMessage): Promise<string>;
+  /** `gone` when the reply was already deleted, which is the same outcome. */
+  remove(key: string, thread: Thread, ts: string): Promise<"removed" | "gone">;
 }
 
 export type PropertyReader = Pick<JiraClient, "getIssueProperty">;
@@ -65,7 +69,7 @@ export function dryStore(jira: PropertyReader, directory: string): AuditStore {
 }
 
 export function slackPublisher(
-  slack: Pick<SlackClient, "post" | "update">,
+  slack: Pick<SlackClient, "post" | "update" | "deleteMessage">,
   channel: string,
 ): Publisher {
   return {
@@ -82,6 +86,26 @@ export function slackPublisher(
           blocks: message.blocks,
         });
         return "updated";
+      } catch (error) {
+        if (error instanceof SlackError && error.code === "message_not_found") {
+          return "gone";
+        }
+        throw error;
+      }
+    },
+    broadcast: async (_key, thread, message) => {
+      const posted = await slack.post({
+        channel: thread.channel,
+        text: message.text,
+        threadTs: thread.ts,
+        broadcast: true,
+      });
+      return posted.ts;
+    },
+    remove: async (_key, thread, ts) => {
+      try {
+        await slack.deleteMessage({ channel: thread.channel, ts });
+        return "removed";
       } catch (error) {
         if (error instanceof SlackError && error.code === "message_not_found") {
           return "gone";
@@ -110,6 +134,19 @@ export function dryPublisher(directory: string): Publisher {
     update: async (key, thread, message) => {
       await write(key, "chat.update", message, thread);
       return "updated";
+    },
+    broadcast: async (key, thread, message) => {
+      await writeJson(directory, `${key}.broadcast.json`, {
+        method: "chat.postMessage",
+        thread_ts: thread.ts,
+        reply_broadcast: true,
+        text: message.text,
+      });
+      return "dry-run";
+    },
+    remove: async (key, thread, ts) => {
+      await writeJson(directory, `${key}.delete.json`, { method: "chat.delete", thread, ts });
+      return "removed";
     },
   };
 }

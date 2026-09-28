@@ -67,15 +67,20 @@ export class SlackClient {
     };
   }
 
+  /** `threadTs` makes it a reply; `broadcast` also shows that reply at the bottom of the channel. */
   async post(args: {
     readonly channel: string;
     readonly text: string;
     readonly blocks?: readonly object[];
+    readonly threadTs?: string;
+    readonly broadcast?: boolean;
   }): Promise<SlackWriteResult> {
     const body = await this.#call("chat.postMessage", {
       channel: args.channel,
       text: args.text,
       blocks: args.blocks,
+      thread_ts: args.threadTs,
+      reply_broadcast: args.threadTs === undefined ? undefined : args.broadcast,
       unfurl_links: false,
       unfurl_media: false,
     });

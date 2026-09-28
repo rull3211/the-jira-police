@@ -1,14 +1,15 @@
 /**
- * An audit record drawn as the Slack message it stands for: a status card, one line per major event,
- * then the timeline newest first. Pure, so the whole layout is readable in a test.
+ * An audit record drawn as the Slack message it stands for: one collapsible container showing the
+ * title, holding the status card, one line per major event, then the timeline newest first. Pure,
+ * so the whole layout is readable in a test.
  */
 
 import type { AuditRecord, Entry, PullRequest, TriageState, WorkState } from "./audit.ts";
 
-/** Slack's own limits: a header's text, one section's text, and blocks per message. */
-const HEADER_CHARS = 150;
+/** Slack's own limits: a container's title, one section's text, and a container's children. */
+const TITLE_CHARS = 150;
 const SECTION_CHARS = 3000;
-export const MAX_BLOCKS = 50;
+export const MAX_CHILD_BLOCKS = 10;
 
 export interface RenderedMessage {
   /** What a notification or a screen reader shows in place of the blocks. */
@@ -17,17 +18,11 @@ export interface RenderedMessage {
 }
 
 export function renderRecord(record: AuditRecord): RenderedMessage {
-  const blocks: object[] = [
-    {
-      type: "header",
-      text: {
-        type: "plain_text",
-        text: clip(
-          record.summary === record.key ? record.key : `${record.key} · ${record.summary}`,
-          HEADER_CHARS,
-        ),
-      },
-    },
+  const title = clip(
+    record.summary === record.key ? record.key : `${record.key} · ${record.summary}`,
+    TITLE_CHARS,
+  );
+  const children: object[] = [
     {
       type: "context",
       elements: [
@@ -37,7 +32,6 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
         },
       ],
     },
-    { type: "divider" },
     {
       type: "section",
       fields: [
@@ -49,24 +43,25 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
     },
   ];
 
-  if (record.major.length > 0) {
-    blocks.push({ type: "divider" });
-    for (const entry of record.major) {
-      blocks.push(section(`${entry.icon} *${escape(entry.text)}*  ${stamp(entry.at)}`));
-    }
-  }
+  const major = chunks(
+    record.major.map((entry) => `${entry.icon} *${escape(entry.text)}*  ${stamp(entry.at)}`),
+    SECTION_CHARS,
+  );
+  children.push(...major.map((chunk) => section(chunk)));
 
-  if (record.timeline.length > 0) {
-    blocks.push({ type: "divider" });
-    const lines = record.timeline.toReversed().map((entry) => timelineLine(entry));
-    for (const chunk of chunks(["*Timeline*", ...lines], SECTION_CHARS)) {
-      blocks.push(section(chunk));
-    }
-  }
+  // The timeline gives way first: whatever the other children leave of the container's ten.
+  const room = MAX_CHILD_BLOCKS - children.length - 1;
+  const lines = record.timeline.toReversed().map((entry) => timelineLine(entry));
+  const timeline = lines.length === 0 ? [] : chunks(["*Timeline*", ...lines], SECTION_CHARS);
+  const shown = timeline.slice(0, Math.max(0, room));
+  children.push(...shown.map((chunk) => section(chunk)));
+  const heading = shown.length > 0 ? 1 : 0;
+  const cut =
+    lines.length - (shown.reduce((count, chunk) => count + chunk.split("\n").length, 0) - heading);
 
-  const hidden = record.dropped.major + record.dropped.timeline;
+  const hidden = record.dropped.major + record.dropped.timeline + cut;
   if (hidden > 0) {
-    blocks.push({
+    children.push({
       type: "context",
       elements: [
         {
@@ -77,7 +72,28 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
     });
   }
 
-  return { text: fallbackText(record), blocks: blocks.slice(0, MAX_BLOCKS) };
+  return {
+    text: fallbackText(record),
+    blocks: [
+      {
+        type: "container",
+        title: { type: "plain_text", text: title },
+        rich_text_title: richTitle(record.url, title),
+        is_collapsible: true,
+        default_collapsed: true,
+        child_blocks: children.slice(0, MAX_CHILD_BLOCKS),
+      },
+    ],
+  };
+}
+
+/** The one line a major entry is broadcast as, so the channel shows what happened and to which ticket. */
+export function renderBump(record: AuditRecord, entry: Entry): RenderedMessage {
+  const title = record.summary === record.key ? record.key : `${record.key} · ${record.summary}`;
+  return {
+    text: `${entry.icon} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}`,
+    blocks: [],
+  };
 }
 
 /**
@@ -86,6 +102,14 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
  */
 export function escape(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+/** Rich text is never parsed for markup, so the title needs no escaping; the URL still must be plain https. */
+function richTitle(url: string, title: string): object {
+  const text = isPlainHttps(url)
+    ? { type: "link", url, text: title, style: { bold: true } }
+    : { type: "text", text: title, style: { bold: true } };
+  return { type: "rich_text", elements: [{ type: "rich_text_section", elements: [text] }] };
 }
 
 function describeTriage(triage: TriageState): string {
@@ -138,7 +162,11 @@ function describePr(pr: PullRequest | null): string {
 
 /** Escaping cannot make a URL safe inside `<url|label>`, so anything but a plain https URL is shown as its label. */
 function link(url: string, label: string): string {
-  return /^https:\/\/[^\s|<>]+$/u.test(url) ? `<${url}|${escape(label)}>` : escape(label);
+  return isPlainHttps(url) ? `<${url}|${escape(label)}>` : escape(label);
+}
+
+function isPlainHttps(url: string): boolean {
+  return /^https:\/\/[^\s|<>]+$/u.test(url);
 }
 
 /** The one field that answers "is anything wrong", so a crash outranks every other state. */

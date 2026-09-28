@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3414 tests in 105 files**, no build step.
+> **3421 tests in 105 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -91,7 +91,7 @@ from their own base. §68–70 were taken by `feat/slack-audit-thread`, open whe
 owns the parent message and keeps editing it as an audit log: four status fields (triage, work,
 pull request, state), a prominent entry per major event (triage verdict, gate refusal, crash, pull
 request opened, ready, merged or closed), and a capped timeline of the minor ones (triage started,
-verdict posted, claim, each pass, verify, review rounds). Replies are left to people. Outbound
+verdict posted, claim, each pass, verify, review rounds). Other replies are left to people. Outbound
 only — `chat:write`, nothing else — behind `SLACK_MODE=off|dry|live`, off by default.
 
 **Why now.** The operator asked for it on 2026-09-28, and the access that stopped the canvas sink
@@ -151,6 +151,33 @@ the ticket. Each caller could fetch it, but the next one added would forget. So 
 it: a record whose title is still its key, drawn with no ticket facts, reads the title from Jira
 once. A failed read draws the key and says so. Predicted for a dry `record` on SSX-3929 with no
 facts: one lookup, the real title in the dry record, and nothing remote written. It held.
+
+**The cards drown, 2026-09-28.** An edit never moves a message, because Slack orders a channel by
+`ts`, so a ticket's card stays wherever it was first posted. The operator chose, over a card as an
+edited thread reply and over never resurfacing:
+
+- The card is drawn inside a `container` block with `is_collapsible` and `default_collapsed`, which
+  Slack documents for messages. The channel then shows the title; the card opens on a click.
+- Each major entry posts a one-line thread reply with `reply_broadcast`, so it lands at the bottom
+  of the channel, and deletes the ticket's previous one. A ticket then appears there at most once,
+  as its latest event.
+
+Neither is measured here. A probe goes first: a collapsed container whose `rich_text_title` is a
+link, edited once, then two broadcasts with the first deleted. The bot cannot read the channel, so
+a person looks. Predicted: Slack accepts all of it (about 70%); the title link works (about 50%);
+a deleted broadcast leaves no "This message was deleted" in the channel (about 60%).
+
+What would make it wrong: a broadcast per major event is still one channel message per event,
+only fewer of them; a client too old for `container` shows only the fallback text; and a deleted
+reply that leaves a marker turns the bump into litter.
+
+The probe never ran. dcg refused the inline script, reading its `=>` as a shell redirect, and the
+operator chose to skip it, making the first real redraw the probe. `slack:once --post` on SSX-3929,
+then SSX-3895 and SSX-3944, drew each as a container, and Slack accepted all three with no
+warning. That measures acceptance only. How the container renders, the title link, and a deleted
+broadcast leaving no marker are still unobserved. The first broadcast will be the next major entry
+on a ticket that already has a thread. Residual risk: a record save that fails after a broadcast
+leaves that broadcast in the channel with nothing recording it, so it is never deleted.
 
 **One more keychain dialog everywhere.** Declaring `SLACK_BOT_TOKEN` sensitive means `readSettings`
 resolves a `keychain:` value for it at every start, so each command and the daemon ask for the

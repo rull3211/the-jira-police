@@ -63,6 +63,8 @@ export interface AuditRecord {
   readonly url: string;
   readonly repo: string | null;
   readonly slack: { readonly channel: string; readonly ts: string } | null;
+  /** The `ts` of the one reply broadcast to the channel for this ticket, deleted when the next is posted. */
+  readonly bump: string | null;
   readonly triage: TriageState;
   readonly work: WorkState;
   readonly pr: PullRequest | null;
@@ -115,6 +117,7 @@ export function newRecord(key: string, summary: string, url: string): AuditRecor
     url,
     repo: null,
     slack: null,
+    bump: null,
     triage: { kind: "pending" },
     work: { kind: "idle" },
     pr: null,
@@ -123,6 +126,12 @@ export function newRecord(key: string, summary: string, url: string): AuditRecor
     timeline: [],
     dropped: { major: 0, timeline: 0 },
   };
+}
+
+/** The major entry `after` gained over `before`, or `null`; only a major entry resurfaces a ticket. */
+export function addedMajor(before: AuditRecord, after: AuditRecord): Entry | null {
+  const entry = after.major.at(-1);
+  return entry === undefined || entry === before.major.at(-1) ? null : entry;
 }
 
 /** `record` itself when the ticket's title and link are what it already holds. */
@@ -263,7 +272,11 @@ export function parseRecord(value: unknown): AuditRecord | null {
   ) {
     return null;
   }
-  return candidate as AuditRecord;
+  // Absent from every record written before broadcasts existed.
+  return {
+    ...(candidate as AuditRecord),
+    bump: typeof candidate.bump === "string" ? candidate.bump : null,
+  };
 }
 
 /**

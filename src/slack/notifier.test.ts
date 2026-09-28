@@ -45,14 +45,25 @@ function store(initial: Loaded = { kind: "absent" }): {
   return handle;
 }
 
-function publisher(behaviour: { readonly gone?: boolean; readonly fail?: boolean } = {}): {
+function publisher(
+  behaviour: {
+    readonly gone?: boolean;
+    readonly fail?: boolean;
+    readonly failBroadcast?: boolean;
+    readonly failRemove?: boolean;
+  } = {},
+): {
   readonly publisher: Publisher;
   readonly calls: string[];
+  readonly bumps: string[];
 } {
   const calls: string[] = [];
+  const bumps: string[] = [];
   let next = 0;
+  let bumped = 0;
   return {
     calls,
+    bumps,
     publisher: {
       post: async (): Promise<Thread> => {
         if (behaviour.fail === true) {
@@ -66,6 +77,34 @@ function publisher(behaviour: { readonly gone?: boolean; readonly fail?: boolean
         calls.push(`update ${thread.ts}`);
         return behaviour.gone === true ? "gone" : "updated";
       },
+      broadcast: async (_key, thread, message) => {
+        if (behaviour.failBroadcast === true) {
+          throw new Error("Slack chat.postMessage failed: ratelimited");
+        }
+        bumped += 1;
+        calls.push(`broadcast b-${String(bumped)} in ${thread.ts}`);
+        bumps.push(message.text);
+        return `b-${String(bumped)}`;
+      },
+      remove: async (_key, _thread, ts) => {
+        if (behaviour.failRemove === true) {
+          throw new Error("Slack chat.delete failed: cant_delete_message");
+        }
+        calls.push(`remove ${ts}`);
+        return "removed";
+      },
+    },
+  };
+}
+
+/** A ticket whose thread already exists, so an event edits it rather than posting a new one. */
+function threaded(bump: string | null = null): Loaded {
+  return {
+    kind: "found",
+    record: {
+      ...newRecord("SSX-1", "Cache", `${BASE_URL}/browse/SSX-1`),
+      slack: { channel: "C1", ts: "ts-0" },
+      bump,
     },
   };
 }
@@ -232,6 +271,64 @@ describe("createAuditNotifier", () => {
 
       expect(outcome.kind).toBe("posted");
       expect(s.saved()?.summary).toBe("SSX-1");
+    }
+  });
+
+  it("resurfaces a ticket on each major entry, keeping one broadcast in the channel", async () => {
+    const s = store(threaded());
+    const p = publisher();
+    const audit = notifier(s.store, p.publisher);
+    const opened = {
+      kind: "pr-opened",
+      url: "https://github.com/o/r/pull/7",
+      number: 7,
+      title: "fix(cache): evict",
+    } as const;
+
+    await audit.record("SSX-1", opened);
+    await audit.record("SSX-1", { kind: "claimed", repo: null });
+    await audit.record("SSX-1", { kind: "pr-ready" });
+
+    expect(p.calls).toEqual([
+      "update ts-0",
+      "broadcast b-1 in ts-0",
+      "update ts-0",
+      "update ts-0",
+      "broadcast b-2 in ts-0",
+      "remove b-1",
+    ]);
+    expect(s.saved()?.bump).toBe("b-2");
+    expect(p.bumps[1]).toContain("PR ready for review");
+    expect(p.bumps[1]).toContain(`<${BASE_URL}/browse/SSX-1|SSX-1 · Cache>`);
+  });
+
+  it("does not broadcast a thread it has just posted, which is already at the bottom", async () => {
+    const p = publisher();
+
+    await notifier(store().store, p.publisher).record("SSX-1", {
+      kind: "triage-verdict",
+      verdict: "ready-ish",
+      solvable: false,
+      confidence: null,
+      posted: true,
+    });
+
+    expect(p.calls).toEqual(["post 1"]);
+  });
+
+  it("saves the edited record when the broadcast or the deletion fails, since only the bump is lost", async () => {
+    const pr = { kind: "pr-ended", state: "merged" } as const;
+    for (const [behaviour, bump] of [
+      [{ failBroadcast: true }, "b-old"],
+      [{ failRemove: true }, "b-1"],
+    ] as const) {
+      const s = store(threaded("b-old"));
+
+      const outcome = await notifier(s.store, publisher(behaviour).publisher).record("SSX-1", pr);
+
+      expect(outcome.kind).toBe("edited");
+      expect(s.saved()?.major.at(-1)?.text).toBe("PR merged");
+      expect(s.saved()?.bump).toBe(bump);
     }
   });
 

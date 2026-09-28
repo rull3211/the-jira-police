@@ -8,7 +8,7 @@ import {
   applyEvent,
   newRecord,
 } from "./audit.ts";
-import { MAX_BLOCKS, renderRecord } from "./render.ts";
+import { MAX_CHILD_BLOCKS, renderBump, renderRecord } from "./render.ts";
 
 const NOW = new Date("2026-09-28T13:58:00Z");
 const URL = "https://example.atlassian.net/browse/SSX-1";
@@ -21,9 +21,25 @@ function texts(blocks: readonly object[]): string[] {
   );
 }
 
-function full(): AuditRecord {
+interface Container {
+  readonly type: string;
+  readonly title: { readonly text: string };
+  readonly rich_text_title: {
+    readonly elements: readonly { readonly elements: readonly Record<string, unknown>[] }[];
+  };
+  readonly is_collapsible: boolean;
+  readonly default_collapsed: boolean;
+  readonly child_blocks: readonly object[];
+}
+
+function container(record: AuditRecord): Container {
+  const { blocks } = renderRecord(record);
+  expect(blocks).toHaveLength(1);
+  return blocks[0] as Container;
+}
+
+function full(long = "word ".repeat(MAX_ENTRY_CHARS)): AuditRecord {
   let record = newRecord("SSX-1", "x".repeat(400), URL);
-  const long = "word ".repeat(MAX_ENTRY_CHARS);
   for (let index = 0; index < MAX_MAJOR_ENTRIES + 3; index += 1) {
     // Distinct messages: a crash identical to the current one is folded into it, not added.
     record = applyEvent(
@@ -59,18 +75,52 @@ describe("renderRecord", () => {
   });
 
   it("stays inside Slack's limits with every cap full and every entry at its longest", () => {
-    const { blocks } = renderRecord(full());
+    // `<` escapes to four characters, the longest any entry can render.
+    for (const record of [full(), full("<".repeat(MAX_ENTRY_CHARS))]) {
+      const card = container(record);
 
-    expect(blocks.length).toBeLessThanOrEqual(MAX_BLOCKS);
-    const header = blocks[0] as { text: { text: string } };
-    expect(header.text.text.length).toBeLessThanOrEqual(150);
-    for (const text of texts(blocks)) {
-      expect(text.length).toBeLessThanOrEqual(3000);
+      expect(card.child_blocks.length).toBeLessThanOrEqual(MAX_CHILD_BLOCKS);
+      expect(card.title.text.length).toBeLessThanOrEqual(150);
+      for (const text of texts(card.child_blocks)) {
+        expect(text.length).toBeLessThanOrEqual(3000);
+      }
     }
   });
 
-  it("says how many entries the caps dropped", () => {
+  it("says how many entries the caps dropped, and how many the container had no room for", () => {
     expect(JSON.stringify(renderRecord(full()).blocks)).toContain("6 earlier entries not shown");
+
+    // Every entry drawn, major or timeline, carries exactly one date token.
+    const crowded = texts(container(full("<".repeat(MAX_ENTRY_CHARS))).child_blocks).join("\n");
+    const hidden = Number(/… (\d+) earlier entries not shown/u.exec(crowded)?.[1]);
+    const shown = crowded.match(/<!date\^/gu)?.length ?? 0;
+    expect(hidden).toBeGreaterThan(6);
+    expect(shown + hidden).toBe(MAX_MAJOR_ENTRIES + MAX_TIMELINE_ENTRIES + 6);
+  });
+
+  it("collapses to the title, and makes the title the ticket's link", () => {
+    const card = container(newRecord("SSX-1", "Cache", URL));
+
+    expect(card).toMatchObject({
+      type: "container",
+      title: { text: "SSX-1 · Cache" },
+      is_collapsible: true,
+      default_collapsed: true,
+    });
+    expect(card.rich_text_title.elements[0]?.elements[0]).toEqual({
+      type: "link",
+      url: URL,
+      text: "SSX-1 · Cache",
+      style: { bold: true },
+    });
+  });
+
+  it("broadcasts a major entry as one line naming the ticket, escaped like the card", () => {
+    const record = applyEvent(newRecord("SSX-1", "<!channel>", URL), { kind: "pr-ready" }, NOW);
+
+    const bump = renderBump(record, record.major[0] ?? { at: "", icon: "", text: "" });
+
+    expect(bump.text).toBe(`👀 *PR ready for review* — <${URL}|SSX-1 · &lt;!channel&gt;>`);
   });
 
   it("puts the newest timeline entry first", () => {
@@ -134,5 +184,6 @@ describe("renderRecord", () => {
 
     expect(JSON.stringify(safe.blocks)).toContain(`<${URL}|SSX-1>`);
     expect(JSON.stringify(tampered.blocks)).not.toContain("https://x.test|");
+    expect(JSON.stringify(tampered.blocks)).not.toContain('"type":"link"');
   });
 });

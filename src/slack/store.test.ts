@@ -46,37 +46,63 @@ describe("propertyStore", () => {
   });
 });
 
+/** A publisher over a Slack whose every edit and delete fails with `code`. */
+function failing(code: string) {
+  return slackPublisher(
+    {
+      post: async () => ({ ts: "1", warnings: [] }),
+      update: async () => {
+        throw new SlackError("chat.update", code, "");
+      },
+      deleteMessage: async () => {
+        throw new SlackError("chat.delete", code, "");
+      },
+    },
+    "C1",
+  );
+}
+
 describe("slackPublisher", () => {
   const message = { text: "SSX-1: claimed", blocks: [] };
+  const thread = { channel: "C1", ts: "1" };
 
   it("reads a deleted message as gone, so a fresh one can be posted", async () => {
-    const publisher = slackPublisher(
-      {
-        post: async () => ({ ts: "1", warnings: [] }),
-        update: async () => {
-          throw new SlackError("chat.update", "message_not_found", "");
-        },
-      },
-      "C1",
-    );
-
-    expect(await publisher.update("SSX-1", { channel: "C1", ts: "1" }, message)).toBe("gone");
+    expect(await failing("message_not_found").update("SSX-1", thread, message)).toBe("gone");
+    expect(await failing("message_not_found").remove("SSX-1", thread, "2")).toBe("gone");
   });
 
   it("does not read any other failure as gone", async () => {
-    const publisher = slackPublisher(
-      {
-        post: async () => ({ ts: "1", warnings: [] }),
-        update: async () => {
-          throw new SlackError("chat.update", "not_in_channel", "");
-        },
-      },
-      "C1",
-    );
-
-    await expect(publisher.update("SSX-1", { channel: "C1", ts: "1" }, message)).rejects.toThrow(
+    await expect(failing("not_in_channel").update("SSX-1", thread, message)).rejects.toThrow(
       "not_in_channel",
     );
+    await expect(failing("cant_delete_message").remove("SSX-1", thread, "2")).rejects.toThrow(
+      "cant_delete_message",
+    );
+  });
+
+  it("broadcasts into the ticket's own thread, and deletes in the thread's channel", async () => {
+    const calls: unknown[] = [];
+    const publisher = slackPublisher(
+      {
+        post: async (args) => {
+          calls.push(args);
+          return { ts: "9", warnings: [] };
+        },
+        update: async () => ({ ts: "1", warnings: [] }),
+        deleteMessage: async (args) => {
+          calls.push(args);
+        },
+      },
+      "C-configured",
+    );
+
+    expect(await publisher.broadcast("SSX-1", { channel: "C-thread", ts: "1" }, message)).toBe("9");
+    await publisher.remove("SSX-1", { channel: "C-thread", ts: "1" }, "8");
+
+    expect(calls).toEqual([
+      { channel: "C-thread", text: "SSX-1: claimed", threadTs: "1", broadcast: true },
+      { channel: "C-thread", ts: "8" },
+    ]);
   });
 });
 
