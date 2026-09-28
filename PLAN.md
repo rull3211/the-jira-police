@@ -92,7 +92,7 @@ owns the parent message and keeps editing it as an audit log: four status fields
 pull request, state), a prominent entry per major event (triage verdict, gate refusal, crash, pull
 request opened, ready, merged or closed), and a capped timeline of the minor ones (triage started,
 verdict posted, claim, each pass, verify, review rounds). Replies are left to people. Outbound
-only — `chat:write` and `channels:history` — behind `SLACK_MODE=off|dry|live`, off by default.
+only — `chat:write`, nothing else — behind `SLACK_MODE=off|dry|live`, off by default.
 
 **Why now.** The operator asked for it on 2026-09-28, and the access that stopped the canvas sink
 (`INCIDENTS.md`, "The Slack canvas sink") exists: the operator can create and install an app in the
@@ -100,15 +100,25 @@ workspace. It lets a person see what happened to a ticket — including the runs
 label — without reading JSON lines or the board.
 
 **The order.** `SLACK_` joins `JIRA_` in `WITHHELD_FROM_CHILD` before any token exists, so no model
-session inherits one. Then `pnpm slack:probe` measures the single fact the design rests on — that a
-message's `metadata` survives `chat.postMessage`, `conversations.history` and `chat.update` —
-against the real app, before the record exists. Then `dry`, which writes each would-be request
-under `OUTPUT_DIR/slack/`; then `live` on `triage:once <KEY>` and `solve:once <KEY> --advance`; the
-daemon last.
+session inherits one. Then `pnpm slack:probe` measures what the store rests on, against the real
+app and one ticket the operator names, before the record exists. Then `dry`, which writes each
+would-be request under `OUTPUT_DIR/slack/`; then `live` on `triage:once <KEY>` and
+`solve:once <KEY> --advance`; the daemon last.
 
-**State lives in Slack.** The record is the parent's own metadata, read back and rewritten on each
-event, and a per-process lock serialises one ticket's updates. Residual risk: a daemon and a CLI
-updating one ticket in the same second can drop one timeline entry.
+**The first probe refuted the first store, 2026-09-28.** The record was to be the Slack parent's own
+message metadata. The run posted and edited fine, and Slack dropped the metadata both times with
+`invalid_metadata_schema`: a custom event type must be declared in the manifest, and the declared
+schema cannot hold objects inside arrays, which a timeline is. The prediction had been that it
+would round-trip without a declaration, at about 60%.
+
+**State lives on the ticket instead.** One Jira issue property per ticket, `jira-police.slack`,
+holding the thread's channel and `ts` and the record, read back and rewritten on each event; a
+per-process lock serialises one ticket's updates. The operator chose it over declaring a string
+field in the manifest (two documented formats, no stated size limit) and over a file in `state/`.
+It is where `BUILDING.md` says state belongs, it survives a restart and a second instance, and
+finding a ticket's thread needs no history search, so `channels:history` and the metadata code
+go. Residual risk: a daemon and a CLI updating one ticket in the same second can drop one
+timeline entry.
 
 **One more keychain dialog everywhere.** Declaring `SLACK_BOT_TOKEN` sensitive means `readSettings`
 resolves a `keychain:` value for it at every start, so each command and the daemon ask for the
@@ -117,8 +127,13 @@ Slack client is built would spare them, at the cost of a dialog that can arrive 
 
 **What would make it the wrong idea.**
 
-- If the probe shows metadata does not round-trip, the record has nowhere to live in Slack and the
-  store is re-planned before anything depends on it — the reason the probe comes first.
+- The Jira REST credential gains a write it has never had. It is bounded the way label writes are
+  — a key outside `jira-police.` refused before any request — and it is a widening all the same,
+  which `architecture/configuration.md` and the invariants must say in the same commit.
+- An issue property is invisible on the ticket page and readable by anyone who can see the
+  ticket. It holds only what the Slack message already shows, and must never hold more.
+- A property value is capped at 32 KB, so the record's caps are a correctness bound, not
+  tidiness: a ticket with many review rounds must drop its oldest timeline entries, marked.
 - A thread per triaged ticket may be a channel nobody reads. At four or five a day it should not
   be; if it is, opening at the claim instead is one call site.
 - A notifier that swallows every Slack failure can go quiet unnoticed: its warn line is the only
@@ -132,8 +147,9 @@ Slack client is built would spare them, at the cost of a dialog that can arrive 
 `tags` are mentioned in each new parent as it is posted; `dm` get a direct message on each major
 event. Slack sends no notification for a mention added by editing a message — reported
 consistently, not measured here — so a tag in the parent pings once, and the DM list is the answer
-for every later event. Both lists live in one bot-owned roster message in the channel: metadata the
-source of truth, text a person can read.
+for every later event. Where the two lists live is open: they were to be the metadata of a
+bot-owned roster message, which §68's probe refuted. The counterpart of §68's store is a property
+on the Jira project rather than on a ticket, under the same `jira-police.` prefix.
 
 Inbound needs Socket Mode, because the daemon has no public URL, and Node 24's own `WebSocket` is
 enough — no dependency. `apps.connections.open` with the `xapp-` token, the command's reply sent in
@@ -145,10 +161,10 @@ reject the daemon's `Promise.all`.
 **Why its own branch.** It is the first inbound channel this service has — something outside it can
 now cause a write — which is a different privilege from posting.
 
-**What would make it the wrong idea.** A roster found by scanning history can be missed by a scan
-that stops early, and a missed roster is every subscriber silently dropped: the scan must be
-complete, or the listener must refuse to write. A DM per major event per subscriber is noise at
-scale; at one team it should not be.
+**What would make it the wrong idea.** A roster that cannot be read must stop the listener from
+writing, never be taken as empty: an empty list written over an unreadable one is every subscriber
+silently dropped. A DM per major event per subscriber is noise at scale; at one team it should not
+be.
 
 ### 70. The pull request channel's announcement is written by hand every time
 
