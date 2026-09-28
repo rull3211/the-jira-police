@@ -96,10 +96,12 @@ label `agent:solvable` goes on the board and a future solver acts on it.
   against; and the skill's dev lens — repo, blast radius, file, technique, rejected alternative —
   is only emitted on ACCEPT, and is most of the evidence a fitness call rests on. A `dor:gaps`
   ticket is therefore never agent-solvable, which is the same fact stated a fourth way.
-- The field **fails closed everywhere**: it is absent from the schema's `required` list, and
-  `parseAgentFitness` reads a missing object, a malformed one, or a truthy-but-not-`true` value all
-  as `solvable: false`. A wrong `false` costs a human triaging a ticket they were triaging anyway.
-  A wrong `true` costs an unasked-for pull request.
+- The field **fails closed everywhere**: the schema requires it, so a reply that drops it is refused
+  inside the run rather than by the gate after it — SSX-3986 kept `agent:solvable` in `labels` with
+  no fitness call behind it while the field was optional — and `parseAgentFitness` still reads a
+  missing object, a malformed one, or a truthy-but-not-`true` value all as `solvable: false`. A wrong
+  `false` costs a human triaging a ticket they were triaging anyway. A wrong `true` costs an
+  unasked-for pull request.
 
 **The `plausible` rules guard a different cost, which is why they are their own function**
 (`checkPlausible`, `gate.ts:303`) rather than four more lines in `checkAgentFitness`. Every
