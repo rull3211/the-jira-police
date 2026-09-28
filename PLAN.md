@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §71 and §73, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §71 and §73, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,137 +78,26 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §72. The pointer is a per-branch guess: two branches open at once each read it
-from their own base. §68–70 were taken by `feat/slack-audit-thread`, open when §71 was written.
+The next entry is §75. The pointer is a per-branch guess: two branches open at once each read it
+from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
+`feat/slack-audit-thread`, open when §71 was written; §69 and §70 are the Slack work that follows it.
 
 <!-- refs:on -->
 
-### 68. Nobody can see what the bot is doing to a ticket without reading its log
-
-**Branch:** `feat/slack-audit-thread`
-
-**What is being attempted.** One Slack thread per ticket, opened when triage picks it up. The bot
-owns the parent message and keeps editing it as an audit log: four status fields (triage, work,
-pull request, state), a prominent entry per major event (triage verdict, gate refusal, crash, pull
-request opened, ready, merged or closed), and a capped timeline of the minor ones (triage started,
-verdict posted, claim, each pass, verify, review rounds). Other replies are left to people. Outbound
-only — `chat:write`, nothing else — behind `SLACK_MODE=off|dry|live`, off by default.
-
-**Why now.** The operator asked for it on 2026-09-28, and the access that stopped the canvas sink
-(`INCIDENTS.md`, "The Slack canvas sink") exists: the operator can create and install an app in the
-workspace. It lets a person see what happened to a ticket — including the runs that end without a
-label — without reading JSON lines or the board.
-
-**The order.** `SLACK_` joins `JIRA_` in `WITHHELD_FROM_CHILD` before any token exists, so no model
-session inherits one. Then `pnpm slack:probe` measures what the store rests on, against the real
-app and one ticket the operator names, before the record exists. Then `dry`, which writes each
-would-be request under `OUTPUT_DIR/slack/`; then `live` on `triage:once <KEY>` and
-`solve:once <KEY> --advance`; the daemon last.
-
-**The first probe refuted the first store, 2026-09-28.** The record was to be the Slack parent's own
-message metadata. The run posted and edited fine, and Slack dropped the metadata both times with
-`invalid_metadata_schema`: a custom event type must be declared in the manifest, and the declared
-schema cannot hold objects inside arrays, which a timeline is. The prediction had been that it
-would round-trip without a declaration, at about 60%.
-
-**State lives on the ticket instead.** One Jira issue property per ticket, `jira-police.slack`,
-holding the thread's channel and `ts` and the record, read back and rewritten on each event; a
-per-process lock serialises one ticket's updates. The operator chose it over declaring a string
-field in the manifest (two documented formats, no stated size limit) and over a file in `state/`.
-It is where `BUILDING.md` says state belongs, it survives a restart and a second instance, and
-finding a ticket's thread needs no history search, so `channels:history` and the metadata code
-go. Residual risk: a daemon and a CLI updating one ticket in the same second can drop one
-timeline entry.
-
-**The second probe held, 2026-09-28, on SSX-3595.** A message posted, edited and deleted with no
-Slack warning, and a 12 452-character record — nested objects and two lists of objects, at the
-caps' size — written to the property, read back identical, deleted and confirmed gone. Predicted
-exactly that; nothing refuted.
-
-**The first live thread, 2026-09-28, SSX-3595.** `slack:once SSX-3595 --post` posted it and saved a
-365-character record; a second run, a new process with nothing in memory, found the thread through
-the record and edited it rather than posting another. The dry run before them had predicted and
-found one defect: the card called a ticket nothing had happened to "running".
-
-**The first review sweeps with Slack live, 2026-09-28, drew SSX-3895 and SSX-3944 wrong.** Both were
-in review before the thread existed. Each card had the key for a title, triage pending, work not
-started, no pull request, and "PR ready for review" three times in five minutes. The sweep recorded
-without the ticket's facts; only `pr-opened` sets a record's PR; and `surveyReview` answers `ready`
-on every look at a PR already out of draft. The fix: each look records what it saw first (the PR,
-its draft flag, the ticket's labels). That fills only what the record lacks, so work is verified,
-because `runPublish` takes only a verified outcome, and triage is shown as read from the labels
-rather than as a verdict. After that, `pr-ready` does nothing on a PR already ready, until a round
-that pushed, or a person drafting it, sends it back. Predicted for `solve:once SSX-3895 --watch`
-with no rounds allowed: the first pass edits the card, the second writes nothing, and the three
-lines already there stay. It held on both tickets: one property write on the first pass, none on
-the next two. The tests had refuted an assumption first: the notifier's "changed nothing" skip had
-only ever fired for a repeated crash, because `applyEvent` copied every record to clear a crash that
-was not there.
-
-**SSX-3929, triaged by `triage:once` at 20:09 the same day, still had its key for a title.** A typed
-key carries a placeholder summary, which `ticketFacts` rightly refuses as a title, so nothing named
-the ticket. Each caller could fetch it, but the next one added would forget. So the notifier does
-it: a record whose title is still its key, drawn with no ticket facts, reads the title from Jira
-once. A failed read draws the key and says so. Predicted for a dry `record` on SSX-3929 with no
-facts: one lookup, the real title in the dry record, and nothing remote written. It held.
-
-**The cards drown, 2026-09-28.** An edit never moves a message, because Slack orders a channel by
-`ts`, so a ticket's card stays wherever it was first posted. The operator chose, over a card as an
-edited thread reply and over never resurfacing:
-
-- The card is drawn inside a `container` block with `is_collapsible` and `default_collapsed`, which
-  Slack documents for messages. The channel then shows the title; the card opens on a click.
-- Each major entry posts a one-line thread reply with `reply_broadcast`, so it lands at the bottom
-  of the channel, and deletes the ticket's previous one. A ticket then appears there at most once,
-  as its latest event.
-
-Neither is measured here. A probe goes first: a collapsed container whose `rich_text_title` is a
-link, edited once, then two broadcasts with the first deleted. The bot cannot read the channel, so
-a person looks. Predicted: Slack accepts all of it (about 70%); the title link works (about 50%);
-a deleted broadcast leaves no "This message was deleted" in the channel (about 60%).
-
-What would make it wrong: a broadcast per major event is still one channel message per event,
-only fewer of them; a client too old for `container` shows only the fallback text; and a deleted
-reply that leaves a marker turns the bump into litter.
-
-The probe never ran. dcg refused the inline script, reading its `=>` as a shell redirect, and the
-operator chose to skip it, making the first real redraw the probe. `slack:once --post` on SSX-3929,
-then SSX-3895 and SSX-3944, drew each as a container, and Slack accepted all three with no
-warning. That measures acceptance only. How the container renders, the title link, and a deleted
-broadcast leaving no marker are still unobserved. The first broadcast will be the next major entry
-on a ticket that already has a thread. Residual risk: a record save that fails after a broadcast
-leaves that broadcast in the channel with nothing recording it, so it is never deleted.
-
-**One more keychain dialog everywhere.** Declaring `SLACK_BOT_TOKEN` sensitive means `readSettings`
-resolves a `keychain:` value for it at every start, so each command and the daemon ask for the
-Slack token as well as `JIRA_AUTH`, whether or not they touch Slack. Resolving it only where a
-Slack client is built would spare them, at the cost of a dialog that can arrive mid-run.
-
-**What would make it the wrong idea.**
-
-- The Jira REST credential gains a write it has never had. It is bounded the way label writes are
-  — a key outside `jira-police.` refused before any request — and it is a widening all the same,
-  which `architecture/configuration.md` and the invariants must say in the same commit.
-- An issue property is invisible on the ticket page and readable by anyone who can see the
-  ticket. It holds only what the Slack message already shows, and must never hold more.
-- A property value is capped at 32 KB, so the record's caps are a correctness bound, not
-  tidiness: a ticket with many review rounds must drop its oldest timeline entries, marked.
-- A thread per triaged ticket may be a channel nobody reads. At four or five a day it should not
-  be; if it is, opening at the claim instead is one call site.
-- A notifier that swallows every Slack failure can go quiet unnoticed: its warn line is the only
-  signal, in the log this entry exists because nobody reads.
-
 ### 69. Nobody is told when a ticket they care about crashes or opens a pull request
 
-**Branch:** none yet — cut from `main` after §68 merges.
+**Branch:** none yet — cut from `main` after `feat/slack-audit-thread` merges.
 
 **What is not built.** `/bencebot subscribe|unsubscribe tags|dm`, and the two lists behind it.
 `tags` are mentioned in each new parent as it is posted; `dm` get a direct message on each major
 event. Slack sends no notification for a mention added by editing a message — reported
 consistently, not measured here — so a tag in the parent pings once, and the DM list is the answer
-for every later event. Where the two lists live is open: they were to be the metadata of a
-bot-owned roster message, which §68's probe refuted. The counterpart of §68's store is a property
-on the Jira project rather than on a ticket, under the same `jira-police.` prefix.
+for every later event. That was written before each major entry became a broadcast reply, which is
+a new message: a tag carried on the broadcast would ping on every major event, so the two lists may
+collapse into one. Where the lists live is open: they were to be the metadata of a bot-owned roster
+message, which the audit thread's first probe refuted (`README.md`, `slack:probe`). The counterpart
+of the thread's store, a property on the ticket, is a property on the Jira project, under the same
+`jira-police.` prefix.
 
 Inbound needs Socket Mode, because the daemon has no public URL, and Node 24's own `WebSocket` is
 enough — no dependency. `apps.connections.open` with the `xapp-` token, the command's reply sent in
@@ -227,7 +116,7 @@ be.
 
 ### 70. The pull request channel's announcement is written by hand every time
 
-**Branch:** none yet — cut from `main` after §68 merges.
+**Branch:** none yet — cut from `main` after `feat/slack-audit-thread` merges.
 
 **What is not built.** When a pull request opens, a direct message to `SLACK_OPERATOR_USER_ID`
 holding one line to copy into the team's pull request channel: `<url|PR-Bencebot>` and one
@@ -636,6 +525,14 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   on 2026-09-24, round 6 was discarded inside `parseReview` before reaching it, and rounds 7 and 8
   were not refused by it. A member's request aimed at a file the pull request had not changed is the
   case that would show it.
+- **The audit thread has never broadcast.** Each major entry on a ticket that already has a thread
+  is posted as a reply with `reply_broadcast`, and the ticket's previous broadcast deleted, so a
+  ticket resurfaces at the bottom of the channel once. The collapsed card it sits beside has been
+  looked at: the operator saw six redrawn on 2026-09-28 render collapsed, with the title a working
+  link. No broadcast has been posted. What deletion leaves is the open question: a "This message was
+  deleted" marker in the channel or the thread would make the bump litter, and the deletion should
+  go. **What would show it:** two major entries on one ticket with a thread. SSX-3986's re-triage
+  after its answering comment is the first; the second on the same ticket deletes it.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
   daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket

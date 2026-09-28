@@ -331,7 +331,10 @@ Things that look like details and are not:
     a record it cannot read comes back as an outcome and a `slack.audit_failed` or
     `slack.record_unreadable` warning naming the remote system's own reason, and the triage, solve
     or review it was reporting carries on. A failed broadcast costs only the bump: `slack.bump_failed`
-    or `slack.unbump_failed`, and the edited record is saved regardless. The one configuration error it can raise, a live mode it
-    cannot build, is raised by `pipelineAuditNotifier` at startup and before any claim, where it
-    stops a start rather than strands work. What this costs is that a thread can fall silent while
-    the pipeline runs on; the warning is the only signal.
+    or `slack.unbump_failed`, and the edited record is saved regardless. The one configuration error
+    it can raise, a live mode it cannot build, is raised by `pipelineAuditNotifier` at startup and
+    before any claim, where it stops a start rather than strands work. What this costs is that a
+    thread can fall silent while the pipeline runs on; the warning is the only signal. Two residues
+    are left unguarded: a daemon and a CLI updating one ticket in the same second can drop a
+    timeline entry, since only one process's updates are serialised; and a record save that fails
+    after a broadcast leaves that broadcast in the channel, recorded nowhere, so it is never deleted.
