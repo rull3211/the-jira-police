@@ -1036,6 +1036,41 @@ and the run is gone.
   composition today. A socket that accepts a command is a second, and it would need its refusals
   worked out before its conveniences, not after.
 
+### 73. A triage reply can keep `agent:solvable` and leave out the fitness call behind it
+
+**Branch:** `fix/triage-fitness-required`
+
+**What is not built.** Anything that stops a reply naming `agent:solvable` without an `agentFitness`
+object before the run ends. `agentFitness` is not in `TRIAGE_SCHEMA`'s top-level `required`
+(`src/triage/schema.ts:12`), so Claude Code's own validation accepts the reply, and the
+contradiction is caught only by `checkAgentFitness` in `src/triage/gate.ts`, after the session has
+been paid for. On SSX-3986, 2026-09-28, `claude-sonnet-5` did exactly that: neither of its two
+`StructuredOutput` submissions carried `agentFitness`, `labels` held `agent:solvable` and
+`labelsAdd` did not, the gate refused on both counts, and the poller pays for the ticket again next
+cycle because a failed ticket is not marked seen.
+
+**The change.** Add `agentFitness` to the top-level `required`, so a reply without it is rejected
+inside the run and corrected at the price of a turn — the same session had an extra `cloudId`
+rejected and resubmitted 17 seconds later. Replace the description's "omit this object entirely if
+you are unsure" with "say `solvable: false` and why". Have the `solvable` and `plausible`
+descriptions name `mutation.labelsAdd` as well as `labels`, which `checkOwnedLabelReachesDelta`
+already demands on a first triage and nothing tells the model. `parseAgentFitness` keeps failing
+closed on absence, and the gate is unchanged.
+
+**What would make it the wrong idea:**
+
+- **The schema's own header names the cost**: a reply that keeps failing validation ends in
+  `error_max_structured_output_retries`, a run lost after paying for it. If models leave the object
+  out persistently rather than by slip, requiring it turns a refused post into a failed run. The
+  drive measures it: a real run's transcript must carry `agentFitness`, first time or after one
+  rejection naming it.
+- **Every run now volunteers an opinion.** A run that could not judge becomes `solvable: false`
+  with a rationale, and the calibration reading of the artifacts (`architecture/overview.md`, the
+  fitness section) will count it as a judgement of "no".
+- **It closes the observed case, not the class.** `agentFitness.solvable: false` beside the label
+  still passes the schema. A JSON Schema `if`/`then` could reject that too, but whether the tool
+  schema accepts those keywords is unmeasured, and a schema the API refuses fails every triage.
+
 ## Verification
 
 Unit and integration, following existing patterns, plus the house rule: **a guard is not shipped
