@@ -26,7 +26,14 @@ export type TriageState =
       readonly confidence: string | null;
       readonly posted: boolean;
     }
-  | { readonly kind: "refused" };
+  | { readonly kind: "refused" }
+  /** Triaged before this thread existed: what the ticket's labels say, never a verdict they cannot prove. */
+  | ({ readonly kind: "labelled" } & LabelledTriage);
+
+export interface LabelledTriage {
+  readonly dor: "pass" | "gaps" | null;
+  readonly solvable: boolean;
+}
 
 export type WorkState =
   | { readonly kind: "idle" }
@@ -38,7 +45,8 @@ export type WorkState =
 export interface PullRequest {
   readonly url: string;
   readonly number: number;
-  readonly state: "draft" | "ready" | "merged" | "closed";
+  /** `reworking`: out of draft, but a round pushed since it was handed over, so it is not ready again yet. */
+  readonly state: "draft" | "ready" | "reworking" | "merged" | "closed";
 }
 
 export interface Entry {
@@ -88,7 +96,14 @@ export type AuditEvent =
       readonly title: string;
     }
   | { readonly kind: "review-round"; readonly text: string }
+  /** What a review look found, recorded before its outcome; fills in only what the record lacks. */
+  | {
+      readonly kind: "observed";
+      readonly pr: { readonly url: string; readonly number: number; readonly draft: boolean };
+      readonly triage: LabelledTriage | null;
+    }
   | { readonly kind: "pr-ready" }
+  | { readonly kind: "pr-reworking" }
   | { readonly kind: "pr-ended"; readonly state: "merged" | "closed" }
   | { readonly kind: "crashed"; readonly where: string; readonly message: string };
 
@@ -110,12 +125,20 @@ export function newRecord(key: string, summary: string, url: string): AuditRecor
   };
 }
 
+/** `record` itself when the ticket's title and link are what it already holds. */
+export function retitle(record: AuditRecord, summary: string, url: string): AuditRecord {
+  const title = bounded(summary);
+  return title === record.summary && url === record.url
+    ? record
+    : { ...record, summary: title, url };
+}
+
 /**
- * `now` is injected so a transition is a function of its inputs. A crash describes the ticket only
- * until the next thing happens to it; its major entry stays as history.
+ * A crash describes the ticket only until the next event; its entry stays as history. An event that
+ * changed nothing returns `record` itself, which is how the notifier knows to write nothing.
  */
 export function applyEvent(record: AuditRecord, event: AuditEvent, now: Date): AuditRecord {
-  return event.kind === "crashed"
+  return event.kind === "crashed" || record.crash === null
     ? transition(record, event, now)
     : transition({ ...record, crash: null }, event, now);
 }
@@ -183,9 +206,20 @@ function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRec
       );
     case "review-round":
       return minor(record, at, "💬", event.text);
+    case "observed":
+      return observe(record, event, at);
     case "pr-ready":
+      // A look at a PR already out of draft answers `ready` every tick; only the handover is news.
+      if (record.pr?.state === "ready") {
+        return record;
+      }
       return major(withPrState(record, "ready"), at, "👀", "PR ready for review");
+    case "pr-reworking":
+      return record.pr?.state === "ready" ? withPrState(record, "reworking") : record;
     case "pr-ended":
+      if (record.pr?.state === event.state) {
+        return record;
+      }
       return event.state === "merged"
         ? major(withPrState(record, "merged"), at, "🎉", "PR merged")
         : major(withPrState(record, "closed"), at, "🗑️", "PR closed without merging");
@@ -230,6 +264,35 @@ export function parseRecord(value: unknown): AuditRecord | null {
     return null;
   }
   return candidate as AuditRecord;
+}
+
+/**
+ * Returns `record` itself when the look taught it nothing, so an unchanged tick writes nothing. A PR
+ * it already knows is only ever moved back to draft: the move to ready is `pr-ready`'s entry to make.
+ */
+function observe(
+  record: AuditRecord,
+  event: Extract<AuditEvent, { kind: "observed" }>,
+  at: string,
+): AuditRecord {
+  let next = record;
+  if (next.triage.kind === "pending" && event.triage !== null) {
+    next = { ...next, triage: { kind: "labelled", ...event.triage } };
+  }
+  if (next.work.kind === "idle") {
+    // `runPublish` takes only a verified outcome, so a PR on the bot's branch means verified work.
+    next = { ...next, work: { kind: "verified" } };
+  }
+  const { url, number, draft } = event.pr;
+  if (next.pr === null || next.pr.number !== number) {
+    const pr: PullRequest = { url, number, state: draft ? "draft" : "ready" };
+    return minor({ ...next, pr }, at, "🔗", `PR #${String(number)} found`);
+  }
+  if (draft && next.pr.state !== "draft") {
+    const pr: PullRequest = { ...next.pr, state: "draft" };
+    return minor({ ...next, pr }, at, "↩️", `PR #${String(number)} moved back to draft`);
+  }
+  return next;
 }
 
 function withPrState(record: AuditRecord, state: PullRequest["state"]): AuditRecord {

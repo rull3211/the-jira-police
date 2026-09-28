@@ -109,6 +109,25 @@ describe("renderRecord", () => {
     expect(state(solving)).toBe("*State*\n🟢 working");
   });
 
+  it("draws a ticket triaged before its thread from the labels, and a PR a round sent back as not ready", () => {
+    let record = newRecord("SSX-1", "summary", URL);
+    record = applyEvent(
+      record,
+      {
+        kind: "observed",
+        pr: { url: "https://github.com/o/r/pull/7", number: 7, draft: false },
+        triage: { dor: "pass", solvable: true },
+      },
+      NOW,
+    );
+    record = applyEvent(record, { kind: "pr-reworking" }, NOW);
+
+    const fields = texts(renderRecord(record).blocks);
+    expect(fields).toContain("*Triage*\n✅ DoR passed · solvable · from the ticket's labels");
+    expect(fields).toContain("*Work*\n✅ implemented and verified");
+    expect(fields).toContain("*PR*\n<https://github.com/o/r/pull/7|#7> back with the bot");
+  });
+
   it("renders a stored URL as a link only when it cannot break out of one", () => {
     const safe = renderRecord(newRecord("SSX-1", "summary", URL));
     const tampered = renderRecord(newRecord("SSX-1", "summary", "https://x.test|<!channel>"));

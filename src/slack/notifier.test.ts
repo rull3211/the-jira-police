@@ -160,6 +160,24 @@ describe("createAuditNotifier", () => {
     expect(p.calls).toEqual(["post 1"]);
   });
 
+  it("retitles a record whose event changed nothing else, and only once", async () => {
+    const existing = {
+      ...newRecord("SSX-1", "SSX-1", `${BASE_URL}/browse/SSX-1`),
+      slack: { channel: "C1", ts: "ts-0" },
+    };
+    const s = store({ kind: "found", record: existing });
+    const p = publisher();
+    const audit = notifier(s.store, p.publisher);
+    const ticket = { summary: "Cache", url: `${BASE_URL}/browse/SSX-1` };
+
+    const first = await audit.record("SSX-1", { kind: "pr-reworking" }, ticket);
+    const second = await audit.record("SSX-1", { kind: "pr-reworking" }, ticket);
+
+    expect([first.kind, second.kind]).toEqual(["edited", "skipped"]);
+    expect(s.saved()?.summary).toBe("Cache");
+    expect(p.calls).toEqual(["update ts-0"]);
+  });
+
   it("puts a pass on the timeline as a start and a finish, and a pass that died as a start only", async () => {
     const s = store();
     const audit = notifier(s.store, publisher().publisher);

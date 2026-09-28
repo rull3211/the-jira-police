@@ -1,10 +1,11 @@
 /**
- * The pipeline's own outcomes turned into audit events. Pure, and reusing the one-line descriptions
- * operators already read, so a thread never words an outcome differently from the terminal.
+ * The pipeline's own outcomes, and what a review look saw, turned into audit events. Pure, and reusing
+ * the one-line descriptions operators already read, so a thread never words an outcome differently.
  */
 
 import { describeAdvanceOutcome, describeSolveOutcome } from "../cli/solve-outcome.ts";
 import type { AdvanceOutcome } from "../solve/delivery.ts";
+import { AGENT_LABELS } from "../solve/labels.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 import type { TriagePayload } from "../triage/runner.ts";
 import type { AuditEvent } from "./audit.ts";
@@ -34,10 +35,31 @@ export function solveOutcomeEvent(outcome: SolveOutcome): AuditEvent {
   }
 }
 
-/** `waiting` is nothing happening, which is not news; everything else earns a line. */
+/**
+ * What a review look found, for `observed`. The labels are read, never trusted as a verdict: a
+ * person can add `agent:solvable` by hand.
+ */
+export function observedEvent(
+  labels: readonly string[],
+  pr: { readonly url: string | null; readonly number: number; readonly draft: boolean },
+): AuditEvent {
+  const dor = labels.includes("dor:pass") ? "pass" : labels.includes("dor:gaps") ? "gaps" : null;
+  const solvable = labels.includes(AGENT_LABELS.solvable);
+  return {
+    kind: "observed",
+    pr: { url: pr.url ?? "", number: pr.number, draft: pr.draft },
+    triage: dor === null && !solvable ? null : { dor, solvable },
+  };
+}
+
+/**
+ * `waiting` and `unlanded` recur every tick until someone comments, so they are not news; everything
+ * else earns a line. `pr-reworking` mirrors `reviewStageAfter` handing the ticket back to `reviewing`.
+ */
 export function reviewOutcomeEvents(outcome: AdvanceOutcome): readonly AuditEvent[] {
   switch (outcome.kind) {
     case "waiting":
+    case "unlanded":
       return [];
     case "ready":
       return [{ kind: "pr-ready" }];
@@ -46,7 +68,10 @@ export function reviewOutcomeEvents(outcome: AdvanceOutcome): readonly AuditEven
         kind: "review-round",
         text: `review round ${String(outcome.round)}: ${outcome.pushed ? "pushed a change" : "nothing pushed"}, ${String(outcome.responses.length)} answer(s)`,
       };
-      return outcome.undrafted === "undrafted" ? [round, { kind: "pr-ready" }] : [round];
+      return [
+        round,
+        outcome.undrafted === "undrafted" ? { kind: "pr-ready" } : { kind: "pr-reworking" },
+      ];
     }
     case "reviewer-exhausted":
       return [

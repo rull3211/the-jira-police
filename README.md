@@ -609,7 +609,11 @@ there is no page, says outright that an absent file is not evidence that no roun
 editing its first message.** Triage starting opens it; the verdict, a gate refusal, a claim, each
 model pass, the solve's outcome, the pull request, each review round, the undraft, the merge and
 any crash land on it — the ones that decide the ticket's fate as their own lines, the rest in the
-timeline, newest first. Replies are left to people. `dry` writes what each thread would be to
+timeline, newest first. The undraft is one line per handover, however many looks find the pull
+request ready; a round that pushes a change, or a person drafting it, makes the next one news. A
+ticket already in review when the thread starts gets it from the review loop's first look, which
+fills in the title, the pull request, and triage as the ticket's labels state it. Replies are left
+to people. `dry` writes what each thread would be to
 `<OUTPUT_DIR>/slack/<KEY>.message.json` and the record beside it, changing nothing remote; `live`
 posts it and saves the record on the ticket. Either way a Slack or Jira failure is logged as
 `slack.audit_failed` — or `slack.record_unreadable`, for a record this version cannot read — with

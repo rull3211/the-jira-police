@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3399 tests in 105 files**, no build step.
+> **3412 tests in 105 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -129,6 +129,21 @@ exactly that; nothing refuted.
 365-character record; a second run, a new process with nothing in memory, found the thread through
 the record and edited it rather than posting another. The dry run before them had predicted and
 found one defect: the card called a ticket nothing had happened to "running".
+
+**The first review sweeps with Slack live, 2026-09-28, drew SSX-3895 and SSX-3944 wrong.** Both were
+in review before the thread existed. Each card had the key for a title, triage pending, work not
+started, no pull request, and "PR ready for review" three times in five minutes. The sweep recorded
+without the ticket's facts; only `pr-opened` sets a record's PR; and `surveyReview` answers `ready`
+on every look at a PR already out of draft. The fix: each look records what it saw first (the PR,
+its draft flag, the ticket's labels). That fills only what the record lacks, so work is verified,
+because `runPublish` takes only a verified outcome, and triage is shown as read from the labels
+rather than as a verdict. After that, `pr-ready` does nothing on a PR already ready, until a round
+that pushed, or a person drafting it, sends it back. Predicted for `solve:once SSX-3895 --watch`
+with no rounds allowed: the first pass edits the card, the second writes nothing, and the three
+lines already there stay. It held on both tickets: one property write on the first pass, none on
+the next two. The tests had refuted an assumption first: the notifier's "changed nothing" skip had
+only ever fired for a repeated crash, because `applyEvent` copied every record to clear a crash that
+was not there.
 
 **One more keychain dialog everywhere.** Declaring `SLACK_BOT_TOKEN` sensitive means `readSettings`
 resolves a `keychain:` value for it at every start, so each command and the daemon ask for the

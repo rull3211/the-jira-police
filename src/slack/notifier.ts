@@ -14,6 +14,7 @@ import {
   type AuditRecord,
   applyEvent,
   newRecord,
+  retitle,
 } from "./audit.ts";
 import { renderRecord } from "./render.ts";
 import type { AuditStore, Publisher } from "./store.ts";
@@ -97,10 +98,9 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
             ticket?.summary ?? key,
             ticket?.url ?? `${deps.jiraBaseUrl}/browse/${key}`,
           );
-    const facts =
-      ticket === undefined ? base : { ...base, summary: ticket.summary, url: ticket.url };
+    const facts = ticket === undefined ? base : retitle(base, ticket.summary, ticket.url);
     const changed = change(facts);
-    if (draw === "if-changed" && changed === facts && changed.slack !== null) {
+    if (draw === "if-changed" && changed === base && changed.slack !== null) {
       return { kind: "skipped", reason: "the event changed nothing" };
     }
     const message = renderRecord(changed);

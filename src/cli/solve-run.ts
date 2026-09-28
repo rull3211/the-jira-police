@@ -52,7 +52,7 @@ import {
   solveWithRetry,
 } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, type SolveDeps, runSolveCycle } from "../solve/poller.ts";
-import { findPullRequest } from "../solve/pr.ts";
+import { type FindPrResult, findPullRequest } from "../solve/pr.ts";
 import {
   type ReviewCycleOutcome,
   type ReviewLook,
@@ -78,7 +78,14 @@ import {
   createTicketReader,
   pipelineAuditNotifier,
 } from "../wiring.ts";
-import { prEndedEvent, reviewOutcomeEvents, solveOutcomeEvent } from "../slack/events.ts";
+import type { AuditEvent } from "../slack/audit.ts";
+import {
+  observedEvent,
+  prEndedEvent,
+  reviewOutcomeEvents,
+  solveOutcomeEvent,
+} from "../slack/events.ts";
+import type { TicketFacts } from "../slack/notifier.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
 import {
   chainDecision,
@@ -520,6 +527,7 @@ export async function runAdvance(
     process.exitCode = 3;
     return null;
   }
+  const observed = observedEventOf(detail.labels, found);
   if (found.state !== "OPEN") {
     // Reported, not an error — a merged pull request is the happy ending, a closed one is a
     // person's decision; neither is something to push to.
@@ -538,7 +546,9 @@ export async function runAdvance(
         ? labelEdit([], [])
         : completionTransition(labels, completionLabelFor(endedState(found.state))),
     );
-    await audit?.record(issueKey, prEndedEvent(endedState(found.state)), facts);
+    for (const event of [observed, prEndedEvent(endedState(found.state))]) {
+      await audit?.record(issueKey, event, facts);
+    }
     return null;
   }
 
@@ -578,7 +588,7 @@ export async function runAdvance(
   // belongs to. The stage is `null` for every outcome that left the draft flag alone, which is
   // most of them.
   await moveReviewStage(client, issueKey, reviewStageAfter(result));
-  for (const event of reviewOutcomeEvents(result)) {
+  for (const event of [observed, ...reviewOutcomeEvents(result)]) {
     await audit?.record(issueKey, event, facts);
   }
 
@@ -696,6 +706,19 @@ interface ReviewTarget {
   readonly holder: { worktree: Worktree | null };
 }
 
+/** One look's ticket and what it found, for the audit thread; `observed` is `null` until a PR is. */
+interface Seen {
+  readonly facts: TicketFacts;
+  readonly observed: AuditEvent | null;
+}
+
+function observedEventOf(
+  labels: readonly string[],
+  found: Extract<FindPrResult, { outcome: "found" }>,
+): AuditEvent {
+  return observedEvent(labels, { url: found.url, number: found.number, draft: found.isDraft });
+}
+
 /**
  * The cheap half, for one watched ticket.
  *
@@ -712,10 +735,13 @@ function createReviewLook(
   deps: SolveDependencies,
   targets: Map<string, ReviewTarget>,
   promoteRepair: boolean,
+  seen: Map<string, Seen>,
 ): (ticket: WatchedTicket) => Promise<ReviewLook> {
   const read = createTicketReader(client);
 
   return async (ticket: WatchedTicket): Promise<ReviewLook> => {
+    const facts = { summary: ticket.summary, url: ticket.url };
+    seen.set(ticket.key, { facts, observed: null });
     const { text, detail } = await read(ticket.key);
     // Throws `NotSolvableError` for a repository the operator has not allowed — not caught here,
     // since the cycle records it as a real answer about one ticket.
@@ -734,6 +760,7 @@ function createReviewLook(
     if (found.outcome === "none") {
       return { outcome: "no-pull-request", reason: `no pull request on ${branch}` };
     }
+    seen.set(ticket.key, { facts, observed: observedEventOf(ticket.labels, found) });
     if (found.state !== "OPEN") {
       return { outcome: "ended", number: found.number, state: endedState(found.state) };
     }
@@ -862,10 +889,11 @@ export async function runReviewSweep(
   signal?: AbortSignal,
 ): Promise<ReviewCycleOutcome> {
   const targets = new Map<string, ReviewTarget>();
+  const seen = new Map<string, Seen>();
   const deps = createReviewCycleDeps(
     settings,
     client,
-    createReviewLook(settings, client, runDeps, targets, promoteRepair),
+    createReviewLook(settings, client, runDeps, targets, promoteRepair, seen),
     createReviewAct(runDeps, targets),
     signal,
   );
@@ -884,6 +912,14 @@ export async function runReviewSweep(
   );
 
   const audit = pipelineAuditNotifier(settings);
+  const tell = async (key: string, events: readonly AuditEvent[]): Promise<void> => {
+    const look = seen.get(key);
+    const observed = look?.observed ?? null;
+    for (const event of observed === null ? events : [observed, ...events]) {
+      await audit?.record(key, event, look?.facts);
+    }
+  };
+
   for (const ended of outcome.ended) {
     // §6.1's terminal, through the same function `--advance` uses — a metric encoded twice is a
     // metric that will eventually be encoded two ways.
@@ -892,22 +928,20 @@ export async function runReviewSweep(
         ? labelEdit([], [])
         : completionTransition(labels, completionLabelFor(ended.state)),
     );
-    await audit?.record(ended.issueKey, prEndedEvent(ended.state));
+    await tell(ended.issueKey, [prEndedEvent(ended.state)]);
   }
 
   for (const entry of [...outcome.acted, ...outcome.settled]) {
     await moveReviewStage(client, entry.issueKey, reviewStageAfter(entry.outcome));
-    for (const event of reviewOutcomeEvents(entry.outcome)) {
-      await audit?.record(entry.issueKey, event);
-    }
+    await tell(entry.issueKey, reviewOutcomeEvents(entry.outcome));
   }
 
   for (const failure of outcome.unlooked) {
-    await audit?.record(failure.issueKey, {
-      kind: "crashed",
-      where: "review",
-      message: failure.reason,
-    });
+    await tell(failure.issueKey, [{ kind: "crashed", where: "review", message: failure.reason }]);
+  }
+
+  for (const key of outcome.deferred) {
+    await tell(key, []);
   }
 
   return outcome;

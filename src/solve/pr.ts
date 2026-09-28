@@ -662,6 +662,8 @@ export type FindPrResult =
       readonly number: number;
       readonly state: string;
       readonly isDraft: boolean;
+      /** For display only, so `null` rather than a failed find when `gh` leaves it out. */
+      readonly url: string | null;
     }
   /** No pull request was ever opened for this branch. */
   | { readonly outcome: "none" }
@@ -697,7 +699,7 @@ export async function findPullRequest(
       "--state",
       "all",
       "--json",
-      "number,state,isDraft",
+      "number,state,isDraft,url",
       "--limit",
       "20",
     ],
@@ -721,12 +723,13 @@ export async function findPullRequest(
     };
   }
 
-  const rows: { number: number; state: string; isDraft: boolean }[] = [];
+  const rows: { number: number; state: string; isDraft: boolean; url: string | null }[] = [];
   for (const entry of parsed) {
     const row = asRecord(entry);
     const number = row?.["number"];
     const state = row?.["state"];
     const isDraft = row?.["isDraft"];
+    const url = row?.["url"];
     if (typeof number !== "number" || typeof state !== "string" || typeof isDraft !== "boolean") {
       // One unreadable row is not "no pull requests" — dropping it silently is
       // how a merged PR becomes an absence.
@@ -735,7 +738,7 @@ export async function findPullRequest(
         reason: "a pull request row is missing number, state or isDraft",
       };
     }
-    rows.push({ number, state, isDraft });
+    rows.push({ number, state, isDraft, url: typeof url === "string" ? url : null });
   }
 
   if (rows.length === 0) {
@@ -762,6 +765,7 @@ export async function findPullRequest(
     number: chosen.number,
     state: chosen.state.toUpperCase(),
     isDraft: chosen.isDraft,
+    url: chosen.url,
   };
 }
 

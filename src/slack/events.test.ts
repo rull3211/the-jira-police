@@ -4,6 +4,7 @@ import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 import type { TriagePayload } from "../triage/runner.ts";
 import {
+  observedEvent,
   prEndedEvent,
   reviewOutcomeEvents,
   solveOutcomeEvent,
@@ -75,13 +76,18 @@ describe("reviewOutcomeEvents", () => {
     expect(reviewOutcomeEvents({ kind: "waiting", quietMs: 1000 })).toEqual([]);
   });
 
-  it("marks the pull request ready when the round undrafted it, and only then", () => {
-    expect(reviewOutcomeEvents(iterated("undrafted", true)).map((event) => event.kind)).toEqual([
+  it("says nothing about a round that never landed, since that settle recurs until someone comments", () => {
+    expect(reviewOutcomeEvents({ kind: "unlanded", round: 3 })).toEqual([]);
+  });
+
+  it("marks the pull request ready when the round undrafted it, and sends it back when not", () => {
+    expect(reviewOutcomeEvents(iterated("undrafted", false)).map((event) => event.kind)).toEqual([
       "review-round",
       "pr-ready",
     ]);
-    expect(reviewOutcomeEvents(iterated("still-drafting", false))).toEqual([
-      { kind: "review-round", text: "review round 2: nothing pushed, 2 answer(s)" },
+    expect(reviewOutcomeEvents(iterated("still-drafting", true))).toEqual([
+      { kind: "review-round", text: "review round 2: pushed a change, 2 answer(s)" },
+      { kind: "pr-reworking" },
     ]);
   });
 
@@ -90,6 +96,24 @@ describe("reviewOutcomeEvents", () => {
 
     expect(event).toMatchObject({ kind: "review-round" });
     expect((event as { text: string }).text.length).toBeGreaterThan(0);
+  });
+});
+
+describe("observedEvent", () => {
+  const pr = { url: "https://github.com/o/r/pull/7", number: 7, draft: false };
+
+  it("reads triage's call from the labels triage writes, and nothing from the rest", () => {
+    expect(observedEvent(["dor:pass", "agent:solvable", "route:ours"], pr)).toMatchObject({
+      triage: { dor: "pass", solvable: true },
+    });
+    expect(observedEvent(["dor:gaps"], pr)).toMatchObject({
+      triage: { dor: "gaps", solvable: false },
+    });
+    expect(observedEvent(["agent:review-done", "urgent"], pr)).toMatchObject({ triage: null });
+  });
+
+  it("shows a PR without a URL as its number rather than failing the look", () => {
+    expect(observedEvent([], { ...pr, url: null })).toMatchObject({ pr: { url: "", number: 7 } });
   });
 });
 

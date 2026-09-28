@@ -101,6 +101,15 @@ function describeTriage(triage: TriageState): string {
         : "not solvable";
       return `${icon} ${escape(triage.verdict)} · ${solvable}${triage.posted ? "" : " · not posted"}`;
     }
+    case "labelled": {
+      const dor =
+        triage.dor === "pass"
+          ? "✅ DoR passed"
+          : triage.dor === "gaps"
+            ? "📝 DoR gaps"
+            : "🏷️ triaged";
+      return `${dor} · ${triage.solvable ? "solvable" : "not solvable"} · from the ticket's labels`;
+    }
   }
 }
 
@@ -120,9 +129,11 @@ function describeWork(work: WorkState): string {
 }
 
 function describePr(pr: PullRequest | null): string {
-  return pr === null
-    ? "— none yet"
-    : `${link(pr.url, `#${String(pr.number)}`)} ${escape(pr.state)}`;
+  if (pr === null) {
+    return "— none yet";
+  }
+  const state = pr.state === "reworking" ? "back with the bot" : pr.state;
+  return `${link(pr.url, `#${String(pr.number)}`)} ${escape(state)}`;
 }
 
 /** Escaping cannot make a URL safe inside `<url|label>`, so anything but a plain https URL is shown as its label. */
