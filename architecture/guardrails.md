@@ -113,6 +113,9 @@ git worktree add -b fix/<slug> ../the-jira-police-<slug> origin/main
   whatever branch you were standing on, silently, which is the stacking `branch-stack.sh` counts.
 - **It is not a working checkout yet.** `.env` and `node_modules/` are gitignored, so copy the first
   and `pnpm install` the second, or the suite fails for a reason unrelated to the change.
+- **A copied `.env`'s relative paths now point into the worktree.** A run from it writes
+  `OUTPUT_DIR` and `STATE_PATH` there, so its reports and calibration rows are deleted with it
+  unless copied back; SSX-3980's `dev-lens.md` row, 2026-09-25, landed in a worktree this way.
 - **Remove it in the same breath as the branch.** `git worktree remove` never deletes a branch and
   `git branch -d` never removes a worktree, so each one left behind orphans the other.
 - **A human can waive the rule.** Nothing mechanical can, and nothing mechanical will notice.

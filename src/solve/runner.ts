@@ -688,7 +688,7 @@ export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
   return verdict;
 }
 
-/** Validates a fix report, including the coherence the schema cannot express. */
+/** Validates a fix report, coherence included: `FIX_SCHEMA` repeats these rules so the model is corrected in-session, and this is the net. */
 export function parseFix(value: unknown, issueKey: string): FixReport {
   const record = asRecord(value, `fix report for ${issueKey}`);
   const report: FixReport = {
