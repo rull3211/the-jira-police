@@ -44,6 +44,23 @@ so it has found no placeholders, and claiming otherwise would trip the coherence
 check on the `ready-ish` branch and make every fourth key fail for a reason that
 has nothing to do with the pipeline being exercised.
 
+Set `agentFitness` to exactly this, for every key:
+
+```json
+{
+  "solvable": false,
+  "plausible": false,
+  "confidence": "low",
+  "repo": "",
+  "rationale": "Mock triage: no ticket was read, so there is nothing to judge.",
+  "blockers": ["mock triage read no ticket"]
+}
+```
+
+The schema requires the object, and the mock has no opinion to give. Either
+`true` would need an `agent:` label the table above does not carry, and the
+gate would refuse the payload for a reason unrelated to the pipeline.
+
 Set `recommendedNextStep` to a single sentence appropriate to the verdict.
 
 Fill `mutation` in as the schema describes, so the shape of a real run is

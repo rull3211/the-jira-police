@@ -139,6 +139,20 @@ describe("buildArgs", () => {
     expect(() => JSON.parse(schema ?? "")).not.toThrow();
   });
 
+  it("requires agentFitness and its plausible field in the schema it passes, never inviting omission", () => {
+    // A reply can drop the fitness call and keep `agent:solvable` (SSX-3986); only the schema stops
+    // that before the run is paid for. A description inviting omission would make the retries loop.
+    const args = buildArgs(BASE);
+    const schema = JSON.parse(args[args.indexOf("--json-schema") + 1] ?? "{}") as {
+      required: readonly string[];
+      properties: { agentFitness: { description: string; required: readonly string[] } };
+    };
+
+    expect(schema.required).toContain("agentFitness");
+    expect(schema.properties.agentFitness.required).toContain("plausible");
+    expect(schema.properties.agentFitness.description).not.toMatch(/\bomit/iu);
+  });
+
   it("defaults the tool allowlist and allows overriding it", () => {
     expect(buildArgs(BASE)[buildArgs(BASE).indexOf("--allowedTools") + 1]).toBe(
       ALLOWED_TOOLS.join(","),
@@ -684,7 +698,7 @@ describe("parseAgentFitness", () => {
   });
 
   it("gives parsePayload a declining fitness when the field is absent", () => {
-    // `agentFitness` is optional on purpose: the ordinary path for a run that volunteers no opinion.
+    // The schema requires it, but nothing guarantees the CLI enforced that schema on this payload.
     const parsed = parsePayload(
       {
         verdict: "needs-info",
