@@ -66,8 +66,8 @@ export function formatReport(
     "",
     "---",
     "",
-    "_Nothing reads these images yet. `attach:stage` is the only caller of the_",
-    "_stager; see `architecture/not-built.md` §13 for the phases that would change that._",
+    "_Triage reads staged images only with `TRIAGE_IMAGES` on, recon only with `RECON_IMAGES`_",
+    "_on, and no later pass at all; see `architecture/not-built.md` §13._",
     "",
   );
   return lines.join("\n");
