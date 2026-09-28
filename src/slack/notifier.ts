@@ -50,6 +50,8 @@ export interface NotifierDeps {
   readonly jiraBaseUrl: string;
   /** A title for a titleless record drawn without one; a typed key carries only a placeholder. */
   readonly lookup?: (key: string) => Promise<TicketFacts>;
+  /** Who each broadcast mentions; read per broadcast, so a `/bencebot` change applies at the next one. */
+  readonly subscribers?: () => Promise<readonly string[]>;
   readonly now?: () => Date;
 }
 
@@ -100,6 +102,20 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     }
   };
 
+  /** An unreadable list costs the mentions, never the broadcast. */
+  const mentioned = async (key: string): Promise<readonly string[]> => {
+    if (deps.subscribers === undefined) {
+      return [];
+    }
+    try {
+      return await deps.subscribers();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log.warn("slack.subscribers_unread", { key, reason, note: "broadcast without mentions" });
+      return [];
+    }
+  };
+
   /**
    * An edit never moves a message, so a major entry is also broadcast, and the ticket's previous
    * broadcast deleted. Failures cost only the bump: the record is saved either way.
@@ -110,9 +126,10 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     thread: Thread,
     entry: Entry,
   ): Promise<AuditRecord> => {
+    const message = renderBump(record, entry, await mentioned(key));
     let bump: string;
     try {
-      bump = await deps.publisher.broadcast(key, thread, renderBump(record, entry));
+      bump = await deps.publisher.broadcast(key, thread, message);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log.warn("slack.bump_failed", { key, reason, note: "the card was edited; not resurfaced" });

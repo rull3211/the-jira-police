@@ -1,14 +1,14 @@
 /**
  * Minimal Jira Cloud client — discovery reads, and three narrow writes (`updateLabels`,
- * `moveToCodeReview`, and issue properties under `jira-police.`, which `assertOwnedPropertyKey`
- * holds to the service's own bookkeeping).
+ * `moveToCodeReview`, and issue and project properties under `jira-police.`, which
+ * `assertOwnedPropertyKey` holds to the service's own bookkeeping).
  *
  * `updateLabels` exists because the MCP tool surface only offers `fields` (set semantics), so
  * adding one label means read-all-N/append/write-all-N-back — destroying any label a human added
  * in between. This credential may touch `agent:`-namespaced labels (`assertOwnedLabel`), exactly
- * one Jira status, named once at construction and never per call, and `jira-police.*` issue
- * properties; nothing else — never a field or a comment, which stay on the MCP path since ADF
- * conversion lives there.
+ * one Jira status, named once at construction and never per call, and `jira-police.*` issue and
+ * project properties; nothing else — never a field or a comment, which stay on the MCP path since
+ * ADF conversion lives there.
  *
  * `moveToCodeReview` is the status write, and it is a workflow **transition**, not a field edit —
  * Jira does not accept `status` as a settable field. Unconfigured (`codeReviewStatus` unset at
@@ -36,6 +36,13 @@ const log = createLogger("jira");
  */
 const ISSUE_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9]*-\d+$/;
 const ATTACHMENT_ID_PATTERN = /^\d+$/;
+const PROJECT_KEY_PATTERN = /^[A-Z][A-Z0-9_]{0,19}$/;
+
+export function assertProjectKey(project: string): void {
+  if (!PROJECT_KEY_PATTERN.test(project)) {
+    throw new JiraError(0, `Refusing a malformed project key: ${JSON.stringify(project)}`);
+  }
+}
 
 export function assertIssueKey(key: string): void {
   if (!ISSUE_KEY_PATTERN.test(key)) {
@@ -77,9 +84,20 @@ export function assertOwnedPropertyKey(property: string): void {
   if (!PROPERTY_KEY_PATTERN.test(property)) {
     throw new JiraError(
       0,
-      `Refusing issue property ${JSON.stringify(property)}: this credential may only touch jira-police.* properties, and every other one belongs to another app`,
+      `Refusing property ${JSON.stringify(property)}: this credential may only touch jira-police.* properties, and every other one belongs to another app`,
     );
   }
+}
+
+function propertyChars(property: string, owner: string, value: unknown): number {
+  const chars = JSON.stringify(value).length;
+  if (chars > MAX_PROPERTY_CHARS) {
+    throw new JiraError(
+      0,
+      `Refusing to write ${property} on ${owner}: ${String(chars)} characters, over Jira's ${String(MAX_PROPERTY_CHARS)}`,
+    );
+  }
+  return chars;
 }
 
 /** Only the fields the pipeline actually reads. */
@@ -554,15 +572,37 @@ export class JiraClient {
   async setIssueProperty(key: string, property: string, value: unknown): Promise<void> {
     assertIssueKey(key);
     assertOwnedPropertyKey(property);
-    const chars = JSON.stringify(value).length;
-    if (chars > MAX_PROPERTY_CHARS) {
-      throw new JiraError(
-        0,
-        `Refusing to write ${property} on ${key}: ${String(chars)} characters, over Jira's ${String(MAX_PROPERTY_CHARS)}`,
-      );
-    }
+    const chars = propertyChars(property, key, value);
     await this.#write("PUT", `/rest/api/3/issue/${key}/properties/${property}`, value);
     log.info("jira.property_written", { key, property, chars });
+  }
+
+  /** `null` when the project carries no such property. Writing one needs Administer Projects. */
+  async getProjectProperty(project: string, property: string): Promise<unknown> {
+    assertProjectKey(project);
+    assertOwnedPropertyKey(property);
+    let response: Response;
+    try {
+      response = await this.#get(
+        `/rest/api/3/project/${project}/properties/${property}`,
+        "application/json",
+      );
+    } catch (error) {
+      if (error instanceof JiraError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+    const body = (await response.json()) as { readonly value?: unknown };
+    return body.value ?? null;
+  }
+
+  async setProjectProperty(project: string, property: string, value: unknown): Promise<void> {
+    assertProjectKey(project);
+    assertOwnedPropertyKey(property);
+    const chars = propertyChars(property, project, value);
+    await this.#write("PUT", `/rest/api/3/project/${project}/properties/${property}`, value);
+    log.info("jira.project_property_written", { project, property, chars });
   }
 
   /** `false` when there was nothing to delete. */
