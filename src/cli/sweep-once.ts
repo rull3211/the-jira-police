@@ -30,7 +30,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createLogger } from "../logger.ts";
-import { numeric, readSettings, withConfigErrors } from "../settings.ts";
+import { numeric, readLocalSettings, withConfigErrors } from "../settings.ts";
 import { runSweep } from "../sweep.ts";
 import { attachStagingRoot, worktreeRoot } from "../wiring.ts";
 import { formatReport } from "./sweep-once-report.ts";
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   }
   const write = argv.includes("--write");
 
-  const settings = readSettings();
+  const settings = readLocalSettings();
   const maxAgeMs = numeric(settings, "STAGING_SWEEP_MAX_AGE_MS", 1);
   const now = Date.now();
 

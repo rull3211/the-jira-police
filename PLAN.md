@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66 and §67, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67 and §71, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -82,42 +82,6 @@ The next entry is §72. The pointer is a per-branch guess: two branches open at 
 from their own base. §68–70 were taken by `feat/slack-audit-thread`, open when §71 was written.
 
 <!-- refs:on -->
-
-### 71. Every credential this service holds sits in plaintext in a file an agent can read
-
-**Branch:** `feat/keychain-secrets`
-
-**What is being attempted.** A sensitive setting may be written `keychain:<name>` in `.env`, and
-`readSettings` resolves it once, at startup, by running `/usr/bin/security find-generic-password`
-for the current user. The resolved value lives only in the settings object: never in
-`process.env`, so no child inherits it, and never in a file. A reference on a setting not marked
-`sensitive` is refused, because `describeSettings` would print the resolved value into the
-startup log. A lookup that fails, is denied, or goes unanswered is a `SettingsError` naming the
-setting — exit 78, the same shape as a missing one.
-
-**Why now.** On 2026-09-28 an agent working in this repository printed the Slack bot token out
-of `.env` while trying to redact it, and nothing stopped it: every hook here inspects the command
-sent, none what comes back. The operator moved `JIRA_AUTH` and the Slack token into the login
-keychain the same day, with every read gated on a macOS dialog, and `.env` now holds references
-the code does not understand — so the daemon cannot restart until this lands. Exporting the value
-from a launcher instead was ruled out: a process's launch environment is readable by anything
-running as the same user (`ps -E`), where a value resolved inside the process is not.
-
-**What it costs.** One keychain dialog per referenced secret each time the daemon or a command
-starts, and a dialog cannot say who asked. `sweep:once` reads settings through `readSettings` and
-never reaches Jira, so it asks for a credential it does not use; `readLocalSettings` resolves
-nothing and asks for nothing.
-
-**What would make it the wrong idea.**
-
-- A daemon started unattended — launchd, cron — would block at startup on a dialog nobody
-  answers. The lookup has a timeout and fails closed, so it stops rather than hangs, but it does
-  not start either. Nothing here runs unattended today (`architecture/not-built.md` §13).
-- The gate is a person reading a dialog. One "Always Allow" makes every later read silent,
-  including an agent's, and nothing here can tell that it happened.
-- `security -w` prints a value holding a non-printable character as hex, which this reads as the
-  secret. A token pasted with a trailing newline would therefore arrive wrong, and fail at the
-  remote system rather than here.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
