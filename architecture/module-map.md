@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-112 production modules, 100 test files. Grouped by what they belong to rather than alphabetically,
+114 production modules, 102 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -199,6 +199,8 @@ inheritance.
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/slack/client.ts` | The Web API over `fetch`, and the only holder of the bot token. Success is `ok: true`, never the HTTP status; warnings handed back                                                                   |
 | `src/slack/probe.ts`  | Whether both halves of the thread's store work: a message posted, edited, deleted, and a full-size record round-tripped through a ticket's `jira-police.slack-probe` property. Pure over two clients |
+| `src/slack/audit.ts`  | One ticket's audit record and the events that move it: status fields, major entries, a timeline, and the caps that keep it under Jira's property limit. Pure                                         |
+| `src/slack/render.ts` | A record drawn as its Slack message: status card, major events, timeline newest first. Escapes every string it did not write, and stays inside Slack's limits                                        |
 
 `createSlackTarget` (`wiring.ts`) is the one construction site, and it refuses any token but a plain
 `xoxb-` bot token. `src/cli/slack-probe.ts` is its only caller today.
