@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3421 tests in 105 files**, no build step.
+> **3429 tests in 105 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and `runCycle` in `review-loop.ts` advances _and then_ claims in one tick,
@@ -531,8 +531,9 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   looked at: the operator saw six redrawn on 2026-09-28 render collapsed, with the title a working
   link. No broadcast has been posted. What deletion leaves is the open question: a "This message was
   deleted" marker in the channel or the thread would make the bump litter, and the deletion should
-  go. **What would show it:** two major entries on one ticket with a thread. SSX-3986's re-triage
-  after its answering comment is the first; the second on the same ticket deletes it.
+  go. **What would show it:** `pnpm slack:once SSX-3986 --post --bump`, run twice, looking at the
+  channel and the thread after each. The first posts a broadcast; the second posts another and
+  deletes the first.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
   daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket

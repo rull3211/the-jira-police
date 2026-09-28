@@ -208,6 +208,17 @@ describe("createAuditNotifier", () => {
 
     expect(repeat).toEqual({ kind: "skipped", reason: "the event changed nothing" });
     expect(p.calls).toEqual(["post 1"]);
+
+    // Not only a crash: the look at a PR already ready, which every review tick repeats.
+    const q = publisher();
+    const reviewed = notifier(store(threaded()).store, q.publisher);
+    const opened = { kind: "pr-opened", url: "https://github.com/o/r/pull/7", number: 7 } as const;
+    await reviewed.record("SSX-1", { ...opened, title: "fix(cache): evict" });
+    await reviewed.record("SSX-1", { kind: "pr-ready" });
+    const before = [...q.calls];
+
+    expect(await reviewed.record("SSX-1", { kind: "pr-ready" })).toEqual(repeat);
+    expect(q.calls).toEqual(before);
   });
 
   it("retitles a record whose event changed nothing else, and only once", async () => {
@@ -300,6 +311,32 @@ describe("createAuditNotifier", () => {
     expect(s.saved()?.bump).toBe("b-2");
     expect(p.bumps[1]).toContain("PR ready for review");
     expect(p.bumps[1]).toContain(`<${BASE_URL}/browse/SSX-1|SSX-1 · Cache>`);
+  });
+
+  it("broadcasts the latest major entry again only on a redraw asked to bump", async () => {
+    const existing = threaded("b-old");
+    if (existing.kind !== "found") {
+      throw new Error("threaded() returns a found record");
+    }
+    const withEntry = {
+      ...existing.record,
+      major: [{ at: NOW.toISOString(), icon: "👀", text: "PR ready for review" }],
+    };
+    const s = store({ kind: "found", record: withEntry });
+    const p = publisher();
+    const audit = notifier(s.store, p.publisher);
+
+    await audit.redraw("SSX-1");
+    await audit.redraw("SSX-1", undefined, true);
+
+    expect(p.calls).toEqual([
+      "update ts-0",
+      "update ts-0",
+      "broadcast b-1 in ts-0",
+      "remove b-old",
+    ]);
+    expect(p.bumps).toEqual([expect.stringContaining("PR ready for review")]);
+    expect(s.saved()?.bump).toBe("b-1");
   });
 
   it("does not broadcast a thread it has just posted, which is already at the bottom", async () => {

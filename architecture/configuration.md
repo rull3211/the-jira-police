@@ -102,7 +102,8 @@ pnpm watch:once                    # every agent:watching ticket; reports, write
 pnpm watch:once SSX-1234           # ... or just that one, label or no label
 pnpm watch:once --write            # ... and act: drop the watch, or pay for a re-triage
 pnpm slack:once SSX-1234 [--post]  # draw the ticket's audit thread from its record; dry
-                                   #   writes groomed/slack/, --post posts or edits it
+                                   #   writes groomed/slack/, --post posts or edits it,
+                                   #   --bump broadcasts its latest major entry again
 pnpm slack:probe SSX-1234 [--keep] # both halves of the audit thread's store: a message
                                    #   posted, edited, deleted; a record written to the
                                    #   ticket's jira-police.slack-probe property, read, deleted

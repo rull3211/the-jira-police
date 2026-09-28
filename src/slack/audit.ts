@@ -251,8 +251,8 @@ function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRec
 }
 
 /**
- * A stored record read back, or `null` for anything that is not one this version wrote — a hand
- * edit, a newer schema, a truncation. The caller must not write over what it could not read.
+ * A stored record read back, or `null` when its top-level shape is not this version's. Only the shape
+ * is checked: anyone who can edit the ticket can write any field, so the renderer escapes every one.
  */
 export function parseRecord(value: unknown): AuditRecord | null {
   if (typeof value !== "object" || value === null) {

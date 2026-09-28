@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   type AuditRecord,
+  type Entry,
   MAX_ENTRY_CHARS,
   MAX_MAJOR_ENTRIES,
   MAX_TIMELINE_ENTRIES,
@@ -72,6 +73,25 @@ describe("renderRecord", () => {
       expect(text).not.toMatch(/<(?:!(?!date\^)|@)/u);
     }
     expect(JSON.stringify(rendered.blocks)).toContain("&lt;!here&gt;");
+  });
+
+  it("escapes a record hand-edited through the property API, down to its icons and timestamps", () => {
+    // Anyone who can edit the ticket can write `jira-police.slack`; parseRecord checks only its shape.
+    const forged: Entry = { at: "Sep 28 2026 (x><!channel>)", icon: "<!here>", text: "t" };
+    const record: AuditRecord = {
+      ...newRecord("SSX-1", "summary", URL),
+      major: [forged],
+      timeline: [forged],
+    };
+
+    const rendered = renderRecord(record);
+    const bump = renderBump(record, forged);
+
+    for (const text of [...texts(rendered.blocks), rendered.text, bump.text]) {
+      expect(text).not.toMatch(
+        /<(?:!(?!date\^\d+\^\{date_short_pretty\} \{time\}\|[\dT:.Z-]+>)|@)/u,
+      );
+    }
   });
 
   it("stays inside Slack's limits with every cap full and every entry at its longest", () => {

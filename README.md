@@ -553,6 +553,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm slack:probe <KEY> [--keep]`                      | Post, edit and delete one message in `SLACK_CHANNEL_ID`; write, read back and delete a record on the ticket. A verdict per step | Slack and one Jira property, both removed + a report |
 | `pnpm slack:once <KEY>`                                | Draw the ticket's audit thread from its record, dry: the record and the exact Slack request                                     | `groomed/slack/`                                     |
 | `pnpm slack:once <KEY> --post`                         | …and post or edit the thread for real, saving the record on the ticket                                                          | Slack + the `jira-police.slack` property             |
+| `pnpm slack:once <KEY> --post --bump`                  | …and broadcast its latest major entry to the channel again, deleting the ticket's previous broadcast                            | Slack + the `jira-police.slack` property             |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                           | no                                                   |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                        | no                                                   |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                        | no                                                   |
@@ -629,8 +630,10 @@ setting `live`.
 **`slack:once <KEY>` draws one ticket's thread by hand.** It reads the ticket and its
 `jira-police.slack` record — a record that does not exist yet is started fresh — and draws the
 message. Dry by default, writing the same two files; `--post` posts the thread, or edits it if the
-ticket already has one, and saves the record on the ticket. A record this version cannot read is
-left as found and the command exits 1 saying so: deleting the property starts the thread afresh.
+ticket already has one, and saves the record on the ticket. `--bump` resurfaces the ticket by hand:
+its latest major entry is broadcast again and its previous broadcast deleted, which is also the only
+way to drive a broadcast on a ticket you choose. A record this version cannot read is left as found
+and the command exits 1 saying so: deleting the property starts the thread afresh.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and

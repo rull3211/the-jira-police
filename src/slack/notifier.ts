@@ -36,8 +36,11 @@ export type AuditOutcome =
 
 export interface AuditNotifier {
   record(key: string, event: AuditEvent, ticket?: TicketFacts): Promise<AuditOutcome>;
-  /** Draws the record as it stands, creating the thread if it has none. */
-  redraw(key: string, ticket?: TicketFacts): Promise<AuditOutcome>;
+  /**
+   * Draws the record as it stands, creating the thread if it has none. `bump` broadcasts its latest
+   * major entry again, so a person can resurface a ticket, and the broadcast can be driven by hand.
+   */
+  redraw(key: string, ticket?: TicketFacts, bump?: boolean): Promise<AuditOutcome>;
 }
 
 export interface NotifierDeps {
@@ -131,6 +134,7 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     change: (record: AuditRecord) => AuditRecord,
     ticket: TicketFacts | undefined,
     draw: "always" | "if-changed",
+    bump = false,
   ): Promise<AuditOutcome> => {
     const loaded = await deps.store.load(key);
     if (loaded.kind === "unreadable") {
@@ -157,7 +161,7 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     if (changed.slack !== null) {
       const result = await deps.publisher.update(key, changed.slack, message);
       if (result === "updated") {
-        const entry = addedMajor(facts, changed);
+        const entry = addedMajor(facts, changed) ?? (bump ? (changed.major.at(-1) ?? null) : null);
         await deps.store.save(
           key,
           entry === null ? changed : await resurface(key, changed, changed.slack, entry),
@@ -177,8 +181,8 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
       enqueue(key, event.kind, () =>
         apply(key, (record) => applyEvent(record, event, now()), ticket, "if-changed"),
       ),
-    redraw: (key, ticket) =>
-      enqueue(key, "redraw", () => apply(key, (record) => record, ticket, "always")),
+    redraw: (key, ticket, bump) =>
+      enqueue(key, "redraw", () => apply(key, (record) => record, ticket, "always", bump)),
   };
 }
 

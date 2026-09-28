@@ -801,6 +801,21 @@ describe("JiraClient issue properties", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["a prefix without its dot", "jira-policeman.data"],
+    ["the namespace inside another key", "other.jira-police.slack"],
+    ["a path out of the property", "jira-police.slack/../other-app.data"],
+    ["the bare namespace", "jira-police."],
+  ])("refuses %s, which a looser key check would let through", async (_name, key) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client().setIssueProperty("SSX-1", key, {})).rejects.toThrow(
+      /may only touch jira-police\.\*/u,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("refuses a value over Jira's limit before the request, saying how big it was", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);

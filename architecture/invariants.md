@@ -16,7 +16,7 @@ Things that look like details and are not:
    fine and then crash at startup. This bit twice for real before the flag went on.
 2. **The analyst never gets a write tool**, and there is no `--yes` path. A second way to post
    would be a second way to post unchecked.
-3. **The REST credential never leaves discovery, and the Slack token never leaves this process.**
+3. **Neither the Jira REST credential nor the Slack token ever reaches a model session.**
    `childEnv` in `triage/runner.ts` withholds every `JIRA_` and `SLACK_` variable from each model
    session, triage and solve passes alike, and the tests asserting their absence are the proof —
    one per name Slack's own tooling injects, because a denylist naming one token leaks the others.
@@ -334,7 +334,11 @@ Things that look like details and are not:
     or `slack.unbump_failed`, and the edited record is saved regardless. The one configuration error
     it can raise, a live mode it cannot build, is raised by `pipelineAuditNotifier` at startup and
     before any claim, where it stops a start rather than strands work. What this costs is that a
-    thread can fall silent while the pipeline runs on; the warning is the only signal. Two residues
-    are left unguarded: a daemon and a CLI updating one ticket in the same second can drop a
-    timeline entry, since only one process's updates are serialised; and a record save that fails
-    after a broadcast leaves that broadcast in the channel, recorded nowhere, so it is never deleted.
+    thread can fall silent while the pipeline runs on; the warning is the only signal. Three
+    residues are left unguarded:
+    - A daemon and a CLI updating one ticket in the same second can drop a timeline entry, since
+      only one process's updates are serialised.
+    - A record save that fails after a thread's first post leaves the record without its `ts`, so
+      the next event opens a second thread for the ticket.
+    - A record save that fails after a broadcast leaves that broadcast in the channel, recorded
+      nowhere, so it is never deleted.

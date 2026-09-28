@@ -461,10 +461,8 @@ export function createJiraClient(settings: Settings): JiraClient {
 }
 
 /**
- * The Slack client and the one channel it writes to, or a configuration error naming what is missing.
- *
- * Only a plain bot token is accepted: `xoxe.` tokens expire in twelve hours and nothing here refreshes
- * one, and a user token would post as whoever generated it.
+ * Only a plain `xoxb-` bot token: an `xoxe.` token expires in twelve hours and nothing here refreshes
+ * it, and a user token would post as whoever generated it.
  */
 export function createSlackTarget(settings: Settings): {
   readonly client: SlackClient;

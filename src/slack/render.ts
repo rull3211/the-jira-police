@@ -44,7 +44,9 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
   ];
 
   const major = chunks(
-    record.major.map((entry) => `${entry.icon} *${escape(entry.text)}*  ${stamp(entry.at)}`),
+    record.major.map(
+      (entry) => `${escape(entry.icon)} *${escape(entry.text)}*  ${stamp(entry.at)}`,
+    ),
     SECTION_CHARS,
   );
   children.push(...major.map((chunk) => section(chunk)));
@@ -91,7 +93,7 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
 export function renderBump(record: AuditRecord, entry: Entry): RenderedMessage {
   const title = record.summary === record.key ? record.key : `${record.key} · ${record.summary}`;
   return {
-    text: `${entry.icon} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}`,
+    text: `${escape(entry.icon)} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}`,
     blocks: [],
   };
 }
@@ -201,14 +203,17 @@ function fallbackText(record: AuditRecord): string {
 }
 
 function timelineLine(entry: Entry): string {
-  return `${stamp(entry.at)}  ${entry.icon} ${escape(entry.text)}`;
+  return `${stamp(entry.at)}  ${escape(entry.icon)} ${escape(entry.text)}`;
 }
 
-/** Rendered in each reader's own timezone by Slack; the fallback is what a client too old to do so shows. */
+/**
+ * Rendered in each reader's own timezone by Slack. The fallback is rebuilt from the parsed time, never
+ * echoed: `Date.parse` accepts text that can close the token early.
+ */
 function stamp(iso: string): string {
-  const seconds = Math.floor(Date.parse(iso) / 1000);
-  return Number.isFinite(seconds)
-    ? `<!date^${String(seconds)}^{date_short_pretty} {time}|${iso}>`
+  const millis = Date.parse(iso);
+  return Number.isFinite(millis)
+    ? `<!date^${String(Math.floor(millis / 1000))}^{date_short_pretty} {time}|${new Date(millis).toISOString()}>`
     : "";
 }
 

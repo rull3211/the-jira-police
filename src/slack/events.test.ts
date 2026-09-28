@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { describeAdvanceOutcome } from "../cli/solve-outcome.ts";
 import type { AdvanceOutcome } from "../solve/delivery.ts";
 import type { SolveOutcome } from "../solve/orchestrator.ts";
 import type { TriagePayload } from "../triage/runner.ts";
@@ -91,11 +92,20 @@ describe("reviewOutcomeEvents", () => {
     ]);
   });
 
-  it("gives every other outcome a timeline line in the words the terminal uses", () => {
-    const [event] = reviewOutcomeEvents({ kind: "capped", rounds: 20, unresolved: "" });
+  it("marks the pull request ready when the reviewer's budget ran out, since that undrafts it too", () => {
+    expect(
+      reviewOutcomeEvents({ kind: "reviewer-exhausted", rounds: 3, unresolved: "" }).map(
+        (event) => event.kind,
+      ),
+    ).toEqual(["review-round", "pr-ready"]);
+  });
 
-    expect(event).toMatchObject({ kind: "review-round" });
-    expect((event as { text: string }).text.length).toBeGreaterThan(0);
+  it("gives a capped outcome one timeline line, in the words the terminal prints for it", () => {
+    const outcome = { kind: "capped", rounds: 20, unresolved: "" } as const;
+
+    expect(reviewOutcomeEvents(outcome)).toEqual([
+      { kind: "review-round", text: describeAdvanceOutcome(outcome).split("\n", 1)[0] },
+    ]);
   });
 });
 

@@ -75,6 +75,8 @@ describe("SlackClient", () => {
 
     expect(error.code).toBe("ratelimited");
     expect(error.retryAfterSeconds).toBe(7);
+    // The message is all `slack.audit_failed` logs, so the pause has to be in it to reach anyone.
+    expect(error.message).toContain("pause of 7s");
   });
 
   it("reports a network failure as its own kind", async () => {

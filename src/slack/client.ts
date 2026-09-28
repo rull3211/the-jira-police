@@ -133,12 +133,14 @@ export class SlackClient {
     }
 
     if (response.status === 429) {
-      const seconds = Number(response.headers.get("retry-after"));
+      const header = response.headers.get("retry-after");
+      const seconds = header === null ? Number.NaN : Number(header);
+      const known = Number.isFinite(seconds);
       throw new SlackError(
         method,
         "ratelimited",
-        "Slack asked for a pause before the next call",
-        Number.isFinite(seconds) ? seconds : null,
+        `Slack asked for a pause${known ? ` of ${String(seconds)}s` : ""} before the next call`,
+        known ? seconds : null,
       );
     }
 
