@@ -86,33 +86,36 @@ from their own base, and it read §72 here after §73 and §74 had been issued. 
 
 ### 69. Nobody is told when a ticket they care about crashes or opens a pull request
 
-**Branch:** none yet — cut from `main` after `feat/slack-audit-thread` merges.
+**Branch:** `feat/slack-subscribers`
 
-**What is not built.** `/bencebot subscribe|unsubscribe tags|dm`, and the two lists behind it.
-`tags` are mentioned in each new parent as it is posted; `dm` get a direct message on each major
-event. Slack sends no notification for a mention added by editing a message — reported
-consistently, not measured here — so a tag in the parent pings once, and the DM list is the answer
-for every later event. That was written before each major entry became a broadcast reply, which is
-a new message: a tag carried on the broadcast would ping on every major event, so the two lists may
-collapse into one. Where the lists live is open: they were to be the metadata of a bot-owned roster
-message, which the audit thread's first probe refuted (`README.md`, `slack:probe`). The counterpart
-of the thread's store, a property on the ticket, is a property on the Jira project, under the same
-`jira-police.` prefix.
+**What is being built.** `/bencebot subscribe`, `/bencebot unsubscribe`, and a bare `/bencebot`
+that answers whether you are on the list. One list, covering every ticket, and a subscriber is
+mentioned on each broadcast line — the operator's choice on 2026-09-28. The earlier `tags`/`dm`
+pair collapses into it because each major entry is now a broadcast reply, which is a new message,
+so a mention on it pings each time. The card itself carries no mention. The list is the
+`jira-police.slack-subscribers` property on `JIRA_PROJECT`, the counterpart of the thread's store;
+the credential holds Administer Projects on SSX, measured on 2026-09-28, and this is its first use.
 
-Inbound needs Socket Mode, because the daemon has no public URL, and Node 24's own `WebSocket` is
-enough — no dependency. `apps.connections.open` with the `xapp-` token, the command's reply sent in
-the envelope's ack, a reconnect on `disconnect`. **The subscriber is the envelope's `user_id`,
-never anything in the command's text.** `pnpm slack:listen` drives it by hand; `src/slack-loop.ts`
-puts it in the daemon under invariant 17 — built before the loops, `null` when off, and unable to
-reject the daemon's `Promise.all`.
+Inbound is Socket Mode over Node 24's own `WebSocket`: `apps.connections.open` with an `xapp-`
+token, the reply carried in the envelope's acknowledgement, a reconnect after each `disconnect`.
+Who subscribes is taken from the envelope's `user_id` field rather than from the command's
+arguments. Built in this order, one commit each:
+
+1. The roster, the command, the socket and the mention, with nothing wiring them.
+2. `pnpm slack:listen`, dry: reads the real roster and writes the result to
+   `OUTPUT_DIR/slack/roster.json`, answering as a dry run.
+3. `pnpm slack:listen --write`, which writes the property.
+4. The daemon, after 3 has been watched: `src/slack-loop.ts` under invariant 17, off by default.
 
 **Why its own branch.** It is the first inbound channel this service has — something outside it can
 now cause a write — which is a different privilege from posting.
 
 **What would make it the wrong idea.** A roster that cannot be read must stop the listener from
-writing, never be taken as empty: an empty list written over an unreadable one is every subscriber
-silently dropped. A DM per major event per subscriber is noise at scale; at one team it should not
-be.
+writing, and is not taken as empty: an empty list written over an unreadable one drops every
+subscriber with no sign of it. The daemon and a hand-run listener each hold a connection and Slack
+gives each command to one of them, so two commands in the same second can lose one; a read-back
+after the write reports that case. A mention on every major event of every ticket is noise past one
+team.
 
 ### 70. The pull request channel's announcement is written by hand every time
 
