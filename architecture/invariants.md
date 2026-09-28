@@ -20,6 +20,8 @@ Things that look like details and are not:
    `childEnv` in `triage/runner.ts` withholds every `JIRA_` and `SLACK_` variable from each model
    session, triage and solve passes alike, and the tests asserting their absence are the proof —
    one per name Slack's own tooling injects, because a denylist naming one token leaks the others.
+   A credential written `keychain:<name>` is resolved into the settings object only, so
+   `process.env` — which every child inherits — never holds it at all.
 4. **The gate reads structured fields, never prose.** See §3.
 5. **Labels are a delta, unioned against live** — never a replacement array.
 6. **The footer sentinel is verbatim and load-bearing.** Change it and every existing comment

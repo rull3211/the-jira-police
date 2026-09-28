@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-111 production modules, 99 test files. Grouped by what they belong to rather than alphabetically,
+112 production modules, 100 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -24,6 +24,7 @@ because the grouping is the architecture.
 | `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                    |
 | `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                     |
 | `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                             |
+| `src/keychain.ts`          | `keychain:<name>` values, read from the macOS login keychain by `/usr/bin/security` inside the process. `readSettings` honours one only on a `sensitive` setting   |
 | `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger             |
 | `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide     |
 | `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                                |

@@ -1964,3 +1964,35 @@ The suite found none of them.
 the harness bounds it](BUILDING.md#fail-closed-except-guards-which-fail-open), where `silent` is now
 narrowed per round by a schema the CLI enforces in-session; and
 [a probe a guard blocks is handed over as a command, never dropped](PROVING.md#ask-for-it--and-nudge-never-refuse).
+
+### The token printed by the command meant to hide it
+
+**2026-09-28.** Starting a Slack integration on `feat/slack-audit-thread`, an agent wanted to know
+whether the operator's `.env` held the new Slack lines, and printed the matching lines through a
+`sed` substitution meant to keep five characters of each value and mask the rest. macOS `sed` does
+not know `\s` or `\S`, so the pattern matched nothing, `sed` passed every line through unchanged,
+and the bot token went into the session's context in full. The token was revoked and the app
+reinstalled; the operator moved `JIRA_AUTH` and the new token into the login keychain the same day,
+and `keychain:` references were built on `feat/keychain-secrets`.
+
+**The mechanism, not the excuse.** Two decisions, each wrong on its own. The mask failed open: a
+substitution that does not match leaves its input alone, so a redaction written as one prints the
+secret whenever it is wrong — the direction
+[a guard fails in](BUILDING.md#fail-closed-except-guards-which-fail-open), in a filter nobody had
+thought of as a guard. And the command was not needed: a count had already answered the question,
+and the decision it served — whether deleting a copy of the file would lose anything — did not
+depend on the lines' contents. A check that could not leak, written earlier in the same session —
+set or absent, a prefix and a length, computed from the variable rather than filtered out of text —
+was a few commands up.
+
+**Nothing mechanical was in the way, and nothing is now.** Three hooks refused commands in that
+session — a redirect to `/dev/null`, a fake token assigned inline, a snippet flagged as obfuscated —
+and every one inspects the command sent. None inspects what a command prints, and reading `.env`
+passes all of them without a prompt. Claude Code's `Read` deny rules and its sandbox `denyRead`
+would have refused it; neither is configured, and whether to is the operator's decision rather than
+a file in this tree.
+
+**Found by** the operator, reading the output: "bro you just grepped my bot token".
+
+**No rule yet** — a second instance showing the shape is not one bad `sed`, such as another secret
+read by a command whose purpose did not need its contents, and `secret-read` at 2.

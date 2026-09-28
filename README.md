@@ -204,6 +204,27 @@ pnpm install
 cp .env.example .env    # then fill in JIRA_EMAIL, JIRA_AUTH, VAULT_PATH
 ```
 
+**Keep the credential out of the file.** Any sensitive setting may be written `keychain:<name>`,
+and the service reads the named item from your macOS login keychain once, at startup, inside the
+process — never through the file and never through the environment it was launched with, which
+anything running as you can read with `ps -E`. Store the item in your own terminal, not through an
+agent session, since whatever an agent runs lands in its context:
+
+```bash
+security add-generic-password -a "$USER" -s the-jira-police.JIRA_AUTH -T "" -w   # asks for the value
+```
+
+and write `JIRA_AUTH=keychain:the-jira-police.JIRA_AUTH` in `.env`. `-T ""` trusts no application,
+so every read raises a dialog: one per referenced secret each time the daemon or a command starts,
+and it cannot say who asked, so allow it only when you just started something. **Never choose
+"Always Allow"** — it makes every later read silent, an agent's included. A denied or unanswered
+dialog stops the start, naming the setting: exit 78, except from `attach:stage`, which exits 3 on
+any failure. Store the value without a trailing
+newline: `security` prints a value holding one as hex, which then arrives as the wrong secret —
+`security find-generic-password -a "$USER" -s <name> -w | wc -c` should print the token's length
+plus one. Commands that reach nothing
+(`repair:ledger`, `sweep:once`) resolve nothing and ask for nothing.
+
 Those three are all grooming needs. **Solving needs three more with no defaults** —
 `SOLVE_REPO_ROOT`, `SOLVE_REPOS` and `SOLVE_GITHUB_OWNER` — and each one is unset rather than
 guessed because a default there is a privilege that survives being deleted from `.env`. See
@@ -544,7 +565,9 @@ audit thread will keep its state in each parent message's own metadata, so befor
 on that, this command checks it against the real app: one message posted with metadata, read back,
 edited with new metadata, read back again, then deleted. Every step prints `PASS` or `FAIL` with
 Slack's own error code, and the table lands in `<OUTPUT_DIR>/slack-probe.md`. Exit 0 means the round
-trip holds; 78 means the token or channel is missing or the token is not a bot token.
+trip holds; 78 means the token or channel is missing, the token is not a bot token, or a keychain
+dialog was denied. Like every command that reads `readSettings`, it asks for each `keychain:`
+secret in `.env` at startup, including `JIRA_AUTH`, which it never sends anywhere.
 
 To set it up, create the app from the manifest rather than by hand:
 
@@ -764,37 +787,37 @@ there is no build step here.
 
 Full table in `architecture/configuration.md` §10. The ones that matter for a demo:
 
-| Setting                         | Default       | Notes                                                                                        |
-| ------------------------------- | ------------- | -------------------------------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket                          |
-| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                      |
-| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                             |
-| `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`                       |
-| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank widens rather than closes** — see below                   |
-| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below                      |
-| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                                           |
-| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                                       |
-| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in                    |
-| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed                         |
-| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write                          |
-| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it                      |
-| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory                               |
-| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it                      |
-| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built                          |
-| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days                       |
-| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend                       |
-| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot                          |
-| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design                       |
-| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above                       |
-| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see                           |
-| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                                              |
-| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back                      |
-| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none                     |
-| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed        |
-| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                        |
-| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                     |
-| `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only. An `xoxe.` or user token is refused at startup. Never reaches a model session |
-| `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                |
+| Setting                         | Default       | Notes                                                                                                                   |
+| ------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, plus `agent:*` labels — nothing else on the ticket                                                     |
+| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                                                 |
+| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                                                        |
+| `WRITE_BACK`                    | `false`       | The only setting the whole team can see the effect of. Strict `"true"`                                                  |
+| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank widens rather than closes** — see below                                              |
+| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below                                                 |
+| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                                                                      |
+| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                                                                  |
+| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in                                               |
+| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed                                                    |
+| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write                                                     |
+| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it                                                 |
+| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory                                                          |
+| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it                                                 |
+| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built                                                     |
+| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days                                                  |
+| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend                                                  |
+| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot                                                     |
+| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are uncapped by design                                                  |
+| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above                                                  |
+| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see                                                      |
+| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                                                                         |
+| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back                                                 |
+| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none                                                |
+| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed                                   |
+| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                                                   |
+| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                                                |
+| `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only, best as `keychain:<name>`. An `xoxe.` or user token is refused at startup. Never reaches a model session |
+| `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                                           |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
