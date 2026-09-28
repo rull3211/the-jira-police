@@ -13,6 +13,7 @@ import {
   readLocalSettings,
   readSettings,
   repairRound,
+  slackMode,
   solveMode,
 } from "./settings.ts";
 
@@ -347,6 +348,23 @@ function keychain(items: Readonly<Record<string, string>>): {
     },
   };
 }
+
+describe("slackMode", () => {
+  it("is off unless somebody turned it on", () => {
+    expect(slackMode(readSettings(MINIMAL))).toBe("off");
+  });
+
+  it.each([
+    ["dry", "dry"],
+    ["LIVE", "live"],
+  ])("reads %j as %s", (value, mode) => {
+    expect(slackMode(readSettings({ ...MINIMAL, SLACK_MODE: value }))).toBe(mode);
+  });
+
+  it.each(["on", "true", "lvie"])("refuses %j rather than guessing a mode", (value) => {
+    expect(() => slackMode(readSettings({ ...MINIMAL, SLACK_MODE: value }))).toThrow(SettingsError);
+  });
+});
 
 describe("keychain: references", () => {
   const REFERENCED = { ...MINIMAL, JIRA_AUTH: "keychain:the-jira-police.JIRA_AUTH" };

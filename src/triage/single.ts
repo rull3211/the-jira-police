@@ -17,10 +17,14 @@ import type { TriagePayload } from "./runner.ts";
  * fabricated field that reaches `TriageResult.summary` and a reader should be able to tell which
  * report had a real ticket behind it.
  */
+export function syntheticSummary(issueKey: string): string {
+  return `${issueKey} (summary not fetched in single-run mode)`;
+}
+
 export function syntheticTicket(issueKey: string, baseUrl: string): TicketRef {
   return {
     key: issueKey,
-    summary: `${issueKey} (summary not fetched in single-run mode)`,
+    summary: syntheticSummary(issueKey),
     url: `${baseUrl}/browse/${issueKey}`,
     created: new Date().toISOString(),
     updated: "",

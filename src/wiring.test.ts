@@ -26,6 +26,7 @@ import {
   createPollDeps,
   createReviewCycleDeps,
   createSlackTarget,
+  pipelineAuditNotifier,
   createSolveDeps,
   createSolveRunDeps,
   githubRepoFor,
@@ -1407,6 +1408,25 @@ describe("createReviewCycleDeps", () => {
     );
 
     expect(deps.signal).toBe(controller.signal);
+  });
+});
+
+describe("pipelineAuditNotifier", () => {
+  it("builds nothing while SLACK_MODE is off, so nothing can reach Slack by accident", () => {
+    expect(pipelineAuditNotifier(settingsWith({}))).toBeNull();
+  });
+
+  it("refuses a live mode it cannot configure, at the call that happens at startup", () => {
+    expect(() => pipelineAuditNotifier(settingsWith({ SLACK_MODE: "live" }))).toThrow(
+      /SLACK_BOT_TOKEN.*SLACK_CHANNEL_ID/su,
+    );
+  });
+
+  it("hands every call site the same notifier, so they share one queue per ticket", () => {
+    const settings = settingsWith({ SLACK_MODE: "dry" });
+
+    expect(pipelineAuditNotifier(settings)).not.toBeNull();
+    expect(pipelineAuditNotifier({ ...settings })).toBe(pipelineAuditNotifier(settings));
   });
 });
 

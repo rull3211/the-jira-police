@@ -323,3 +323,12 @@ Things that look like details and are not:
     the same way, naming its size. The property holds the service's own bookkeeping — the audit
     thread's Slack message and the record it shows — and never anything the message does not
     already show, since anyone who can see the ticket can read it through the API.
+
+19. **Slack never fails the work it reports on.** The audit thread is a reporting channel, and
+    `AuditNotifier` in `slack/notifier.ts` never throws: a Slack refusal, a Jira property failure or
+    a record it cannot read comes back as an outcome and a `slack.audit_failed` or
+    `slack.record_unreadable` warning naming the remote system's own reason, and the triage, solve
+    or review it was reporting carries on. The one configuration error it can raise, a live mode it
+    cannot build, is raised by `pipelineAuditNotifier` at startup and before any claim, where it
+    stops a start rather than strands work. What this costs is that a thread can fall silent while
+    the pipeline runs on; the warning is the only signal.

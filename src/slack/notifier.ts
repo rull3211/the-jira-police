@@ -7,6 +7,7 @@
  */
 
 import { createLogger } from "../logger.ts";
+import type { PassRunner } from "../solve/orchestrator.ts";
 import {
   AUDIT_PROPERTY,
   type AuditEvent,
@@ -80,6 +81,7 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     key: string,
     change: (record: AuditRecord) => AuditRecord,
     ticket: TicketFacts | undefined,
+    draw: "always" | "if-changed",
   ): Promise<AuditOutcome> => {
     const loaded = await deps.store.load(key);
     if (loaded.kind === "unreadable") {
@@ -98,6 +100,9 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     const facts =
       ticket === undefined ? base : { ...base, summary: ticket.summary, url: ticket.url };
     const changed = change(facts);
+    if (draw === "if-changed" && changed === facts && changed.slack !== null) {
+      return { kind: "skipped", reason: "the event changed nothing" };
+    }
     const message = renderRecord(changed);
 
     if (changed.slack !== null) {
@@ -117,8 +122,21 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
   return {
     record: (key, event, ticket) =>
       enqueue(key, event.kind, () =>
-        apply(key, (record) => applyEvent(record, event, now()), ticket),
+        apply(key, (record) => applyEvent(record, event, now()), ticket, "if-changed"),
       ),
-    redraw: (key, ticket) => enqueue(key, "redraw", () => apply(key, (record) => record, ticket)),
+    redraw: (key, ticket) =>
+      enqueue(key, "redraw", () => apply(key, (record) => record, ticket, "always")),
+  };
+}
+
+/** Every model pass, solve and review round alike, as a start and a finish on its ticket's timeline. */
+export function auditPasses(passes: PassRunner, audit: AuditNotifier): PassRunner {
+  return {
+    run: async (pass, options, parse) => {
+      await audit.record(options.issueKey, { kind: "pass-started", pass });
+      const result = await passes.run(pass, options, parse);
+      await audit.record(options.issueKey, { kind: "pass-finished", pass });
+      return result;
+    },
   };
 }

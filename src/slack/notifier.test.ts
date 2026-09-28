@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import type { PassRunner } from "../solve/orchestrator.ts";
+import type { SolveRunOptions } from "../solve/runner.ts";
 import { type AuditRecord, newRecord } from "./audit.ts";
-import { type AuditOutcome, createAuditNotifier } from "./notifier.ts";
+import { type AuditOutcome, auditPasses, createAuditNotifier } from "./notifier.ts";
 import type { AuditStore, Loaded, Publisher, Thread } from "./store.ts";
 
 const NOW = new Date("2026-09-28T13:58:00Z");
@@ -143,6 +145,49 @@ describe("createAuditNotifier", () => {
     expect(outcome.kind).toBe("posted");
     expect(p.calls).toEqual(["update old", "post 1"]);
     expect(s.saved()?.slack?.ts).toBe("ts-1");
+  });
+
+  it("touches nothing remote for an event that changed nothing", async () => {
+    const s = store();
+    const p = publisher();
+    const audit = notifier(s.store, p.publisher);
+    const crash = { kind: "crashed", where: "review", message: "gh said 502" } as const;
+
+    await audit.record("SSX-1", crash);
+    const repeat = await audit.record("SSX-1", crash);
+
+    expect(repeat).toEqual({ kind: "skipped", reason: "the event changed nothing" });
+    expect(p.calls).toEqual(["post 1"]);
+  });
+
+  it("puts a pass on the timeline as a start and a finish, and a pass that died as a start only", async () => {
+    const s = store();
+    const audit = notifier(s.store, publisher().publisher);
+    const passes = auditPasses(
+      {
+        run: async <T>(
+          pass: string,
+          _options: unknown,
+          parse: (value: unknown) => T,
+        ): Promise<T> => {
+          if (pass === "fix") {
+            throw new Error("session died");
+          }
+          return parse({});
+        },
+      } as PassRunner,
+      audit,
+    );
+    const options = { issueKey: "SSX-1" } as unknown as SolveRunOptions;
+
+    await passes.run("recon", options, () => "ok");
+    await expect(passes.run("fix", options, () => "ok")).rejects.toThrow("session died");
+
+    expect(s.saved()?.timeline.map((entry) => entry.text)).toEqual([
+      "recon started",
+      "recon finished",
+      "fix started",
+    ]);
   });
 
   it("reports a record it posted but could not save, the case that opens a duplicate thread", async () => {

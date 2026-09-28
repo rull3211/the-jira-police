@@ -562,14 +562,21 @@ nothing mechanical here separates them. So an untouched page means rounds happen
 them were honest. Needs no credential, which is deliberate: a command that reaches nothing should
 require nothing, so this one runs in a fresh clone and in a checkout nobody has configured.
 
-**`slack:once <KEY>` draws one ticket's audit thread; nothing in the pipeline calls Slack yet.** It
-reads the ticket and its `jira-police.slack` record — a record that does not exist yet is started
-fresh — and draws the message: a status card, one line per major event, the timeline newest first.
-Dry by default, writing the record to `<OUTPUT_DIR>/slack/<KEY>.record.json` and the exact Slack
-request to `<KEY>.message.json` and changing nothing remote. `--post` posts the thread, or edits it
-if the ticket already has one, and saves the record on the ticket. A record this version cannot
-read is left as found and the command exits 1 saying so: deleting the property starts the thread
-afresh.
+**With `SLACK_MODE` set, every ticket the pipeline touches gets one Slack thread, and the bot keeps
+editing its first message.** Triage starting opens it; the verdict, a gate refusal, a claim, each
+model pass, the solve's outcome, the pull request, each review round, the undraft, the merge and
+any crash land on it — the ones that decide the ticket's fate as their own lines, the rest in the
+timeline, newest first. Replies are left to people. `dry` writes what each thread would be to
+`<OUTPUT_DIR>/slack/<KEY>.message.json` and the record beside it, changing nothing remote; `live`
+posts. Either way a Slack or Jira failure is logged as `slack.audit_failed` with the remote
+system's own reason and never fails the work it was reporting — try `dry` on a command you were
+going to run anyway before setting `live`.
+
+**`slack:once <KEY>` draws one ticket's thread by hand.** It reads the ticket and its
+`jira-police.slack` record — a record that does not exist yet is started fresh — and draws the
+message. Dry by default, writing the same two files; `--post` posts the thread, or edits it if the
+ticket already has one, and saves the record on the ticket. A record this version cannot read is
+left as found and the command exits 1 saying so: deleting the property starts the thread afresh.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
@@ -830,6 +837,7 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed                                   |
 | `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                                                   |
 | `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                                                |
+| `SLACK_MODE`                    | `off`         | `dry` writes what each thread would be under `groomed/slack/`; `live` posts it. A typo is a startup error               |
 | `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only, best as `keychain:<name>`. An `xoxe.` or user token is refused at startup. Never reaches a model session |
 | `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                                           |
 

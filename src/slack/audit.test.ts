@@ -91,6 +91,25 @@ describe("applyEvent", () => {
     expect(record.crash).toMatchObject({ where: "fix pass" });
   });
 
+  it("stops calling a ticket crashed once something else happens, and keeps the crash as history", () => {
+    const crashed = applyEvent(BASE, EVERY_EVENT.crashed.event, NOW);
+    const retried = applyEvent(crashed, EVERY_EVENT["triage-verdict"].event, NOW);
+
+    expect(crashed.crash).not.toBeNull();
+    expect(retried.crash).toBeNull();
+    expect(retried.major.map((entry) => entry.icon)).toEqual(["💥", "🔍"]);
+  });
+
+  it("folds a crash identical to the current one into it, so a failure met every tick is one entry", () => {
+    const once = applyEvent(BASE, EVERY_EVENT.crashed.event, NOW);
+    const again = applyEvent(once, EVERY_EVENT.crashed.event, NOW);
+
+    expect(again).toBe(once);
+    expect(
+      applyEvent(once, { kind: "crashed", where: "fix pass", message: "another" }, NOW).major,
+    ).toHaveLength(2);
+  });
+
   it("keeps the newest entries at the caps, and counts what it dropped", () => {
     let record: AuditRecord = BASE;
     for (let index = 0; index < MAX_TIMELINE_ENTRIES + 5; index += 1) {

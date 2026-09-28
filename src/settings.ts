@@ -346,6 +346,12 @@ export const SETTINGS = [
     fallback: "true",
   },
   {
+    name: "SLACK_MODE",
+    description:
+      "Whether the pipeline draws each ticket's audit thread in Slack. `off`, the default; `dry`, which reads the ticket's real record and writes the record and the exact Slack request under OUTPUT_DIR/slack/, changing nothing remote; or `live`, which posts and edits the thread and saves the record on the ticket as its `jira-police.slack` property. An unrecognised value is a startup error rather than a fallback, like SOLVE_MODE. `slack:once` ignores it: that command is dry unless `--post` is typed.",
+    fallback: "off",
+  },
+  {
     name: "SLACK_BOT_TOKEN",
     description:
       "The Slack app's bot token, `xoxb-…`, from OAuth & Permissions once the app from docs/slack-app-manifest.json is installed. Unset, nothing reaches Slack. Only a bot token is accepted: a configuration token (`xoxe.xoxp-…`) drives the manifest API and cannot post, and a rotating one (`xoxe.xoxb-…`) expires in twelve hours with nothing here to refresh it. Best written `keychain:<name>` (README, Setup). Withheld from every model session along with the Jira credential.",
@@ -570,6 +576,19 @@ export function list(settings: Settings, name: SettingName): readonly string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
+}
+
+export type SlackMode = "off" | "dry" | "live";
+
+/** Reads `SLACK_MODE`, refusing anything it does not recognise, for the reason `solveMode` gives. */
+export function slackMode(settings: Settings): SlackMode {
+  const raw = settings.SLACK_MODE.trim().toLowerCase();
+  if (raw === "off" || raw === "dry" || raw === "live") {
+    return raw;
+  }
+  throw new SettingsError([
+    `SLACK_MODE (expected "off", "dry" or "live", got "${settings.SLACK_MODE}")`,
+  ]);
 }
 
 /**

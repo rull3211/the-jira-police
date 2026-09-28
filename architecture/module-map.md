@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-117 production modules, 104 test files. Grouped by what they belong to rather than alphabetically,
+118 production modules, 105 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -196,18 +196,23 @@ inheritance.
 
 **Slack — the audit thread, outbound only**
 
-| Path                    | Role                                                                                                                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/slack/client.ts`   | The Web API over `fetch`, and the only holder of the bot token. Success is `ok: true`, never the HTTP status; warnings handed back                                                                   |
-| `src/slack/probe.ts`    | Whether both halves of the thread's store work: a message posted, edited, deleted, and a full-size record round-tripped through a ticket's `jira-police.slack-probe` property. Pure over two clients |
-| `src/slack/audit.ts`    | One ticket's audit record and the events that move it: status fields, major entries, a timeline, and the caps that keep it under Jira's property limit. Pure                                         |
-| `src/slack/render.ts`   | A record drawn as its Slack message: status card, major events, timeline newest first. Escapes every string it did not write, and stays inside Slack's limits                                        |
-| `src/slack/store.ts`    | Where a record lives and where its message goes: the ticket's `jira-police.slack` property and Slack when live; the real property read and local files written when dry                              |
-| `src/slack/notifier.ts` | Load, apply the event, redraw, post or edit, save — one ticket at a time. Never throws: it returns and logs what went wrong, so a Slack failure cannot fail the work it reports                      |
+| Path                    | Role                                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/slack/client.ts`   | The Web API over `fetch`, and the only holder of the bot token. Success is `ok: true`, never the HTTP status; warnings handed back                                                                                  |
+| `src/slack/probe.ts`    | Whether both halves of the thread's store work: a message posted, edited, deleted, and a full-size record round-tripped through a ticket's `jira-police.slack-probe` property. Pure over two clients                |
+| `src/slack/audit.ts`    | One ticket's audit record and the events that move it: status fields, major entries, a timeline, and the caps that keep it under Jira's property limit. Pure                                                        |
+| `src/slack/render.ts`   | A record drawn as its Slack message: status card, major events, timeline newest first. Escapes every string it did not write, and stays inside Slack's limits                                                       |
+| `src/slack/store.ts`    | Where a record lives and where its message goes: the ticket's `jira-police.slack` property and Slack when live; the real property read and local files written when dry                                             |
+| `src/slack/notifier.ts` | Load, apply the event, redraw, post or edit, save — one ticket at a time. Never throws: it returns and logs what went wrong, so a Slack failure cannot fail the work it reports. `auditPasses` wraps a `PassRunner` |
+| `src/slack/events.ts`   | The pipeline's own outcomes — a triage verdict, a `SolveOutcome`, an `AdvanceOutcome`, a merge — as audit events, worded from `describeSolveOutcome` and `describeAdvanceOutcome`. Pure                             |
 
 `createSlackTarget` (`wiring.ts`) builds the Slack client and refuses any token but a plain `xoxb-`
-bot token; `auditNotifierFor` builds the notifier, dry or live, and `src/cli/slack-once.ts` is its
-only caller until the pipeline is wired to it.
+bot token; `auditNotifierFor` builds a notifier, dry or live, for `slack:once`; and
+`pipelineAuditNotifier` is the pipeline's — one per process, `null` while `SLACK_MODE` is off, built
+by `createGroom` at startup so a live misconfiguration stops the daemon there. It is read at five
+places: `createGroom` (triage), `createSolveRunDeps` (every model pass, through `auditPasses`),
+`runWriteRungs` (claim, outcome, pull request, crash — before the claim, since a configuration error
+after it would strand the claim), `runReviewSweep` and `runAdvance` (rounds, undraft, merge).
 
 `wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same

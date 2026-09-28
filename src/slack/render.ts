@@ -20,7 +20,13 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
   const blocks: object[] = [
     {
       type: "header",
-      text: { type: "plain_text", text: clip(`${record.key} · ${record.summary}`, HEADER_CHARS) },
+      text: {
+        type: "plain_text",
+        text: clip(
+          record.summary === record.key ? record.key : `${record.key} · ${record.summary}`,
+          HEADER_CHARS,
+        ),
+      },
     },
     {
       type: "context",

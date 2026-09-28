@@ -110,8 +110,17 @@ export function newRecord(key: string, summary: string, url: string): AuditRecor
   };
 }
 
-/** `now` is injected so a transition is a function of its inputs; the notifier passes the clock. */
+/**
+ * `now` is injected so a transition is a function of its inputs. A crash describes the ticket only
+ * until the next thing happens to it; its major entry stays as history.
+ */
 export function applyEvent(record: AuditRecord, event: AuditEvent, now: Date): AuditRecord {
+  return event.kind === "crashed"
+    ? transition(record, event, now)
+    : transition({ ...record, crash: null }, event, now);
+}
+
+function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRecord {
   const at = now.toISOString();
   switch (event.kind) {
     case "triage-started":
@@ -181,6 +190,14 @@ export function applyEvent(record: AuditRecord, event: AuditEvent, now: Date): A
         ? major(withPrState(record, "merged"), at, "🎉", "PR merged")
         : major(withPrState(record, "closed"), at, "🗑️", "PR closed without merging");
     case "crashed":
+      // The same failure met again every tick is one crash, not a page of them.
+      if (
+        record.crash !== null &&
+        record.crash.where === bounded(event.where) &&
+        record.crash.message === bounded(event.message)
+      ) {
+        return record;
+      }
       return major(
         { ...record, crash: { at, where: bounded(event.where), message: bounded(event.message) } },
         at,

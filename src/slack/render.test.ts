@@ -25,7 +25,12 @@ function full(): AuditRecord {
   let record = newRecord("SSX-1", "x".repeat(400), URL);
   const long = "word ".repeat(MAX_ENTRY_CHARS);
   for (let index = 0; index < MAX_MAJOR_ENTRIES + 3; index += 1) {
-    record = applyEvent(record, { kind: "crashed", where: "fix pass", message: long }, NOW);
+    // Distinct messages: a crash identical to the current one is folded into it, not added.
+    record = applyEvent(
+      record,
+      { kind: "crashed", where: "fix pass", message: `${String(index)} ${long}` },
+      NOW,
+    );
   }
   for (let index = 0; index < MAX_TIMELINE_ENTRIES + 3; index += 1) {
     record = applyEvent(record, { kind: "review-round", text: long }, NOW);
