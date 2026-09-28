@@ -138,10 +138,16 @@ function describeState(record: AuditRecord): string {
   if (record.work.kind === "ended") {
     return "🛑 stopped";
   }
-  if (record.work.kind === "idle" && record.triage.kind !== "pending") {
-    return "⚪ waiting";
+  if (record.pr !== null) {
+    return "👀 in review";
   }
-  return "🟢 running";
+  if (record.work.kind !== "idle") {
+    return "🟢 working";
+  }
+  if (record.triage.kind === "pending" && record.timeline.length > 0) {
+    return "🟢 triaging";
+  }
+  return "⚪ waiting";
 }
 
 function fallbackText(record: AuditRecord): string {

@@ -92,6 +92,18 @@ describe("renderRecord", () => {
     expect(texts(renderRecord(record).blocks)).toContain("*State*\n💥 crashed in review round 2");
   });
 
+  it("calls a ticket nothing has happened to waiting, and says running only when something is", () => {
+    const fresh = newRecord("SSX-1", "summary", URL);
+    const triaging = applyEvent(fresh, { kind: "triage-started" }, NOW);
+    const solving = applyEvent(triaging, { kind: "pass-started", pass: "fix" }, NOW);
+
+    const state = (record: AuditRecord): string | undefined =>
+      texts(renderRecord(record).blocks).find((text) => text.startsWith("*State*"));
+    expect(state(fresh)).toBe("*State*\n⚪ waiting");
+    expect(state(triaging)).toBe("*State*\n🟢 triaging");
+    expect(state(solving)).toBe("*State*\n🟢 working");
+  });
+
   it("renders a stored URL as a link only when it cannot break out of one", () => {
     const safe = renderRecord(newRecord("SSX-1", "summary", URL));
     const tampered = renderRecord(newRecord("SSX-1", "summary", "https://x.test|<!channel>"));
