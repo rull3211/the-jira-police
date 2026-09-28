@@ -107,6 +107,10 @@ arguments. Built in this order, one commit each:
 3. `pnpm slack:listen --write`, which writes the property.
 4. The daemon, after 3 has been watched: `src/slack-loop.ts` under invariant 17, off by default.
 
+**Where it stands, 2026-09-28.** Rungs 1–3 are committed and not pushed. The registered app is waiting
+on workspace approval for the `commands` scope; the operator then generates the `xapp-` token and
+drives `slack:listen`, dry and then `--write`, before rung 4 starts.
+
 **Why its own branch.** It is the first inbound channel this service has — something outside it can
 now cause a write — which is a different privilege from posting.
 
