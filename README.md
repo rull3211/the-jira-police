@@ -662,10 +662,12 @@ The audit thread is a Slack message the bot keeps editing, with its state — wh
 the record it shows — kept on the ticket as the `jira-police.slack` issue property. So before
 anything relies on either, this command checks both against the real systems: one message posted,
 edited and deleted in `SLACK_CHANNEL_ID`, and a record the size of a full one written to the named
-ticket as `jira-police.slack-probe`, read back, and deleted. Every step prints `PASS` or `FAIL` with
+ticket as `jira-police.slack-probe`, read back, and deleted. With `SLACK_OPERATOR_USER_ID` set it
+also sends that person a direct message and deletes it, which is how the line for the team's pull
+request channel arrives when a solve opens one. Every step prints `PASS` or `FAIL` with
 the remote system's own error, and the table lands in `<OUTPUT_DIR>/slack-probe.md`. Exit 0 means
-both halves hold and 1 that a step failed; 78 means a setting is missing, the token is not a bot
-token, or a keychain dialog was denied. The state was first meant to live in the message's own Slack metadata, and this
+every step held and 1 that a step failed; 78 means a setting is missing, the token is not a bot
+token, a member ID is malformed, or a keychain dialog was denied. The state was first meant to live in the message's own Slack metadata, and this
 command's first run is why it does not: Slack drops a custom metadata type unless the manifest
 declares it, and a declared one cannot hold a list of timeline entries.
 
@@ -927,9 +929,10 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 | `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed                                   |
 | `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                                                   |
 | `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                                                |
-| `SLACK_MODE`                    | `off`         | `dry` writes each thread to `groomed/slack/`; `live` posts it, and saves the record on the ticket. A typo fails startup |
+| `SLACK_MODE`                    | `off`         | `dry` writes each thread and PR line to `groomed/slack/`; `live` posts them, and saves the record. A typo fails startup |
 | `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only, best as `keychain:<name>`. `live` refuses an `xoxe.` or user token. Never reaches a model session        |
 | `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                                           |
+| `SLACK_OPERATOR_USER_ID`        | —             | Your Slack member ID, `U…`. Each PR the bot opens DMs you the line for the team's PR channel                            |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull

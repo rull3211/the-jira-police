@@ -53,6 +53,7 @@ import {
 } from "../solve/orchestrator.ts";
 import { type SolveCycleOutcome, type SolveDeps, runSolveCycle } from "../solve/poller.ts";
 import { type FindPrResult, findPullRequest } from "../solve/pr.ts";
+import { channelSentence } from "../solve/pr-text.ts";
 import {
   type ReviewCycleOutcome,
   type ReviewLook,
@@ -77,6 +78,7 @@ import {
   botIdentityOf,
   createTicketReader,
   pipelineAuditNotifier,
+  pipelinePrLineSender,
 } from "../wiring.ts";
 import type { AuditEvent } from "../slack/audit.ts";
 import {
@@ -86,6 +88,7 @@ import {
   solveOutcomeEvent,
 } from "../slack/events.ts";
 import type { TicketFacts } from "../slack/notifier.ts";
+import { renderPrLine } from "../slack/render.ts";
 import { type SolvePhase, includes } from "./solve-args.ts";
 import {
   chainDecision,
@@ -1033,6 +1036,7 @@ export async function runWriteRungs(
 ): Promise<void> {
   // Before the claim: a live-mode misconfiguration throws here, and after the claim it would strand it.
   const audit = pipelineAuditNotifier(settings);
+  const prLine = pipelinePrLineSender(settings);
   const receipt = await runClaim(client, issueKey, authority);
   if (receipt === null) {
     return;
@@ -1077,6 +1081,10 @@ export async function runWriteRungs(
     keepClaim = published !== null;
     if (published !== null) {
       await audit?.record(issueKey, { kind: "pr-opened", ...published });
+      await prLine?.send(
+        issueKey,
+        renderPrLine(published.url, channelSentence(outcome), published.title),
+      );
       // Handed in here rather than released: `runRelease` restores the labels this run found,
       // including `agent:start`, which would put a solved ticket back in the queue with a
       // human's go-ahead still on it. `keepClaim` means "do not release, and move on instead of

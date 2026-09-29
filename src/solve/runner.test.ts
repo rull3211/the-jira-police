@@ -77,6 +77,7 @@ const fix = (overrides: Record<string, unknown> = {}): Record<string, unknown> =
   summary: "add the favicon link element to the document head",
   commitSubject: "fix(advisor): add missing favicon link",
   commitBody: "SSX-3822. The head component never rendered a link element.",
+  teamChannelLine: "Legger til favicon-lenken i dokumentets head",
   testAdded: true,
   testOmittedReason: "",
   residualRisk: "",
@@ -820,6 +821,7 @@ describe("FIX_SCHEMA's conditional, against parseFix", () => {
       testAdded: true,
       testOmittedReason: "stopped before writing one",
     }),
+    "a fix with no channel sentence": fix({ teamChannelLine: "" }),
   };
 
   for (const [name, report] of Object.entries(cases)) {
@@ -834,6 +836,10 @@ describe("FIX_SCHEMA's conditional, against parseFix", () => {
 
   it("mentions residualRisk in testOmittedReason's description", () => {
     expect(FIX_SCHEMA.properties.testOmittedReason.description).toContain("`residualRisk`");
+  });
+
+  it("requires the channel sentence, so the CLI asks for it in-session rather than the parser refusing it after", () => {
+    expect(FIX_SCHEMA.required).toContain("teamChannelLine");
   });
 });
 
@@ -1075,6 +1081,39 @@ describe("shortCommitBody", () => {
 describe("parseFix", () => {
   it("accepts a coherent report", () => {
     expect(parseFix(fix(), "SSX-3822").changed).toBe(true);
+  });
+
+  it("carries the channel sentence through as written", () => {
+    expect(parseFix(fix(), "SSX-3822").teamChannelLine).toBe(
+      "Legger til favicon-lenken i dokumentets head",
+    );
+  });
+
+  it("accepts a fix with no channel sentence, which is worth less than the fix", () => {
+    for (const line of ["", "  \n", '""']) {
+      const report = parseFix(fix({ teamChannelLine: line }), "SSX-3822");
+      expect(report.changed).toBe(true);
+      expect(report.teamChannelLine).toBe("");
+    }
+  });
+
+  it("puts the channel sentence on one line, so it cannot forge a second message line", () => {
+    const report = parseFix(
+      fix({ teamChannelLine: "Fiks på cache eviction\n\n*slik at*   vi tømmer cachen " }),
+      "SSX-3822",
+    );
+    expect(report.teamChannelLine).toBe("Fiks på cache eviction *slik at* vi tømmer cachen");
+  });
+
+  it("cuts an over-long channel sentence on a word boundary and marks the cut", () => {
+    const line = parseFix(fix({ teamChannelLine: "ord ".repeat(80) }), "SSX-3822").teamChannelLine;
+    expect(line.length).toBeLessThanOrEqual(201);
+    expect(line).toMatch(/^(?:ord )+ord…$/u);
+  });
+
+  it("refuses a report with no channel sentence field, like any field the schema requires", () => {
+    const { teamChannelLine: _dropped, ...withoutLine } = fix();
+    expect(() => parseFix(withoutLine, "SSX-3822")).toThrow(/teamChannelLine was not a string/u);
   });
 
   it('reads `""` as empty in the fields held to an iff', () => {

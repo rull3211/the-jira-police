@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-122 production modules, 108 test files. Grouped by what they belong to rather than alphabetically,
+123 production modules, 109 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -114,7 +114,7 @@ inheritance.
 | Path                         | Role                                                                                           |
 | ---------------------------- | ---------------------------------------------------------------------------------------------- |
 | `src/solve/pr.ts`            | `git` and `gh` as argv arrays. Commit, push, draft PR, read review and threads, reply, resolve |
-| `src/solve/pr-text.ts`       | The title and body of the draft pull request. Pure, so the wording is readable in a test       |
+| `src/solve/pr-text.ts`       | The draft pull request's title, body and channel sentence. Pure, so the wording is testable    |
 | `src/solve/marker.ts`        | The round cursor as one comment: render, parse, locate, refuse rather than reset. No I/O       |
 | `src/solve/delivery.ts`      | `publish`, `surveyReview` and `advance` — the review round-trip as callable steps              |
 | `src/solve/widening.ts`      | Whether a round's declared widening cites a repository member and a file already under review  |
@@ -162,7 +162,7 @@ inheritance.
 | `src/cli/sweep-once.ts`          | `pnpm sweep:once [--write]`. Reports, and with `--write` removes, stale skill roots and staged-image directories. Dry by default, not on any automatic path                                                                                                      |
 | `src/cli/sweep-once-report.ts`   | Its report, kept where a test can import it without running the command                                                                                                                                                                                          |
 | `src/cli/repair-ledger.ts`       | `pnpm repair:ledger`. Reads `repair-rounds.md` back as a distribution. Needs no credential, writes nothing                                                                                                                                                       |
-| `src/cli/slack-probe.ts`         | `pnpm slack:probe <KEY> [--keep]`. A message posted, edited, deleted; a full-size record written to the ticket's property, read back, deleted. A verdict per step in `slack-probe.md`                                                                            |
+| `src/cli/slack-probe.ts`         | `pnpm slack:probe <KEY> [--keep]`. A message posted, edited, deleted; a full-size record written to the ticket's property, read back, deleted; with `SLACK_OPERATOR_USER_ID`, a direct message sent and deleted. A verdict per step in `slack-probe.md`          |
 | `src/cli/slack-once.ts`          | `pnpm slack:once <KEY> [--post] [--bump]`. Draws one ticket's audit thread from its record; `--bump` broadcasts its latest major entry again. Dry by default: the record and the exact Slack requests under `OUTPUT_DIR/slack/`                                  |
 | `src/cli/slack-listen.ts`        | `pnpm slack:listen [--write]`. Holds a Socket Mode connection and answers `/bencebot` until Ctrl-C. Dry by default: the real subscriber list read, the would-be one written to `OUTPUT_DIR/slack/roster.json`, every reply marked; `--write` writes the property |
 | `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                                                                                                                          |
@@ -196,16 +196,17 @@ inheritance.
 | -------------------- | ------------------------------------------------ |
 | `src/output/sink.ts` | `FileSink` (reports) and the rejection artifacts |
 
-**Slack — the audit thread out, and `/bencebot` in**
+**Slack — the audit thread and the pull request line out, and `/bencebot` in**
 
 | Path                    | Role                                                                                                                                                                                                                                                                                                                             |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/slack/client.ts`   | The Web API over `fetch`, and the only holder of a Slack token — the bot's, or the app-level one that opens a Socket Mode connection. Success is `ok: true`, never the HTTP status; warnings handed back                                                                                                                         |
 | `src/slack/socket.ts`   | A Socket Mode connection held until shutdown: each slash command answered in its envelope's acknowledgement within Slack's budget, one at a time, and a fresh connection after every disconnect, backed off when one fails. Only `openWebSocket` touches the real socket                                                         |
 | `src/slack/roster.ts`   | Who each broadcast mentions: one list, the `jira-police.slack-subscribers` property on the project. The command read from its text, the subscriber from Slack's `user_id`; a list it cannot parse is left as found. The property store, and a dry one writing `roster.json`                                                      |
-| `src/slack/probe.ts`    | Whether both halves of the thread's store work: a message posted, edited, deleted, and a full-size record round-tripped through a ticket's `jira-police.slack-probe` property. Pure over two clients                                                                                                                             |
+| `src/slack/probe.ts`    | Whether both halves of the thread's store work: a message posted, edited, deleted, and a full-size record round-tripped through a ticket's `jira-police.slack-probe` property; with an operator named, a direct message sent and deleted. Pure over two clients                                                                  |
 | `src/slack/audit.ts`    | One ticket's audit record and the events that move it: status fields, major entries, a timeline, and the caps that keep it under Jira's property limit. Pure                                                                                                                                                                     |
-| `src/slack/render.ts`   | A record drawn as its Slack message: one container collapsed to the linked title, holding the status card, major events and the timeline newest first; and a major entry as its one-line broadcast, mentioning each subscriber. Escapes every string it did not write but a user ID, and stays inside Slack's limits             |
+| `src/slack/render.ts`   | A record drawn as its Slack message: one container collapsed to the linked title, holding the status card, major events and the timeline newest first; a major entry as its broadcast, mentioning each subscriber; and the PR line. Escapes every string it did not write but a user ID, and stays inside Slack's limits         |
+| `src/slack/pr-line.ts`  | The direct message a solve sends the operator when it opens a pull request, dry or live. Never throws: a refused message is `slack.pr_line_failed`, and the pull request stands                                                                                                                                                  |
 | `src/slack/store.ts`    | Where a record lives and where its messages go: the ticket's `jira-police.slack` property and Slack when live; the real property read and local files written when dry                                                                                                                                                           |
 | `src/slack/notifier.ts` | Load, apply the event, redraw, post or edit, broadcast a major entry with the subscribers read at that moment and delete the ticket's previous broadcast, save — one ticket at a time. Never throws: it returns and logs what went wrong, so a Slack failure cannot fail the work it reports. `auditPasses` wraps a `PassRunner` |
 | `src/slack/events.ts`   | The pipeline's own outcomes — a triage verdict, a `SolveOutcome`, an `AdvanceOutcome`, a merge, what a review look found — as audit events, worded from `describeSolveOutcome` and `describeAdvanceOutcome`. Pure                                                                                                                |
@@ -218,6 +219,9 @@ places: `createGroom` (triage), `createSolveRunDeps` (every model pass, through 
 `runWriteRungs` (claim, outcome, pull request, crash — before the claim, since a configuration error
 after it would strand the claim), `runReviewSweep` and `runAdvance` (what each look found, recorded
 first, then rounds, undraft, merge). Both notifiers read the subscriber list at each broadcast.
+`pipelinePrLineSender` is the pull request line's, `null` while `SLACK_MODE` is off or
+`SLACK_OPERATOR_USER_ID` unset; `runWriteRungs` builds it beside the notifier, before the claim,
+and the review loop once at startup, so a malformed member ID stops the daemon there.
 `createListenClient` builds the Socket Mode client and refuses any token but an `xapp-` one, and
 `rosterStoreFor` the list's store, and `listenerFor` puts them together for both callers,
 `slack:listen` and the daemon's `createSlackListener`.

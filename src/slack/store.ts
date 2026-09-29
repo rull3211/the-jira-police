@@ -151,7 +151,7 @@ export function dryPublisher(directory: string): Publisher {
   };
 }
 
-async function writeJson(directory: string, name: string, value: unknown): Promise<void> {
+export async function writeJson(directory: string, name: string, value: unknown): Promise<void> {
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, name), `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }

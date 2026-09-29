@@ -30,6 +30,7 @@
  * The tool denylists are the only thing that actually withholds anything.
  */
 
+import { oneLine, shorten } from "../text.ts";
 import { DENIED_BUILTIN_TOOLS } from "../triage/session.ts";
 import type { StagedImagePrompt } from "../triage/runner.ts";
 import { memberLabel } from "./pr.ts";
@@ -430,12 +431,17 @@ export interface FixReport {
   readonly summary: string;
   readonly commitSubject: string;
   readonly commitBody: string;
+  /** The model's bokmål sentence for the team's pull request channel, one line and capped; may be empty. */
+  readonly teamChannelLine: string;
   readonly testAdded: boolean;
   readonly testOmittedReason: string;
   readonly residualRisk: string;
   readonly abandoned: string;
   readonly abandonedCause: AbandonCause;
 }
+
+/** A sentence, not a paragraph: over this it is cut on a word boundary and marked. */
+const TEAM_CHANNEL_LINE_CHARS = 200;
 
 const COMMIT_TYPES = "fix|feat|chore|docs|test|refactor|perf|style|build|ci";
 
@@ -697,6 +703,8 @@ export function parseFix(value: unknown, issueKey: string): FixReport {
     summary: str(record, "summary"),
     commitSubject: str(record, "commitSubject"),
     commitBody: str(record, "commitBody"),
+    // Empty is never refused: a paid fix is worth more than one channel sentence.
+    teamChannelLine: shorten(oneLine(str(record, "teamChannelLine")), TEAM_CHANNEL_LINE_CHARS),
     testAdded: bool(record, "testAdded"),
     testOmittedReason: str(record, "testOmittedReason"),
     residualRisk: str(record, "residualRisk"),

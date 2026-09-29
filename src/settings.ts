@@ -348,7 +348,7 @@ export const SETTINGS = [
   {
     name: "SLACK_MODE",
     description:
-      "Whether the pipeline draws each ticket's audit thread in Slack. `off`, the default; `dry`, which reads the ticket's real record and writes the record and the exact Slack request under OUTPUT_DIR/slack/, changing nothing remote; or `live`, which posts and edits the thread and saves the record on the ticket as its `jira-police.slack` property. An unrecognised value is a startup error rather than a fallback, like SOLVE_MODE. `slack:once` ignores it: that command is dry unless `--post` is typed.",
+      "Whether the pipeline draws each ticket's audit thread in Slack, and sends SLACK_OPERATOR_USER_ID the line for each pull request it opens. `off`, the default; `dry`, which reads the ticket's real record and writes the record and the exact Slack requests under OUTPUT_DIR/slack/, changing nothing remote; or `live`, which posts and edits the thread, saves the record on the ticket as its `jira-police.slack` property, and sends the line. An unrecognised value is a startup error rather than a fallback, like SOLVE_MODE. `slack:once` ignores it: that command is dry unless `--post` is typed.",
     fallback: "off",
   },
   {
@@ -361,6 +361,11 @@ export const SETTINGS = [
     name: "SLACK_CHANNEL_ID",
     description:
       "The ID (`C…`) of the channel the audit threads go to, not its name, so a rename cannot move them. The bot has to be a member: `/invite @Bencebot` in the channel, or every post fails with `not_in_channel`.",
+  },
+  {
+    name: "SLACK_OPERATOR_USER_ID",
+    description:
+      "The Slack member ID (`U…`) of the person who announces the bot's pull requests to the team; from their Slack profile, ⋮ → Copy member ID. When a solve opens a pull request, the bot sends them a direct message holding the line to paste into the team's pull request channel: the link, labelled PR-Bencebot, and the fix pass's one bokmål sentence. Unset, nothing is sent. Follows SLACK_MODE — `dry` writes the request under OUTPUT_DIR/slack/, `live` sends it — and a value that is not a member ID is a startup error. A failed message is logged and never fails the pull request.",
   },
   {
     name: "SLACK_APP_TOKEN",

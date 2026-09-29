@@ -1707,6 +1707,7 @@ async function runReviewRound(
       summary: report.summary,
       commitSubject: report.commitSubject,
       commitBody: report.commitBody,
+      teamChannelLine: "",
       testAdded: false,
       testOmittedReason: "",
       residualRisk: report.unresolved,

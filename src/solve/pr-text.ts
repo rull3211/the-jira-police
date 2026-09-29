@@ -1,6 +1,6 @@
 /**
- * The title and body of the draft pull request. Pure and its own module so the
- * wording can be read in a test rather than only by opening a PR.
+ * The title and body of the draft pull request, and its channel sentence. Pure
+ * and its own module so the wording can be read in a test rather than in a PR.
  *
  * The model writes the commit message and its account of each pass, quoted here
  * under headings that say whose words they are; everything else (exit codes,
@@ -91,6 +91,11 @@ function changeOf(outcome: Verified, issueKey: string): CommitMessage {
 /** The PR title: the change's subject (what was actually done) plus the issue key, not the ticket summary. */
 export function composeTitle(outcome: Verified, issueKey: string): string {
   return `${changeOf(outcome, issueKey).subject} (${issueKey})`;
+}
+
+/** The sentence the pull request is announced with: the fix's, like the title, even when a repair was promoted. */
+export function channelSentence(outcome: Verified): string {
+  return outcome.fix.teamChannelLine;
 }
 
 function browseUrl(base: string, issueKey: string): string {

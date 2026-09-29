@@ -13,7 +13,12 @@ import type { LoopOptions } from "./loop.ts";
 import type { AttemptLedger } from "./solve/attempts.ts";
 import { REVIEW_ROUND_USD } from "./solve/review-cycle.ts";
 import { type Settings, daemonPromotesRepair, flag, numeric, repairRound } from "./settings.ts";
-import { createSolveDeps, createSolveRunDeps, reviewIntervalMs } from "./wiring.ts";
+import {
+  createSolveDeps,
+  createSolveRunDeps,
+  pipelinePrLineSender,
+  reviewIntervalMs,
+} from "./wiring.ts";
 
 const log = createLogger("review");
 
@@ -46,6 +51,8 @@ export function createReviewLoop(
   // Built here, not per tick, so a malformed query (unsafe project key, auto mode with no issue
   // types, an unrecognised SOLVE_MODE) stops the process at startup rather than every cycle.
   const queueDeps = createSolveDeps(settings, client, signal);
+  // Each claim builds its own sender; this one stops a malformed SLACK_OPERATOR_USER_ID at startup.
+  const announces = pipelinePrLineSender(settings) !== null;
   const promoteRepair = daemonPromotesRepair(settings);
 
   // Logged because the operator is the only bound on what this costs, and can't act on a number
@@ -55,6 +62,7 @@ export function createReviewLoop(
     maxRoundsPerTick: maxRounds,
     worstCasePerTickUsd: Number((maxRounds * REVIEW_ROUND_USD).toFixed(2)),
     promotesRepairs: promoteRepair,
+    messagesOperatorOnPullRequest: announces,
     note:
       maxRounds === 0
         ? "zero rounds per tick: every pull request is looked at and none is paid for"

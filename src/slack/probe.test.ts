@@ -16,13 +16,15 @@ import {
 
 const TARGET: ProbeTarget = {
   channel: "C1",
+  operator: null,
   issueKey: "SSX-1",
   keep: false,
   nonce: "n-1",
   now: new Date("2026-09-28T10:00:00Z"),
 };
 
-function slack(behaviour: { readonly failAuth?: boolean } = {}): {
+/** A post to a member ID lands in the bot's conversation with them, `D1`, as Slack answers it. */
+function slack(behaviour: { readonly failAuth?: boolean; readonly failDirect?: string } = {}): {
   readonly client: ProbeSlack;
   readonly deleted: string[];
 } {
@@ -36,10 +38,18 @@ function slack(behaviour: { readonly failAuth?: boolean } = {}): {
         }
         return { userId: "U1", botId: "B1", team: "Storebrand" };
       },
-      post: async () => ({ ts: "100.1", warnings: [] }),
+      post: async (args) => {
+        if (!args.channel.startsWith("U")) {
+          return { ts: "100.1", channel: args.channel, warnings: [] };
+        }
+        if (behaviour.failDirect !== undefined) {
+          throw new SlackError("chat.postMessage", behaviour.failDirect, "");
+        }
+        return { ts: "200.1", channel: "D1", warnings: [] };
+      },
       update: async (args) => ({ ts: args.ts, warnings: [] }),
       deleteMessage: async (args) => {
-        deleted.push(args.ts);
+        deleted.push(`${args.channel}/${args.ts}`);
       },
     },
   };
@@ -92,9 +102,65 @@ describe("runProbe", () => {
       ["property delete", true],
       ["property gone", true],
     ]);
-    expect(chat.deleted).toEqual(["100.1"]);
+    expect(chat.deleted).toEqual(["C1/100.1"]);
     expect(ticket.stored.size).toBe(0);
     expect(exitCodeFor(result)).toBe(EXIT.ok);
+  });
+
+  it("with an operator named, sends them a direct message and deletes it where Slack put it", async () => {
+    const chat = slack();
+
+    const result = await runProbe(chat.client, jira().client, { ...TARGET, operator: "U0123ABCD" });
+
+    expect(result.steps.map((step) => [step.name, step.ok]).slice(0, 6)).toEqual([
+      ["auth.test", true],
+      ["chat.postMessage", true],
+      ["chat.update", true],
+      ["chat.delete", true],
+      ["direct message", true],
+      ["direct message delete", true],
+    ]);
+    // Deleted in the conversation Slack answered with, never by the member ID it was posted to.
+    expect(chat.deleted).toEqual(["C1/100.1", "D1/200.1"]);
+    expect(result.directLeft).toBeNull();
+    expect(exitCodeFor(result)).toBe(EXIT.ok);
+  });
+
+  it("fails on a refused direct message with Slack's reason, and still measures the Jira half", async () => {
+    const result = await runProbe(slack({ failDirect: "missing_scope" }).client, jira().client, {
+      ...TARGET,
+      operator: "U0123ABCD",
+    });
+
+    const direct = result.steps.find((step) => step.name === "direct message");
+    expect(direct?.ok).toBe(false);
+    expect(direct?.detail).toContain("missing_scope");
+    expect(result.steps.at(-1)).toEqual({
+      name: "property gone",
+      ok: true,
+      detail: "reads as absent",
+    });
+    expect(exitCodeFor(result)).toBe(EXIT.failed);
+  });
+
+  it("sends no direct message when Slack refused the token", async () => {
+    const result = await runProbe(slack({ failAuth: true }).client, jira().client, {
+      ...TARGET,
+      operator: "U0123ABCD",
+    });
+
+    expect(result.steps.some((step) => step.name.startsWith("direct message"))).toBe(false);
+  });
+
+  it("leaves the direct message under --keep, and the report says where", async () => {
+    const kept = { ...TARGET, operator: "U0123ABCD", keep: true };
+    const chat = slack();
+
+    const result = await runProbe(chat.client, jira().client, kept);
+
+    expect(chat.deleted).toEqual([]);
+    expect(result.directLeft).toEqual({ channel: "D1", ts: "200.1" });
+    expect(formatReport(result, kept)).toContain("still with U0123ABCD: D1, ts 200.1");
   });
 
   it("fails when Jira hands back the record without its timeline, the shape Slack could not hold", async () => {

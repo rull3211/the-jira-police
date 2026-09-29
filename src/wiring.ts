@@ -42,6 +42,8 @@ import {
   auditPasses,
   createAuditNotifier,
 } from "./slack/notifier.ts";
+import { type PrLineSender, dryDelivery, prLineSender, slackDelivery } from "./slack/pr-line.ts";
+import { SLACK_USER_ID_PATTERN } from "./slack/render.ts";
 import { syntheticSummary } from "./triage/single.ts";
 import {
   ROSTER_PROPERTY,
@@ -592,6 +594,36 @@ export function pipelineAuditNotifier(settings: Settings): AuditNotifier | null 
     pipelineAudit = { key, notifier: mode === "off" ? null : auditNotifierFor(settings, mode) };
   }
   return pipelineAudit.notifier;
+}
+
+/**
+ * Who hears that a pull request opened, `null` when SLACK_MODE is off or SLACK_OPERATOR_USER_ID is
+ * unset. A malformed ID or a live mode it cannot build throws, so callers build it before any claim.
+ */
+export function pipelinePrLineSender(settings: Settings): PrLineSender | null {
+  const mode = slackMode(settings);
+  const operator = operatorUserId(settings);
+  if (mode === "off" || operator === null) {
+    return null;
+  }
+  if (mode === "dry") {
+    return prLineSender(dryDelivery(join(settings.OUTPUT_DIR, "slack"), operator));
+  }
+  return prLineSender(slackDelivery(createSlackTarget(settings).client, operator));
+}
+
+/** SLACK_OPERATOR_USER_ID, `null` when unset; anything but a member ID is refused rather than messaged. */
+export function operatorUserId(settings: Settings): string | null {
+  const operator = settings.SLACK_OPERATOR_USER_ID.trim();
+  if (operator === "") {
+    return null;
+  }
+  if (!SLACK_USER_ID_PATTERN.test(operator)) {
+    throw new SettingsError([
+      `SLACK_OPERATOR_USER_ID (expected a member ID such as U0123ABCD, got "${operator}")`,
+    ]);
+  }
+  return operator;
 }
 
 /**

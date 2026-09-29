@@ -1328,6 +1328,7 @@ describe("advance", () => {
       summary: "deleted the interface the round left declared and unused",
       commitSubject: "fix(advisor): delete the interface the round left unused",
       commitBody: "Removing its export left it unreferenced, which lint refuses.",
+      teamChannelLine: "",
       testAdded: false,
       testOmittedReason: "a lint correction",
       residualRisk: "",
