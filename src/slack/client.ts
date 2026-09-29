@@ -1,6 +1,5 @@
 /**
- * The Slack Web API over `fetch`, and the only module that holds a Slack token: the bot's, or the
- * app-level one that opens a Socket Mode connection, one per client.
+ * The Slack Web API over `fetch`, and the only module that holds a Slack token, bot or app-level.
  *
  * Slack reports failure as HTTP 200 with `ok: false`, so success is decided by that field and never
  * by the status alone. A dropped field arrives as a `warning` on a successful call instead, which is

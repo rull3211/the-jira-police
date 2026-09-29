@@ -11,9 +11,8 @@ import { listenerFor, rosterWhere } from "./wiring.ts";
 const log = createLogger("slack");
 
 /**
- * `null` while SLACK_LISTEN is off, so nothing is built; a missing or wrong SLACK_APP_TOKEN throws
- * here, at startup, rather than inside a loop. What it returns never rejects, so a listener that
- * breaks cannot take the daemon's `Promise.all` down with it.
+ * A bad SLACK_APP_TOKEN throws here, at startup, not inside a loop; the runner it returns never
+ * rejects, so a broken listener cannot take the daemon's `Promise.all` with it.
  */
 export function createSlackListener(
   settings: Settings,

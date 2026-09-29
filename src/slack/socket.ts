@@ -1,7 +1,6 @@
 /**
- * A Socket Mode connection held until shutdown: slash commands in, each answered in its envelope's
- * acknowledgement, and a fresh connection after every disconnect. The daemon has no public URL, so
- * this is the only way Slack can reach it.
+ * A Socket Mode connection held until shutdown, each slash command answered in its envelope's
+ * acknowledgement. The daemon has no public URL, so this is the only way Slack can reach it.
  */
 
 import { createLogger } from "../logger.ts";
