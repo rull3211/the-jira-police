@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §71 and §73, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §71 and §73, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -80,46 +80,9 @@ holds the entry and the commit that deleted it, so what follows is only what tha
 
 The next entry is §75. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
-`feat/slack-audit-thread`, open when §71 was written; §69 and §70 are the Slack work that follows it.
+`feat/slack-audit-thread`, open when §71 was written; §70 is the Slack work still to follow it.
 
 <!-- refs:on -->
-
-### 69. Nobody is told when a ticket they care about crashes or opens a pull request
-
-**Branch:** `feat/slack-subscribers`
-
-**What is being built.** `/bencebot subscribe`, `/bencebot unsubscribe`, and a bare `/bencebot`
-that answers whether you are on the list. One list, covering every ticket, and a subscriber is
-mentioned on each broadcast line — the operator's choice on 2026-09-28. The earlier `tags`/`dm`
-pair collapses into it because each major entry is now a broadcast reply, which is a new message,
-so a mention on it pings each time. The card itself carries no mention. The list is the
-`jira-police.slack-subscribers` property on `JIRA_PROJECT`, the counterpart of the thread's store;
-the credential holds Administer Projects on SSX, measured on 2026-09-28, and this is its first use.
-
-Inbound is Socket Mode over Node 24's own `WebSocket`: `apps.connections.open` with an `xapp-`
-token, the reply carried in the envelope's acknowledgement, a reconnect after each `disconnect`.
-Who subscribes is taken from the envelope's `user_id` field rather than from the command's
-arguments. Built in this order, one commit each:
-
-1. The roster, the command, the socket and the mention, with nothing wiring them.
-2. `pnpm slack:listen`, dry: reads the real roster and writes the result to
-   `OUTPUT_DIR/slack/roster.json`, answering as a dry run.
-3. `pnpm slack:listen --write`, which writes the property.
-4. The daemon, after 3 has been watched: `src/slack-loop.ts` under invariant 17, off by default.
-
-**Where it stands, 2026-09-28.** Rungs 1–3 are committed and not pushed. The registered app is waiting
-on workspace approval for the `commands` scope; the operator then generates the `xapp-` token and
-drives `slack:listen`, dry and then `--write`, before rung 4 starts.
-
-**Why its own branch.** It is the first inbound channel this service has — something outside it can
-now cause a write — which is a different privilege from posting.
-
-**What would make it the wrong idea.** A roster that cannot be read must stop the listener from
-writing, and is not taken as empty: an empty list written over an unreadable one drops every
-subscriber with no sign of it. The daemon and a hand-run listener each hold a connection and Slack
-gives each command to one of them, so two commands in the same second can lose one; a read-back
-after the write reports that case. A mention on every major event of every ticket is noise past one
-team.
 
 ### 70. The pull request channel's announcement is written by hand every time
 
