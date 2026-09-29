@@ -132,6 +132,7 @@ export const FIX_SCHEMA = {
     "summary",
     "commitSubject",
     "commitBody",
+    "teamChannelLine",
     "testAdded",
     "testOmittedReason",
     "residualRisk",
@@ -163,6 +164,11 @@ export const FIX_SCHEMA = {
       type: "string",
       description:
         "Why the change was made, in ONE OR TWO SENTENCES — as short as a person writes a commit. The harness keeps only the first two sentences and discards the rest, so put the reason first. The diff already shows what changed, so do not narrate it. Save the longer explanation for `summary` and `residualRisk`, which reach the pull request. Do NOT include the issue key or a tracking reference — the harness appends that itself, because it knows the key and asking you to remember it would only invent a way for the run to fail. Must not claim tests pass or that the fix is verified.",
+    },
+    teamChannelLine: {
+      type: "string",
+      description:
+        "ONE sentence in Norwegian bokmål saying what the change does, as a developer on the team would announce it in their pull request channel — for example: `Fiks på cache eviction på vellykket customer write slik at vi tømmer cachen på utdaterte personer`. Plain words only: no issue key, no link, no markdown, no emoji. The harness puts the pull request's link in front of it and cuts it to one line. Describe the change; do NOT claim that it works or that anything passes. Empty if you abandoned the run.",
     },
     testAdded: {
       type: "boolean",

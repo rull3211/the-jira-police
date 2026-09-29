@@ -34,6 +34,7 @@ const FIX_REPORT: FixReport = {
   summary: "point the favicon at the nonprod asset",
   commitSubject: "fix(advisor): point the favicon at the nonprod asset",
   commitBody: "The head tag named the production file in every environment.",
+  teamChannelLine: "",
   testAdded: true,
   testOmittedReason: "",
   residualRisk: "",

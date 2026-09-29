@@ -40,6 +40,7 @@ function verified(overrides: Partial<Verified> = {}): Verified {
       summary: "Chose the favicon from the environment.",
       commitSubject: "fix(advisor): distinct favicon outside production",
       commitBody: "body",
+      teamChannelLine: "",
       testAdded: true,
       testOmittedReason: "",
       residualRisk: "",

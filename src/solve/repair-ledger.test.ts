@@ -36,6 +36,7 @@ const fixReport = (filesTouched: readonly string[] = ["src/CustomerDto.java"]): 
   summary: "stop auto-vivifying contactInfo",
   commitSubject: "fix(customer): stop auto-vivifying contactInfo",
   commitBody: "The defensive getter created an empty DTO the merger then treated as present.",
+  teamChannelLine: "",
   testAdded: true,
   testOmittedReason: "",
   residualRisk: "",

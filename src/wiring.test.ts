@@ -924,6 +924,7 @@ function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
       summary: "did it",
       commitSubject: "fix(advisor): distinct favicon",
       commitBody: "why",
+      teamChannelLine: "",
       testAdded: true,
       testOmittedReason: "",
       residualRisk: "",

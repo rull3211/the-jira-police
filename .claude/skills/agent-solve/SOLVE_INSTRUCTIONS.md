@@ -242,6 +242,7 @@ why the rule is written down rather than left to taste.
   "summary": "what was changed, in the imperative, for a reviewer",
   "commitSubject": "fix(scope): …",
   "commitBody": "why, in one or two sentences — only the first two survive",
+  "teamChannelLine": "one bokmål sentence for the team's pull request channel",
   "testAdded": true,
   "testOmittedReason": "",
   "residualRisk": "what could still be wrong, or empty",
@@ -249,6 +250,12 @@ why the rule is written down rather than left to taste.
   "abandonedCause": "none"
 }
 ```
+
+`teamChannelLine` is how the operator announces the pull request to the team: one Norwegian
+sentence saying what the change does, the way a developer writes it in that channel — _Fiks på
+cache eviction på vellykket customer write slik at vi tømmer cachen på utdaterte personer_. No
+issue key, link or markdown, and no claim that it works; the harness adds the link. Empty if you
+abandoned the run.
 
 `abandoned` non-empty means you stopped and the harness should discard the run. Say what you left
 behind: if you wrote something before stopping, set `changed` and list it in `filesTouched`
@@ -568,9 +575,10 @@ undo it. A request you would have to reverse to go green is an `abandoned`, with
 ### Repair output
 
 Same shape as the fix pass's output (§2) — `changed`, `filesTouched`, `summary`, `commitSubject`,
-`commitBody`, `testAdded`, `testOmittedReason`, `residualRisk`, `abandoned`, `abandonedCause`. This
-is a correction to the same change, not a different kind of pass, and the harness reads it the
-same way.
+`commitBody`, `teamChannelLine`, `testAdded`, `testOmittedReason`, `residualRisk`, `abandoned`,
+`abandonedCause`. This is a correction to the same change, not a different kind of pass, and the
+harness reads it the same way — except `teamChannelLine`, where the fix pass's sentence is the one
+announced, since the pull request is still the fix's.
 
 ---
 
