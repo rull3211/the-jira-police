@@ -124,7 +124,15 @@ export function createCommandHandler(
   options: { readonly dry: boolean; readonly where: string },
 ): (command: SlashCommand) => Promise<string> {
   const prefix = options.dry ? "(dry run, nothing written) " : "";
-  const answer = async (command: SlashCommand): Promise<string> => {
+  const answer = async (command: SlashCommand, ms: Record<string, number>): Promise<string> => {
+    const timed = async <T>(step: string, work: () => Promise<T>): Promise<T> => {
+      const started = Date.now();
+      try {
+        return await work();
+      } finally {
+        ms[step] = Date.now() - started;
+      }
+    };
     if (!SLACK_USER_ID_PATTERN.test(command.userId)) {
       return "Slack named no user this list can hold, so nothing changed.";
     }
@@ -132,31 +140,33 @@ export function createCommandHandler(
     if (parsed === null) {
       return USAGE_REPLY;
     }
-    const loaded = await store.load();
+    const loaded = await timed("load", () => store.load());
     if (loaded.kind === "unreadable") {
       return `The subscriber list (${options.where}) cannot be read, so it was left as found: ${escape(loaded.reason)}`;
     }
-    const applied = applyCommand(parsed, command.userId, loaded.roster);
-    if (applied.next === null) {
-      return prefix + applied.reply;
+    const { next, reply } = applyCommand(parsed, command.userId, loaded.roster);
+    if (next === null) {
+      return prefix + reply;
     }
-    await store.save(applied.next);
-    const back = await store.load();
-    const wanted = applied.next.subscribers.includes(command.userId);
+    await timed("save", () => store.save(next));
+    const back = await timed("readBack", () => store.load());
+    const wanted = next.subscribers.includes(command.userId);
     if (back.kind !== "found" || back.roster.subscribers.includes(command.userId) !== wanted) {
       return `${prefix}The list was written, but reading it back does not show the change; \`/bencebot\` says where you stand.`;
     }
-    return prefix + applied.reply;
+    return prefix + reply;
   };
   return async (command) => {
     const text = command.text.trim().slice(0, 40);
+    // Per Jira step, so a reply that missed Slack's budget says which call was slow.
+    const ms: Record<string, number> = {};
     try {
-      const reply = await answer(command);
-      log.info("slack.command", { user: command.userId, text, dry: options.dry, reply });
+      const reply = await answer(command, ms);
+      log.info("slack.command", { user: command.userId, text, dry: options.dry, reply, ms });
       return reply;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      log.warn("slack.command_failed", { user: command.userId, text, reason });
+      log.warn("slack.command_failed", { user: command.userId, text, reason, ms });
       return `${prefix}That did not go through: ${escape(reason)}. \`/bencebot\` says where you stand.`;
     }
   };

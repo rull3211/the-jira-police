@@ -62,6 +62,30 @@ function harness(
   };
 }
 
+/** Every log line written while `run` runs; `vitest.config.ts` silences the logger otherwise. */
+async function logged(run: () => Promise<unknown>): Promise<Record<string, unknown>[]> {
+  const lines: string[] = [];
+  const keep = (chunk: unknown): boolean => {
+    lines.push(String(chunk));
+    return true;
+  };
+  const level = process.env["LOG_LEVEL"];
+  process.env["LOG_LEVEL"] = "info";
+  vi.spyOn(process.stdout, "write").mockImplementation(keep);
+  vi.spyOn(process.stderr, "write").mockImplementation(keep);
+  try {
+    await run();
+  } finally {
+    vi.restoreAllMocks();
+    if (level === undefined) {
+      delete process.env["LOG_LEVEL"];
+    } else {
+      process.env["LOG_LEVEL"] = level;
+    }
+  }
+  return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 const HELLO = JSON.stringify({ type: "hello", debug_info: { approximate_connection_time: 3600 } });
 
 function command(envelope: string, text: string, userId = "U0ME"): string {
@@ -150,6 +174,36 @@ describe("listen", () => {
     expect(returned).toBe(false);
     finish?.();
     await running;
+  });
+
+  it("warns when a command outlived the budget, saying how long it took, and is quiet when it did not", async () => {
+    const run = async (delayMs: number): Promise<Record<string, unknown>[]> =>
+      logged(async () => {
+        const h = harness(
+          () =>
+            new Promise((resolve) => {
+              setTimeout(() => {
+                resolve("done");
+              }, delayMs);
+            }),
+          ["wss://one"],
+        );
+        const running = listen(h.deps);
+        const socket = await socketAt(h.sockets, 0);
+        socket.on.message(command("e-1", "subscribe"));
+        await vi.waitFor(() => {
+          expect(socket.sent).toHaveLength(1);
+        });
+        h.stop();
+        await running;
+      });
+
+    const late = (await run(80)).find((line) => line["message"] === "slack.command_late");
+    const quick = (await run(0)).find((line) => line["message"] === "slack.command_late");
+
+    expect(late).toMatchObject({ budgetMs: 50 });
+    expect(late?.["ms"]).toBeGreaterThanOrEqual(80);
+    expect(quick).toBeUndefined();
   });
 
   it("runs one command at a time, so two never interleave a read and a write", async () => {

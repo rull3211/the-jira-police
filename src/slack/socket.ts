@@ -100,8 +100,19 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
   let chain: Promise<unknown> = Promise.resolve();
   const answer = async (command: SlashCommand): Promise<string> => {
     commands += 1;
+    const started = Date.now();
     const handled = chain.then(() => deps.handle(command));
     chain = handled.catch(() => undefined);
+    void chain.then(() => {
+      const ms = Date.now() - started;
+      if (ms > budget) {
+        log.warn("slack.command_late", {
+          ms,
+          budgetMs: budget,
+          note: "acknowledged with the still-working reply; the command itself ran to the end",
+        });
+      }
+    });
     return withinBudget(handled, budget);
   };
 

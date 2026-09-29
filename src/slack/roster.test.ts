@@ -174,6 +174,31 @@ describe("createCommandHandler", () => {
     expect(reply).toContain("no user");
   });
 
+  it("logs how long each Jira step took, so a reply that missed Slack's budget says which call was slow", async () => {
+    const lines: string[] = [];
+    const level = process.env["LOG_LEVEL"];
+    process.env["LOG_LEVEL"] = "info";
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    try {
+      await handler(memory())({ userId: ME, text: "subscribe" });
+    } finally {
+      vi.restoreAllMocks();
+      if (level === undefined) {
+        delete process.env["LOG_LEVEL"];
+      } else {
+        process.env["LOG_LEVEL"] = level;
+      }
+    }
+
+    const line = lines
+      .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+      .find((entry) => entry["message"] === "slack.command");
+    expect(Object.keys(line?.["ms"] as object)).toEqual(["load", "save", "readBack"]);
+  });
+
   it("marks every reply of a dry run as one", async () => {
     expect(await handler(memory(), true)({ userId: ME, text: "subscribe" })).toMatch(
       /^\(dry run, nothing written\) Subscribed/u,
