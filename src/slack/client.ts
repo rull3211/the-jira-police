@@ -23,6 +23,11 @@ export interface SlackWriteResult {
   readonly warnings: readonly string[];
 }
 
+export interface SlackPostResult extends SlackWriteResult {
+  /** The conversation it landed in: for a post to a user's ID, their direct message with the bot. */
+  readonly channel: string;
+}
+
 export class SlackError extends Error {
   readonly method: string;
   /** Slack's `error` code, `http_<status>` for a non-JSON failure, or `network`. */
@@ -74,7 +79,7 @@ export class SlackClient {
     readonly blocks?: readonly object[];
     readonly threadTs?: string;
     readonly broadcast?: boolean;
-  }): Promise<SlackWriteResult> {
+  }): Promise<SlackPostResult> {
     const body = await this.#call("chat.postMessage", {
       channel: args.channel,
       text: args.text,
@@ -84,7 +89,7 @@ export class SlackClient {
       unfurl_links: false,
       unfurl_media: false,
     });
-    return { ts: str(body["ts"]), warnings: warningsOf(body) };
+    return { ts: str(body["ts"]), channel: str(body["channel"]), warnings: warningsOf(body) };
   }
 
   async update(args: {

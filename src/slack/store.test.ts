@@ -50,7 +50,7 @@ describe("propertyStore", () => {
 function failing(code: string) {
   return slackPublisher(
     {
-      post: async () => ({ ts: "1", warnings: [] }),
+      post: async () => ({ ts: "1", channel: "C1", warnings: [] }),
       update: async () => {
         throw new SlackError("chat.update", code, "");
       },
@@ -86,7 +86,7 @@ describe("slackPublisher", () => {
       {
         post: async (args) => {
           calls.push(args);
-          return { ts: "9", warnings: [] };
+          return { ts: "9", channel: "C1", warnings: [] };
         },
         update: async () => ({ ts: "1", warnings: [] }),
         deleteMessage: async (args) => {

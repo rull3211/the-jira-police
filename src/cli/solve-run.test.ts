@@ -300,6 +300,30 @@ describe("runWriteRungs", () => {
     ).rejects.toThrow(/SLACK_BOT_TOKEN/u);
     expect(touched).toEqual([]);
   });
+
+  it("refuses an operator that is not a member ID before touching the ticket, too", async () => {
+    const touched: string[] = [];
+    const client = new Proxy(
+      {},
+      {
+        get: (_target, name) => () => {
+          touched.push(String(name));
+          throw new Error("the ticket must not be touched");
+        },
+      },
+    ) as unknown as JiraClient;
+    const settings = readSettings({
+      JIRA_EMAIL: "a@b.c",
+      JIRA_AUTH: "placeholder",
+      SLACK_MODE: "dry",
+      SLACK_OPERATOR_USER_ID: "@bence",
+    });
+
+    await expect(
+      runWriteRungs(settings, client, "SSX-1", "claim", null, "named", false),
+    ).rejects.toThrow(/SLACK_OPERATOR_USER_ID/u);
+    expect(touched).toEqual([]);
+  });
 });
 
 describe("keepsEvidence", () => {

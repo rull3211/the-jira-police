@@ -29,6 +29,7 @@ import {
   createListenClient,
   createSlackTarget,
   pipelineAuditNotifier,
+  pipelinePrLineSender,
   createSolveDeps,
   createSolveRunDeps,
   githubRepoFor,
@@ -1430,6 +1431,38 @@ describe("pipelineAuditNotifier", () => {
 
     expect(pipelineAuditNotifier(settings)).not.toBeNull();
     expect(pipelineAuditNotifier({ ...settings })).toBe(pipelineAuditNotifier(settings));
+  });
+});
+
+describe("pipelinePrLineSender", () => {
+  const OPERATOR = { SLACK_OPERATOR_USER_ID: "U0123ABCD" };
+
+  it("builds nothing while SLACK_MODE is off, even with an operator named", () => {
+    expect(pipelinePrLineSender(settingsWith(OPERATOR))).toBeNull();
+  });
+
+  it("builds nothing with no operator named, even while the audit thread is on", () => {
+    expect(pipelinePrLineSender(settingsWith({ SLACK_MODE: "dry" }))).toBeNull();
+  });
+
+  it("builds a sender for an operator and a mode that is on", () => {
+    expect(pipelinePrLineSender(settingsWith({ ...OPERATOR, SLACK_MODE: "dry" }))).not.toBeNull();
+  });
+
+  it("refuses something that is not a member ID, whatever the mode, rather than messaging no one", () => {
+    for (const id of ["@bence", "#pr-kanal", "C0123ABCD", "u0123abcd", "U0123ABCD extra"]) {
+      for (const mode of ["off", "dry"]) {
+        expect(() =>
+          pipelinePrLineSender(settingsWith({ SLACK_OPERATOR_USER_ID: id, SLACK_MODE: mode })),
+        ).toThrow(SettingsError);
+      }
+    }
+  });
+
+  it("refuses a live mode it cannot configure, at the call that happens before the claim", () => {
+    expect(() => pipelinePrLineSender(settingsWith({ ...OPERATOR, SLACK_MODE: "live" }))).toThrow(
+      /SLACK_BOT_TOKEN/u,
+    );
   });
 });
 

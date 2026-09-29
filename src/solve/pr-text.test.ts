@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { SolveOutcome } from "./orchestrator.ts";
-import { asProse, composePullRequest, composeTitle, withoutTrailer } from "./pr-text.ts";
+import {
+  asProse,
+  channelSentence,
+  composePullRequest,
+  composeTitle,
+  withoutTrailer,
+} from "./pr-text.ts";
 
 type Verified = Extract<SolveOutcome, { kind: "verified" }>;
 
@@ -442,6 +448,15 @@ describe("composePullRequest, for a change a repair round finished", () => {
     expect(composeTitle(outcome, "SSX-3822")).toBe(title);
     expect(body.split("\n\n")).toContain("body");
     expect(body).not.toContain("The stub only the old behaviour reached");
+  });
+
+  it("announces the pull request with the fix's channel sentence, not the repair's", () => {
+    const base = repaired();
+    const outcome = repaired({
+      fix: { ...base.fix, teamChannelLine: "Velger favicon etter miljø" },
+      repair: { ...(base.repair ?? base.fix), teamChannelLine: "Retter testen for favicon" },
+    });
+    expect(channelSentence(outcome)).toBe("Velger favicon etter miljø");
   });
 
   it("collapses the repair pass's account and its risk under headings naming that pass", () => {

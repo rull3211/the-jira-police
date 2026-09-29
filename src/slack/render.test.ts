@@ -9,7 +9,13 @@ import {
   applyEvent,
   newRecord,
 } from "./audit.ts";
-import { MAX_CHILD_BLOCKS, renderBump, renderRecord } from "./render.ts";
+import {
+  MAX_CHILD_BLOCKS,
+  PR_LINK_LABEL,
+  renderBump,
+  renderPrLine,
+  renderRecord,
+} from "./render.ts";
 
 const NOW = new Date("2026-09-28T13:58:00Z");
 const URL = "https://example.atlassian.net/browse/SSX-1";
@@ -218,5 +224,36 @@ describe("renderRecord", () => {
     expect(JSON.stringify(safe.blocks)).toContain(`<${URL}|SSX-1>`);
     expect(JSON.stringify(tampered.blocks)).not.toContain("https://x.test|");
     expect(JSON.stringify(tampered.blocks)).not.toContain('"type":"link"');
+  });
+});
+
+describe("renderPrLine", () => {
+  const PR = "https://github.com/storebrand-digital/advisor/pull/2663";
+  const TITLE = "fix(cache): evict the customer on a successful write (SSX-3990)";
+
+  it("is the link, labelled as the team labels a bot's pull request, then the sentence", () => {
+    expect(renderPrLine(PR, "Fiks på cache eviction på vellykket customer write", TITLE)).toBe(
+      `<${PR}|PR-Bencebot> Fiks på cache eviction på vellykket customer write`,
+    );
+    expect(PR_LINK_LABEL).toBe("PR-Bencebot");
+  });
+
+  it("falls back to the pull request's title when the fix pass wrote no sentence", () => {
+    for (const sentence of ["", "  \n "]) {
+      expect(renderPrLine(PR, sentence, TITLE)).toBe(`<${PR}|PR-Bencebot> ${TITLE}`);
+    }
+  });
+
+  it("escapes the sentence, so a model cannot ping the channel it is pasted into", () => {
+    const line = renderPrLine(PR, "Fiks <!channel> & <@U0123ABCD>", TITLE);
+    expect(line).toBe(`<${PR}|PR-Bencebot> Fiks &lt;!channel&gt; &amp; &lt;@U0123ABCD&gt;`);
+  });
+
+  it("shows only the label for a URL that is not plain https, since escaping cannot make one safe", () => {
+    expect(renderPrLine("https://x.test|<!channel>", "Fiks", TITLE)).toBe("PR-Bencebot Fiks");
+  });
+
+  it("keeps the whole line on one line", () => {
+    expect(renderPrLine(PR, "Fiks\n\nnoe", TITLE)).toBe(`<${PR}|PR-Bencebot> Fiks noe`);
   });
 });

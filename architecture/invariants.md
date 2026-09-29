@@ -344,9 +344,12 @@ Things that look like details and are not:
     or `slack.unbump_failed`, and the edited record is saved regardless; a subscriber list it
     cannot read costs only the mentions, `slack.subscribers_unread`. The one configuration error
     it can raise, a live mode it cannot build, is raised by `pipelineAuditNotifier` at startup and
-    before any claim, where it stops a start rather than strands work. What this costs is that a
-    thread can fall silent while the pipeline runs on; the warning is the only signal. Three
-    residues are left unguarded:
+    before any claim, where it stops a start rather than strands work. The pull request line's
+    `PrLineSender` in `slack/pr-line.ts` holds the same: a refused direct message is
+    `slack.pr_line_failed` and the pull request stands, and `pipelinePrLineSender` raises its
+    configuration errors, a malformed `SLACK_OPERATOR_USER_ID` among them, before the claim. What
+    this costs is that a thread can fall silent while the pipeline runs on, and a pull request
+    can open with no line sent; the warning is the only signal. Three residues are left unguarded:
     - A daemon and a CLI updating one ticket in the same second can drop a timeline entry, since
       only one process's updates are serialised.
     - A record save that fails after a thread's first post leaves the record without its `ts`, so

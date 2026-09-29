@@ -1,7 +1,8 @@
 /**
  * Whether both halves of the audit thread's store work against the real systems: a Slack message
  * posted, edited and deleted, and a record written to, read back from and deleted on one named
- * ticket. Measured before anything is built on either.
+ * ticket. Measured before anything is built on either. With an operator named, also whether the bot
+ * can send them the direct message a pull request's line arrives in.
  */
 
 import { isDeepStrictEqual } from "node:util";
@@ -26,6 +27,8 @@ export type ProbeJira = Pick<
 
 export interface ProbeTarget {
   readonly channel: string;
+  /** SLACK_OPERATOR_USER_ID, or `null` to skip the direct message. */
+  readonly operator: string | null;
   readonly issueKey: string;
   readonly keep: boolean;
   readonly nonce: string;
@@ -42,6 +45,8 @@ export interface ProbeResult {
   readonly steps: readonly ProbeStep[];
   /** The Slack message's `ts`, when it is still in the channel. */
   readonly messageLeft: string | null;
+  /** The direct message, when it is still in the operator's conversation with the bot. */
+  readonly directLeft: { readonly channel: string; readonly ts: string } | null;
   /** Whether the probe property is still on the ticket, deliberately or by a failed delete. */
   readonly propertyLeft: boolean;
 }
@@ -62,8 +67,49 @@ export async function runProbe(
   };
 
   const messageLeft = await slackHalf(slack, target, record);
+  const authed = steps.some((step) => step.name === "auth.test" && step.ok);
+  const directLeft =
+    target.operator === null || !authed
+      ? null
+      : await directMessage(slack, target, target.operator, record);
   const propertyLeft = await jiraHalf(jira, target, messageLeft ?? "", record);
-  return { steps, messageLeft, propertyLeft };
+  return { steps, messageLeft, directLeft, propertyLeft };
+}
+
+async function directMessage(
+  slack: ProbeSlack,
+  target: ProbeTarget,
+  operator: string,
+  record: Recorder,
+): Promise<ProbeResult["directLeft"]> {
+  let left: { readonly channel: string; readonly ts: string };
+  try {
+    const posted = await slack.post({
+      channel: operator,
+      text: `the-jira-police probe for ${target.issueKey}, ${target.now.toISOString()}: a pull request's line arrives here — safe to ignore`,
+    });
+    left = { channel: posted.channel, ts: posted.ts };
+    record(
+      "direct message",
+      true,
+      withWarnings(`to ${operator}, in ${posted.channel}, ts ${posted.ts}`, posted.warnings),
+    );
+  } catch (error) {
+    record("direct message", false, describe(error));
+    return null;
+  }
+
+  if (target.keep) {
+    return left;
+  }
+  try {
+    await slack.deleteMessage(left);
+    record("direct message delete", true, `removed ${left.ts}`);
+    return null;
+  } catch (error) {
+    record("direct message delete", false, describe(error));
+    return left;
+  }
 }
 
 async function slackHalf(
@@ -201,8 +247,9 @@ export function formatReport(result: ProbeResult, target: ProbeTarget): string {
     "",
     `- **Run:** ${target.now.toISOString()}`,
     `- **Channel:** ${target.channel}`,
+    `- **Operator:** ${target.operator ?? "none named; no direct message sent"}`,
     `- **Ticket:** ${target.issueKey}`,
-    `- **Verdict:** ${exitCodeFor(result) === EXIT.ok ? "PASS — both halves of the store work" : "FAIL"}`,
+    `- **Verdict:** ${exitCodeFor(result) === EXIT.ok ? "PASS — every step worked" : "FAIL"}`,
     "",
     "| step | result | detail |",
     "| ---- | ------ | ------ |",
@@ -213,6 +260,12 @@ export function formatReport(result: ProbeResult, target: ProbeTarget): string {
   ];
   if (result.messageLeft !== null) {
     lines.push("", `The probe message is still in the channel: ts ${result.messageLeft}.`);
+  }
+  if (result.directLeft !== null) {
+    lines.push(
+      "",
+      `The direct message is still with ${target.operator ?? "the operator"}: ${result.directLeft.channel}, ts ${result.directLeft.ts}.`,
+    );
   }
   if (result.propertyLeft) {
     lines.push("", `${PROBE_PROPERTY} is still on ${target.issueKey}.`);

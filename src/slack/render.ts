@@ -1,9 +1,11 @@
 /**
  * An audit record drawn as the Slack message it stands for: one collapsible container showing the
- * title, holding the status card, one line per major event, then the timeline newest first. Pure,
- * so the whole layout is readable in a test.
+ * title, holding the status card, one line per major event, then the timeline newest first. Beside
+ * it, the one-line messages: a major entry's broadcast, and the line the operator copies into the
+ * team's pull request channel. Pure, so the whole layout is readable in a test.
  */
 
+import { oneLine } from "../text.ts";
 import type { AuditRecord, Entry, PullRequest, TriageState, WorkState } from "./audit.ts";
 
 /** Slack's own limits: a container's title, one section's text, and a container's children. */
@@ -110,6 +112,18 @@ export function renderBump(
     text: `${escape(entry.icon)} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}${mentions}`,
     blocks: [],
   };
+}
+
+/** The team's own convention for a bot's pull request, so the pasted line reads like the others. */
+export const PR_LINK_LABEL = "PR-Bencebot";
+
+/**
+ * What the operator pastes into the team's pull request channel: the link, then the fix pass's
+ * sentence, or the pull request's title when the pass wrote none.
+ */
+export function renderPrLine(url: string, sentence: string, title: string): string {
+  const words = oneLine(sentence) === "" ? oneLine(title) : oneLine(sentence);
+  return `${link(url, PR_LINK_LABEL)} ${escape(words)}`;
 }
 
 /**

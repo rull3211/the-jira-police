@@ -1,6 +1,6 @@
 /**
- * The one way the pipeline tells Slack what happened to a ticket: load its record, apply the event,
- * redraw the message, post or edit it, broadcast a major entry, save the record.
+ * The one way the pipeline tells a ticket's audit thread what happened: load its record, apply the
+ * event, redraw the message, post or edit it, broadcast a major entry, save the record.
  *
  * Never throws. Slack is a reporting channel, and a Slack or property failure must not fail the paid
  * work it reports on; it is logged with the remote system's own reason, and returned.

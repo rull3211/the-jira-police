@@ -108,6 +108,17 @@ describe("SlackClient", () => {
     expect(result.warnings).toEqual(["superfluous_charset", "invalid_metadata_schema"]);
   });
 
+  it("hands back the conversation Slack answers with, which for a member ID is not the ID posted to", async () => {
+    slack({ ok: true, ts: "1.2", channel: "D0123ABCD" });
+
+    const result = await new SlackClient({ token: NEEDLE }).post({
+      channel: "U0123ABCD",
+      text: "hi",
+    });
+
+    expect(result).toEqual({ ts: "1.2", channel: "D0123ABCD", warnings: [] });
+  });
+
   it("sends objects as JSON, omits what was not given, and keeps the token in the header only", async () => {
     const mock = slack({ ok: true, ts: "1.2" });
 
