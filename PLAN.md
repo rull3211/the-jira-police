@@ -86,7 +86,7 @@ from their own base, and it read §72 here after §73 and §74 had been issued. 
 
 ### 70. The pull request channel's announcement is written by hand every time
 
-**Branch:** none yet — cut from `main` after `feat/slack-audit-thread` merges.
+**Branch:** `feat/pr-channel-dm`, in `../the-jira-police-pr-channel-dm`.
 
 **What is not built.** When a pull request opens, a direct message to `SLACK_OPERATOR_USER_ID`
 holding one line to copy into the team's pull request channel: `<url|PR-Bencebot>` and one
@@ -95,6 +95,18 @@ slik at vi tømmer cachen på utdaterte personer_. Nothing writes that sentence 
 `commitSubject` is an English Conventional Commits line and `summary` an English paragraph for the
 reviewer. So `FIX_SCHEMA` gains a required `teamChannelLine` — one bokmål sentence, no ticket key,
 no claim that anything passes — which `parseFix` reads and the harness one-lines and caps.
+
+**The shape, as attempted.** An empty line is not a parse failure: a paid fix is never discarded
+over the channel sentence, and the message falls back to the pull request's title. The sentence is
+the fix pass's, as the title is (`composeTitle`), so a repair round writes one that nothing reads.
+The message is sent from `runWriteRungs` beside the `pr-opened` audit event, under `SLACK_MODE`
+(`dry` writes the request under `OUTPUT_DIR/slack/`) and only with `SLACK_OPERATOR_USER_ID` set,
+and never throws, as invariant 19 holds the audit thread. `slack:probe` gains a direct message to
+the operator, so the Slack half can be run for nothing before a paid solve.
+
+**Prediction, before the first real run.** `chat:write` alone lets the bot post to a user ID —
+Slack opens the direct message itself — so the manifest needs no `im:write`. Wrong if the probe's
+direct-message step fails `missing_scope` or `channel_not_found`.
 
 **Why its own branch.** It changes the contract of the paid fix pass, whose `if` conditional has
 already needed a fix of its own (`2ed3049`), so it is watched on one real `solve:once <KEY> --pr`
