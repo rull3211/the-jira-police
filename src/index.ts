@@ -1,8 +1,8 @@
 /**
- * The service: poll, triage, repeat — plus sweeping PRs under review and tickets sent back for an answer.
+ * The service: poll, triage, repeat — plus PRs under review, sent-back tickets, and `/bencebot`.
  *
- * The three loops share only a Jira client and a shutdown signal, so a failure in one cannot stop
- * another. See architecture/overview.md §2.
+ * The loops share only a Jira client and a shutdown signal, so a failure in one cannot stop another.
+ * See architecture/overview.md §2.
  */
 
 import { stopOnBrokenPipe } from "./broken-pipe.ts";
@@ -11,6 +11,7 @@ import { createLogger } from "./logger.ts";
 import { runLoop } from "./loop.ts";
 import { runPollCycle } from "./poller.ts";
 import { createReviewLoop } from "./review-loop.ts";
+import { createSlackListener } from "./slack-loop.ts";
 import {
   type Settings,
   describeSettings,
@@ -131,6 +132,7 @@ async function main(): Promise<void> {
     BACKOFF_CAP_MS,
     createWatchMemo(),
   );
+  const listener = createSlackListener(settings, shutdown.signal);
   const deps = createPollDeps(settings, client, shutdown.signal);
 
   const grooming = runLoop({
@@ -163,10 +165,11 @@ async function main(): Promise<void> {
 
   // Awaited together, not raced: stopping when the first loop returns would kill another
   // loop's cycle mid-push just to make the exit look tidy.
-  const [groomed, reviewed, watched] = await Promise.all([
+  const [groomed, reviewed, watched, listened] = await Promise.all([
     grooming,
     review === null ? Promise.resolve(null) : runLoop(review),
     watch === null ? Promise.resolve(null) : runLoop(watch),
+    listener === null ? Promise.resolve(null) : listener(),
   ]);
 
   serviceLog.info("service.stopped", {
@@ -176,6 +179,7 @@ async function main(): Promise<void> {
     reviewFailures: reviewed?.failures ?? "off",
     watchCycles: watched?.cycles ?? "off",
     watchFailures: watched?.failures ?? "off",
+    slackCommands: listener === null ? "off" : (listened?.commands ?? "crashed"),
   });
 }
 

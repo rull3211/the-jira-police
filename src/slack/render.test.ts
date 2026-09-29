@@ -143,6 +143,19 @@ describe("renderRecord", () => {
     expect(bump.text).toBe(`👀 *PR ready for review* — <${URL}|SSX-1 · &lt;!channel&gt;>`);
   });
 
+  it("mentions only what is a Slack user ID, so a forged list cannot ping the channel", () => {
+    const record = applyEvent(newRecord("SSX-1", "t", URL), { kind: "pr-ready" }, NOW);
+
+    const bump = renderBump(record, record.major[0] ?? { at: "", icon: "", text: "" }, [
+      "U0ME",
+      "<!channel>",
+      "U0ME>|x",
+      "here",
+    ]);
+
+    expect(bump.text).toBe(`👀 *PR ready for review* — <${URL}|SSX-1 · t> <@U0ME>`);
+  });
+
   it("puts the newest timeline entry first", () => {
     let record = newRecord("SSX-1", "summary", URL);
     record = applyEvent(record, { kind: "triage-started" }, new Date("2026-09-28T10:00:00Z"));

@@ -150,4 +150,17 @@ describe("SlackClient", () => {
       "application/x-www-form-urlencoded",
     );
   });
+
+  it("opens a Socket Mode connection with the token in the header, and refuses an answer with no wss URL", async () => {
+    const mock = slack({ ok: true, url: "wss://wss.slack.com/link/?ticket=1" });
+    const client = new SlackClient({ token: "xapp-needle" });
+
+    expect(await client.openConnection()).toBe("wss://wss.slack.com/link/?ticket=1");
+    expect(sent(mock).url).toBe("https://slack.com/api/apps.connections.open");
+    expect(sent(mock).form.toString()).toBe("");
+    expect(new Headers(sent(mock).init.headers).get("authorization")).toBe("Bearer xapp-needle");
+
+    slack({ ok: true, url: "https://example.test/" });
+    expect((await caught(client.openConnection())).code).toBe("no_url");
+  });
 });

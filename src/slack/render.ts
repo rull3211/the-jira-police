@@ -89,11 +89,25 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
   };
 }
 
-/** The one line a major entry is broadcast as, so the channel shows what happened and to which ticket. */
-export function renderBump(record: AuditRecord, entry: Entry): RenderedMessage {
+/** The one string written into a message unescaped, as `<@…>`; anything else could be a broadcast ping. */
+export const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,20}$/u;
+
+/**
+ * The one line a major entry is broadcast as, so the channel shows what happened and to which ticket.
+ * Mentions ride here and never on the card: a broadcast is a new message each time, the card an edit.
+ */
+export function renderBump(
+  record: AuditRecord,
+  entry: Entry,
+  subscribers: readonly string[] = [],
+): RenderedMessage {
   const title = record.summary === record.key ? record.key : `${record.key} · ${record.summary}`;
+  const mentions = subscribers
+    .filter((id) => SLACK_USER_ID_PATTERN.test(id))
+    .map((id) => ` <@${id}>`)
+    .join("");
   return {
-    text: `${escape(entry.icon)} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}`,
+    text: `${escape(entry.icon)} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}${mentions}`,
     blocks: [],
   };
 }

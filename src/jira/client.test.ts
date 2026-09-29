@@ -866,3 +866,61 @@ describe("JiraClient issue properties", () => {
     expect(init.body).toBeUndefined();
   });
 });
+
+describe("JiraClient project properties", () => {
+  const roster = { subscribers: ["U123ABC"] };
+
+  it("writes the value as the PUT body at the project's property path, and reads it back", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ key: "jira-police.slack-subscribers", value: roster }))
+      .mockResolvedValueOnce(jsonResponse({ errorMessages: ["not found"] }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await client().setProjectProperty("SSX", "jira-police.slack-subscribers", roster);
+    expect(await client().getProjectProperty("SSX", "jira-police.slack-subscribers")).toEqual(
+      roster,
+    );
+    expect(await client().getProjectProperty("SSX", "jira-police.slack-subscribers")).toBeNull();
+
+    const { url, init } = callArgs(fetchMock, 0);
+    expect(url).toBe(
+      "https://example.invalid/rest/api/3/project/SSX/properties/jira-police.slack-subscribers",
+    );
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual(roster);
+  });
+
+  it.each([
+    ["another app's property", "SSX", "other-app.data", /may only touch jira-police\.\*/u],
+    ["a path out of the project", "SSX/../..", "jira-police.x", /malformed project key/u],
+    ["an issue key for a project", "SSX-1", "jira-police.x", /malformed project key/u],
+  ])("refuses %s before any request", async (_name, project, property, message) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client().setProjectProperty(project, property, {})).rejects.toThrow(message);
+    await expect(client().getProjectProperty(project, property)).rejects.toThrow(message);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a value over Jira's limit before the request", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      client().setProjectProperty("SSX", "jira-police.x", { text: "x".repeat(MAX_PROPERTY_CHARS) }),
+    ).rejects.toThrow(/on SSX: .* over Jira's 32768/u);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not read a refusal as an absent property", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => jsonResponse({ errorMessages: ["forbidden"] }, 403)),
+    );
+
+    await expect(client().getProjectProperty("SSX", "jira-police.x")).rejects.toThrow(JiraError);
+  });
+});

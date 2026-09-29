@@ -40,6 +40,7 @@ export const LOG_SOURCES = [
   "session",
   "shutdown",
   "slack",
+  "slack-listen",
   "slack-once",
   "slack-probe",
   "solve",

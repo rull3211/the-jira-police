@@ -369,6 +369,33 @@ describe("createAuditNotifier", () => {
     }
   });
 
+  it("mentions each subscriber on the broadcast, and broadcasts without them when the list cannot be read", async () => {
+    const lists = [
+      async () => ["U0ME", "U0OTHER"],
+      async () => {
+        throw new Error("jira said 403");
+      },
+    ];
+    const seen: [string, string | undefined][] = [];
+    for (const subscribers of lists) {
+      const p = publisher();
+      const audit = createAuditNotifier({
+        store: store(threaded()).store,
+        publisher: p.publisher,
+        jiraBaseUrl: BASE_URL,
+        now: () => NOW,
+        subscribers,
+      });
+      const outcome = await audit.record("SSX-1", { kind: "pr-ended", state: "merged" });
+      seen.push([outcome.kind, p.bumps[0]]);
+    }
+
+    expect(seen[0]?.[1]).toMatch(/PR merged.* <@U0ME> <@U0OTHER>$/u);
+    expect(seen[1]?.[0]).toBe("edited");
+    expect(seen[1]?.[1]).toContain("PR merged");
+    expect(seen[1]?.[1]).not.toContain("<@");
+  });
+
   it("puts a pass on the timeline as a start and a finish, and a pass that died as a start only", async () => {
     const s = store();
     const audit = notifier(s.store, publisher().publisher);

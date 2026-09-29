@@ -41,6 +41,7 @@ path.** A second way to mutate a ticket would be a second way to mutate it unche
                       │    store.ts    cursor + seen keys        │
                       │    review-loop.ts  review, then claim    │
                       │    watch-loop.ts   the sendback watch    │
+                      │    slack-loop.ts   /bencebot, if on      │
                       └──────────────┬───────────────────────────┘
                                      │ one TicketRef → one groom
                       ┌──────────────▼───────────────────────────┐
@@ -94,6 +95,13 @@ sweep that throws every tick backs off the review side and nothing else. Both ne
 `null` when their switch is off — a `null` rather than a loop that does nothing, so an operator
 running exactly yesterday's configuration gets one line at startup rather than `review.disabled`
 every two minutes forever.
+
+**Beside them, with `SLACK_LISTEN` on, the same `Promise.all` holds the `/bencebot` listener**
+from `slack-loop.ts`. It is not a `runLoop` but one Socket Mode connection with its own reconnect
+backoff, and it spends nothing but a property write per command that changes the subscriber list.
+It follows the loops' rule all the same (`architecture/invariants.md` invariant 17): `null` when
+off, its token checked at startup, and a listener that breaks resolves rather than rejects, leaving
+the three loops running.
 
 #### The review loop advances and then claims, in one tick
 

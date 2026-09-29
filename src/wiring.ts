@@ -43,6 +43,15 @@ import {
   createAuditNotifier,
 } from "./slack/notifier.ts";
 import { syntheticSummary } from "./triage/single.ts";
+import {
+  ROSTER_PROPERTY,
+  type RosterStore,
+  createCommandHandler,
+  dryRosterStore,
+  loadRoster,
+  propertyRosterStore,
+} from "./slack/roster.ts";
+import { type ListenDeps, type ListenSummary, listen, openWebSocket } from "./slack/socket.ts";
 import { dryPublisher, dryStore, propertyStore, slackPublisher } from "./slack/store.ts";
 import {
   type Settings,
@@ -498,12 +507,21 @@ export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): Audi
     const detail = await jira.fetchDetail(key);
     return { summary: detail.summary, url: detail.url };
   };
+  // The real list in both modes: a dry broadcast shows who a live one would mention.
+  const subscribers = async (): Promise<readonly string[]> => {
+    const loaded = await loadRoster(jira, settings.JIRA_PROJECT);
+    if (loaded.kind === "unreadable") {
+      throw new Error(loaded.reason);
+    }
+    return loaded.roster.subscribers;
+  };
   if (mode === "dry") {
     return createAuditNotifier({
       store: dryStore(jira, directory),
       publisher: dryPublisher(directory),
       jiraBaseUrl: settings.JIRA_BASE_URL,
       lookup,
+      subscribers,
     });
   }
   const { client, channel } = createSlackTarget(settings);
@@ -512,7 +530,51 @@ export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): Audi
     publisher: slackPublisher(client, channel),
     jiraBaseUrl: settings.JIRA_BASE_URL,
     lookup,
+    subscribers,
   });
+}
+
+/** Only an `xapp-` token can open Socket Mode, and the bot token cannot stand in for it. */
+export function createListenClient(settings: Settings): SlackClient {
+  const token = settings.SLACK_APP_TOKEN.trim();
+  if (token === "") {
+    throw new SettingsError([
+      "SLACK_APP_TOKEN (the app-level token, xapp-…, from Basic Information → App-Level Tokens)",
+    ]);
+  }
+  if (!token.startsWith("xapp-")) {
+    throw new SettingsError([
+      `SLACK_APP_TOKEN (expected an app-level token starting xapp-, got one starting ${token.slice(0, 5)}…)`,
+    ]);
+  }
+  return new SlackClient({ token });
+}
+
+/** `dry` reads the real list and writes `OUTPUT_DIR/slack/roster.json`; `live` writes the property. */
+export function rosterStoreFor(settings: Settings, mode: "dry" | "live"): RosterStore {
+  const jira = createJiraClient(settings);
+  return mode === "dry"
+    ? dryRosterStore(jira, settings.JIRA_PROJECT, join(settings.OUTPUT_DIR, "slack"))
+    : propertyRosterStore(jira, settings.JIRA_PROJECT);
+}
+
+/** `slack:listen` and the daemon alike; the token is checked here, before anything connects. */
+export function listenerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+  signal: AbortSignal,
+  run: (deps: ListenDeps) => Promise<ListenSummary> = listen,
+): () => Promise<ListenSummary> {
+  const client = createListenClient(settings);
+  const handle = createCommandHandler(rosterStoreFor(settings, mode), {
+    dry: mode === "dry",
+    where: rosterWhere(settings),
+  });
+  return () => run({ open: () => client.openConnection(), connect: openWebSocket, handle, signal });
+}
+
+export function rosterWhere(settings: Settings): string {
+  return `${ROSTER_PROPERTY} on ${settings.JIRA_PROJECT}`;
 }
 
 let pipelineAudit: { readonly key: string; readonly notifier: AuditNotifier | null } | undefined;

@@ -1,5 +1,5 @@
 /**
- * The Slack Web API over `fetch`, and the only module that holds the bot token.
+ * The Slack Web API over `fetch`, and the only module that holds a Slack token, bot or app-level.
  *
  * Slack reports failure as HTTP 200 with `ok: false`, so success is decided by that field and never
  * by the status alone. A dropped field arrives as a `warning` on a successful call instead, which is
@@ -104,6 +104,16 @@ export class SlackClient {
 
   async deleteMessage(args: { readonly channel: string; readonly ts: string }): Promise<void> {
     await this.#call("chat.delete", { channel: args.channel, ts: args.ts });
+  }
+
+  /** Only an app-level `xapp-` token may call it, and Slack generates the URL per call, so one per connect. */
+  async openConnection(): Promise<string> {
+    const body = await this.#call("apps.connections.open", {});
+    const url = str(body["url"]);
+    if (!url.startsWith("wss://")) {
+      throw new SlackError("apps.connections.open", "no_url", "the answer held no wss:// URL");
+    }
+    return url;
   }
 
   /** Form-encoded, objects as JSON strings: the one body shape every Slack method accepts. */
