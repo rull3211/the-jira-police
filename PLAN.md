@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3513 tests in 109 files**, no build step.
+> **3516 tests in 109 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §71 and §73, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71 and §73, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -80,41 +80,9 @@ holds the entry and the commit that deleted it, so what follows is only what tha
 
 The next entry is §75. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
-`feat/slack-audit-thread`, open when §71 was written; §70 is the Slack work still to follow it.
+`feat/slack-audit-thread`, open when §71 was written.
 
 <!-- refs:on -->
-
-### 70. The pull request channel's announcement is written by hand every time
-
-**Branch:** `feat/pr-channel-dm`, in `../the-jira-police-pr-channel-dm`.
-
-**What is not built.** When a pull request opens, a direct message to `SLACK_OPERATOR_USER_ID`
-holding one line to copy into the team's pull request channel: `<url|PR-Bencebot>` and one
-Norwegian sentence describing the change, like _Fiks på cache eviction på vellykket customer write
-slik at vi tømmer cachen på utdaterte personer_. Nothing writes that sentence today:
-`commitSubject` is an English Conventional Commits line and `summary` an English paragraph for the
-reviewer. So `FIX_SCHEMA` gains a required `teamChannelLine` — one bokmål sentence, no ticket key,
-no claim that anything passes — which `parseFix` reads and the harness one-lines and caps.
-
-**The shape, as attempted.** An empty line is not a parse failure: a paid fix is never discarded
-over the channel sentence, and the message falls back to the pull request's title. The sentence is
-the fix pass's, as the title is (`composeTitle`), so a repair round writes one that nothing reads.
-The message is sent from `runWriteRungs` beside the `pr-opened` audit event, under `SLACK_MODE`
-(`dry` writes the request under `OUTPUT_DIR/slack/`) and only with `SLACK_OPERATOR_USER_ID` set,
-and never throws, as invariant 19 holds the audit thread. `slack:probe` gains a direct message to
-the operator, so the Slack half can be run for nothing before a paid solve.
-
-**Prediction, before the first real run.** `chat:write` alone lets the bot post to a user ID —
-Slack opens the direct message itself — so the manifest needs no `im:write`. Wrong if the probe's
-direct-message step fails `missing_scope` or `channel_not_found`.
-
-**Why its own branch.** It changes the contract of the paid fix pass, whose `if` conditional has
-already needed a fix of its own (`2ed3049`), so it is watched on one real `solve:once <KEY> --pr`
-before anything relies on it.
-
-**What would make it the wrong idea.** Norwegian written by a model for a channel is prose nothing
-checks mechanically. If the line needs rewriting every time, the ticket's own summary is the free
-alternative.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
@@ -521,6 +489,14 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   so the ack budget on a steady one is unmeasured too. **What would show it:** `SLACK_LISTEN=dry` in
   the daemon's `.env` and a restart; `slack.listen_enabled`, then `slack.listen_connected`, then a
   `/bencebot` answered as a dry run with no `slack.command_late`.
+- **No pull request's line has been sent.** The transport has: `slack:probe SSX-3991` on
+  2026-09-29 posted to the operator's member ID with `chat:write` alone, Slack put it in their
+  direct message with the bot, and the probe deleted it — the prediction that the manifest needs no
+  `im:write` held. That run cannot say the message shows in the operator's Slack, since it was gone
+  a second later. Unseen still is a fix pass writing `teamChannelLine`, and the first bokmål
+  sentence anyone reads. **What would show it:** one `solve:once <KEY> --pr` with `SLACK_MODE=live`,
+  its message pasted into the team's channel as it stands. If the sentence needs rewriting every
+  time, the ticket's own summary is the free alternative.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
   daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket
