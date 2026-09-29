@@ -532,15 +532,20 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   on 2026-09-24, round 6 was discarded inside `parseReview` before reaching it, and rounds 7 and 8
   were not refused by it. A member's request aimed at a file the pull request had not changed is the
   case that would show it.
-- **The audit thread has never broadcast.** Each major entry on a ticket that already has a thread
-  is posted as a reply with `reply_broadcast`, and the ticket's previous broadcast deleted, so a
-  ticket resurfaces at the bottom of the channel once. The collapsed card it sits beside has been
-  looked at: the operator saw six redrawn on 2026-09-28 render collapsed, with the title a working
-  link. No broadcast has been posted. What deletion leaves is the open question: a "This message was
-  deleted" marker in the channel or the thread would make the bump litter, and the deletion should
-  go. **What would show it:** `pnpm slack:once SSX-3986 --post --bump`, run twice, looking at the
-  channel and the thread after each. The first posts a broadcast; the second posts another and
-  deletes the first.
+- **What deleting a broadcast leaves has never been looked at.** Each major entry on a ticket that
+  already has a thread is posted as a reply with `reply_broadcast`, and the ticket's previous
+  broadcast deleted. One broadcast has been seen: `slack:once SSX-3986 --post --bump` on 2026-09-29,
+  whose mention notified the operator in the thread. A "This message was deleted" marker in the
+  channel or the thread would make the bump litter, and the deletion should go. **What would show
+  it:** the same command again, looking at the channel and the thread: it posts another broadcast
+  and deletes that one.
+- **The daemon has never answered `/bencebot`.** `SLACK_LISTEN` refuses a bad value and a missing
+  token at startup, driven on 2026-09-29; a daemon holding the connection has not been watched, nor
+  has Slack's own `disconnect` — every reconnect seen was a network drop, and Slack said the
+  connection lasts 18060s. The one command timed took seven seconds on a network that was dropping,
+  so the ack budget on a steady one is unmeasured too. **What would show it:** `SLACK_LISTEN=dry` in
+  the daemon's `.env` and a restart; `slack.listen_enabled`, then `slack.listen_connected`, then a
+  `/bencebot` answered as a dry run with no `slack.command_late`.
 - **The `MERGED → agent:done` arrow**, which needs a human to merge.
 - **The `poll.order` head has never truncated in the wild.** The line itself is observed: the first
   daemon cycle with `TRIAGE_STATUS_PRIORITY` set, 2026-09-10, emitted it for a real seven-ticket

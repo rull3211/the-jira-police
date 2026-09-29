@@ -651,7 +651,9 @@ writes the property and reads it back, and a reply that cannot see its own chang
 credential needs Administer Projects on `JIRA_PROJECT` for that write, and nothing else here does.
 The daemon answers it too once `SLACK_LISTEN` is `dry` or `live`, the same two modes; off by
 default, and a missing or wrong `SLACK_APP_TOKEN` stops the start. A hand-run listener beside the
-daemon is harmless but halves what each sees, since Slack gives each command to one connection.
+daemon splits the commands between them, since Slack gives each to one connection, and two changes
+in the same second can lose one without either reply saying so (`architecture/invariants.md`
+invariant 18).
 On a network that drops, Slack can report a command as failed that went through: `/bencebot` says
 where you stand, and `slack.command_late` in the log says the reply missed Slack's budget.
 

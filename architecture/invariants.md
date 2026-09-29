@@ -331,7 +331,10 @@ Things that look like details and are not:
     service's own bookkeeping — the audit thread's Slack message, its latest broadcast reply, the
     record they show, and on the project the Slack user IDs each broadcast mentions — and never
     anything the messages do not already show, since anyone who can see the ticket or the project
-    can read them through the API.
+    can read them through the API. The project's list is a read-modify-write with nothing
+    serialising two processes: a daemon and a hand-run `slack:listen` changing it in the same second
+    can lose one change. The read-back reports it only when the other write lands between its own
+    write and read; one landing after goes unreported, and `/bencebot` is how anyone would find out.
 
 19. **Slack never fails the work it reports on.** The audit thread is a reporting channel, and
     `AuditNotifier` in `slack/notifier.ts` never throws: a Slack refusal, a Jira property failure or
