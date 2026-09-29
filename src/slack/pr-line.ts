@@ -1,10 +1,7 @@
 /**
- * The direct message a solve sends the operator when it opens a pull request: the one line they copy
- * into the team's pull request channel. Posted to the user's ID, not a conversation's; `slack:probe`
- * measures whether Slack delivers that with the bot's scopes.
- *
- * Never throws, for the reason the audit notifier never throws: the pull request is already open,
- * and a Slack failure costs only the message, logged with Slack's own reason.
+ * The direct message a solve sends the operator when it opens a pull request: the line they paste
+ * into the team's pull request channel. Never throws, like the audit notifier: the pull request is
+ * already open, and a Slack failure costs only the message.
  */
 
 import { createLogger } from "../logger.ts";
