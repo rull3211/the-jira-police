@@ -254,8 +254,8 @@ why the rule is written down rather than left to taste.
 `teamChannelLine` is how the operator announces the pull request to the team: one Norwegian
 sentence saying what the change does, the way a developer writes it in that channel — _Fiks på
 cache eviction på vellykket customer write slik at vi tømmer cachen på utdaterte personer_. No
-issue key, link or markdown, and no claim that it works; the harness adds the link. Empty if you
-abandoned the run.
+issue key, link, @-mention or markdown, and no claim that it works; the harness adds the link.
+Empty if you abandoned the run.
 
 `abandoned` non-empty means you stopped and the harness should discard the run. Say what you left
 behind: if you wrote something before stopping, set `changed` and list it in `filesTouched`

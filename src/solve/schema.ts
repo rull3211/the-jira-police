@@ -168,7 +168,7 @@ export const FIX_SCHEMA = {
     teamChannelLine: {
       type: "string",
       description:
-        "ONE sentence in Norwegian bokmål saying what the change does, as a developer on the team would announce it in their pull request channel — for example: `Fiks på cache eviction på vellykket customer write slik at vi tømmer cachen på utdaterte personer`. Plain words only: no issue key, no link, no markdown, no emoji. The harness puts the pull request's link in front of it and cuts it to one line. Describe the change; do NOT claim that it works or that anything passes. Empty if you abandoned the run.",
+        "ONE sentence in Norwegian bokmål saying what the change does, as a developer on the team would announce it in their pull request channel — for example: `Fiks på cache eviction på vellykket customer write slik at vi tømmer cachen på utdaterte personer`. Plain words only: no issue key, no link, no @-mention, no markdown, no emoji. The harness puts the pull request's link in front of it and cuts it to one line. Describe the change; do NOT claim that it works or that anything passes. Empty if you abandoned the run.",
     },
     testAdded: {
       type: "boolean",

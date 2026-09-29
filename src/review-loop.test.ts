@@ -83,6 +83,18 @@ describe("createReviewLoop", () => {
     ).toThrow(SettingsError);
   });
 
+  it("refuses at startup an operator that is not a member ID, rather than at every claim", () => {
+    expect(() =>
+      createReviewLoop(
+        settingsWith({ ...ARMED, SLACK_OPERATOR_USER_ID: "@bence" }),
+        CLIENT,
+        new AbortController().signal,
+        900_000,
+        UNUSED_LEDGER,
+      ),
+    ).toThrow(SettingsError);
+  });
+
   it("ticks on REVIEW_POLL_MS, not on the poll cadence", () => {
     const loop = createReviewLoop(
       settingsWith({ ...ARMED, REVIEW_POLL_MS: "45000", POLL_INTERVAL_MS: "300000" }),
@@ -155,6 +167,17 @@ function startupLog(overrides: Partial<Record<string, string>>): Record<string, 
 
 const said = (log: readonly Record<string, unknown>[], message: string) =>
   log.find((line) => line["message"] === message);
+
+describe("what the daemon says about the pull request line when it starts", () => {
+  it("reports that it messages the operator only with an operator named and SLACK_MODE on", () => {
+    const on = { SLACK_MODE: "dry", SLACK_OPERATOR_USER_ID: "U0123ABCD" };
+    const start = (overrides: Partial<Record<string, string>>) =>
+      said(startupLog(overrides), "review.loop.start")?.["messagesOperatorOnPullRequest"];
+    expect(start(on)).toBe(true);
+    expect(start({ SLACK_MODE: "dry" })).toBe(false);
+    expect(start({ SLACK_OPERATOR_USER_ID: "U0123ABCD" })).toBe(false);
+  });
+});
 
 describe("what the daemon says about repair rounds when it starts", () => {
   it("reports that it promotes none unless REPAIR_PUBLISH is on", () => {

@@ -51,7 +51,7 @@ export function createReviewLoop(
   // Built here, not per tick, so a malformed query (unsafe project key, auto mode with no issue
   // types, an unrecognised SOLVE_MODE) stops the process at startup rather than every cycle.
   const queueDeps = createSolveDeps(settings, client, signal);
-  // Thrown away: each claim builds its own; this one only stops a malformed SLACK_OPERATOR_USER_ID at startup.
+  // Each claim builds its own sender; this one stops a malformed SLACK_OPERATOR_USER_ID at startup.
   const announces = pipelinePrLineSender(settings) !== null;
   const promoteRepair = daemonPromotesRepair(settings);
 

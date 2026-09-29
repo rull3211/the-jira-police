@@ -1,8 +1,7 @@
 /**
- * An audit record drawn as the Slack message it stands for: one collapsible container showing the
- * title, holding the status card, one line per major event, then the timeline newest first. Beside
- * it, the one-line messages: a major entry's broadcast, and the line the operator copies into the
- * team's pull request channel. Pure, so the whole layout is readable in a test.
+ * An audit record drawn as the Slack message it stands for — a collapsible container holding the
+ * status card, major events and the timeline — plus a broadcast's line and the pull request line.
+ * Pure, so the whole layout is readable in a test.
  */
 
 import { oneLine } from "../text.ts";
@@ -123,7 +122,9 @@ export const PR_LINK_LABEL = "PR-Bencebot";
  */
 export function renderPrLine(url: string, sentence: string, title: string): string {
   const words = oneLine(sentence) === "" ? oneLine(title) : oneLine(sentence);
-  return `${link(url, PR_LINK_LABEL)} ${escape(words)}`;
+  // Escaping protects only this message; pasted, a plain `@channel` would ping as the operator.
+  const unpinged = words.replaceAll(/(?<![\w.])@(here|channel|everyone)\b/giu, "$1");
+  return `${link(url, PR_LINK_LABEL)} ${escape(unpinged)}`;
 }
 
 /**

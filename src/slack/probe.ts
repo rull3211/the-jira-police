@@ -1,8 +1,7 @@
 /**
- * Whether both halves of the audit thread's store work against the real systems: a Slack message
- * posted, edited and deleted, and a record written to, read back from and deleted on one named
- * ticket. Measured before anything is built on either. With an operator named, also whether the bot
- * can send them the direct message a pull request's line arrives in.
+ * Whether the audit thread's store works against the real systems — a Slack message posted, edited
+ * and deleted, a record round-tripped through one named ticket — and, with an operator named,
+ * whether the bot can send them a direct message.
  */
 
 import { isDeepStrictEqual } from "node:util";

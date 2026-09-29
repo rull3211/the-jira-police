@@ -1,7 +1,6 @@
 /**
- * The direct message a solve sends the operator when it opens a pull request: the line they paste
- * into the team's pull request channel. Never throws, like the audit notifier: the pull request is
- * already open, and a Slack failure costs only the message.
+ * The direct message holding the line the operator pastes into the team's pull request channel.
+ * Never throws, like the audit notifier: the pull request is already open when it is sent.
  */
 
 import { createLogger } from "../logger.ts";

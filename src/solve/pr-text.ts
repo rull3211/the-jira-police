@@ -1,7 +1,6 @@
 /**
- * The title and body of the draft pull request, and the sentence it is announced
- * with. Pure and its own module so the wording can be read in a test rather than
- * only by opening a PR.
+ * The title and body of the draft pull request, and its channel sentence. Pure
+ * and its own module so the wording can be read in a test rather than in a PR.
  *
  * The model writes the commit message and its account of each pass, quoted here
  * under headings that say whose words they are; everything else (exit codes,

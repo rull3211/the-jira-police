@@ -244,9 +244,14 @@ describe("renderPrLine", () => {
     }
   });
 
-  it("escapes the sentence, so a model cannot ping the channel it is pasted into", () => {
+  it("escapes the sentence, so the direct message itself carries no markup it did not write", () => {
     const line = renderPrLine(PR, "Fiks <!channel> & <@U0123ABCD>", TITLE);
     expect(line).toBe(`<${PR}|PR-Bencebot> Fiks &lt;!channel&gt; &amp; &lt;@U0123ABCD&gt;`);
+  });
+
+  it("drops the @ from a broadcast mention, which would ping as the operator once pasted", () => {
+    const line = renderPrLine(PR, "Fiks @channel, @HERE og @everyone; mail@here.no står", TITLE);
+    expect(line).toBe(`<${PR}|PR-Bencebot> Fiks channel, HERE og everyone; mail@here.no står`);
   });
 
   it("shows only the label for a URL that is not plain https, since escaping cannot make one safe", () => {
