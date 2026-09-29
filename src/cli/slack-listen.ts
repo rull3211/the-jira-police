@@ -11,9 +11,7 @@ import { join } from "node:path";
 
 import { createLogger } from "../logger.ts";
 import { readSettings, withConfigErrors } from "../settings.ts";
-import { createCommandHandler, ROSTER_PROPERTY } from "../slack/roster.ts";
-import { listen, openWebSocket } from "../slack/socket.ts";
-import { createListenClient, rosterStoreFor } from "../wiring.ts";
+import { listenerFor, rosterWhere } from "../wiring.ts";
 
 const log = createLogger("slack-listen");
 
@@ -39,14 +37,9 @@ async function main(): Promise<void> {
   }
   const write = args.includes("--write");
   const settings = readSettings();
-  const client = createListenClient(settings);
-  const where = `${ROSTER_PROPERTY} on ${settings.JIRA_PROJECT}`;
-  const handle = createCommandHandler(rosterStoreFor(settings, write ? "live" : "dry"), {
-    dry: !write,
-    where,
-  });
-
+  const where = rosterWhere(settings);
   const controller = new AbortController();
+  const start = listenerFor(settings, write ? "live" : "dry", controller.signal);
   const stop = (): void => {
     controller.abort();
   };
@@ -58,12 +51,7 @@ async function main(): Promise<void> {
       ? `Listening for /bencebot, writing ${where}. Ctrl-C stops.\n`
       : `Listening for /bencebot, dry: ${where} is read, and ${join(settings.OUTPUT_DIR, "slack", "roster.json")} written. Ctrl-C stops.\n`,
   );
-  const summary = await listen({
-    open: () => client.openConnection(),
-    connect: openWebSocket,
-    handle,
-    signal: controller.signal,
-  });
+  const summary = await start();
   process.stdout.write(
     `\nStopped after ${String(summary.commands)} command(s) over ${String(summary.connections)} connection(s).\n`,
   );

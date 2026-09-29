@@ -365,8 +365,14 @@ export const SETTINGS = [
   {
     name: "SLACK_APP_TOKEN",
     description:
-      "The Slack app's app-level token, `xapp-…`, from Basic Information → App-Level Tokens with the `connections:write` scope: what opens the Socket Mode connection `/bencebot` arrives on. Unset, nothing listens; only `slack:listen` reads it, and it refuses any other prefix. Best written `keychain:<name>`, like SLACK_BOT_TOKEN. Withheld from every model session.",
+      "The Slack app's app-level token, `xapp-…`, from Basic Information → App-Level Tokens with the `connections:write` scope: what opens the Socket Mode connection `/bencebot` arrives on. Unset, nothing listens; only `slack:listen` and a daemon with SLACK_LISTEN on read it, and both refuse any other prefix. Best written `keychain:<name>`, like SLACK_BOT_TOKEN. Withheld from every model session.",
     sensitive: true,
+  },
+  {
+    name: "SLACK_LISTEN",
+    description:
+      "Whether the daemon answers `/bencebot`. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and writing OUTPUT_DIR/slack/roster.json; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
+    fallback: "off",
   },
   {
     name: "LOG_LEVEL",
@@ -594,6 +600,17 @@ export function slackMode(settings: Settings): SlackMode {
   }
   throw new SettingsError([
     `SLACK_MODE (expected "off", "dry" or "live", got "${settings.SLACK_MODE}")`,
+  ]);
+}
+
+/** Reads `SLACK_LISTEN`; the same three words as `SLACK_MODE`, answering a different question. */
+export function slackListen(settings: Settings): SlackMode {
+  const raw = settings.SLACK_LISTEN.trim().toLowerCase();
+  if (raw === "off" || raw === "dry" || raw === "live") {
+    return raw;
+  }
+  throw new SettingsError([
+    `SLACK_LISTEN (expected "off", "dry" or "live", got "${settings.SLACK_LISTEN}")`,
   ]);
 }
 

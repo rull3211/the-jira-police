@@ -10,18 +10,19 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-121 production modules, 107 test files. Grouped by what they belong to rather than alphabetically,
+122 production modules, 108 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
 
 | Path                       | Role                                                                                                                                                               |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/index.ts`             | Daemon entry point. Three loops, signal handling, `--skill` / `--interval` / `--for` overrides                                                                     |
+| `src/index.ts`             | Daemon entry point. Three loops and the `/bencebot` listener, signal handling, `--skill` / `--interval` / `--for` overrides                                        |
 | `src/loop.ts`              | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                               |
 | `src/poller.ts`            | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                     |
 | `src/review-loop.ts`       | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                    |
 | `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                    |
+| `src/slack-loop.ts`        | The `/bencebot` listener's switch: `SLACK_LISTEN`, the token checked at startup, a runner that resolves rather than rejects                                        |
 | `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                     |
 | `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                             |
 | `src/keychain.ts`          | `keychain:<name>` values, read from the macOS login keychain by `/usr/bin/security` inside the process. `readSettings` honours one only on a `sensitive` setting   |
@@ -218,7 +219,8 @@ places: `createGroom` (triage), `createSolveRunDeps` (every model pass, through 
 after it would strand the claim), `runReviewSweep` and `runAdvance` (what each look found, recorded
 first, then rounds, undraft, merge). Both notifiers read the subscriber list at each broadcast.
 `createListenClient` builds the Socket Mode client and refuses any token but an `xapp-` one, and
-`rosterStoreFor` the list's store; `slack:listen` is the only caller of either.
+`rosterStoreFor` the list's store, and `listenerFor` puts them together for both callers,
+`slack:listen` and the daemon's `createSlackListener`.
 
 `wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same

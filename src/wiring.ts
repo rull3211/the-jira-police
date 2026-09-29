@@ -44,11 +44,14 @@ import {
 } from "./slack/notifier.ts";
 import { syntheticSummary } from "./triage/single.ts";
 import {
+  ROSTER_PROPERTY,
   type RosterStore,
+  createCommandHandler,
   dryRosterStore,
   loadRoster,
   propertyRosterStore,
 } from "./slack/roster.ts";
+import { type ListenDeps, type ListenSummary, listen, openWebSocket } from "./slack/socket.ts";
 import { dryPublisher, dryStore, propertyStore, slackPublisher } from "./slack/store.ts";
 import {
   type Settings,
@@ -553,6 +556,25 @@ export function rosterStoreFor(settings: Settings, mode: "dry" | "live"): Roster
   return mode === "dry"
     ? dryRosterStore(jira, settings.JIRA_PROJECT, join(settings.OUTPUT_DIR, "slack"))
     : propertyRosterStore(jira, settings.JIRA_PROJECT);
+}
+
+/** `slack:listen` and the daemon alike; the token is checked here, before anything connects. */
+export function listenerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+  signal: AbortSignal,
+  run: (deps: ListenDeps) => Promise<ListenSummary> = listen,
+): () => Promise<ListenSummary> {
+  const client = createListenClient(settings);
+  const handle = createCommandHandler(rosterStoreFor(settings, mode), {
+    dry: mode === "dry",
+    where: rosterWhere(settings),
+  });
+  return () => run({ open: () => client.openConnection(), connect: openWebSocket, handle, signal });
+}
+
+export function rosterWhere(settings: Settings): string {
+  return `${ROSTER_PROPERTY} on ${settings.JIRA_PROJECT}`;
 }
 
 let pipelineAudit: { readonly key: string; readonly notifier: AuditNotifier | null } | undefined;

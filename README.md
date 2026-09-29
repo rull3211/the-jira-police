@@ -649,6 +649,11 @@ it. Dry, it reads the real list and writes what each command would make of it to
 `<OUTPUT_DIR>/slack/roster.json`, and every reply starts `(dry run, nothing written)`. `--write`
 writes the property and reads it back, and a reply that cannot see its own change says so. The
 credential needs Administer Projects on `JIRA_PROJECT` for that write, and nothing else here does.
+The daemon answers it too once `SLACK_LISTEN` is `dry` or `live`, the same two modes; off by
+default, and a missing or wrong `SLACK_APP_TOKEN` stops the start. A hand-run listener beside the
+daemon is harmless but halves what each sees, since Slack gives each command to one connection.
+On a network that drops, Slack can report a command as failed that went through: `/bencebot` says
+where you stand, and `slack.command_late` in the log says the reply missed Slack's budget.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and

@@ -316,6 +316,12 @@ Things that look like details and are not:
     not tidiness either — the ordering above is the whole of the safety property, and a safety
     property with no test is a comment.
 
+    The `/bencebot` listener is held to the same rule without being a loop. `createSlackListener`
+    in `src/slack-loop.ts` reads `SLACK_LISTEN` first and returns `null` when it is off; when it is
+    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks; and what it returns resolves
+    rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves the loops
+    running.
+
 18. **A property write names a key under `jira-police.`, and nothing else.** The REST credential
     reads and writes a ticket's properties only through `getIssueProperty`, `setIssueProperty` and
     `deleteIssueProperty` in `jira/client.ts`, and the project's through `getProjectProperty` and
