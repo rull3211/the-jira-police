@@ -550,16 +550,17 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
-- **No solve has moved its ticket's status or edited its broadcast line.** Both are tested and
-  neither has run. The daemon's `.env` sets none of the `SOLVE_*_STATUS` settings, so the move to
-  code review has been inert there too, and nothing has sent `chat.update` to a `reply_broadcast`
-  reply: `slack:probe` measures that call and has not been run since it learned to, and its reply
-  names nobody, so whether an edit that keeps a line's mentions notifies them again is unmeasured.
-  Moving into progress costs two status notifications when recon declines. **What would show it:**
-  `pnpm slack:probe <KEY> --keep`, then look at the channel for the edited reply. Then set the
-  statuses by id and run one `solve:once <KEY> --pr` on a ticket in Prioritized. The ticket should
-  be in "Under arbeid" at the claim, and the channel should show "Solve started" with each pass edited
-  under it. A run that opens no pull request should put the ticket back in Prioritized.
+- **The status moves have run; the broadcast line's edits have not been looked at.** SSX-4005 on
+  2026-09-30 took all three moves over two daemon runs, read back from its changelog: Received → In
+  Progress at the claim and back to Prioritized when the fix pass crashed (§79), then Prioritized →
+  In Progress → In Code Review when the second run opened a pull request. Its audit record advanced
+  through every pass. Nobody checked whether each step was edited into the "Solve started" line
+  rather than posted, and `slack:probe`, which measures that call, has not been run since it
+  learned to; its reply names nobody, so whether an edit that keeps a line's mentions notifies them
+  again is unmeasured. Moving into progress costs two status notifications when recon declines.
+  **What would show it:** the channel on the next solve, one "Solve started" line with a single `↳`
+  step under it that changes as the passes run; and `pnpm slack:probe <KEY> --keep` for the edited
+  reply.
 - **No triage has run on the skill text that puts the legend above the footer sentinel.** Three of
   155 bodies, 2026-09-03 to 2026-09-30, put it below (`architecture/triage.md` §12, the legend
   entry), too few for any number of runs to show the text changed the rate. `withFitnessNote` moves
