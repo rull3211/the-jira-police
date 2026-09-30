@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73 and §75, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75 and §77, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -83,28 +83,6 @@ from their own base, and it read §72 here after §73 and §74 had been issued. 
 `feat/slack-audit-thread`, open when §71 was written.
 
 <!-- refs:on -->
-
-### 77. The demo decks live in a gitignored folder on one laptop
-
-**Branch:** `docs/presentation`
-
-**What is not built.** A home in the repository for the three demo decks written for the
-2026-09-29 demo: the full English deck, its Norwegian twin and a short capabilities-only deck.
-Today they are generator scripts under `/groomed/demo/`, which `.gitignore` excludes, loading
-`pptxgenjs` from an absolute path outside the repository. Nobody else can rebuild them, and nobody
-can review them.
-
-**Why now.** The operator asked for it after the demo: the decks are reused, and a second demo is
-tomorrow.
-
-**The shape.** `presentation/` at the root, with its own `package.json` and lockfile so the
-daemon's dependency set gains nothing; one shared module for the masters and drawing helpers
-instead of three pasted copies; `pnpm presentation` to build all three into a gitignored `out/`;
-and the macOS render check that verified every slide, kept beside them.
-
-**What would make it the wrong idea.** The decks quote numbers and states of the repository as of
-2026-09-29, and nothing keeps them true. If they are read as current documentation rather than a
-dated snapshot, they are the stale-prose defect this project exists to catch, committed on purpose.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
