@@ -41,10 +41,13 @@ pnpm --dir presentation check full.en        # every slide
 pnpm --dir presentation check full.en 4 11   # just these
 ```
 
-It writes one PNG per slide to `out/check/<deck>/png/`. macOS only: it renders through Quick Look
-and WebKit, reads the fonts out of an installed Microsoft PowerPoint, and compiles
-`check/snap.swift` with `swiftc` on first use. Each slide is built as a one-slide file first,
-because Quick Look reuses the shapes of earlier slides in the same file.
+A slide's number is the one printed in its bottom-right corner in the built deck; every PNG shows
+1, because each slide is rendered on its own. It writes one PNG per slide to
+`out/check/<deck>/png/`, and exits non-zero if any slide could not be rendered. macOS only: it
+renders through Quick Look and WebKit, reads the fonts out of an installed Microsoft PowerPoint, and
+compiles `check/snap.swift` with `swiftc` whenever the source is newer than the binary. Each slide is
+built as a one-slide file first, because Quick Look reuses the shapes of earlier slides in the same
+file.
 
 **What it does not show.** Quick Look ignores a text box's right inset, so a line that fits here
 can wrap in PowerPoint; and it collapses table rows that PowerPoint draws at their full height.

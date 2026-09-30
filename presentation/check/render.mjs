@@ -1,16 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const DECKS = ["full.en", "full.no", "simple.en"];
+import { DECKS } from "../decks.mjs";
+
 const USAGE = `usage: pnpm --dir presentation check <${DECKS.join("|")}> [slide ...]   (macOS, with PowerPoint installed)\n`;
+
+function fail(message, code) {
+  process.stderr.write(message);
+  process.exit(code);
+}
 
 const here = import.meta.dirname;
 const root = join(here, "..");
 const [deck, ...asked] = process.argv.slice(2);
 if (!DECKS.includes(deck) || asked.some((n) => !/^\d+$/.test(n))) {
-  process.stderr.write(USAGE);
-  process.exit(2);
+  fail(USAGE, 2);
 }
 
 // Quick Look's HTML names Calibri and Consolas, which WebKit cannot see; without these it falls back to Times and every width is wrong.
@@ -40,11 +45,16 @@ function build(only) {
   return execFileSync(process.execPath, [join(root, `${deck}.mjs`)], { env, encoding: "utf8" });
 }
 
-let slides = asked.map(Number);
-if (slides.length === 0) {
-  const total = Number(/\((\d+) slides\)/.exec(build())?.[1] ?? 0);
-  slides = [...Array(total).keys()].map((i) => i + 1);
+const counted = /\((\d+) slides\)/.exec(build());
+if (counted === null) {
+  fail(`could not read the slide count from ${deck}.mjs's output\n`, 1);
 }
+const total = Number(counted[1]);
+const outOfRange = asked.map(Number).filter((n) => n < 1 || n > total);
+if (outOfRange.length > 0) {
+  fail(`${deck} has slides 1–${total}; no slide ${outOfRange.join(", ")}\n`, 2);
+}
+const slides = asked.length > 0 ? asked.map(Number) : [...Array(total).keys()].map((i) => i + 1);
 
 // qlmanage opens an interactive preview instead of writing files when the output directory is missing.
 mkdirSync(ql, { recursive: true });
@@ -65,8 +75,10 @@ for (const n of slides) {
 }
 
 const snap = join(root, "out", "check", "snap");
-if (!existsSync(snap)) {
-  execFileSync("swiftc", ["-O", join(here, "snap.swift"), "-o", snap], { stdio: "inherit" });
+const snapSource = join(here, "snap.swift");
+if (!existsSync(snap) || statSync(snapSource).mtimeMs > statSync(snap).mtimeMs) {
+  execFileSync("swiftc", ["-O", snapSource, "-o", snap], { stdio: "inherit" });
 }
+// snap exits non-zero on any slide it could not render, which execFileSync turns into a throw.
 execFileSync(snap, [png, "/", ...previews], { stdio: "inherit" });
 process.stdout.write(`${slides.length} slide(s) → ${png}\n`);

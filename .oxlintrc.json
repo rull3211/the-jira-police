@@ -31,7 +31,11 @@
       }
     },
     {
-      "files": ["presentation/**"],
+      "files": [
+        "presentation/full.en.mjs",
+        "presentation/full.no.mjs",
+        "presentation/simple.en.mjs"
+      ],
       "rules": {
         "unicorn/consistent-function-scoping": "off"
       }

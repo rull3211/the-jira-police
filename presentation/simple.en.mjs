@@ -10,12 +10,8 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
       ["agent", "AI — a model session"],
       ["human", "A person"],
     ],
-    partLabel: "PART",
   });
 
-// =====================================================================
-// 1. Title
-// =====================================================================
 {
   const s = pptx.addSlide({ masterName: "DARK" });
   s.addText("DEMO  ·  29 SEPTEMBER 2026", {
@@ -85,9 +81,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 2. The big picture
-// =====================================================================
 {
   const s = content(
     "The big picture",
@@ -171,9 +164,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   legend(s, 6.4);
 }
 
-// =====================================================================
-// 3. Grooming
-// =====================================================================
 {
   const s = content(
     "Capability 1 · Grooming",
@@ -276,9 +266,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 4. Follow-up
-// =====================================================================
 {
   const s = content(
     "Capability 2 · Follow-up",
@@ -428,9 +415,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   legend(s, 6.4);
 }
 
-// =====================================================================
-// 5. Solving
-// =====================================================================
 {
   const s = content(
     "Capability 3 · Solving",
@@ -528,9 +512,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 6. Verification
-// =====================================================================
 {
   const s = content(
     "Capability 4 · Checking",
@@ -617,9 +598,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 7. Review
-// =====================================================================
 {
   const s = content(
     "Capability 5 · Review",
@@ -741,9 +719,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   });
 }
 
-// =====================================================================
-// 8. Slack
-// =====================================================================
 {
   const s = content(
     "Capability 6 · Audit trail",
@@ -927,9 +902,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 9. Who does what
-// =====================================================================
 {
   const s = content(
     "The split",
@@ -1018,9 +990,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 10. Safety
-// =====================================================================
 {
   const s = content(
     "Safety",
@@ -1096,9 +1065,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 11. A real run
-// =====================================================================
 {
   const s = content(
     "A real run",
@@ -1178,9 +1144,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   });
 }
 
-// =====================================================================
-// 12. How it's built
-// =====================================================================
 {
   const s = content(
     "How it's built",
@@ -1266,9 +1229,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   );
 }
 
-// =====================================================================
-// 13. Live demo
-// =====================================================================
 {
   const s = content(
     "Live demo",
@@ -1334,9 +1294,6 @@ const { pptx, content, node, arrow, path, label, legend, bullets, card, callout,
   });
 }
 
-// =====================================================================
-// 14. Close
-// =====================================================================
 {
   const s = pptx.addSlide({ masterName: "DARK" });
   s.addText("TAKEAWAYS", {

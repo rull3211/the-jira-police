@@ -279,6 +279,9 @@ export function createDeck({ id, title, footer, legendItems, partLabel }) {
   }
 
   function section(num, heading, sub, items, notes) {
+    if (partLabel === undefined) {
+      throw new Error(`deck ${id} draws a section slide but was created without a partLabel`);
+    }
     const s = pptx.addSlide({ masterName: "DARK" });
     s.addText(`${partLabel} ${num}`, {
       x: 0.8,
