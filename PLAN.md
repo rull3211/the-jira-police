@@ -543,6 +543,12 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   the session transcript, and recon and review share that gap. **What would show it:** a fix pass's
   transcript holding a `does not match required schema` tool result, or a probe that gets a
   violating submission past the model.
+- **The gate's verdict-banner check has refused only replayed bodies, never a live run.** Through
+  `assertPostable`, the 152 `StructuredOutput` bodies on disk gave exactly four refusals: the
+  three sessions that never triaged, and the mock (`architecture/triage.md` §3). Withholding
+  `Skill` has held on one real run, SSX-4000 on 2026-09-30. **What would show it:** a
+  `groomed/<KEY>.rejected.md` naming the missing banner — either a session that stopped for some
+  reason other than the refusal, or a real report the pattern misses.
 
 ### 11. Loose ends recorded in no other file
 
@@ -1134,6 +1140,28 @@ three runs above. The mock's body has none, and never reaches the gate: a stand-
   a vendored update could change; a real run refused for a missing banner costs a paid retry.
 - **The model may find another route to the same confusion** — the refusal is one trigger seen, not
   the only possible one — which a banner check would not catch when the triage itself was done.
+
+### 76. The solve passes can still reach the Skill tool and its refusal
+
+**Branch:** none yet.
+
+**What is not built.** The analyst withholds `Skill` (`architecture/overview.md` §6); no solve pass
+does, and `agent-solve` carries `disable-model-invocation: true` too. Two review passes called the
+tool for `agent-solve` and got the same "do not replicate this skill's workflow" refusal: SSX-3784
+on 2026-09-24 and SSX-3940 on 2026-09-28. Whether either answer changed because of it has not been
+read.
+
+**Why it was not built alongside.** The simplify pass holds `Skill` on purpose, to run `/simplify`
+(`SIMPLIFY_ALLOWED_TOOLS`), and shares `FIX_DENIED_TOOLS` with fix, review, merge and repair, so
+the denial has to be split per pass rather than added to one list. Each pass it touches needs a
+paid run to show its `/agent-solve` line still expands.
+
+**What would make it the wrong idea:**
+
+- **Two sessions out of every solve pass since 2026-09-17 may be the whole rate.** Count them
+  before building: if no solve outcome ever followed the refusal, the split buys little.
+- **Splitting the denylist is a new place for passes to drift apart**, which one shared list
+  prevents today.
 
 ## Verification
 

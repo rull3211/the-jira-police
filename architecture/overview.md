@@ -219,7 +219,8 @@ storecode -p "/intake-triage SSX-1234 --no-write --no-html" \
   122 before it. SSX-3918, SSX-2681 and SSX-3989 obeyed it and returned an explanation in place of
   a triage; SSX-4000 triaged and then scored its own run as "not applicable" instead of the ticket.
   The `/intake-triage` line is expanded before the model's first turn, not through the tool, so the
-  denial removes the refusal and nothing the run uses. What catches a session that stops anyway is
+  denial removes the refusal and nothing the run uses: SSX-4000's re-run on 2026-09-30, CLI
+  2.1.285, loaded the skill and made no `Skill` call. What catches a session that stops anyway is
   the gate's banner check (`architecture/triage.md` §3).
 
 - **`stream-json`, not `json`** — the MCP status guard needs the `system`/`init` event, which only
