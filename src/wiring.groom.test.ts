@@ -193,7 +193,6 @@ describe("createGroom with WRITE_BACK on", () => {
   });
 
   it("posts a body whose legend the model put below the sentinel, rather than refusing it", async () => {
-    // SSX-4005's first triage on 2026-09-30 was refused for exactly this, and bought again.
     const legend = "_Legend: ✅accept ⛔reject ↪route ↩send-back._";
     runTriage.mockResolvedValue(
       readyish({

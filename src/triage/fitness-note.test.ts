@@ -189,6 +189,7 @@ describe("the footer, which upstream also told the model to end with the legend"
     ).match(/`(_Legend:[^`]+)`/u)?.[1] ?? "";
   const REPORT = "# ✅ ACCEPT → queue · SSX-3822\n\nThe report.";
   const TEMPLATE_ORDER = `${REPORT}\n\n${LEGEND}\n\n${FOOTER_SENTINEL}`;
+  const TYPED = `${REPORT}\n\n---\n\n${FITNESS_MARKER}:** in its own words\n\nA reason.`;
 
   /** What SSX-3935, SSX-3534 and SSX-4005 were refused for, with `lines` after the sentinel. */
   const below = (...lines: readonly string[]): string =>
@@ -212,14 +213,13 @@ describe("the footer, which upstream also told the model to end with the legend"
     expect(posted(below(LEGEND), "needs-info")).toBe(TEMPLATE_ORDER);
   });
 
-  it("keeps the legend when the model typed its own fitness block above the sentinel", () => {
-    // That block runs to the sentinel, so a legend moved above it before the strip goes with it.
-    const typed = `${REPORT}\n\n---\n\n${FITNESS_MARKER}:** in its own words\n\nA reason.\n\n${FOOTER_SENTINEL}\n${LEGEND}`;
-    const body = posted(typed);
-
-    expect(body.split(LEGEND)).toHaveLength(2);
-    expect(blocks(body)).toBe(1);
-    expect(body.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
+  it.each([
+    ["above the sentinel, where the skill says", `${TYPED}\n\n${LEGEND}\n\n${FOOTER_SENTINEL}`],
+    ["below the sentinel", `${TYPED}\n\n${FOOTER_SENTINEL}\n${LEGEND}`],
+  ])("keeps the legend after a fitness block the model typed itself, legend %s", (_, body) => {
+    // A block runs until something closes it, and whatever it runs over is stripped with it.
+    expect(posted(body)).toBe(posted(TEMPLATE_ORDER));
+    expect(posted(body, "needs-info")).toBe(TEMPLATE_ORDER);
   });
 
   it("leaves a sentinel sharing its line with text alone, since moving it would drop that text", () => {

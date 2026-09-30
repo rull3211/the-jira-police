@@ -1,7 +1,6 @@
 /**
  * Renders the agent-fitness call onto the ticket from `payload.agentFitness` rather than having
- * the model write prose, so the comment can never disagree with the structured field. It owns the
- * comment's tail, so it also puts back a legend the model wrote below the footer sentinel.
+ * the model write prose, so the comment can never disagree with the structured field.
  */
 
 import { FITNESS_MARKER, FOOTER_SENTINEL } from "./gate.ts";
@@ -75,11 +74,11 @@ export function buildFitnessNote(
 
 const isSeparator = (line: string): boolean => line.trim() === "---";
 
+const isLegend = (line: string): boolean => line.trimStart().startsWith("_Legend:");
+
 /**
- * Removes existing agent-fitness blocks so the splice below is the only writer of one. A block
- * opens on a line starting with `FITNESS_MARKER` (column zero only, so a mention mid-sentence
- * doesn't count) and closes at the next `---` or the footer; the backward scan also eats the
- * separator/blank the renderer put before the marker, so no dangling `---` is left behind.
+ * Removes agent-fitness blocks so the splice below is the only writer of one. A block opens at a
+ * column-zero `FITNESS_MARKER` and closes at `---`, the legend line or the footer.
  */
 function stripFitnessBlocks(body: string): string {
   const lines = body.split("\n");
@@ -104,16 +103,18 @@ function stripFitnessBlocks(body: string): string {
       continue;
     }
 
-    if (isSeparator(line) || line.startsWith(FOOTER_SENTINEL)) {
+    if (isSeparator(line) || isLegend(line) || line.startsWith(FOOTER_SENTINEL)) {
       inBlock = false;
+      // The block's own `---` was popped above, so the legend would join the paragraph before it.
+      if (isLegend(line) && (kept.at(-1) ?? "").trim() !== "") {
+        kept.push("");
+      }
       kept.push(line);
     }
   }
 
   return kept.join("\n");
 }
-
-const isLegend = (line: string): boolean => line.trimStart().startsWith("_Legend:");
 
 /**
  * Moves the skill's legend line back above the sentinel when it is the one line below it, since
@@ -133,15 +134,12 @@ function legendAboveSentinel(body: string): string {
 }
 
 /**
- * Returns the payload with exactly one note in the comment, above the footer sentinel, which is
- * left as the last line. The strip always runs, even with no note to add, so a watch note is
- * cleared once the ticket stops qualifying; a body with no sentinel is returned untouched since
- * `assertPostable` refuses it elsewhere.
+ * Returns the payload with exactly one note, above the footer sentinel, which stays the last line.
+ * The strip runs even with no note, so a watch note is cleared once the ticket stops qualifying.
  */
 export function withFitnessNote(payload: TriagePayload): TriagePayload {
   const note = buildFitnessNote(payload.verdict, payload.agentFitness);
   const body = payload.mutation.commentBody;
-  // Stripped first: a block runs to the sentinel, so a legend moved above it first would go with it.
   const tidied = legendAboveSentinel(stripFitnessBlocks(body));
 
   if (note === null && tidied === body) {
