@@ -1,6 +1,7 @@
 /**
  * Renders the agent-fitness call onto the ticket from `payload.agentFitness` rather than having
- * the model write prose, so the comment can never disagree with the structured field.
+ * the model write prose, so the comment can never disagree with the structured field. It owns the
+ * comment's tail, so it also puts back a legend the model wrote below the footer sentinel.
  */
 
 import { FITNESS_MARKER, FOOTER_SENTINEL } from "./gate.ts";
@@ -112,28 +113,48 @@ function stripFitnessBlocks(body: string): string {
   return kept.join("\n");
 }
 
+const isLegend = (line: string): boolean => line.trimStart().startsWith("_Legend:");
+
 /**
- * Returns the payload with exactly one note in the comment, above the footer sentinel (the poster
- * matches that exact trailing line to update in place). The strip always runs, even with no note
- * to add, so a watch note is cleared once the ticket stops qualifying; a body with no sentinel is
- * returned untouched since `assertPostable` refuses it elsewhere.
+ * Moves the skill's legend line back above the sentinel when it is the one line below it, since
+ * upstream told the model to end the comment with each. Anything else below is left for the gate.
+ */
+function legendAboveSentinel(body: string): string {
+  const lines = body.trimEnd().split("\n");
+  const at = lines.findLastIndex((line) => line.trimEnd() === FOOTER_SENTINEL);
+  const below = lines.slice(at + 1).filter((line) => line.trim() !== "");
+  const legend = below[0];
+
+  if (at === -1 || below.length !== 1 || legend === undefined || !isLegend(legend)) {
+    return body;
+  }
+
+  return `${lines.slice(0, at).join("\n").trimEnd()}\n\n${legend.trim()}\n\n${FOOTER_SENTINEL}`;
+}
+
+/**
+ * Returns the payload with exactly one note in the comment, above the footer sentinel, which is
+ * left as the last line. The strip always runs, even with no note to add, so a watch note is
+ * cleared once the ticket stops qualifying; a body with no sentinel is returned untouched since
+ * `assertPostable` refuses it elsewhere.
  */
 export function withFitnessNote(payload: TriagePayload): TriagePayload {
   const note = buildFitnessNote(payload.verdict, payload.agentFitness);
   const body = payload.mutation.commentBody;
-  const stripped = stripFitnessBlocks(body);
+  // Stripped first: a block runs to the sentinel, so a legend moved above it first would go with it.
+  const tidied = legendAboveSentinel(stripFitnessBlocks(body));
 
-  if (note === null && stripped === body) {
+  if (note === null && tidied === body) {
     return payload;
   }
 
-  const at = stripped.lastIndexOf(FOOTER_SENTINEL);
+  const at = tidied.lastIndexOf(FOOTER_SENTINEL);
   if (at === -1) {
     return payload;
   }
 
-  const head = stripped.slice(0, at).trimEnd();
-  const tail = stripped.slice(at);
+  const head = tidied.slice(0, at).trimEnd();
+  const tail = tidied.slice(at);
   const commentBody = note === null ? `${head}\n\n${tail}` : `${head}\n\n${note}\n\n${tail}`;
 
   return { ...payload, mutation: { ...payload.mutation, commentBody } };

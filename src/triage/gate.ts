@@ -136,9 +136,14 @@ function checkComment(payload: TriagePayload, issueKey: string): readonly string
     );
   }
 
-  if (!body.trimEnd().endsWith(FOOTER_SENTINEL)) {
+  if (!body.includes(FOOTER_SENTINEL)) {
     violations.push(
-      `the comment body does not end with the §11 footer sentinel, so a re-run could not update it in place and would post a second copy instead`,
+      `the comment body has no §11 footer sentinel, so a re-run could not find it to update in place and would post a second copy instead`,
+    );
+  } else if (!body.trimEnd().endsWith(FOOTER_SENTINEL)) {
+    // `withFitnessNote` has already moved a legend line back above it, so this is something else.
+    violations.push(
+      `the comment body has text after the footer sentinel, which the skill makes the last line, and it is not the legend line that is moved back above it`,
     );
   }
 

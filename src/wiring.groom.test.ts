@@ -181,8 +181,8 @@ describe("createGroom with WRITE_BACK on", () => {
     expect(posted).toContain("`buy-insurance-advisor-web`");
   });
 
-  it("keeps the footer sentinel last, so a re-run still updates in place", async () => {
-    // The poster identifies its own previous comment by this trailing line; splicing the note after it would duplicate on every re-run.
+  it("keeps the footer sentinel last, and only one of it", async () => {
+    // The skill makes the sentinel the last line, and a second copy would be a second match for a re-run.
     runTriage.mockResolvedValue(readyish());
     await createGroom(on())(TICKET);
 
@@ -190,6 +190,26 @@ describe("createGroom with WRITE_BACK on", () => {
 
     expect(posted.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
     expect(posted.split(FOOTER_SENTINEL)).toHaveLength(2);
+  });
+
+  it("posts a body whose legend the model put below the sentinel, rather than refusing it", async () => {
+    // SSX-4005's first triage on 2026-09-30 was refused for exactly this, and bought again.
+    const legend = "_Legend: ✅accept ⛔reject ↪route ↩send-back._";
+    runTriage.mockResolvedValue(
+      readyish({
+        mutation: mutation({
+          commentBody: `# ✅ ACCEPT → queue · SSX-1234\n\nThe report.\n\n${FOOTER_SENTINEL}\n${legend}`,
+          labelsAdd: ["dor:pass"],
+          labelsRemove: ["dor:gaps"],
+        }),
+      }),
+    );
+    await createGroom(on())(TICKET);
+
+    const posted = runPost.mock.calls[0]?.[0]?.mutation.commentBody ?? "";
+
+    expect(posted.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
+    expect(posted).toContain(legend);
   });
 
   it("gates the body it will actually post, not the draft before the splice", async () => {
