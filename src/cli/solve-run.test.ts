@@ -24,7 +24,7 @@ import {
   returnFromInProgress,
   runWriteRungs,
 } from "./solve-run.ts";
-import type { StatusMoveResult, JiraClient } from "../jira/client.ts";
+import { STATUS_MOVE_OUTCOMES, type JiraClient, type StatusMoveResult } from "../jira/client.ts";
 import { AGENT_LABELS } from "../solve/labels.ts";
 import type { AdvanceRequest, PendingRound } from "../solve/delivery.ts";
 import type { SolveDependencies } from "../solve/orchestrator.ts";
@@ -337,12 +337,16 @@ describe("runWriteRungs", () => {
  * A ticket the claim, the ticket reader and both status moves can run against, logging every write
  * in the order it landed. `fetchDetail` serves the claim's label reads and the solver's ticket read.
  */
-function lifecycleClient(movedIn: StatusMoveResult["outcome"]): {
+function lifecycleClient(
+  movedIn: StatusMoveResult["outcome"],
+  failWrite?: number,
+): {
   client: JiraClient;
   writes: string[];
 } {
   let labels: string[] = [AGENT_LABELS.solvable, "svc:somewhere-not-allowed"];
   const writes: string[] = [];
+  let labelWrites = 0;
   const client = {
     fetchDetail: async (key: string) => ({
       key,
@@ -359,6 +363,10 @@ function lifecycleClient(movedIn: StatusMoveResult["outcome"]): {
       _key: string,
       change: { readonly add?: readonly string[]; readonly remove?: readonly string[] },
     ) => {
+      labelWrites += 1;
+      if (labelWrites === failWrite) {
+        throw new Error("Jira is down");
+      }
       const add = change.add ?? [];
       const remove = change.remove ?? [];
       writes.push(`labels +${add.join(",")} -${remove.join(",")}`);
@@ -420,9 +428,25 @@ describe("runWriteRungs and the ticket's status", () => {
     expect(writes.at(-1)).toBe("status back");
   });
 
+  it("moves a ticket back even when the release itself throws", async () => {
+    quietly();
+    const { client, writes } = lifecycleClient("moved", 2);
+    const settings = readSettings({
+      JIRA_EMAIL: "a@b.c",
+      JIRA_AUTH: "placeholder",
+      SOLVE_REPO_ROOT: "/nonexistent",
+      SOLVE_REPOS: "allowed-repo",
+    });
+
+    await expect(
+      runWriteRungs(settings, client, "SSX-1", "solve", null, "named", false),
+    ).rejects.toThrow();
+    expect(writes).toEqual([`labels +${AGENT_LABELS.solving} -`, "status in", "status back"]);
+  });
+
   it("never moves back a ticket it did not move in, which somebody else put in progress", async () => {
     quietly();
-    for (const outcome of ["already-there", "disabled", "unreachable"] as const) {
+    for (const outcome of STATUS_MOVE_OUTCOMES.filter((kind) => kind !== "moved")) {
       const { client, writes } = lifecycleClient(outcome);
       const settings = readSettings({ JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" });
 

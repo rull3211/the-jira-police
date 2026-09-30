@@ -614,7 +614,7 @@ never moves a message, so each line below that decides the ticket's fate, and a 
 also posted as a one-line reply sent to the channel, and the ticket's previous one is deleted: the
 ticket resurfaces at the bottom once, as its latest event, mentioning everyone on the subscriber
 list below. Every timeline entry after it is edited into that reply as a second line, so the bottom
-of the channel follows a solve step by step and nobody is pinged again. Triage starting opens it;
+of the channel follows a solve step by step without a new message. Triage starting opens it;
 the verdict, a gate refusal, a claim, each model pass, the solve's outcome, the pull request, each
 review round, the undraft, the merge and any crash land on it — the claim and the ones that decide
 the ticket's fate as their own lines, the rest in the timeline, newest first. The undraft is one line per handover, however many looks find the pull

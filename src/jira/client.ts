@@ -13,9 +13,8 @@
  * `moveToInProgress`, `moveBackFromInProgress` and `moveToCodeReview` are the status writes, each a
  * workflow **transition**, not a field edit — Jira does not accept `status` as a settable field.
  * Each is a guaranteed no-op until its target is named at construction: the capability ships inert.
- * They are the deliberate narrowing of the "never a status" guarantee invariant 11
- * (`architecture/invariants.md` §14) used to state unconditionally; touching status from a headless
- * model session is still refused everywhere else — `src/triage/poster.ts` denies
+ * They are the deliberate narrowing of invariant 11 (`architecture/invariants.md` §14) to one kind of
+ * status write; touching status from a headless model session is refused everywhere — `src/triage/poster.ts` denies
  * `mcp__atlassian__transitionJiraIssue` for exactly that reason — and these are different writes
  * because nothing but this deterministic harness code ever calls them.
  *
@@ -184,12 +183,18 @@ export interface IssueDetail {
   readonly url: string;
 }
 
-/**
- * What a status move did, or why it did nothing; `from` is the status found before the attempt.
- * `elsewhere` is `moveBackFromInProgress` finding the ticket no longer in progress.
- */
+/** `elsewhere` is `moveBackFromInProgress` finding the ticket no longer in progress. */
+export const STATUS_MOVE_OUTCOMES = [
+  "moved",
+  "already-there",
+  "unreachable",
+  "disabled",
+  "elsewhere",
+] as const;
+
+/** What a status move did, or why it did nothing; `from` is the status found before the attempt. */
 export interface StatusMoveResult {
-  readonly outcome: "moved" | "already-there" | "unreachable" | "disabled" | "elsewhere";
+  readonly outcome: (typeof STATUS_MOVE_OUTCOMES)[number];
   readonly from: string;
 }
 

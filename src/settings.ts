@@ -233,7 +233,7 @@ export const SETTINGS = [
   {
     name: "SOLVE_RETURN_STATUS",
     description:
-      "The Jira status (id or name) a ticket is moved back to when a solve that moved it to SOLVE_IN_PROGRESS_STATUS ends without a pull request: a crash, a refusal, a decline, a failed verification, a publish that opened nothing. Only a ticket still at SOLVE_IN_PROGRESS_STATUS is moved; one a person moved during the run is left where they put it, and so is one that was already in progress before the claim. A run that opens a pull request leaves the ticket in progress, for SOLVE_CODE_REVIEW_STATUS to move. No fallback, and refused at startup unless SOLVE_IN_PROGRESS_STATUS is set too.",
+      "The Jira status (id or name) a ticket is moved to when a solve that moved it to SOLVE_IN_PROGRESS_STATUS ends without a pull request, whatever status it was claimed from: a crash, a refusal, a decline, a failed verification, a publish that opened nothing. Only a ticket still at SOLVE_IN_PROGRESS_STATUS is moved; one a person moved during the run is left where they put it, and so is one that was already in progress before the claim. A run that opens a pull request leaves the ticket in progress, for SOLVE_CODE_REVIEW_STATUS to move. No fallback, and refused at startup unless SOLVE_IN_PROGRESS_STATUS is set too.",
     // No fallback: a status write, like SOLVE_CODE_REVIEW_STATUS.
   },
   {

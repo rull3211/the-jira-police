@@ -94,8 +94,7 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
 export const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,20}$/u;
 
 /**
- * The one line a major entry is broadcast as, so the channel shows what happened and to which ticket,
- * and under it the latest `step` once a minor entry has edited it in.
+ * A major entry's broadcast line, with the latest minor `step` under it once one is edited in.
  * Mentions ride here and never on the card: a broadcast is a new message each time, the card an edit.
  */
 export function renderBump(

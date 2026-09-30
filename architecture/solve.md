@@ -25,7 +25,7 @@ nothing on the solve path is moved by hand any more. A ticket goes
 the ticket to `SOLVE_IN_PROGRESS_STATUS` (`enterInProgress` in `src/cli/solve-run.ts`, straight
 after the claim is recorded). A run that ends without a pull request — any outcome but a
 published one, or a throw — moves it to `SOLVE_RETURN_STATUS` in `runWriteRungs`'s `finally`, after
-the labels: only when this run moved it in, and only from that status, so a ticket that was already
+the labels and whether or not they land: only when this run moved it in, and only from that status, so a ticket that was already
 in progress, or that somebody moved during the run, is left where it is. A run that opens a pull
 request leaves it in progress, and a confirmed move into `agent:review-done` moves it on:
 `moveReviewStage` calls `JiraClient.moveToCodeReview` after the label write lands, never before and

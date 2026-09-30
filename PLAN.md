@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3552 tests in 109 files**, no build step.
+> **3554 tests in 109 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -554,8 +554,9 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 - **No solve has moved its ticket's status or edited its broadcast line.** Both are tested and
   neither has run. The daemon's `.env` sets none of the `SOLVE_*_STATUS` settings, so the move to
   code review has been inert there too, and nothing has sent `chat.update` to a `reply_broadcast`
-  reply: `slack:probe` measures that call and has not been run since it learned to. Moving into
-  progress costs two status notifications when recon declines. **What would show it:**
+  reply: `slack:probe` measures that call and has not been run since it learned to, and its reply
+  names nobody, so whether an edit that keeps a line's mentions notifies them again is unmeasured.
+  Moving into progress costs two status notifications when recon declines. **What would show it:**
   `pnpm slack:probe <KEY> --keep`, then look at the channel for the edited reply. Then set the
   statuses by id and run one `solve:once <KEY> --pr` on a ticket in Prioritized. The ticket should
   be in "Under arbeid" at the claim, and the channel should show "Solve started" with each pass edited

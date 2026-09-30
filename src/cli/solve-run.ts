@@ -377,9 +377,8 @@ export async function moveReviewStage(
 }
 
 /**
- * The status half of a claim. `true` only when this call moved the ticket, the one case
- * `returnFromInProgress` may undo: a ticket already in progress was put there by somebody else.
- * Never throws — a status is bookkeeping, and the solve goes on without it.
+ * `true` only when this call moved the ticket, since one already in progress was put there by someone
+ * else and must not be moved on. Never throws: a status is bookkeeping, and the solve goes on.
  */
 export async function enterInProgress(client: JiraClient, issueKey: string): Promise<boolean> {
   try {
@@ -390,6 +389,11 @@ export async function enterInProgress(client: JiraClient, issueKey: string): Pro
     }
     if (result.outcome === "unreachable") {
       labelsLog.warn("labels.in_progress_status_unreachable", { issueKey, from: result.from });
+    } else if (result.outcome === "already-there") {
+      labelsLog.info("labels.in_progress_status_already_there", {
+        issueKey,
+        note: "in progress before the claim, so a run with no pull request leaves the status alone",
+      });
     }
     return false;
   } catch (error) {
@@ -402,7 +406,7 @@ export async function enterInProgress(client: JiraClient, issueKey: string): Pro
   }
 }
 
-/** Undoes `enterInProgress` for a run that ends without a pull request. Never throws, for the same reason. */
+/** Moves a ticket `enterInProgress` moved to the return status, not to where it was. Never throws. */
 export async function returnFromInProgress(client: JiraClient, issueKey: string): Promise<void> {
   try {
     const result = await client.moveBackFromInProgress(issueKey);
@@ -1066,8 +1070,7 @@ export async function runWatch(
 }
 
 /**
- * The write rungs, in order, with the release, and the status the claim moved, as the last things
- * that happen.
+ * The write rungs, in order, with the release and then the status as the last things that happen.
  *
  * `try`/`finally` rather than a release at each exit: the rungs can set an exit code and return,
  * `runSolver` can throw, and a claim left behind by either is a ticket nobody can pick up again.
@@ -1161,19 +1164,23 @@ export async function runWriteRungs(
     // looking untried, so auto mode would re-claim and re-refuse it every tick. See
     // `terminalLabelAfter`.
     const decided = terminal;
-    if (keepClaim) {
-      // Handed on by `reviewTransition` above; the pull request owns it now.
-    } else if (decided === null) {
-      await runRelease(client, receipt);
-    } else {
-      await moveLabels(client, issueKey, (labels) => completionTransition(labels, decided));
-      process.stdout.write(
-        `\n${issueKey} is out of the solve queue until a human removes agent:${decided}.\n` +
-          `That is the point: this run reached a verdict, and re-running it would reach the same one.\n`,
-      );
-    }
-    if (movedIn && !keepClaim) {
-      await returnFromInProgress(client, issueKey);
+    try {
+      if (keepClaim) {
+        // Handed on by `reviewTransition` above; the pull request owns it now.
+      } else if (decided === null) {
+        await runRelease(client, receipt);
+      } else {
+        await moveLabels(client, issueKey, (labels) => completionTransition(labels, decided));
+        process.stdout.write(
+          `\n${issueKey} is out of the solve queue until a human removes agent:${decided}.\n` +
+            `That is the point: this run reached a verdict, and re-running it would reach the same one.\n`,
+        );
+      }
+    } finally {
+      // A label read that throws must not also strand the status.
+      if (movedIn && !keepClaim) {
+        await returnFromInProgress(client, issueKey);
+      }
     }
   }
 }
