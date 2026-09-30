@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §77. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §78. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written.
 
@@ -1125,6 +1125,36 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
+
+### 77. A solve is invisible in the channel until it ends, and never moves the ticket's status
+
+**Branch:** `feat/solve-lifecycle`
+
+**What is being attempted.** Two changes to one lifecycle, `runWriteRungs` in `src/cli/solve-run.ts`:
+
+- **The channel sees a solve start, and follows it.** SSX-3991's record stamps every step when it
+  happened, the claim at 10:08 to the pull request at 10:21 on 2026-09-29, so the card was edited
+  live. Nobody saw it: the card is collapsed and was posted at triage, two hours up the channel, and
+  only a major entry is broadcast. Nothing between the claim and the pull request is major, so the
+  solve read as arriving all at once. `claimed` becomes major, and a minor entry edits the ticket's
+  latest broadcast in place to show the current step — an edit, so nobody is pinged again.
+- **The status column follows the claim.** At the claim the ticket moves to
+  `SOLVE_IN_PROGRESS_STATUS`. A run ending without a pull request moves it to `SOLVE_RETURN_STATUS`,
+  only if this run moved it in and it is still there, so a status a person set is left alone. A pull
+  request leaves it where it is, for `SOLVE_CODE_REVIEW_STATUS` to move. Both unset by default, and
+  refused at startup when only one is set: that half leaves every failed ticket in progress.
+
+**Why now.** The operator asked for both on 2026-09-30, after watching SSX-3991's solve.
+
+**What would make it the wrong idea:**
+
+- **The edit may not land where it is seen.** Nothing here has measured `chat.update` on a
+  `reply_broadcast` reply; if Slack edits only the thread's copy, the channel line stays stale.
+- **Two status writes per declined recon.** A recon decline moves a ticket in and back within
+  minutes, and each move notifies its watchers. If that is the common ending, the fix pass is the
+  better moment to move it.
+- **The return move races a person.** It reads the status before it writes, and the window between
+  the two is still open.
 
 ## Verification
 
