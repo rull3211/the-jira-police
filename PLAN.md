@@ -544,11 +544,13 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   transcript holding a `does not match required schema` tool result, or a probe that gets a
   violating submission past the model.
 - **The gate's verdict-banner check has refused only replayed bodies, never a live run.** Through
-  `assertPostable`, the 152 `StructuredOutput` bodies on disk gave exactly four refusals: the
-  three sessions that never triaged, and the mock (`architecture/triage.md` §3). Withholding
-  `Skill` has held on one real run, SSX-4000 on 2026-09-30. **What would show it:** a
-  `groomed/<KEY>.rejected.md` naming the missing banner — either a session that stopped for some
-  reason other than the refusal, or a real report the pattern misses.
+  `assertPostable`, the 152 `StructuredOutput` bodies on disk on 2026-09-30, before the re-run,
+  gave exactly four refusals: the three sessions that never triaged, and the mock
+  (`architecture/triage.md` §3). Withholding `Skill` has held on one real run, SSX-4000 that
+  evening. The pattern does not cover a banner quoted inside a code fence, or a heading like
+  `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
+  naming the missing banner — either a session that stopped for some reason other than the
+  refusal, or a real report the pattern misses.
 
 ### 11. Loose ends recorded in no other file
 
@@ -639,7 +641,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **129 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **130 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost
@@ -1141,27 +1143,32 @@ three runs above. The mock's body has none, and never reaches the gate: a stand-
 - **The model may find another route to the same confusion** — the refusal is one trigger seen, not
   the only possible one — which a banner check would not catch when the triage itself was done.
 
-### 76. The solve passes can still reach the Skill tool and its refusal
+### 76. Every session's built-in tools are a denylist, and `--tools` could name them instead
 
 **Branch:** none yet.
 
-**What is not built.** The analyst withholds `Skill` (`architecture/overview.md` §6); no solve pass
-does, and `agent-solve` carries `disable-model-invocation: true` too. Two review passes called the
-tool for `agent-solve` and got the same "do not replicate this skill's workflow" refusal: SSX-3784
-on 2026-09-24 and SSX-3940 on 2026-09-28. Whether either answer changed because of it has not been
-read.
+**What is not built.** `ANALYST_DENIED_TOOLS` and the solve denylists name built-in tools one at a
+time, so a built-in nobody listed is reachable. `Skill` was one: the analyst withholds it now
+(`architecture/overview.md` §6), but no solve pass does, and `agent-solve` also carries
+`disable-model-invocation: true`. Two review passes called it for `agent-solve` and got the same
+"do not replicate this skill's workflow" refusal, SSX-3784 on 2026-09-24 and SSX-3940 on
+2026-09-28; whether either answer changed because of it has not been read. Claude Code's `--tools`
+takes the list of built-ins a session gets, which is the inversion `BUILDING.md` asks for.
 
-**Why it was not built alongside.** The simplify pass holds `Skill` on purpose, to run `/simplify`
-(`SIMPLIFY_ALLOWED_TOOLS`), and shares `FIX_DENIED_TOOLS` with fix, review, merge and repair, so
-the denial has to be split per pass rather than added to one list. Each pass it touches needs a
-paid run to show its `/agent-solve` line still expands.
+**Why it was not built alongside.** Each question needs a paid probe of its own. Is
+`StructuredOutput`, which `--json-schema` depends on, a built-in that `--tools` removes? Is
+`ToolSearch`, which a session uses to load deferred MCP tools like the poster's? And does the
+prompt's `/intake-triage` or `/agent-solve` line still expand? Simplify also holds `Skill` on
+purpose, to run `/simplify` (`SIMPLIFY_ALLOWED_TOOLS`), so its list differs from the passes it
+shares `FIX_DENIED_TOOLS` with.
 
 **What would make it the wrong idea:**
 
-- **Two sessions out of every solve pass since 2026-09-17 may be the whole rate.** Count them
-  before building: if no solve outcome ever followed the refusal, the split buys little.
-- **Splitting the denylist is a new place for passes to drift apart**, which one shared list
-  prevents today.
+- **`--tools` may take away what the harness needs**, which the probes above would show before
+  anything ships.
+- **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
+  followed the refusal, only the analyst's inversion buys anything.
+- **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
 
 ## Verification
 

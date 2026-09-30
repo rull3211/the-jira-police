@@ -53,6 +53,9 @@ export const ALLOWED_TOOLS: readonly string[] = [
  * Tools withheld from the analyst. `--allowedTools` enforces nothing by itself, so "never writes to
  * Jira" rests on this list, not on omission from `ALLOWED_TOOLS` above.
  *
+ * A denylist over built-ins each CLI release can add to; `--tools` would invert it, but whether it
+ * also removes `StructuredOutput` and `ToolSearch` is unprobed (`PLAN.md` §76).
+ *
  * The Atlassian mutators are listed on the same principle but are NOT verified withheld — a bare
  * probe run has no MCP server connected, so nothing distinguishes "denied" from "absent" here.
  * Nobody should read this list as proof the analyst is mechanically unable to edit a Jira issue;

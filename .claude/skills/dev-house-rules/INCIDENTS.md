@@ -1996,3 +1996,35 @@ a file in this tree.
 
 **No rule yet** — a second instance showing the shape is not one bad `sed`, such as another secret
 read by a command whose purpose did not need its contents, and `secret-read` at 2.
+
+## 2026-09-30
+
+### The CLI upgrade that told the analyst not to triage, for thirteen days
+
+**2026-09-30.** SSX-4000's posted agent-fitness call said the question "is not applicable to this
+run". The session's transcript showed the skill expanded from the prompt and then a `Skill` tool
+call for the same skill, which `disable-model-invocation: true` answered with "Do not replicate this
+skill's workflow by other means". Counted that day across the 182 triage transcripts Claude Code
+keeps locally, none of the 122 before CLI 2.1.274 (2026-09-17) carries the refusal and 54 of the 60
+after do. Three sessions obeyed it and returned an explanation in place of a triage — SSX-3918,
+SSX-2681 and SSX-3989 — and SSX-3989's, "No comment should be posted from this run", was posted.
+Nothing in this tree changed on 2026-09-17, and the opening turn is the same length on both sides
+of the version. Fixed on `fix/triage-deny-skill-tool` by withholding `Skill` from the analyst and
+refusing a comment with no verdict banner.
+
+**The mechanism.** Two gaps let it run for thirteen days. The analyst's built-in tools are a
+denylist, and `Skill` was never on it, so a tool whose behaviour changed under an upgrade stayed
+reachable — the case [a denylist over a vocabulary you do not
+control](BUILDING.md#fail-closed-except-guards-which-fail-open) describes, with `--tools` the
+inversion nobody had probed (`PLAN.md` §76). And nothing records which Claude Code version ran a
+session: `session.ts` reads the init event only for MCP status, the probes in
+`architecture/overview.md` §6 are dated rather than versioned, and the start could be pinned only
+because this machine still held Claude Code's own transcripts, which nothing here keeps. It became
+visible only when `0d5c143` made the fitness call mandatory, so a session that thought the field did
+not apply had to say so on the ticket.
+
+**Found by** the operator, reading SSX-4000's comment: "this one produced a really wierd agent
+fitness verdict".
+
+**No rule yet** — a second Claude Code upgrade changing what a session does with nothing changed in
+this tree, and `harness-upgrade` at 2.

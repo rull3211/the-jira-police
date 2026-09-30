@@ -215,13 +215,14 @@ storecode -p "/intake-triage SSX-1234 --no-write --no-html" \
 - **`Skill` is withheld from the analyst, because its refusal told sessions not to triage.** From
   Claude Code 2.1.274 (2026-09-17) the session calls the Skill tool for the skill its prompt has
   already expanded, and `disable-model-invocation: true` answers "Do not replicate this skill's
-  workflow by other means": 54 of the 60 triage transcripts since carry that refusal, none of the
-  122 before it. SSX-3918, SSX-2681 and SSX-3989 obeyed it and returned an explanation in place of
+  workflow by other means": counted on 2026-09-30, before this fix, 54 of the 60 triage transcripts
+  since carried that refusal and none of the 122 before it. SSX-3918, SSX-2681 and SSX-3989 obeyed it and returned an explanation in place of
   a triage; SSX-4000 triaged and then scored its own run as "not applicable" instead of the ticket.
   The `/intake-triage` line is expanded before the model's first turn, not through the tool, so the
   denial removes the refusal and nothing the run uses: SSX-4000's re-run on 2026-09-30, CLI
-  2.1.285, loaded the skill and made no `Skill` call. What catches a session that stops anyway is
-  the gate's banner check (`architecture/triage.md` §3).
+  2.1.285, loaded the skill and made no `Skill` call. If a session stops anyway, the gate's banner
+  check keeps its text off the ticket (`architecture/triage.md` §3) — on a posting run only, since
+  a preview never reaches the gate.
 
 - **`stream-json`, not `json`** — the MCP status guard needs the `system`/`init` event, which only
   the streaming format emits. Requires `--verbose`.
