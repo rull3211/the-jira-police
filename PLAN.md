@@ -78,11 +78,64 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §77. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §78. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written.
 
 <!-- refs:on -->
+
+### 77. `@Bencebot start` in a ticket's thread adds `agent:start`, and `@Bencebot clear` removes `agent:failed`
+
+**Branch:** `feat/slack-agent-start`
+
+**What is attempted.** A person on `SLACK_START_USERS` mentions the bot in a ticket's audit thread
+— `@Bencebot start` — and the ticket gets `agent:start`, manual mode's go-ahead, so the next solve
+tick claims it. `@Bencebot clear` takes `agent:failed` off a ticket the solver already tried, so a
+start can follow; `start` refuses while `agent:failed` is on, and says to clear first. Asked for by
+the operator on 2026-09-30, from SSX-4003's thread.
+
+**Why a mention and not `/agent start`.** Slack does not dispatch a custom slash command typed in a
+thread, and the payload names no thread: "Slash commands created by developers cannot, however, be
+invoked in message threads" (docs.slack.dev, _Implementing slash commands_, read 2026-09-30; outside
+this tree). The `app_mention` event does carry the thread — unmeasured here, and the first run
+settles it.
+
+**The shape.**
+
+- **Transport.** The Socket Mode connection held for `/bencebot` acknowledges an `events_api`
+  envelope at once and hands an `app_mention` to the same one-at-a-time chain. A mention's envelope
+  takes no reply, so the answer is an ephemeral message in the thread, to the person who asked.
+- **Which ticket.** The thread's top message, read with `conversations.replies`, must be the bot's
+  own and open with `<KEY>:`; that ticket's `jira-police.slack` record must name the same channel
+  and `ts`. Either disagreeing refuses. Nothing the person typed names the ticket.
+- **Who.** `SLACK_START_USERS`, member IDs, with no fallback; empty refuses every start and clear
+  with a reply that says so. The person is the event's `user`, which Slack sets.
+- **What.** `start` is refused unless `eligibility` would claim the ticket once `agent:start` is on
+  it, so the command and the queue ask one question. The write is the claim's read, write and
+  read-back through `updateLabels`.
+- **Modes.** `SLACK_LISTEN`'s: `dry` writes the would-be edit to `OUTPUT_DIR/slack/`, `live` writes
+  the label. The listener answers a mention only once `SLACK_START_USERS` is set, so a daemon
+  already on `SLACK_LISTEN=live` gains nothing until someone types the list.
+- **A hand rung.** `pnpm slack:start <thread-link> [--clear] [--write]` resolves one named thread
+  and applies the same edit from a terminal, where being at the terminal is the authority, as it is
+  for `solve:once`. It lets the resolution and the write run before the event subscription exists.
+- **Manifest.** `app_mentions:read`, `channels:history` and the `app_mention` bot event. A Slack
+  admin updates and reinstalls the app; nothing here can.
+
+**Phases, a commit each:** the pure pieces with their tests, unwired; `slack:start`, dry then
+`--write`; the mention through the listener, dry and live, which also reaches the daemon.
+
+**What would make it the wrong idea.**
+
+- **Jira will name the wrong person.** `agent:start` is the one human step before an unattended code
+  change, and today it takes edit rights on the ticket. From Slack it is written with the operator's
+  Jira account, so the ticket's history names the operator; the mention in the thread is the only
+  record of who asked. If that record matters, the start wants a line naming them on the ticket or
+  in the audit card, which this does not build.
+- **`channels:history` is a read the bot token does not have today**: every message in every public
+  channel the bot is in. A private channel would need `groups:history` instead.
+- **The mention may not carry `thread_ts`.** Assumed from how message events behave. If it does
+  not, the fallback is a keyed form, `@Bencebot start SSX-4003`, checked against the same record.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
