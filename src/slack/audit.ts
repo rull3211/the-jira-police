@@ -134,6 +134,12 @@ export function addedMajor(before: AuditRecord, after: AuditRecord): Entry | nul
   return entry === undefined || entry === before.major.at(-1) ? null : entry;
 }
 
+/** The timeline entry `after` gained over `before`, or `null`; a minor entry edits the broadcast instead. */
+export function addedMinor(before: AuditRecord, after: AuditRecord): Entry | null {
+  const entry = after.timeline.at(-1);
+  return entry === undefined || entry === before.timeline.at(-1) ? null : entry;
+}
+
 /** `record` itself when the ticket's title and link are what it already holds. */
 export function retitle(record: AuditRecord, summary: string, url: string): AuditRecord {
   const title = bounded(summary);
@@ -182,11 +188,12 @@ function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRec
         `Triage refused by the gate — ${event.reason}`,
       );
     case "claimed":
-      return minor(
+      // Major so the channel sees a solve start: nothing else is until it ends, minutes later.
+      return major(
         { ...record, work: { kind: "claimed" }, repo: event.repo ?? record.repo },
         at,
         "🙋",
-        "claimed",
+        "Solve started",
       );
     case "pass-started":
       return minor(

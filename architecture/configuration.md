@@ -110,7 +110,8 @@ pnpm slack:once SSX-1234 [--post]  # draw the ticket's audit thread from its rec
                                    #   writes groomed/slack/, --post posts or edits it,
                                    #   --bump broadcasts its latest major entry again
 pnpm slack:probe SSX-1234 [--keep] # both halves of the audit thread's store: a message
-                                   #   posted, edited, deleted; a record written to the
+                                   #   posted, edited, deleted; a broadcast reply to it,
+                                   #   edited, deleted; a record written to the
                                    #   ticket's jira-police.slack-probe property, read, deleted;
                                    #   with SLACK_OPERATOR_USER_ID, a direct message, deleted
 pnpm check-types && pnpm lint && pnpm test

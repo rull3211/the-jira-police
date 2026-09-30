@@ -341,7 +341,8 @@ Things that look like details and are not:
     a record it cannot read comes back as an outcome and a `slack.audit_failed` or
     `slack.record_unreadable` warning naming the remote system's own reason, and the triage, solve
     or review it was reporting carries on. A failed broadcast costs only the bump: `slack.bump_failed`
-    or `slack.unbump_failed`, and the edited record is saved regardless; a subscriber list it
+    or `slack.unbump_failed`, and the edited record is saved regardless; a step it cannot edit into
+    the broadcast costs only that line, `slack.follow_failed`; a subscriber list it
     cannot read costs only the mentions, `slack.subscribers_unread`. The one configuration error
     it can raise, a live mode it cannot build, is raised by `pipelineAuditNotifier` at startup and
     before any claim, where it stops a start rather than strands work. The pull request line's
