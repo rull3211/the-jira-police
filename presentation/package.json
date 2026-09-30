@@ -1,0 +1,19 @@
+{
+  "name": "the-jira-police-presentation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The demo decks, generated with pptxgenjs",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node check/render.mjs"
+  },
+  "dependencies": {
+    "pptxgenjs": "4.0.1"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11"
+  },
+  "packageManager": "pnpm@11.20.0"
+}
