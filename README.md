@@ -556,6 +556,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm slack:once <KEY> --post --bump`                  | …and broadcast its latest major entry to the channel again, deleting the ticket's previous broadcast                            | Slack + the `jira-police.slack` property             |
 | `pnpm slack:listen`                                    | Answer `/bencebot` until Ctrl-C, dry: the real subscriber list read, what each command would make of it written                 | `groomed/slack/roster.json`                          |
 | `pnpm slack:listen --write`                            | …and write the list, reading it back after each change                                                                          | the `jira-police.slack-subscribers` project property |
+| `pnpm slack:start <thread-link> [--clear]`             | `agent:start` for the ticket a Slack thread belongs to, or `agent:failed` off with `--clear`, dry: the edit written to a file   | `groomed/slack/`                                     |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                           | no                                                   |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                        | no                                                   |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                        | no                                                   |
@@ -657,6 +658,17 @@ invariant 18).
 On a network that drops, Slack can report a command as failed that went through: `/bencebot` says
 where you stand, and `slack.command_late` in the log says the reply missed Slack's budget.
 
+**`slack:start <thread-link>` starts a ticket from its Slack thread, by hand.** Give it Slack's
+**Copy link** on a ticket's audit thread or on any reply in it. The ticket is the one the bot's own
+top message names, and only when that ticket's `jira-police.slack` record names the same thread;
+either disagreeing exits 1 and says which. It adds `agent:start`, the go-ahead manual mode waits
+for, and is refused unless the solve queue would then claim the ticket — one without
+`agent:solvable`, or carrying `agent:failed` or anything else the queue skips, is left as found.
+`--clear` takes `agent:failed` off instead, so a ticket the solver already tried can be started
+again. Dry: the edit goes to `<OUTPUT_DIR>/slack/<KEY>.labels.json` and nothing remote changes, and
+every run writes its outcome to `<OUTPUT_DIR>/slack/<channel>-<ts>.thread.json`. Reading the
+thread needs the bot's `channels:history` scope.
+
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
 the record it shows — kept on the ticket as the `jira-police.slack` issue property. So before
@@ -674,7 +686,8 @@ declares it, and a declared one cannot hold a list of timeline entries.
 To set it up, create the app from the manifest rather than by hand:
 
 1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**,
-   then paste `docs/slack-app-manifest.json`. It asks for `chat:write` and `commands`, declares
+   then paste `docs/slack-app-manifest.json`. It asks for `chat:write`, `channels:history` and
+   `commands`, declares
    `/bencebot`, turns Socket Mode on and both token rotations off, since nothing here refreshes a
    token. An app made from an earlier copy takes the new one under **App Manifest**, then a
    reinstall.

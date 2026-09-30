@@ -1,8 +1,8 @@
-import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { JqlError } from "./jira/jql.ts";
 import type { JiraClient } from "./jira/client.ts";
@@ -26,6 +26,7 @@ import {
   createDiscover,
   createPollDeps,
   createReviewCycleDeps,
+  createBotClient,
   createListenClient,
   createSlackTarget,
   pipelineAuditNotifier,
@@ -37,6 +38,7 @@ import {
   pollIntervalMs,
   reviewIntervalMs,
   shouldPost,
+  threadCommandDeps,
 } from "./wiring.ts";
 
 /** Minimum environment that satisfies the required settings. */
@@ -1492,6 +1494,82 @@ describe("createSlackTarget", () => {
       expect(attempt).not.toThrow(token);
     },
   );
+});
+
+describe("createBotClient", () => {
+  it("builds the client from a bot token alone, with no channel set", () => {
+    expect(createBotClient(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }))).toBeInstanceOf(
+      SlackClient,
+    );
+  });
+
+  it("refuses what createSlackTarget refuses, without echoing more than the prefix", () => {
+    expect(() => createBotClient(settingsWith({}))).toThrow(/SLACK_BOT_TOKEN \(the bot token/u);
+    const attempt = (): unknown =>
+      createBotClient(settingsWith({ SLACK_BOT_TOKEN: "xoxe.xoxb-1-rotating" }));
+    expect(attempt).toThrow(/expected a bot token starting xoxb-/u);
+    expect(attempt).not.toThrow("xoxe.xoxb-1-rotating");
+  });
+});
+
+function authTest(body: object): Response {
+  return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+}
+
+describe("threadCommandDeps", () => {
+  it("forgets a failed bot lookup, so one dropped call does not last the listener's life", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("socket hang up"))
+      .mockResolvedValueOnce(authTest({ ok: true, user_id: "U1", bot_id: "B1", team: "T" }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deps = threadCommandDeps(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "dry");
+
+      await expect(deps.botId()).rejects.toThrow(/network/u);
+      expect(await deps.botId()).toBe("B1");
+      expect(await deps.botId()).toBe("B1");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses a token Slack names no bot for, rather than matching every message against null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => authTest({ ok: true, user_id: "U1", team: "T" })),
+    );
+    try {
+      const deps = threadCommandDeps(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "dry");
+
+      await expect(deps.botId()).rejects.toThrow(/no bot_id/u);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("dry, writes the edit under OUTPUT_DIR and says so, rather than sending it", async () => {
+    const output = mkdtempSync(join(tmpdir(), "thread-deps-"));
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deps = threadCommandDeps(
+        settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc", OUTPUT_DIR: output }),
+        "dry",
+      );
+
+      await deps.labels.apply("SSX-4003", { add: ["agent:start"], remove: [] });
+
+      expect(deps.labels.dry).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(readFileSync(join(output, "slack", "SSX-4003.labels.json"), "utf8")),
+      ).toEqual({ method: "updateLabels", key: "SSX-4003", add: ["agent:start"], remove: [] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("createListenClient", () => {

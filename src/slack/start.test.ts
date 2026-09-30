@@ -11,6 +11,7 @@ import {
   decide,
   describeThreadOutcome,
   parseMentionVerb,
+  parseThreadLink,
   recordNamesThread,
   runThreadCommand,
   ticketOfRoot,
@@ -126,6 +127,43 @@ describe("parseMentionVerb", () => {
     expect(parseMentionVerb("<@U0BENCEBOT> start now")).toBeNull();
     expect(parseMentionVerb("<@U0BENCEBOT> subscribe")).toBeNull();
     expect(parseMentionVerb("thanks <@U0BENCEBOT>")).toBeNull();
+  });
+});
+
+describe("parseThreadLink", () => {
+  it("takes the thread from a reply's thread_ts, not from the reply", () => {
+    expect(
+      parseThreadLink(
+        "https://storebrand.slack.com/archives/C0C4WAHKCA2/p1790779745218229?thread_ts=1790779480.401999&cid=C0C4WAHKCA2",
+      ),
+    ).toEqual({ channel: "C0C4WAHKCA2", threadTs: "1790779480.401999" });
+  });
+
+  it("takes a link to the top message itself as the thread", () => {
+    expect(
+      parseThreadLink("https://storebrand.slack.com/archives/C0C4WAHKCA2/p1790779480401999"),
+    ).toEqual({
+      channel: "C0C4WAHKCA2",
+      threadTs: "1790779480.401999",
+    });
+  });
+
+  it("is null for a direct message, another host, plain http, or a malformed thread_ts", () => {
+    expect(
+      parseThreadLink("https://storebrand.slack.com/archives/D0DIRECT1/p1790779480401999"),
+    ).toBeNull();
+    expect(
+      parseThreadLink("https://slack.com.evil.test/archives/C0C4WAHKCA2/p1790779480401999"),
+    ).toBeNull();
+    expect(
+      parseThreadLink("http://storebrand.slack.com/archives/C0C4WAHKCA2/p1790779480401999"),
+    ).toBeNull();
+    expect(
+      parseThreadLink(
+        "https://storebrand.slack.com/archives/C0C4WAHKCA2/p1790779745218229?thread_ts=1.2",
+      ),
+    ).toBeNull();
+    expect(parseThreadLink("SSX-4003")).toBeNull();
   });
 });
 

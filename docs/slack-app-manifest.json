@@ -20,7 +20,7 @@
   },
   "oauth_config": {
     "scopes": {
-      "bot": ["chat:write", "commands"]
+      "bot": ["chat:write", "channels:history", "commands"]
     }
   },
   "settings": {

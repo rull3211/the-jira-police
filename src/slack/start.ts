@@ -27,6 +27,32 @@ export function parseMentionVerb(text: string): ThreadVerb | null {
   return words.length === 1 && (word === "start" || word === "clear") ? word : null;
 }
 
+const LINK_PATH = /^\/archives\/([CG][A-Z0-9]{2,})\/p(\d{16})$/u;
+const SLACK_TS = /^\d{10}\.\d{6}$/u;
+
+/**
+ * A message link as Slack's "Copy link" writes it; the thread is its `thread_ts` when the link is a
+ * reply, and the message itself otherwise. `null` for anything else, a direct message's included.
+ */
+export function parseThreadLink(link: string): { channel: string; threadTs: string } | null {
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    return null;
+  }
+  const path = LINK_PATH.exec(url.pathname);
+  const [, channel, digits] = path ?? [];
+  if (url.protocol !== "https:" || !url.hostname.endsWith(".slack.com") || !channel || !digits) {
+    return null;
+  }
+  const reply = url.searchParams.get("thread_ts");
+  if (reply !== null) {
+    return SLACK_TS.test(reply) ? { channel, threadTs: reply } : null;
+  }
+  return { channel, threadTs: `${digits.slice(0, 10)}.${digits.slice(10)}` };
+}
+
 export interface RootMessage {
   readonly ts: string;
   readonly text: string;
