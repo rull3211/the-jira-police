@@ -78,11 +78,33 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §77. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §78. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written.
 
 <!-- refs:on -->
+
+### 77. The demo decks live in a gitignored folder on one laptop
+
+**Branch:** `docs/presentation`
+
+**What is not built.** A home in the repository for the three demo decks written for the
+2026-09-29 demo: the full English deck, its Norwegian twin and a short capabilities-only deck.
+Today they are generator scripts under `/groomed/demo/`, which `.gitignore` excludes, loading
+`pptxgenjs` from an absolute path outside the repository. Nobody else can rebuild them, and nobody
+can review them.
+
+**Why now.** The operator asked for it after the demo: the decks are reused, and a second demo is
+tomorrow.
+
+**The shape.** `presentation/` at the root, with its own `package.json` and lockfile so the
+daemon's dependency set gains nothing; one shared module for the masters and drawing helpers
+instead of three pasted copies; `pnpm presentation` to build all three into a gitignored `out/`;
+and the macOS render check that verified every slide, kept beside them.
+
+**What would make it the wrong idea.** The decks quote numbers and states of the repository as of
+2026-09-29, and nothing keeps them true. If they are read as current documentation rather than a
+dated snapshot, they are the stale-prose defect this project exists to catch, committed on purpose.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
