@@ -94,21 +94,23 @@ export function renderRecord(record: AuditRecord): RenderedMessage {
 export const SLACK_USER_ID_PATTERN = /^[UW][A-Z0-9]{2,20}$/u;
 
 /**
- * The one line a major entry is broadcast as, so the channel shows what happened and to which ticket.
+ * A major entry's broadcast line, with the latest minor `step` under it once one is edited in.
  * Mentions ride here and never on the card: a broadcast is a new message each time, the card an edit.
  */
 export function renderBump(
   record: AuditRecord,
   entry: Entry,
   subscribers: readonly string[] = [],
+  step: Entry | null = null,
 ): RenderedMessage {
   const title = record.summary === record.key ? record.key : `${record.key} · ${record.summary}`;
   const mentions = subscribers
     .filter((id) => SLACK_USER_ID_PATTERN.test(id))
     .map((id) => ` <@${id}>`)
     .join("");
+  const now = step === null ? "" : `\n↳ ${timelineLine(step)}`;
   return {
-    text: `${escape(entry.icon)} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}${mentions}`,
+    text: `${escape(entry.icon)} *${escape(entry.text)}* — ${link(record.url, clip(title, TITLE_CHARS))}${mentions}${now}`,
     blocks: [],
   };
 }

@@ -6,6 +6,7 @@ import {
   MAX_ENTRY_CHARS,
   MAX_MAJOR_ENTRIES,
   MAX_TIMELINE_ENTRIES,
+  addedMinor,
   applyEvent,
   newRecord,
   parseRecord,
@@ -39,7 +40,7 @@ const EVERY_EVENT: Record<
     event: { kind: "triage-refused", reason: "a dor:pass with placeholders" },
     bucket: "major",
   },
-  claimed: { event: { kind: "claimed", repo: "buy-insurance-advisor-web" }, bucket: "timeline" },
+  claimed: { event: { kind: "claimed", repo: "buy-insurance-advisor-web" }, bucket: "major" },
   "pass-started": { event: { kind: "pass-started", pass: "fix" }, bucket: "timeline" },
   "pass-finished": { event: { kind: "pass-finished", pass: "fix" }, bucket: "timeline" },
   verified: { event: { kind: "verified" }, bucket: "timeline" },
@@ -220,6 +221,17 @@ describe("applyEvent", () => {
     expect(text).not.toContain("\n");
     expect(text.length).toBeLessThanOrEqual(MAX_ENTRY_CHARS + 1);
     expect(text.endsWith("…")).toBe(true);
+  });
+});
+
+describe("addedMinor", () => {
+  it("names the timeline entry an event added, and nothing for one that added a major entry or none", () => {
+    const started = applyEvent(BASE, EVERY_EVENT["pass-started"].event, NOW);
+    const claimed = applyEvent(started, EVERY_EVENT.claimed.event, NOW);
+
+    expect(addedMinor(BASE, started)).toBe(started.timeline[0]);
+    expect(addedMinor(started, claimed)).toBeNull();
+    expect(addedMinor(started, started)).toBeNull();
   });
 });
 

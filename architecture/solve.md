@@ -21,14 +21,21 @@ nothing on the solve path is moved by hand any more. A ticket goes
 `agent:solving → agent:reviewing → agent:review-done` and ends on `agent:done`, `agent:closed` or
 `agent:failed`, and every outcome that spent a claim says so on the ticket.
 
-**A confirmed move into `agent:review-done` optionally mirrors onto the Jira status field too**,
-since a later change: `moveReviewStage` (`src/cli/solve-run.ts`) calls `JiraClient.moveToCodeReview`
-after the label write lands, never before and never on a no-op re-application. Unconfigured
-(`SOLVE_CODE_REVIEW_STATUS` unset), the call is a guaranteed no-op — see `architecture/
-configuration.md` §10. This is the one deliberate narrowing of invariant 11
-(`architecture/invariants.md` §14), and it is a harness write, never one a model session can reach:
-nothing gave any pass or the poster a transition tool, and this call site takes no ticket text as
-input, only the `AdvanceOutcome` `gh` itself reported.
+**The Jira status field optionally follows the same lifecycle, at three points.** The claim moves
+the ticket to `SOLVE_IN_PROGRESS_STATUS` (`enterInProgress` in `src/cli/solve-run.ts`, straight
+after the claim is recorded). A run that ends without a pull request — any outcome but a
+published one, or a throw — moves it to `SOLVE_RETURN_STATUS` in `runWriteRungs`'s `finally`, after
+the labels and whether or not they land: only when this run moved it in, and only from that status, so a ticket that was already
+in progress, or that somebody moved during the run, is left where it is. A run that opens a pull
+request leaves it in progress, and a confirmed move into `agent:review-done` moves it on:
+`moveReviewStage` calls `JiraClient.moveToCodeReview` after the label write lands, never before and
+never on a no-op re-application. Each target unset is a guaranteed no-op, and the first two are set
+together or `createJiraClient` refuses to start — see `architecture/configuration.md` §10. These are
+the deliberate narrowings of invariant 11 (`architecture/invariants.md` §14), and they are harness
+writes, never ones a model session can reach: nothing gave any pass or the poster a transition tool,
+and no call site takes ticket text as input. A process killed mid-solve strands the status in
+progress beside the claim it strands (`PLAN.md` §31), and the move back reads the status before it
+transitions, so a person moving the ticket between the two is overwritten.
 
 **Nothing structural is left here, and this paragraph used to name two things that are now
 false.** It said human reviewers were collected and then dropped by the `waiting` gate: they are

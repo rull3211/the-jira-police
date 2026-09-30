@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3545 tests in 109 files**, no build step.
+> **3567 tests in 109 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75 and §78, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77 and §78, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -552,6 +552,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
+- **No solve has moved its ticket's status or edited its broadcast line.** Both are tested and
+  neither has run. The daemon's `.env` sets none of the `SOLVE_*_STATUS` settings, so the move to
+  code review has been inert there too, and nothing has sent `chat.update` to a `reply_broadcast`
+  reply: `slack:probe` measures that call and has not been run since it learned to, and its reply
+  names nobody, so whether an edit that keeps a line's mentions notifies them again is unmeasured.
+  Moving into progress costs two status notifications when recon declines. **What would show it:**
+  `pnpm slack:probe <KEY> --keep`, then look at the channel for the edited reply. Then set the
+  statuses by id and run one `solve:once <KEY> --pr` on a ticket in Prioritized. The ticket should
+  be in "Under arbeid" at the claim, and the channel should show "Solve started" with each pass edited
+  under it. A run that opens no pull request should put the ticket back in Prioritized.
 - **No triage has run on the skill text that puts the legend above the footer sentinel.** Three of
   155 bodies, 2026-09-03 to 2026-09-30, put it below (`architecture/triage.md` §12, the legend
   entry), too few for any number of runs to show the text changed the rate. `withFitnessNote` moves

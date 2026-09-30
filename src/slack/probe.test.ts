@@ -24,13 +24,22 @@ const TARGET: ProbeTarget = {
 };
 
 /** A post to a member ID lands in the bot's conversation with them, `D1`, as Slack answers it. */
-function slack(behaviour: { readonly failAuth?: boolean; readonly failDirect?: string } = {}): {
+function slack(
+  behaviour: {
+    readonly failAuth?: boolean;
+    readonly failDirect?: string;
+    readonly failReplyEdit?: string;
+  } = {},
+): {
   readonly client: ProbeSlack;
   readonly deleted: string[];
+  readonly replies: string[];
 } {
   const deleted: string[] = [];
+  const replies: string[] = [];
   return {
     deleted,
+    replies,
     client: {
       authTest: async () => {
         if (behaviour.failAuth === true) {
@@ -39,6 +48,10 @@ function slack(behaviour: { readonly failAuth?: boolean; readonly failDirect?: s
         return { userId: "U1", botId: "B1", team: "Storebrand" };
       },
       post: async (args) => {
+        if (args.threadTs !== undefined) {
+          replies.push(`${args.threadTs} broadcast=${String(args.broadcast)}`);
+          return { ts: "100.2", channel: args.channel, warnings: [] };
+        }
         if (!args.channel.startsWith("U")) {
           return { ts: "100.1", channel: args.channel, warnings: [] };
         }
@@ -47,7 +60,12 @@ function slack(behaviour: { readonly failAuth?: boolean; readonly failDirect?: s
         }
         return { ts: "200.1", channel: "D1", warnings: [] };
       },
-      update: async (args) => ({ ts: args.ts, warnings: [] }),
+      update: async (args) => {
+        if (args.ts === "100.2" && behaviour.failReplyEdit !== undefined) {
+          throw new SlackError("chat.update", behaviour.failReplyEdit, "");
+        }
+        return { ts: args.ts, warnings: [] };
+      },
       deleteMessage: async (args) => {
         deleted.push(`${args.channel}/${args.ts}`);
       },
@@ -96,15 +114,31 @@ describe("runProbe", () => {
       ["auth.test", true],
       ["chat.postMessage", true],
       ["chat.update", true],
+      ["broadcast reply", true],
+      ["broadcast reply edit", true],
+      ["broadcast reply delete", true],
       ["chat.delete", true],
       ["property write", true],
       ["property read back", true],
       ["property delete", true],
       ["property gone", true],
     ]);
-    expect(chat.deleted).toEqual(["C1/100.1"]);
+    expect(chat.replies).toEqual(["100.1 broadcast=true"]);
+    expect(chat.deleted).toEqual(["C1/100.2", "C1/100.1"]);
     expect(ticket.stored.size).toBe(0);
     expect(exitCodeFor(result)).toBe(EXIT.ok);
+  });
+
+  it("fails on a broadcast reply Slack will not edit, the call a solve's live line makes", async () => {
+    const chat = slack({ failReplyEdit: "cant_update_message" });
+
+    const result = await runProbe(chat.client, jira().client, TARGET);
+
+    const edit = result.steps.find((step) => step.name === "broadcast reply edit");
+    expect(edit?.ok).toBe(false);
+    expect(edit?.detail).toContain("cant_update_message");
+    expect(chat.deleted).toEqual(["C1/100.2", "C1/100.1"]);
+    expect(exitCodeFor(result)).toBe(EXIT.failed);
   });
 
   it("with an operator named, sends them a direct message and deletes it where Slack put it", async () => {
@@ -112,16 +146,16 @@ describe("runProbe", () => {
 
     const result = await runProbe(chat.client, jira().client, { ...TARGET, operator: "U0123ABCD" });
 
-    expect(result.steps.map((step) => [step.name, step.ok]).slice(0, 6)).toEqual([
-      ["auth.test", true],
-      ["chat.postMessage", true],
-      ["chat.update", true],
+    expect(result.steps.map((step) => [step.name, step.ok]).slice(3, 9)).toEqual([
+      ["broadcast reply", true],
+      ["broadcast reply edit", true],
+      ["broadcast reply delete", true],
       ["chat.delete", true],
       ["direct message", true],
       ["direct message delete", true],
     ]);
     // Deleted in the conversation Slack answered with, never by the member ID it was posted to.
-    expect(chat.deleted).toEqual(["C1/100.1", "D1/200.1"]);
+    expect(chat.deleted).toEqual(["C1/100.2", "C1/100.1", "D1/200.1"]);
     expect(result.directLeft).toBeNull();
     expect(exitCodeFor(result)).toBe(EXIT.ok);
   });
@@ -199,6 +233,7 @@ describe("runProbe", () => {
     expect(ticket.stored.has(`SSX-1/${PROBE_PROPERTY}`)).toBe(true);
     const report = formatReport(result, kept);
     expect(report).toContain("still in the channel: ts 100.1");
+    expect(report).toContain("broadcast reply is still in the channel: ts 100.2");
     expect(report).toContain(`${PROBE_PROPERTY} is still on SSX-1`);
   });
 });

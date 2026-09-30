@@ -12,10 +12,10 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 **Two credentials, two jobs, and they never swap.**
 
-|           | Credential                                                    | Used for                                                                                                                                                                        | Never used for                                 |
-| --------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Discovery | Jira REST (`JIRA_EMAIL` + `JIRA_AUTH`, HTTP Basic)            | Learning _which_ issues are new; one ticket's detail for a solve; `agent:` labels, one status transition and `jira-police.*` issue properties, each bounded in `jira/client.ts` | Comments, and every other field on the ticket. |
-| Grooming  | The Atlassian **MCP session** inside the storecode subprocess | Reading what is _in_ an issue, and writing the verdict back.                                                                                                                    | Discovery.                                     |
+|           | Credential                                                    | Used for                                                                                                                                                                     | Never used for                                 |
+| --------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Discovery | Jira REST (`JIRA_EMAIL` + `JIRA_AUTH`, HTTP Basic)            | Learning _which_ issues are new; one ticket's detail for a solve; `agent:` labels, named status moves and `jira-police.*` issue properties, each bounded in `jira/client.ts` | Comments, and every other field on the ticket. |
+| Grooming  | The Atlassian **MCP session** inside the storecode subprocess | Reading what is _in_ an issue, and writing the verdict back.                                                                                                                 | Discovery.                                     |
 
 This is not stylistic. It buys three things:
 

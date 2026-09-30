@@ -33,6 +33,13 @@ export interface Publisher {
   update(key: string, thread: Thread, message: RenderedMessage): Promise<"updated" | "gone">;
   /** A reply in `thread` that also lands at the bottom of the channel; resolves to its `ts`. */
   broadcast(key: string, thread: Thread, message: RenderedMessage): Promise<string>;
+  /** Rewrites the broadcast reply `ts` in place; `gone` when it was deleted. */
+  amend(
+    key: string,
+    thread: Thread,
+    ts: string,
+    message: RenderedMessage,
+  ): Promise<"amended" | "gone">;
   /** `gone` when the reply was already deleted, which is the same outcome. */
   remove(key: string, thread: Thread, ts: string): Promise<"removed" | "gone">;
 }
@@ -102,6 +109,18 @@ export function slackPublisher(
       });
       return posted.ts;
     },
+    amend: async (_key, thread, ts, message) => {
+      try {
+        // Text only, the way `broadcast` posted it.
+        await slack.update({ channel: thread.channel, ts, text: message.text });
+        return "amended";
+      } catch (error) {
+        if (error instanceof SlackError && error.code === "message_not_found") {
+          return "gone";
+        }
+        throw error;
+      }
+    },
     remove: async (_key, thread, ts) => {
       try {
         await slack.deleteMessage({ channel: thread.channel, ts });
@@ -143,6 +162,15 @@ export function dryPublisher(directory: string): Publisher {
         text: message.text,
       });
       return "dry-run";
+    },
+    amend: async (key, thread, ts, message) => {
+      await writeJson(directory, `${key}.broadcast.json`, {
+        method: "chat.update",
+        channel: thread.channel,
+        ts,
+        text: message.text,
+      });
+      return "amended";
     },
     remove: async (key, thread, ts) => {
       await writeJson(directory, `${key}.delete.json`, { method: "chat.delete", thread, ts });

@@ -171,6 +171,13 @@ Things that look like details and are not:
     what the model was shown — so the residual risk here is **unmeasured**, not controlled, and
     that is why the wiring is phased behind a setting that defaults off.
 
+    **The credential also moves a ticket's status, to exactly the statuses the operator named.**
+    `moveToInProgress`, `moveBackFromInProgress` and `moveToCodeReview` each transition to a target
+    fixed when the client is built, from `SOLVE_IN_PROGRESS_STATUS`, `SOLVE_RETURN_STATUS` and
+    `SOLVE_CODE_REVIEW_STATUS`, never passed per call, and each is a no-op while its setting is
+    unset. The move back reads the status first and leaves a ticket that is no longer in progress
+    where a person put it. Only harness code calls them: no model session holds a transition tool.
+
 12. **A capability is only withheld if something withholds it.** `--allowedTools` pre-approves;
     it does not restrict. This service ran for its whole life with three comments in
     `runner.ts` and one in `poster.ts` asserting that omission from that list was denial, and it
@@ -204,6 +211,10 @@ Things that look like details and are not:
     queue for a second solver to duplicate. So the rule is not "always release" but **release
     unless the run produced something someone else can now see** — which is the same line the
     ladder is ordered along.
+
+    **The status is not restored to where it was found.** A run whose claim moved the ticket into
+    `SOLVE_IN_PROGRESS_STATUS` ends at `SOLVE_RETURN_STATUS`, which is where it started only when it
+    was claimed from there (`architecture/solve.md` §15).
 
     Two things make this checkable rather than aspirational. The release is derived from the
     receipt (invariant 11), so it is arithmetically the inverse of the claim and cannot touch a
@@ -341,7 +352,8 @@ Things that look like details and are not:
     a record it cannot read comes back as an outcome and a `slack.audit_failed` or
     `slack.record_unreadable` warning naming the remote system's own reason, and the triage, solve
     or review it was reporting carries on. A failed broadcast costs only the bump: `slack.bump_failed`
-    or `slack.unbump_failed`, and the edited record is saved regardless; a subscriber list it
+    or `slack.unbump_failed`, and the edited record is saved regardless; a step it cannot edit into
+    the broadcast costs only that line, `slack.follow_failed`; a subscriber list it
     cannot read costs only the mentions, `slack.subscribers_unread`. The one configuration error
     it can raise, a live mode it cannot build, is raised by `pipelineAuditNotifier` at startup and
     before any claim, where it stops a start rather than strands work. The pull request line's
