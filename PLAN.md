@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3532 tests in 109 files**, no build step.
+> **3564 tests in 110 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -108,8 +108,10 @@ settles it.
 - **Which ticket.** The thread's top message, read with `conversations.replies`, must be the bot's
   own and open with `<KEY>:`; that ticket's `jira-police.slack` record must name the same channel
   and `ts`. Either disagreeing refuses. Nothing the person typed names the ticket.
-- **Who.** `SLACK_START_USERS`, member IDs, with no fallback; empty refuses every start and clear
-  with a reply that says so. The person is the event's `user`, which Slack sets.
+- **Who.** `SLACK_START_USERS`, member IDs, with no fallback. Empty, the listener takes no mention
+  at all — it acknowledges it and logs why — so the bot token is needed only once someone opts in;
+  someone not on a list that is set gets a refusal. The person is the event's `user`, which Slack
+  sets.
 - **What.** `start` is refused unless `eligibility` would claim the ticket once `agent:start` is on
   it, so the command and the queue ask one question. The write is the claim's read, write and
   read-back through `updateLabels`.

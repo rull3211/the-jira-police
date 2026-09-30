@@ -174,4 +174,49 @@ describe("SlackClient", () => {
     slack({ ok: true, url: "https://example.test/" });
     expect((await caught(client.openConnection())).code).toBe("no_url");
   });
+
+  it("reads a thread's top message with its bot_id, and null when Slack returns none", async () => {
+    const mock = slack({
+      ok: true,
+      messages: [{ ts: "1.2", text: "SSX-1: picked up", bot_id: "B1", user: "U1" }],
+    });
+    const client = new SlackClient({ token: NEEDLE });
+
+    expect(await client.threadRoot({ channel: "C1", ts: "1.2" })).toEqual({
+      ts: "1.2",
+      text: "SSX-1: picked up",
+      botId: "B1",
+    });
+    expect(sent(mock).url).toBe("https://slack.com/api/conversations.replies");
+    expect(Object.fromEntries(sent(mock).form)).toEqual({
+      channel: "C1",
+      ts: "1.2",
+      limit: "1",
+      inclusive: "true",
+    });
+
+    slack({ ok: true, messages: [{ ts: "1.2", text: "hi", user: "U1" }] });
+    expect((await client.threadRoot({ channel: "C1", ts: "1.2" }))?.botId).toBeNull();
+    slack({ ok: true, messages: [] });
+    expect(await client.threadRoot({ channel: "C1", ts: "1.2" })).toBeNull();
+  });
+
+  it("posts an ephemeral reply into the thread it names, to the one user", async () => {
+    const mock = slack({ ok: true, message_ts: "1.3" });
+
+    await new SlackClient({ token: NEEDLE }).postEphemeral({
+      channel: "C1",
+      user: "U1",
+      text: "hi",
+      threadTs: "1.2",
+    });
+
+    expect(sent(mock).url).toBe("https://slack.com/api/chat.postEphemeral");
+    expect(Object.fromEntries(sent(mock).form)).toEqual({
+      channel: "C1",
+      user: "U1",
+      text: "hi",
+      thread_ts: "1.2",
+    });
+  });
 });
