@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SlackError } from "./client.ts";
 import type { SlashCommand } from "./roster.ts";
+import type { Mention } from "./start.ts";
 import { LATE_REPLY, type ListenDeps, type SocketHandlers, listen, parseFrame } from "./socket.ts";
 
 interface FakeSocket {
@@ -15,6 +16,7 @@ interface FakeSocket {
 function harness(
   handle: (command: SlashCommand) => Promise<string>,
   opens: (string | Error)[],
+  mention: (mention: Mention) => Promise<void> = async () => undefined,
 ): {
   readonly deps: ListenDeps;
   readonly sockets: FakeSocket[];
@@ -53,6 +55,7 @@ function harness(
         };
       },
       handle,
+      mention,
       signal: controller.signal,
       pause: async (ms) => {
         pauses.push(ms);
@@ -97,6 +100,23 @@ function command(envelope: string, text: string, userId = "U0ME"): string {
   });
 }
 
+function mentioned(envelope: string, event: Record<string, unknown>): string {
+  return JSON.stringify({
+    envelope_id: envelope,
+    type: "events_api",
+    accepts_response_payload: false,
+    payload: { type: "event_callback", event: { type: "app_mention", ...event } },
+  });
+}
+
+const IN_THREAD = {
+  user: "U0ME",
+  text: "<@U0BOT> start",
+  channel: "C0CHAN",
+  ts: "1790779745.218229",
+  thread_ts: "1790779480.401999",
+};
+
 async function socketAt(sockets: FakeSocket[], index: number): Promise<FakeSocket> {
   await vi.waitFor(() => {
     expect(sockets.length).toBeGreaterThan(index);
@@ -125,7 +145,7 @@ describe("listen", () => {
       payload: { response_type: "ephemeral", text: "saw U0ME subscribe" },
     });
     h.stop();
-    expect(await running).toEqual({ connections: 1, commands: 1 });
+    expect(await running).toEqual({ connections: 1, commands: 1, mentions: 0 });
     expect(socket.closed).toBe(true);
   });
 
@@ -258,6 +278,74 @@ describe("listen", () => {
     await running;
   });
 
+  it("acknowledges a mention before its work finishes, and hands the work the thread", async () => {
+    const work = Promise.withResolvers<void>();
+    const heard: Mention[] = [];
+    const h = harness(
+      async () => "",
+      ["wss://one"],
+      async (mention) => {
+        heard.push(mention);
+        await work.promise;
+      },
+    );
+    const running = listen(h.deps);
+    const socket = await socketAt(h.sockets, 0);
+
+    socket.on.message(mentioned("e-m", IN_THREAD));
+
+    expect(socket.sent.map((data) => JSON.parse(data) as unknown)).toEqual([
+      { envelope_id: "e-m" },
+    ]);
+    await vi.waitFor(() => {
+      expect(heard).toHaveLength(1);
+    });
+    expect(heard[0]).toEqual({
+      userId: "U0ME",
+      text: "<@U0BOT> start",
+      channel: "C0CHAN",
+      ts: "1790779745.218229",
+      threadTs: "1790779480.401999",
+    });
+    work.resolve();
+    h.stop();
+    expect(await running).toMatchObject({ commands: 0, mentions: 1 });
+  });
+
+  it("runs a mention after the command already running, never beside it", async () => {
+    const order: string[] = [];
+    const gate = Promise.withResolvers<void>();
+    const h = harness(
+      async () => {
+        order.push("command started");
+        await gate.promise;
+        order.push("command finished");
+        return "ok";
+      },
+      ["wss://one"],
+      async () => {
+        order.push("mention");
+      },
+    );
+    const running = listen(h.deps);
+    const socket = await socketAt(h.sockets, 0);
+
+    socket.on.message(command("e-1", "subscribe"));
+    await vi.waitFor(() => {
+      expect(order).toEqual(["command started"]);
+    });
+    socket.on.message(mentioned("e-m", IN_THREAD));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(order).toEqual(["command started"]);
+
+    gate.resolve();
+    await vi.waitFor(() => {
+      expect(order).toEqual(["command started", "command finished", "mention"]);
+    });
+    h.stop();
+    await running;
+  });
+
   it("backs off a failing open, at least as long as a rate limit asked", async () => {
     const h = harness(
       async () => "",
@@ -295,6 +383,36 @@ describe("parseFrame", () => {
       envelope: "e-1",
       respond: true,
       command: { userId: "U0ME", text: "subscribe U0OTHER" },
+    });
+  });
+
+  it("takes a mention's person from the event's user, and no thread when it names none", () => {
+    const { thread_ts: _dropped, ...topLevel } = IN_THREAD;
+
+    expect(parseFrame(mentioned("e-2", topLevel))).toEqual({
+      kind: "mention",
+      envelope: "e-2",
+      mention: {
+        userId: "U0ME",
+        text: "<@U0BOT> start",
+        channel: "C0CHAN",
+        ts: "1790779745.218229",
+        threadTs: null,
+      },
+    });
+  });
+
+  it("reads an event that is not a mention as one to acknowledge and ignore", () => {
+    const message = JSON.stringify({
+      envelope_id: "e-3",
+      type: "events_api",
+      payload: { event: { type: "message", text: "start" } },
+    });
+
+    expect(parseFrame(message)).toEqual({
+      kind: "other",
+      envelope: "e-3",
+      type: "events_api/message",
     });
   });
 

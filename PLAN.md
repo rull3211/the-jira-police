@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3573 tests in 110 files**, no build step.
+> **3580 tests in 110 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -606,6 +606,22 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
+- **No mention has reached the bot.** Slack sends none until an admin updates the app from
+  `docs/slack-app-manifest.json` — `app_mentions:read` and the `app_mention` event — and reinstalls
+  it. Three things rest on no run: that a mention in a thread carries `thread_ts` (assumed from how
+  message events behave; the event's documented examples show none), that an ephemeral reply with
+  a `thread_ts` lands in the thread, and that a daemon holding the connection gets mentions as well
+  as commands. The resolution does rest on one: `slack:start` dry on SSX-4003's thread on
+  2026-09-30 read the bot's top message and the ticket's record and would have added
+  `agent:start`. **What would show it:** after the reinstall, your member ID in
+  `SLACK_START_USERS`, `pnpm slack:listen`, then `@Bencebot start` in SSX-4003's thread. A reply
+  there starting `(dry run, nothing written) Would add agent:start` is the whole path; one saying
+  this is not a thread is the missing `thread_ts`; nothing in the log at all is the subscription
+  not taken, since Slack then sends nothing.
+- **No start has been written.** `slack:start --write` and a live mention are both built on
+  `updateLabels`, which the claim uses every tick, but neither has written a label. The first one
+  is also a paid solve on the next tick with `SOLVE_ENABLED` on, so it waits for a ticket somebody
+  wants solved rather than being run to see.
 
 ### 11. Loose ends recorded in no other file
 

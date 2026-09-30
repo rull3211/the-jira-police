@@ -54,7 +54,7 @@ import {
   propertyRosterStore,
 } from "./slack/roster.ts";
 import { type ListenDeps, type ListenSummary, listen, openWebSocket } from "./slack/socket.ts";
-import type { ThreadDeps } from "./slack/start.ts";
+import { type Mention, type ThreadDeps, createMentionHandler } from "./slack/start.ts";
 import {
   dryPublisher,
   dryStore,
@@ -102,6 +102,7 @@ import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance
 
 const pollLog = createLogger("poll");
 const reviewLog = createLogger("review");
+const slackLog = createLogger("slack");
 const solveLog = createLogger("solve");
 const triageLog = createLogger("triage");
 
@@ -593,7 +594,53 @@ export function listenerFor(
     dry: mode === "dry",
     where: rosterWhere(settings),
   });
-  return () => run({ open: () => client.openConnection(), connect: openWebSocket, handle, signal });
+  const mention = mentionHandlerFor(settings, mode);
+  return () =>
+    run({ open: () => client.openConnection(), connect: openWebSocket, handle, mention, signal });
+}
+
+/**
+ * With nobody on SLACK_START_USERS a mention is logged and dropped, and nothing that could answer or
+ * write is built; with someone, a missing bot token stops the start here rather than every mention.
+ */
+export function mentionHandlerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+): (mention: Mention) => Promise<void> {
+  const allowed = startUsers(settings);
+  if (allowed.length === 0) {
+    return async (mention) => {
+      slackLog.info("slack.mention_ignored", {
+        user: mention.userId,
+        note: "SLACK_START_USERS is empty, so nobody may start or clear a ticket from Slack",
+      });
+    };
+  }
+  const slack = createBotClient(settings);
+  return createMentionHandler({
+    allowed,
+    deps: threadCommandDeps(settings, mode),
+    reply: async (mention, text) => {
+      await slack.postEphemeral({
+        channel: mention.channel,
+        user: mention.userId,
+        text,
+        ...(mention.threadTs === null ? {} : { threadTs: mention.threadTs }),
+      });
+    },
+  });
+}
+
+/** SLACK_START_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
+export function startUsers(settings: Settings): readonly string[] {
+  const entries = list(settings, "SLACK_START_USERS");
+  const malformed = entries.filter((entry) => !SLACK_USER_ID_PATTERN.test(entry));
+  if (malformed.length > 0) {
+    throw new SettingsError([
+      `SLACK_START_USERS (expected member IDs such as U0123ABCD, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
+    ]);
+  }
+  return [...new Set(entries)];
 }
 
 export function rosterWhere(settings: Settings): string {
