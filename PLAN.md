@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §79. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §80. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was.
@@ -535,15 +535,13 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   file itself, which is exactly the check that caught this entry claiming a first run that was
   actually the third, the last time this bullet was wrong. A session starting fresh still cannot see
   any of this from the repository alone.
-- **`FIX_SCHEMA`'s conditional has never refused anything, and a pass that runs out of retries
-  would not say which rule it kept breaking.** Five probes on 2026-09-25 pushed a report toward a
-  contradiction and every one arrived coherent before it was submitted (`architecture/solve.md`),
-  so the CLI's refusal of this schema is unseen. If a pass exhausted the retries, its crash would
-  read `fix pass of <KEY> failed: error_max_structured_output_retries`, from
-  `describeFailedResult` in `src/triage/session.ts`; the refusal text naming the rule reaches only
-  the session transcript, and recon and review share that gap. **What would show it:** a fix pass's
-  transcript holding a `does not match required schema` tool result, or a probe that gets a
-  violating submission past the model.
+- **`FIX_SCHEMA`'s conditional has never refused a report that contradicted itself.** Five probes
+  on 2026-09-25 pushed a report toward a contradiction and every one arrived coherent before it was
+  submitted (`architecture/solve.md`). Its one refusal, SSX-4005's fix pass on 2026-09-30, was a
+  side effect: the leak in §79 had dropped `testAdded`, so the `if` held vacuously and demanded an
+  empty `testOmittedReason`. That pass also ran out of retries and crashed saying only
+  `error_max_structured_output_retries`, which §79 now holds. **What would show it:** a fix pass's
+  transcript holding a `must match "then" schema` refusal of a report that carries every field.
 - **The gate's verdict-banner check has refused only replayed bodies, never a live run.** Through
   `assertPostable`, the 152 `StructuredOutput` bodies on disk on 2026-09-30, before the re-run,
   gave exactly four refusals: the three sessions that never triaged, and the mock
@@ -552,16 +550,17 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
-- **No solve has moved its ticket's status or edited its broadcast line.** Both are tested and
-  neither has run. The daemon's `.env` sets none of the `SOLVE_*_STATUS` settings, so the move to
-  code review has been inert there too, and nothing has sent `chat.update` to a `reply_broadcast`
-  reply: `slack:probe` measures that call and has not been run since it learned to, and its reply
-  names nobody, so whether an edit that keeps a line's mentions notifies them again is unmeasured.
-  Moving into progress costs two status notifications when recon declines. **What would show it:**
-  `pnpm slack:probe <KEY> --keep`, then look at the channel for the edited reply. Then set the
-  statuses by id and run one `solve:once <KEY> --pr` on a ticket in Prioritized. The ticket should
-  be in "Under arbeid" at the claim, and the channel should show "Solve started" with each pass edited
-  under it. A run that opens no pull request should put the ticket back in Prioritized.
+- **The status moves have run; the broadcast line's edits have not been looked at.** SSX-4005 on
+  2026-09-30 took all three moves over two daemon runs, read back from its changelog: Received → In
+  Progress at the claim and back to Prioritized when the fix pass crashed (§79), then Prioritized →
+  In Progress → In Code Review when the second run opened a pull request. Its audit record advanced
+  through every pass. Nobody checked whether each step was edited into the "Solve started" line
+  rather than posted, and `slack:probe`, which measures that call, has not been run since it
+  learned to; its reply names nobody, so whether an edit that keeps a line's mentions notifies them
+  again is unmeasured. Moving into progress costs two status notifications when recon declines.
+  **What would show it:** the channel on the next solve, one "Solve started" line with a single `↳`
+  step under it that changes as the passes run; and `pnpm slack:probe <KEY> --keep` for the edited
+  reply.
 - **No triage has run on the skill text that puts the legend above the footer sentinel.** Three of
   155 bodies, 2026-09-03 to 2026-09-30, put it below (`architecture/triage.md` §12, the legend
   entry), too few for any number of runs to show the text changed the rate. `withFitnessNote` moves
@@ -1142,6 +1141,54 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
+
+### 79. A pass whose tool call garbles its fields crashes, and the crash does not say so
+
+**Branch:** none yet.
+
+**What happened.** SSX-4005's fix pass on 2026-09-30 edited the eight files its ticket named and
+drafted a correct report, then crashed: `fix pass of SSX-4005 failed: is_error, subtype
+error_max_structured_output_retries`. Its transcript holds five `StructuredOutput` calls. In the
+first, the model closed `summary` with `</summary>` where the tool-call syntax wants
+`</parameter>`, so `commitSubject` arrived as literal `<parameter name="commitSubject">` text
+inside `summary`, and the CLI refused the report as missing it. Each retry swallowed more fields;
+the last three were identical, eight fields inside `summary`. The ticket went back to Prioritized
+with `agent:failed`, and the edits sit uncommitted in its worktree.
+
+**It is a rate, not a one-off.** This machine's transcripts hold 760 `StructuredOutput` calls in
+710 sessions. Six sessions leaked fields this way, in five different fields: SSX-3944's recon and
+fix on 2026-09-23, SSX-3918's recon twice and one triage on 2026-09-24, and SSX-4005. Five
+recovered inside the CLI's retries. Every attempt carrying another field's text was refused,
+because a required field went missing with it: the schema has been the detector, and nothing
+garbled has been accepted.
+
+**What is not built.**
+
+1. **The crash says why.** `describeFailedResult` (`src/triage/session.ts`) reports the subtype and
+   `result`, and `runSession` reads only the `init` and `result` events. Every pass runs with
+   `--output-format stream-json --verbose`, so it already receives each `StructuredOutput` call and
+   the CLI's `Output does not match required schema` reply, and drops both. Keeping the last of
+   each would let the crash name the refusal, and a string field holding `<parameter name=` would
+   let it name the leak, so the Slack crash line could tell "this ticket cannot be solved" from
+   "the harness lost a finished report".
+2. **A leaked report is recovered.** The swallowed fields are intact inside the field that
+   swallowed them, in tool-call syntax. Split back out by hand, SSX-4005's first attempt carries
+   every field, with the values the model meant. Handed to the pass's own parser, that run would
+   have gone on to verification with nothing bought twice.
+
+**What would make it the wrong idea:**
+
+- **A recovered report is one the CLI's schema never checked.** Whether the parsers refuse
+  everything the schemas do is the first thing to establish: the schemas were written to carry the
+  parsers' rules (`architecture/solve.md` §15), not the reverse, so it may already hold. If it does
+  not, the choices are growing the parsers, adding a draft-07 validator as a dependency, or
+  resuming the session once with a note naming the leak so the CLI validates, at the price of a
+  turn and a model that may repeat itself: SSX-4005's last three attempts were identical.
+- **Six in 760 may not carry a repair path.** Item 1 alone makes the next crash legible, five of
+  the six recovered unaided, and the sixth cost one solve bought twice.
+- **The slip is the model's, and may move.** It hit five different fields, so renaming `summary`
+  would not have helped, and a model or CLI release could change the rate either way, leaving
+  item 2 guarding a shape nothing produces.
 
 ## Verification
 

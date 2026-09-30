@@ -445,8 +445,9 @@ and holds exactly one of "a test was added" and "here is why not"; an abandoned 
 and is held to nothing else, because `parseFix` returns before its other rules. A probe on
 2026-09-25 handed the CLI SSX-3980's report five ways: against the conditional every submission
 arrived coherent and none was refused, because the model conformed before submitting, where the
-control schema let the report through for `parseFix` to discard — so the CLI's own refusal of this
-schema is still unobserved. `testOmittedReason`'s description names `residualRisk`, the one of the
+control schema let the report through for `parseFix` to discard — so the CLI's refusal of a
+self-contradicting report is still unobserved. Its one refusal of this conditional so far, SSX-4005
+on 2026-09-30, was of a report whose tool call had lost `testAdded` (`PLAN.md` §79). `testOmittedReason`'s description names `residualRisk`, the one of the
 two a reviewer is shown, as the place for partial coverage; the probe did not show it moving a
 note, and a model handed the drafted report dropped it.
 `parseSimplify` is handed the fix pass's file list and refuses anything outside it, because
