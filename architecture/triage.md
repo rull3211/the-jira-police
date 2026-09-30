@@ -464,9 +464,9 @@ returns `ready-ish` and the normal path takes over, or when `MAX_RETRIAGE_PER_TI
 
 ## 12. Local divergence from upstream
 
-`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Five local
+`.claude/skills/intake-triage/` is vendored from Jacob's `backlog-governance`. **Six local
 changes.** The first four are to §11's label-reconciliation list; the fifth is to §1's ingest and
-is the only one that changes what the skill reads:
+is the only one that changes what the skill reads; the sixth is to the posted comment's last line:
 
 1. **`next:*`.** Skill vocabulary — the same file defines
    `next:to-trio | next:to-reporter | next:to-other-team | next:needs-techlead` — and no human sets
@@ -586,6 +586,14 @@ is the only one that changes what the skill reads:
    ended in a defensible state. It shows that a model's boolean is not a measurement, and that the
    design already assumed as much in the places that count — the human gate, the recon bail, and
    the dry phase that produced this observation instead of a pull request.
+
+5. **The legend goes directly above the footer sentinel.** Upstream asked for both to end the
+   comment: `REPORT_TEMPLATES.md`'s glyph legend said "end the Jira comment with ONE legend line",
+   its comment format that the comment "**ends** with the idempotent footer marker", and
+   `INTAKE_INSTRUCTIONS.md` named the sentinel and then said "Append a one-line glyph + CONF
+   legend". Three of the 155 bodies on this machine from 2026-09-03 to 2026-09-30 put the legend
+   last, and the gate refused each: SSX-3935, SSX-3534 and SSX-4005. Both files now place the
+   legend second to last.
 
 Both of the gate's lists must **match §11 exactly, not be a superset**. A gate looser than the
 contract it enforces has a hole in it. Widen either only by widening §11 first — and tell Jacob,
