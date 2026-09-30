@@ -34,7 +34,8 @@ together or `createJiraClient` refuses to start — see `architecture/configurat
 the deliberate narrowings of invariant 11 (`architecture/invariants.md` §14), and they are harness
 writes, never ones a model session can reach: nothing gave any pass or the poster a transition tool,
 and no call site takes ticket text as input. A process killed mid-solve strands the status in
-progress beside the claim it strands (`PLAN.md` §31).
+progress beside the claim it strands (`PLAN.md` §31), and the move back reads the status before it
+transitions, so a person moving the ticket between the two is overwritten.
 
 **Nothing structural is left here, and this paragraph used to name two things that are now
 false.** It said human reviewers were collected and then dropped by the `waiting` gate: they are

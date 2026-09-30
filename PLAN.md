@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73 and §75, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75 and §77, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -551,6 +551,15 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
+- **No solve has moved its ticket's status or edited its broadcast line.** Both are tested and
+  neither has run. The daemon's `.env` sets none of the `SOLVE_*_STATUS` settings, so the move to
+  code review has been inert there too, and nothing has sent `chat.update` to a `reply_broadcast`
+  reply: `slack:probe` measures that call and has not been run since it learned to. Moving into
+  progress costs two status notifications when recon declines. **What would show it:**
+  `pnpm slack:probe <KEY> --keep`, then look at the channel for the edited reply. Then set the
+  statuses by id and run one `solve:once <KEY> --pr` on a ticket in Prioritized. The ticket should
+  be in "Under arbeid" at the claim, and the channel should show "Solve started" with each pass edited
+  under it. A run that opens no pull request should put the ticket back in Prioritized.
 
 ### 11. Loose ends recorded in no other file
 
@@ -1125,36 +1134,6 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
-
-### 77. A solve is invisible in the channel until it ends, and never moves the ticket's status
-
-**Branch:** `feat/solve-lifecycle`
-
-**What is being attempted.** Two changes to one lifecycle, `runWriteRungs` in `src/cli/solve-run.ts`:
-
-- **The channel sees a solve start, and follows it.** SSX-3991's record stamps every step when it
-  happened, the claim at 10:08 to the pull request at 10:21 on 2026-09-29, so the card was edited
-  live. Nobody saw it: the card is collapsed and was posted at triage, two hours up the channel, and
-  only a major entry is broadcast. Nothing between the claim and the pull request is major, so the
-  solve read as arriving all at once. `claimed` becomes major, and a minor entry edits the ticket's
-  latest broadcast in place to show the current step — an edit, so nobody is pinged again.
-- **The status column follows the claim.** At the claim the ticket moves to
-  `SOLVE_IN_PROGRESS_STATUS`. A run ending without a pull request moves it to `SOLVE_RETURN_STATUS`,
-  only if this run moved it in and it is still there, so a status a person set is left alone. A pull
-  request leaves it where it is, for `SOLVE_CODE_REVIEW_STATUS` to move. Both unset by default, and
-  refused at startup when only one is set: that half leaves every failed ticket in progress.
-
-**Why now.** The operator asked for both on 2026-09-30, after watching SSX-3991's solve.
-
-**What would make it the wrong idea:**
-
-- **The edit may not land where it is seen.** Nothing here has measured `chat.update` on a
-  `reply_broadcast` reply; if Slack edits only the thread's copy, the channel line stays stale.
-- **Two status writes per declined recon.** A recon decline moves a ticket in and back within
-  minutes, and each move notifies its watchers. If that is the common ending, the fix pass is the
-  better moment to move it.
-- **The return move races a person.** It reads the status before it writes, and the window between
-  the two is still open.
 
 ## Verification
 
