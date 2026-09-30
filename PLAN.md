@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3532 tests in 109 files**, no build step.
+> **3545 tests in 109 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73 and §75, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75 and §78, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,9 +78,10 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §77. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §79. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
-`feat/slack-audit-thread`, open when §71 was written.
+`feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
+§78 was.
 
 <!-- refs:on -->
 
@@ -551,6 +552,12 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
+- **No triage has run on the skill text that puts the legend above the footer sentinel.** Three of
+  155 bodies, 2026-09-03 to 2026-09-30, put it below (`architecture/triage.md` §12, the legend
+  entry), too few for any number of runs to show the text changed the rate. `withFitnessNote` moves
+  a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
+  would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
+  none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
 
 ### 11. Loose ends recorded in no other file
 
