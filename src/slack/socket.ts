@@ -1,7 +1,6 @@
 /**
- * A Socket Mode connection held until shutdown, each slash command answered in its envelope's
- * acknowledgement and each mention of the bot handed on after its own. The daemon has no public
- * URL, so this is the only way Slack can reach it.
+ * A Socket Mode connection held until shutdown: the daemon has no public URL, so this is the only
+ * way Slack can reach it, with a slash command or a mention of the bot.
  */
 
 import { createLogger } from "../logger.ts";
@@ -120,7 +119,7 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
   let mentions = 0;
   let failures = 0;
 
-  // One at a time, so two commands never interleave a read and its write in this process.
+  // One at a time, commands and mentions alike, so two never interleave a read and its write here.
   let chain: Promise<unknown> = Promise.resolve();
   const answer = async (command: SlashCommand): Promise<string> => {
     commands += 1;

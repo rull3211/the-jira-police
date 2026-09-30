@@ -72,16 +72,25 @@ async function main(): Promise<void> {
 
   const settings = readSettings();
   const deps = threadCommandDeps(settings, write ? "live" : "dry");
-  const outcome = await runThreadCommand(deps, { verb, ...thread });
-
   const directory = join(settings.OUTPUT_DIR, "slack");
-  await writeJson(directory, `${thread.channel}-${thread.threadTs}.thread.json`, {
-    link,
-    ...thread,
-    verb,
-    dry: !write,
-    outcome,
-  });
+  const report = `${thread.channel}-${thread.threadTs}.thread.json`;
+  const run = { link, ...thread, verb, dry: !write };
+
+  let outcome: ThreadOutcome;
+  try {
+    outcome = await runThreadCommand(deps, { verb, ...thread });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await writeJson(directory, report, { ...run, threw: reason });
+    // The write and its read-back are one step here, so a throw after --write cannot say which failed.
+    throw new Error(
+      write
+        ? `${reason} — whether the edit reached the ticket is unknown; read its labels before running this again`
+        : reason,
+      { cause: error },
+    );
+  }
+  await writeJson(directory, report, { ...run, outcome });
   const prefix = write ? "" : "(dry run, nothing written) ";
   const edited =
     outcome.kind === "dry" ? ` See ${join(directory, `${outcome.key}.labels.json`)}.` : "";

@@ -648,9 +648,8 @@ export function rosterWhere(settings: Settings): string {
 }
 
 /**
- * How a thread command finds its ticket and edits its labels. **`live` is the grant that lets a
- * Slack thread write `agent:start` and remove `agent:failed`**, through `updateLabels`; `dry` reads
- * Slack and the ticket for real and writes the edit to `OUTPUT_DIR/slack/<KEY>.labels.json` instead.
+ * **`live` is the grant that lets a Slack thread write `agent:start` and remove `agent:failed`.** `dry`
+ * reads Slack and the ticket for real and writes the edit to a file instead.
  */
 export function threadCommandDeps(settings: Settings, mode: "dry" | "live"): ThreadDeps {
   const slack = createBotClient(settings);

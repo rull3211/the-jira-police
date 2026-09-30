@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { AGENT_LABELS, type LabelEdit, SOLVE_QUEUE_EXCLUDED_LABELS } from "../solve/labels.ts";
-import { newRecord } from "./audit.ts";
+import { applyEvent, newRecord } from "./audit.ts";
+import { renderRecord } from "./render.ts";
 import {
   MENTION_USAGE,
   type Mention,
@@ -24,10 +25,11 @@ const THREAD = "1790779480.401999";
 const ISSUE = "SSX-4003";
 const ALLOWED = "U0ALLOWED";
 
+/** The text `renderRecord` gives the thread's top message, so a change to its fallback fails here. */
 function rootMessage(overrides: Partial<RootMessage> = {}): RootMessage {
   return {
     ts: THREAD,
-    text: `${ISSUE}: Triaged — ready-ish, solvable (high)`,
+    text: renderRecord(newRecord(ISSUE, "Beløp på forsikring vises feil", "https://x")).text,
     botId: BOT,
     ...overrides,
   };
@@ -168,8 +170,24 @@ describe("parseThreadLink", () => {
 });
 
 describe("ticketOfRoot", () => {
-  it("takes the ticket from the bot's own top message", () => {
+  it("takes the ticket from the bot's own top message, before and after it gains a major entry", () => {
+    const triaged = applyEvent(
+      newRecord(ISSUE, "summary", "https://x"),
+      {
+        kind: "triage-verdict",
+        verdict: "ready-ish",
+        solvable: true,
+        confidence: "high",
+        posted: true,
+      },
+      new Date("2026-09-30T20:00:00Z"),
+    );
+
     expect(ticketOfRoot(rootMessage(), THREAD, BOT)).toEqual({ kind: "ticket", key: ISSUE });
+    expect(ticketOfRoot(rootMessage({ text: renderRecord(triaged).text }), THREAD, BOT)).toEqual({
+      kind: "ticket",
+      key: ISSUE,
+    });
   });
 
   it("refuses a top message somebody else posted, however much it looks like the bot's", () => {

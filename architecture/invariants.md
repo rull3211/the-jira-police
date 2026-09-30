@@ -49,7 +49,7 @@ Things that look like details and are not:
    ticket produced reaches that path: no session holds a Slack token (invariant 3), and the bot's
    own messages raise no mention.
 10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
-    value is missing _or blank_ (`settings.ts:333`) — the two are indistinguishable to it. So a
+    value is missing _or blank_ — the two are indistinguishable to it. So a
     default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
     an operator emptying the allowlist to take the solver off a repository would have it handed
     straight back, revocable only by editing source. It is one of several solve settings with no

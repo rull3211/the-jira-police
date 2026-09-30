@@ -653,9 +653,10 @@ writes the property and reads it back, and a reply that cannot see its own chang
 credential needs Administer Projects on `JIRA_PROJECT` for that write, and nothing else here does.
 The daemon answers it too once `SLACK_LISTEN` is `dry` or `live`, the same two modes; off by
 default, and a missing or wrong `SLACK_APP_TOKEN` stops the start. A hand-run listener beside the
-daemon splits the commands between them, since Slack gives each to one connection, and two changes
-in the same second can lose one without either reply saying so (`architecture/invariants.md`
-invariant 18).
+daemon splits the commands and mentions between them, since Slack gives each to one connection, and
+two changes in the same second can lose one without either reply saying so (`architecture/invariants.md`
+invariant 18). A mention landing on a listener with no `SLACK_START_USERS` is dropped with only
+`slack.mention_ignored` in its log, so run both with the same list or only one.
 On a network that drops, Slack can report a command as failed that went through: `/bencebot` says
 where you stand, and `slack.command_late` in the log says the reply missed Slack's budget.
 
@@ -700,10 +701,10 @@ declares it, and a declared one cannot hold a list of timeline entries.
 To set it up, create the app from the manifest rather than by hand:
 
 1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**,
-   then paste `docs/slack-app-manifest.json`. It asks for `app_mentions:read`, `chat:write`,
-   `channels:history` and `commands`, declares `/bencebot` and the `app_mention` event, turns
-   Socket Mode on and both token rotations off, since nothing here refreshes a token. An app made
-   from an earlier copy takes the new one under **App Manifest**, then a reinstall.
+   then paste `docs/slack-app-manifest.json`. It declares `/bencebot` and the `app_mention` event,
+   turns Socket Mode on and both token rotations off, since nothing here refreshes a token, and asks
+   for the scopes in the table below. An app made from an earlier copy takes the new one under
+   **App Manifest**, then a reinstall.
 2. **Install to Workspace**, then copy **OAuth & Permissions → Bot User OAuth Token** (`xoxb-…`)
    into `SLACK_BOT_TOKEN`. The **App Configuration Token** on the apps page is a different thing: it
    starts `xoxe.xoxp-`, expires in twelve hours, drives only the manifest API, and cannot post.
@@ -714,6 +715,25 @@ To set it up, create the app from the manifest rather than by hand:
    `keychain:<name>`.
 5. For `@Bencebot start` only: the member ID of each person who may start a ticket, comma-separated,
    into `SLACK_START_USERS` — from their Slack profile, ⋮ → Copy member ID.
+
+**The manifest asks for more scopes than the code uses, on purpose.** A scope added later means a
+reinstall, which an organisation admin may have to approve, so the operator chose on 2026-09-30 to
+ask once for what planned Slack features would need. The cost is that a leaked bot token can do
+everything in the right-hand column. A scope whose feature is dropped should come out of the
+manifest in the same change.
+
+| scope                                          | used by                                                                                               |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `chat:write`                                   | the audit thread, broadcasts, the pull request line, every reply                                      |
+| `commands`                                     | `/bencebot`                                                                                           |
+| `app_mentions:read`                            | `@Bencebot start` and `clear`                                                                         |
+| `channels:history`                             | reading a thread's top message, to tie it to its ticket                                               |
+| `reactions:write`                              | **not yet** — marking a mention as taken, so the thread sees it and not only the asker                |
+| `reactions:read`                               | **not yet** — starting a ticket by reacting to its card                                               |
+| `users:read`, `users:read.email`               | **not yet** — finding the asker's Jira account, so a start or a created task names them on the ticket |
+| `groups:history`, `groups:read`                | **not yet** — the same reads in a private channel                                                     |
+| `im:history`, `mpim:history`                   | **not yet** — commands in a direct message, and threads in a group one                                |
+| `channels:read`, `channels:join`, `files:read` | **not yet** — creating a Jira task from any thread: whether the bot is in it, joining, its images     |
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch, or with `solve:once --watch`, which polls pull
