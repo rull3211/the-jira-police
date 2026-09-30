@@ -1091,6 +1091,50 @@ night before a demo.
   several rules nested that way may be a schema nobody can review, which is worse than a gate that
   can be read.
 
+### 75. The analyst can reach the Skill tool, and its refusal tells the session not to triage
+
+**Branch:** `fix/triage-deny-skill-tool`
+
+**What is being attempted.** Add `Skill` to `ANALYST_DENIED_TOOLS`, and have the gate refuse a
+comment body carrying no verdict banner heading (`✅ ACCEPT`, `⛔ REJECT`, `↪ ROUTE`, `↩ SEND BACK`,
+or the template's no-emoji fallbacks).
+
+**Why now.** SSX-4000's posted fitness call, 2026-09-30, said the question "is not applicable to this
+run". Its transcript shows the skill expanded from the prompt, and then the model called the `Skill`
+tool for `intake-triage` anyway; `disable-model-invocation: true` makes Claude Code answer "Ask the
+user to run /intake-triage themselves … Do not replicate this skill's workflow by other means". Of
+the 182 triage transcripts on disk, none of the 122 before Claude Code 2.1.274 (2026-09-17) calls
+`Skill`, and 54 of the 60 since carry the refusal. The opening turn is the same 8,430-character
+expansion on both sides of that version, so what changed is what the CLI tells the model, which a
+transcript does not record. Most runs ignore the refusal. Three obeyed it and triaged nothing —
+SSX-3918 on 09-17, SSX-2681 on 09-21, SSX-3989 on 09-29 — and SSX-3989's "No comment should be
+posted from this run" was posted. SSX-4000 did the work and then treated its own run as the thing
+being scored; that it surfaced only now is `0d5c143`, which removed "omit this object entirely if
+you are unsure", so a session that thinks the field does not apply must write that down.
+
+**The banner check was measured before it was written.** Of the 151 `StructuredOutput` bodies in
+those transcripts, every one that did triage carries a banner heading, not always first (a `## Run
+info` or a re-run note can precede it) and at `#` or `##`; the three with none are exactly the
+three runs above. The mock's body has none, and never reaches the gate: a stand-in never posts.
+
+**Predictions for the real run, SSX-4000, before it happens:**
+
+- the prompt's `/intake-triage` still expands with `Skill` withheld — it is expanded by the CLI
+  before the model's first turn, never through the tool. If the transcript's first user turn lacks
+  the skill body, the approach is wrong and this entry is rewritten;
+- the transcript holds no `Skill` call and no "cannot be used with Skill tool" result;
+- the fitness call is about the refactor, not the run; I expect `solvable: false` for its size
+  (two ~700-line classes split, ~26 tests moved);
+- `--write` passes the gate and updates the bad comment in place rather than adding a second.
+
+**What would make it the wrong idea:**
+
+- **Denying `Skill` may break the expansion itself**, which the first prediction tests.
+- **The banner may stop being a proxy for "the skill ran".** It is the skill's own template, which
+  a vendored update could change; a real run refused for a missing banner costs a paid retry.
+- **The model may find another route to the same confusion** — the refusal is one trigger seen, not
+  the only possible one — which a banner check would not catch when the triage itself was done.
+
 ## Verification
 
 Unit and integration, following existing patterns, plus the house rule: **a guard is not shipped
