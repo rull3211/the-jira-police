@@ -78,9 +78,10 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §77. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §79. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
-`feat/slack-audit-thread`, open when §71 was written.
+`feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
+§78 was.
 
 <!-- refs:on -->
 
@@ -1125,6 +1126,44 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
+
+### 78. A triage body with its legend below the footer sentinel is refused, and bought again
+
+**Branch:** `fix/triage-footer-order`
+
+**What is being attempted.** `assertPostable` refuses a comment body that does not end with
+`FOOTER_SENTINEL`. This machine's session transcripts hold 155 triage bodies, 2026-09-03 to
+2026-09-30, and three broke that rule, all three the same way: the exact sentinel as the
+second-to-last line, and the `_Legend:` line after it. SSX-3935 on 2026-09-17, SSX-3534 on
+2026-09-24, SSX-4005 on 2026-09-30. None lacked the sentinel. SSX-4005 was bought again on the next
+poll and posted; SSX-3534's `rejected.md` is still the last thing written for it.
+
+**The vendored skill asks for it.** `REPORT_TEMPLATES.md` tells the model to "end the Jira comment
+with ONE legend line" and, further down, that the comment "**ends** with the idempotent footer
+marker"; `INTAKE_INSTRUCTIONS.md` says to post a comment "ending with the idempotent footer
+sentinel line" and then to "Append a one-line glyph + CONF legend". Two things each claim the last
+line, and the swap is the model obeying the other one. So two changes, each its own commit:
+
+1. **The skill** says the legend goes directly above the sentinel, in both files, as a local
+   divergence in `architecture/triage.md` §12.
+2. **The harness** moves a legend line found below the sentinel back above it, in
+   `withFitnessNote`, which already rewrites the tail around the sentinel; and the gate's one
+   refusal splits in two, a sentinel that is missing and one with something after it.
+
+**Why now.** SSX-4005 paid for a second triage, and the channel got a refusal naming the operator,
+on a ticket whose report was right.
+
+**What would make it the wrong idea:**
+
+- **A repair widens what passes the gate.** Hence the legend line only: anything else after the
+  sentinel, a closing code fence or a note to the operator, is still refused.
+- **The skill fix may be enough on its own.** It cannot be measured at three in 155, and
+  `BUILDING.md` puts the bound in the harness, not the prompt. If `groomed/*.rejected.md` never
+  shows this shape again, the harness half guards nothing and is a candidate to delete.
+- **The gate may be stricter than its reason.** Nothing that reads the sentinel needs it last: the
+  watcher's `isOurComment` uses `includes`, and the poster looks for "the exact footer sentinel
+  line". Relaxing the gate to presence stops the refusal too, but posts the legend under the footer
+  on a board where every other triage comment ends with it.
 
 ## Verification
 
