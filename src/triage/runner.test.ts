@@ -244,6 +244,18 @@ describe("the analyst denylist", () => {
     expect(denied).toContain("Edit");
   });
 
+  it("withholds the Skill tool, mock or real, whose refusal told three sessions not to triage", () => {
+    // The skill arrives expanded from the prompt; `disable-model-invocation` makes the tool answer
+    // "do not replicate this skill's workflow", and SSX-3918, SSX-2681 and SSX-3989 did as told.
+    for (const options of [BASE, { ...BASE, allowedTools: [] }]) {
+      const args = buildArgs(options);
+      const denied = (args[args.indexOf("--disallowedTools") + 1] ?? "").split(",");
+
+      expect(denied).toContain("Skill");
+      expect(buildPrompt(options).startsWith(`/${options.skillName} `)).toBe(true);
+    }
+  });
+
   it("withholds them even when the caller supplies its own allowlist", () => {
     // The mock skill passes `allowedTools: []`; that must not end up denying nothing, which is
     // what would happen if the denylist were derived from the allowlist rather than fixed.

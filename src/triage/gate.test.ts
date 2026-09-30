@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { RETRIAGE_LABEL_PREFIX } from "../watch/counter.ts";
@@ -35,9 +37,11 @@ function solvable(overrides: Partial<AgentFitness> = {}): AgentFitness {
   });
 }
 
+const BANNER = "# ↩ SEND BACK → needs info · SSX-1234";
+
 function mutation(overrides: Partial<Mutation> = {}): Mutation {
   return {
-    commentBody: `## Triage of SSX-1234\n\nLooks fine.\n\n${FOOTER_SENTINEL}`,
+    commentBody: `${BANNER}\n\nLooks fine.\n\n${FOOTER_SENTINEL}`,
     labelsAdd: [],
     labelsRemove: [],
     component: "",
@@ -73,6 +77,16 @@ function violations(input: TriagePayload, issueKey = "SSX-1234"): readonly strin
   }
 }
 
+function withFooter(...lines: readonly string[]): string {
+  return [...lines, "", FOOTER_SENTINEL].join("\n");
+}
+
+function bannerViolations(commentBody: string): readonly string[] {
+  return violations(payload({ mutation: mutation({ commentBody }) })).filter((violation) =>
+    violation.includes("verdict banner"),
+  );
+}
+
 describe("assertPostable", () => {
   it("allows a well-formed mutation", () => {
     expect(() => assertPostable(payload(), "SSX-1234")).not.toThrow();
@@ -106,7 +120,7 @@ describe("the comment body", () => {
   });
 
   it("refuses a body missing the idempotency sentinel", () => {
-    const body = "## Triage of SSX-1234\n\nLooks fine.";
+    const body = `${BANNER}\n\nLooks fine.`;
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
       "footer sentinel",
@@ -114,7 +128,7 @@ describe("the comment body", () => {
   });
 
   it("tolerates trailing whitespace after the sentinel", () => {
-    const body = `## SSX-1234\n\n${FOOTER_SENTINEL}\n\n`;
+    const body = `${BANNER}\n\n${FOOTER_SENTINEL}\n\n`;
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
   });
@@ -122,7 +136,7 @@ describe("the comment body", () => {
   it("refuses a body carrying two agent-fitness blocks", () => {
     // Unreachable unless `withFitnessNote`'s strip missed a paraphrase of the marker it keys on.
     const body = [
-      "## Triage of SSX-1234",
+      BANNER,
       "",
       "🤖 **Agent fitness:** looks automatable · confidence med",
       "",
@@ -137,21 +151,21 @@ describe("the comment body", () => {
   });
 
   it("accepts the one block a normal run posts", () => {
-    const body = `## SSX-1234\n\n🤖 **Agent fitness:** looks automatable\n\n${FOOTER_SENTINEL}`;
+    const body = `${BANNER}\n\n🤖 **Agent fitness:** looks automatable\n\n${FOOTER_SENTINEL}`;
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
   });
 
   it("does not count the phrase where the report merely mentions it", () => {
     // Column-zero anchoring separates the region the renderer owns from a mere mention.
-    const body = `## SSX-1234\n\n> the 🤖 **Agent fitness** call was withdrawn\n\n${FOOTER_SENTINEL}`;
+    const body = `${BANNER}\n\n> the 🤖 **Agent fitness** call was withdrawn\n\n${FOOTER_SENTINEL}`;
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([]);
   });
 
   it("refuses a body that mentions a different issue", () => {
     // The only place body-to-key pairing is checked.
-    const body = `## Triage of SSX-9999\n\nLooks fine.\n\n${FOOTER_SENTINEL}`;
+    const body = `# ↩ SEND BACK → needs info · SSX-9999\n\nLooks fine.\n\n${FOOTER_SENTINEL}`;
 
     expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
       "belongs to another issue",
@@ -204,7 +218,7 @@ describe("the comment body", () => {
 
   it("allows a body that merely quotes the placeholder", () => {
     // Punishing this would push the model towards saying less.
-    const body = `## SSX-1234\n\nDoR: gaps — baseline is still "[N]".\n\n${FOOTER_SENTINEL}`;
+    const body = `${BANNER}\n\nDoR: gaps — baseline is still "[N]".\n\n${FOOTER_SENTINEL}`;
 
     expect(
       violations(
@@ -214,6 +228,61 @@ describe("the comment body", () => {
         }),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("the verdict banner", () => {
+  // Read from the vendored template, so an upstream change to the banner set fails here, not on a paid run.
+  const TEMPLATE = readFileSync(
+    new URL("../../.claude/skills/intake-triage/REPORT_TEMPLATES.md", import.meta.url),
+    "utf8",
+  );
+  const SECTION =
+    TEMPLATE.split("\n## ").find((part) => part.startsWith("Verdict banner set")) ?? "";
+  const TEMPLATE_BANNERS = [...SECTION.matchAll(/`(#[^`]+)`/gu)].map(([, banner]) =>
+    (banner ?? "").replaceAll("<KEY>", "SSX-1234").replaceAll("<owning_team>", "Claims"),
+  );
+
+  it("finds the template's banner set, glyphs and no-emoji fallbacks both", () => {
+    expect(TEMPLATE_BANNERS).toEqual(
+      expect.arrayContaining([
+        "# ✅ ACCEPT → queue · SSX-1234",
+        "# [BACK] -> needs info · SSX-1234",
+      ]),
+    );
+  });
+
+  it.each(TEMPLATE_BANNERS)("accepts the template's %s", (banner) => {
+    expect(bannerViolations(withFooter(banner, "", "The reason line."))).toEqual([]);
+  });
+
+  it("refuses the comment SSX-3989 posted after its session obeyed the Skill tool's refusal", () => {
+    const body = withFooter(
+      "_Triage not performed: the intake-triage skill failed to load (disable-model-invocation refusal), so no research was run against SSX-1234. No comment should be posted from this run._",
+    );
+
+    expect(bannerViolations(body)).toHaveLength(1);
+  });
+
+  it("accepts a banner below a run note, which is where real runs put it", () => {
+    // SSX-3986's re-run on 2026-09-29 opened with `## Run info`, whatever the template says about line 1.
+    const body = withFooter("## Run info", "", "Re-run after an edit.", "", BANNER);
+
+    expect(bannerViolations(body)).toEqual([]);
+  });
+
+  it("accepts a second-level banner, and a glyph carrying its variation selector", () => {
+    expect(bannerViolations(withFooter("## ✅ ACCEPT → queue · SSX-1234"))).toEqual([]);
+    expect(bannerViolations(withFooter("# ↩\u{FE0F} SEND BACK → needs info · SSX-1234"))).toEqual(
+      [],
+    );
+  });
+
+  it("refuses a verdict that is only mentioned, never a heading", () => {
+    // An explanation of why the triage never ran can still name the verdict it would have reached.
+    const body = withFooter("SSX-1234 would have been a ✅ ACCEPT, but the skill never loaded.");
+
+    expect(bannerViolations(body)).toHaveLength(1);
   });
 });
 

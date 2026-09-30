@@ -53,6 +53,9 @@ export const ALLOWED_TOOLS: readonly string[] = [
  * Tools withheld from the analyst. `--allowedTools` enforces nothing by itself, so "never writes to
  * Jira" rests on this list, not on omission from `ALLOWED_TOOLS` above.
  *
+ * A denylist over built-ins each CLI release can add to; `--tools` would invert it, but whether it
+ * also removes `StructuredOutput` and `ToolSearch` is unprobed (`PLAN.md` §76).
+ *
  * The Atlassian mutators are listed on the same principle but are NOT verified withheld — a bare
  * probe run has no MCP server connected, so nothing distinguishes "denied" from "absent" here.
  * Nobody should read this list as proof the analyst is mechanically unable to edit a Jira issue;
@@ -68,6 +71,9 @@ export const ANALYST_DENIED_TOOLS: readonly string[] = [
   // Worth nothing while a subagent can be spawned with an unverified tool surface, but the triage
   // skill already treats subagents as unusable headlessly, so the run loses nothing it was using.
   "Task",
+  // The prompt already expands the skill; calling it again only fetches a refusal telling the session
+  // not to triage, which three runs obeyed (`architecture/overview.md` §6).
+  "Skill",
   "mcp__atlassian__editJiraIssue",
   "mcp__atlassian__addCommentToJiraIssue",
   "mcp__atlassian__createJiraIssue",

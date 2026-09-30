@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3516 tests in 109 files**, no build step.
+> **3532 tests in 109 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71 and §73, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73 and §75, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §75. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §77. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written.
 
@@ -543,6 +543,14 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   the session transcript, and recon and review share that gap. **What would show it:** a fix pass's
   transcript holding a `does not match required schema` tool result, or a probe that gets a
   violating submission past the model.
+- **The gate's verdict-banner check has refused only replayed bodies, never a live run.** Through
+  `assertPostable`, the 152 `StructuredOutput` bodies on disk on 2026-09-30, before the re-run,
+  gave exactly four refusals: the three sessions that never triaged, and the mock
+  (`architecture/triage.md` §3). Withholding `Skill` has held on one real run, SSX-4000 that
+  evening. The pattern does not cover a banner quoted inside a code fence, or a heading like
+  `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
+  naming the missing banner — either a session that stopped for some reason other than the
+  refusal, or a real report the pattern misses.
 
 ### 11. Loose ends recorded in no other file
 
@@ -633,7 +641,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **128 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **130 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost
@@ -1090,6 +1098,33 @@ night before a demo.
 - **Nesting may stop being readable.** `solve.md` repeats one rule inside both branches of another;
   several rules nested that way may be a schema nobody can review, which is worse than a gate that
   can be read.
+
+### 76. Every session's built-in tools are a denylist, and `--tools` could name them instead
+
+**Branch:** none yet.
+
+**What is not built.** `ANALYST_DENIED_TOOLS` and the solve denylists name built-in tools one at a
+time, so a built-in nobody listed is reachable. `Skill` was one: the analyst withholds it now
+(`architecture/overview.md` §6), but no solve pass does, and `agent-solve` also carries
+`disable-model-invocation: true`. Two review passes called it for `agent-solve` and got the same
+"do not replicate this skill's workflow" refusal, SSX-3784 on 2026-09-24 and SSX-3940 on
+2026-09-28; whether either answer changed because of it has not been read. Claude Code's `--tools`
+takes the list of built-ins a session gets, which is the inversion `BUILDING.md` asks for.
+
+**Why it was not built alongside.** Each question needs a paid probe of its own. Is
+`StructuredOutput`, which `--json-schema` depends on, a built-in that `--tools` removes? Is
+`ToolSearch`, which a session uses to load deferred MCP tools like the poster's? And does the
+prompt's `/intake-triage` or `/agent-solve` line still expand? Simplify also holds `Skill` on
+purpose, to run `/simplify` (`SIMPLIFY_ALLOWED_TOOLS`), so its list differs from the passes it
+shares `FIX_DENIED_TOOLS` with.
+
+**What would make it the wrong idea:**
+
+- **`--tools` may take away what the harness needs**, which the probes above would show before
+  anything ships.
+- **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
+  followed the refusal, only the analyst's inversion buys anything.
+- **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
 
 ## Verification
 

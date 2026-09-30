@@ -66,7 +66,7 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
  * Deliberately no grandfather list — a path exemption never expires the way a dated declaration
  * does.
  */
-export const UNRESOLVED_ON_PURPOSE = 11;
+export const UNRESOLVED_ON_PURPOSE = 12;
 
 /** How stale a dated `**No rule yet**` is allowed to get. */
 export const UNRESOLVED_DAYS = 30;

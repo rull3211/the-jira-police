@@ -47,7 +47,7 @@ const TICKET: TicketRef = {
 
 function mutation(overrides: Partial<Mutation> = {}): Mutation {
   return {
-    commentBody: `## Triage of SSX-1234\n\nGaps remain.\n\n${FOOTER_SENTINEL}`,
+    commentBody: `# ↩ SEND BACK → needs info · SSX-1234\n\nGaps remain.\n\n${FOOTER_SENTINEL}`,
     labelsAdd: ["dor:gaps"],
     labelsRemove: [],
     component: "",
