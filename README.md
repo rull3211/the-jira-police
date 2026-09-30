@@ -641,8 +641,8 @@ and the command exits 1 saying so: deleting the property starts the thread afres
 
 **`slack:listen` answers `/bencebot`, and the subscriber list is what it changes.**
 `/bencebot subscribe` puts you on one list, for every ticket, and each broadcast then mentions you;
-`/bencebot unsubscribe` takes you off, and a bare `/bencebot` says which you are. The reply is only
-visible to you. Who is added is the Slack user who typed it, never a name in the text. The list is
+`/bencebot unsubscribe` takes you off, and a bare `/bencebot` says which you are. `/bencebot help`
+lists these and the mentions below, without reading the list. The reply is only visible to you. Who is added is the Slack user who typed it, never a name in the text. The list is
 the `jira-police.slack-subscribers` property on `JIRA_PROJECT`, read at each broadcast, so a change
 applies from the next one; a list this version cannot read is left as found, each command says so,
 and broadcasts go out without mentions and log `slack.subscribers_unread`. The command holds a

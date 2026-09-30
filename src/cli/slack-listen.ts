@@ -22,7 +22,7 @@ const EXIT = { ok: 0, usage: 2, threw: 3 } as const;
 function usage(): never {
   process.stderr.write(
     "usage: pnpm slack:listen [--write]\n" +
-      "  Holds a Socket Mode connection and answers /bencebot subscribe, unsubscribe and status\n" +
+      "  Holds a Socket Mode connection and answers /bencebot subscribe, unsubscribe, status and help\n" +
       "  until Ctrl-C, and @Bencebot start and clear in a ticket's thread from the people on\n" +
       "  SLACK_START_USERS. Dry by default: reads the real jira-police.slack-subscribers list on\n" +
       "  JIRA_PROJECT and writes the would-be list to <OUTPUT_DIR>/slack/roster.json, and a\n" +

@@ -12,8 +12,8 @@
     "slash_commands": [
       {
         "command": "/bencebot",
-        "description": "Be mentioned on each major event of every ticket, or stop",
-        "usage_hint": "[subscribe | unsubscribe]",
+        "description": "Be mentioned on each major event of every ticket, or stop; help lists every command",
+        "usage_hint": "[help | subscribe | unsubscribe]",
         "should_escape": false
       }
     ]
