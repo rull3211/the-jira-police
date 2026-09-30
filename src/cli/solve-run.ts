@@ -224,11 +224,8 @@ export async function runSolver(
   // that had claimed, cut a worktree, verified the base, and was stopped by a policy hook: it
   // released every label and said nothing, leaving the board looking untouched.
   //
-  // This line is not mutation-covered, measured rather than assumed: there is no
-  // `solve-run.test.ts`, so putting `terminalLabelAfter` back here leaves the suite green. The
-  // predicate itself is covered in `solve-outcome.test.ts`; the choice of predicate at this one
-  // call site is the gap, recorded rather than fixed since a harness for this function is a
-  // larger change than the feature it would guard.
+  // Not mutation-covered: `solve-run.test.ts` never drives a run this far, so putting
+  // `terminalLabelAfter` back here leaves the suite green. `solve-outcome.test.ts` covers the predicate.
   const commenter = reportsToTicket(outcome) ? createSolveCommenter(settings) : null;
   const feedback = await reportOutcome(
     {
@@ -375,6 +372,56 @@ export async function moveReviewStage(
       issueKey,
       error,
       note: "move the Jira status by hand; the pull request and its labels are unaffected",
+    });
+  }
+}
+
+/**
+ * The status half of a claim. `true` only when this call moved the ticket, the one case
+ * `returnFromInProgress` may undo: a ticket already in progress was put there by somebody else.
+ * Never throws — a status is bookkeeping, and the solve goes on without it.
+ */
+export async function enterInProgress(client: JiraClient, issueKey: string): Promise<boolean> {
+  try {
+    const result = await client.moveToInProgress(issueKey);
+    if (result.outcome === "moved") {
+      labelsLog.info("labels.in_progress_status_moved", { issueKey, from: result.from });
+      return true;
+    }
+    if (result.outcome === "unreachable") {
+      labelsLog.warn("labels.in_progress_status_unreachable", { issueKey, from: result.from });
+    }
+    return false;
+  } catch (error) {
+    labelsLog.error("labels.in_progress_status_failed", {
+      issueKey,
+      error,
+      note: "the solve goes on; whether the status moved is unknown, and nothing will move it back",
+    });
+    return false;
+  }
+}
+
+/** Undoes `enterInProgress` for a run that ends without a pull request. Never throws, for the same reason. */
+export async function returnFromInProgress(client: JiraClient, issueKey: string): Promise<void> {
+  try {
+    const result = await client.moveBackFromInProgress(issueKey);
+    if (result.outcome === "moved") {
+      labelsLog.info("labels.return_status_moved", { issueKey, from: result.from });
+    } else if (result.outcome === "unreachable") {
+      labelsLog.warn("labels.return_status_unreachable", { issueKey, from: result.from });
+    } else if (result.outcome === "elsewhere") {
+      labelsLog.info("labels.return_status_left_alone", {
+        issueKey,
+        from: result.from,
+        note: "moved out of in progress during the run, so left where it was put",
+      });
+    }
+  } catch (error) {
+    labelsLog.error("labels.return_status_failed", {
+      issueKey,
+      error,
+      note: "move the Jira status back by hand; the labels were handled either way",
     });
   }
 }
@@ -1019,7 +1066,8 @@ export async function runWatch(
 }
 
 /**
- * The write rungs, in order, with the release as the last thing that happens.
+ * The write rungs, in order, with the release, and the status the claim moved, as the last things
+ * that happen.
  *
  * `try`/`finally` rather than a release at each exit: the rungs can set an exit code and return,
  * `runSolver` can throw, and a claim left behind by either is a ticket nobody can pick up again.
@@ -1044,6 +1092,7 @@ export async function runWriteRungs(
 
   let keepClaim = false;
   let terminal: SolveOutcomeLabel | null = null;
+  let movedIn = false;
   try {
     if (!includes(phase, "solve")) {
       // The `--claim` rehearsal, performed rather than described: with the claim in place the
@@ -1066,6 +1115,7 @@ export async function runWriteRungs(
       kind: "claimed",
       repo: cycle?.planned.find((candidate) => candidate.issueKey === issueKey)?.repo ?? null,
     });
+    movedIn = await enterInProgress(client, issueKey);
     const outcome = await runSolver(settings, client, issueKey, cycle, promoteRepair);
     // Read before the early return: the outcomes that decide a ticket's fate are exactly the
     // ones that never reach a pull request.
@@ -1121,6 +1171,9 @@ export async function runWriteRungs(
         `\n${issueKey} is out of the solve queue until a human removes agent:${decided}.\n` +
           `That is the point: this run reached a verdict, and re-running it would reach the same one.\n`,
       );
+    }
+    if (movedIn && !keepClaim) {
+      await returnFromInProgress(client, issueKey);
     }
   }
 }

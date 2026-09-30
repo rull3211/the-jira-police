@@ -753,6 +753,120 @@ describe("JiraClient.moveToCodeReview", () => {
   });
 });
 
+/** All three targets configured, by id, as this board's are: each move must aim at its own. */
+function statusClient(
+  statuses: { codeReviewStatus?: string; inProgressStatus?: string; returnStatus?: string } = {
+    codeReviewStatus: "10232",
+    inProgressStatus: "3",
+    returnStatus: "10213",
+  },
+): JiraClient {
+  return new JiraClient({
+    baseUrl: "https://example.invalid",
+    email: "someone@example.com",
+    auth: NEEDLE,
+    ...statuses,
+  });
+}
+
+/** The SSX workflow's transitions, trimmed: every one is global, so each is offered from anywhere. */
+const SSX_TRANSITIONS = [
+  { id: "21", to: { id: "3", name: "Under arbeid" } },
+  { id: "161", to: { id: "10213", name: "Prioritized" } },
+  { id: "191", to: { id: "10232", name: "In Code Review" } },
+];
+
+describe("JiraClient.moveToInProgress", () => {
+  it("is a guaranteed no-op when only another status was configured", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("10232").moveToInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "disabled",
+      from: "",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("takes the transition landing on its own target, whatever the transition is called", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("Prioritized", "10213"))
+      .mockResolvedValueOnce(transitionsResponse(SSX_TRANSITIONS))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveToInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "moved",
+      from: "Prioritized",
+    });
+    expect(JSON.parse(String(callArgs(fetchMock, 2).init.body))).toEqual({
+      transition: { id: "21" },
+    });
+  });
+
+  it("leaves a ticket already in progress alone, which is what tells the caller not to undo it", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("Under arbeid", "3"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveToInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "already-there",
+      from: "Under arbeid",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("JiraClient.moveBackFromInProgress", () => {
+  it("is a guaranteed no-op without an in-progress status, even with a return status", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      statusClient({ returnStatus: "10213" }).moveBackFromInProgress("SSX-3822"),
+    ).resolves.toEqual({ outcome: "disabled", from: "" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("moves a ticket still in progress to the return status", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("Under arbeid", "3"))
+      .mockResolvedValueOnce(transitionsResponse(SSX_TRANSITIONS))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveBackFromInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "moved",
+      from: "Under arbeid",
+    });
+    expect(JSON.parse(String(callArgs(fetchMock, 2).init.body))).toEqual({
+      transition: { id: "161" },
+    });
+  });
+
+  it("leaves a ticket somebody moved out of progress where they put it, reading nothing more", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("Blokkert", "11130"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveBackFromInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "elsewhere",
+      from: "Blokkert",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls a ticket already at the return status there, rather than elsewhere", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("Prioritized", "10213"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveBackFromInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "already-there",
+      from: "Prioritized",
+    });
+  });
+});
+
 describe("assertOwnedLabel", () => {
   it("accepts every label the state machine can write", () => {
     // Read off AGENT_LABELS rather than copied out of it, so a new label here can't silently rot.

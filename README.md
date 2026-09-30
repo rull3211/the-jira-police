@@ -902,7 +902,7 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 
 | Setting                         | Default       | Notes                                                                                                                   |
 | ------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, a status move if `SOLVE_CODE_REVIEW_STATUS` is set       |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, status moves where a `SOLVE_*_STATUS` setting names one  |
 | `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                                                 |
 | `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                                                        |
 | `WRITE_BACK`                    | `false`       | Whether triage posts its comment and labels. Strict `"true"`                                                            |
