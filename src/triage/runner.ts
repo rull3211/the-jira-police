@@ -68,6 +68,9 @@ export const ANALYST_DENIED_TOOLS: readonly string[] = [
   // Worth nothing while a subagent can be spawned with an unverified tool surface, but the triage
   // skill already treats subagents as unusable headlessly, so the run loses nothing it was using.
   "Task",
+  // The prompt already expands the skill; calling it again only fetches a refusal telling the session
+  // not to triage, which three runs obeyed (`architecture/overview.md` §6).
+  "Skill",
   "mcp__atlassian__editJiraIssue",
   "mcp__atlassian__addCommentToJiraIssue",
   "mcp__atlassian__createJiraIssue",

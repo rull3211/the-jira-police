@@ -212,6 +212,15 @@ storecode -p "/intake-triage SSX-1234 --no-write --no-html" \
   unrecognised name is inert, but nothing in this service should be described as mechanically
   unable to edit a Jira issue on that basis. What actually keeps the analyst from writing is
   `--no-write` in the prompt plus `gate.ts` sitting between it and the poster.
+- **`Skill` is withheld from the analyst, because its refusal told sessions not to triage.** From
+  Claude Code 2.1.274 (2026-09-17) the session calls the Skill tool for the skill its prompt has
+  already expanded, and `disable-model-invocation: true` answers "Do not replicate this skill's
+  workflow by other means": 54 of the 60 triage transcripts since carry that refusal, none of the
+  122 before it. SSX-3918, SSX-2681 and SSX-3989 obeyed it and returned an explanation in place of
+  a triage; SSX-4000 triaged and then scored its own run as "not applicable" instead of the ticket.
+  The `/intake-triage` line is expanded before the model's first turn, not through the tool, so the
+  denial removes the refusal and nothing the run uses. What catches a session that stops anyway is
+  the gate's banner check (`architecture/triage.md` §3).
 
 - **`stream-json`, not `json`** — the MCP status guard needs the `system`/`init` event, which only
   the streaming format emits. Requires `--verbose`.

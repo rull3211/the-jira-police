@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3516 tests in 109 files**, no build step.
+> **3532 tests in 109 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -633,7 +633,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **128 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **129 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost
@@ -1124,7 +1124,7 @@ three runs above. The mock's body has none, and never reaches the gate: a stand-
   the skill body, the approach is wrong and this entry is rewritten;
 - the transcript holds no `Skill` call and no "cannot be used with Skill tool" result;
 - the fitness call is about the refactor, not the run; I expect `solvable: false` for its size
-  (two ~700-line classes split, ~26 tests moved);
+  (two ~700-line classes split into six units, their tests moving with them);
 - `--write` passes the gate and updates the bad comment in place rather than adding a second.
 
 **What would make it the wrong idea:**
