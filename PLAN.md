@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73 and §75, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75 and §78, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -552,6 +552,12 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
+- **No triage has run on the skill text that puts the legend above the footer sentinel.** Three of
+  155 bodies, 2026-09-03 to 2026-09-30, put it below (`architecture/triage.md` §12, the legend
+  entry), too few for any number of runs to show the text changed the rate. `withFitnessNote` moves
+  a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
+  would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
+  none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
 
 ### 11. Loose ends recorded in no other file
 
@@ -1126,44 +1132,6 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
-
-### 78. A triage body with its legend below the footer sentinel is refused, and bought again
-
-**Branch:** `fix/triage-footer-order`
-
-**What is being attempted.** `assertPostable` refuses a comment body that does not end with
-`FOOTER_SENTINEL`. This machine's session transcripts hold 155 triage bodies, 2026-09-03 to
-2026-09-30, and three broke that rule, all three the same way: the exact sentinel as the
-second-to-last line, and the `_Legend:` line after it. SSX-3935 on 2026-09-17, SSX-3534 on
-2026-09-24, SSX-4005 on 2026-09-30. None lacked the sentinel. SSX-4005 was bought again on the next
-poll and posted; SSX-3534's `rejected.md` is still the last thing written for it.
-
-**The vendored skill asks for it.** `REPORT_TEMPLATES.md` tells the model to "end the Jira comment
-with ONE legend line" and, further down, that the comment "**ends** with the idempotent footer
-marker"; `INTAKE_INSTRUCTIONS.md` says to post a comment "ending with the idempotent footer
-sentinel line" and then to "Append a one-line glyph + CONF legend". Two things each claim the last
-line, and the swap is the model obeying the other one. So two changes, each its own commit:
-
-1. **The skill** says the legend goes directly above the sentinel, in both files, as a local
-   divergence in `architecture/triage.md` §12.
-2. **The harness** moves a legend line found below the sentinel back above it, in
-   `withFitnessNote`, which already rewrites the tail around the sentinel; and the gate's one
-   refusal splits in two, a sentinel that is missing and one with something after it.
-
-**Why now.** SSX-4005 paid for a second triage, and the channel got a refusal naming the operator,
-on a ticket whose report was right.
-
-**What would make it the wrong idea:**
-
-- **A repair widens what passes the gate.** Hence the legend line only: anything else after the
-  sentinel, a closing code fence or a note to the operator, is still refused.
-- **The skill fix may be enough on its own.** It cannot be measured at three in 155, and
-  `BUILDING.md` puts the bound in the harness, not the prompt. If `groomed/*.rejected.md` never
-  shows this shape again, the harness half guards nothing and is a candidate to delete.
-- **The gate may be stricter than its reason.** Nothing that reads the sentinel needs it last: the
-  watcher's `isOurComment` uses `includes`, and the poster looks for "the exact footer sentinel
-  line". Relaxing the gate to presence stops the refusal too, but posts the legend under the footer
-  on a board where every other triage comment ends with it.
 
 ## Verification
 
