@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1566,6 +1566,31 @@ describe("threadCommandDeps", () => {
       expect(
         JSON.parse(readFileSync(join(output, "slack", "SSX-4003.labels.json"), "utf8")),
       ).toEqual({ method: "updateLabels", key: "SSX-4003", add: ["agent:start"], remove: [] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("live, sends the edit to the ticket as a label delta and writes no file", async () => {
+    const output = mkdtempSync(join(tmpdir(), "thread-deps-"));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deps = threadCommandDeps(
+        settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc", OUTPUT_DIR: output }),
+        "live",
+      );
+
+      await deps.labels.apply("SSX-4003", { add: [], remove: ["agent:failed"] });
+
+      expect(deps.labels.dry).toBe(false);
+      const [url, init] = fetchMock.mock.calls[0] ?? [];
+      expect(String(url)).toMatch(/\/rest\/api\/3\/issue\/SSX-4003$/u);
+      expect(init?.method).toBe("PUT");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        update: { labels: [{ remove: "agent:failed" }] },
+      });
+      expect(existsSync(join(output, "slack"))).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }

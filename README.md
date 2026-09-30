@@ -557,6 +557,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm slack:listen`                                    | Answer `/bencebot` until Ctrl-C, dry: the real subscriber list read, what each command would make of it written                 | `groomed/slack/roster.json`                          |
 | `pnpm slack:listen --write`                            | …and write the list, reading it back after each change                                                                          | the `jira-police.slack-subscribers` project property |
 | `pnpm slack:start <thread-link> [--clear]`             | `agent:start` for the ticket a Slack thread belongs to, or `agent:failed` off with `--clear`, dry: the edit written to a file   | `groomed/slack/`                                     |
+| `pnpm slack:start <thread-link> [--clear] --write`     | …and send the edit to the ticket, reading it back                                                                               | Jira labels: `agent:start` on, or `agent:failed` off |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                           | no                                                   |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                        | no                                                   |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                        | no                                                   |
@@ -665,9 +666,11 @@ either disagreeing exits 1 and says which. It adds `agent:start`, the go-ahead m
 for, and is refused unless the solve queue would then claim the ticket — one without
 `agent:solvable`, or carrying `agent:failed` or anything else the queue skips, is left as found.
 `--clear` takes `agent:failed` off instead, so a ticket the solver already tried can be started
-again. Dry: the edit goes to `<OUTPUT_DIR>/slack/<KEY>.labels.json` and nothing remote changes, and
-every run writes its outcome to `<OUTPUT_DIR>/slack/<channel>-<ts>.thread.json`. Reading the
-thread needs the bot's `channels:history` scope.
+again. Dry by default: the edit goes to `<OUTPUT_DIR>/slack/<KEY>.labels.json` and nothing remote
+changes. `--write` sends it to the ticket and reads it back, exiting 4 when the ticket does not show
+it. Every run writes its outcome to `<OUTPUT_DIR>/slack/<channel>-<ts>.thread.json`. Reading the
+thread needs the bot's `channels:history` scope. A start is the same go-ahead as adding the label
+by hand: with `SOLVE_ENABLED` on, the next solve tick claims the ticket and pays for its passes.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and

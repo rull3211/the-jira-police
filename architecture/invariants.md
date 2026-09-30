@@ -42,7 +42,9 @@ Things that look like details and are not:
    refusal, never a default yes.
 9. **Triage cannot authorise its own downstream work.** It may set `agent:solvable`; `agent:start`
    belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
-   attacker-controlled ticket text, so this is a boundary rather than a convention.
+   attacker-controlled ticket text, so this is a boundary rather than a convention. The service
+   writes `agent:start`, and takes `agent:failed` off, only when a person asks for it by name:
+   `slack:start --write` at a terminal. Nothing a model or a ticket produced reaches that path.
 10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
     value is missing _or blank_ (`settings.ts:333`) — the two are indistinguishable to it. So a
     default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
