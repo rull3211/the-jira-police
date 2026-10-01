@@ -434,10 +434,13 @@ Four brakes, in the order a sweep applies them, and each is cheaper than the one
   it must cost less than the thing it gates, and a session that can go looking is a session that
   can cost what a triage costs. Everything it needs is in the prompt, sliced by `context.ts` at the
   instant the decision was made — because `decideWatch` returns on its first trigger, which is
-  right for a decision and wrong for a question about _what happened_.
+  right for a decision and wrong for a question about _what happened_. **A blocker counts as dealt
+  with when it is supplied or when the ticket now says it no longer applies**; asked about supply
+  alone, the check declined SSX-4023's rescoping edit three runs out of three. A proposal to drop
+  one is neither, for the reason a promise to supply one is not.
 - **`memo.ts` closes the gap the relevance check opens.** Every other brake works because the
   action it bounds leaves a mark: a re-triage posts a comment, a reservation writes a label. **The
-  relevance check writes nothing.** So a ticket whose latest activity is not an answer — a PM
+  relevance check writes nothing.** So a ticket whose latest activity deals with no blocker — a PM
   linking a duplicate, a reporter promising to get to it next sprint — stays triggered on that same
   activity and is re-judged every sweep, on identical content, forever. Cheap per lap times a
   daemon is not cheap. The memo is in memory, which is why `WATCH_POLL_MS` is six hours and why

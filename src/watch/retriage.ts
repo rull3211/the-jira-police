@@ -36,15 +36,15 @@ export interface RetriageDeps {
 
 /**
  * What a re-triage attempt did, named so a caller can count spend. Each
- * refusal kind names a different reason, so a sweep can tell "nobody
- * answered" from "the counter is broken".
+ * refusal kind names a different reason, so a sweep can tell "nothing
+ * dealt with a blocker" from "the counter is broken".
  */
 export type RetriageOutcome =
   /** No comment of ours, so nothing to judge the activity against. */
   | { readonly kind: "no-mark" }
   /** The counter on the ticket will not read, and it must not read as zero. */
   | { readonly kind: "uncountable" }
-  /** Somebody moved, and it was not an answer. The commonest outcome by design. */
+  /** Somebody moved, and it dealt with no blocker. The commonest outcome by design. */
   | { readonly kind: "irrelevant"; readonly reason: string }
   /** The reservation would not write, so the run that it authorises does not happen. */
   | { readonly kind: "unreserved"; readonly error: string }
