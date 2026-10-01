@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HELP_REPLY,
   MAX_SUBSCRIBERS,
   ROSTER_PROPERTY,
   type Roster,
@@ -77,7 +78,8 @@ describe("parseCommand", () => {
     ["unsubscribe", "unsubscribe"],
     ["status", "status"],
     ["subscribe U0OTHER", null],
-    ["help", null],
+    [" Help", "help"],
+    ["help start", null],
   ])("reads %j as %j", (text, expected) => {
     expect(parseCommand(text)).toBe(expected);
   });
@@ -132,6 +134,25 @@ describe("createCommandHandler", () => {
 
     expect(reply).toBe(USAGE_REPLY);
     expect(store.saved).toEqual([]);
+  });
+
+  it("answers help without reading the list, naming the slash commands and the mentions", async () => {
+    const load = vi.fn<RosterStore["load"]>(async () => ({
+      kind: "unreadable",
+      reason: "not a list this version wrote",
+    }));
+
+    const reply = await handler({ load, save: vi.fn() })({ userId: ME, text: "help" });
+
+    expect(reply).toBe(HELP_REPLY);
+    expect(reply).toContain("/bencebot subscribe");
+    expect(reply).toContain("@Bencebot start");
+    expect(reply).toContain("@Bencebot clear");
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("points an unknown command at help", () => {
+    expect(USAGE_REPLY).toContain("/bencebot help");
   });
 
   it("writes nothing over a list it cannot read, and says so", async () => {

@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3567 tests in 109 files**, no build step.
+> **3618 tests in 110 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77 and §78, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78 and §79, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,10 +78,11 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §79. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §80. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
-§78 was.
+§78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
+`main`.
 
 <!-- refs:on -->
 
@@ -483,13 +484,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   channel or the thread would make the bump litter, and the deletion should go. **What would show
   it:** the same command again, looking at the channel and the thread: it posts another broadcast
   and deletes that one.
-- **The daemon has never answered `/bencebot`.** `SLACK_LISTEN` refuses a bad value and a missing
-  token at startup, driven on 2026-09-29; a daemon holding the connection has not been watched, nor
-  has Slack's own `disconnect` — every reconnect seen was a network drop, and Slack said the
-  connection lasts 18060s. The one command timed took seven seconds on a network that was dropping,
-  so the ack budget on a steady one is unmeasured too. **What would show it:** `SLACK_LISTEN=dry` in
-  the daemon's `.env` and a restart; `slack.listen_enabled`, then `slack.listen_connected`, then a
-  `/bencebot` answered as a dry run with no `slack.command_late`.
+- **Slack's own `disconnect` has never been watched.** Every reconnect seen was a network drop, and
+  Slack says a connection lasts 18060s, so a listener has to stay up five hours to meet one. **What
+  would show it:** a listener left running that long; `slack.listen_disconnect`, then
+  `slack.listen_connected` again, with no `slack.listen_dropped` between.
 - **No pull request's line has been sent.** The transport has: `slack:probe SSX-3991` on
   2026-09-29 posted to the operator's member ID with `chat:write` alone, Slack put it in their
   direct message with the bot, and the probe deleted it — the prediction that the manifest needs no
@@ -552,6 +550,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
+- **Two of a mention's refusals have run only in tests**: someone not on `SLACK_START_USERS`, and a
+  mention outside a thread. **What would show it:** a colleague's `@Bencebot start` in a ticket's
+  thread, and anyone's in the channel itself; each must get a reply only they see, and leave the
+  ticket's labels as they were.
 - **No solve has moved its ticket's status or edited its broadcast line.** Both are tested and
   neither has run. The daemon's `.env` sets none of the `SOLVE_*_STATUS` settings, so the move to
   code review has been inert there too, and nothing has sent `chat.update` to a `reply_broadcast`
@@ -571,12 +573,20 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 
 ### 11. Loose ends recorded in no other file
 
-Four things that exist in neither `architecture/*.md`, `README.md` nor the source, and were being kept
-alive only by being carried forward in conversation. A fifth — the `dev-lens.md` calibration row
+Things that exist in neither `architecture/*.md`, `README.md` nor the source, and were being kept
+alive only by being carried forward in conversation. Another — the `dev-lens.md` calibration row
 scoring the SSX-3801 fix as failed — is closed: the row carries a dated annotation naming the
 `git-commit-id` harness failure and pointing at the `verified` re-run beneath it, and the file now
 states the rule that produced that shape, which is that a recorded verdict is never edited.
 
+- **A start from Slack is recorded on the ticket as the operator's.** `@Bencebot start` writes
+  `agent:start` with the service's Jira credential, so the ticket's history names the operator's
+  account, not the person who asked; the mention in the thread is the only record of who did. The
+  shape that closes it: look up the asker's email (`users:read.email`, already granted) and the
+  Jira account it belongs to, and name them on the ticket or in the audit card. Left open when the
+  feature shipped on `feat/slack-agent-start`, because one person is on `SLACK_START_USERS` today.
+  **What would make it the wrong idea:** a comment on every start is noise on the ticket, and the
+  audit card may be where the name belongs rather than Jira.
 - **A post-merge vacuous-test sweep.** Two shipped tests guard nothing: #1413's timezone test and
   #2661's run-date block. `checkFailFirst` is a one-shot at solve time and misses both, for two
   different reasons — #2661 is `guarded` and sound (7/7 red against the real bug; only the

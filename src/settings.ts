@@ -382,14 +382,19 @@ export const SETTINGS = [
   {
     name: "SLACK_APP_TOKEN",
     description:
-      "The Slack app's app-level token, `xapp-…`, from Basic Information → App-Level Tokens with the `connections:write` scope: what opens the Socket Mode connection `/bencebot` arrives on. Unset, nothing listens; only `slack:listen` and a daemon with SLACK_LISTEN on read it, and both refuse any other prefix. Best written `keychain:<name>`, like SLACK_BOT_TOKEN. Withheld from every model session.",
+      "The Slack app's app-level token, `xapp-…`, from Basic Information → App-Level Tokens with the `connections:write` scope: what opens the Socket Mode connection `/bencebot` and a mention arrive on. Unset, nothing listens; only `slack:listen` and a daemon with SLACK_LISTEN on read it, and both refuse any other prefix. Best written `keychain:<name>`, like SLACK_BOT_TOKEN. Withheld from every model session.",
     sensitive: true,
   },
   {
     name: "SLACK_LISTEN",
     description:
-      "Whether the daemon answers `/bencebot`. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and writing OUTPUT_DIR/slack/roster.json; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
+      "Whether the daemon answers `/bencebot`, and a mention from someone on SLACK_START_USERS. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and tickets and writing what each would change under OUTPUT_DIR/slack/; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there, and a mention's label edit. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
     fallback: "off",
+  },
+  {
+    name: "SLACK_START_USERS",
+    description:
+      "Comma-separated Slack member IDs (`U…`) of the people who may mention the bot in a ticket's audit thread to start or clear it: `@Bencebot start` adds agent:start, manual mode's go-ahead for an unattended solve, and `@Bencebot clear` takes agent:failed off. Nobody else may, whatever they type. Empty, the listener answers no mention: it acknowledges each and logs `slack.mention_ignored`. No fallback, like SOLVE_REPOS, so emptying it takes the power away. Set, the listener also needs SLACK_BOT_TOKEN, to read the thread and reply, and both are checked at startup; an entry that is not a member ID is a startup error. Follows SLACK_LISTEN's mode: `dry` writes the edit to OUTPUT_DIR/slack/, `live` writes the label.",
   },
   {
     name: "LOG_LEVEL",

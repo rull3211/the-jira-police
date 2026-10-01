@@ -1,18 +1,18 @@
 /**
- * The daemon's `/bencebot` listener: decided before any loop starts, like `createReviewLoop`, and in
- * its own file because `index.ts` runs `main` on import and so cannot be asserted about.
+ * The daemon's Slack listener, for `/bencebot` and `@Bencebot start|clear`: decided before any loop
+ * starts, like `createReviewLoop`, and in its own file because `index.ts` runs `main` on import.
  */
 
 import { createLogger } from "./logger.ts";
 import { type Settings, slackListen } from "./settings.ts";
 import { type ListenDeps, type ListenSummary, listen } from "./slack/socket.ts";
-import { listenerFor, rosterWhere } from "./wiring.ts";
+import { listenerFor, rosterWhere, startUsers } from "./wiring.ts";
 
 const log = createLogger("slack");
 
 /**
- * A bad SLACK_APP_TOKEN throws here, at startup, not inside a loop; the runner it returns never
- * rejects, so a broken listener cannot take the daemon's `Promise.all` with it.
+ * A bad SLACK_APP_TOKEN, or a start list with no bot token to act on it, throws here at startup; the
+ * runner it returns never rejects, so a broken listener cannot take the daemon's `Promise.all` with it.
  */
 export function createSlackListener(
   settings: Settings,
@@ -24,7 +24,11 @@ export function createSlackListener(
     return null;
   }
   const start = listenerFor(settings, mode, signal, run);
-  log.info("slack.listen_enabled", { mode, list: rosterWhere(settings) });
+  log.info("slack.listen_enabled", {
+    mode,
+    list: rosterWhere(settings),
+    mayStart: startUsers(settings).length,
+  });
   return async () => {
     try {
       return await start();

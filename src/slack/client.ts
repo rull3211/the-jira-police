@@ -111,6 +111,49 @@ export class SlackClient {
     await this.#call("chat.delete", { channel: args.channel, ts: args.ts });
   }
 
+  /** Seen only by `user`, in the thread `threadTs` names; the user must be in the channel. */
+  async postEphemeral(args: {
+    readonly channel: string;
+    readonly user: string;
+    readonly text: string;
+    readonly threadTs?: string;
+  }): Promise<void> {
+    await this.#call("chat.postEphemeral", {
+      channel: args.channel,
+      user: args.user,
+      text: args.text,
+      thread_ts: args.threadTs,
+    });
+  }
+
+  /**
+   * The message a thread hangs from, `null` when Slack returns none. Needs `channels:history`, or
+   * `groups:history` in a private channel.
+   */
+  async threadRoot(args: { readonly channel: string; readonly ts: string }): Promise<{
+    readonly ts: string;
+    readonly text: string;
+    readonly botId: string | null;
+  } | null> {
+    const body = await this.#call("conversations.replies", {
+      channel: args.channel,
+      ts: args.ts,
+      limit: 1,
+      inclusive: true,
+    });
+    const messages = body["messages"];
+    const first: unknown = Array.isArray(messages) ? messages[0] : undefined;
+    if (first === undefined) {
+      return null;
+    }
+    const message = record(first);
+    return {
+      ts: str(message["ts"]),
+      text: str(message["text"]),
+      botId: optionalStr(message["bot_id"]),
+    };
+  }
+
   /** Only an app-level `xapp-` token may call it, and Slack generates the URL per call, so one per connect. */
   async openConnection(): Promise<string> {
     const body = await this.#call("apps.connections.open", {});

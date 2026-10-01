@@ -42,9 +42,14 @@ Things that look like details and are not:
    refusal, never a default yes.
 9. **Triage cannot authorise its own downstream work.** It may set `agent:solvable`; `agent:start`
    belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
-   attacker-controlled ticket text, so this is a boundary rather than a convention.
+   attacker-controlled ticket text, so this is a boundary rather than a convention. The service
+   writes `agent:start`, and takes `agent:failed` off, only when a person asks for it by name:
+   `slack:start --write` at a terminal, or `@Bencebot start` and `clear` in the ticket's thread from
+   someone on `SLACK_START_USERS`, who is the event's `user` as Slack sets it. Nothing a model or a
+   ticket produced reaches that path: no session holds a Slack token (invariant 3), and the bot's
+   own messages raise no mention.
 10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
-    value is missing _or blank_ (`settings.ts:333`) — the two are indistinguishable to it. So a
+    value is missing _or blank_ — the two are indistinguishable to it. So a
     default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
     an operator emptying the allowlist to take the solver off a repository would have it handed
     straight back, revocable only by editing source. It is one of several solve settings with no
@@ -54,7 +59,9 @@ Things that look like details and are not:
     written to — **`SOLVE_GITHUB_OWNER` is the other one**, and carries a second reason of its
     own: an owner inferred from the checkout's remote is correct right up until somebody adds a
     fork as `origin`, at which point a bot opens a pull request against a repository nobody
-    chose. Note this cuts the opposite way from `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
+    chose. `SLACK_START_USERS` names who rather than what — the people whose mention may write
+    `agent:start` — and has no fallback for the same reason. Note this cuts the opposite way from
+    `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
     the restriction — the test to apply is not "does it have a default" but "does silence widen
     or narrow what the service may touch."
 11. **A label write names the labels it changes, and nothing else.** Every label edit goes
@@ -327,9 +334,10 @@ Things that look like details and are not:
     not tidiness either — the ordering above is the whole of the safety property, and a safety
     property with no test is a comment.
 
-    The `/bencebot` listener is held to the same rule without being a loop. `createSlackListener`
-    in `src/slack-loop.ts` reads `SLACK_LISTEN` first and returns `null` when it is off; when it is
-    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks; and what it returns resolves
+    The Slack listener is held to the same rule without being a loop. `createSlackListener` in
+    `src/slack-loop.ts` reads `SLACK_LISTEN` first and returns `null` when it is off; when it is
+    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks, and so are `SLACK_START_USERS`
+    and — once anyone is on it — `SLACK_BOT_TOKEN`; and what it returns resolves
     rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves the loops
     running.
 

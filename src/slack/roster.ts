@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { JiraClient } from "../jira/client.ts";
 import { createLogger } from "../logger.ts";
 import { SLACK_USER_ID_PATTERN, escape } from "./render.ts";
+import { MENTION_USAGE } from "./start.ts";
 
 const log = createLogger("slack");
 
@@ -51,7 +52,7 @@ export function parseRoster(value: unknown): Roster | null {
 export type RosterCommand = "subscribe" | "unsubscribe" | "status";
 
 /** A bare command asks where you stand; anything but one known word is `null`, answered with usage. */
-export function parseCommand(text: string): RosterCommand | null {
+export function parseCommand(text: string): RosterCommand | "help" | null {
   const words = text
     .trim()
     .toLowerCase()
@@ -61,7 +62,8 @@ export function parseCommand(text: string): RosterCommand | null {
     return "status";
   }
   const [word] = words;
-  return words.length === 1 && (word === "subscribe" || word === "unsubscribe" || word === "status")
+  return words.length === 1 &&
+    (word === "subscribe" || word === "unsubscribe" || word === "status" || word === "help")
     ? word
     : null;
 }
@@ -112,8 +114,12 @@ export interface SlashCommand {
   readonly text: string;
 }
 
-export const USAGE_REPLY =
+const SUBSCRIBE_USAGE =
   "`/bencebot subscribe` mentions you on each major event of every ticket, `/bencebot unsubscribe` stops it, and `/bencebot` says which you are.";
+
+export const USAGE_REPLY = `${SUBSCRIBE_USAGE} \`/bencebot help\` lists everything the bot answers.`;
+
+export const HELP_REPLY = `${SUBSCRIBE_USAGE}\n${MENTION_USAGE} Only the people on the start list may use those two.`;
 
 /**
  * Load, apply, write, read back. Never throws: the reply is the only place the person who typed the
@@ -139,6 +145,10 @@ export function createCommandHandler(
     const parsed = parseCommand(command.text);
     if (parsed === null) {
       return USAGE_REPLY;
+    }
+    // Before the list is read, so help still answers while the list cannot be.
+    if (parsed === "help") {
+      return prefix + HELP_REPLY;
     }
     const loaded = await timed("load", () => store.load());
     if (loaded.kind === "unreadable") {

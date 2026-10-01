@@ -54,7 +54,15 @@ import {
   propertyRosterStore,
 } from "./slack/roster.ts";
 import { type ListenDeps, type ListenSummary, listen, openWebSocket } from "./slack/socket.ts";
-import { dryPublisher, dryStore, propertyStore, slackPublisher } from "./slack/store.ts";
+import { type Mention, type ThreadDeps, createMentionHandler } from "./slack/start.ts";
+import {
+  dryPublisher,
+  dryStore,
+  loadFromProperty,
+  propertyStore,
+  slackPublisher,
+  writeJson,
+} from "./slack/store.ts";
 import {
   type Settings,
   SettingsError,
@@ -94,6 +102,7 @@ import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance
 
 const pollLog = createLogger("poll");
 const reviewLog = createLogger("review");
+const slackLog = createLogger("slack");
 const solveLog = createLogger("solve");
 const triageLog = createLogger("triage");
 
@@ -489,23 +498,36 @@ export function createSlackTarget(settings: Settings): {
   readonly client: SlackClient;
   readonly channel: string;
 } {
-  const token = settings.SLACK_BOT_TOKEN.trim();
   const channel = settings.SLACK_CHANNEL_ID.trim();
-  const problems: string[] = [];
-  if (token === "") {
-    problems.push("SLACK_BOT_TOKEN (the bot token, xoxb-…, from OAuth & Permissions)");
-  } else if (!token.startsWith("xoxb-")) {
-    problems.push(
-      `SLACK_BOT_TOKEN (expected a bot token starting xoxb-, got one starting ${token.slice(0, 5)}…)`,
-    );
-  }
+  const problems = botTokenProblems(settings);
   if (channel === "") {
     problems.push("SLACK_CHANNEL_ID (the channel's ID, C…, not its name)");
   }
   if (problems.length > 0) {
     throw new SettingsError(problems);
   }
-  return { client: new SlackClient({ token }), channel };
+  return { client: new SlackClient({ token: settings.SLACK_BOT_TOKEN.trim() }), channel };
+}
+
+/** The bot client alone, for a caller that is handed its channel rather than configured with one. */
+export function createBotClient(settings: Settings): SlackClient {
+  const problems = botTokenProblems(settings);
+  if (problems.length > 0) {
+    throw new SettingsError(problems);
+  }
+  return new SlackClient({ token: settings.SLACK_BOT_TOKEN.trim() });
+}
+
+function botTokenProblems(settings: Settings): string[] {
+  const bot = settings.SLACK_BOT_TOKEN.trim();
+  if (bot === "") {
+    return ["SLACK_BOT_TOKEN (the bot token, xoxb-…, from OAuth & Permissions)"];
+  }
+  return bot.startsWith("xoxb-")
+    ? []
+    : [
+        `SLACK_BOT_TOKEN (expected a bot token starting xoxb-, got one starting ${bot.slice(0, 5)}…)`,
+      ];
 }
 
 /**
@@ -582,11 +604,106 @@ export function listenerFor(
     dry: mode === "dry",
     where: rosterWhere(settings),
   });
-  return () => run({ open: () => client.openConnection(), connect: openWebSocket, handle, signal });
+  const mention = mentionHandlerFor(settings, mode);
+  return () =>
+    run({ open: () => client.openConnection(), connect: openWebSocket, handle, mention, signal });
+}
+
+/**
+ * With nobody on SLACK_START_USERS a mention is logged and dropped, and nothing that could answer or
+ * write is built; with someone, a missing bot token stops the start here rather than every mention.
+ */
+export function mentionHandlerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+): (mention: Mention) => Promise<void> {
+  const allowed = startUsers(settings);
+  if (allowed.length === 0) {
+    return async (mention) => {
+      slackLog.info("slack.mention_ignored", {
+        user: mention.userId,
+        note: "SLACK_START_USERS is empty, so nobody may start or clear a ticket from Slack",
+      });
+    };
+  }
+  const slack = createBotClient(settings);
+  return createMentionHandler({
+    allowed,
+    deps: threadCommandDeps(settings, mode),
+    reply: async (mention, text) => {
+      await slack.postEphemeral({
+        channel: mention.channel,
+        user: mention.userId,
+        text,
+        ...(mention.threadTs === null ? {} : { threadTs: mention.threadTs }),
+      });
+    },
+  });
+}
+
+/** SLACK_START_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
+export function startUsers(settings: Settings): readonly string[] {
+  const entries = list(settings, "SLACK_START_USERS");
+  const malformed = entries.filter((entry) => !SLACK_USER_ID_PATTERN.test(entry));
+  if (malformed.length > 0) {
+    throw new SettingsError([
+      `SLACK_START_USERS (expected member IDs such as U0123ABCD, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
+    ]);
+  }
+  return [...new Set(entries)];
 }
 
 export function rosterWhere(settings: Settings): string {
   return `${ROSTER_PROPERTY} on ${settings.JIRA_PROJECT}`;
+}
+
+/**
+ * **`live` is the grant that lets a Slack thread write `agent:start` and remove `agent:failed`.** `dry`
+ * reads Slack and the ticket for real and writes the edit to a file instead.
+ */
+export function threadCommandDeps(settings: Settings, mode: "dry" | "live"): ThreadDeps {
+  const slack = createBotClient(settings);
+  const jira = createJiraClient(settings);
+  const directory = join(settings.OUTPUT_DIR, "slack");
+  let bot: Promise<string> | undefined;
+  return {
+    // Kept once known; a failed lookup is forgotten, so one network drop is not a listener's lifetime.
+    botId: () => {
+      bot ??= slack.authTest().then(
+        ({ botId }) => {
+          if (botId === null) {
+            throw new Error(
+              "auth.test named no bot_id, so no message can be told as the bot's own",
+            );
+          }
+          return botId;
+        },
+        (error: unknown) => {
+          bot = undefined;
+          throw error;
+        },
+      );
+      return bot;
+    },
+    root: (channel, ts) => slack.threadRoot({ channel, ts }),
+    record: (key) => loadFromProperty(jira, key),
+    labels: {
+      dry: mode === "dry",
+      read: async (key) => (await jira.fetchDetail(key)).labels,
+      apply: async (key, edit) => {
+        if (mode === "live") {
+          await jira.updateLabels(key, { add: edit.add, remove: edit.remove });
+          return;
+        }
+        await writeJson(directory, `${key}.labels.json`, {
+          method: "updateLabels",
+          key,
+          add: edit.add,
+          remove: edit.remove,
+        });
+      },
+    },
+  };
 }
 
 let pipelineAudit: { readonly key: string; readonly notifier: AuditNotifier | null } | undefined;
