@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { JqlError } from "./jira/jql.ts";
 import type { JiraClient } from "./jira/client.ts";
@@ -24,6 +24,7 @@ import {
   buildSolveRequest,
   buildTriageOptions,
   createDiscover,
+  createJiraClient,
   createPollDeps,
   createReviewCycleDeps,
   createBotClient,
@@ -1044,6 +1045,57 @@ describe("buildPublishRequest", () => {
     );
 
     expect(request.identity).toEqual({ name: "jira-police", email: "jp@x.invalid" });
+  });
+});
+
+describe("createJiraClient", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses half of the in-progress pair, naming the half that is missing", () => {
+    expect(() => createJiraClient(settingsWith({ SOLVE_IN_PROGRESS_STATUS: "3" }))).toThrow(
+      SettingsError,
+    );
+    expect(() => createJiraClient(settingsWith({ SOLVE_IN_PROGRESS_STATUS: "3" }))).toThrow(
+      /: SOLVE_RETURN_STATUS\./u,
+    );
+    expect(() => createJiraClient(settingsWith({ SOLVE_RETURN_STATUS: "10213" }))).toThrow(
+      /: SOLVE_IN_PROGRESS_STATUS\./u,
+    );
+    expect(() => createJiraClient(settingsWith({}))).not.toThrow();
+  });
+
+  it("hands each status setting to the move that goes there", async () => {
+    const posted: unknown[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        posted.push(JSON.parse(String(init.body)));
+        return new Response(null, { status: 204 });
+      }
+      const body = url.endsWith("/transitions")
+        ? {
+            transitions: [
+              { id: "21", to: { id: "3" } },
+              { id: "161", to: { id: "10213" } },
+              { id: "191", to: { id: "10232" } },
+            ],
+          }
+        : { fields: { status: { id: "3", name: "Under arbeid" } } };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    const client = createJiraClient(
+      settingsWith({
+        SOLVE_IN_PROGRESS_STATUS: "3",
+        SOLVE_RETURN_STATUS: "10213",
+        SOLVE_CODE_REVIEW_STATUS: "10232",
+      }),
+    );
+
+    await client.moveBackFromInProgress("SSX-1");
+    await client.moveToCodeReview("SSX-1");
+
+    expect(posted).toEqual([{ transition: { id: "161" } }, { transition: { id: "191" } }]);
   });
 });
 

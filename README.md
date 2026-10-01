@@ -550,7 +550,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm repair:ledger`                                   | Every repair round so far, as a distribution, and which green ones nobody has read. No credential                                | no                                                      |
 | `pnpm sweep:once`                                      | Report stale skill roots and staged-image directories past `STAGING_SWEEP_MAX_AGE_MS`                                            | a report                                                |
 | `pnpm sweep:once --write`                              | …and remove them. Never a live git worktree — see below                                                                          | filesystem: the worktree and staging roots              |
-| `pnpm slack:probe <KEY> [--keep]`                      | Post, edit and delete one message in `SLACK_CHANNEL_ID`; write, read back and delete a record on the ticket. A verdict per step  | Slack and one Jira property, both removed + a report    |
+| `pnpm slack:probe <KEY> [--keep]`                      | Post, edit and delete a message and a reply broadcast from it; write, read, delete a record on the ticket. A verdict per step    | Slack and one Jira property, both removed + a report    |
 | `pnpm slack:once <KEY>`                                | Draw the ticket's audit thread from its record, dry: the record and the exact Slack request                                      | `groomed/slack/`                                        |
 | `pnpm slack:once <KEY> --post`                         | …and post or edit the thread for real, saving the record on the ticket                                                           | Slack + the `jira-police.slack` property                |
 | `pnpm slack:once <KEY> --post --bump`                  | …and broadcast its latest major entry to the channel again, deleting the ticket's previous broadcast                             | Slack + the `jira-police.slack` property                |
@@ -612,12 +612,14 @@ there is no page, says outright that an absent file is not evidence that no roun
 
 **With `SLACK_MODE` set, every ticket the pipeline touches gets one Slack thread, and the bot keeps
 editing its first message,** drawn collapsed to the ticket's title, with the card inside. An edit
-never moves a message, so each line below that decides the ticket's fate is also posted as a
-one-line reply sent to the channel, and the ticket's previous one is deleted: the ticket resurfaces
-at the bottom once, as its latest event, mentioning everyone on the subscriber list below. Triage starting opens it; the verdict, a gate refusal, a claim, each
-model pass, the solve's outcome, the pull request, each review round, the undraft, the merge and
-any crash land on it — the ones that decide the ticket's fate as their own lines, the rest in the
-timeline, newest first. The undraft is one line per handover, however many looks find the pull
+never moves a message, so each line below that decides the ticket's fate, and a solve starting, is
+also posted as a one-line reply sent to the channel, and the ticket's previous one is deleted: the
+ticket resurfaces at the bottom once, as its latest event, mentioning everyone on the subscriber
+list below. Every timeline entry after it is edited into that reply as a second line, so the bottom
+of the channel follows a solve step by step without a new message. Triage starting opens it;
+the verdict, a gate refusal, a claim, each model pass, the solve's outcome, the pull request, each
+review round, the undraft, the merge and any crash land on it — the claim and the ones that decide
+the ticket's fate as their own lines, the rest in the timeline, newest first. The undraft is one line per handover, however many looks find the pull
 request ready; a round that pushes a change, or a person drafting it, makes the next one news. A
 ticket already in review when the thread starts gets it from the review loop's first look, which
 fills in the title, the pull request, and triage as the ticket's labels state it. A thread started
@@ -642,8 +644,9 @@ and the command exits 1 saying so: deleting the property starts the thread afres
 **`slack:listen` answers `/bencebot`, and the subscriber list is what it changes.**
 `/bencebot subscribe` puts you on one list, for every ticket, and each broadcast then mentions you;
 `/bencebot unsubscribe` takes you off, and a bare `/bencebot` says which you are. `/bencebot help`
-lists these and the mentions below, without reading the list. The reply is only visible to you. Who is added is the Slack user who typed it, never a name in the text. The list is
-the `jira-police.slack-subscribers` property on `JIRA_PROJECT`, read at each broadcast, so a change
+lists these and the mentions below, without reading the list. The reply is only visible to you.
+Who is added is the Slack user who typed it, never a name in the text. The list is the
+`jira-police.slack-subscribers` property on `JIRA_PROJECT`, read at each broadcast, so a change
 applies from the next one; a list this version cannot read is left as found, each command says so,
 and broadcasts go out without mentions and log `slack.subscribers_unread`. The command holds a
 Socket Mode connection, because the daemon has no public URL, and reconnects whenever Slack drops
@@ -688,7 +691,8 @@ by hand: with `SOLVE_ENABLED` on, the next solve tick claims the ticket and pays
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
 the record it shows — kept on the ticket as the `jira-police.slack` issue property. So before
 anything relies on either, this command checks both against the real systems: one message posted,
-edited and deleted in `SLACK_CHANNEL_ID`, and a record the size of a full one written to the named
+edited and deleted in `SLACK_CHANNEL_ID`, a reply to it sent to the channel and edited in place as a
+solve's steps are, then deleted, and a record the size of a full one written to the named
 ticket as `jira-police.slack-probe`, read back, and deleted. With `SLACK_OPERATOR_USER_ID` set it
 also sends that person a direct message and deletes it, which is how the line for the team's pull
 request channel arrives when a solve opens one. Every step prints `PASS` or `FAIL` with
@@ -951,7 +955,7 @@ Full table in `architecture/configuration.md` §10. The ones that matter for a d
 
 | Setting                         | Default       | Notes                                                                                                                   |
 | ------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, a status move if `SOLVE_CODE_REVIEW_STATUS` is set       |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, status moves where a `SOLVE_*_STATUS` setting names one  |
 | `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                                                 |
 | `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                                                        |
 | `WRITE_BACK`                    | `false`       | Whether triage posts its comment and labels. Strict `"true"`                                                            |

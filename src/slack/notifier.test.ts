@@ -51,20 +51,32 @@ function publisher(
     readonly fail?: boolean;
     readonly failBroadcast?: boolean;
     readonly failRemove?: boolean;
+    readonly amend?: "gone" | "fail";
   } = {},
 ): {
   readonly publisher: Publisher;
   readonly calls: string[];
   readonly bumps: string[];
+  readonly amends: string[];
 } {
   const calls: string[] = [];
   const bumps: string[] = [];
+  const amends: string[] = [];
   let next = 0;
   let bumped = 0;
   return {
     calls,
     bumps,
+    amends,
     publisher: {
+      amend: async (_key, thread, ts, message) => {
+        if (behaviour.amend === "fail") {
+          throw new Error("Slack chat.update failed: ratelimited");
+        }
+        calls.push(`amend ${ts} in ${thread.ts}`);
+        amends.push(message.text);
+        return behaviour.amend ?? "amended";
+      },
       post: async (): Promise<Thread> => {
         if (behaviour.fail === true) {
           throw new Error("Slack chat.postMessage failed: not_in_channel");
@@ -130,13 +142,16 @@ describe("createAuditNotifier", () => {
       { kind: "triage-started" },
       { summary: "Cache", url: `${BASE_URL}/browse/SSX-1` },
     );
-    const second = await audit.record("SSX-1", { kind: "claimed", repo: null });
+    const second = await audit.record("SSX-1", { kind: "pass-started", pass: "recon" });
 
     expect([first.kind, second.kind]).toEqual(["posted", "edited"]);
     expect(p.calls).toEqual(["post 1", "update ts-1"]);
     expect(s.saved()?.slack).toEqual({ channel: "C1", ts: "ts-1" });
     expect(s.saved()?.summary).toBe("Cache");
-    expect(s.saved()?.timeline.map((entry) => entry.text)).toEqual(["triage started", "claimed"]);
+    expect(s.saved()?.timeline.map((entry) => entry.text)).toEqual([
+      "triage started",
+      "recon started",
+    ]);
   });
 
   it("applies two events fired together one after the other, so neither is lost", async () => {
@@ -297,13 +312,14 @@ describe("createAuditNotifier", () => {
     } as const;
 
     await audit.record("SSX-1", opened);
-    await audit.record("SSX-1", { kind: "claimed", repo: null });
+    await audit.record("SSX-1", { kind: "review-round", text: "review round 1: nothing pushed" });
     await audit.record("SSX-1", { kind: "pr-ready" });
 
     expect(p.calls).toEqual([
       "update ts-0",
       "broadcast b-1 in ts-0",
       "update ts-0",
+      "amend b-1 in ts-0",
       "update ts-0",
       "broadcast b-2 in ts-0",
       "remove b-1",
@@ -311,6 +327,73 @@ describe("createAuditNotifier", () => {
     expect(s.saved()?.bump).toBe("b-2");
     expect(p.bumps[1]).toContain("PR ready for review");
     expect(p.bumps[1]).toContain(`<${BASE_URL}/browse/SSX-1|SSX-1 · Cache>`);
+  });
+
+  it("broadcasts a solve's start, then edits each step into that one broadcast instead of posting again", async () => {
+    const s = store(threaded());
+    const p = publisher();
+    const audit = createAuditNotifier({
+      store: s.store,
+      publisher: p.publisher,
+      jiraBaseUrl: BASE_URL,
+      now: () => NOW,
+      subscribers: async () => ["U0ME"],
+    });
+
+    await audit.record("SSX-1", { kind: "claimed", repo: null });
+    await audit.record("SSX-1", { kind: "pass-started", pass: "recon" });
+    await audit.record("SSX-1", { kind: "pass-finished", pass: "recon" });
+
+    expect(p.calls).toEqual([
+      "update ts-0",
+      "broadcast b-1 in ts-0",
+      "update ts-0",
+      "amend b-1 in ts-0",
+      "update ts-0",
+      "amend b-1 in ts-0",
+    ]);
+    expect(p.bumps).toEqual([expect.stringMatching(/^🙋 \*Solve started\* — .* <@U0ME>$/u)]);
+    expect(p.amends[1]).toMatch(/^🙋 \*Solve started\* — .* <@U0ME>\n↳ .* ⏹️ recon finished$/u);
+    expect(s.saved()?.bump).toBe("b-1");
+  });
+
+  it("edits nothing into a ticket with no broadcast yet", async () => {
+    const p = publisher();
+
+    await notifier(store(threaded()).store, p.publisher).record("SSX-1", {
+      kind: "pass-started",
+      pass: "recon",
+    });
+
+    expect(p.calls).toEqual(["update ts-0"]);
+  });
+
+  it("forgets a broadcast deleted in Slack, and keeps the step when the edit fails", async () => {
+    const broadcast = (): Loaded => {
+      const existing = threaded("b-old");
+      return existing.kind === "found"
+        ? {
+            kind: "found",
+            record: {
+              ...existing.record,
+              major: [{ at: NOW.toISOString(), icon: "🙋", text: "Solve started" }],
+            },
+          }
+        : existing;
+    };
+    const step = { kind: "pass-started", pass: "fix" } as const;
+    const gone = store(broadcast());
+    const failing = store(broadcast());
+
+    const outcomes = [
+      await notifier(gone.store, publisher({ amend: "gone" }).publisher).record("SSX-1", step),
+      await notifier(failing.store, publisher({ amend: "fail" }).publisher).record("SSX-1", step),
+    ];
+
+    expect(outcomes.map((outcome) => outcome.kind)).toEqual(["edited", "edited"]);
+    expect(gone.saved()?.bump).toBeNull();
+    expect(failing.saved()?.bump).toBe("b-old");
+    expect(failing.saved()?.timeline.map((entry) => entry.text)).toEqual(["fix started"]);
   });
 
   it("broadcasts the latest major entry again only on a redraw asked to bump", async () => {

@@ -225,6 +225,18 @@ export const SETTINGS = [
     // No fallback, deliberately: this is a status write, not a label, and every other privilege setting in this table defaults off.
   },
   {
+    name: "SOLVE_IN_PROGRESS_STATUS",
+    description:
+      "The Jira status (id or name) a ticket is moved to when a solve claims it, so the board shows the solver working on it. No fallback, on the same terms as SOLVE_CODE_REVIEW_STATUS, and set together with SOLVE_RETURN_STATUS or not at all: set alone, every run that ended without a pull request would leave its ticket in progress, and the service refuses to start. Prefer the id: the name Jira reports is the one in the Jira account's language, which need not be the transition's name — on this board the transition called In Progress lands on a status named Under arbeid.",
+    // No fallback: a status write, like SOLVE_CODE_REVIEW_STATUS.
+  },
+  {
+    name: "SOLVE_RETURN_STATUS",
+    description:
+      "The Jira status (id or name) a ticket is moved to when a solve that moved it to SOLVE_IN_PROGRESS_STATUS ends without a pull request, whatever status it was claimed from: a crash, a refusal, a decline, a failed verification, a publish that opened nothing. Only a ticket still at SOLVE_IN_PROGRESS_STATUS is moved; one a person moved during the run is left where they put it, and so is one that was already in progress before the claim. A run that opens a pull request leaves the ticket in progress, for SOLVE_CODE_REVIEW_STATUS to move. No fallback, and refused at startup unless SOLVE_IN_PROGRESS_STATUS is set too.",
+    // No fallback: a status write, like SOLVE_CODE_REVIEW_STATUS.
+  },
+  {
     name: "SOLVE_WORKTREE_ROOT",
     description:
       "Directory the solver cuts its worktrees into, one per issue key. Defaults to the system temp directory, which is where a temporary checkout belongs — deliberately nowhere near the repository, so a failed run leaves its evidence somewhere obviously not the working copy. Configurable because a run that fails keeps its worktree for a human to read, and on macOS the default lands under /private/var, which some tooling cannot open; pointing this at a readable directory is the difference between a diff that can be reviewed by hand and one that can only be described.",

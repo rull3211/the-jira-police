@@ -1,6 +1,7 @@
 /**
  * The one way the pipeline tells a ticket's audit thread what happened: load its record, apply the
- * event, redraw the message, post or edit it, broadcast a major entry, save the record.
+ * event, redraw the message, post or edit it, broadcast a major entry or edit a minor one into the
+ * last broadcast, save the record.
  *
  * Never throws. Slack is a reporting channel, and a Slack or property failure must not fail the paid
  * work it reports on; it is logged with the remote system's own reason, and returned.
@@ -14,6 +15,7 @@ import {
   type AuditRecord,
   type Entry,
   addedMajor,
+  addedMinor,
   applyEvent,
   newRecord,
   retitle,
@@ -146,6 +148,37 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     return { ...record, bump };
   };
 
+  /**
+   * A minor entry is edited into the ticket's broadcast, so the bottom of the channel follows the
+   * work without a new message or a second ping. Failures cost only the line.
+   */
+  const follow = async (
+    key: string,
+    record: AuditRecord,
+    thread: Thread,
+    step: Entry | null,
+  ): Promise<AuditRecord> => {
+    const shown = record.major.at(-1);
+    if (step === null || record.bump === null || shown === undefined) {
+      return record;
+    }
+    try {
+      const message = renderBump(record, shown, await mentioned(key), step);
+      if ((await deps.publisher.amend(key, thread, record.bump, message)) === "gone") {
+        log.info("slack.bump_gone", {
+          key,
+          ts: record.bump,
+          note: "deleted in Slack; the next major entry broadcasts a fresh one",
+        });
+        return { ...record, bump: null };
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log.warn("slack.follow_failed", { key, ts: record.bump, reason });
+    }
+    return record;
+  };
+
   const apply = async (
     key: string,
     change: (record: AuditRecord) => AuditRecord,
@@ -181,7 +214,9 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
         const entry = addedMajor(facts, changed) ?? (bump ? (changed.major.at(-1) ?? null) : null);
         await deps.store.save(
           key,
-          entry === null ? changed : await resurface(key, changed, changed.slack, entry),
+          entry === null
+            ? await follow(key, changed, changed.slack, addedMinor(facts, changed))
+            : await resurface(key, changed, changed.slack, entry),
         );
         return { kind: "edited" };
       }

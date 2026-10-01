@@ -468,15 +468,25 @@ function ticketFacts(ticket: TicketRef): TicketFacts | undefined {
 }
 
 export function createJiraClient(settings: Settings): JiraClient {
-  // Blank means unset (`resolveDeclared` has no fallback for it), which leaves
-  // `moveToCodeReview` a guaranteed no-op — the capability ships inert until named. The key is
-  // omitted rather than set to `undefined`: `exactOptionalPropertyTypes` treats the two differently.
+  // Blank means unset (`resolveDeclared` has no fallback for these), which leaves the move to that
+  // status a guaranteed no-op — the capability ships inert until named. Keys are omitted rather
+  // than set to `undefined`: `exactOptionalPropertyTypes` treats the two differently.
   const codeReviewStatus = settings.SOLVE_CODE_REVIEW_STATUS.trim();
+  const inProgressStatus = settings.SOLVE_IN_PROGRESS_STATUS.trim();
+  const returnStatus = settings.SOLVE_RETURN_STATUS.trim();
+  if ((inProgressStatus === "") !== (returnStatus === "")) {
+    throw new SettingsError(
+      [inProgressStatus === "" ? "SOLVE_IN_PROGRESS_STATUS" : "SOLVE_RETURN_STATUS"],
+      "Missing the other half of a status pair",
+      "SOLVE_IN_PROGRESS_STATUS and SOLVE_RETURN_STATUS are set together or not at all: alone, the first leaves every run that opened no pull request in progress, and the second has nothing to move a ticket back from.",
+    );
+  }
   return new JiraClient({
     baseUrl: settings.JIRA_BASE_URL,
     email: settings.JIRA_EMAIL,
     auth: settings.JIRA_AUTH,
     ...(codeReviewStatus === "" ? {} : { codeReviewStatus }),
+    ...(inProgressStatus === "" ? {} : { inProgressStatus, returnStatus }),
   });
 }
 

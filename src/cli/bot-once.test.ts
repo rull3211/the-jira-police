@@ -1,3 +1,6 @@
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import type { Settings } from "../settings.ts";
@@ -19,6 +22,30 @@ function fitness(overrides: Partial<AgentFitness> = {}): AgentFitness {
     ...overrides,
   };
 }
+
+describe("bot:once", () => {
+  it("refuses a half-set status pair before it pays for triage", () => {
+    // A child process, since `main` runs at import; a storecode that cannot start keeps a regression free.
+    const run = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("./bot-once.ts", import.meta.url)), "SSX-1"],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          JIRA_EMAIL: "a@b.c",
+          JIRA_AUTH: "placeholder",
+          SOLVE_IN_PROGRESS_STATUS: "3",
+          STORECODE_PATH: "/nonexistent/storecode",
+        },
+      },
+    );
+
+    expect(run.stdout).not.toContain("Triaging");
+    expect(run.stderr).toContain("SOLVE_RETURN_STATUS");
+    expect(run.status).toBe(78);
+  }, 20_000);
+});
 
 describe("resolveSettings", () => {
   it("does not post at the free rung, whatever .env says", () => {

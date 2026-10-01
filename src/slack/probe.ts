@@ -1,7 +1,7 @@
 /**
  * Whether the audit thread's store works against the real systems — a Slack message posted, edited
- * and deleted, a record round-tripped through one named ticket — and, with an operator named,
- * whether the bot can send them a direct message.
+ * and deleted, a reply broadcast to the channel and edited in place, a record round-tripped through
+ * one named ticket — and, with an operator named, whether the bot can send them a direct message.
  */
 
 import { isDeepStrictEqual } from "node:util";
@@ -44,6 +44,8 @@ export interface ProbeResult {
   readonly steps: readonly ProbeStep[];
   /** The Slack message's `ts`, when it is still in the channel. */
   readonly messageLeft: string | null;
+  /** The broadcast reply's `ts`, when it is still in the thread and the channel. */
+  readonly replyLeft: string | null;
   /** The direct message, when it is still in the operator's conversation with the bot. */
   readonly directLeft: { readonly channel: string; readonly ts: string } | null;
   /** Whether the probe property is still on the ticket, deliberately or by a failed delete. */
@@ -65,14 +67,60 @@ export async function runProbe(
     return ok;
   };
 
-  const messageLeft = await slackHalf(slack, target, record);
+  const { messageLeft, replyLeft } = await slackHalf(slack, target, record);
   const authed = steps.some((step) => step.name === "auth.test" && step.ok);
   const directLeft =
     target.operator === null || !authed
       ? null
       : await directMessage(slack, target, target.operator, record);
   const propertyLeft = await jiraHalf(jira, target, messageLeft ?? "", record);
-  return { steps, messageLeft, directLeft, propertyLeft };
+  return { steps, messageLeft, replyLeft, directLeft, propertyLeft };
+}
+
+/** The one line a ticket keeps at the bottom of the channel: a broadcast reply, edited in place. */
+async function broadcastReply(
+  slack: ProbeSlack,
+  target: ProbeTarget,
+  parent: string,
+  record: Recorder,
+): Promise<string | null> {
+  let ts: string;
+  try {
+    const posted = await slack.post({
+      channel: target.channel,
+      threadTs: parent,
+      broadcast: true,
+      text: `the-jira-police probe for ${target.issueKey}: a reply sent to the channel — safe to ignore`,
+    });
+    ts = posted.ts;
+    record("broadcast reply", true, withWarnings(`ts ${ts}`, posted.warnings));
+  } catch (error) {
+    record("broadcast reply", false, describe(error));
+    return null;
+  }
+
+  try {
+    const edited = await slack.update({
+      channel: target.channel,
+      ts,
+      text: `the-jira-police probe for ${target.issueKey}: a reply sent to the channel, edited in place as a solve's step is — safe to ignore`,
+    });
+    record("broadcast reply edit", true, withWarnings(`ts ${edited.ts}`, edited.warnings));
+  } catch (error) {
+    record("broadcast reply edit", false, describe(error));
+  }
+
+  if (target.keep) {
+    return ts;
+  }
+  try {
+    await slack.deleteMessage({ channel: target.channel, ts });
+    record("broadcast reply delete", true, `removed ${ts}`);
+    return null;
+  } catch (error) {
+    record("broadcast reply delete", false, describe(error));
+    return ts;
+  }
 }
 
 async function directMessage(
@@ -115,13 +163,13 @@ async function slackHalf(
   slack: ProbeSlack,
   target: ProbeTarget,
   record: Recorder,
-): Promise<string | null> {
+): Promise<{ readonly messageLeft: string | null; readonly replyLeft: string | null }> {
   try {
     const who = await slack.authTest();
     record("auth.test", true, `bot user ${who.userId} in ${who.team}`);
   } catch (error) {
     record("auth.test", false, describe(error));
-    return null;
+    return { messageLeft: null, replyLeft: null };
   }
 
   let ts: string;
@@ -134,7 +182,7 @@ async function slackHalf(
     record("chat.postMessage", true, withWarnings(`ts ${ts}`, posted.warnings));
   } catch (error) {
     record("chat.postMessage", false, describe(error));
-    return null;
+    return { messageLeft: null, replyLeft: null };
   }
 
   try {
@@ -148,16 +196,18 @@ async function slackHalf(
     record("chat.update", false, describe(error));
   }
 
+  const replyLeft = await broadcastReply(slack, target, ts, record);
+
   if (target.keep) {
-    return ts;
+    return { messageLeft: ts, replyLeft };
   }
   try {
     await slack.deleteMessage({ channel: target.channel, ts });
     record("chat.delete", true, `removed ${ts}`);
-    return null;
+    return { messageLeft: null, replyLeft };
   } catch (error) {
     record("chat.delete", false, describe(error));
-    return ts;
+    return { messageLeft: ts, replyLeft };
   }
 }
 
@@ -259,6 +309,9 @@ export function formatReport(result: ProbeResult, target: ProbeTarget): string {
   ];
   if (result.messageLeft !== null) {
     lines.push("", `The probe message is still in the channel: ts ${result.messageLeft}.`);
+  }
+  if (result.replyLeft !== null) {
+    lines.push("", `The broadcast reply is still in the channel: ts ${result.replyLeft}.`);
   }
   if (result.directLeft !== null) {
     lines.push(

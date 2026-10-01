@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { buildFitnessNote, withFitnessNote } from "./fitness-note.ts";
@@ -133,7 +135,7 @@ describe("buildFitnessNote", () => {
 
 describe("withFitnessNote", () => {
   it("splices the note above the footer sentinel, never below it", () => {
-    // The poster matches that exact trailing line to find its previous comment.
+    // The skill makes the sentinel the comment's last line.
     const body = withFitnessNote(payload()).mutation.commentBody;
 
     expect(body.trimEnd().endsWith(FOOTER_SENTINEL)).toBe(true);
@@ -175,6 +177,67 @@ describe("withFitnessNote", () => {
     const body = withFitnessNote(payload()).mutation.commentBody;
 
     expect(body.split(FOOTER_SENTINEL)).toHaveLength(2);
+  });
+});
+
+describe("the footer, which upstream also told the model to end with the legend", () => {
+  // Read from the vendored template, so a reworded legend fails here rather than on a paid run.
+  const LEGEND =
+    readFileSync(
+      new URL("../../.claude/skills/intake-triage/REPORT_TEMPLATES.md", import.meta.url),
+      "utf8",
+    ).match(/`(_Legend:[^`]+)`/u)?.[1] ?? "";
+  const REPORT = "# ✅ ACCEPT → queue · SSX-3822\n\nThe report.";
+  const TEMPLATE_ORDER = `${REPORT}\n\n${LEGEND}\n\n${FOOTER_SENTINEL}`;
+  const TYPED = `${REPORT}\n\n---\n\n${FITNESS_MARKER}:** in its own words\n\nA reason.`;
+
+  /** What SSX-3935, SSX-3534 and SSX-4005 were refused for, with `lines` after the sentinel. */
+  const below = (...lines: readonly string[]): string =>
+    `${REPORT}\n\n${FOOTER_SENTINEL}\n${lines.join("\n")}`;
+
+  const posted = (commentBody: string, verdict: TriagePayload["verdict"] = "ready-ish"): string =>
+    withFitnessNote(payload({ verdict, mutation: mutation({ commentBody }) })).mutation.commentBody;
+
+  it("finds the template's legend line", () => {
+    expect(LEGEND).toMatch(/^_Legend: .+_$/u);
+  });
+
+  it("posts what the template's order would have, note and all", () => {
+    expect(posted(below(LEGEND))).toBe(posted(TEMPLATE_ORDER));
+    expect(posted(TEMPLATE_ORDER).indexOf(LEGEND)).toBeLessThan(
+      posted(TEMPLATE_ORDER).indexOf(FITNESS_MARKER),
+    );
+  });
+
+  it("moves it on a verdict that gets no note, too", () => {
+    expect(posted(below(LEGEND), "needs-info")).toBe(TEMPLATE_ORDER);
+  });
+
+  it.each([
+    ["above the sentinel, where the skill says", `${TYPED}\n\n${LEGEND}\n\n${FOOTER_SENTINEL}`],
+    ["below the sentinel", `${TYPED}\n\n${FOOTER_SENTINEL}\n${LEGEND}`],
+  ])("keeps the legend after a fitness block the model typed itself, legend %s", (_, body) => {
+    // A block runs until something closes it, and whatever it runs over is stripped with it.
+    expect(posted(body)).toBe(posted(TEMPLATE_ORDER));
+    expect(posted(body, "needs-info")).toBe(TEMPLATE_ORDER);
+  });
+
+  it("leaves a sentinel sharing its line with text alone, since moving it would drop that text", () => {
+    const body = `${REPORT}\n\nSee above. ${FOOTER_SENTINEL}\n${LEGEND}`;
+
+    expect(posted(body, "needs-info")).toBe(body);
+    expect(posted(body)).toContain("See above.");
+    expect(posted(body).trimEnd().endsWith(FOOTER_SENTINEL)).toBe(false);
+  });
+
+  it.each([
+    ["a closing code fence", below("```")],
+    ["a note to the operator", below("Note: the dossier cache could not be written.")],
+    ["the legend twice", below(LEGEND, LEGEND)],
+    ["the legend and something else", below(LEGEND, "```")],
+  ])("leaves %s after the sentinel for the gate to refuse", (_, body) => {
+    expect(posted(body, "needs-info").trimEnd().endsWith(FOOTER_SENTINEL)).toBe(false);
+    expect(posted(body).trimEnd().endsWith(FOOTER_SENTINEL)).toBe(false);
   });
 });
 
