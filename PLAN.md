@@ -537,7 +537,9 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   channel or the thread would make the bump litter, and the deletion should go. **What would show
   it:** the same command again, looking at the channel and the thread: it posts another broadcast
   and deletes that one.
-- **The daemon has never answered `/bencebot`.** `SLACK_LISTEN` refuses a bad value and a missing
+- **The daemon has never answered `/bencebot` or a mention.** `slack:listen` has answered both, a
+  thread's `@Bencebot start` and `clear` on SSX-4003 on 2026-10-01 included, through the same
+  `listenerFor`. `SLACK_LISTEN` refuses a bad value and a missing
   token at startup, driven on 2026-09-29; a daemon holding the connection has not been watched, nor
   has Slack's own `disconnect` — every reconnect seen was a network drop, and Slack said the
   connection lasts 18060s. The one command timed took seven seconds on a network that was dropping,
@@ -606,22 +608,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
-- **No mention has reached the bot.** Slack sends none until an admin updates the app from
-  `docs/slack-app-manifest.json` — `app_mentions:read` and the `app_mention` event — and reinstalls
-  it. Three things rest on no run: that a mention in a thread carries `thread_ts` (assumed from how
-  message events behave; the event's documented examples show none), that an ephemeral reply with
-  a `thread_ts` lands in the thread, and that a daemon holding the connection gets mentions as well
-  as commands. The resolution does rest on one: `slack:start` dry on SSX-4003's thread on
-  2026-09-30 read the bot's top message and the ticket's record and would have added
-  `agent:start`. **What would show it:** after the reinstall, your member ID in
-  `SLACK_START_USERS`, `pnpm slack:listen`, then `@Bencebot start` in SSX-4003's thread. A reply
-  there starting `(dry run, nothing written) Would add agent:start` is the whole path; one saying
-  this is not a thread is the missing `thread_ts`; nothing in the log at all is the subscription
-  not taken, since Slack then sends nothing.
-- **No start has been written.** `slack:start --write` and a live mention are both built on
-  `updateLabels`, which the claim uses every tick, but neither has written a label. The first one
-  is also a paid solve on the next tick with `SOLVE_ENABLED` on, so it waits for a ticket somebody
-  wants solved rather than being run to see.
+- **Two of a mention's refusals have run only in tests**: someone not on `SLACK_START_USERS`, and a
+  mention outside a thread. **What would show it:** a colleague's `@Bencebot start` in a ticket's
+  thread, and anyone's in the channel itself; each must get a reply only they see, and leave the
+  ticket's labels as they were.
 
 ### 11. Loose ends recorded in no other file
 
