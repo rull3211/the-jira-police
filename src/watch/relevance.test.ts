@@ -7,6 +7,7 @@ import {
   type EditedField,
   parseRelevance,
   RELEVANCE_DENIED_TOOLS,
+  RELEVANCE_SCHEMA,
   type RelevanceInput,
 } from "./relevance.ts";
 
@@ -62,7 +63,7 @@ describe("parseRelevance, which decides whether to spend", () => {
     // The reason is the only evidence of engagement, on the branch that spends money.
     expect(parseRelevance({ answers: true, reason: "   " })).toEqual({
       answers: false,
-      reason: "answered yes without naming what was supplied",
+      reason: "answered yes without naming what was supplied or removed",
     });
   });
 
@@ -219,6 +220,38 @@ describe("the prompt, which is handed attacker-controlled text on both sides", (
     // Asking this session whether the ticket is ready would be a second, worse
     // triage with no vault or DoR rules.
     expect(buildRelevancePrompt(input())).toContain("Do not judge whether the issue is now ready");
+  });
+});
+
+describe("the question, which a blocker taken out of scope must be able to satisfy", () => {
+  /** The instructions, before any fenced ticket text could echo the words being looked for. */
+  function question(): string {
+    const prompt = buildRelevancePrompt(input());
+    return prompt.slice(0, prompt.indexOf("---BEGIN"));
+  }
+
+  it("accepts an item removed as well as one supplied", () => {
+    // SSX-4023: asked only whether the edit supplied an item, three runs out of
+    // three declined an edit that put both blockers out of scope.
+    expect(question()).toContain("Supplied: what was asked for is\nnow present.");
+    expect(question()).toContain("Removed: the ticket now says the item no longer applies");
+    expect(question()).toContain("Answer true only if at least one item was supplied or removed.");
+  });
+
+  it("keeps a proposal to remove an item a no, as a promise to supply one already is", () => {
+    expect(question()).toContain("A proposal to remove an item");
+    expect(question()).toContain("only promises or schedules the work");
+  });
+
+  it("names a removal in the schema too, since the model reads its descriptions as well", () => {
+    // A schema still saying "supplies" alone would contradict the prompt it ships with.
+    expect(RELEVANCE_SCHEMA.properties.answers.description).toContain("no longer applies");
+    expect(RELEVANCE_SCHEMA.properties.reason.description).toContain("supplied or removed");
+  });
+
+  it("does not say the ticket was sent back", () => {
+    // An accepted ticket with `plausible` fitness is watched too, and that framing is false of it.
+    expect(buildRelevancePrompt(input())).not.toContain("sent it back");
   });
 });
 

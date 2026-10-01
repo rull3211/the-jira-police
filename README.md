@@ -8,8 +8,8 @@ to be fixed by an agent. That queue claims a ticket, fixes it in an isolated wor
 mechanical verification, opens a draft pull request and works the review to a handover.
 
 A **third loop** watches tickets triage sent back as nearly-solvable, and re-triages one when the
-reporter answers — so a ticket that was one missing acceptance criterion away from being fixable
-does not sit there unread.
+reporter answers a blocker or takes it out of scope — so a ticket that was one missing acceptance
+criterion away from being fixable does not sit there unread.
 
 With `SLACK_MODE` set, every ticket the three touch also gets **one Slack thread** the bot keeps
 editing as the work moves — off by default, and described under [Commands](#commands).

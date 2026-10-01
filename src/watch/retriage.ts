@@ -44,7 +44,7 @@ export type RetriageOutcome =
   | { readonly kind: "no-mark" }
   /** The counter on the ticket will not read, and it must not read as zero. */
   | { readonly kind: "uncountable" }
-  /** Somebody moved, and it was not an answer. The commonest outcome by design. */
+  /** Somebody moved, and it neither supplied nor removed a blocker. The commonest outcome by design. */
   | { readonly kind: "irrelevant"; readonly reason: string }
   /** The reservation would not write, so the run that it authorises does not happen. */
   | { readonly kind: "unreserved"; readonly error: string }
