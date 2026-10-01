@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78 and §79, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79 and §80, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -85,33 +85,6 @@ from their own base, and it read §72 here after §73 and §74 had been issued. 
 `main`.
 
 <!-- refs:on -->
-
-### 80. The relevance check cannot see a blocker that was removed rather than answered
-
-**Branch:** `fix/watch-relevance-moot`
-
-**What is being attempted.** Widen the one question `watch/relevance.ts` asks. Today it is "does the
-activity _supply_ any of what triage asked for?", with "false if you cannot tell". An edit that
-takes the blocked part of the work out of scope supplies nothing, so the check declines it and the
-watch never re-triages a ticket whose blockers are gone. The new question accepts either way of
-dealing with an item: supplying it, or changing the ticket so it no longer applies. A proposal to
-drop an item stays a no, for the reason a promise already is.
-
-**Why now.** SSX-4023, 2026-10-01. Triage accepted it with fitness "not yet", blocked on a PO
-decision and an FDC answer. At 13:27 the reporter rewrote the description to put both out of
-scope. A sweep shortly after declined the edit, and every sweep after that logged
-`already declined this activity`. The check answered its own question correctly; the question was
-wrong. The prompt also says triage "sent it back", which is untrue of a ticket accepted with
-`plausible` fitness.
-
-**What would refute it.** Run the old and the new prompt on SSX-4023's real content. If the new one
-still says no, the question is not the cause, and the cut description is the next suspect (the
-check sees 4,000 of about 10,000 characters). If the new one says yes to the "SSX-3944 is now
-merged" comment alone, it has widened past removals into "anything related" and spends on noise.
-
-**What would make it the wrong idea.** A reporter who hollows out a ticket to make the bot pick it
-up. That still has to pass a full re-triage, and `MAX_RETRIAGE_PER_TICKET` still bounds it, so the
-widening costs at most the attempts a ticket already had.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
@@ -597,6 +570,12 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
   would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
   none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
+- **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
+  check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
+  rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
+  each (`architecture/triage.md`, the sendback watch). **What would show it:** after the merge and a
+  daemon restart, SSX-4023's next sweep logging `re-triaged` rather than `no re-triage:`; and a
+  watched ticket whose description is edited without dropping a blocker still being declined.
 
 ### 11. Loose ends recorded in no other file
 
