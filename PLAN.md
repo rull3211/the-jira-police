@@ -537,15 +537,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   channel or the thread would make the bump litter, and the deletion should go. **What would show
   it:** the same command again, looking at the channel and the thread: it posts another broadcast
   and deletes that one.
-- **The daemon has never answered `/bencebot` or a mention.** `slack:listen` has answered both, a
-  thread's `@Bencebot start` and `clear` on SSX-4003 on 2026-10-01 included, through the same
-  `listenerFor`. `SLACK_LISTEN` refuses a bad value and a missing
-  token at startup, driven on 2026-09-29; a daemon holding the connection has not been watched, nor
-  has Slack's own `disconnect` — every reconnect seen was a network drop, and Slack said the
-  connection lasts 18060s. The one command timed took seven seconds on a network that was dropping,
-  so the ack budget on a steady one is unmeasured too. **What would show it:** `SLACK_LISTEN=dry` in
-  the daemon's `.env` and a restart; `slack.listen_enabled`, then `slack.listen_connected`, then a
-  `/bencebot` answered as a dry run with no `slack.command_late`.
+- **Slack's own `disconnect` has never been watched.** Every reconnect seen was a network drop, and
+  Slack says a connection lasts 18060s, so a listener has to stay up five hours to meet one. **What
+  would show it:** a listener left running that long; `slack.listen_disconnect`, then
+  `slack.listen_connected` again, with no `slack.listen_dropped` between.
 - **No pull request's line has been sent.** The transport has: `slack:probe SSX-3991` on
   2026-09-29 posted to the operator's member ID with `chat:write` alone, Slack put it in their
   direct message with the bot, and the probe deleted it — the prediction that the manifest needs no
