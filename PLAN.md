@@ -78,13 +78,40 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §80. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §81. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
 `main`.
 
 <!-- refs:on -->
+
+### 80. The relevance check cannot see a blocker that was removed rather than answered
+
+**Branch:** `fix/watch-relevance-moot`
+
+**What is being attempted.** Widen the one question `watch/relevance.ts` asks. Today it is "does the
+activity _supply_ any of what triage asked for?", with "false if you cannot tell". An edit that
+takes the blocked part of the work out of scope supplies nothing, so the check declines it and the
+watch never re-triages a ticket whose blockers are gone. The new question accepts either way of
+dealing with an item: supplying it, or changing the ticket so it no longer applies. A proposal to
+drop an item stays a no, for the reason a promise already is.
+
+**Why now.** SSX-4023, 2026-10-01. Triage accepted it with fitness "not yet", blocked on a PO
+decision and an FDC answer. At 13:27 the reporter rewrote the description to put both out of
+scope. A sweep shortly after declined the edit, and every sweep after that logged
+`already declined this activity`. The check answered its own question correctly; the question was
+wrong. The prompt also says triage "sent it back", which is untrue of a ticket accepted with
+`plausible` fitness.
+
+**What would refute it.** Run the old and the new prompt on SSX-4023's real content. If the new one
+still says no, the question is not the cause, and the cut description is the next suspect (the
+check sees 4,000 of about 10,000 characters). If the new one says yes to the "SSX-3944 is now
+merged" comment alone, it has widened past removals into "anything related" and spends on noise.
+
+**What would make it the wrong idea.** A reporter who hollows out a ticket to make the bot pick it
+up. That still has to pass a full re-triage, and `MAX_RETRIAGE_PER_TICKET` still bounds it, so the
+widening costs at most the attempts a ticket already had.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
