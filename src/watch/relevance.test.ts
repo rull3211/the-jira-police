@@ -231,8 +231,7 @@ describe("the question, which a blocker taken out of scope must be able to satis
   }
 
   it("accepts an item removed as well as one supplied", () => {
-    // SSX-4023: asked only whether the edit supplied an item, three runs out of
-    // three declined an edit that put both blockers out of scope.
+    // Asked about supply alone, an edit putting a blocker out of scope supplies nothing (SSX-4023).
     expect(question()).toContain("Supplied: what was asked for is\nnow present.");
     expect(question()).toContain("Removed: the ticket now says the item no longer applies");
     expect(question()).toContain("Answer true only if at least one item was supplied or removed.");

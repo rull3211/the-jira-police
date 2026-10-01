@@ -818,7 +818,7 @@ export function createSolveCommenter(settings: Settings): TicketCommenter {
 }
 
 /**
- * The watch's cheap gate: does what happened on the ticket answer the sendback?
+ * The watch's cheap gate: did what happened on the ticket supply or remove a blocker triage listed?
  *
  * Composed here for the same reason as the commenter above. `createRelevanceChecker` builds a
  * session with no MCP server and no tools, so there's nothing to withhold or scope. Budgeted on
