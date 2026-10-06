@@ -203,6 +203,15 @@ export class SlackClient {
     return { messages, complete: true };
   }
 
+  /** The message's link as Slack's Copy link writes it, workspace domain included. */
+  async permalink(args: { readonly channel: string; readonly ts: string }): Promise<string> {
+    const body = await this.#call("chat.getPermalink", {
+      channel: args.channel,
+      message_ts: args.ts,
+    });
+    return str(body["permalink"]);
+  }
+
   /** Only an app-level `xapp-` token may call it, and Slack generates the URL per call, so one per connect. */
   async openConnection(): Promise<string> {
     const body = await this.#call("apps.connections.open", {});

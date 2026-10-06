@@ -237,5 +237,15 @@ describe("runDraftSession", () => {
     expect(session.requiredMcpServers).toEqual(["atlassian"]);
     expect(session.args).toEqual(buildDraftArgs(options()));
     expect(parse).toBe(parseDraft);
+    expect(session.signal).toBeUndefined();
+  });
+
+  it("hands the session the caller's signal, so a shutdown can kill it", async () => {
+    const controller = new AbortController();
+    runSession.mockResolvedValue(parseDraft(reply()));
+
+    await runDraftSession(options({ signal: controller.signal }));
+
+    expect(runSession.mock.calls[0]?.[0].signal).toBe(controller.signal);
   });
 });

@@ -34,6 +34,8 @@ export interface DraftRunOptions {
   readonly readDirs: readonly string[];
   /** The insurance-knowledge-vault clone, or `""` for none. */
   readonly vaultPath: string;
+  /** Kills the session when it fires: a draft is cheap to ask for again and holds nothing to finish. */
+  readonly signal?: AbortSignal;
 }
 
 export interface DraftTicket {
@@ -159,6 +161,7 @@ export async function runDraftSession(options: DraftRunOptions): Promise<DraftRe
       // A draft that cannot search Jira cannot see a duplicate or a component, and says nothing of it.
       requiredMcpServers: ["atlassian"],
       label: `Draft of ${options.threadLabel}`,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     },
     parseDraft,
   );

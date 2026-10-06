@@ -97,12 +97,14 @@ running exactly yesterday's configuration gets one line at startup rather than `
 every two minutes forever.
 
 **Beside them, with `SLACK_LISTEN` on, the same `Promise.all` holds the Slack listener** from
-`slack-loop.ts`, for `/bencebot` and for a mention in a ticket's thread. It is not a `runLoop` but
-one Socket Mode connection with its own reconnect backoff, and it spends nothing but a property
-write per command that changes the subscriber list and a label write per mention that starts or
-clears a ticket — though a start hands the solve loop a ticket it will pay to solve. It follows the
-loops' rule all the same (`architecture/invariants.md` invariant 17): `null` when off, its tokens
-and start list checked at startup, and a listener that breaks resolves rather than rejects, leaving
+`slack-loop.ts`, for `/bencebot`, for a mention in a ticket's thread, and for `@Bencebot draft` in
+any thread. It is not a `runLoop` but one Socket Mode connection with its own reconnect backoff,
+and it writes nothing but a property write per command that changes the subscriber list and a label
+write per mention that starts or clears a ticket — though a start hands the solve loop a ticket it
+will pay to solve. A draft is the one thing it pays for itself: a read-only session per mention, one
+at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message.
+It follows the loops' rule all the same (`architecture/invariants.md` invariant 17): `null` when
+off, its tokens and both lists checked at startup, and a listener that breaks resolves rather than rejects, leaving
 the three loops running.
 
 #### The review loop advances and then claims, in one tick

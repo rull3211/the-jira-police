@@ -1,19 +1,20 @@
 /**
- * Holds a Socket Mode connection and answers `/bencebot`, and `@Bencebot start|clear` in a ticket's
- * thread from someone on SLACK_START_USERS, until Ctrl-C.
+ * Holds a Socket Mode connection and answers `/bencebot`, `@Bencebot start|clear` in a ticket's thread
+ * from someone on SLACK_START_USERS, and `@Bencebot draft` in any thread from someone on
+ * SLACK_DRAFT_USERS, until Ctrl-C.
  *
  *   pnpm slack:listen [--write]
  *
  * Dry by default: reads the real subscriber list and tickets, writes what a command or a mention
  * would make of them under <OUTPUT_DIR>/slack/, and says so in every reply. `--write` writes the
- * property and the labels.
+ * property and the labels, and sends a draft as a direct message.
  */
 
 import { join } from "node:path";
 
 import { createLogger } from "../logger.ts";
 import { readSettings, withConfigErrors } from "../settings.ts";
-import { listenerFor, rosterWhere, startUsers } from "../wiring.ts";
+import { draftUsers, listenerFor, rosterWhere, startUsers } from "../wiring.ts";
 
 const log = createLogger("slack-listen");
 
@@ -24,10 +25,13 @@ function usage(): never {
     "usage: pnpm slack:listen [--write]\n" +
       "  Holds a Socket Mode connection and answers /bencebot subscribe, unsubscribe, status and help\n" +
       "  until Ctrl-C, and @Bencebot start and clear in a ticket's thread from the people on\n" +
-      "  SLACK_START_USERS. Dry by default: reads the real jira-police.slack-subscribers list on\n" +
-      "  JIRA_PROJECT and writes the would-be list to <OUTPUT_DIR>/slack/roster.json, and a\n" +
-      "  mention's would-be label edit to <OUTPUT_DIR>/slack/<KEY>.labels.json; every reply says\n" +
-      "  so. --write writes the property and the labels instead, and reads each back.\n" +
+      "  SLACK_START_USERS, and @Bencebot draft in any thread from the people on SLACK_DRAFT_USERS.\n" +
+      "  Dry by default: reads the real jira-police.slack-subscribers list on JIRA_PROJECT and\n" +
+      "  writes the would-be list to <OUTPUT_DIR>/slack/roster.json, a mention's would-be label edit\n" +
+      "  to <OUTPUT_DIR>/slack/<KEY>.labels.json, and a draft's direct message to\n" +
+      "  <OUTPUT_DIR>/slack/<channel>-<ts>.dm.json — a draft's session still runs, and is paid for;\n" +
+      "  every reply says so. --write writes the property and the labels instead, reading each\n" +
+      "  back, and sends a draft as a direct message.\n" +
       "  Exit: 0 stopped, 2 this usage, 3 the run threw, 78 a setting missing, a token that is\n" +
       "  not an app-level or bot token, a malformed member ID, or a keychain dialog denied.\n",
   );
@@ -55,10 +59,15 @@ async function main(): Promise<void> {
     starters === 0
       ? "No mention is answered: SLACK_START_USERS is empty."
       : `${String(starters)} ${starters === 1 ? "person" : "people"} may start or clear a ticket from its thread${write ? "" : ", dry"}.`;
+  const drafters = draftUsers(settings).length;
+  const drafts =
+    drafters === 0
+      ? "No draft is answered: SLACK_DRAFT_USERS is empty."
+      : `${String(drafters)} ${drafters === 1 ? "person" : "people"} may draft a thread${write ? "" : ", dry, though each session is still paid for"}.`;
   process.stdout.write(
     write
-      ? `Listening for /bencebot, writing ${where}. ${mentions} Ctrl-C stops.\n`
-      : `Listening for /bencebot, dry: ${where} is read, and ${join(settings.OUTPUT_DIR, "slack", "roster.json")} written. ${mentions} Ctrl-C stops.\n`,
+      ? `Listening for /bencebot, writing ${where}. ${mentions} ${drafts} Ctrl-C stops.\n`
+      : `Listening for /bencebot, dry: ${where} is read, and ${join(settings.OUTPUT_DIR, "slack", "roster.json")} written. ${mentions} ${drafts} Ctrl-C stops.\n`,
   );
   const summary = await start();
   process.stdout.write(

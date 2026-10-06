@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import { runDraftSession } from "./draft/runner.ts";
-import type { ThreadDraftDeps } from "./draft/thread.ts";
+import { type ThreadDraftDeps, draftThread } from "./draft/thread.ts";
 import { type IssueDetail, JiraClient } from "./jira/client.ts";
 import {
   buildInFlightJql,
@@ -56,6 +56,7 @@ import {
   propertyRosterStore,
 } from "./slack/roster.ts";
 import { type ListenDeps, type ListenSummary, listen, openWebSocket } from "./slack/socket.ts";
+import { type DraftHandler, createDraftHandler, isDraftMention } from "./slack/draft.ts";
 import { type Mention, type ThreadDeps, createMentionHandler } from "./slack/start.ts";
 import {
   dryPublisher,
@@ -607,9 +608,23 @@ export function listenerFor(
     dry: mode === "dry",
     where: rosterWhere(settings),
   });
-  const mention = mentionHandlerFor(settings, mode);
-  return () =>
-    run({ open: () => client.openConnection(), connect: openWebSocket, handle, mention, signal });
+  const start = mentionHandlerFor(settings, mode);
+  const draft = draftHandlerFor(settings, mode, signal);
+  const mention = async (heard: Mention): Promise<void> => {
+    await (isDraftMention(heard.text) ? draft.handle(heard) : start(heard));
+  };
+  return async () => {
+    const summary = await run({
+      open: () => client.openConnection(),
+      connect: openWebSocket,
+      handle,
+      mention,
+      signal,
+    });
+    // The same signal has already killed a running draft's session; this waits for its last message.
+    await draft.settled();
+    return summary;
+  };
 }
 
 /**
@@ -629,28 +644,76 @@ export function mentionHandlerFor(
       });
     };
   }
-  const slack = createBotClient(settings);
   return createMentionHandler({
     allowed,
     deps: threadCommandDeps(settings, mode),
-    reply: async (mention, text) => {
-      await slack.postEphemeral({
-        channel: mention.channel,
-        user: mention.userId,
-        text,
-        ...(mention.threadTs === null ? {} : { threadTs: mention.threadTs }),
-      });
-    },
+    reply: ephemeralReply(createBotClient(settings)),
   });
+}
+
+/**
+ * With nobody on SLACK_DRAFT_USERS a draft mention is logged and dropped, and no session can be
+ * built; with someone, a missing bot token stops the start here rather than every mention.
+ */
+export function draftHandlerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+  signal: AbortSignal,
+): DraftHandler {
+  const allowed = draftUsers(settings);
+  if (allowed.length === 0) {
+    return {
+      handle: async (mention) => {
+        slackLog.info("slack.draft_ignored", {
+          user: mention.userId,
+          note: "SLACK_DRAFT_USERS is empty, so nobody may ask for a draft",
+        });
+      },
+      settled: async () => undefined,
+    };
+  }
+  const slack = createBotClient(settings);
+  const deps = threadDraftDeps(settings, signal);
+  return createDraftHandler({
+    allowed,
+    dry: mode === "dry",
+    draft: (thread) => draftThread(deps, thread),
+    permalink: (channel, ts) => slack.permalink({ channel, ts }),
+    deliver: draftDelivery(settings, mode),
+    reply: ephemeralReply(slack),
+  });
+}
+
+function ephemeralReply(slack: SlackClient): (mention: Mention, text: string) => Promise<void> {
+  return async (mention, text) => {
+    await slack.postEphemeral({
+      channel: mention.channel,
+      user: mention.userId,
+      text,
+      ...(mention.threadTs === null ? {} : { threadTs: mention.threadTs }),
+    });
+  };
 }
 
 /** SLACK_START_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
 export function startUsers(settings: Settings): readonly string[] {
-  const entries = list(settings, "SLACK_START_USERS");
+  return memberIds(settings, "SLACK_START_USERS");
+}
+
+/** SLACK_DRAFT_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
+export function draftUsers(settings: Settings): readonly string[] {
+  return memberIds(settings, "SLACK_DRAFT_USERS");
+}
+
+function memberIds(
+  settings: Settings,
+  name: "SLACK_START_USERS" | "SLACK_DRAFT_USERS",
+): readonly string[] {
+  const entries = list(settings, name);
   const malformed = entries.filter((entry) => !SLACK_USER_ID_PATTERN.test(entry));
   if (malformed.length > 0) {
     throw new SettingsError([
-      `SLACK_START_USERS (expected member IDs such as U0123ABCD, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
+      `${name} (expected member IDs such as U0123ABCD, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
     ]);
   }
   return [...new Set(entries)];
@@ -710,7 +773,7 @@ export function threadCommandDeps(settings: Settings, mode: "dry" | "live"): Thr
 }
 
 /** Reads only: the thread over the bot token, and a session that holds no writer and no token. */
-export function threadDraftDeps(settings: Settings): ThreadDraftDeps {
+export function threadDraftDeps(settings: Settings, signal?: AbortSignal): ThreadDraftDeps {
   const slack = createBotClient(settings);
   const readDirs = draftReadDirs(settings);
   return {
@@ -725,6 +788,7 @@ export function threadDraftDeps(settings: Settings): ThreadDraftDeps {
         maxRunMs: numeric(settings, "DRAFT_TIMEOUT_MS", 1),
         readDirs,
         vaultPath: settings.VAULT_PATH,
+        ...(signal === undefined ? {} : { signal }),
       }),
   };
 }

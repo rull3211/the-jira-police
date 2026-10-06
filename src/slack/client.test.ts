@@ -290,6 +290,16 @@ describe("SlackClient", () => {
     expect(mock).toHaveBeenCalledTimes(1);
   });
 
+  it("asks Slack for a message's link", async () => {
+    const mock = slack({ ok: true, permalink: "https://acme.slack.com/archives/C1/p1000000000000200" });
+
+    expect(await new SlackClient({ token: NEEDLE }).permalink({ channel: "C1", ts: "1.2" })).toBe(
+      "https://acme.slack.com/archives/C1/p1000000000000200",
+    );
+    expect(sent(mock).url).toBe("https://slack.com/api/chat.getPermalink");
+    expect(Object.fromEntries(sent(mock).form)).toEqual({ channel: "C1", message_ts: "1.2" });
+  });
+
   it("posts an ephemeral reply into the thread it names, to the one user", async () => {
     const mock = slack({ ok: true, message_ts: "1.3" });
 

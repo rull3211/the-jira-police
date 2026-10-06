@@ -22,6 +22,12 @@ const MENTION: Mention = {
   threadTs: "1790779480.401999",
 };
 
+function answer(body: object): Response {
+  return new Response(JSON.stringify({ ok: true, ...body }), {
+    headers: { "content-type": "application/json" },
+  });
+}
+
 describe("createSlackListener", () => {
   it("builds nothing while SLACK_LISTEN is off, the default, so no token is asked for", () => {
     expect(createSlackListener(settingsWith({}), new AbortController().signal, UNUSED)).toBeNull();
@@ -137,6 +143,143 @@ describe("createSlackListener", () => {
         MENTION.threadTs,
       ]);
       expect(form.get("text")).toContain("not one of them");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("with nobody on SLACK_DRAFT_USERS, asks for no bot token and answers a draft mention by doing nothing", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      let heard: ListenDeps["mention"] | undefined;
+      const listener = createSlackListener(
+        settingsWith({ SLACK_LISTEN: "live", SLACK_APP_TOKEN: "xapp-1-abc" }),
+        new AbortController().signal,
+        async (deps) => {
+          heard = deps.mention;
+          return { connections: 0, commands: 0, mentions: 0 };
+        },
+      );
+      await listener?.();
+
+      await heard?.({ ...MENTION, text: "<@U0BOT> draft" });
+
+      expect(heard).toBeDefined();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("with someone on SLACK_DRAFT_USERS, refuses at startup a missing bot token and an entry that is not a member ID", () => {
+    const signal = new AbortController().signal;
+    const on = { SLACK_LISTEN: "dry", SLACK_APP_TOKEN: "xapp-1-abc" };
+
+    expect(() =>
+      createSlackListener(settingsWith({ ...on, SLACK_DRAFT_USERS: "U0ME" }), signal),
+    ).toThrow(/SLACK_BOT_TOKEN \(the bot token/u);
+    expect(() =>
+      createSlackListener(
+        settingsWith({ ...on, SLACK_DRAFT_USERS: "U0ME, @bence", SLACK_BOT_TOKEN: "xoxb-1-abc" }),
+        signal,
+      ),
+    ).toThrow(/SLACK_DRAFT_USERS \(expected member IDs such as U0123ABCD, got "@bence"\)/u);
+  });
+
+  it.each([
+    [
+      "a draft from someone only on the start list",
+      "<@U0BOT> draft",
+      { SLACK_START_USERS: "U0ME" },
+    ],
+    [
+      "a start from someone only on the draft list",
+      "<@U0BOT> start",
+      { SLACK_DRAFT_USERS: "U0ME" },
+    ],
+  ])("keeps the two lists apart: refuses %s, reading nothing first", async (_name, text, lists) => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      let heard: ListenDeps["mention"] | undefined;
+      const listener = createSlackListener(
+        settingsWith({
+          SLACK_LISTEN: "live",
+          SLACK_APP_TOKEN: "xapp-1-abc",
+          SLACK_BOT_TOKEN: "xoxb-1-abc",
+          SLACK_START_USERS: "U0OTHER",
+          SLACK_DRAFT_USERS: "U0OTHER",
+          ...lists,
+        }),
+        new AbortController().signal,
+        async (deps) => {
+          heard = deps.mention;
+          return { connections: 0, commands: 0, mentions: 0 };
+        },
+      );
+      await listener?.();
+
+      await heard?.({ ...MENTION, text });
+
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls).toEqual(["https://slack.com/api/chat.postEphemeral"]);
+      const form = new URLSearchParams(String(fetchMock.mock.calls[0]?.[1]?.body));
+      expect(form.get("text")).toContain("not one of them");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("returns only once a running draft has sent its message", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (url) => {
+        const method = String(url).replace("https://slack.com/api/", "");
+        urls.push(method);
+        if (method === "chat.getPermalink") {
+          return answer({ permalink: "https://acme.slack.com/archives/C0CHAN/p1790779480401999" });
+        }
+        if (method === "conversations.replies") {
+          // No messages: the outcome is decided before any session, so nothing is spawned.
+          return answer({ messages: [] });
+        }
+        if (method === "chat.postMessage") {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return answer({ ts: "9.9", channel: "D0DM" });
+        }
+        return answer({});
+      }),
+    );
+    try {
+      const listener = createSlackListener(
+        settingsWith({
+          SLACK_LISTEN: "live",
+          SLACK_APP_TOKEN: "xapp-1-abc",
+          SLACK_BOT_TOKEN: "xoxb-1-abc",
+          SLACK_DRAFT_USERS: "U0ME",
+        }),
+        new AbortController().signal,
+        async (deps) => {
+          await deps.mention({ ...MENTION, text: "<@U0BOT> draft" });
+          return { connections: 1, commands: 0, mentions: 1 };
+        },
+      );
+
+      await listener?.();
+
+      expect(urls.toSorted()).toEqual([
+        "chat.getPermalink",
+        "chat.postEphemeral",
+        "chat.postMessage",
+        "conversations.replies",
+      ]);
     } finally {
       vi.unstubAllGlobals();
     }
