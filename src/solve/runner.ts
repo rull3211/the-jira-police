@@ -152,7 +152,7 @@ export interface SolveRunOptions {
 
 /** Anything a model would plausibly read as the end of a data block: three or more dashes, either keyword, either block name, tolerant of spacing and case. */
 const DELIMITER_PATTERN =
-  /-{3,}\s*(?:BEGIN|END)\s+(?:TICKET|DIFF|REVIEW|CONFLICT|VERIFICATION FAILURE)\s+DATA\s*-{3,}/gi;
+  /-{3,}\s*(?:BEGIN|END)\s+(?:TICKET|DIFF|REVIEW|CONFLICT|VERIFICATION FAILURE|SLACK\s+THREAD)\s+DATA\s*-{3,}/gi;
 
 /** NUL terminates a C string; `spawn` refuses an argv containing one (`ERR_INVALID_ARG_VALUE`), failing the whole pass since the prompt is one argv element. */
 const ARGV_HOSTILE_PATTERN = /\0/g;

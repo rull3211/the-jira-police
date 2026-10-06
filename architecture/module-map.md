@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-125 production modules, 110 test files. Grouped by what they belong to rather than alphabetically,
+128 production modules, 112 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -140,6 +140,14 @@ inheritance.
 | `src/watch/unsubscribe.ts` | Taking a ticket off the watch list, as a pure edit                                              |
 | `src/watch/end.ts`         | Performing that unsubscribe: the label off, then a comment if one is owed                       |
 | `src/watch/sweep.ts`       | One pass over the watched tickets. Shared by `watch:once` and the daemon, so they cannot drift  |
+
+**Drafting — a Slack thread to a ticket, read-only, and constructed by nothing yet**
+
+| Path                  | Role                                                                                                                                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/draft/schema.ts` | The draft-07 contract handed to the drafting session: whether the thread makes a ticket, why, its open questions, the ticket's fields and body, what was read, and any text that spoke to the bot                                 |
+| `src/draft/runner.ts` | The `thread-draft` session: the analyst's tool surface and token withholding, the thread fenced as data, the checkouts it may read named before it. Parses fail-closed — anything short of a literal yes with a body is no ticket |
+| `src/draft/thread.ts` | One thread to one outcome: read it whole, refuse one too long before a session is paid for, run the session, and word the direct message, every string escaped. A message's body is quoted so it cannot forge another's header    |
 
 **Entry points and their argument parsing**
 

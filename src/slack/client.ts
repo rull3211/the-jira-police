@@ -28,6 +28,16 @@ export interface SlackPostResult extends SlackWriteResult {
   readonly channel: string;
 }
 
+/** One message of a thread; `user` is null for a message a bot or an integration posted. */
+export interface ThreadMessage {
+  readonly ts: string;
+  readonly user: string | null;
+  readonly botId: string | null;
+  readonly text: string;
+}
+
+const THREAD_PAGE_SIZE = 200;
+
 export class SlackError extends Error {
   readonly method: string;
   /** Slack's `error` code, `http_<status>` for a non-JSON failure, or `network`. */
@@ -152,6 +162,45 @@ export class SlackClient {
       text: str(message["text"]),
       botId: optionalStr(message["bot_id"]),
     };
+  }
+
+  /**
+   * Every message in a thread, the top one first, paged to the end; `complete` is false once more
+   * than `max` arrived, and reading stops there. The same scopes as `threadRoot`.
+   */
+  async threadMessages(args: {
+    readonly channel: string;
+    readonly ts: string;
+    readonly max: number;
+  }): Promise<{ readonly messages: readonly ThreadMessage[]; readonly complete: boolean }> {
+    const messages: ThreadMessage[] = [];
+    let cursor: string | undefined;
+    do {
+      const body = await this.#call("conversations.replies", {
+        channel: args.channel,
+        ts: args.ts,
+        limit: THREAD_PAGE_SIZE,
+        inclusive: true,
+        cursor,
+      });
+      const page = body["messages"];
+      for (const entry of Array.isArray(page) ? page : []) {
+        const message = record(entry);
+        messages.push({
+          ts: str(message["ts"]),
+          user: optionalStr(message["user"]),
+          botId: optionalStr(message["bot_id"]),
+          text: str(message["text"]),
+        });
+      }
+      if (messages.length > args.max) {
+        return { messages: messages.slice(0, args.max), complete: false };
+      }
+      // Slack ends paging with an empty `next_cursor`, not an absent one.
+      const next = str(record(body["response_metadata"])["next_cursor"]);
+      cursor = next === "" ? undefined : next;
+    } while (cursor !== undefined);
+    return { messages, complete: true };
   }
 
   /** Only an app-level `xapp-` token may call it, and Slack generates the URL per call, so one per connect. */
