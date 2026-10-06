@@ -10,10 +10,12 @@
  * (`runPost`), composed in that order so a bad verdict costs a retry, not an unreviewable write.
  */
 
-import { mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
+import { runDraftSession } from "./draft/runner.ts";
+import type { ThreadDraftDeps } from "./draft/thread.ts";
 import { type IssueDetail, JiraClient } from "./jira/client.ts";
 import {
   buildInFlightJql,
@@ -100,6 +102,7 @@ import {
 } from "./triage/runner.ts";
 import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
+const draftLog = createLogger("draft");
 const pollLog = createLogger("poll");
 const reviewLog = createLogger("review");
 const slackLog = createLogger("slack");
@@ -704,6 +707,54 @@ export function threadCommandDeps(settings: Settings, mode: "dry" | "live"): Thr
       },
     },
   };
+}
+
+/** Reads only: the thread over the bot token, and a session that holds no writer and no token. */
+export function threadDraftDeps(settings: Settings): ThreadDraftDeps {
+  const slack = createBotClient(settings);
+  const readDirs = draftReadDirs(settings);
+  return {
+    messages: (channel, ts, max) => slack.threadMessages({ channel, ts, max }),
+    draft: (thread, threadLabel) =>
+      runDraftSession({
+        threadLabel,
+        thread,
+        executable: settings.STORECODE_PATH,
+        workingDirectory: process.cwd(),
+        idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+        maxRunMs: numeric(settings, "DRAFT_TIMEOUT_MS", 1),
+        readDirs,
+        vaultPath: settings.VAULT_PATH,
+      }),
+  };
+}
+
+/**
+ * Every checkout the solver knows — `SOLVE_REPOS` and `SOLVE_READ_DIRS` under `SOLVE_REPO_ROOT` — that
+ * is a directory here: an `--add-dir` naming a missing path fails the whole session at startup.
+ */
+export function draftReadDirs(settings: Settings): readonly string[] {
+  if (settings.SOLVE_REPO_ROOT === "") {
+    return [];
+  }
+  const scope = readScope(
+    settings.SOLVE_REPO_ROOT,
+    [...list(settings, "SOLVE_REPOS"), ...list(settings, "SOLVE_READ_DIRS")],
+    null,
+  );
+  const missing = scope.dirs.filter((dir) => !isDirectory(dir));
+  if (scope.rejected.length > 0 || missing.length > 0) {
+    draftLog.warn("draft.read_dirs_skipped", { rejected: scope.rejected, missing });
+  }
+  return scope.dirs.filter((dir) => !missing.includes(dir));
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 let pipelineAudit: { readonly key: string; readonly notifier: AuditNotifier | null } | undefined;

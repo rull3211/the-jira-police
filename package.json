@@ -22,6 +22,7 @@
     "slack:probe": "node --env-file-if-exists=.env src/cli/slack-probe.ts",
     "slack:listen": "node --env-file-if-exists=.env src/cli/slack-listen.ts",
     "slack:start": "node --env-file-if-exists=.env src/cli/slack-start.ts",
+    "slack:draft": "node --env-file-if-exists=.env src/cli/slack-draft.ts",
     "daemon:status": "node src/cli/daemon-status.ts",
     "logs": "node src/cli/logs.ts",
     "check-types": "tsc --noEmit",

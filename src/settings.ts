@@ -139,6 +139,12 @@ export const SETTINGS = [
     fallback: "1200000",
   },
   {
+    name: "DRAFT_TIMEOUT_MS",
+    description:
+      "Absolute ceiling on one `@Bencebot draft` session, counting only time the machine was awake; SESSION_IDLE_TIMEOUT_MS still catches one that goes silent. A draft reads a thread, Jira and whichever checkouts it needs, so it is sized like a triage rather than like a solve pass. A cap, not a target.",
+    fallback: "1200000",
+  },
+  {
     name: "SOLVE_ENABLED",
     description:
       'Master switch for the solve queue. Off means the second poller never starts, so no ticket is ever claimed. Separate from SOLVE_MODE because they answer different questions — whether the machinery runs at all, and how much human approval it needs when it does — and collapsing them into one setting would mean the only way to test the plumbing was to arm it. Strict "true", so a typo fails closed.',

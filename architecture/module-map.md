@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-128 production modules, 112 test files. Grouped by what they belong to rather than alphabetically,
+129 production modules, 112 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -141,7 +141,7 @@ inheritance.
 | `src/watch/end.ts`         | Performing that unsubscribe: the label off, then a comment if one is owed                       |
 | `src/watch/sweep.ts`       | One pass over the watched tickets. Shared by `watch:once` and the daemon, so they cannot drift  |
 
-**Drafting — a Slack thread to a ticket, read-only, and constructed by nothing yet**
+**Drafting — a Slack thread to a ticket, read-only**
 
 | Path                  | Role                                                                                                                                                                                                                              |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -174,6 +174,7 @@ inheritance.
 | `src/cli/slack-once.ts`          | `pnpm slack:once <KEY> [--post] [--bump]`. Draws one ticket's audit thread from its record; `--bump` broadcasts its latest major entry again. Dry by default: the record and the exact Slack requests under `OUTPUT_DIR/slack/`                                                                                                                                                       |
 | `src/cli/slack-listen.ts`        | `pnpm slack:listen [--write]`. Holds a Socket Mode connection and answers `/bencebot`, and `@Bencebot start` or `clear` from `SLACK_START_USERS`, until Ctrl-C. Dry by default: the real list and tickets read, the would-be list written to `OUTPUT_DIR/slack/roster.json` and a label edit to `<KEY>.labels.json`, every reply marked; `--write` writes the property and the labels |
 | `src/cli/slack-start.ts`         | `pnpm slack:start <thread-link> [--clear] [--write]`. The edit `@Bencebot start` or `clear` makes, for one thread named at a terminal, which is its authority. Dry by default: the edit written to `OUTPUT_DIR/slack/<KEY>.labels.json`; `--write` sends it and reads it back. Every outcome to `<channel>-<ts>.thread.json`                                                          |
+| `src/cli/slack-draft.ts`         | `pnpm slack:draft <thread-link>`. What `@Bencebot draft` would send, for one thread named at a terminal: the whole thread read, the `thread-draft` session run over it, the direct message written to `OUTPUT_DIR/slack/<channel>-<ts>.draft.md` and the outcome to `.draft.json`. Sends nothing. `threadDraftDeps` builds what it reads with                                         |
 | `src/cli/daemon-status.ts`       | `pnpm daemon:status`. Is the daemon up? Reads `ps`, needs no credential, writes nothing                                                                                                                                                                                                                                                                                               |
 | `src/cli/daemon-processes.ts`    | Picking the daemon out of `ps` output. Split off so a test can import it                                                                                                                                                                                                                                                                                                              |
 | `src/cli/docs-check.ts`          | `pnpm docs:check`. Development tooling, not a service entry point — see below                                                                                                                                                                                                                                                                                                         |
@@ -239,7 +240,10 @@ resolves and writes with: `createBotClient` — the bot token's check without a 
 thread names its own — for the top message, and the Jira client for the record and the labels. Its
 `live` mode is the grant: the label edit through `updateLabels`. `listenerFor` hands the listener
 `mentionHandlerFor`'s handler, which with `SLACK_START_USERS` empty only logs, so neither a bot token
-nor a way to write is built until someone is on the list.
+nor a way to write is built until someone is on the list. `threadDraftDeps` is what a draft reads
+with, and it holds nothing that writes: the bot client for the thread, and `runDraftSession` over
+`draftReadDirs` — the checkouts `SOLVE_REPOS` and `SOLVE_READ_DIRS` name under `SOLVE_REPO_ROOT`,
+each one a directory here, since an `--add-dir` on a missing path fails the session at startup.
 
 `wiring.ts` exists because there are seven entry points — the daemon, `poll:once`, `triage:once`,
 `solve:once`, `bot:once`, `watch:once` and `recon:once` — and a difference in how they wire the same

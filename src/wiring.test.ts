@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,6 +41,7 @@ import {
   pipelinePrLineSender,
   createSolveDeps,
   createSolveRunDeps,
+  draftReadDirs,
   githubRepoFor,
   imageStageOptions,
   pollIntervalMs,
@@ -1646,6 +1654,52 @@ describe("threadCommandDeps", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("draftReadDirs", () => {
+  it("opens every checkout SOLVE_REPOS and SOLVE_READ_DIRS name that is a directory here", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+    for (const name of ["commerce-rest", "advisor-web"]) {
+      mkdirSync(join(root, name));
+    }
+
+    const dirs = draftReadDirs(
+      settingsWith({
+        SOLVE_REPO_ROOT: root,
+        SOLVE_REPOS: "commerce-rest",
+        SOLVE_READ_DIRS: "advisor-web, commerce-rest",
+      }),
+    );
+
+    expect(dirs).toEqual([join(root, "commerce-rest"), join(root, "advisor-web")]);
+  });
+
+  it("skips a name that is no directory here, since --add-dir on it fails the whole session", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+    mkdirSync(join(root, "commerce-rest"));
+
+    const dirs = draftReadDirs(
+      settingsWith({
+        SOLVE_REPO_ROOT: root,
+        SOLVE_REPOS: "commerce-rest",
+        SOLVE_READ_DIRS: "gone",
+      }),
+    );
+
+    expect(dirs).toEqual([join(root, "commerce-rest")]);
+  });
+
+  it("refuses a name that would climb out of the root", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+
+    expect(
+      draftReadDirs(settingsWith({ SOLVE_REPO_ROOT: join(root, "inner"), SOLVE_READ_DIRS: ".." })),
+    ).toEqual([]);
+  });
+
+  it("opens nothing with no SOLVE_REPO_ROOT, rather than resolving names against the working directory", () => {
+    expect(draftReadDirs(settingsWith({ SOLVE_REPOS: "src", SOLVE_READ_DIRS: "src" }))).toEqual([]);
   });
 });
 
