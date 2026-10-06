@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §81. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §82. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -1158,6 +1158,55 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
+
+### 81. `@Bencebot draft`: a Slack thread cannot become a ticket without a person redoing the research
+
+**Branch:** `feat/slack-draft` — the draft half only. `post`, which creates the issue, is a
+second privilege and gets its own branch once this one has merged.
+
+**What is being attempted.** Someone on a new allowlist, `SLACK_DRAFT_USERS`, mentions
+`@Bencebot draft` in any thread the bot is in. The listener reads the whole thread, starts a
+read-only session — the analyst's tool surface, the vault, every checkout under `SOLVE_REPO_ROOT`
+that `SOLVE_REPOS` or `SOLVE_READ_DIRS` names — and sends the person a direct message holding a
+ticket drafted the way `jira-implementation-ticket` asks, or why the thread does not make one.
+Nothing is written to Jira. Tracked as SSX-4071, which also describes the `post` half.
+
+**Why now.** The operator asked for it, and the pieces exist: the mention listener
+(`slack/start.ts`), a read-only session (`triage/runner.ts`, `solve/runner.ts`'s recon), a fence for
+untrusted text (`sanitiseUntrusted`) and a direct message (`slack/pr-line.ts`). Today the same
+result needs a person at a terminal running intake-triage on text they pasted.
+
+**In the house order** (`STARTING.md`, "Phase a privilege"), one commit each:
+
+1. Inert: the thread reader, the session, its schema and the `thread-draft` skill, constructed by
+   nothing.
+2. `pnpm slack:draft <thread-link>`: reads the thread, runs the session, writes the draft to
+   `OUTPUT_DIR/slack/`, sends nothing.
+3. `--dm`: sends that draft to `SLACK_OPERATOR_USER_ID`.
+4. The listener: `@Bencebot draft`, dispatched before `runThreadCommand` — whose `ticketOfRoot`
+   refuses every thread the bot did not open, which is every thread this is for — and run off the
+   listener's one promise chain, which a session of minutes would otherwise hold against every
+   `/bencebot`.
+
+**Predictions, written before the first run:**
+
+- The session finds the right repository for a thread that names a service, and cites lines; for
+  a thread that does not, it says so rather than guessing.
+- A real run costs about what a triage costs, around a dollar, and takes minutes, not seconds.
+- `conversations.replies` returns a whole short thread in one page; Slack's 2025 limit on
+  non-Marketplace apps does not apply to an internal one.
+
+**What would make it the wrong idea:**
+
+- **The drafts are not worth filing.** If the first real ones need rewriting more than a person
+  writing from scratch would, the session is spending money to produce a starting point nobody
+  uses, and `post` should not be built.
+- **The thread is the attack surface.** Anyone who can write in the channel writes the session's
+  input. The containment is the tool surface, and whether `--disallowedTools` withholds MCP
+  mutators is still unverified (`src/triage/runner.ts`). The draft half writes nothing, so the
+  worst it can do is say something untrue in a direct message; `post` is where this decides.
+- **One session at a time may be too few**, or too many: the listener refuses a second `draft`
+  while one runs rather than queueing it.
 
 ## Verification
 
