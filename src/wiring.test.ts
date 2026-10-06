@@ -41,6 +41,7 @@ import {
   pipelinePrLineSender,
   createSolveDeps,
   createSolveRunDeps,
+  draftDelivery,
   draftReadDirs,
   githubRepoFor,
   imageStageOptions,
@@ -1700,6 +1701,53 @@ describe("draftReadDirs", () => {
 
   it("opens nothing with no SOLVE_REPO_ROOT, rather than resolving names against the working directory", () => {
     expect(draftReadDirs(settingsWith({ SOLVE_REPOS: "src", SOLVE_READ_DIRS: "src" }))).toEqual([]);
+  });
+});
+
+describe("draftDelivery", () => {
+  it("dry, writes the request beside the draft and sends nothing", async () => {
+    const output = mkdtempSync(join(tmpdir(), "draft-delivery-"));
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deliver = draftDelivery(settingsWith({ OUTPUT_DIR: output }), "dry");
+
+      expect(await deliver("U0ASKER1", "C0THREAD1-1.2", "the draft")).toBe("dry-run");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(readFileSync(join(output, "slack", "C0THREAD1-1.2.dm.json"), "utf8")),
+      ).toEqual({ method: "chat.postMessage", channel: "U0ASKER1", text: "the draft" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("live, posts to the person's member ID, which Slack delivers as a direct message", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ ok: true, ts: "9.9", channel: "D0DM1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deliver = draftDelivery(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "live");
+
+      expect(await deliver("U0ASKER1", "C0THREAD1-1.2", "the draft")).toBe("9.9");
+      const [url, init] = fetchMock.mock.calls[0] ?? [];
+      expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
+      const form = new URLSearchParams(String(init?.body));
+      expect(form.get("channel")).toBe("U0ASKER1");
+      expect(form.get("text")).toBe("the draft");
+      expect(form.get("thread_ts")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("live, refuses to build without a bot token", () => {
+    expect(() => draftDelivery(settingsWith({}), "live")).toThrow(SettingsError);
   });
 });
 

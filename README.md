@@ -559,6 +559,7 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm slack:start <thread-link> [--clear]`             | `agent:start` for the ticket a Slack thread belongs to, or `agent:failed` off with `--clear`, dry: the edit written to a file    | `groomed/slack/`                                        |
 | `pnpm slack:start <thread-link> [--clear] --write`     | …and send the edit to the ticket, reading it back                                                                                | Jira labels: `agent:start` on, or `agent:failed` off    |
 | `pnpm slack:draft <thread-link>`                       | Draft a Jira ticket from a Slack thread with a read-only session, dry: the direct message it would send, written to a file       | `groomed/slack/`                                        |
+| `pnpm slack:draft <thread-link> --dm`                  | …and send that message to `SLACK_OPERATOR_USER_ID` as a direct message                                                           | a Slack direct message                                  |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                            | no                                                      |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                         | no                                                      |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                         | no                                                      |
@@ -694,10 +695,12 @@ by hand: with `SOLVE_ENABLED` on, the next solve tick claims the ticket and pays
 the Atlassian MCP — the vault, and every checkout `SOLVE_REPOS` and `SOLVE_READ_DIRS` name under
 `SOLVE_REPO_ROOT`, and no Jira or Slack credential. The direct message `@Bencebot draft` would send
 — the drafted ticket, or why the thread does not make one, with its open questions — goes to
-`<OUTPUT_DIR>/slack/<channel>-<ts>.draft.md`, and the outcome beside it as `.draft.json`. Nothing is
-sent and nothing is written to Jira. A thread over 500 messages or 100 000 characters is refused
-before the session is paid for. Exit 0 means a ticket was
-drafted, 1 that none was and why, 3 that the run threw.
+`<OUTPUT_DIR>/slack/<channel>-<ts>.draft.md`, and the outcome beside it as `.draft.json`. Dry by
+default, nothing is sent; nothing is ever written to Jira. A thread over 500 messages or 100 000 characters is refused
+before the session is paid for. `--dm` also sends the message to `SLACK_OPERATOR_USER_ID`, checked
+before the session runs, as a direct message from the bot. Exit 0 means a ticket was drafted, 1
+that none was and why, 3 that the run threw, 4 that the message was written and `--dm` could not
+send it.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and

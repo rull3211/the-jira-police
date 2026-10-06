@@ -749,6 +749,26 @@ export function draftReadDirs(settings: Settings): readonly string[] {
   return scope.dirs.filter((dir) => !missing.includes(dir));
 }
 
+/** Sends one rendered draft and resolves to the message's `ts`; may throw. */
+export type DraftDelivery = (userId: string, threadLabel: string, text: string) => Promise<string>;
+
+/** `live` sends the draft as a direct message; `dry` writes the request beside the draft instead. */
+export function draftDelivery(settings: Settings, mode: "dry" | "live"): DraftDelivery {
+  if (mode === "dry") {
+    const directory = join(settings.OUTPUT_DIR, "slack");
+    return async (userId, threadLabel, text) => {
+      await writeJson(directory, `${threadLabel}.dm.json`, {
+        method: "chat.postMessage",
+        channel: userId,
+        text,
+      });
+      return "dry-run";
+    };
+  }
+  const slack = createBotClient(settings);
+  return async (userId, _threadLabel, text) => (await slack.post({ channel: userId, text })).ts;
+}
+
 function isDirectory(path: string): boolean {
   try {
     return statSync(path).isDirectory();
