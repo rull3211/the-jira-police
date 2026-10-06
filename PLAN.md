@@ -570,6 +570,18 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
   would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
   none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
+- **No draft has run against a real thread.** Every rung of `@Bencebot draft` is tested with Slack
+  and the session stubbed, and none has run: the operator's `.env` reads its tokens from the
+  keychain, which the agent's sandbox could not reach on 2026-10-06. Predicted, before any run:
+  the session finds the repository a thread names and cites lines it opened, and says so when a
+  thread names none; a run costs about what a triage does and takes minutes; `conversations.replies`
+  returns a short thread in one page, Slack's 2025 limit on non-Marketplace apps not applying to an
+  internal one; `chat.getPermalink` needs no scope beyond those held; the session's Atlassian MCP
+  connects from whatever directory the command runs in. Unseen too: how a direct message holding
+  Markdown headings reads in Slack, and the message a stopped draft sends. **What would show it:**
+  `pnpm slack:draft <link>` on a real thread, the `.draft.md` it writes read against the code it
+  cites; then `--dm`; then `pnpm slack:listen` with someone on `SLACK_DRAFT_USERS` and
+  `@Bencebot draft` typed in a thread, and once more stopped with Ctrl-C mid-draft.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1159,54 +1171,38 @@ shares `FIX_DENIED_TOOLS` with.
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
 
-### 81. `@Bencebot draft`: a Slack thread cannot become a ticket without a person redoing the research
+### 81. A drafted ticket still has to be filed by hand
 
-**Branch:** `feat/slack-draft` — the draft half only. `post`, which creates the issue, is a
-second privilege and gets its own branch once this one has merged.
+**Branch:** none yet. It waits for `@Bencebot draft` to have produced drafts worth filing.
 
-**What is being attempted.** Someone on a new allowlist, `SLACK_DRAFT_USERS`, mentions
-`@Bencebot draft` in any thread the bot is in. The listener reads the whole thread, starts a
-read-only session — the analyst's tool surface, the vault, every checkout under `SOLVE_REPO_ROOT`
-that `SOLVE_REPOS` or `SOLVE_READ_DIRS` names — and sends the person a direct message holding a
-ticket drafted the way `jira-implementation-ticket` asks, or why the thread does not make one.
-Nothing is written to Jira. Tracked as SSX-4071, which also describes the `post` half.
+**What is not built.** `@Bencebot draft` sends the asker a drafted ticket as a direct message and
+writes nothing to Jira. The second half of SSX-4071 is filing it: the asker replies `post` in that
+direct message, the service creates the issue, and its key and link are posted back into the
+thread. That is a new write, from text anyone in a channel wrote into a Jira issue, gated only by a
+person reading the exact draft — so it is a privilege of its own, and a branch of its own.
 
-**Why now.** The operator asked for it, and the pieces exist: the mention listener
-(`slack/start.ts`), a read-only session (`triage/runner.ts`, `solve/runner.ts`'s recon), a fence for
-untrusted text (`sanitiseUntrusted`) and a direct message (`slack/pr-line.ts`). Today the same
-result needs a person at a terminal running intake-triage on text they pasted.
+**The shape SSX-4071 settles:** `message.im` added to the manifest's events and a direct-message
+frame to `parseFrame`; `post` files the draft the asker read, verbatim, and never re-runs the
+session; the project must be on a new `DRAFT_PROJECTS` allowlist with no default, and the component
+one of that project's live components, or nothing is filed; the writer is a session in the poster's
+shape (`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here
+builds it; the issue is read back over REST; and the draft is marked as filing before the create,
+so a crash between the two can never file it twice.
 
-**In the house order** (`STARTING.md`, "Phase a privilege"), one commit each:
-
-1. Inert: the thread reader, the session, its schema and the `thread-draft` skill, constructed by
-   nothing.
-2. `pnpm slack:draft <thread-link>`: reads the thread, runs the session, writes the draft to
-   `OUTPUT_DIR/slack/`, sends nothing.
-3. `--dm`: sends that draft to `SLACK_OPERATOR_USER_ID`.
-4. The listener: `@Bencebot draft`, dispatched before `runThreadCommand` — whose `ticketOfRoot`
-   refuses every thread the bot did not open, which is every thread this is for — and run off the
-   listener's one promise chain, which a session of minutes would otherwise hold against every
-   `/bencebot`.
-
-**Predictions, written before the first run:**
-
-- The session finds the right repository for a thread that names a service, and cites lines; for
-  a thread that does not, it says so rather than guessing.
-- A real run costs about what a triage costs, around a dollar, and takes minutes, not seconds.
-- `conversations.replies` returns a whole short thread in one page; Slack's 2025 limit on
-  non-Marketplace apps does not apply to an internal one.
+**Where the pending draft lives is open.** `BUILDING.md` keeps state in the remote system, and the
+bot's own direct message already holds the draft verbatim: a `post` replied in that message's thread
+could read it back, rather than a file under `state/` that a restart or a second machine would not
+see.
 
 **What would make it the wrong idea:**
 
 - **The drafts are not worth filing.** If the first real ones need rewriting more than a person
-  writing from scratch would, the session is spending money to produce a starting point nobody
-  uses, and `post` should not be built.
-- **The thread is the attack surface.** Anyone who can write in the channel writes the session's
-  input. The containment is the tool surface, and whether `--disallowedTools` withholds MCP
-  mutators is still unverified (`src/triage/runner.ts`). The draft half writes nothing, so the
-  worst it can do is say something untrue in a direct message; `post` is where this decides.
-- **One session at a time may be too few**, or too many: the listener refuses a second `draft`
-  while one runs rather than queueing it.
+  writing from scratch would, `post` files that rewriting into Jira faster, and is not worth
+  building.
+- **The containment is unverified at the write.** The draft session holds no Jira writer only as far
+  as `--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`). A
+  draft that can only reach a direct message tolerates that; a session holding `createJiraIssue` is
+  where it has to be measured first.
 
 ## Verification
 
