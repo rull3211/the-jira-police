@@ -18,6 +18,8 @@ export const MAX_TIMELINE_ENTRIES = 40;
 export const MAX_ENTRY_CHARS = 200;
 
 const UNREACHABLE_ICON = "📡";
+/** Must exceed `REVIEW_POLL_MS`, or every look in one outage is a line of its own. */
+const OUTAGE_FOLD_MS = 60 * 60 * 1000;
 
 export type TriageState =
   | { readonly kind: "pending" }
@@ -258,9 +260,10 @@ function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRec
         "💥",
         `Crashed in ${event.where} — ${event.message}`,
       );
-    case "unreachable":
+    case "unreachable": {
       // An outage fails every tick until it ends, and only its start is worth a line.
-      if (record.timeline.at(-1)?.icon === UNREACHABLE_ICON) {
+      const last = record.timeline.at(-1);
+      if (last?.icon === UNREACHABLE_ICON && now.getTime() - Date.parse(last.at) < OUTAGE_FOLD_MS) {
         return record;
       }
       return minor(
@@ -269,6 +272,7 @@ function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRec
         UNREACHABLE_ICON,
         `Network failure in ${event.where} — ${event.message}`,
       );
+    }
   }
 }
 
