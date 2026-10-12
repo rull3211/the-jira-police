@@ -161,7 +161,10 @@ describe("reviewFailureEvent", () => {
       "gh, a bad gateway in the same format",
       "gh could not list pull requests (exit 1: HTTP 502: 502 Bad Gateway (https://api.github.com/graphql))",
     ],
-    ["Jira, unavailable in `JiraError`'s format", "Jira returned 503: Service Unavailable"],
+    [
+      "Jira, unavailable, `JiraError` quoting a body that names no status",
+      "Jira returned 503: <!DOCTYPE html><html><head><title>Atlassian</title></head><body>Back soon</body></html>",
+    ],
   ])("files %s as a network failure", (_source, reason) => {
     expect(reviewFailureEvent(reason)).toEqual({
       kind: "unreachable",
