@@ -149,6 +149,10 @@ describe("reviewFailureEvent", () => {
       "git, the resolver failing (measured)",
       "fatal: unable to access 'https://github.com/o/r/': Could not resolve host: github.com",
     ],
+    [
+      "gh, the TLS handshake stalling (SSX-3895's record, 2026-10-01)",
+      'gh could not read #1443 (exit 1: Post "https://api.github.com/graphql": net/http: TLS handshake timeout)',
+    ],
   ])("files %s as a network failure", (_source, reason) => {
     expect(reviewFailureEvent(reason)).toEqual({
       kind: "unreachable",

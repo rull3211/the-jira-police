@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3638 tests in 110 files**, no build step.
+> **3639 tests in 110 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -456,6 +456,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   (`architecture/solve.md`, "A review is never silent"), one of which had a model rename a refused
   silence to the allowed comment. **What would show it:** a round with a colleague's thank-you beside
   a review must answer the review and add a `no reply to comment M` line to the marker.
+
+- **A review look failing on the network has never been watched becoming a 📡 line.**
+  `reviewFailureEvent`'s patterns were measured against gh, git and Node offline on 2026-10-12, and
+  SSX-3895's real record replayed through it turns its five `Crashed in review` broadcasts of
+  2026-10-05 to 2026-10-09 into timeline lines. The call in `runReviewSweep` has met no outage:
+  `HTTPS_PROXY` cannot break gh there, since `childEnv` in `solve/exec.ts` does not pass it on.
+  **What would show it:** `SLACK_MODE=dry pnpm solve:once --watch` with the network dropped
+  mid-run, or with a `gh` first on `PATH` that runs the real one through a dead proxy. Each watched
+  ticket's `<OUTPUT_DIR>/slack/<KEY>.record.json` must gain a 📡 timeline entry, and no
+  `<KEY>.broadcast.json` may carry `reply_broadcast`.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries
