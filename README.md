@@ -621,6 +621,9 @@ the verdict, a gate refusal, a claim, each model pass, the solve's outcome, the 
 review round, the undraft, the merge and any crash land on it — the claim and the ones that decide
 the ticket's fate as their own lines, the rest in the timeline, newest first. The undraft is one line per handover, however many looks find the pull
 request ready; a round that pushes a change, or a person drafting it, makes the next one news. A
+review look that fails because the network did — a timeout, a refused connection, a host that does
+not resolve — is not a crash: it is a 📡 timeline line, never broadcast, and taken into one already
+newest on the timeline, so an outage leaves one line; a crash already on the card stays there. A
 ticket already in review when the thread starts gets it from the review loop's first look, which
 fills in the title, the pull request, and triage as the ticket's labels state it. A thread started
 without a title, as a key typed at `triage:once` starts one, reads it from Jira once; if that read

@@ -7,6 +7,7 @@ import type { TriagePayload } from "../triage/runner.ts";
 import {
   observedEvent,
   prEndedEvent,
+  reviewFailureEvent,
   reviewOutcomeEvents,
   solveOutcomeEvent,
   triageVerdictEvent,
@@ -124,6 +125,50 @@ describe("observedEvent", () => {
 
   it("shows a PR without a URL as its number rather than failing the look", () => {
     expect(observedEvent([], { ...pr, url: null })).toMatchObject({ pr: { url: "", number: 7 } });
+  });
+});
+
+describe("reviewFailureEvent", () => {
+  // Worded as each source prints it; the ones marked were measured offline on 2026-10-12.
+  it.each([
+    ["the runner's own timeout", "gh could not list pull requests (timed out)"],
+    [
+      "gh, the resolver failing (measured)",
+      "gh could not list pull requests (exit 1: error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com)",
+    ],
+    [
+      "gh, the connection refused (measured)",
+      'gh could not list pull requests (exit 1: Post "https://api.github.com/graphql": proxyconnect tcp: dial tcp 127.0.0.1:9: connect: connection refused)',
+    ],
+    ["Jira, no route (measured)", "Request to /rest/api/3/issue/SSX-1 failed: fetch failed"],
+    [
+      "Jira, its timeout (measured)",
+      "Request to /rest/api/3/issue/SSX-1 failed: The operation was aborted due to timeout",
+    ],
+    [
+      "git, the resolver failing (measured)",
+      "fatal: unable to access 'https://github.com/o/r/': Could not resolve host: github.com",
+    ],
+  ])("files %s as a network failure", (_source, reason) => {
+    expect(reviewFailureEvent(reason)).toEqual({
+      kind: "unreachable",
+      where: "review",
+      message: reason,
+    });
+  });
+
+  it.each([
+    "gh could not list pull requests (exit 1: HTTP 401: Bad credentials (https://api.github.com/graphql))",
+    "Jira rejected the credentials (401). Check JIRA_EMAIL and JIRA_AUTH; API credentials are revoked when the account password changes.",
+    "Jira returned 404: Issue does not exist",
+    "SSX-1's summary yields no usable branch name",
+    "no pull request on fix/SSX-1-cache",
+  ])("keeps %s a crash", (reason) => {
+    expect(reviewFailureEvent(reason)).toEqual({
+      kind: "crashed",
+      where: "review",
+      message: reason,
+    });
   });
 });
 
