@@ -153,6 +153,18 @@ describe("reviewFailureEvent", () => {
       "gh, the TLS handshake stalling (SSX-3895's record, 2026-10-01)",
       'gh could not read #1443 (exit 1: Post "https://api.github.com/graphql": net/http: TLS handshake timeout)',
     ],
+    [
+      "gh, GitHub's gateway giving up (SSX-4042's broadcast, 2026-10-12)",
+      "gh could not list pull requests (exit 1: HTTP 504: 504 Gateway Timeout (https://api.github.com/graphql))",
+    ],
+    [
+      "gh, a bad gateway in the same format",
+      "gh could not list pull requests (exit 1: HTTP 502: 502 Bad Gateway (https://api.github.com/graphql))",
+    ],
+    [
+      "Jira, unavailable, `JiraError` quoting a body that names no status",
+      "Jira returned 503: <!DOCTYPE html><html><head><title>Atlassian</title></head><body>Back soon</body></html>",
+    ],
   ])("files %s as a network failure", (_source, reason) => {
     expect(reviewFailureEvent(reason)).toEqual({
       kind: "unreachable",
@@ -165,6 +177,9 @@ describe("reviewFailureEvent", () => {
     "gh could not list pull requests (exit 1: HTTP 401: Bad credentials (https://api.github.com/graphql))",
     "Jira rejected the credentials (401). Check JIRA_EMAIL and JIRA_AUTH; API credentials are revoked when the account password changes.",
     "Jira returned 404: Issue does not exist",
+    "Jira returned 500: Internal server error",
+    "gh could not list pull requests (exit 1: HTTP 500: Something went wrong (https://api.github.com/graphql))",
+    "gh could not list pull requests (exit 1: HTTP 403: API rate limit exceeded for user ID 1234567. (https://api.github.com/graphql))",
     "SSX-1's summary yields no usable branch name",
     "no pull request on fix/SSX-1-cache",
   ])("keeps %s a crash", (reason) => {
