@@ -1159,6 +1159,34 @@ shares `FIX_DENIED_TOOLS` with.
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
 
+### 82. A review look that cannot reach the network is broadcast as a crash
+
+**Branch:** `fix/slack-offline-quiet`
+
+**What is being attempted.** `runReviewSweep` turns every unlooked ticket into a `crashed` audit
+event, a major entry, so it is broadcast to the channel mentioning every subscriber. A laptop waking
+from sleep or losing Wi-Fi fails every watched ticket's look on the same tick: one broadcast per
+ticket, and since the next good look clears the crash, again on the next drop. The operator asked
+for these as a quiet timeline line. A look whose reason reads as the network failing — our own
+`timed out`, `fetch failed`, `aborted due to timeout`, gh's `dial tcp`, `error connecting to`, a
+resolver error — becomes an `unreachable` event: a timeline entry, no broadcast, no `crash` field,
+folded into a 📡 entry already newest on the timeline, and leaving a real crash on the card standing.
+
+**Why only the review look.** A pass that times out ends a solve and labels the ticket, which is
+news; triage's timeouts are `SessionTimeoutError`, not the network. The review look is the one
+failure retried every tick against GitHub and Jira, which is why it is the one that spams.
+
+**What would make it the wrong idea:**
+
+- **A reason is text, and the match is on text.** A real defect whose reason happens to contain
+  `timed out` — gh hanging on every call for a reason that is not the network — is never broadcast.
+  It still lands in the timeline and the `review.cycle` log line.
+- **Folding hides a second outage.** With nothing between them, a later drop folds into the earlier
+  📡 entry and keeps its time.
+- **The spam may not be the look at all.** If the broadcasts the operator sees come from a path
+  other than `outcome.unlooked`, this quiets nothing; the run below has to show a 📡 line where a 💥
+  broadcast was.
+
 ## Verification
 
 Unit and integration, following existing patterns, plus the house rule: **a guard is not shipped
