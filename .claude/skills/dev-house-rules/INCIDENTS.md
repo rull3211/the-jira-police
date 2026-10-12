@@ -1096,10 +1096,8 @@ confident it was, not asked to confirm the documents.
 
 **The rule** — [measure, do not
 assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code),
-extended from assumptions about your own code to assumptions about your own privileges.
-
-**No rule yet** — that extension is stated here and nowhere in `PROVING.md`, so a reader who never
-opens this file gets the rule without the half that would have caught this, and 2026-09-09.
+extended from assumptions about your own code to assumptions about your own privileges, in a
+paragraph of its own there since 2026-10-12.
 
 ### The silent guard that was diagnosed before anyone checked whether it had run
 

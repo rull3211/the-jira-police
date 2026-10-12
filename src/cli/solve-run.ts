@@ -84,6 +84,7 @@ import type { AuditEvent } from "../slack/audit.ts";
 import {
   observedEvent,
   prEndedEvent,
+  reviewFailureEvent,
   reviewOutcomeEvents,
   solveOutcomeEvent,
 } from "../slack/events.ts";
@@ -991,7 +992,7 @@ export async function runReviewSweep(
   }
 
   for (const failure of outcome.unlooked) {
-    await tell(failure.issueKey, [{ kind: "crashed", where: "review", message: failure.reason }]);
+    await tell(failure.issueKey, [reviewFailureEvent(failure.reason)]);
   }
 
   for (const key of outcome.deferred) {
