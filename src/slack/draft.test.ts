@@ -141,7 +141,9 @@ describe("createDraftHandler", () => {
 
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]?.text).toContain("*Duplicate of SSX-3534*");
-    expect(h.sent[0]?.text).toContain("*Comment to add to SSX-3534*\nRådgiver ber om å åpne kunden.");
+    expect(h.sent[0]?.text).toContain(
+      "*Comment to add to SSX-3534*\nRådgiver ber om å åpne kunden.",
+    );
   });
 
   it("returns once it has answered, while the draft is still running", async () => {

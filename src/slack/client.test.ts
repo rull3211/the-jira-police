@@ -325,7 +325,10 @@ describe("SlackClient", () => {
   });
 
   it("asks Slack for a message's link", async () => {
-    const mock = slack({ ok: true, permalink: "https://acme.slack.com/archives/C1/p1000000000000200" });
+    const mock = slack({
+      ok: true,
+      permalink: "https://acme.slack.com/archives/C1/p1000000000000200",
+    });
 
     expect(await new SlackClient({ token: NEEDLE }).permalink({ channel: "C1", ts: "1.2" })).toBe(
       "https://acme.slack.com/archives/C1/p1000000000000200",

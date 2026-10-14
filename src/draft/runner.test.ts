@@ -225,9 +225,8 @@ describe("parseDraft", () => {
     const sentence = "Rådgiver ber om å åpne kunden direkte fra handlekurven. ";
     const long = sentence.repeat(Math.ceil(FEEDBACK_MAX / sentence.length) + 2);
 
-    const feedback = parseDraft(
-      reply({ ...NOT_A_TICKET, duplicateOf: "SSX-3534", feedback: long }),
-    ).duplicate?.feedback;
+    const feedback = parseDraft(reply({ ...NOT_A_TICKET, duplicateOf: "SSX-3534", feedback: long }))
+      .duplicate?.feedback;
 
     expect(feedback?.endsWith(". …")).toBe(true);
     expect(feedback?.length).toBeLessThanOrEqual(FEEDBACK_MAX + 2);
