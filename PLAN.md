@@ -1190,38 +1190,58 @@ shares `FIX_DENIED_TOOLS` with.
 
 ### 81. A drafted ticket still has to be filed by hand
 
-**Branch:** none yet. It waits for `@Bencebot draft` to have produced drafts worth filing.
+**Branch:** `feat/slack-draft-post`, which builds the button through the dry click and no write at
+all. The operator started it ahead of the evidence the first bullet below asks for, so it stops where
+being wrong costs nothing remote.
 
 **What is not built.** `@Bencebot draft` sends the asker a drafted ticket, or for a thread that
 duplicates an open issue the comment to add to it, as a direct message and writes nothing to Jira.
-The second half of SSX-4071 is filing it: the asker replies `post` in that direct message, the
+The second half of SSX-4071 is filing it: the asker clicks **Post** on that direct message, the
 service creates the issue or adds the comment to the issue named, and the key and link are posted
 back into the thread. That is a new write, from text anyone in a channel wrote into a Jira issue,
 gated only by a person reading the exact draft — so it is a privilege of its own, and a branch of
 its own.
 
-**The shape SSX-4071 settles:** `message.im` added to the manifest's events and a direct-message
-frame to `parseFrame`; `post` files the draft the asker read, verbatim, and never re-runs the
-session; the project must be on a new `DRAFT_PROJECTS` allowlist with no default, and the component
-one of that project's live components, or nothing is filed; the writer is a session in the poster's
-shape (`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here
-builds it; the issue is read back over REST; and the draft is marked as filing before the create,
-so a crash between the two can never file it twice. A comment adds to that: the key is the
-model's word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project
-and is open — and its writer, `addCommentToJiraIssue`, is a second MCP mutator whose withholding
-nobody has measured either.
+**What `feat/slack-draft-post` builds, in the order the privilege is phased.** Inert: interactivity
+on in the manifest, an `interactive` frame in `parseFrame`, a `DRAFT_PROJECTS` allowlist with no
+default, and a pending-draft record; with the list empty no draft carries a button and nothing a
+click could reach is constructed. Dry: a ticket draft in a listed project, whose component and issue
+type Jira lists for it, carries the button; a click by the asker runs the same gate over real Jira
+reads and writes the `createJiraIssue` request it would make to `OUTPUT_DIR/slack/<id>.issue.json`,
+filing nothing. **Not built, and waiting on one probe:** the writer. Whether `--disallowedTools` and
+`dontAsk` keep a session that holds `createJiraIssue` from `editJiraIssue`, `addCommentToJiraIssue`
+or a Confluence write is the last bullet below, and its answer decides the writer's tool surface, so
+building the writer first would build a guess. **Also not built:** the comment a duplicate adds, a
+second write on a key the model chose.
 
-**Nobody can reply in the bot's direct message today.** The manifest declares no `app_home`, so the
-Messages tab is not writable, and `message.im` is not subscribed (the operator could not type in
-it, 2026-10-14). A typed `post` needs both, and a reinstall an organisation admin may have to
-approve. A button on the draft needs interactivity switched on instead, and no typed reply; whether
-a button stays clickable in a read-only direct message is unprobed. A `@Bencebot post` in the thread
-needs neither, but the thread cannot see the direct message that holds the draft.
+**The shape SSX-4071 settles:** a **Post** button on the draft message, its click an `interactive`
+frame in `parseFrame`; Post files the draft the asker read, verbatim, and never re-runs the session;
+the project must be on a new `DRAFT_PROJECTS` allowlist with no default, and the component one of
+that project's live components, or nothing is filed; the writer is a session in the poster's shape
+(`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here builds
+it; the issue is read back over REST; and the draft is marked as filing before the create, so a
+crash between the two can never file it twice. A comment adds to that: the key is the model's word,
+so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project and is open —
+and its writer, `addCommentToJiraIssue`, is a second MCP mutator whose withholding nobody has
+measured either.
 
-**Where the pending draft lives is open.** `BUILDING.md` keeps state in the remote system, and the
-bot's own direct message already holds the draft verbatim: a `post` replied in that message's thread
-could read it back, rather than a file under `state/` that a restart or a second machine would not
-see.
+**Why a button, and what is unprobed.** Nobody can reply in the bot's direct message today: the
+manifest declares no `app_home`, so the Messages tab is not writable, and `message.im` is not
+subscribed (the operator could not type in it, 2026-10-14). A typed `post` needs both, and a
+reinstall an organisation admin may have to approve; a button needs interactivity on and no typed
+reply, and the operator chose it. **Whether a button stays clickable in a read-only direct message
+is unprobed**, and so is whether switching interactivity on needs a reinstall: the first click is
+both probes. A `@Bencebot post` in the thread needs neither, but the thread cannot see the direct
+message that holds the draft.
+
+**Where the pending draft lives, decided against `BUILDING.md`'s default.** A file under `state/`
+keyed by the id the button carries, not the bot's own direct message read back. What the writer
+needs — project, component, type, summary, body — is structured, and a rendered message cannot be
+parsed back into it without a second reading of the same draft that can drift from the first. The
+cost is that a second machine, or a wiped `state/`, does not hold the draft. That fails closed: the
+click answers that the draft is gone and nothing is filed, and the marker that stops a double filing
+sits in the same file as the draft, so losing one loses both. The file is the only place the record
+exists, and a pending draft never expires.
 
 **What would make it the wrong idea:**
 
