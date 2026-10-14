@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79 and §80, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80 and §83, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -570,18 +570,20 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
   would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
   none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
-- **No draft has run against a real thread.** Every rung of `@Bencebot draft` is tested with Slack
-  and the session stubbed, and none has run: the operator's `.env` reads its tokens from the
-  keychain, which the agent's sandbox could not reach on 2026-10-06. Predicted, before any run:
-  the session finds the repository a thread names and cites lines it opened, and says so when a
-  thread names none; a run costs about what a triage does and takes minutes; `conversations.replies`
-  returns a short thread in one page, Slack's 2025 limit on non-Marketplace apps not applying to an
-  internal one; `chat.getPermalink` needs no scope beyond those held; the session's Atlassian MCP
-  connects from whatever directory the command runs in. Unseen too: how a direct message holding
-  Markdown headings reads in Slack, and the message a stopped draft sends. **What would show it:**
-  `pnpm slack:draft <link>` on a real thread, the `.draft.md` it writes read against the code it
-  cites; then `--dm`; then `pnpm slack:listen` with someone on `SLACK_DRAFT_USERS` and
-  `@Bencebot draft` typed in a thread, and once more stopped with Ctrl-C mid-draft.
+- **`@Bencebot draft` has run twice on real threads, dry, and nothing past that rung has.** On
+  2026-10-14 `pnpm slack:draft` read two threads in `C03AYDRGP0A`: one was declined as a duplicate of
+  SSX-3534 ($1.00, 159 s), the other, a one-line feedback-form post, was drafted whole, in Norwegian
+  ($1.64, 350 s). Seven of its `file:line` citations were read against the checkouts and held; its
+  claim that a cart row's `customerId` carries a `NO~` prefix was traced to code and to no stored
+  value, and the ticket says so. Unseen: the duplicate outcome, a comment on the existing issue,
+  against a real thread — the one run meant to show it stopped at a keychain dialog nobody answered;
+  a person judging whether a draft is worth filing; `--dm`; how a direct message holding Markdown
+  headings reads in Slack; `@Bencebot draft` from the listener, and the message a stopped draft
+  sends; a thread that names no repository; a thread past one page of `conversations.replies`.
+  **What would show it:** `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809`,
+  expecting `outcome: duplicate` in the `.draft.json`; then `--dm`; then `pnpm slack:listen` with
+  someone on `SLACK_DRAFT_USERS` and `@Bencebot draft` typed in a thread, and once more stopped with
+  Ctrl-C mid-draft.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1175,11 +1177,13 @@ shares `FIX_DENIED_TOOLS` with.
 
 **Branch:** none yet. It waits for `@Bencebot draft` to have produced drafts worth filing.
 
-**What is not built.** `@Bencebot draft` sends the asker a drafted ticket as a direct message and
-writes nothing to Jira. The second half of SSX-4071 is filing it: the asker replies `post` in that
-direct message, the service creates the issue, and its key and link are posted back into the
-thread. That is a new write, from text anyone in a channel wrote into a Jira issue, gated only by a
-person reading the exact draft — so it is a privilege of its own, and a branch of its own.
+**What is not built.** `@Bencebot draft` sends the asker a drafted ticket, or for a thread that
+duplicates an open issue the comment to add to it, as a direct message and writes nothing to Jira.
+The second half of SSX-4071 is filing it: the asker replies `post` in that direct message, the
+service creates the issue or adds the comment to the issue named, and the key and link are posted
+back into the thread. That is a new write, from text anyone in a channel wrote into a Jira issue,
+gated only by a person reading the exact draft — so it is a privilege of its own, and a branch of
+its own.
 
 **The shape SSX-4071 settles:** `message.im` added to the manifest's events and a direct-message
 frame to `parseFrame`; `post` files the draft the asker read, verbatim, and never re-runs the
@@ -1187,7 +1191,10 @@ session; the project must be on a new `DRAFT_PROJECTS` allowlist with no default
 one of that project's live components, or nothing is filed; the writer is a session in the poster's
 shape (`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here
 builds it; the issue is read back over REST; and the draft is marked as filing before the create,
-so a crash between the two can never file it twice.
+so a crash between the two can never file it twice. A comment adds to that: the key is the
+model's word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project
+and is open — and its writer, `addCommentToJiraIssue`, is a second MCP mutator whose withholding
+nobody has measured either.
 
 **Where the pending draft lives is open.** `BUILDING.md` keeps state in the remote system, and the
 bot's own direct message already holds the draft verbatim: a `post` replied in that message's thread
@@ -1199,28 +1206,15 @@ see.
 - **The drafts are not worth filing.** If the first real ones need rewriting more than a person
   writing from scratch would, `post` files that rewriting into Jira faster, and is not worth
   building.
+- **The session cannot tell a duplicate from a neighbour.** The first run called a thread a clear
+  duplicate while its own first question asked whether the thread meant the same thing as the
+  ticket. A comment aimed at the wrong issue is worse than a declined thread once `post` writes it.
+- **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
+  person reading it once will stop.
 - **The containment is unverified at the write.** The draft session holds no Jira writer only as far
   as `--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`). A
   draft that can only reach a direct message tolerates that; a session holding `createJiraIssue` is
   where it has to be measured first.
-
-### 83. A thread that duplicates an open ticket is feedback on it, and the draft throws that away
-
-**Branch:** `feat/slack-draft`
-
-**What is being attempted.** The first real draft, on 2026-10-14, declined a thread as a duplicate of
-SSX-3534 and said nothing a person could act on beyond the key. The operator confirmed it was a
-duplicate, and that what a duplicate thread adds to the ticket is worth keeping. A duplicate becomes
-its own outcome: the existing issue's key and the comment the thread adds to it, drafted into the
-direct message. Nothing is written to Jira; posting that comment is `post`'s, §81.
-
-**What would make it the wrong idea:**
-
-- **The session cannot tell a duplicate from a neighbour.** That run called the thread a clear
-  duplicate while its own first question asked whether the thread meant the same thing as the ticket.
-  A comment aimed at the wrong issue is worse than a declined thread once `post` can write it.
-- **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
-  person reading it once will stop.
 
 ## Verification
 
