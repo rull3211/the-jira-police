@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-130 production modules, 113 test files. Grouped by what they belong to rather than alphabetically,
+130 production modules, 114 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**

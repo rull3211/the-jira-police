@@ -144,6 +144,12 @@ describe("buildDraftArgs", () => {
     expect(args).not.toContain("--add-dir");
   });
 
+  it("uses dontAsk, not acceptEdits", () => {
+    const args = buildDraftArgs(options());
+
+    expect(args[args.indexOf("--permission-mode") + 1]).toBe("dontAsk");
+  });
+
   it("hands the session the draft schema", () => {
     const args = buildDraftArgs(options());
 
