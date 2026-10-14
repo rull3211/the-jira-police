@@ -98,6 +98,12 @@ Every significant correction in this project came from running something, not fr
 **Probe with a control.** A negative result means nothing unless you have shown the setup was one
 clause away from a positive.
 
+**The assumption can be about your own privileges, and then nothing tests it.** A refusal is a fact
+about one mechanism refusing one operation, not about what the agent can do: two refusals were
+written down as "no agent can read the hook settings" while the file-reading tool returned the file
+on the first attempt, and the claim stopped anyone trying. Try each route before writing a limit
+down [→](INCIDENTS.md#a-permission-granted-to-a-human-read-as-a-permission-granted-to-the-agent).
+
 **State which case your check does not cover, before you quote it as evidence.** A green check is a
 statement about the case it ran, and the gap between that and the claim made from it is the
 most-recorded cause in `INCIDENTS.md` — **eight** occurrences, not eight entries; count headings

@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3726 tests in 113 files**, no build step.
+> **3743 tests in 113 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80 and §83, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §82 and §83, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §82. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §84. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -456,6 +456,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   (`architecture/solve.md`, "A review is never silent"), one of which had a model rename a refused
   silence to the allowed comment. **What would show it:** a round with a colleague's thank-you beside
   a review must answer the review and add a `no reply to comment M` line to the marker.
+
+- **A review look failing on the network has never been watched becoming a 📡 line.**
+  `reviewFailureEvent`'s patterns were measured against gh, git and Node offline on 2026-10-12, and
+  SSX-3895's real record replayed through it turns its five `Crashed in review` broadcasts of
+  2026-10-05 to 2026-10-09 into timeline lines. The call in `runReviewSweep` has met no outage:
+  `HTTPS_PROXY` cannot break gh there, since `childEnv` in `solve/exec.ts` does not pass it on.
+  **What would show it:** `SLACK_MODE=dry pnpm solve:once --watch` with the network dropped
+  mid-run, or with a `gh` first on `PATH` that runs the real one through a dead proxy. Each watched
+  ticket's `<OUTPUT_DIR>/slack/<KEY>.record.json` must gain a 📡 timeline entry, and no
+  `<KEY>.broadcast.json` may carry `reply_broadcast`.
 
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries
