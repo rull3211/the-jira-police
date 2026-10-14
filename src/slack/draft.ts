@@ -1,7 +1,6 @@
 /**
- * `@Bencebot draft` in any thread the bot is in: the person checked against the draft list before
- * anything is read, the session started off the listener's chain, one at a time, and what came of
- * it sent to that person as a direct message. Nothing here writes to Jira.
+ * `@Bencebot draft` in any thread the bot is in: the asker checked first, one session at a time off
+ * the listener's chain, the result sent to them as a direct message.
  */
 
 import {
@@ -73,7 +72,7 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
         user: mention.userId,
         thread: label,
         outcome,
-        ts,
+        messageTs: ts,
         dry: deps.dry,
       });
     } catch (error) {

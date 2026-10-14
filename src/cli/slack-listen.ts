@@ -1,13 +1,6 @@
 /**
- * Holds a Socket Mode connection and answers `/bencebot`, `@Bencebot start|clear` in a ticket's thread
- * from someone on SLACK_START_USERS, and `@Bencebot draft` in any thread from someone on
- * SLACK_DRAFT_USERS, until Ctrl-C.
- *
- *   pnpm slack:listen [--write]
- *
- * Dry by default: reads the real subscriber list and tickets, writes what a command or a mention
- * would make of them under <OUTPUT_DIR>/slack/, and says so in every reply. `--write` writes the
- * property and the labels, and sends a draft as a direct message.
+ * `pnpm slack:listen [--write]`: holds a Socket Mode connection and answers `/bencebot` and the
+ * `@Bencebot` mentions until Ctrl-C. Dry by default; `usage()` below has the rest.
  */
 
 import { join } from "node:path";

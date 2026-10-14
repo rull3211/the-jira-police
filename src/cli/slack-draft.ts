@@ -1,11 +1,6 @@
 /**
- * What `@Bencebot draft` would send, for one thread named at a terminal, and with `--dm`, sending it.
- *
- *   pnpm slack:draft <thread-link> [--dm]
- *
- * Reads the whole thread, runs the read-only `thread-draft` session, and writes the direct message to
- * <OUTPUT_DIR>/slack/<channel>-<ts>.draft.md, with the outcome beside it as .draft.json. `--dm` also
- * sends it to SLACK_OPERATOR_USER_ID. Nothing is ever written to Jira.
+ * `pnpm slack:draft <thread-link> [--dm]`: what `@Bencebot draft` would send for one thread. `usage()`
+ * below says what it reads, writes and exits with.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";

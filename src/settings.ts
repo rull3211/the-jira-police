@@ -383,7 +383,7 @@ export const SETTINGS = [
   {
     name: "SLACK_OPERATOR_USER_ID",
     description:
-      "The Slack member ID (`U…`) of the person who announces the bot's pull requests to the team; from their Slack profile, ⋮ → Copy member ID. When a solve opens a pull request, the bot sends them a direct message holding the line to paste into the team's pull request channel: the link, labelled PR-Bencebot, and the fix pass's one bokmål sentence. Unset, nothing is sent. Follows SLACK_MODE — `dry` writes the request under OUTPUT_DIR/slack/, `live` sends it — and a value that is not a member ID is a startup error. A failed message is logged and never fails the pull request.",
+      "The Slack member ID (`U…`) of the person who announces the bot's pull requests to the team; from their Slack profile, ⋮ → Copy member ID. When a solve opens a pull request, the bot sends them a direct message holding the line to paste into the team's pull request channel: the link, labelled PR-Bencebot, and the fix pass's one bokmål sentence. Unset, nothing is sent. The pull request line follows SLACK_MODE — `dry` writes the request under OUTPUT_DIR/slack/, `live` sends it — while `pnpm slack:draft --dm` sends its draft to them whatever SLACK_MODE says. A value that is not a member ID is a startup error. A failed message is logged and never fails the pull request.",
   },
   {
     name: "SLACK_APP_TOKEN",

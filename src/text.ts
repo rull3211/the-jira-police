@@ -30,9 +30,8 @@ export function shorten(text: string, limit: number): string {
 }
 
 /**
- * As `shorten`, but ends on the last whole sentence when one closes in the second half of the
- * limit, so a cut reads as a shorter answer rather than a broken one. A stop only counts before
- * whitespace: the one in `hooks.ts:6-16` ends nothing.
+ * As `shorten`, but ends on the last whole sentence when one closes in the second half of the limit.
+ * A stop only counts before whitespace: the one in `hooks.ts:6-16` ends nothing.
  */
 export function shortenToSentence(text: string, limit: number): string {
   if (text.length <= limit) {

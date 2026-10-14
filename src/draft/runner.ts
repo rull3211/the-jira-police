@@ -1,8 +1,6 @@
 /**
- * Runs the `thread-draft` skill headlessly over one Slack thread and parses what it drafted.
- *
- * Read-only by the same means as the analyst: `ANALYST_DENIED_TOOLS` withholds every writer, the
- * network and subagents, and `childEnv` withholds every token. Nothing here sends the draft anywhere.
+ * Runs the `thread-draft` skill over one Slack thread. Read-only by `ANALYST_DENIED_TOOLS`, whose
+ * Atlassian entries are unmeasured (`src/triage/runner.ts`); nothing here sends the draft anywhere.
  */
 
 import { sanitiseUntrusted } from "../solve/runner.ts";

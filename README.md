@@ -685,7 +685,7 @@ command typed in a thread, which is why this is a mention rather than `/bencebot
 `slack:draft` below does — reads the whole thread and runs the read-only `thread-draft` session over
 it — and sends the asker the draft, or, when an open ticket already asks for the same, the comment to add to
 it, or why the thread makes neither, as a direct message.
-Nothing is written to Jira. Anyone else is refused before the thread is read, a mention outside a
+The service writes nothing to Jira; the session's own Atlassian writers are denied by a list nobody has measured. Anyone else is refused before the thread is read, a mention outside a
 thread is answered with usage, and one draft runs at a time: a second is refused until the first
 arrives. The session runs off the listener's chain, so `/bencebot` and `@Bencebot start` are
 answered while it works, and stopping the listener kills it and tells the asker so. It follows the
@@ -716,7 +716,7 @@ the Atlassian MCP — the vault, and every checkout `SOLVE_REPOS` and `SOLVE_REA
 — the drafted ticket; or, for a thread that duplicates an open issue, that issue's key and the comment the
 thread adds to it; or why the thread makes neither, with its open questions — goes to
 `<OUTPUT_DIR>/slack/<channel>-<ts>.draft.md`, and the outcome beside it as `.draft.json`. Dry by
-default, nothing is sent; nothing is ever written to Jira. A thread over 500 messages or 100 000 characters is refused
+default, nothing is sent; the service never writes to Jira, and the session's own Atlassian writers are denied by a list nobody has measured. A thread over 500 messages or 100 000 characters is refused
 before the session is paid for. `--dm` also sends the message to `SLACK_OPERATOR_USER_ID`, checked
 before the session runs, as a direct message from the bot. Exit 0 means a ticket or a duplicate's comment
 was drafted (`.draft.json` says which), 1 that neither was and why, 3 that the run threw, 4 that the message was written and `--dm` could not
@@ -993,39 +993,39 @@ there is no build step here.
 
 Full table in `architecture/configuration.md` §10. The ones that matter for a demo:
 
-| Setting                         | Default       | Notes                                                                                                                   |
-| ------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, status moves where a `SOLVE_*_STATUS` setting names one  |
-| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                                                 |
-| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                                                        |
-| `WRITE_BACK`                    | `false`       | Whether triage posts its comment and labels. Strict `"true"`                                                            |
-| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank brings the default back**, not every column — see below                              |
-| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below                                                 |
-| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                                                                      |
-| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                                                                  |
-| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in                                               |
-| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed                                                    |
-| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write                                                     |
-| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it                                                 |
-| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory                                                          |
-| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it                                                 |
-| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built                                                     |
-| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days                                                  |
-| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend                                                  |
-| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot                                                     |
-| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are outside it by design, not outside the total                         |
-| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above                                                  |
-| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see                                                      |
-| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                                                                         |
-| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back                                                 |
-| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none                                                |
-| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed                                   |
-| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                                                   |
-| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                                                |
-| `SLACK_MODE`                    | `off`         | `dry` writes each thread and PR line to `groomed/slack/`; `live` posts them, and saves the record. A typo fails startup |
-| `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only, best as `keychain:<name>`. `live` refuses an `xoxe.` or user token. Never reaches a model session        |
-| `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                                           |
-| `SLACK_OPERATOR_USER_ID`        | —             | Your Slack member ID, `U…`. Each PR the bot opens DMs you the line for the team's PR channel                            |
+| Setting                         | Default       | Notes                                                                                                                                |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, status moves where a `SOLVE_*_STATUS` setting names one               |
+| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                                                              |
+| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                                                                     |
+| `WRITE_BACK`                    | `false`       | Whether triage posts its comment and labels. Strict `"true"`                                                                         |
+| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank brings the default back**, not every column — see below                                           |
+| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below                                                              |
+| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                                                                                   |
+| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                                                                               |
+| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in                                                            |
+| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed                                                                 |
+| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write                                                                  |
+| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it                                                              |
+| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory                                                                       |
+| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it                                                              |
+| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built                                                                  |
+| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days                                                               |
+| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend                                                               |
+| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot                                                                  |
+| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are outside it by design, not outside the total                                      |
+| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above                                                               |
+| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see                                                                   |
+| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                                                                                      |
+| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back                                                              |
+| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none                                                             |
+| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed                                                |
+| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                                                                |
+| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                                                             |
+| `SLACK_MODE`                    | `off`         | `dry` writes each thread and PR line to `groomed/slack/`; `live` posts them, and saves the record. A typo fails startup              |
+| `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only, best as `keychain:<name>`. `live` refuses an `xoxe.` or user token. Never reaches a model session                     |
+| `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                                                        |
+| `SLACK_OPERATOR_USER_ID`        | —             | Your Slack member ID, `U…`. Each PR the bot opens DMs you the line for the team's PR channel, and `slack:draft --dm` DMs you a draft |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull
