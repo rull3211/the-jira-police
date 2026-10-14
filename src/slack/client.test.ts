@@ -216,6 +216,40 @@ describe("SlackClient", () => {
     expect(await client.threadRoot({ channel: "C1", ts: "1.2" })).toBeNull();
   });
 
+  it.each([
+    {
+      name: "threadRoot",
+      read: (client: SlackClient) => client.threadRoot({ channel: "C1", ts: "1.2" }),
+    },
+    {
+      name: "threadMessages",
+      read: (client: SlackClient) => client.threadMessages({ channel: "C1", ts: "1.2", max: 10 }),
+    },
+  ])(
+    "tells a $name refused with not_in_channel to invite the bot, keeping Slack's code",
+    async ({ read }) => {
+      slack({ ok: false, error: "not_in_channel" });
+
+      const error = await caught(read(new SlackClient({ token: NEEDLE })));
+
+      expect(error.code).toBe("not_in_channel");
+      expect(error.method).toBe("conversations.replies");
+      expect(error.message).toContain("invite it there first");
+    },
+  );
+
+  it("gives the invitation to no other refusal of a thread read, and to no other method's not_in_channel", async () => {
+    const client = new SlackClient({ token: NEEDLE });
+
+    slack({ ok: false, error: "thread_not_found" });
+    const other = await caught(client.threadMessages({ channel: "C1", ts: "1.2", max: 10 }));
+    slack({ ok: false, error: "not_in_channel" });
+    const post = await caught(client.post({ channel: "C1", text: "hi" }));
+
+    expect(other.message).not.toContain("invite");
+    expect(post.message).toBe("Slack chat.postMessage failed: not_in_channel");
+  });
+
   it("reads a thread page by page until Slack's cursor comes back empty", async () => {
     const mock = slackPages(
       {

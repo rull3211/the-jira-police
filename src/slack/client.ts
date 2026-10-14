@@ -145,7 +145,7 @@ export class SlackClient {
     readonly text: string;
     readonly botId: string | null;
   } | null> {
-    const body = await this.#call("conversations.replies", {
+    const body = await this.#replies({
       channel: args.channel,
       ts: args.ts,
       limit: 1,
@@ -176,7 +176,7 @@ export class SlackClient {
     const messages: ThreadMessage[] = [];
     let cursor: string | undefined;
     do {
-      const body = await this.#call("conversations.replies", {
+      const body = await this.#replies({
         channel: args.channel,
         ts: args.ts,
         limit: THREAD_PAGE_SIZE,
@@ -220,6 +220,22 @@ export class SlackClient {
       throw new SlackError("apps.connections.open", "no_url", "the answer held no wss:// URL");
     }
     return url;
+  }
+
+  /** Slack answers a thread read in a channel the bot has not joined with `not_in_channel` alone. */
+  async #replies(params: Params): Promise<Readonly<Record<string, unknown>>> {
+    try {
+      return await this.#call("conversations.replies", params);
+    } catch (error) {
+      if (error instanceof SlackError && error.code === "not_in_channel") {
+        throw new SlackError(
+          error.method,
+          error.code,
+          "the bot is not a member of that channel: invite it there first",
+        );
+      }
+      throw error;
+    }
   }
 
   /** Form-encoded, objects as JSON strings: the one body shape every Slack method accepts. */
