@@ -570,20 +570,24 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
   would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
   none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
-- **`@Bencebot draft` has run twice on real threads, dry, and nothing past that rung has.** On
-  2026-10-14 `pnpm slack:draft` read two threads in `C03AYDRGP0A`: one was declined as a duplicate of
-  SSX-3534 ($1.00, 159 s), the other, a one-line feedback-form post, was drafted whole, in Norwegian
-  ($1.64, 350 s). Seven of its `file:line` citations were read against the checkouts and held; its
-  claim that a cart row's `customerId` carries a `NO~` prefix was traced to code and to no stored
-  value, and the ticket says so. Unseen: the duplicate outcome, a comment on the existing issue,
-  against a real thread — the one run meant to show it stopped at a keychain dialog nobody answered;
-  a person judging whether a draft is worth filing; `--dm`; how a direct message holding Markdown
-  headings reads in Slack; `@Bencebot draft` from the listener, and the message a stopped draft
-  sends; a thread that names no repository; a thread past one page of `conversations.replies`.
-  **What would show it:** `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809`,
-  expecting `outcome: duplicate` in the `.draft.json`; then `--dm`; then `pnpm slack:listen` with
-  someone on `SLACK_DRAFT_USERS` and `@Bencebot draft` typed in a thread, and once more stopped with
-  Ctrl-C mid-draft.
+- **`@Bencebot draft` has run three times on two real threads, dry, and nothing past that rung has.**
+  On 2026-10-14 `pnpm slack:draft` read two threads in `C03AYDRGP0A`. The first, which the operator
+  confirms duplicates SSX-3534, was declined as that duplicate ($1.00, 159 s); read again after the
+  duplicate outcome was built, it was drafted as a ticket instead ($1.08, 238 s), on a reading of
+  "tilbakenavigasjon" as the in-app «Bytt kunde» button, with the doubt put in its questions. The
+  other, a one-line feedback-form post, was drafted whole, in Norwegian ($1.64, 350 s). Seven of its
+  `file:line` citations were read against the checkouts and held; its claim that a cart row's
+  `customerId` carries a `NO~` prefix was traced to code and to no stored value, and the ticket says
+  so. Unseen: the duplicate outcome, a comment on the existing issue, against a real thread, and
+  whether one thread gives one outcome — two runs of the same text gave two, and nothing says the
+  change between them was the cause; a person judging whether a draft is worth filing; `--dm`; how a
+  direct message holding Markdown headings reads in Slack; `@Bencebot draft` from the listener, and
+  the message a stopped draft sends; a thread that names no repository; a thread past one page of
+  `conversations.replies`. **What would show it:**
+  `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
+  times, counting the `outcome.kind` in each `.draft.json`; then `--dm`; then `pnpm slack:listen`
+  with someone on `SLACK_DRAFT_USERS` and `@Bencebot draft` typed in a thread, and once more stopped
+  with Ctrl-C mid-draft.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
