@@ -60,7 +60,7 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
       const discard = async (): Promise<void> => {
         await deps.pending.remove(id).catch(() => undefined);
       };
-      const note = `Pressing *Post to Jira* does nothing yet. It is for filing exactly this draft as ${escape(ticket.issueType)} in the component ${escape(ticket.component)} of ${escape(ticket.project)}, and nothing else.`;
+      const note = `Pressing *Post to Jira* files nothing yet: it checks this draft again and writes the request it would make, for ${escape(ticket.issueType)} in the component ${escape(ticket.component)} of ${escape(ticket.project)}.`;
       const blocks = draftBlocks(`${text}\n\n${note}`, id);
       if (blocks === null) {
         await discard();

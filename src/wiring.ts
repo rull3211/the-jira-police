@@ -14,6 +14,7 @@ import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import type { FileGateDeps } from "./draft/gate.ts";
 import { type DraftOffer, createDraftOffer } from "./draft/offer.ts";
 import { discardingStore, fileStore } from "./draft/pending.ts";
 import { runDraftSession } from "./draft/runner.ts";
@@ -46,6 +47,7 @@ import {
   auditPasses,
   createAuditNotifier,
 } from "./slack/notifier.ts";
+import { createPostHandler } from "./slack/post.ts";
 import { type PrLineSender, dryDelivery, prLineSender, slackDelivery } from "./slack/pr-line.ts";
 import { SLACK_USER_ID_PATTERN } from "./slack/render.ts";
 import { syntheticSummary } from "./triage/single.ts";
@@ -627,7 +629,7 @@ export function listenerFor(
       connect: openWebSocket,
       handle,
       mention,
-      click: ignoreClick,
+      click: clickHandlerFor(settings),
       signal,
     });
     // The same signal has already killed a running draft's session; this waits for its last message.
@@ -636,13 +638,52 @@ export function listenerFor(
   };
 }
 
-/** No button of the bot's carries anything yet, so a press is logged and dropped. */
-async function ignoreClick(click: Click): Promise<void> {
-  slackLog.info("slack.click_ignored", {
-    user: click.userId,
-    actionId: click.actionId,
-    note: "nothing is wired to a button yet",
+/**
+ * With nobody on SLACK_DRAFT_USERS or nothing on DRAFT_PROJECTS no draft carries a button, so a press
+ * is logged and dropped and nothing that could answer it is built; otherwise it is `createPostHandler`'s.
+ * Both lists are read first, so a malformed one stops the start whatever the other holds.
+ */
+export function clickHandlerFor(settings: Settings): (click: Click) => Promise<void> {
+  const allowed = draftUsers(settings);
+  const projects = draftProjects(settings);
+  if (allowed.length === 0 || projects.length === 0) {
+    return async (click) => {
+      slackLog.info("slack.click_ignored", {
+        user: click.userId,
+        actionId: click.actionId,
+        note: "SLACK_DRAFT_USERS or DRAFT_PROJECTS is empty, so no press is answered",
+      });
+    };
+  }
+  const slack = createBotClient(settings);
+  const handler = createPostHandler({
+    allowed,
+    pending: fileStore(pendingDirectory(settings)),
+    gate: fileGate(settings, projects),
+    rehearse: async (draft) => {
+      const directory = join(settings.OUTPUT_DIR, "slack");
+      await writeJson(directory, `${draft.id}.issue.json`, {
+        method: "createJiraIssue",
+        arguments: {
+          cloudId: new URL(settings.JIRA_BASE_URL).hostname,
+          projectKey: draft.ticket.project,
+          issueTypeName: draft.ticket.issueType,
+          summary: draft.ticket.summary,
+          description: draft.ticket.description,
+          contentFormat: "markdown",
+          additional_fields: { components: [{ name: draft.ticket.component }] },
+        },
+        draft: draft.id,
+        askedBy: draft.asker,
+        thread: draft.thread,
+      });
+      return join(directory, `${draft.id}.issue.json`);
+    },
+    reply: async (click, text) => {
+      await slack.post({ channel: click.channel, text, threadTs: click.messageTs });
+    },
   });
+  return (click) => handler.handle(click);
 }
 
 /**
@@ -713,11 +754,16 @@ export function draftOfferFor(settings: Settings, persist: boolean): DraftOffer 
   if (projects.length === 0) {
     return null;
   }
-  const jira = createJiraClient(settings);
   return createDraftOffer({
-    gate: { projects, facts: (project) => jira.projectFacts(project) },
+    gate: fileGate(settings, projects),
     pending: persist ? fileStore(pendingDirectory(settings)) : discardingStore(),
   });
+}
+
+/** One gate for the offer and the press, so a draft is judged by the same rule at both. */
+function fileGate(settings: Settings, projects: readonly string[]): FileGateDeps {
+  const jira = createJiraClient(settings);
+  return { projects, facts: (project) => jira.projectFacts(project) };
 }
 
 /**

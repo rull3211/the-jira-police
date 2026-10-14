@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3849 tests in 118 files**, no build step.
+> **3874 tests in 119 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -607,8 +607,9 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `projectFacts` against Jira's `project/{key}` and `project/{key}/components`. **What would show
   it:** with `DRAFT_PROJECTS=SSX` and the operator on `SLACK_DRAFT_USERS`,
   `pnpm slack:draft <thread-link> --dm`, then `pnpm slack:listen` running while the button is
-  pressed: the log should say `slack.click_ignored` for `draft_post` and nothing else should
-  change. A direct message with no button says why in its last line; one Slack refuses exits 4.
+  pressed: the message's thread should answer that nothing was filed, `slack.post_pressed` should
+  log `rehearsed`, and `<OUTPUT_DIR>/slack/<id>.issue.json` should hold the request. A direct
+  message with no button says why in its last line; one Slack refuses exits 4.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs

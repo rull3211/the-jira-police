@@ -91,7 +91,7 @@ describe("createDraftOffer", () => {
       .join("\n");
     expect(shown).toContain(TEXT);
     expect(shown).toContain(
-      "Pressing *Post to Jira* does nothing yet. It is for filing exactly this draft as Oppgave in the component SSX Advisor of SSX, and nothing else.",
+      "Pressing *Post to Jira* files nothing yet: it checks this draft again and writes the request it would make, for Oppgave in the component SSX Advisor of SSX.",
     );
   });
 

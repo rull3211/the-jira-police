@@ -410,7 +410,7 @@ export const SETTINGS = [
   {
     name: "DRAFT_PROJECTS",
     description:
-      "Comma-separated Jira project keys (such as SSX) a drafted ticket may be posted to. Only a draft that names one of them, with a component and an issue type that project lists, carries a Post to Jira button in its direct message; any other says why it does not. No fallback, like SOLVE_REPOS, so emptying it takes the power away: empty, no draft carries a button and nothing a press could reach is built. An entry that is not a project key is a startup error. Only matters to someone on SLACK_DRAFT_USERS. A press does nothing yet.",
+      "Comma-separated Jira project keys (such as SSX) a drafted ticket may be posted to. Only a draft that names one of them, with a component and an issue type that project lists, carries a Post to Jira button in its direct message; any other says why it does not. No fallback, like SOLVE_REPOS, so emptying it takes the power away: empty, no draft carries a button and nothing a press could reach is built. An entry that is not a project key is a startup error. Only matters to someone on SLACK_DRAFT_USERS. A press files nothing yet: the listener checks the draft again and writes the request it would make to OUTPUT_DIR/slack/<id>.issue.json.",
   },
   {
     name: "LOG_LEVEL",

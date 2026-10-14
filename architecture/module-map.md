@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-134 production modules, 118 test files. Grouped by what they belong to rather than alphabetically,
+135 production modules, 119 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -224,6 +224,7 @@ inheritance.
 | `src/slack/notifier.ts`     | Load, apply the event, redraw, post or edit; broadcast a major entry to the subscribers read then, deleting the last, or edit a minor one into it; save — one ticket at a time. Never throws: it returns and logs what went wrong, so a Slack failure cannot fail the work it reports. `auditPasses` wraps a `PassRunner`                                                                                                                                                                                                                                                                                                                                             |
 | `src/slack/start.ts`        | `@Bencebot start` and `@Bencebot clear` in a ticket's audit thread. A thread is one ticket only when the bot's own top message and that ticket's `jira-police.slack` record agree; `start` is refused unless `eligibility` would claim the ticket once started, `clear` takes `agent:failed` off; the edit is read back. The mention handler checks the person against the start list before reading anything, and answers with an ephemeral reply in the thread. `slack:start` drives the resolution and the edit by hand; `mentionHandlerFor` builds the handler for the listener                                                                                   |
 | `src/slack/draft.ts`        | `@Bencebot draft` in any thread the bot is in. The person is checked against the draft list before the thread is read; the session is started off the listener's chain, one at a time, and the handler returns once it has answered. The draft — or the comment a duplicate adds, or why there is none, or that the listener stopped it — goes to the asker as a direct message, and one that cannot be sent is admitted in the thread, and its record, if it had a button, forgotten. A ticket draft goes through the offer first, which decides whether it carries a Post button. `settled` is what the listener waits for as it stops; `draftHandlerFor` builds it |
+| `src/slack/post.ts`         | A press on a draft's Post to Jira button. The action is the button's, the person is on the draft list **before the record is read**, the record exists and names this person as the asker, and the gate passes again against Jira as it is now; then the request a filing would make is written to a file and the person told in the message's thread that nothing was filed. Every refusal says which check and that nothing was filed, and the handler never throws                                                                                                                                                                                                 |
 | `src/slack/draft-blocks.ts` | A draft message as Block Kit: the draft in sections of at most Slack's 3 000 characters, cut at a line, else a space, never inside an entity or a character, and the **Post to Jira** button under them carrying the record's id. A draft that would pass Slack's 50 blocks gets none. Pure                                                                                                                                                                                                                                                                                                                                                                           |
 | `src/slack/events.ts`       | The pipeline's own outcomes — a triage verdict, a `SolveOutcome`, an `AdvanceOutcome`, a merge, what a review look found or why it failed — as audit events, worded from `describeSolveOutcome` and `describeAdvanceOutcome`. A look, or a round that threw, whose reason reads as the network failing is `unreachable`, a timeline line, not a crash. Pure                                                                                                                                                                                                                                                                                                           |
 
@@ -252,8 +253,11 @@ logs, and it waits for a running draft once the listener stops. `threadDraftDeps
 with, and it holds nothing that writes: the bot client for the thread, and `runDraftSession` over
 `draftReadDirs` — the checkouts `SOLVE_REPOS` and `SOLVE_READ_DIRS` name under `SOLVE_REPO_ROOT`,
 each one a directory here, since an `--add-dir` on a missing path fails the session at startup. A
-press on a button of the bot's goes to `ignoreClick` in `listenerFor`, which logs
-`slack.click_ignored` and does nothing else, since a press does nothing yet. `draftHandlerFor` also
+press on a button of the bot's goes to `clickHandlerFor`'s handler, which with nothing on
+`SLACK_DRAFT_USERS` or `DRAFT_PROJECTS` only logs `slack.click_ignored`, and otherwise is
+`createPostHandler` over the file store and the same gate the offer used — built by `fileGate`, so a
+draft is judged by one rule at both moments — with a rehearsal that writes the request a filing would
+make and nothing that files. `draftHandlerFor` also
 builds `draftOfferFor`, which with nothing on `DRAFT_PROJECTS` is `null` and builds nothing, and
 otherwise holds `projectFacts` over a Jira client and a `PendingStore` that is a file store when the
 message is really sent and a discarding one in a dry run; `draftProjects` refuses a malformed entry at

@@ -42,7 +42,8 @@ function usage(): never {
       "  Jira lists for it carries a Post to Jira button — in the message --dm sends, and in the\n" +
       "  blocks written to .draft.json — and one that does not says why. With --dm the button is\n" +
       "  sent only if SLACK_OPERATOR_USER_ID is on SLACK_DRAFT_USERS, and its record is kept under\n" +
-      "  the state directory. A press does nothing yet.\n" +
+      "  the state directory. A press files nothing yet: slack:listen answers it by writing the\n" +
+      "  request it would make to <OUTPUT_DIR>/slack/<id>.issue.json.\n" +
       "  Nothing is ever written to Jira. A real run is paid for, like a triage.\n" +
       "  Exit: 0 drafted (a ticket, or the comment a thread that duplicates an open issue adds to\n" +
       "  it), 1 not drafted (the thread was empty, too long, or made neither, and why), 2 this\n" +
