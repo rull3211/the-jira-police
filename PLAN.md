@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3755 tests in 114 files**, no build step.
+> **3849 tests in 118 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -599,6 +599,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
   times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
   a draft runs.
+- **The Post to Jira button has never been sent, pressed or checked against real Jira.** It exists
+  in tests and as blocks written to a file. Unseen: that Slack accepts the message (`chat.postMessage`
+  answers `invalid_blocks` otherwise), that a button is clickable in a direct message the manifest
+  leaves read-only, that interactivity needs no reinstall, a press arriving as the `interactive`
+  frame `parseFrame` reads — shaped from Slack's documentation, not from a captured one — and
+  `projectFacts` against Jira's `project/{key}` and `project/{key}/components`. **What would show
+  it:** with `DRAFT_PROJECTS=SSX` and the operator on `SLACK_DRAFT_USERS`,
+  `pnpm slack:draft <thread-link> --dm`, then `pnpm slack:listen` running while the button is
+  pressed: the log should say `slack.click_ignored` for `draft_post` and nothing else should
+  change. A direct message with no button says why in its last line; one Slack refuses exits 4.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs

@@ -685,7 +685,11 @@ command typed in a thread, which is why this is a mention rather than `/bencebot
 `slack:draft` below does — reads the whole thread and runs the read-only `thread-draft` session over
 it — and sends the asker the draft, or, when an open ticket already asks for the same, the comment to add to
 it, or why the thread makes neither, as a direct message.
-The service writes nothing to Jira; the session's own Atlassian writers are denied by a list nobody has measured. Anyone else is refused before the thread is read, a mention outside a
+The service writes nothing to Jira; the session's own Atlassian writers are denied by a list nobody has measured.
+With `DRAFT_PROJECTS` set, a ticket draft in a listed project whose component and issue type Jira
+lists for it carries a **Post to Jira** button, and the message says exactly what it would file; any
+other ticket draft says why it carries none. The draft is kept as a file under the state directory,
+named by the id the button carries, and **a press does nothing yet**. Anyone else is refused before the thread is read, a mention outside a
 thread is answered with usage, and one draft runs at a time: a second is refused until the first
 arrives. The session runs off the listener's chain, so `/bencebot` and `@Bencebot start` are
 answered while it works, and stopping the listener kills it and tells the asker so. It follows the
@@ -718,7 +722,10 @@ thread adds to it; or why the thread makes neither, with its open questions — 
 `<OUTPUT_DIR>/slack/<channel>-<ts>.draft.md`, and the outcome beside it as `.draft.json`. Dry by
 default, nothing is sent; the service never writes to Jira, and the session's own Atlassian writers are denied by a list nobody has measured. A thread over 500 messages or 100 000 characters is refused
 before the session is paid for. `--dm` also sends the message to `SLACK_OPERATOR_USER_ID`, checked
-before the session runs, as a direct message from the bot. Exit 0 means a ticket or a duplicate's comment
+before the session runs, as a direct message from the bot — with the **Post to Jira** button when
+`DRAFT_PROJECTS` lists the draft's project and the operator is on `SLACK_DRAFT_USERS`, and the
+message says so when it carries none. Without `--dm` the button is evaluated and its blocks written
+to `.draft.json`, and no record is kept. Exit 0 means a ticket or a duplicate's comment
 was drafted (`.draft.json` says which), 1 that neither was and why, 3 that the run threw, 4 that the message was written and `--dm` could not
 send it.
 

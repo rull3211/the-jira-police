@@ -408,6 +408,11 @@ export const SETTINGS = [
       "Comma-separated Slack member IDs (`U…`) of the people who may mention `@Bencebot draft` in a thread to have it drafted as a Jira ticket: the listener reads the whole thread, runs a read-only session over it that is paid for like a triage, and sends the draft to that person as a direct message. Nothing is ever written to Jira. Nobody else may, whatever they type. Separate from SLACK_START_USERS, since starting a paid session that reads every configured checkout is a different privilege from writing agent:start. Empty, the listener answers no draft mention: it acknowledges each and logs `slack.draft_ignored`. No fallback, like SOLVE_REPOS, so emptying it takes the power away. Set, the listener also needs SLACK_BOT_TOKEN, checked at startup; an entry that is not a member ID is a startup error. Follows SLACK_LISTEN's mode: `dry` writes the direct message to OUTPUT_DIR/slack/ instead of sending it, and still runs the session.",
   },
   {
+    name: "DRAFT_PROJECTS",
+    description:
+      "Comma-separated Jira project keys (such as SSX) a drafted ticket may be posted to. Only a draft that names one of them, with a component and an issue type that project lists, carries a Post to Jira button in its direct message; any other says why it does not. No fallback, like SOLVE_REPOS, so emptying it takes the power away: empty, no draft carries a button and nothing a press could reach is built. An entry that is not a project key is a startup error. Only matters to someone on SLACK_DRAFT_USERS. A press does nothing yet.",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",

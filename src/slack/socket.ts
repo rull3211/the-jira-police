@@ -70,9 +70,8 @@ export type Frame =
   | { readonly kind: "unreadable" };
 
 /**
- * The person is whoever Slack names — a command's `user_id`, a mention's `user`, a click's `user.id` —
- * and the text only picks the verb. A click is a `block_actions` payload naming an action; every other
- * interactive payload is acknowledged and ignored.
+ * The person is whoever Slack names — a command's `user_id`, a mention's `user`, a click's `user.id`
+ * — and the text only picks the verb. Only a `block_actions` payload is a click; other interactive ones are ignored.
  */
 export function parseFrame(data: string): Frame {
   let frame: Record<string, unknown>;

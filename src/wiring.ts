@@ -12,11 +12,13 @@
 
 import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
+import { type DraftOffer, createDraftOffer } from "./draft/offer.ts";
+import { discardingStore, fileStore } from "./draft/pending.ts";
 import { runDraftSession } from "./draft/runner.ts";
 import { type ThreadDraftDeps, draftThread } from "./draft/thread.ts";
-import { type IssueDetail, JiraClient } from "./jira/client.ts";
+import { type IssueDetail, JiraClient, assertProjectKey } from "./jira/client.ts";
 import {
   buildInFlightJql,
   buildNewIssuesJql,
@@ -690,6 +692,7 @@ export function draftHandlerFor(
   }
   const slack = createBotClient(settings);
   const deps = threadDraftDeps(settings, signal);
+  const offer = draftOfferFor(settings, mode === "live");
   return createDraftHandler({
     allowed,
     dry: mode === "dry",
@@ -697,7 +700,65 @@ export function draftHandlerFor(
     permalink: (channel, ts) => slack.permalink({ channel, ts }),
     deliver: draftDelivery(settings, mode),
     reply: ephemeralReply(slack),
+    ...(offer === null ? {} : { offer }),
   });
+}
+
+/**
+ * With nothing on DRAFT_PROJECTS nothing that could keep or file a draft is built. `persist` is
+ * whether the message is really sent: a dry run keeps no record, with no message to press.
+ */
+export function draftOfferFor(settings: Settings, persist: boolean): DraftOffer | null {
+  const projects = draftProjects(settings);
+  if (projects.length === 0) {
+    return null;
+  }
+  const jira = createJiraClient(settings);
+  return createDraftOffer({
+    gate: { projects, facts: (project) => jira.projectFacts(project) },
+    pending: persist ? fileStore(pendingDirectory(settings)) : discardingStore(),
+  });
+}
+
+/**
+ * Why `slack:draft --dm` sends the operator no button, or `null`: with projects listed, a draft sent
+ * to someone off SLACK_DRAFT_USERS would carry a button whose press the handler refuses.
+ */
+export function buttonWithheld(
+  settings: Settings,
+  recipient: string | null,
+  sending: boolean,
+): string | null {
+  if (!sending || draftProjects(settings).length === 0) {
+    return null;
+  }
+  return recipient !== null && draftUsers(settings).includes(recipient)
+    ? null
+    : "SLACK_OPERATOR_USER_ID is not on SLACK_DRAFT_USERS, so a press on it would be refused";
+}
+
+/** Beside the poll state, so wherever an operator keeps one they keep the other. */
+export function pendingDirectory(settings: Settings): string {
+  return join(dirname(settings.STATE_PATH), "pending-drafts");
+}
+
+/** DRAFT_PROJECTS as project keys; one entry that is not a project key refuses the whole list. */
+export function draftProjects(settings: Settings): readonly string[] {
+  const entries = list(settings, "DRAFT_PROJECTS");
+  const malformed = entries.filter((entry) => {
+    try {
+      assertProjectKey(entry);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (malformed.length > 0) {
+    throw new SettingsError([
+      `DRAFT_PROJECTS (expected project keys such as SSX, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
+    ]);
+  }
+  return [...new Set(entries)];
 }
 
 function ephemeralReply(slack: SlackClient): (mention: Mention, text: string) => Promise<void> {
@@ -829,24 +890,31 @@ export function draftReadDirs(settings: Settings): readonly string[] {
   return scope.dirs.filter((dir) => !missing.includes(dir));
 }
 
-/** Sends one rendered draft and resolves to the message's `ts`; may throw. */
-export type DraftDelivery = (userId: string, threadLabel: string, text: string) => Promise<string>;
+/** Sends one rendered draft, with the blocks that carry its button when it has one, and resolves to the message's `ts`; may throw. */
+export type DraftDelivery = (
+  userId: string,
+  threadLabel: string,
+  text: string,
+  blocks?: readonly object[],
+) => Promise<string>;
 
 /** `live` sends the draft as a direct message; `dry` writes the request beside the draft instead. */
 export function draftDelivery(settings: Settings, mode: "dry" | "live"): DraftDelivery {
   if (mode === "dry") {
     const directory = join(settings.OUTPUT_DIR, "slack");
-    return async (userId, threadLabel, text) => {
+    return async (userId, threadLabel, text, blocks) => {
       await writeJson(directory, `${threadLabel}.dm.json`, {
         method: "chat.postMessage",
         channel: userId,
         text,
+        ...(blocks === undefined ? {} : { blocks }),
       });
       return "dry-run";
     };
   }
   const slack = createBotClient(settings);
-  return async (userId, _threadLabel, text) => (await slack.post({ channel: userId, text })).ts;
+  return async (userId, _threadLabel, text, blocks) =>
+    (await slack.post({ channel: userId, text, ...(blocks === undefined ? {} : { blocks }) })).ts;
 }
 
 function isDirectory(path: string): boolean {

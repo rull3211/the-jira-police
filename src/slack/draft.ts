@@ -3,6 +3,7 @@
  * the listener's chain, the result sent to them as a direct message.
  */
 
+import type { DraftOffer, PreparedDraft } from "../draft/offer.ts";
 import {
   type ThreadDraftOutcome,
   type ThreadRef,
@@ -31,7 +32,15 @@ export interface DraftMentionDeps {
   readonly dry: boolean;
   draft(thread: ThreadRef): Promise<ThreadDraftOutcome>;
   permalink(channel: string, ts: string): Promise<string>;
-  deliver(userId: string, threadLabel: string, text: string): Promise<string>;
+  /** `blocks` is present only for a message that carries a Post button. */
+  deliver(
+    userId: string,
+    threadLabel: string,
+    text: string,
+    blocks?: readonly object[],
+  ): Promise<string>;
+  /** Absent while nothing is on `DRAFT_PROJECTS`: no draft then carries a button. */
+  readonly offer?: DraftOffer;
   /** Seen only by the person, in the thread. */
   reply(mention: Mention, text: string): Promise<void>;
 }
@@ -43,6 +52,10 @@ export interface DraftHandler {
   settled(): Promise<void>;
 }
 
+function unoffered(text: string): PreparedDraft {
+  return { text, blocks: null, discard: async () => undefined };
+}
+
 export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
   const prefix = deps.dry ? "(dry run, nothing sent) " : "";
   let running: { readonly label: string; readonly done: Promise<void> } | null = null;
@@ -51,32 +64,43 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
     const label = threadLabel(thread);
     const link = await deps.permalink(thread.channel, thread.threadTs).catch(() => null);
     const where = threadReference(link, thread.channel);
-    let text: string;
+    let message: PreparedDraft;
     let outcome: string;
     try {
       const drafted = await deps.draft(thread);
       outcome = drafted.kind;
-      text = renderDraftMessage(drafted, where);
+      const text = renderDraftMessage(drafted, where);
+      message =
+        deps.offer === undefined
+          ? unoffered(text)
+          : await deps.offer.prepare(drafted, text, { asker: mention.userId, thread });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const stopped = error instanceof SessionAbortedError;
       outcome = stopped ? "stopped" : "failed";
-      text = stopped
-        ? `Bencebot was stopped before the draft of ${where} finished, so nothing was drafted. Mention \`@Bencebot draft\` there again once it is back.`
-        : `The draft of ${where} did not finish: ${escape(reason)}. Nothing was drafted; mention \`@Bencebot draft\` there again to retry.`;
+      message = unoffered(
+        stopped
+          ? `Bencebot was stopped before the draft of ${where} finished, so nothing was drafted. Mention \`@Bencebot draft\` there again once it is back.`
+          : `The draft of ${where} did not finish: ${escape(reason)}. Nothing was drafted; mention \`@Bencebot draft\` there again to retry.`,
+      );
       log.warn("slack.draft_failed", { user: mention.userId, thread: label, outcome, reason });
     }
     try {
-      const ts = await deps.deliver(mention.userId, label, text);
+      const ts =
+        message.blocks === null
+          ? await deps.deliver(mention.userId, label, message.text)
+          : await deps.deliver(mention.userId, label, message.text, message.blocks);
       log.info("slack.draft_sent", {
         user: mention.userId,
         thread: label,
         outcome,
         messageTs: ts,
         dry: deps.dry,
+        button: message.blocks !== null,
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      await message.discard();
       log.warn("slack.draft_unsent", { user: mention.userId, thread: label, outcome, reason });
       // The ephemeral reply promised a direct message, so the thread is where a lost one is admitted.
       await deps

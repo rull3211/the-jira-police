@@ -383,6 +383,66 @@ describe("JiraClient.fetchDetail", () => {
   });
 });
 
+describe("JiraClient.projectFacts", () => {
+  const issueTypes = [
+    { id: "10007", name: "Oppgave", subtask: false },
+    { id: "10008", name: "Feil", subtask: false },
+    { id: "10009", name: "Deloppgave", subtask: true },
+  ];
+
+  function answering(components: unknown, project: unknown): FetchMock {
+    return vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith("/components") ? jsonResponse(components) : jsonResponse(project),
+    );
+  }
+
+  it("names the project's components and the issue types a ticket can be created as", async () => {
+    const fetchMock = answering([{ name: "SSX Advisor" }, { name: "SSX Customer" }], {
+      issueTypes,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const facts = await client().projectFacts("SSX");
+
+    expect(facts).toEqual({
+      components: ["SSX Advisor", "SSX Customer"],
+      issueTypes: ["Oppgave", "Feil"],
+    });
+    expect(fetchMock.mock.calls.map((call) => String(call[0])).toSorted()).toEqual([
+      "https://example.invalid/rest/api/3/project/SSX",
+      "https://example.invalid/rest/api/3/project/SSX/components",
+    ]);
+  });
+
+  it("leaves out a subtask type, which cannot be created without a parent", async () => {
+    vi.stubGlobal("fetch", answering([], { issueTypes }));
+
+    expect((await client().projectFacts("SSX")).issueTypes).not.toContain("Deloppgave");
+  });
+
+  it("reads an answer of the wrong shape as nothing listed, never as a throw or a guess", async () => {
+    vi.stubGlobal("fetch", answering({ not: "a list" }, { issueTypes: [{ name: 7 }, {}] }));
+
+    expect(await client().projectFacts("SSX")).toEqual({ components: [], issueTypes: [] });
+  });
+
+  it("refuses a project key that would escape the endpoint, before any request", async () => {
+    const fetchMock = answering([], { issueTypes });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of ["ssx", "SSX/../../myself", "SSX?expand=x", "", "SSX SSX"]) {
+      await expect(client().projectFacts(bad)).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails when Jira refuses either read, so a gate cannot read an outage as an empty list", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse({ errorMessages: ["no"] }, 404));
+
+    await expect(client().projectFacts("SSX")).rejects.toThrow(JiraError);
+  });
+});
+
 describe("JiraClient.fetchAttachmentText", () => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32"></svg>';
 
