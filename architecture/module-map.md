@@ -15,25 +15,25 @@ because the grouping is the architecture.
 
 **The shell — scheduling and composition**
 
-| Path                       | Role                                                                                                                                                                        |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`             | Daemon entry point. Three loops and the `/bencebot` listener, signal handling, `--skill` / `--interval` / `--for` overrides                                                 |
-| `src/loop.ts`              | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                                        |
-| `src/poller.ts`            | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                              |
-| `src/review-loop.ts`       | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                             |
-| `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                             |
-| `src/slack-loop.ts`        | The Slack listener's switch, for `/bencebot` and mentions: `SLACK_LISTEN`, the tokens and both mention lists checked at startup, a runner that resolves rather than rejects |
-| `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                              |
-| `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                                      |
-| `src/keychain.ts`          | `keychain:<name>` values, read from the macOS login keychain by `/usr/bin/security` inside the process. `readSettings` honours one only on a `sensitive` setting            |
-| `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger                      |
-| `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide              |
-| `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                                         |
-| `src/broken-pipe.ts`       | `EPIPE` on stdout is a shutdown request, not a crash — quitting `pnpm start`'s viewer closes the daemon's pipe, and the default death skips the claim release               |
-| `src/text.ts`              | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, and `oneLine` for the documents made of headings and rows                            |
-| `src/read-only-tree.ts`    | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair                |
-| `src/staging-sweep.ts`     | Which directory names under `worktreeRoot`/`attachStagingRoot` are a skill root or a staged-image directory, and whether one is old enough to remove. Pure — no fs          |
-| `src/sweep.ts`             | Walking those two parent directories and, with `write`, removing what `staging-sweep.ts` marks. Shared by `sweep-once.ts`; nothing automatic calls it                       |
+| Path                       | Role                                                                                                                                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`             | Daemon entry point. Three loops and the `/bencebot` listener, signal handling, `--skill` / `--interval` / `--for` overrides                                                                                 |
+| `src/loop.ts`              | Scheduling shell: interval, exponential backoff to a 15-min cap, interruptible sleep                                                                                                                        |
+| `src/poller.ts`            | One grooming cycle. Ordering, dedupe, failure isolation, the three rules above                                                                                                                              |
+| `src/review-loop.ts`       | Review schedule + **the advance-then-claim tick**: `SOLVE_ENABLED`, `REVIEW_POLL_MS`, deps once                                                                                                             |
+| `src/watch-loop.ts`        | The sendback watch's schedule: `WATCH_ENABLED`, `WATCH_POLL_MS`. The switch that most earns one                                                                                                             |
+| `src/slack-loop.ts`        | The Slack listener's switch, for `/bencebot` and mentions: `SLACK_LISTEN`, the tokens and both mention lists checked at startup, a runner that resolves rather than rejects                                 |
+| `src/wiring.ts`            | **The composition.** Every `create*Deps` and every `build*Request`, for all seven entry points                                                                                                              |
+| `src/settings.ts`          | Declarative settings table + generic reader, with a `sensitive` marker                                                                                                                                      |
+| `src/keychain.ts`          | `keychain:<name>` values, read from the macOS login keychain by `/usr/bin/security` inside the process. `readSettings` honours one only on a `sensitive` setting                                            |
+| `src/logger.ts`            | JSON lines to stdout/stderr; `console` is banned by lint. `q`: ⏳ nothing happened, 🔧 it did. `createLogger(src)` only — there is no unsourced logger                                                      |
+| `src/logger-call-sites.ts` | Text scan proving each log message sits under the `src` its logger declared. A guard the type checker cannot be; `logger-call-sites.test.ts` runs it tree-wide                                              |
+| `src/duration.ts`          | `30s` / `4m` / `1.5h` for CLI flags                                                                                                                                                                         |
+| `src/broken-pipe.ts`       | `EPIPE` on stdout is a shutdown request, not a crash — quitting `pnpm start`'s viewer closes the daemon's pipe, and the default death skips the claim release                                               |
+| `src/text.ts`              | Text bounds shared by anything placing untrusted content where it must fit. `shorten`, `shortenToSentence` where a cut text is read as an answer, and `oneLine` for the documents made of headings and rows |
+| `src/read-only-tree.ts`    | Staging a throwaway directory a session may read and nothing may write. Extracted from `skill-root.ts` when a second caller wanted the same 0o555/0o444 pair                                                |
+| `src/staging-sweep.ts`     | Which directory names under `worktreeRoot`/`attachStagingRoot` are a skill root or a staged-image directory, and whether one is old enough to remove. Pure — no fs                                          |
+| `src/sweep.ts`             | Walking those two parent directories and, with `write`, removing what `staging-sweep.ts` marks. Shared by `sweep-once.ts`; nothing automatic calls it                                                       |
 
 **Jira**
 

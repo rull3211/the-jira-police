@@ -28,3 +28,19 @@ export function shorten(text: string, limit: number): string {
   // rather than returning the whole string and capping nothing.
   return `${(space > limit / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
+
+/**
+ * As `shorten`, but ends on the last whole sentence when one closes in the second half of the
+ * limit, so a cut reads as a shorter answer rather than a broken one. A stop only counts before
+ * whitespace: the one in `hooks.ts:6-16` ends nothing.
+ */
+export function shortenToSentence(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  const stops = [...text.slice(0, limit).matchAll(/[.!?](?=\s)/gu)];
+  const last = stops.at(-1);
+  return last !== undefined && last.index + 1 > limit / 2
+    ? `${text.slice(0, last.index + 1)} …`
+    : shorten(text, limit);
+}

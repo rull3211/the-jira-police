@@ -6,19 +6,19 @@
  */
 
 import { sanitiseUntrusted } from "../solve/runner.ts";
-import { oneLine, shorten } from "../text.ts";
+import { oneLine, shorten, shortenToSentence } from "../text.ts";
 import { ALLOWED_TOOLS, ANALYST_DENIED_TOOLS, childEnv } from "../triage/runner.ts";
 import { runSession } from "../triage/session.ts";
-import { DRAFT_SCHEMA_JSON } from "./schema.ts";
+import {
+  DESCRIPTION_MAX,
+  DRAFT_SCHEMA_JSON,
+  LIST_ITEM_MAX,
+  LIST_MAX,
+  REASON_MAX,
+  SUMMARY_MAX,
+} from "./schema.ts";
 
 export const DRAFT_SKILL = "thread-draft";
-
-/** Jira refuses a longer summary. */
-const SUMMARY_MAX = 255;
-/** Under Jira's description limit, and leaves a direct message room for the rest under Slack's. */
-const DESCRIPTION_MAX = 30_000;
-const LIST_ITEM_MAX = 300;
-const LIST_MAX = 10;
 
 export interface DraftRunOptions {
   /** `<channel>-<threadTs>`, naming the run in the slash line and the log. */
@@ -122,7 +122,7 @@ export function parseDraft(value: unknown): DraftResult {
   const source = value as Record<string, unknown>;
   const summary = shorten(oneLine(text(source["summary"])), SUMMARY_MAX);
   const description = shorten(text(source["description"]).trim(), DESCRIPTION_MAX);
-  const said = shorten(oneLine(text(source["reason"])), LIST_ITEM_MAX * 2);
+  const said = shortenToSentence(oneLine(text(source["reason"])), REASON_MAX);
   const claimed = source["draftable"] === true;
   const missing = [summary === "" ? "summary" : "", description === "" ? "description" : ""]
     .filter((field) => field !== "")
@@ -177,7 +177,7 @@ function list(value: unknown): readonly string[] {
   }
   return value
     .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => shorten(oneLine(entry), LIST_ITEM_MAX))
+    .map((entry) => shortenToSentence(oneLine(entry), LIST_ITEM_MAX))
     .filter((entry) => entry !== "")
     .slice(0, LIST_MAX);
 }

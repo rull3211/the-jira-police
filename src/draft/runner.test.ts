@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ANALYST_DENIED_TOOLS } from "../triage/runner.ts";
-import { DRAFT_SCHEMA, DRAFT_SCHEMA_JSON } from "./schema.ts";
+import {
+  DESCRIPTION_MAX,
+  DRAFT_SCHEMA,
+  DRAFT_SCHEMA_JSON,
+  LIST_ITEM_MAX,
+  LIST_MAX,
+  REASON_MAX,
+  SUMMARY_MAX,
+} from "./schema.ts";
 
 // Stubs the subprocess, so nothing here can reach storecode, Jira or Slack.
 const runSession = vi.hoisted(() => vi.fn());
@@ -211,6 +219,31 @@ describe("parseDraft", () => {
     expect(result.questions).toHaveLength(10);
     expect(result.questions[0]).toBe("q0");
     expect(result.injectionNoticed[0]?.length).toBeLessThanOrEqual(301);
+  });
+
+  it("ends an over-long reason on its last whole sentence rather than inside a clause", () => {
+    const sentence = "This duplicates SSX-3534 and the code shows why it does. ";
+    const long = sentence.repeat(Math.ceil(REASON_MAX / sentence.length) + 2);
+
+    const { reason } = parseDraft(reply({ draftable: false, reason: long }));
+
+    const kept = reason.slice(0, -" …".length);
+    expect(reason.endsWith(". …")).toBe(true);
+    expect(reason.length).toBeLessThanOrEqual(REASON_MAX + 2);
+    expect(`${kept} `).toBe(sentence.repeat(Math.round((kept.length + 1) / sentence.length)));
+  });
+
+  it("tells the model each limit the parser enforces, from the constants it enforces them with", () => {
+    const { reason, questions, summary, description, injectionNoticed } = DRAFT_SCHEMA.properties;
+
+    expect(reason.description).toContain(`${String(REASON_MAX)} characters`);
+    expect(summary.description).toContain(`${String(SUMMARY_MAX)} characters`);
+    expect(description.description).toContain(`${String(DESCRIPTION_MAX)} characters`);
+    for (const list of [questions, injectionNoticed]) {
+      expect(list.description).toContain(
+        `${String(LIST_MAX)} of at most ${String(LIST_ITEM_MAX)} characters`,
+      );
+    }
   });
 
   it("offers the model every field the parser reads, and requires all of them", () => {
