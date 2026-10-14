@@ -55,7 +55,13 @@ import {
   loadRoster,
   propertyRosterStore,
 } from "./slack/roster.ts";
-import { type ListenDeps, type ListenSummary, listen, openWebSocket } from "./slack/socket.ts";
+import {
+  type Click,
+  type ListenDeps,
+  type ListenSummary,
+  listen,
+  openWebSocket,
+} from "./slack/socket.ts";
 import { type DraftHandler, createDraftHandler, isDraftMention } from "./slack/draft.ts";
 import { type Mention, type ThreadDeps, createMentionHandler } from "./slack/start.ts";
 import {
@@ -619,12 +625,22 @@ export function listenerFor(
       connect: openWebSocket,
       handle,
       mention,
+      click: ignoreClick,
       signal,
     });
     // The same signal has already killed a running draft's session; this waits for its last message.
     await draft.settled();
     return summary;
   };
+}
+
+/** No button of the bot's carries anything yet, so a press is logged and dropped. */
+async function ignoreClick(click: Click): Promise<void> {
+  slackLog.info("slack.click_ignored", {
+    user: click.userId,
+    actionId: click.actionId,
+    note: "nothing is wired to a button yet",
+  });
 }
 
 /**

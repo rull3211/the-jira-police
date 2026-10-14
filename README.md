@@ -741,9 +741,10 @@ To set it up, create the app from the manifest rather than by hand:
 
 1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**,
    then paste `docs/slack-app-manifest.json`. It declares `/bencebot` and the `app_mention` event,
-   turns Socket Mode on and both token rotations off, since nothing here refreshes a token, and asks
-   for the scopes in the table below. An app made from an earlier copy takes the new one under
-   **App Manifest**, then a reinstall.
+   turns Socket Mode and interactivity on and both token rotations off, since nothing here refreshes
+   a token, and asks for the scopes in the table below. Interactivity needs no request URL under
+   Socket Mode; it is what lets Slack send the listener a press on a button of the bot's. An app made
+   from an earlier copy takes the new one under **App Manifest**, then a reinstall.
 2. **Install to Workspace**, then copy **OAuth & Permissions → Bot User OAuth Token** (`xoxb-…`)
    into `SLACK_BOT_TOKEN`. The **App Configuration Token** on the apps page is a different thing: it
    starts `xoxe.xoxp-`, expires in twelve hours, drives only the manifest API, and cannot post.

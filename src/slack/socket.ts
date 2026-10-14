@@ -1,6 +1,6 @@
 /**
  * A Socket Mode connection held until shutdown: the daemon has no public URL, so this is the only
- * way Slack can reach it, with a slash command or a mention of the bot.
+ * way Slack can reach it, with a slash command, a mention of the bot or a press on one of its buttons.
  */
 
 import { createLogger } from "../logger.ts";
@@ -25,6 +25,15 @@ export interface SocketHandle {
   close(): void;
 }
 
+/** A press on a button of one of the bot's own messages; `value` is what the button was posted carrying. */
+export interface Click {
+  readonly userId: string;
+  readonly channel: string;
+  readonly messageTs: string;
+  readonly actionId: string;
+  readonly value: string;
+}
+
 export interface ListenDeps {
   /** `apps.connections.open`, called once per connection. */
   readonly open: () => Promise<string>;
@@ -32,6 +41,8 @@ export interface ListenDeps {
   readonly handle: (command: SlashCommand) => Promise<string>;
   /** A mention's envelope takes no reply payload, so whatever this says, it says out of band. */
   readonly mention: (mention: Mention) => Promise<void>;
+  /** A click's envelope is acknowledged bare, so like a mention's, whatever this says is out of band. */
+  readonly click: (click: Click) => Promise<void>;
   readonly signal: AbortSignal;
   readonly pause?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly ackBudgetMs?: number;
@@ -41,6 +52,7 @@ export interface ListenSummary {
   readonly connections: number;
   readonly commands: number;
   readonly mentions: number;
+  readonly clicks: number;
 }
 
 export type Frame =
@@ -53,10 +65,15 @@ export type Frame =
       readonly command: SlashCommand;
     }
   | { readonly kind: "mention"; readonly envelope: string; readonly mention: Mention }
+  | { readonly kind: "click"; readonly envelope: string; readonly click: Click }
   | { readonly kind: "other"; readonly envelope: string; readonly type: string }
   | { readonly kind: "unreadable" };
 
-/** The person is whoever Slack names — a command's `user_id`, a mention's `user` — and the text only picks the verb. */
+/**
+ * The person is whoever Slack names — a command's `user_id`, a mention's `user`, a click's `user.id` —
+ * and the text only picks the verb. A click is a `block_actions` payload naming an action; every other
+ * interactive payload is acknowledged and ignored.
+ */
 export function parseFrame(data: string): Frame {
   let frame: Record<string, unknown>;
   try {
@@ -95,6 +112,27 @@ export function parseFrame(data: string): Frame {
       },
     };
   }
+  if (type === "interactive") {
+    const kind = stringOf(payload["type"]);
+    const actions = payload["actions"];
+    const action = record(Array.isArray(actions) ? actions[0] : undefined);
+    const actionId = stringOf(action["action_id"]);
+    if (kind !== "block_actions" || actionId === "") {
+      return { kind: "other", envelope, type: `interactive/${kind === "" ? "none" : kind}` };
+    }
+    const container = record(payload["container"]);
+    return {
+      kind: "click",
+      envelope,
+      click: {
+        userId: stringOf(record(payload["user"])["id"]),
+        channel: stringOf(record(payload["channel"])["id"]) || stringOf(container["channel_id"]),
+        messageTs: stringOf(container["message_ts"]) || stringOf(record(payload["message"])["ts"]),
+        actionId,
+        value: stringOf(action["value"]),
+      },
+    };
+  }
   if (type !== "slash_commands") {
     return { kind: "other", envelope, type };
   }
@@ -117,9 +155,10 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
   let connections = 0;
   let commands = 0;
   let mentions = 0;
+  let clicks = 0;
   let failures = 0;
 
-  // One at a time, commands and mentions alike, so two never interleave a read and its write here.
+  // One at a time, commands, mentions and clicks alike, so two never interleave a read and its write here.
   let chain: Promise<unknown> = Promise.resolve();
   const answer = async (command: SlashCommand): Promise<string> => {
     commands += 1;
@@ -142,6 +181,10 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
     mentions += 1;
     chain = chain.then(() => deps.mention(mention)).catch(() => undefined);
   };
+  const press = (click: Click): void => {
+    clicks += 1;
+    chain = chain.then(() => deps.click(click)).catch(() => undefined);
+  };
 
   while (!deps.signal.aborted) {
     let url: string;
@@ -155,7 +198,7 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
       continue;
     }
     connections += 1;
-    const { end, greeted } = await session(url, deps, answer, hear);
+    const { end, greeted } = await session(url, deps, { answer, hear, press });
     if (end === "stopped") {
       break;
     }
@@ -168,14 +211,19 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
   }
   // A write already begun is finished rather than cut off; a command's reply is lost with the socket.
   await chain;
-  return { connections, commands, mentions };
+  return { connections, commands, mentions, clicks };
+}
+
+interface Routes {
+  readonly answer: (command: SlashCommand) => Promise<string>;
+  readonly hear: (mention: Mention) => void;
+  readonly press: (click: Click) => void;
 }
 
 function session(
   url: string,
   deps: ListenDeps,
-  answer: (command: SlashCommand) => Promise<string>,
-  hear: (mention: Mention) => void,
+  routes: Routes,
 ): Promise<{ readonly end: SessionEnd; readonly greeted: boolean }> {
   return new Promise((resolve) => {
     let greeted = false;
@@ -211,7 +259,7 @@ function session(
         handle?.close();
         finish("refresh");
       } else if (frame.kind === "command") {
-        void answer(frame.command).then((text) => {
+        void routes.answer(frame.command).then((text) => {
           if (!frame.respond) {
             log.warn("slack.listen_reply_dropped", { note: "the envelope takes no reply payload" });
           }
@@ -224,7 +272,10 @@ function session(
       } else if (frame.kind === "mention") {
         // Acknowledged before the work, since Slack resends an envelope it has not heard back on.
         send({ envelope_id: frame.envelope });
-        hear(frame.mention);
+        routes.hear(frame.mention);
+      } else if (frame.kind === "click") {
+        send({ envelope_id: frame.envelope });
+        routes.press(frame.click);
       } else if (frame.kind === "other") {
         send({ envelope_id: frame.envelope });
         log.info("slack.listen_ignored", { type: frame.type });

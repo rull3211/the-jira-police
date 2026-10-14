@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   );
   const summary = await start();
   process.stdout.write(
-    `\nStopped after ${String(summary.commands)} command(s) and ${String(summary.mentions)} mention(s) over ${String(summary.connections)} connection(s).\n`,
+    `\nStopped after ${String(summary.commands)} command(s), ${String(summary.mentions)} mention(s) and ${String(summary.clicks)} click(s) over ${String(summary.connections)} connection(s).\n`,
   );
 }
 
