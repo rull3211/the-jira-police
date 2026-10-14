@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,6 +41,8 @@ import {
   pipelinePrLineSender,
   createSolveDeps,
   createSolveRunDeps,
+  draftDelivery,
+  draftReadDirs,
   githubRepoFor,
   imageStageOptions,
   pollIntervalMs,
@@ -1646,6 +1655,99 @@ describe("threadCommandDeps", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("draftReadDirs", () => {
+  it("opens every checkout SOLVE_REPOS and SOLVE_READ_DIRS name that is a directory here", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+    for (const name of ["commerce-rest", "advisor-web"]) {
+      mkdirSync(join(root, name));
+    }
+
+    const dirs = draftReadDirs(
+      settingsWith({
+        SOLVE_REPO_ROOT: root,
+        SOLVE_REPOS: "commerce-rest",
+        SOLVE_READ_DIRS: "advisor-web, commerce-rest",
+      }),
+    );
+
+    expect(dirs).toEqual([join(root, "commerce-rest"), join(root, "advisor-web")]);
+  });
+
+  it("skips a name that is no directory here, since --add-dir on it fails the whole session", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+    mkdirSync(join(root, "commerce-rest"));
+
+    const dirs = draftReadDirs(
+      settingsWith({
+        SOLVE_REPO_ROOT: root,
+        SOLVE_REPOS: "commerce-rest",
+        SOLVE_READ_DIRS: "gone",
+      }),
+    );
+
+    expect(dirs).toEqual([join(root, "commerce-rest")]);
+  });
+
+  it("refuses a name that would climb out of the root", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+
+    expect(
+      draftReadDirs(settingsWith({ SOLVE_REPO_ROOT: join(root, "inner"), SOLVE_READ_DIRS: ".." })),
+    ).toEqual([]);
+  });
+
+  it("opens nothing with no SOLVE_REPO_ROOT, rather than resolving names against the working directory", () => {
+    expect(draftReadDirs(settingsWith({ SOLVE_REPOS: "src", SOLVE_READ_DIRS: "src" }))).toEqual([]);
+  });
+});
+
+describe("draftDelivery", () => {
+  it("dry, writes the request beside the draft and sends nothing", async () => {
+    const output = mkdtempSync(join(tmpdir(), "draft-delivery-"));
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deliver = draftDelivery(settingsWith({ OUTPUT_DIR: output }), "dry");
+
+      expect(await deliver("U0ASKER1", "C0THREAD1-1.2", "the draft")).toBe("dry-run");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(readFileSync(join(output, "slack", "C0THREAD1-1.2.dm.json"), "utf8")),
+      ).toEqual({ method: "chat.postMessage", channel: "U0ASKER1", text: "the draft" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("live, posts to the person's member ID, which Slack delivers as a direct message", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ ok: true, ts: "9.9", channel: "D0DM1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deliver = draftDelivery(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "live");
+
+      expect(await deliver("U0ASKER1", "C0THREAD1-1.2", "the draft")).toBe("9.9");
+      const [url, init] = fetchMock.mock.calls[0] ?? [];
+      expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
+      const form = new URLSearchParams(String(init?.body));
+      expect(form.get("channel")).toBe("U0ASKER1");
+      expect(form.get("text")).toBe("the draft");
+      expect(form.get("thread_ts")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("live, refuses to build without a bot token", () => {
+    expect(() => draftDelivery(settingsWith({}), "live")).toThrow(SettingsError);
   });
 });
 

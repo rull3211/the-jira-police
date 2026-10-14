@@ -1,17 +1,17 @@
 /**
- * The daemon's Slack listener, for `/bencebot` and `@Bencebot start|clear`: decided before any loop
+ * The daemon's Slack listener, for `/bencebot` and `@Bencebot start|clear|draft`: decided before any loop
  * starts, like `createReviewLoop`, and in its own file because `index.ts` runs `main` on import.
  */
 
 import { createLogger } from "./logger.ts";
 import { type Settings, slackListen } from "./settings.ts";
 import { type ListenDeps, type ListenSummary, listen } from "./slack/socket.ts";
-import { listenerFor, rosterWhere, startUsers } from "./wiring.ts";
+import { draftUsers, listenerFor, rosterWhere, startUsers } from "./wiring.ts";
 
 const log = createLogger("slack");
 
 /**
- * A bad SLACK_APP_TOKEN, or a start list with no bot token to act on it, throws here at startup; the
+ * A bad SLACK_APP_TOKEN, or a start or draft list with no bot token to act on it, throws here at startup; the
  * runner it returns never rejects, so a broken listener cannot take the daemon's `Promise.all` with it.
  */
 export function createSlackListener(
@@ -28,6 +28,7 @@ export function createSlackListener(
     mode,
     list: rosterWhere(settings),
     mayStart: startUsers(settings).length,
+    mayDraft: draftUsers(settings).length,
   });
   return async () => {
     try {

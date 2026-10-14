@@ -18,7 +18,7 @@ Things that look like details and are not:
    would be a second way to post unchecked.
 3. **Neither the Jira REST credential nor the Slack token ever reaches a model session.**
    `childEnv` in `triage/runner.ts` withholds every `JIRA_` and `SLACK_` variable from each model
-   session, triage and solve passes alike, and the tests asserting their absence are the proof —
+   session, triage, solve and draft sessions alike, and the tests asserting their absence are the proof —
    one per name Slack's own tooling injects, because a denylist naming one token leaks the others.
    A credential written `keychain:<name>` is resolved into the settings object only, so
    `process.env` — which every child inherits — never holds it at all.
@@ -60,7 +60,9 @@ Things that look like details and are not:
     own: an owner inferred from the checkout's remote is correct right up until somebody adds a
     fork as `origin`, at which point a bot opens a pull request against a repository nobody
     chose. `SLACK_START_USERS` names who rather than what — the people whose mention may write
-    `agent:start` — and has no fallback for the same reason. Note this cuts the opposite way from
+    `agent:start` — and has no fallback for the same reason; nor has `SLACK_DRAFT_USERS`, the people
+    whose mention may start a paid, read-only draft session over every configured checkout, kept a
+    list of its own because that is not the privilege `agent:start` is. Note this cuts the opposite way from
     `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
     the restriction — the test to apply is not "does it have a default" but "does silence widen
     or narrow what the service may touch."
@@ -336,10 +338,11 @@ Things that look like details and are not:
 
     The Slack listener is held to the same rule without being a loop. `createSlackListener` in
     `src/slack-loop.ts` reads `SLACK_LISTEN` first and returns `null` when it is off; when it is
-    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks, and so are `SLACK_START_USERS`
-    and — once anyone is on it — `SLACK_BOT_TOKEN`; and what it returns resolves
-    rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves the loops
-    running.
+    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks, and so are `SLACK_START_USERS`,
+    `SLACK_DRAFT_USERS` and — once anyone is on either — `SLACK_BOT_TOKEN`; and what it returns
+    resolves rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves
+    the loops running. A draft's session runs off the listener's one promise chain, so minutes of
+    it hold no `/bencebot` back, and the shutdown signal kills it rather than waiting it out.
 
 18. **A property write names a key under `jira-police.`, and nothing else.** The REST credential
     reads and writes a ticket's properties only through `getIssueProperty`, `setIssueProperty` and

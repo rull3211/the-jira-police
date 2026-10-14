@@ -20,6 +20,21 @@ function slack(body: unknown, init: ResponseInit = {}): FetchMock {
   return mock;
 }
 
+/** One response per call, in order, for a method that pages. */
+function slackPages(...bodies: readonly unknown[]): FetchMock {
+  const mock = vi.fn<typeof fetch>();
+  for (const body of bodies) {
+    mock.mockResolvedValueOnce(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
 function sent(mock: FetchMock): { url: string; form: URLSearchParams; init: RequestInit } {
   const call = mock.mock.calls[0];
   if (call === undefined) {
@@ -199,6 +214,127 @@ describe("SlackClient", () => {
     expect((await client.threadRoot({ channel: "C1", ts: "1.2" }))?.botId).toBeNull();
     slack({ ok: true, messages: [] });
     expect(await client.threadRoot({ channel: "C1", ts: "1.2" })).toBeNull();
+  });
+
+  it.each([
+    {
+      name: "threadRoot",
+      read: (client: SlackClient) => client.threadRoot({ channel: "C1", ts: "1.2" }),
+    },
+    {
+      name: "threadMessages",
+      read: (client: SlackClient) => client.threadMessages({ channel: "C1", ts: "1.2", max: 10 }),
+    },
+  ])(
+    "tells a $name refused with not_in_channel to invite the bot, keeping Slack's code",
+    async ({ read }) => {
+      slack({ ok: false, error: "not_in_channel" });
+
+      const error = await caught(read(new SlackClient({ token: NEEDLE })));
+
+      expect(error.code).toBe("not_in_channel");
+      expect(error.method).toBe("conversations.replies");
+      expect(error.message).toContain("invite it there first");
+    },
+  );
+
+  it("gives the invitation to no other refusal of a thread read, and to no other method's not_in_channel", async () => {
+    const client = new SlackClient({ token: NEEDLE });
+
+    slack({ ok: false, error: "thread_not_found" });
+    const other = await caught(client.threadMessages({ channel: "C1", ts: "1.2", max: 10 }));
+    slack({ ok: false, error: "not_in_channel" });
+    const post = await caught(client.post({ channel: "C1", text: "hi" }));
+
+    expect(other.message).not.toContain("invite");
+    expect(post.message).toBe("Slack chat.postMessage failed: not_in_channel");
+  });
+
+  it("reads a thread page by page until Slack's cursor comes back empty", async () => {
+    const mock = slackPages(
+      {
+        ok: true,
+        messages: [
+          { ts: "1.1", user: "U1", text: "top" },
+          { ts: "1.2", bot_id: "B1", text: "from a bot" },
+        ],
+        response_metadata: { next_cursor: "page-2" },
+      },
+      {
+        ok: true,
+        messages: [{ ts: "1.3", user: "U2", text: "last" }],
+        response_metadata: { next_cursor: "" },
+      },
+    );
+
+    const read = await new SlackClient({ token: NEEDLE }).threadMessages({
+      channel: "C1",
+      ts: "1.1",
+      max: 10,
+    });
+
+    expect(read).toEqual({
+      complete: true,
+      messages: [
+        { ts: "1.1", user: "U1", botId: null, text: "top" },
+        { ts: "1.2", user: null, botId: "B1", text: "from a bot" },
+        { ts: "1.3", user: "U2", botId: null, text: "last" },
+      ],
+    });
+    expect(mock).toHaveBeenCalledTimes(2);
+    expect(new URLSearchParams(String(mock.mock.calls[0]?.[1]?.body)).get("cursor")).toBeNull();
+    expect(new URLSearchParams(String(mock.mock.calls[1]?.[1]?.body)).get("cursor")).toBe("page-2");
+  });
+
+  it("stops at an absent cursor as well as an empty one", async () => {
+    const mock = slackPages({ ok: true, messages: [{ ts: "1.1", user: "U1", text: "only" }] });
+
+    const read = await new SlackClient({ token: NEEDLE }).threadMessages({
+      channel: "C1",
+      ts: "1.1",
+      max: 10,
+    });
+
+    expect(read.complete).toBe(true);
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops reading once a thread passes the cap, and says it is incomplete", async () => {
+    const mock = slackPages(
+      {
+        ok: true,
+        messages: [
+          { ts: "1.1", user: "U1", text: "a" },
+          { ts: "1.2", user: "U1", text: "b" },
+          { ts: "1.3", user: "U1", text: "c" },
+        ],
+        response_metadata: { next_cursor: "never-read" },
+      },
+      { ok: true, messages: [], response_metadata: { next_cursor: "" } },
+    );
+
+    const read = await new SlackClient({ token: NEEDLE }).threadMessages({
+      channel: "C1",
+      ts: "1.1",
+      max: 2,
+    });
+
+    expect(read.complete).toBe(false);
+    expect(read.messages.map((message) => message.ts)).toEqual(["1.1", "1.2"]);
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks Slack for a message's link", async () => {
+    const mock = slack({
+      ok: true,
+      permalink: "https://acme.slack.com/archives/C1/p1000000000000200",
+    });
+
+    expect(await new SlackClient({ token: NEEDLE }).permalink({ channel: "C1", ts: "1.2" })).toBe(
+      "https://acme.slack.com/archives/C1/p1000000000000200",
+    );
+    expect(sent(mock).url).toBe("https://slack.com/api/chat.getPermalink");
+    expect(Object.fromEntries(sent(mock).form)).toEqual({ channel: "C1", message_ts: "1.2" });
   });
 
   it("posts an ephemeral reply into the thread it names, to the one user", async () => {

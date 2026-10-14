@@ -148,6 +148,7 @@ describe("createCommandHandler", () => {
     expect(reply).toContain("/bencebot subscribe");
     expect(reply).toContain("@Bencebot start");
     expect(reply).toContain("@Bencebot clear");
+    expect(reply).toContain("@Bencebot draft");
     expect(load).not.toHaveBeenCalled();
   });
 

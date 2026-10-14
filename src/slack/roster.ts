@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { JiraClient } from "../jira/client.ts";
 import { createLogger } from "../logger.ts";
 import { SLACK_USER_ID_PATTERN, escape } from "./render.ts";
+import { DRAFT_USAGE } from "./draft.ts";
 import { MENTION_USAGE } from "./start.ts";
 
 const log = createLogger("slack");
@@ -119,7 +120,7 @@ const SUBSCRIBE_USAGE =
 
 export const USAGE_REPLY = `${SUBSCRIBE_USAGE} \`/bencebot help\` lists everything the bot answers.`;
 
-export const HELP_REPLY = `${SUBSCRIBE_USAGE}\n${MENTION_USAGE} Only the people on the start list may use those two.`;
+export const HELP_REPLY = `${SUBSCRIBE_USAGE}\n${MENTION_USAGE} Only the people on the start list may use those two.\n${DRAFT_USAGE} Only the people on the draft list may ask for one.`;
 
 /**
  * Load, apply, write, read back. Never throws: the reply is the only place the person who typed the

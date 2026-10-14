@@ -15,14 +15,19 @@ export type ThreadVerb = "start" | "clear";
 
 const MENTION_MARKUP = /<@[A-Z0-9]+(?:\|[^>]*)?>/gu;
 
-/** Every mention taken out, then exactly one known word; anything else is `null`, answered with usage. */
-export function parseMentionVerb(text: string): ThreadVerb | null {
-  const words = text
+/** A mention's text with every mention taken out, lowercased, as words. */
+export function mentionWords(text: string): readonly string[] {
+  return text
     .replace(MENTION_MARKUP, " ")
     .trim()
     .toLowerCase()
     .split(/\s+/u)
     .filter((word) => word !== "");
+}
+
+/** Exactly one known word; anything else is `null`, answered with usage. */
+export function parseMentionVerb(text: string): ThreadVerb | null {
+  const words = mentionWords(text);
   const [word] = words;
   return words.length === 1 && (word === "start" || word === "clear") ? word : null;
 }

@@ -139,6 +139,12 @@ export const SETTINGS = [
     fallback: "1200000",
   },
   {
+    name: "DRAFT_TIMEOUT_MS",
+    description:
+      "Absolute ceiling on one `@Bencebot draft` session, counting only time the machine was awake; SESSION_IDLE_TIMEOUT_MS still catches one that goes silent. A draft reads a thread, Jira and whichever checkouts it needs, so it is sized like a triage rather than like a solve pass. A cap, not a target.",
+    fallback: "1200000",
+  },
+  {
     name: "SOLVE_ENABLED",
     description:
       'Master switch for the solve queue. Off means the second poller never starts, so no ticket is ever claimed. Separate from SOLVE_MODE because they answer different questions — whether the machinery runs at all, and how much human approval it needs when it does — and collapsing them into one setting would mean the only way to test the plumbing was to arm it. Strict "true", so a typo fails closed.',
@@ -377,7 +383,7 @@ export const SETTINGS = [
   {
     name: "SLACK_OPERATOR_USER_ID",
     description:
-      "The Slack member ID (`U…`) of the person who announces the bot's pull requests to the team; from their Slack profile, ⋮ → Copy member ID. When a solve opens a pull request, the bot sends them a direct message holding the line to paste into the team's pull request channel: the link, labelled PR-Bencebot, and the fix pass's one bokmål sentence. Unset, nothing is sent. Follows SLACK_MODE — `dry` writes the request under OUTPUT_DIR/slack/, `live` sends it — and a value that is not a member ID is a startup error. A failed message is logged and never fails the pull request.",
+      "The Slack member ID (`U…`) of the person who announces the bot's pull requests to the team; from their Slack profile, ⋮ → Copy member ID. When a solve opens a pull request, the bot sends them a direct message holding the line to paste into the team's pull request channel: the link, labelled PR-Bencebot, and the fix pass's one bokmål sentence. Unset, nothing is sent. The pull request line follows SLACK_MODE — `dry` writes the request under OUTPUT_DIR/slack/, `live` sends it — while `pnpm slack:draft --dm` sends its draft to them whatever SLACK_MODE says. A value that is not a member ID is a startup error. A failed message is logged and never fails the pull request.",
   },
   {
     name: "SLACK_APP_TOKEN",
@@ -388,13 +394,18 @@ export const SETTINGS = [
   {
     name: "SLACK_LISTEN",
     description:
-      "Whether the daemon answers `/bencebot`, and a mention from someone on SLACK_START_USERS. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and tickets and writing what each would change under OUTPUT_DIR/slack/; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there, and a mention's label edit. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
+      "Whether the daemon answers `/bencebot`, a mention from someone on SLACK_START_USERS, and a draft mention from someone on SLACK_DRAFT_USERS. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and tickets and writing what each would change under OUTPUT_DIR/slack/; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there, and a mention's label edit. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
     fallback: "off",
   },
   {
     name: "SLACK_START_USERS",
     description:
       "Comma-separated Slack member IDs (`U…`) of the people who may mention the bot in a ticket's audit thread to start or clear it: `@Bencebot start` adds agent:start, manual mode's go-ahead for an unattended solve, and `@Bencebot clear` takes agent:failed off. Nobody else may, whatever they type. Empty, the listener answers no mention: it acknowledges each and logs `slack.mention_ignored`. No fallback, like SOLVE_REPOS, so emptying it takes the power away. Set, the listener also needs SLACK_BOT_TOKEN, to read the thread and reply, and both are checked at startup; an entry that is not a member ID is a startup error. Follows SLACK_LISTEN's mode: `dry` writes the edit to OUTPUT_DIR/slack/, `live` writes the label.",
+  },
+  {
+    name: "SLACK_DRAFT_USERS",
+    description:
+      "Comma-separated Slack member IDs (`U…`) of the people who may mention `@Bencebot draft` in a thread to have it drafted as a Jira ticket: the listener reads the whole thread, runs a read-only session over it that is paid for like a triage, and sends the draft to that person as a direct message. Nothing is ever written to Jira. Nobody else may, whatever they type. Separate from SLACK_START_USERS, since starting a paid session that reads every configured checkout is a different privilege from writing agent:start. Empty, the listener answers no draft mention: it acknowledges each and logs `slack.draft_ignored`. No fallback, like SOLVE_REPOS, so emptying it takes the power away. Set, the listener also needs SLACK_BOT_TOKEN, checked at startup; an entry that is not a member ID is a startup error. Follows SLACK_LISTEN's mode: `dry` writes the direct message to OUTPUT_DIR/slack/ instead of sending it, and still runs the session.",
   },
   {
     name: "LOG_LEVEL",

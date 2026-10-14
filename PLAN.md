@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3639 tests in 110 files**, no build step.
+> **3746 tests in 114 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80 and §82, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §82 and §83, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §81. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §84. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -580,6 +580,25 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
   would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
   none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
+- **`@Bencebot draft` has run live once, from the daemon, and three times dry from the CLI.** On
+  2026-10-14 `pnpm slack:draft` read two threads in `C03AYDRGP0A`. The first, which the operator
+  confirms duplicates SSX-3534, was declined as that duplicate ($1.00, 159 s); read again after the
+  duplicate outcome was built, it was drafted as a ticket instead ($1.08, 238 s), on a reading of
+  "tilbakenavigasjon" as the in-app «Bytt kunde» button, with the doubt put in its questions. The
+  other, a one-line feedback-form post, was drafted whole, in Norwegian ($1.64, 350 s). Then the
+  daemon, with `SLACK_LISTEN=live`, answered `@Bencebot draft` on the second thread: a ticket
+  ($1.64, 273 s), sent as a direct message the operator reports reads well, a second mention while it
+  ran refused as busy, nothing in the log above info. Seven of the first run's `file:line` citations
+  were read against the checkouts and held; its claim that a cart row's `customerId` carries a `NO~`
+  prefix was traced to code and to no stored value, and the ticket says so. Unseen: the duplicate
+  outcome, a comment on the existing issue, against a real thread, and whether one thread gives one
+  outcome — two runs of the same text gave two, and nothing says the change between them was the
+  cause; a person judging whether a draft is worth filing; `slack:draft --dm`; a draft stopped with
+  Ctrl-C, and the message it sends; a thread that names no repository; a thread past one page of
+  `conversations.replies`. **What would show it:**
+  `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
+  times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
+  a draft runs.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1168,6 +1187,56 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
+
+### 81. A drafted ticket still has to be filed by hand
+
+**Branch:** none yet. It waits for `@Bencebot draft` to have produced drafts worth filing.
+
+**What is not built.** `@Bencebot draft` sends the asker a drafted ticket, or for a thread that
+duplicates an open issue the comment to add to it, as a direct message and writes nothing to Jira.
+The second half of SSX-4071 is filing it: the asker replies `post` in that direct message, the
+service creates the issue or adds the comment to the issue named, and the key and link are posted
+back into the thread. That is a new write, from text anyone in a channel wrote into a Jira issue,
+gated only by a person reading the exact draft — so it is a privilege of its own, and a branch of
+its own.
+
+**The shape SSX-4071 settles:** `message.im` added to the manifest's events and a direct-message
+frame to `parseFrame`; `post` files the draft the asker read, verbatim, and never re-runs the
+session; the project must be on a new `DRAFT_PROJECTS` allowlist with no default, and the component
+one of that project's live components, or nothing is filed; the writer is a session in the poster's
+shape (`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here
+builds it; the issue is read back over REST; and the draft is marked as filing before the create,
+so a crash between the two can never file it twice. A comment adds to that: the key is the
+model's word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project
+and is open — and its writer, `addCommentToJiraIssue`, is a second MCP mutator whose withholding
+nobody has measured either.
+
+**Nobody can reply in the bot's direct message today.** The manifest declares no `app_home`, so the
+Messages tab is not writable, and `message.im` is not subscribed (the operator could not type in
+it, 2026-10-14). A typed `post` needs both, and a reinstall an organisation admin may have to
+approve. A button on the draft needs interactivity switched on instead, and no typed reply; whether
+a button stays clickable in a read-only direct message is unprobed. A `@Bencebot post` in the thread
+needs neither, but the thread cannot see the direct message that holds the draft.
+
+**Where the pending draft lives is open.** `BUILDING.md` keeps state in the remote system, and the
+bot's own direct message already holds the draft verbatim: a `post` replied in that message's thread
+could read it back, rather than a file under `state/` that a restart or a second machine would not
+see.
+
+**What would make it the wrong idea:**
+
+- **The drafts are not worth filing.** If the first real ones need rewriting more than a person
+  writing from scratch would, `post` files that rewriting into Jira faster, and is not worth
+  building.
+- **The session cannot tell a duplicate from a neighbour.** The first run called a thread a clear
+  duplicate while its own first question asked whether the thread meant the same thing as the
+  ticket. A comment aimed at the wrong issue is worse than a declined thread once `post` writes it.
+- **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
+  person reading it once will stop.
+- **The containment is unverified at the write.** The draft session holds no Jira writer only as far
+  as `--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`). A
+  draft that can only reach a direct message tolerates that; a session holding `createJiraIssue` is
+  where it has to be measured first.
 
 ## Verification
 

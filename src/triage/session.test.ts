@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createLogger } from "../logger.ts";
 import {
+  SessionAbortedError,
   SessionError,
   SessionTimeoutError,
   describeFailedResult,
@@ -324,6 +325,59 @@ describe("runSession budgets", () => {
       warn.mockRestore();
     }
   }, 20_000);
+});
+
+describe("runSession abort", () => {
+  it("kills the child when the caller's signal fires, without waiting out a budget", async () => {
+    const controller = new AbortController();
+    const started = Date.now();
+    const run = runSession(
+      behavingSession(WEDGED, { idleMs: 60_000, signal: controller.signal }),
+      () => "parsed",
+    );
+    setTimeout(() => {
+      controller.abort();
+    }, 300);
+
+    const error = await failureOf(run);
+
+    expect(error).toBeInstanceOf(SessionAbortedError);
+    expect(error.message).toMatch(/fake pass of SSX-1234 was stopped/u);
+    expect(Date.now() - started).toBeLessThan(8000);
+  });
+
+  it("starts nothing when the signal has already fired", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const error = await failureOf(
+      runSession(
+        behavingSession(WEDGED, {
+          executable: "/nonexistent/storecode",
+          signal: controller.signal,
+        }),
+        () => "parsed",
+      ),
+    );
+
+    // A spawn would have failed with ENOENT instead.
+    expect(error).toBeInstanceOf(SessionAbortedError);
+  });
+
+  it("lets a run with a quiet signal finish as it would without one", async () => {
+    const controller = new AbortController();
+
+    const value = await runSession(
+      {
+        ...fakeSession([{ ...RESULT, structured_output: { ok: true } }]),
+        signal: controller.signal,
+      },
+      (output) => output,
+    );
+
+    expect(value).toEqual({ ok: true });
+    controller.abort();
+  });
 });
 
 describe("runSession cost reporting", () => {
