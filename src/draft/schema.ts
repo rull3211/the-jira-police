@@ -8,6 +8,7 @@ export const SUMMARY_MAX = 255;
 /** Under Jira's description limit, and leaves a direct message room for the rest under Slack's. */
 export const DESCRIPTION_MAX = 30_000;
 export const REASON_MAX = 600;
+export const FEEDBACK_MAX = 3_000;
 export const LIST_ITEM_MAX = 300;
 export const LIST_MAX = 10;
 
@@ -24,6 +25,8 @@ export const DRAFT_SCHEMA = {
     "component",
     "issueType",
     "description",
+    "duplicateOf",
+    "feedback",
     "reposRead",
     "injectionNoticed",
   ],
@@ -63,6 +66,15 @@ export const DRAFT_SCHEMA = {
     description: {
       type: "string",
       description: `The whole ticket body in Markdown, in the shape SKILL.md gives, at most ${String(DESCRIPTION_MAX)} characters. Empty when not draftable.`,
+    },
+    duplicateOf: {
+      type: "string",
+      description:
+        "The key of the one existing Jira issue that already asks for what the thread asks, such as SSX-3534, found by searching Jira and read before you name it. Only when draftable is false. Empty when no issue is that clear a match: a related issue is not a duplicate, and a doubt belongs in questions.",
+    },
+    feedback: {
+      type: "string",
+      description: `The comment to add to the issue named in duplicateOf, in Markdown, in the thread's language: what this thread says that the issue does not, such as who asked, the behaviour they expect, a case the issue misses. Not a restatement of the issue. At most ${String(FEEDBACK_MAX)} characters. Empty when duplicateOf is empty.`,
     },
     reposRead: {
       type: "array",

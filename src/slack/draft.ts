@@ -24,7 +24,7 @@ export function isDraftMention(text: string): boolean {
 }
 
 export const DRAFT_USAGE =
-  "In any thread I am in, `@Bencebot draft` reads the whole thread and sends you a drafted Jira ticket as a direct message, or says why the thread does not make one. Nothing is filed.";
+  "In any thread I am in, `@Bencebot draft` reads the whole thread and sends you a drafted Jira ticket as a direct message, or, when an open ticket already asks for the same, the comment to add to it, or says why the thread makes neither. Nothing is filed.";
 
 export interface DraftMentionDeps {
   readonly allowed: readonly string[];

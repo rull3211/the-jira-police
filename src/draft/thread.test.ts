@@ -28,6 +28,7 @@ function result(overrides: Partial<DraftResult> = {}): DraftResult {
       issueType: "Oppgave",
       description: "## Where\n\n- `ExportService.ts:40`",
     },
+    duplicate: null,
     reason: "One ask.",
     questions: [],
     reposRead: ["commerce-rest"],
@@ -35,6 +36,8 @@ function result(overrides: Partial<DraftResult> = {}): DraftResult {
     ...overrides,
   };
 }
+
+const DUPLICATE = { key: "SSX-3534", feedback: "Rådgiver ber om å åpne kunden fra handlekurven." };
 
 function deps(
   messages: readonly ThreadMessage[],
@@ -89,6 +92,16 @@ describe("draftThread", () => {
     const outcome = await draftThread(deps([message()], true, result({ ticket: null })), THREAD);
 
     expect(outcome.kind).toBe("declined");
+  });
+
+  it("reports a session that named a duplicate and wrote its comment as a duplicate, not a decline", async () => {
+    const outcome = await draftThread(
+      deps([message()], true, result({ ticket: null, duplicate: DUPLICATE })),
+      THREAD,
+    );
+
+    expect(outcome.kind).toBe("duplicate");
+    expect(outcome.kind === "duplicate" && outcome.duplicate).toEqual(DUPLICATE);
   });
 
   it.each<[string, ReturnType<typeof deps>, ThreadDraftOutcome["kind"]]>([
@@ -152,6 +165,10 @@ describe("renderDraftMessage", () => {
     const texts = [
       renderDraftMessage({ kind: "drafted", ticket: drafted.ticket!, result: drafted }, where),
       renderDraftMessage({ kind: "declined", result: drafted }, where),
+      renderDraftMessage(
+        { kind: "duplicate", duplicate: { key: hostile, feedback: hostile }, result: drafted },
+        where,
+      ),
       renderDraftMessage({ kind: "too-long", reason: hostile }, where),
     ];
 
@@ -183,6 +200,28 @@ describe("renderDraftMessage", () => {
       "*No ticket drafted* from <https://acme.slack.com/archives/C0THREAD1/p1712345678000100|this thread>: Two asks.",
     );
     expect(text).toContain("• Which first?");
+  });
+
+  it("gives a duplicate its key, its reason and the comment, and says nothing was commented", () => {
+    const text = renderDraftMessage(
+      {
+        kind: "duplicate",
+        duplicate: DUPLICATE,
+        result: result({
+          ticket: null,
+          duplicate: DUPLICATE,
+          reason: "Asks for what SSX-3534 asks.",
+          questions: ["Is it the Back button?"],
+        }),
+      },
+      where,
+    );
+
+    expect(text).toContain("*Duplicate of SSX-3534*, so no ticket drafted from <https://");
+    expect(text).toContain("_Asks for what SSX-3534 asks._");
+    expect(text).toContain(`*Comment to add to SSX-3534*\n${DUPLICATE.feedback}`);
+    expect(text).toContain("• Is it the Back button?");
+    expect(text.endsWith("Nothing has been filed or commented in Jira.")).toBe(true);
   });
 
   it("warns the reader when the thread spoke to the bot", () => {

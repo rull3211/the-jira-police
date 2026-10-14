@@ -12,6 +12,7 @@ import { runSession } from "../triage/session.ts";
 import {
   DESCRIPTION_MAX,
   DRAFT_SCHEMA_JSON,
+  FEEDBACK_MAX,
   LIST_ITEM_MAX,
   LIST_MAX,
   REASON_MAX,
@@ -19,6 +20,9 @@ import {
 } from "./schema.ts";
 
 export const DRAFT_SKILL = "thread-draft";
+
+/** The whole value and nothing else: a key inside a sentence or a URL is the model's prose, not a key. */
+const ISSUE_KEY = /^[A-Z][A-Z0-9]+-[1-9][0-9]*$/u;
 
 export interface DraftRunOptions {
   /** `<channel>-<threadTs>`, naming the run in the slash line and the log. */
@@ -46,9 +50,17 @@ export interface DraftTicket {
   readonly description: string;
 }
 
+/** An existing issue the thread asks for again, and the comment the thread adds to it. */
+export interface DraftDuplicate {
+  readonly key: string;
+  readonly feedback: string;
+}
+
 export interface DraftResult {
   /** Non-null exactly when the session said the thread makes a ticket and returned one. */
   readonly ticket: DraftTicket | null;
+  /** Non-null exactly when the session said it is no ticket, named an issue, and wrote the comment. */
+  readonly duplicate: DraftDuplicate | null;
   readonly reason: string;
   readonly questions: readonly string[];
   readonly reposRead: readonly string[];
@@ -127,8 +139,13 @@ export function parseDraft(value: unknown): DraftResult {
   const missing = [summary === "" ? "summary" : "", description === "" ? "description" : ""]
     .filter((field) => field !== "")
     .join(" and ");
+  const named = oneLine(text(source["duplicateOf"]));
+  const key = ISSUE_KEY.test(named) ? named : "";
+  const feedback = shortenToSentence(text(source["feedback"]).trim(), FEEDBACK_MAX);
+  // A ticket and a duplicate of an existing issue contradict each other, and neither is taken.
+  const contradiction = claimed && key !== "";
   const ticket =
-    claimed && missing === ""
+    claimed && !contradiction && missing === ""
       ? {
           summary,
           project: oneLine(text(source["project"])),
@@ -137,12 +154,18 @@ export function parseDraft(value: unknown): DraftResult {
           description,
         }
       : null;
+  const duplicate = !claimed && key !== "" && feedback !== "" ? { key, feedback } : null;
+  const preface = contradiction
+    ? `The run said the thread makes a ticket and also that it duplicates ${key}, which cannot both hold.`
+    : claimed && missing !== ""
+      ? `The run said the thread makes a ticket and returned no ${missing}.`
+      : !claimed && key !== "" && feedback === ""
+        ? `The run named ${key} as a duplicate and wrote no comment for it.`
+        : "";
   return {
     ticket,
-    reason:
-      claimed && missing !== ""
-        ? `The run said the thread makes a ticket and returned no ${missing}. ${said}`.trim()
-        : said,
+    duplicate,
+    reason: `${preface} ${said}`.trim(),
     questions: list(source["questions"]),
     reposRead: list(source["reposRead"]),
     injectionNoticed: list(source["injectionNoticed"]),

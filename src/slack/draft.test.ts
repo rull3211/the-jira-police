@@ -29,12 +29,29 @@ function drafted(): ThreadDraftOutcome {
       issueType: "Oppgave",
       description: "## Where",
     },
+    duplicate: null,
     reason: "One ask.",
     questions: [],
     reposRead: ["commerce-rest"],
     injectionNoticed: [],
   };
   return { kind: "drafted", ticket: result.ticket!, result };
+}
+
+function duplicate(): ThreadDraftOutcome {
+  const found = { key: "SSX-3534", feedback: "Rådgiver ber om å åpne kunden." };
+  return {
+    kind: "duplicate",
+    duplicate: found,
+    result: {
+      ticket: null,
+      duplicate: found,
+      reason: "Asks for what SSX-3534 asks.",
+      questions: [],
+      reposRead: [],
+      injectionNoticed: [],
+    },
+  };
 }
 
 interface Harness {
@@ -113,6 +130,18 @@ describe("createDraftHandler", () => {
     expect(h.sent[0]?.text).toContain("*commerce-rest: raise the export timeout*");
     expect(h.sent[0]?.text).toContain(`<${LINK}|this thread>`);
     expect(h.draft).toHaveBeenCalledWith({ channel: "C0THREAD1", threadTs: "1712345678.000100" });
+  });
+
+  it("sends the comment a duplicate thread adds to an open issue the way it sends a ticket", async () => {
+    const h = harness({ draft: vi.fn(async () => duplicate()) });
+    const handler = createDraftHandler(h.deps);
+
+    await handler.handle(mention());
+    await handler.settled();
+
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0]?.text).toContain("*Duplicate of SSX-3534*");
+    expect(h.sent[0]?.text).toContain("*Comment to add to SSX-3534*\nRådgiver ber om å åpne kunden.");
   });
 
   it("returns once it has answered, while the draft is still running", async () => {
@@ -262,5 +291,6 @@ describe("createDraftHandler", () => {
   it("offers the usage it promises", () => {
     expect(DRAFT_USAGE).toContain("`@Bencebot draft`");
     expect(DRAFT_USAGE).toContain("Nothing is filed.");
+    expect(DRAFT_USAGE).toContain("comment");
   });
 });

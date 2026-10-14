@@ -38,15 +38,18 @@ function usage(): never {
       "  <OUTPUT_DIR>/slack/<channel>-<ts>.draft.md, the outcome beside it as .draft.json.\n" +
       "  Dry by default: sends nothing. --dm also sends that message to SLACK_OPERATOR_USER_ID.\n" +
       "  Nothing is ever written to Jira. A real run is paid for, like a triage.\n" +
-      "  Exit: 0 drafted, 1 not drafted (the thread was empty, too long, or made no ticket, and\n" +
-      "  why), 2 this usage, 3 the run threw, 4 written but --dm could not send it, 78 a setting\n" +
-      "  missing, a token that is not a bot token, or a keychain dialog denied.\n",
+      "  Exit: 0 drafted (a ticket, or the comment a thread that duplicates an open issue adds to\n" +
+      "  it), 1 not drafted (the thread was empty, too long, or made neither, and why), 2 this\n" +
+      "  usage, 3 the run threw, 4 written but --dm could not send it, 78 a setting missing, a\n" +
+      "  token that is not a bot token, or a keychain dialog denied.\n",
   );
   process.exit(EXIT.usage);
 }
 
 const EXIT_FOR: Readonly<Record<ThreadDraftOutcome["kind"], number>> = {
   drafted: EXIT.drafted,
+  // The comment is a draft a person acts on, the same as a ticket; `.draft.json` says which it was.
+  duplicate: EXIT.drafted,
   declined: EXIT.notDrafted,
   empty: EXIT.notDrafted,
   "too-long": EXIT.notDrafted,

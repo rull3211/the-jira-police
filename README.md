@@ -679,7 +679,8 @@ command typed in a thread, which is why this is a mention rather than `/bencebot
 **`@Bencebot draft` in any thread the bot is in drafts a Jira ticket from it, for someone on
 `SLACK_DRAFT_USERS`.** The listener answers at once with a reply only the asker sees, then does what
 `slack:draft` below does — reads the whole thread and runs the read-only `thread-draft` session over
-it — and sends the asker the draft, or why the thread does not make one, as a direct message.
+it — and sends the asker the draft, or, when an open ticket already asks for the same, the comment to add to
+it, or why the thread makes neither, as a direct message.
 Nothing is written to Jira. Anyone else is refused before the thread is read, a mention outside a
 thread is answered with usage, and one draft runs at a time: a second is refused until the first
 arrives. The session runs off the listener's chain, so `/bencebot` and `@Bencebot start` are
@@ -708,12 +709,13 @@ by hand: with `SOLVE_ENABLED` on, the next solve tick claims the ticket and pays
 `thread-draft` session over it: read-only, with the analyst's tools — Jira and Confluence through
 the Atlassian MCP — the vault, and every checkout `SOLVE_REPOS` and `SOLVE_READ_DIRS` name under
 `SOLVE_REPO_ROOT`, and no Jira or Slack credential. The direct message `@Bencebot draft` would send
-— the drafted ticket, or why the thread does not make one, with its open questions — goes to
+— the drafted ticket; or, for a thread that duplicates an open issue, that issue's key and the comment the
+thread adds to it; or why the thread makes neither, with its open questions — goes to
 `<OUTPUT_DIR>/slack/<channel>-<ts>.draft.md`, and the outcome beside it as `.draft.json`. Dry by
 default, nothing is sent; nothing is ever written to Jira. A thread over 500 messages or 100 000 characters is refused
 before the session is paid for. `--dm` also sends the message to `SLACK_OPERATOR_USER_ID`, checked
-before the session runs, as a direct message from the bot. Exit 0 means a ticket was drafted, 1
-that none was and why, 3 that the run threw, 4 that the message was written and `--dm` could not
+before the session runs, as a direct message from the bot. Exit 0 means a ticket or a duplicate's comment
+was drafted (`.draft.json` says which), 1 that neither was and why, 3 that the run threw, 4 that the message was written and `--dm` could not
 send it.
 
 **`slack:probe <KEY>` measures what that rests on.**

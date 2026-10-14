@@ -5,7 +5,7 @@
 
 import type { ThreadMessage } from "../slack/client.ts";
 import { escape } from "../slack/render.ts";
-import type { DraftResult, DraftTicket } from "./runner.ts";
+import type { DraftDuplicate, DraftResult, DraftTicket } from "./runner.ts";
 
 export const THREAD_MAX_MESSAGES = 500;
 /** The thread travels in the prompt, and the prompt is one argv element. */
@@ -48,6 +48,11 @@ export type ThreadDraftOutcome =
       readonly ticket: DraftTicket;
       readonly result: DraftResult;
     }
+  | {
+      readonly kind: "duplicate";
+      readonly duplicate: DraftDuplicate;
+      readonly result: DraftResult;
+    }
   | { readonly kind: "declined"; readonly result: DraftResult };
 
 /** Throws what the session throws — a dropped MCP server, a timeout — for the caller to report. */
@@ -73,9 +78,12 @@ export async function draftThread(
     };
   }
   const result = await deps.draft(rendered, threadLabel(thread));
-  return result.ticket === null
+  if (result.ticket !== null) {
+    return { kind: "drafted", ticket: result.ticket, result };
+  }
+  return result.duplicate === null
     ? { kind: "declined", result }
-    : { kind: "drafted", ticket: result.ticket, result };
+    : { kind: "duplicate", duplicate: result.duplicate, result };
 }
 
 export function threadLabel(thread: ThreadRef): string {
@@ -102,6 +110,20 @@ export function renderDraftMessage(outcome: ThreadDraftOutcome, where: string): 
         ...questions(outcome.result),
         ...footer(outcome.result),
       ].join("\n");
+    case "duplicate": {
+      const { duplicate, result } = outcome;
+      return [
+        `*Duplicate of ${escape(duplicate.key)}*, so no ticket drafted from ${where}`,
+        `_${escape(result.reason)}_`,
+        "",
+        `*Comment to add to ${escape(duplicate.key)}*`,
+        escape(duplicate.feedback),
+        ...questions(result),
+        "",
+        ...footer(result),
+        "Nothing has been filed or commented in Jira.",
+      ].join("\n");
+    }
     case "drafted": {
       const { ticket, result } = outcome;
       return [

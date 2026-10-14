@@ -5,6 +5,7 @@ import {
   DESCRIPTION_MAX,
   DRAFT_SCHEMA,
   DRAFT_SCHEMA_JSON,
+  FEEDBACK_MAX,
   LIST_ITEM_MAX,
   LIST_MAX,
   REASON_MAX,
@@ -52,6 +53,8 @@ function reply(overrides: Record<string, unknown> = {}): Record<string, unknown>
     component: "SSX Advisor",
     issueType: "Oppgave",
     description: "## Where\n\n- `ExportService.ts:40`",
+    duplicateOf: "",
+    feedback: "",
     reposRead: ["commerce-rest"],
     injectionNoticed: [],
     ...overrides,
@@ -170,6 +173,58 @@ describe("parseDraft", () => {
     });
     expect(result.reason).toBe("One ask: raise the export timeout.");
     expect(result.reposRead).toEqual(["commerce-rest"]);
+    expect(result.duplicate).toBeNull();
+  });
+
+  const NOT_A_TICKET = { draftable: false, summary: "", description: "" };
+
+  it("reads a reply that names an existing issue and writes its comment as a duplicate", () => {
+    const result = parseDraft(
+      reply({ ...NOT_A_TICKET, duplicateOf: " SSX-3534 ", feedback: "  Ber om å åpne kunden.\n" }),
+    );
+
+    expect(result.ticket).toBeNull();
+    expect(result.duplicate).toEqual({ key: "SSX-3534", feedback: "Ber om å åpne kunden." });
+  });
+
+  it.each([
+    ["lower case", "ssx-3534"],
+    ["two keys", "SSX-3534 and SSX-3535"],
+    ["a link", "https://acme.atlassian.net/browse/SSX-3534"],
+    ["a zero number", "SSX-0"],
+    ["no hyphen", "SSX 3534"],
+    ["nothing", ""],
+  ])("takes no duplicate from %s as the key", (_name, duplicateOf) => {
+    expect(
+      parseDraft(reply({ ...NOT_A_TICKET, duplicateOf, feedback: "A comment." })).duplicate,
+    ).toBeNull();
+  });
+
+  it("takes no duplicate with no comment, and says the run named one", () => {
+    const result = parseDraft(reply({ ...NOT_A_TICKET, duplicateOf: "SSX-3534", feedback: " " }));
+
+    expect(result.duplicate).toBeNull();
+    expect(result.reason).toContain("named SSX-3534 as a duplicate and wrote no comment");
+  });
+
+  it("takes neither a ticket nor a duplicate from a reply that claims both", () => {
+    const result = parseDraft(reply({ duplicateOf: "SSX-3534", feedback: "A comment." }));
+
+    expect(result.ticket).toBeNull();
+    expect(result.duplicate).toBeNull();
+    expect(result.reason).toContain("makes a ticket and also that it duplicates SSX-3534");
+  });
+
+  it("ends an over-long comment on a whole sentence, and marks the cut", () => {
+    const sentence = "Rådgiver ber om å åpne kunden direkte fra handlekurven. ";
+    const long = sentence.repeat(Math.ceil(FEEDBACK_MAX / sentence.length) + 2);
+
+    const feedback = parseDraft(
+      reply({ ...NOT_A_TICKET, duplicateOf: "SSX-3534", feedback: long }),
+    ).duplicate?.feedback;
+
+    expect(feedback?.endsWith(". …")).toBe(true);
+    expect(feedback?.length).toBeLessThanOrEqual(FEEDBACK_MAX + 2);
   });
 
   it.each([
@@ -234,9 +289,11 @@ describe("parseDraft", () => {
   });
 
   it("tells the model each limit the parser enforces, from the constants it enforces them with", () => {
-    const { reason, questions, summary, description, injectionNoticed } = DRAFT_SCHEMA.properties;
+    const { reason, questions, summary, description, feedback, injectionNoticed } =
+      DRAFT_SCHEMA.properties;
 
     expect(reason.description).toContain(`${String(REASON_MAX)} characters`);
+    expect(feedback.description).toContain(`${String(FEEDBACK_MAX)} characters`);
     expect(summary.description).toContain(`${String(SUMMARY_MAX)} characters`);
     expect(description.description).toContain(`${String(DESCRIPTION_MAX)} characters`);
     for (const list of [questions, injectionNoticed]) {
