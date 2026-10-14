@@ -1204,6 +1204,24 @@ see.
   draft that can only reach a direct message tolerates that; a session holding `createJiraIssue` is
   where it has to be measured first.
 
+### 83. A thread that duplicates an open ticket is feedback on it, and the draft throws that away
+
+**Branch:** `feat/slack-draft`
+
+**What is being attempted.** The first real draft, on 2026-10-14, declined a thread as a duplicate of
+SSX-3534 and said nothing a person could act on beyond the key. The operator confirmed it was a
+duplicate, and that what a duplicate thread adds to the ticket is worth keeping. A duplicate becomes
+its own outcome: the existing issue's key and the comment the thread adds to it, drafted into the
+direct message. Nothing is written to Jira; posting that comment is `post`'s, §81.
+
+**What would make it the wrong idea:**
+
+- **The session cannot tell a duplicate from a neighbour.** That run called the thread a clear
+  duplicate while its own first question asked whether the thread meant the same thing as the ticket.
+  A comment aimed at the wrong issue is worse than a declined thread once `post` can write it.
+- **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
+  person reading it once will stop.
+
 ## Verification
 
 Unit and integration, following existing patterns, plus the house rule: **a guard is not shipped
