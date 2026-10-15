@@ -67,8 +67,12 @@ interface Harness {
   readonly get: ReturnType<typeof vi.fn<PendingStore["get"]>>;
   readonly facts: ReturnType<typeof vi.fn<FileGateDeps["facts"]>>;
   readonly rehearse: ReturnType<typeof vi.fn<PostClickDeps["rehearse"]>>;
+  /** What the person was told as an answer; the acknowledgement that filing has begun is in `acks`. */
   readonly replies: { readonly click: Click; readonly text: string }[];
+  readonly acks: string[];
 }
+
+const ACK = "Filing this draft now.";
 
 /** A store that holds one record and applies `update` the way the file store does. */
 function holding(record: PendingDraft = DRAFT): {
@@ -99,6 +103,7 @@ function holding(record: PendingDraft = DRAFT): {
 
 function harness(overrides: Partial<PostClickDeps> = {}): Harness {
   const replies: { click: Click; text: string }[] = [];
+  const acks: string[] = [];
   const { get, store } = holding();
   const facts = vi.fn<FileGateDeps["facts"]>(async () => ({
     components: ["SSX Advisor"],
@@ -112,11 +117,15 @@ function harness(overrides: Partial<PostClickDeps> = {}): Harness {
     gate: { projects: ["SSX"], facts },
     rehearse,
     reply: async (pressed, text) => {
-      replies.push({ click: pressed, text });
+      if (text.startsWith(ACK)) {
+        acks.push(text);
+      } else {
+        replies.push({ click: pressed, text });
+      }
     },
     ...overrides,
   };
-  return { deps, get, facts, rehearse, replies };
+  return { deps, get, facts, rehearse, replies, acks };
 }
 
 describe("createPostHandler", () => {
@@ -459,17 +468,21 @@ describe("a press on a live listener", () => {
   function filing(overrides: Partial<FilingDeps> = {}): {
     readonly deps: FilingDeps;
     readonly file: ReturnType<typeof vi.fn<FilingDeps["file"]>>;
+    readonly announce: ReturnType<typeof vi.fn<FilingDeps["announce"]>>;
   } {
     const file = vi.fn<FilingDeps["file"]>(async () => ({ kind: "created", key: "SSX-4100" }));
+    const announce = vi.fn<FilingDeps["announce"]>(async () => undefined);
     return {
       deps: {
         file,
         readBack: async () => readBack(TICKET),
         issueUrl: (key) => `https://jira.example/browse/${key}`,
+        announce,
         now: () => new Date("2026-10-15T09:00:00.000Z"),
         ...overrides,
       },
       file,
+      announce,
     };
   }
 
@@ -502,7 +515,7 @@ describe("a press on a live listener", () => {
     expect(h.rehearse).not.toHaveBeenCalled();
     expect(h.replies).toHaveLength(1);
     expect(h.replies[0]?.text).toMatch(
-      /^Filed as <https:\/\/jira\.example\/browse\/SSX-4100\|SSX-4100>\. Read back from Jira: project, type, summary and component match, and the body arrived \(\d+ of \d+ characters\)\.$/u,
+      /^Filed as <https:\/\/jira\.example\/browse\/SSX-4100\|SSX-4100>\. Read back from Jira: project, type, summary and component match, and the body arrived \(\d+ of \d+ characters\)\. The link is posted in the thread the draft came from\.$/u,
     );
   });
 
@@ -711,6 +724,170 @@ describe("a press on a live listener", () => {
     await createPostHandler(h.deps).handle(click());
 
     expect(h.replies[0]?.text).toMatch(/^Filed as SSX-4100\./u);
+  });
+
+  describe("acknowledging the press", () => {
+    it("says filing has begun before the writer runs, in the draft's thread, so the press never looks dead", async () => {
+      const s = holding({ ...DRAFT, ticket: TICKET });
+      const f = filing();
+      const reply = vi.fn<PostClickDeps["reply"]>(async () => undefined);
+      const h = harness({ pending: s.store, filing: f.deps, reply });
+
+      await createPostHandler(h.deps).handle(click({ threadTs: "8.8" }));
+
+      expect(reply.mock.calls[0]?.[0]).toMatchObject({ threadTs: "8.8" });
+      expect(reply.mock.calls[0]?.[1]).toMatch(
+        /^Filing this draft now\. The writer takes about half a minute/u,
+      );
+      expect(reply.mock.invocationCallOrder[0]).toBeLessThan(
+        f.file.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(reply).toHaveBeenCalledTimes(2);
+    });
+
+    it("files all the same when the acknowledgement cannot be sent, and logs that it could not", async () => {
+      const s = holding({ ...DRAFT, ticket: TICKET });
+      const f = filing();
+      const sent: string[] = [];
+      const h = harness({
+        pending: s.store,
+        filing: f.deps,
+        reply: async (_pressed, text) => {
+          if (text.startsWith(ACK)) {
+            throw new Error("ratelimited");
+          }
+          sent.push(text);
+        },
+      });
+
+      const lines = await logged(() => createPostHandler(h.deps).handle(click()));
+
+      expect(f.file).toHaveBeenCalledOnce();
+      expect(sent[0]).toMatch(/^Filed as /u);
+      expect(lines.find((line) => line["message"] === "slack.post_ack_failed")).toMatchObject({
+        reason: "ratelimited",
+      });
+    });
+
+    it.each([
+      ["a refusal at the gate", [] as string[], undefined],
+      [
+        "a draft already filed",
+        undefined,
+        { filed: { key: "SSX-4000", at: "2026-10-14T13:00:00.000Z" } },
+      ],
+      [
+        "a draft whose filing began",
+        undefined,
+        { filing: { startedAt: "2026-10-15T08:00:00.000Z" } },
+      ],
+    ])(
+      "does not acknowledge %s, where nothing is going to be filed",
+      async (_what, facts, marks) => {
+        const { h } = live({}, { ...DRAFT, ticket: TICKET, ...marks });
+        if (facts !== undefined) {
+          h.facts.mockResolvedValue({ components: facts, issueTypes: ["Oppgave"] });
+        }
+
+        await createPostHandler(h.deps).handle(click());
+
+        expect(h.acks).toEqual([]);
+      },
+    );
+
+    it("does not acknowledge a press on a dry listener", async () => {
+      const s = holding({ ...DRAFT, ticket: TICKET });
+      const h = harness({ pending: s.store, filing: filing().deps, dry: true });
+
+      await createPostHandler(h.deps).handle(click());
+
+      expect(h.acks).toEqual([]);
+    });
+  });
+
+  describe("posting the link where the draft came from", () => {
+    it("says in the thread the draft was asked for in what was filed, with a link and the title", async () => {
+      const { h, f } = live();
+
+      await createPostHandler(h.deps).handle(click());
+
+      expect(f.announce).toHaveBeenCalledExactlyOnceWith(
+        { channel: "C0THREAD1", threadTs: "1712345678.000100" },
+        "Filed as <https://jira.example/browse/SSX-4100|SSX-4100>: commerce-rest: raise the export timeout. Drafted from this thread.",
+      );
+      expect(h.replies[0]?.text).toContain("The link is posted in the thread the draft came from.");
+    });
+
+    it("escapes the title, which a model wrote, before it goes into a channel", async () => {
+      const hostile = { ...TICKET, summary: "<!channel> & co" };
+      const { f, h } = live({}, { ...DRAFT, ticket: hostile });
+
+      await createPostHandler(h.deps).handle(click());
+
+      const said = f.announce.mock.calls[0]?.[1] ?? "";
+      expect(said).toContain("&lt;!channel&gt; &amp; co");
+      expect(said).not.toContain("<!channel>");
+    });
+
+    it("links the key only where a safe address can be made, here as well", async () => {
+      const { h, f } = live({ issueUrl: () => null });
+
+      await createPostHandler(h.deps).handle(click());
+
+      expect(f.announce.mock.calls[0]?.[1]).toMatch(/^Filed as SSX-4100: /u);
+      expect(h.replies[0]?.text).toBeDefined();
+    });
+
+    it("still files, records the key and answers when the thread cannot be written to, and says so", async () => {
+      const { h, s } = live({
+        announce: async () => {
+          throw new Error("not_in_channel");
+        },
+      });
+
+      const lines = await logged(() => createPostHandler(h.deps).handle(click()));
+
+      expect(s.current().filed?.key).toBe("SSX-4100");
+      expect(h.replies[0]?.text).toMatch(/^Filed as /u);
+      expect(h.replies[0]?.text).toContain(
+        "I could not post the link in the thread the draft came from (not_in_channel).",
+      );
+      expect(lines.find((line) => line["message"] === "slack.post_link_failed")).toMatchObject({
+        key: "SSX-4100",
+        reason: "not_in_channel",
+      });
+    });
+
+    it.each([
+      ["Jira provably refused", { kind: "not-created", reason: "refused" } as const],
+      ["the outcome is unclear", { kind: "unclear", reason: "timed out" } as const],
+    ])("posts nothing there when %s, since there is no issue to link", async (_what, outcome) => {
+      const { h, f } = live({ file: async () => outcome });
+
+      await createPostHandler(h.deps).handle(click());
+
+      expect(f.announce).not.toHaveBeenCalled();
+    });
+
+    it("posts it once: a second press answers with the key and says nothing more there", async () => {
+      const { h, f } = live();
+      const handler = createPostHandler(h.deps);
+
+      await handler.handle(click());
+      await handler.handle(click());
+
+      expect(f.announce).toHaveBeenCalledOnce();
+    });
+
+    it("posts nothing under a dry listener", async () => {
+      const s = holding({ ...DRAFT, ticket: TICKET });
+      const f = filing();
+      const h = harness({ pending: s.store, filing: f.deps, dry: true });
+
+      await createPostHandler(h.deps).handle(click());
+
+      expect(f.announce).not.toHaveBeenCalled();
+    });
   });
 
   it("is a rehearsal under a dry listener even when a writer was handed to it", async () => {

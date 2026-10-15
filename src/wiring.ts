@@ -685,6 +685,9 @@ export function clickHandlerFor(
                 ticket: draft.ticket,
               }),
             readBack: (key) => jira.fetchFiled(key),
+            announce: async (thread, text) => {
+              await slack.post({ channel: thread.channel, text, threadTs: thread.threadTs });
+            },
             issueUrl: (key) => {
               const url = new URL(`/browse/${key}`, settings.JIRA_BASE_URL).href;
               return /^https:\/\/[^\s<>|]+$/u.test(url) ? url : null;

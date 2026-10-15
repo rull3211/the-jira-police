@@ -701,8 +701,10 @@ the request it would make to `<OUTPUT_DIR>/slack/<id>.issue.json`, files nothing
 thread of the draft's first message, the reply starting `(dry run, nothing filed)`. Under
 `slack:listen --write` and `SLACK_LISTEN=live` **it files the draft**: a session that holds
 `createJiraIssue` and no other tool makes the one call, the issue is read back from Jira and
-compared, and the key and a link go into that thread with what the read-back found. The draft's
-record is marked before the call, so a draft already filed answers with its key, and one whose
+compared, and the key and a link go into that thread with what the read-back found. The press is
+acknowledged there first, since the call takes about half a minute, and once the issue exists the
+link is also posted in the thread the draft was asked for in, which is best effort and never changes
+what was filed. The draft's record is marked before the call, so a draft already filed answers with its key, and one whose
 filing began and did not end, which may have made an issue, is never filed again: its reply says
 which summary to search for. Anyone else is refused before the thread is read, a mention outside a
 thread is answered with usage, and one draft runs at a time: a second is refused until the first

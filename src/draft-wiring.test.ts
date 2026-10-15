@@ -531,13 +531,22 @@ describe("the Post button, from a mention to a direct message", () => {
       // The service itself never writes to Jira: the create is the writer's, and the rest are reads.
       expect(jira.every((call) => call.method === "GET")).toBe(true);
       expect(jira.some((call) => call.what === "/rest/api/3/issue/SSX-4100")).toBe(true);
-      // The draft is a message and its reply; the one after them is the answer to the press.
-      const answer = postedMessages(calls)[TICKET_MESSAGES];
-      expect(postedMessages(calls)).toHaveLength(TICKET_MESSAGES + 1);
+      // The draft is a message and its reply. After them: the acknowledgement to the asker, the link in
+      // the thread the draft came from, and the answer to the press.
+      const [acknowledged, announced, answer] = postedMessages(calls).slice(TICKET_MESSAGES);
+      expect(postedMessages(calls)).toHaveLength(TICKET_MESSAGES + 3);
+      expect(acknowledged?.form.get("channel")).toBe("D0DM");
+      expect(acknowledged?.form.get("thread_ts")).toBe("9.9");
+      expect(acknowledged?.form.get("text")).toMatch(/^Filing this draft now\./u);
+      expect(announced?.form.get("channel")).toBe("C0THREAD1");
+      expect(announced?.form.get("thread_ts")).toBe("1712345678.000100");
+      expect(announced?.form.get("text")).toBe(
+        "Filed as <https://storebrand.atlassian.net/browse/SSX-4100|SSX-4100>: commerce-rest: raise the export timeout. Drafted from this thread.",
+      );
       expect(answer?.form.get("channel")).toBe("D0DM");
       expect(answer?.form.get("thread_ts")).toBe("9.9");
       expect(answer?.form.get("text")).toMatch(
-        /^Filed as <https:\/\/storebrand\.atlassian\.net\/browse\/SSX-4100\|SSX-4100>\. Read back from Jira: project, type, summary and component match/u,
+        /^Filed as <https:\/\/storebrand\.atlassian\.net\/browse\/SSX-4100\|SSX-4100>\. Read back from Jira: project, type, summary and component match.*The link is posted in the thread the draft came from\.$/u,
       );
       const kept = JSON.parse(
         readFileSync(join(root, "state", "pending-drafts", `${id}.json`), "utf8"),

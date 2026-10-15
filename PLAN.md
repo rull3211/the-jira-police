@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4032 tests in 121 files**, no build step.
+> **4046 tests in 121 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -628,18 +628,21 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   first message with no button and no record and an ephemeral reply admitting it, shown only against a
   stub. **What would show it:** a saved `.draft.json` padded by hand and sent with
   `pnpm slack:draft <link> --dm --replay <file>`, since a session never writes a draft that long.
-- **The writer has never filed a real ticket.** Every step between a press and Jira is tested against
-  stubs, and its session's containment is measured at the flags, against a project key that does not
-  exist (`pnpm draft:probe`, 2026-10-15: a name in `--disallowedTools` leaves the session's tool list,
-  and a tool left out of `--allowedTools` stays listed with its call refused). Not seen: the shape
-  `createJiraIssue` returns on success, which `classify` reads as a `key` field, else the one key in
-  the text, and otherwise calls unclear; that Jira's conversion of the Markdown body keeps its words,
-  which the read-back compares by letters and digits; and what the daemon does with a new ticket on
-  its board. Not tried: the refusal of `transitionJiraIssue`, `editJiraIssue` and `createIssueLink`,
-  the same rule as the one tried, and a session with its skill, `--add-dir`s and hooks.
-  **What would show it:** `DRAFT_PROJECTS=SSX pnpm slack:listen --write`, a draft sent with
-  `pnpm slack:draft <link> --dm`, the button pressed. The reply must read `Filed as SSX-<n>` and
-  `Read back from Jira: … match`, and `state/pending-drafts/<id>.json` must carry both marks.
+- **The writer has filed one real ticket, and little else of it has been seen.** On 2026-10-15 a press
+  on a live listener filed SSX-4124: the writer session (3 turns, 0.30 dollars) made its one call about
+  thirty seconds after the press, the key came back in a form the classifier read, the read-back found
+  project, type, summary and component as sent and the body whole (7 275 of 7 275 characters), and
+  Jira lists the operator as the reporter, since the writer posts through the operator's own
+  Atlassian connection. A second press, queued behind the first, answered with the key and created
+  nothing. The reply came about 33 seconds after the press with nothing in between, which read as no
+  response and drew that second press; the acknowledgement, and the link posted in the thread the
+  draft came from, were built after and have not been watched. Not seen: how the body looks in Jira
+  beyond its words (links, code spans, headings), a refusal or an unclear outcome from a real
+  filing, what the daemon does with a new ticket on its board, a link posted to a channel the bot has
+  not joined, the refusal of `transitionJiraIssue`, `editJiraIssue` and `createIssueLink`, the same
+  rule as the one tried, and a session with its skill, `--add-dir`s and hooks. **What would show
+  it:** press the button of a fresh draft under `slack:listen --write`, and read the thread the draft
+  came from.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs

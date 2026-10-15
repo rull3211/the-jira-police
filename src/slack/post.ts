@@ -8,6 +8,7 @@ import { fileability, type FileGateDeps } from "../draft/gate.ts";
 import type { FileOutcome } from "../draft/filer.ts";
 import { type PendingDraft, type PendingStore } from "../draft/pending.ts";
 import type { DraftTicket } from "../draft/runner.ts";
+import type { ThreadRef } from "../draft/thread.ts";
 import { renderAdf } from "../jira/adf.ts";
 import type { FiledIssue } from "../jira/client.ts";
 import { createLogger } from "../logger.ts";
@@ -25,6 +26,8 @@ export interface FilingDeps {
   readBack(key: string): Promise<FiledIssue>;
   /** Where an issue is read, or `null` where no link can be made safely. */
   issueUrl(key: string): string | null;
+  /** Says something in the Slack thread the draft was asked for in; may throw. */
+  announce(thread: ThreadRef, text: string): Promise<void>;
   readonly now?: () => Date;
 }
 
@@ -123,6 +126,18 @@ export function createPostHandler(deps: PostClickDeps): PostHandler {
    */
   const fileIt = async (click: Click, draft: PendingDraft, filing: FilingDeps): Promise<void> => {
     const now = filing.now ?? (() => new Date());
+    // The writer takes about half a minute, and a press that looks dead gets pressed again.
+    try {
+      await deps.reply(
+        click,
+        "Filing this draft now. The writer takes about half a minute, and the result will follow in this thread.",
+      );
+    } catch (error) {
+      log.warn("slack.post_ack_failed", {
+        user: click.userId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
     let marked: PendingDraft;
     try {
       marked = await deps.pending.update(draft.id, { filing: { startedAt: now().toISOString() } });
@@ -180,6 +195,19 @@ export function createPostHandler(deps: PostClickDeps): PostHandler {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
+    // After the key is recorded, and best effort: a thread that cannot be written to costs only the link.
+    let announced: string;
+    try {
+      await filing.announce(
+        draft.thread,
+        `Filed as ${linked(outcome.key)}: ${escape(draft.ticket.summary)}. Drafted from this thread.`,
+      );
+      announced = "The link is posted in the thread the draft came from.";
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log.warn("slack.post_link_failed", { id: draft.id, key: outcome.key, reason });
+      announced = `I could not post the link in the thread the draft came from (${escape(reason)}).`;
+    }
     let checked: string;
     try {
       const { differences, sent, got } = compareFiled(
@@ -195,7 +223,7 @@ export function createPostHandler(deps: PostClickDeps): PostHandler {
       checked = `Reading it back failed (${escape(reason)}), so check ${linked(outcome.key)} by hand.`;
     }
     log.info("slack.post_filed", { id: draft.id, key: outcome.key, user: click.userId });
-    await answer(click, "filed", `Filed as ${linked(outcome.key)}. ${checked}`);
+    await answer(click, "filed", `Filed as ${linked(outcome.key)}. ${checked} ${announced}`);
   };
 
   return {
