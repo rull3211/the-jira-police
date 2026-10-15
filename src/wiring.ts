@@ -639,9 +639,8 @@ export function listenerFor(
 }
 
 /**
- * With nobody on SLACK_DRAFT_USERS or nothing on DRAFT_PROJECTS no draft carries a button, so a press
- * is logged and dropped and nothing that could answer it is built; otherwise it is `createPostHandler`'s.
- * Both lists are read first, so a malformed one stops the start whatever the other holds.
+ * With nobody on SLACK_DRAFT_USERS or nothing on DRAFT_PROJECTS a press is only logged and nothing is
+ * built to answer it. Both lists are read first, so a malformed one stops the start whatever the other holds.
  */
 export function clickHandlerFor(settings: Settings): (click: Click) => Promise<void> {
   const allowed = draftUsers(settings);

@@ -71,7 +71,7 @@ export type Frame =
 
 /**
  * The person is whoever Slack names — a command's `user_id`, a mention's `user`, a click's `user.id`
- * — and the text only picks the verb. Only a `block_actions` payload is a click; other interactive ones are ignored.
+ * — and the text only picks the verb. Only a `block_actions` payload is a click.
  */
 export function parseFrame(data: string): Frame {
   let frame: Record<string, unknown>;

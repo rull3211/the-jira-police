@@ -1,7 +1,6 @@
 /**
- * A press on a draft's Post to Jira button: the person and the draft are checked, then the request
- * is written to a file as a rehearsal, and the person is told in the message's thread that nothing
- * was filed.
+ * A press on a draft's Post to Jira button: the person and the draft are checked, the request a
+ * filing would make is written to a file, and the thread is told nothing was filed.
  */
 
 import { fileability, type FileGateDeps } from "../draft/gate.ts";
