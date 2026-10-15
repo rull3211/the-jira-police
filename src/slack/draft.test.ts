@@ -171,9 +171,11 @@ describe("createDraftHandler", () => {
     await handler.handle(mention());
     await handler.settled();
 
+    // One delivery: the first paragraph is the message and the comment is in its thread.
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]?.text).toContain("*Duplicate of SSX-3534*");
-    expect(h.sent[0]?.text).toContain(
+    expect(h.sent[0]?.text).not.toContain("Rådgiver ber om å åpne kunden.");
+    expect(h.sent[0]?.pieces.map((piece) => piece.text).join("\n")).toContain(
       "*Comment to add to SSX-3534*\nRådgiver ber om å åpne kunden.",
     );
   });

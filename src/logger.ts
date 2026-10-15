@@ -28,6 +28,7 @@ export const LOG_SOURCES = [
   "bot-once",
   "cycle",
   "draft",
+  "draft-probe",
   "exec",
   "jira",
   "labels",

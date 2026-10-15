@@ -104,6 +104,14 @@ to the same session. So the allowlist **does** gate MCP names under `--permissio
 does not gate builtins: two rules for two kinds of tool. Read the 2026-09-04 finding as being about
 builtins only.
 
+**A second qualifier was added 2026-10-15, from six one-call sessions with the Atlassian server
+connected (`pnpm draft:probe`).** `--disallowedTools` removes an MCP tool from the session's init
+tool list by name, and beats an `--allowedTools` that names the same one; tried for
+`createJiraIssue` and `addCommentToJiraIssue`. A tool only left out of `--allowedTools` stays
+listed and its call is refused by don't-ask mode, tried for `addCommentToJiraIssue`. The first
+measurement had to wait for a run that had a server: a bare probe distinguishes "denied" from
+"absent" for nothing.
+
 **The rules** — [Measure, do not assume](PROVING.md#measure-do-not-assume-and-the-assumption-is-usually-about-your-own-code);
 [capability is a question about the composition](STARTING.md#technique).
 

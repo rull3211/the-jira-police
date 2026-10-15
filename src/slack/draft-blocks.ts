@@ -1,7 +1,7 @@
 /**
- * A draft as the messages that carry it: the text cut on lines into pieces Slack takes whole, the
- * first sent as the message and each later one as a reply in its thread, and the Post button under
- * the last of them, carrying the id of the record it files.
+ * A draft as the messages that carry it: its first paragraph is the message, the rest goes in
+ * replies in its thread, cut on lines into pieces Slack takes whole, and the Post button is under
+ * the last piece, carrying the id of the record it files.
  */
 
 export const POST_ACTION_ID = "draft_post";
@@ -19,14 +19,26 @@ export interface Piece {
   readonly blocks: readonly object[] | null;
 }
 
+/** The first paragraph, then the rest as pieces; one paragraph is one message. Empty only for a draft with nothing in it. */
+function messageTexts(text: string): readonly string[] {
+  const blank = text.search(/\n[ \t]*\n/u);
+  if (blank < 0) {
+    return splitSections(text, MESSAGE_MAX);
+  }
+  return [
+    ...splitSections(text.slice(0, blank), MESSAGE_MAX),
+    ...splitSections(text.slice(blank).replace(/^(\n[ \t]*)+\n/u, ""), MESSAGE_MAX),
+  ];
+}
+
 /** Empty only for a draft with nothing in it. */
 export function plainPieces(text: string): readonly Piece[] {
-  return splitSections(text, MESSAGE_MAX).map((piece) => ({ text: piece, blocks: null }));
+  return messageTexts(text).map((piece) => ({ text: piece, blocks: null }));
 }
 
 /** Every piece in sections, so the thread reads one way throughout; the button is under the last. */
 export function buttonPieces(text: string, pendingId: string): readonly Piece[] {
-  const pieces = splitSections(text, MESSAGE_MAX);
+  const pieces = messageTexts(text);
   return pieces.map((piece, index) => ({
     text: piece,
     blocks: [

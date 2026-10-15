@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3905 tests in 119 files**, no build step.
+> **3956 tests in 120 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -521,8 +521,8 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   and `source` for that reason.
 - **The analyst's denial list is a list of strings, and only four of its names have ever been
   measured** (`ANALYST_DENIED_TOOLS` in `triage/runner.ts`). The probe that measured them named four other built-ins; `WebFetch`,
-  `WebSearch` and `Task` rest on the same mechanism and were not in it, and the effect of the list
-  on MCP names is unverified. A test asserts the three reach `--disallowedTools`, which is a claim
+  `WebSearch` and `Task` rest on the same mechanism and were not in it, and its effect on MCP names
+  is measured for two of the five (`pnpm draft:probe`, §84). A test asserts the three reach `--disallowedTools`, which is a claim
   about this service's command line and not about what the subprocess does with it. If a future MCP
   server offers a fetch under another name, nothing here would notice — and this is the denial the
   staged-image path was made safe by, so it is the one worth probing rather than asserting.
@@ -615,16 +615,19 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `interactivity` with no `request_url`, which Slack's manifest reference lists as optional —
   neither was recorded; and every refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
   `state/`, and after the component leaves SSX.
-- **A draft over one message has never been sent in pieces, and no real draft has needed it.** The
-  longest seen is 8 980 characters. The split is tested against a stubbed Slack: pieces of at most
-  40 000 characters, each later one a reply under the first message, the button under the last, and
-  a press answered under the first. Never sent to Slack: that a press on a button of a reply carries
-  `container.thread_ts` (when it does not, `parseFrame` falls back to the message's own `thread_ts`
-  and then to none, and the answer lands under the reply); that a piece of up to 28 blocks is accepted
-  rather than refused as `msg_blocks_too_long`; and that 40 000 is where `text` is cut, which the docs
-  say. A piece that fails after the first went out leaves a first message with no button and no
-  record, and an ephemeral reply admitting it, which only the stub has shown. Nothing drives it live yet:
-  a draft's length is the session's, and `slack:draft` cannot make one run over.
+- **A draft's messages have never been sent near their size limits.** On 2026-10-15 a drafted
+  ticket went out as its first paragraph (516 characters) and a reply holding the rest, 11 951
+  characters in five sections with the button under them. Slack took both. The operator pressed the
+  button on the reply, and the answer `(dry run, nothing filed) …` came back; so it did for a fresh
+  session's draft in the same layout ($1.30). The three presses logged on those two drafts each carry
+  `messageTs` of the reply and `threadTs` of the first message, so the payload names a reply's
+  parent, from its container or from its message, which the log does not say. A draft of
+  13 221 characters sent earlier that day as one plain message arrived whole. Not seen: that a piece of
+  up to 28 blocks is accepted rather than refused as `msg_blocks_too_long`, and that 40 000 is where
+  `text` is cut, which the docs say; and a later piece refused after the first went out, which leaves a
+  first message with no button and no record and an ephemeral reply admitting it, shown only against a
+  stub. **What would show it:** a saved `.draft.json` padded by hand and sent with
+  `pnpm slack:draft <link> --dm --replay <file>`, since a session never writes a draft that long.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1216,7 +1219,7 @@ shares `FIX_DENIED_TOOLS` with.
 
 ### 84. A drafted ticket can be pressed and rehearsed, and still has to be filed by hand
 
-**Branch:** `feat/slack-draft-file`. The probe below is the first thing built on it.
+**Branch:** `feat/slack-draft-file`. The probe below was the first thing built on it, and the writer is next.
 
 **What is not built.** The **Post to Jira** button is on a drafted ticket, and a press by the asker
 rehearses: it judges the draft again against Jira and writes the `createJiraIssue` request a filing
@@ -1236,15 +1239,20 @@ button comes off the message once the draft is filed; the shutdown signal does n
 has begun, as the listener already finishes a command it has begun; and the rehearsal stays as the
 dry rung, `SLACK_LISTEN=dry` rehearsing and `live` the grant.
 
-**The probe comes first.** The drafting session holds no Jira writer only as far as
-`--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`), and the
-poster's own list denies `transitionJiraIssue` and `createJiraIssue` by name with whether MCP names
-are honoured there unverified (`src/triage/poster.ts`). A session holding `createJiraIssue` is where
-that has to be measured: one session given only that tool and told to call another it was not
-given, beside a control told to call the one it was, read from `permission_denials` on the `result`
-event (`sessionDenials` in `src/triage/session.ts`) and not from what the model says. If a denylist
-leaks, `BUILDING.md` already says what to do with one over a vocabulary nobody controls — invert it,
-or say why it cannot be — and the built-in tools' version of the same question is §76.
+**The probe has run, and every verdict was the one predicted.** `pnpm draft:probe` (2026-10-15, $1.13
+for six one-call sessions) asked each session for one Atlassian tool, always at a project key that
+does not exist, and read the verdict from the event stream, since a tool `--disallowedTools` removes
+leaves no entry in `permission_denials`. A tool named in `--disallowedTools` was missing from the
+session's init tool list: `createJiraIssue` under the drafting session's own lists, and
+`addCommentToJiraIssue` against an allowlist that named it too, so for MCP names the denylist beats
+the allowlist. A tool only left out of `--allowedTools` stayed listed and its call was refused by
+don't-ask mode, tried for `addCommentToJiraIssue` with `createJiraIssue` the only tool allowed. The
+granted tool, an allowed comment tool and an allowed read each reached Jira, which refused them for
+the missing project in its own words. So a writer holding only `createJiraIssue` is contained twice,
+by default-deny and by name. **What it did not measure:** the refusal of each other mutator
+(`transitionJiraIssue`, `editJiraIssue` and `createIssueLink` are the same rule, none tried); the
+flags only, not a whole session with its skill, `--add-dir`s and hooks; and a tool the MCP server
+adds later, which the allowlist would refuse by the same rule and no denylist names.
 
 **A second half, separable: the comment a duplicate adds.** A duplicate's draft has no button. Its
 writer would be `addCommentToJiraIssue`, a second MCP mutator, aimed at a key that is the model's
@@ -1266,8 +1274,9 @@ all.
   ticket. A comment aimed at the wrong issue is worse than a declined thread once it is written.
 - **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
   person reading it once will stop.
-- **The containment is unverified at the write.** See the probe above: a draft that can only reach a
-  direct message tolerates an unmeasured denylist, and a session holding `createJiraIssue` does not.
+- **The containment is measured at the flags and not yet at the write.** The probe held for the tools
+  it tried, with Jira refusing every call for want of a project; a real filing is the first call
+  where the project exists, and `createJiraIssue` is the one tool the writer holds.
 
 ## Verification
 

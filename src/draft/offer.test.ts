@@ -86,8 +86,11 @@ describe("createDraftOffer", () => {
     const prepared = await offer.prepare(drafted(), TEXT, WHO);
 
     expect(created).toEqual([{ asker: "U0ASKER1", thread: WHO.thread, ticket: TICKET }]);
-    expect(prepared.pieces).toHaveLength(1);
-    expect(prepared.pieces[0]?.blocks?.at(-1)).toMatchObject({
+    // The draft is the message and the note under it, the note being a paragraph of its own.
+    expect(prepared.pieces).toHaveLength(2);
+    expect(prepared.pieces[0]?.text).toBe(TEXT);
+    expect(JSON.stringify(prepared.pieces[0]?.blocks)).not.toContain("actions");
+    expect(prepared.pieces[1]?.blocks?.at(-1)).toMatchObject({
       type: "actions",
       elements: [{ action_id: POST_ACTION_ID, value: ID }],
     });

@@ -56,11 +56,9 @@ export const ALLOWED_TOOLS: readonly string[] = [
  * A denylist over built-ins each CLI release can add to; `--tools` would invert it, but whether it
  * also removes `StructuredOutput` and `ToolSearch` is unprobed (`PLAN.md` §76).
  *
- * The Atlassian mutators are listed on the same principle but are NOT verified withheld — a bare
- * probe run has no MCP server connected, so nothing distinguishes "denied" from "absent" here.
- * Nobody should read this list as proof the analyst is mechanically unable to edit a Jira issue;
- * what keeps it from doing so today is `--no-write` in the prompt plus `gate.ts` sitting between it
- * and the poster.
+ * The Atlassian mutators are listed too: `pnpm draft:probe` saw this list withhold `createJiraIssue`,
+ * and a list naming `addCommentToJiraIssue` withhold that; the other three are the same flag, not
+ * each tried, and a tool the MCP server adds later is named nowhere.
  */
 export const ANALYST_DENIED_TOOLS: readonly string[] = [
   ...DENIED_BUILTIN_TOOLS,

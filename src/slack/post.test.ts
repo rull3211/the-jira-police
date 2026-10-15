@@ -303,6 +303,24 @@ describe("createPostHandler", () => {
     });
   });
 
+  // Whether Slack names the thread of a button on a reply is read from this line, not inferred from where the answer lands.
+  it.each([
+    ["a button on a reply", "1790779000.000050"],
+    ["a button on a message that is no reply", null],
+  ])("logs the message and the thread a press came from, for %s", async (_what, threadTs) => {
+    const h = harness();
+    h.facts.mockResolvedValue({ components: ["SSX Customer"], issueTypes: ["Oppgave"] });
+
+    const lines = await logged(() =>
+      createPostHandler(h.deps).handle(click({ messageTs: "1790779999.000100", threadTs })),
+    );
+
+    expect(lines.find((line) => line["message"] === "slack.post_pressed")).toMatchObject({
+      messageTs: "1790779999.000100",
+      threadTs,
+    });
+  });
+
   it("logs what it told the person, so a reply Slack refuses does not take the reason with it", async () => {
     const h = harness({
       reply: async () => {

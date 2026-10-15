@@ -33,7 +33,14 @@ export interface PostHandler {
 export function createPostHandler(deps: PostClickDeps): PostHandler {
   const answer = async (click: Click, decision: string, said: string): Promise<void> => {
     const text = deps.dry ? `(dry run, nothing filed) ${said}` : said;
-    log.info("slack.post_pressed", { user: click.userId, id: click.value, decision, said });
+    log.info("slack.post_pressed", {
+      user: click.userId,
+      id: click.value,
+      messageTs: click.messageTs,
+      threadTs: click.threadTs,
+      decision,
+      said,
+    });
     try {
       await deps.reply(click, text);
     } catch (error) {

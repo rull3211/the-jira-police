@@ -143,6 +143,8 @@ export interface SessionOptions {
   readonly label: string;
   /** Kills the child when it fires. Absent for every pass the daemon lets finish at shutdown. */
   readonly signal?: AbortSignal;
+  /** Sees every parsed event before the run acts on it. Must not throw: the line reader would log the throw as an unparsed line. */
+  readonly onEvent?: (event: Record<string, unknown>) => void;
 }
 
 /**
@@ -369,6 +371,7 @@ export async function runSession<T>(
     }, tickMs);
 
     const handleEvent = (event: Record<string, unknown>): void => {
+      options.onEvent?.(event);
       if (event["type"] === "system" && event["subtype"] === "init") {
         const id = event["session_id"];
         if (typeof id === "string" && id !== "") {

@@ -48,6 +48,50 @@ describe("buttonPieces", () => {
     ]);
   });
 
+  it("sends the first paragraph as the message and everything after it as one reply, the button under that", () => {
+    const pieces = buttonPieces(
+      "*Title*\nProject: SSX\n\n*Questions*\n• one\n\nBody\n\nFooter",
+      ID,
+    );
+
+    expect(pieces.map((piece) => piece.text)).toEqual([
+      "*Title*\nProject: SSX",
+      "*Questions*\n• one\n\nBody\n\nFooter",
+    ]);
+    expect(typesOf(pieces[0] as Piece)).toEqual(["section"]);
+    expect(typesOf(pieces[1] as Piece).at(-1)).toBe("actions");
+  });
+
+  it("takes a line of spaces between paragraphs for a blank one, and drops every blank line it cuts at", () => {
+    expect(buttonPieces("head\n \t\n\n\ntail", ID).map((piece) => piece.text)).toEqual([
+      "head",
+      "tail",
+    ]);
+  });
+
+  it("puts the button under the head when the draft is a single paragraph", () => {
+    const pieces = buttonPieces("one paragraph\nof two lines", ID);
+
+    expect(pieces).toHaveLength(1);
+    expect(typesOf(pieces[0] as Piece).at(-1)).toBe("actions");
+  });
+
+  it("still cuts what follows the first paragraph into messages Slack takes whole", () => {
+    const pieces = buttonPieces(`head\n\n${LONG_LINES.join("\n")}`, ID);
+
+    expect(pieces[0]?.text).toBe("head");
+    expect(pieces.length).toBeGreaterThan(2);
+    expect(pieces.every((piece) => piece.text.length <= MESSAGE_MAX)).toBe(true);
+    expect(
+      pieces
+        .slice(1)
+        .map((piece) => piece.text)
+        .join("\n")
+        .split("\n"),
+    ).toEqual(LONG_LINES);
+    expect(pieces.flatMap(typesOf).filter((type) => type === "actions")).toHaveLength(1);
+  });
+
   it("keeps a draft of several sections in one message, which is the size real drafts are", () => {
     const pieces = buttonPieces(LONG_LINES.slice(0, 300).join("\n"), ID);
 
@@ -117,6 +161,13 @@ describe("plainPieces", () => {
   it("sends a short draft as one piece of plain text", () => {
     expect(plainPieces("*Draft ticket*\nBody")).toEqual([
       { text: "*Draft ticket*\nBody", blocks: null },
+    ]);
+  });
+
+  it("sends the first paragraph as the message and the rest as one reply, in plain text", () => {
+    expect(plainPieces("*Title*\nProject: SSX\n\nBody\n\nFooter")).toEqual([
+      { text: "*Title*\nProject: SSX", blocks: null },
+      { text: "Body\n\nFooter", blocks: null },
     ]);
   });
 

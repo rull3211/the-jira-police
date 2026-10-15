@@ -3,13 +3,14 @@
  * below says what it reads, writes and exits with.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
   type ThreadDraftOutcome,
   draftThread,
   renderDraftMessage,
+  replayOutcome,
   threadLabel,
   threadReference,
 } from "../draft/thread.ts";
@@ -32,7 +33,7 @@ const EXIT = { drafted: 0, notDrafted: 1, usage: 2, threw: 3, unsent: 4 } as con
 
 function usage(): never {
   process.stderr.write(
-    "usage: pnpm slack:draft <thread-link> [--dm]\n" +
+    "usage: pnpm slack:draft <thread-link> [--dm] [--replay <file>]\n" +
       "  The link is Slack's Copy link on any message in a thread the bot can read. Reads the whole\n" +
       "  thread, runs the read-only thread-draft session over it — Jira and Confluence through the\n" +
       "  Atlassian MCP, the vault, and every checkout SOLVE_REPOS and SOLVE_READ_DIRS name under\n" +
@@ -47,7 +48,10 @@ function usage(): never {
       "  sent only if SLACK_OPERATOR_USER_ID is on SLACK_DRAFT_USERS, and its record is kept under\n" +
       "  the state directory. A press files nothing yet: slack:listen answers it by writing the\n" +
       "  request it would make to <OUTPUT_DIR>/slack/<id>.issue.json.\n" +
-      "  Nothing is ever written to Jira. A real run is paid for, like a triage.\n" +
+      "  --replay <file> skips the session: the message is built again from the outcome a .draft.json\n" +
+      "  of the same thread holds, so a change to how a draft is laid out costs nothing to look at.\n" +
+      "  A file of another thread, or one missing a field a message is worded from, is refused.\n" +
+      "  Nothing is ever written to Jira. A real run is paid for, like a triage; a replay is not.\n" +
       "  Exit: 0 drafted (a ticket, or the comment a thread that duplicates an open issue adds to\n" +
       "  it), 1 not drafted (the thread was empty, too long, or made neither, and why), 2 this\n" +
       "  usage, 3 the run threw, 4 written but --dm could not send it, 78 a setting missing, a\n" +
@@ -67,8 +71,23 @@ const EXIT_FOR: Readonly<Record<ThreadDraftOutcome["kind"], number>> = {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const links = args.filter((argument) => !argument.startsWith("--"));
-  const flags = args.filter((argument) => argument.startsWith("--"));
+  const links: string[] = [];
+  const flags: string[] = [];
+  let replay: string | null = null;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index] ?? "";
+    if (argument === "--replay") {
+      index += 1;
+      replay = args[index] ?? null;
+      if (replay === null || replay.startsWith("--")) {
+        usage();
+      }
+    } else if (argument.startsWith("--")) {
+      flags.push(argument);
+    } else {
+      links.push(argument);
+    }
+  }
   const [link] = links;
   if (link === undefined || links.length > 1 || flags.some((flag) => flag !== "--dm")) {
     usage();
@@ -91,17 +110,21 @@ async function main(): Promise<void> {
   const offer = withheld === null ? draftOfferFor(settings, dm) : null;
   const directory = join(settings.OUTPUT_DIR, "slack");
   const name = threadLabel(thread);
-  const run = { link, ...thread, dm };
+  const run = { link, ...thread, dm, ...(replay === null ? {} : { replayedFrom: replay }) };
 
   let outcome: ThreadDraftOutcome;
-  try {
-    outcome = await draftThread(deps, thread);
-  } catch (error) {
-    await writeJson(directory, `${name}.draft.json`, {
-      ...run,
-      threw: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
+  if (replay !== null) {
+    outcome = replayOutcome(JSON.parse(await readFile(replay, "utf8")) as unknown, thread);
+  } else {
+    try {
+      outcome = await draftThread(deps, thread);
+    } catch (error) {
+      await writeJson(directory, `${name}.draft.json`, {
+        ...run,
+        threw: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
   const rendered = renderDraftMessage(outcome, threadReference(link, thread.channel));
   // `withheld` and an offer exclude each other; the note goes in before the cut, into the last piece.

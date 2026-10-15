@@ -560,6 +560,9 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 | `pnpm slack:start <thread-link> [--clear] --write`     | …and send the edit to the ticket, reading it back                                                                                                                                                           | Jira labels: `agent:start` on, or `agent:failed` off                      |
 | `pnpm slack:draft <thread-link>`                       | Draft a Jira ticket from a Slack thread with a read-only session, dry: the direct message it would send, written to a file                                                                                  | `groomed/slack/`                                                          |
 | `pnpm slack:draft <thread-link> --dm`                  | …and send that message to `SLACK_OPERATOR_USER_ID` as a direct message                                                                                                                                      | a Slack direct message                                                    |
+| `pnpm slack:draft <thread-link> --replay <file>`       | …without the session: the message built again from the outcome a saved `.draft.json` of the same thread holds, so a change to the layout costs nothing to look at; add `--dm` to send it                    | `groomed/slack/`, or a Slack direct message with `--dm`                   |
+| `pnpm draft:probe`                                     | Print the six cases of the tool-surface probe and what each is predicted to show, dry: runs nothing                                                                                                         | no                                                                        |
+| `pnpm draft:probe --run [--only <case>]`               | …and run them: one-call sessions, paid, each verdict read from the event stream                                                                                                                             | `groomed/probe/`, and calls aimed at a project that does not exist        |
 | `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                                                                                                       | no                                                                        |
 | `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                                                                                                    | no                                                                        |
 | `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                                                                                                    | no                                                                        |
@@ -684,9 +687,10 @@ command typed in a thread, which is why this is a mention rather than `/bencebot
 `SLACK_DRAFT_USERS`.** The listener answers at once with a reply only the asker sees, then does what
 `slack:draft` below does — reads the whole thread and runs the read-only `thread-draft` session over
 it — and sends the asker the draft, or, when an open ticket already asks for the same, the comment to add to
-it, or why the thread makes neither, as a direct message — a draft over 40 000 characters, Slack's
-cap on a message's text, as a message and replies in its thread, with the button under the last.
-The service writes nothing to Jira; the session's own Atlassian writers are denied by a list nobody has measured.
+it, or why the thread makes neither, as a direct message: the draft's first paragraph — what it is,
+where it would go and why — is the message, and the rest is a reply in its thread, cut again at 40 000
+characters, Slack's cap on a message's text, with the button under the last.
+The service writes nothing to Jira; the session's own Atlassian writers are withheld by `--disallowedTools`, measured for two of its five names.
 With `DRAFT_PROJECTS` set, a ticket draft in a listed project whose component and issue type Jira
 lists for it carries a **Post to Jira** button, and the message says exactly what it would file; any
 other ticket draft says why it carries none. The draft is kept as a file under the state directory,
@@ -724,14 +728,29 @@ the Atlassian MCP — the vault, and every checkout `SOLVE_REPOS` and `SOLVE_REA
 — the drafted ticket; or, for a thread that duplicates an open issue, that issue's key and the comment the
 thread adds to it; or why the thread makes neither, with its open questions — goes to
 `<OUTPUT_DIR>/slack/<channel>-<ts>.draft.md`, and the outcome beside it as `.draft.json`. Dry by
-default, nothing is sent; the service never writes to Jira, and the session's own Atlassian writers are denied by a list nobody has measured. A thread over 500 messages or 100 000 characters is refused
+default, nothing is sent; the service never writes to Jira, and the session's own Atlassian writers are withheld by `--disallowedTools`, measured for two of its five names. A thread over 500 messages or 100 000 characters is refused
 before the session is paid for. `--dm` also sends the message to `SLACK_OPERATOR_USER_ID`, checked
 before the session runs, as a direct message from the bot — with the **Post to Jira** button when
 `DRAFT_PROJECTS` lists the draft's project and the operator is on `SLACK_DRAFT_USERS`, and the
 message says so when it carries none. Without `--dm` the button is evaluated and its pieces' blocks written
-to `.draft.json`, and no record is kept. Exit 0 means a ticket or a duplicate's comment
+to `.draft.json`, and no record is kept. `--replay <file>` skips the session and builds the message
+again from the outcome a `.draft.json` of the same thread holds, refusing a file of another thread
+or one missing a field a message is worded from. Exit 0 means a ticket or a duplicate's comment
 was drafted (`.draft.json` says which), 1 that neither was and why, 3 that the run threw, 4 that the message was written and `--dm` could not
 send it.
+
+**`draft:probe` measures whether a session's tool lists keep it off a Jira mutator.** Six one-call
+sessions, in pairs of a case and its control, each told to call one Atlassian tool: `createJiraIssue`
+given alone and an ungiven `addCommentToJiraIssue` asked for, the same comment tool allowed and then
+allowed and denied at once, and the drafting session's own two lists asked for a read and for a
+create. The verdict is read from the event stream, as a refusal, a call that ran, a tool that was not
+there, or no call, never from what the model says. Dry by default, it prints the cases and what each
+is predicted to show; `--run` is paid, and first asks Jira over REST that the project key the calls
+name, `ZZNOPROJ`, does not exist, refusing to start if it does or if that cannot be shown. Each
+result, the tool's own reply included, is written to `<OUTPUT_DIR>/probe/draft-tools.<case>.json`.
+Exit 0 means every verdict was the one predicted, 1 that one was not, 3 that a session threw, 4 that
+the key exists or could not be shown not to. It measures the permission flags a session is started
+with, not a whole draft session, and it says nothing about built-in tools.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
