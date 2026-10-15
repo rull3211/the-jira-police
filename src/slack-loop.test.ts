@@ -55,7 +55,7 @@ describe("createSlackListener", () => {
     const controller = new AbortController();
     const run = vi.fn(async (deps: ListenDeps) => {
       expect(deps.signal).toBe(controller.signal);
-      return { connections: 1, commands: 2, mentions: 0 };
+      return { connections: 1, commands: 2, mentions: 0, clicks: 0 };
     });
 
     const listener = createSlackListener(
@@ -64,7 +64,7 @@ describe("createSlackListener", () => {
       run,
     );
 
-    expect(await listener?.()).toEqual({ connections: 1, commands: 2, mentions: 0 });
+    expect(await listener?.()).toEqual({ connections: 1, commands: 2, mentions: 0, clicks: 0 });
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -78,7 +78,7 @@ describe("createSlackListener", () => {
         new AbortController().signal,
         async (deps) => {
           heard = deps.mention;
-          return { connections: 0, commands: 0, mentions: 0 };
+          return { connections: 0, commands: 0, mentions: 0, clicks: 0 };
         },
       );
       await listener?.();
@@ -127,7 +127,7 @@ describe("createSlackListener", () => {
         new AbortController().signal,
         async (deps) => {
           heard = deps.mention;
-          return { connections: 0, commands: 0, mentions: 0 };
+          return { connections: 0, commands: 0, mentions: 0, clicks: 0 };
         },
       );
       await listener?.();
@@ -158,7 +158,7 @@ describe("createSlackListener", () => {
         new AbortController().signal,
         async (deps) => {
           heard = deps.mention;
-          return { connections: 0, commands: 0, mentions: 0 };
+          return { connections: 0, commands: 0, mentions: 0, clicks: 0 };
         },
       );
       await listener?.();
@@ -185,6 +185,15 @@ describe("createSlackListener", () => {
         signal,
       ),
     ).toThrow(/SLACK_DRAFT_USERS \(expected member IDs such as U0123ABCD, got "@bence"\)/u);
+  });
+
+  it("refuses at startup a malformed DRAFT_PROJECTS, even with nobody on SLACK_DRAFT_USERS", () => {
+    expect(() =>
+      createSlackListener(
+        settingsWith({ SLACK_LISTEN: "dry", SLACK_APP_TOKEN: "xapp-1-abc", DRAFT_PROJECTS: "ssx" }),
+        new AbortController().signal,
+      ),
+    ).toThrow(/DRAFT_PROJECTS \(expected project keys such as SSX, got "ssx"\)/u);
   });
 
   it.each([
@@ -220,7 +229,7 @@ describe("createSlackListener", () => {
         new AbortController().signal,
         async (deps) => {
           heard = deps.mention;
-          return { connections: 0, commands: 0, mentions: 0 };
+          return { connections: 0, commands: 0, mentions: 0, clicks: 0 };
         },
       );
       await listener?.();
@@ -268,7 +277,7 @@ describe("createSlackListener", () => {
         new AbortController().signal,
         async (deps) => {
           await deps.mention({ ...MENTION, text: "<@U0BOT> draft" });
-          return { connections: 1, commands: 0, mentions: 1 };
+          return { connections: 1, commands: 0, mentions: 1, clicks: 0 };
         },
       );
 

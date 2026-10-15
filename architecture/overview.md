@@ -103,6 +103,13 @@ and it writes nothing but a property write per command that changes the subscrib
 write per mention that starts or clears a ticket — though a start hands the solve loop a ticket it
 will pay to solve. A draft is the one thing it pays for itself: a read-only session per mention, one
 at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message.
+With `DRAFT_PROJECTS` set, a ticket draft the gate passes also carries a **Post to Jira** button, and a
+press re-judges the draft and writes the request a filing would make to a file, filing nothing. The
+record the button names is a file under `state/pending-drafts/`, not the direct message read back
+as `BUILDING.md`'s default would have it: what a writer needs is structured, and a rendered message
+cannot be parsed back into it without a second reading that can drift from the first. The cost is
+that a wiped `state/`, or a second machine, does not hold the draft; that fails closed, as a press
+that answers the draft is gone. A record never expires.
 It follows the loops' rule all the same (`architecture/invariants.md` invariant 17): `null` when
 off, its tokens and both lists checked at startup, and a listener that breaks resolves rather than rejects, leaving
 the three loops running.

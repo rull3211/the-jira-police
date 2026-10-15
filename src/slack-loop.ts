@@ -1,6 +1,6 @@
 /**
- * The daemon's Slack listener, for `/bencebot` and `@Bencebot start|clear|draft`: decided before any loop
- * starts, like `createReviewLoop`, and in its own file because `index.ts` runs `main` on import.
+ * The daemon's Slack listener, for `/bencebot`, `@Bencebot start|clear|draft` and a draft's Post
+ * button: decided before any loop starts, and in its own file because `index.ts` runs `main` on import.
  */
 
 import { createLogger } from "./logger.ts";

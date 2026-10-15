@@ -19,6 +19,8 @@ function usage(): never {
       "  Holds a Socket Mode connection and answers /bencebot subscribe, unsubscribe, status and help\n" +
       "  until Ctrl-C, and @Bencebot start and clear in a ticket's thread from the people on\n" +
       "  SLACK_START_USERS, and @Bencebot draft in any thread from the people on SLACK_DRAFT_USERS.\n" +
+      "  With DRAFT_PROJECTS set it also answers a press on a draft's Post to Jira button, which files\n" +
+      "  nothing yet: it checks the draft again and writes <OUTPUT_DIR>/slack/<id>.issue.json.\n" +
       "  Dry by default: reads the real jira-police.slack-subscribers list on JIRA_PROJECT and\n" +
       "  writes the would-be list to <OUTPUT_DIR>/slack/roster.json, a mention's would-be label edit\n" +
       "  to <OUTPUT_DIR>/slack/<KEY>.labels.json, and a draft's direct message to\n" +
@@ -64,7 +66,7 @@ async function main(): Promise<void> {
   );
   const summary = await start();
   process.stdout.write(
-    `\nStopped after ${String(summary.commands)} command(s) and ${String(summary.mentions)} mention(s) over ${String(summary.connections)} connection(s).\n`,
+    `\nStopped after ${String(summary.commands)} command(s), ${String(summary.mentions)} mention(s) and ${String(summary.clicks)} click(s) over ${String(summary.connections)} connection(s).\n`,
   );
 }
 

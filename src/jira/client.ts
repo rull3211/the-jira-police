@@ -183,6 +183,12 @@ export interface IssueDetail {
   readonly url: string;
 }
 
+/** Names exactly as Jira spells them, which is how a draft's component and type are compared. */
+export interface ProjectFacts {
+  readonly components: readonly string[];
+  readonly issueTypes: readonly string[];
+}
+
 /** `elsewhere` is `moveBackFromInProgress` finding the ticket no longer in progress. */
 export const STATUS_MOVE_OUTCOMES = [
   "moved",
@@ -420,6 +426,29 @@ export class JiraClient {
       comments,
       attachments,
       url: `${this.#baseUrl}/browse/${key}`,
+    };
+  }
+
+  /**
+   * What a ticket drafted for `project` may name: its components and the issue types it can be
+   * created as. A subtask type is left out, since one cannot be created without a parent.
+   */
+  async projectFacts(project: string): Promise<ProjectFacts> {
+    assertProjectKey(project);
+    const [components, detail] = await Promise.all([
+      this.#get(`/rest/api/3/project/${project}/components`, "application/json"),
+      this.#get(`/rest/api/3/project/${project}`, "application/json"),
+    ]);
+    const listed = (await components.json()) as unknown;
+    const described = (await detail.json()) as ProjectPayload;
+    return {
+      components: (Array.isArray(listed) ? (listed as readonly { name?: unknown }[]) : [])
+        .map((component) => component.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+      issueTypes: (described.issueTypes ?? [])
+        .filter((type) => type.subtask !== true)
+        .map((type) => type.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
     };
   }
 
@@ -770,6 +799,11 @@ interface DetailPayload {
     readonly comment?: { readonly comments?: readonly RawComment[] };
     readonly attachment?: readonly RawAttachment[];
   };
+}
+
+/** `GET .../project/{key}`: only what `projectFacts` reads of it. */
+interface ProjectPayload {
+  readonly issueTypes?: readonly { readonly name?: unknown; readonly subtask?: unknown }[];
 }
 
 interface RawHistory {

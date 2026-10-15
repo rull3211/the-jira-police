@@ -3,7 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { SlackError } from "./client.ts";
 import type { SlashCommand } from "./roster.ts";
 import type { Mention } from "./start.ts";
-import { LATE_REPLY, type ListenDeps, type SocketHandlers, listen, parseFrame } from "./socket.ts";
+import {
+  type Click,
+  LATE_REPLY,
+  type ListenDeps,
+  type SocketHandlers,
+  listen,
+  parseFrame,
+} from "./socket.ts";
 
 interface FakeSocket {
   readonly url: string;
@@ -17,6 +24,7 @@ function harness(
   handle: (command: SlashCommand) => Promise<string>,
   opens: (string | Error)[],
   mention: (mention: Mention) => Promise<void> = async () => undefined,
+  click: (click: Click) => Promise<void> = async () => undefined,
 ): {
   readonly deps: ListenDeps;
   readonly sockets: FakeSocket[];
@@ -56,6 +64,7 @@ function harness(
       },
       handle,
       mention,
+      click,
       signal: controller.signal,
       pause: async (ms) => {
         pauses.push(ms);
@@ -117,6 +126,33 @@ const IN_THREAD = {
   thread_ts: "1790779480.401999",
 };
 
+/** The shape Slack documents for a button pressed in a message, as a Socket Mode `interactive` envelope. */
+function pressed(envelope: string, overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    envelope_id: envelope,
+    type: "interactive",
+    accepts_response_payload: false,
+    payload: {
+      type: "block_actions",
+      user: { id: "U0ME", name: "someone" },
+      container: { type: "message", message_ts: "1790779999.000100", channel_id: "D0DIRECT" },
+      channel: { id: "D0DIRECT" },
+      message: { ts: "1790779999.000100", text: "Draft ticket" },
+      trigger_id: "t-1",
+      actions: [
+        {
+          action_id: "draft_post",
+          block_id: "b-1",
+          type: "button",
+          value: "d-0123456789abcdef01234567",
+          action_ts: "1790780000.000200",
+        },
+      ],
+      ...overrides,
+    },
+  });
+}
+
 async function socketAt(sockets: FakeSocket[], index: number): Promise<FakeSocket> {
   await vi.waitFor(() => {
     expect(sockets.length).toBeGreaterThan(index);
@@ -145,7 +181,7 @@ describe("listen", () => {
       payload: { response_type: "ephemeral", text: "saw U0ME subscribe" },
     });
     h.stop();
-    expect(await running).toEqual({ connections: 1, commands: 1, mentions: 0 });
+    expect(await running).toEqual({ connections: 1, commands: 1, mentions: 0, clicks: 0 });
     expect(socket.closed).toBe(true);
   });
 
@@ -346,6 +382,101 @@ describe("listen", () => {
     await running;
   });
 
+  it("acknowledges a click before its work finishes, and hands the work what was pressed", async () => {
+    const work = Promise.withResolvers<void>();
+    const pressedOn: Click[] = [];
+    const h = harness(
+      async () => "",
+      ["wss://one"],
+      undefined,
+      async (click) => {
+        pressedOn.push(click);
+        await work.promise;
+      },
+    );
+    const running = listen(h.deps);
+    const socket = await socketAt(h.sockets, 0);
+
+    socket.on.message(pressed("e-c"));
+
+    expect(socket.sent.map((data) => JSON.parse(data) as unknown)).toEqual([
+      { envelope_id: "e-c" },
+    ]);
+    await vi.waitFor(() => {
+      expect(pressedOn).toHaveLength(1);
+    });
+    expect(pressedOn[0]).toEqual({
+      userId: "U0ME",
+      channel: "D0DIRECT",
+      messageTs: "1790779999.000100",
+      actionId: "draft_post",
+      value: "d-0123456789abcdef01234567",
+    });
+    work.resolve();
+    h.stop();
+    expect(await running).toMatchObject({ commands: 0, mentions: 0, clicks: 1 });
+  });
+
+  it("runs a click after the mention already running, never beside it", async () => {
+    const order: string[] = [];
+    const gate = Promise.withResolvers<void>();
+    const h = harness(
+      async () => "",
+      ["wss://one"],
+      async () => {
+        order.push("mention started");
+        await gate.promise;
+        order.push("mention finished");
+      },
+      async () => {
+        order.push("click");
+      },
+    );
+    const running = listen(h.deps);
+    const socket = await socketAt(h.sockets, 0);
+
+    socket.on.message(mentioned("e-m", IN_THREAD));
+    await vi.waitFor(() => {
+      expect(order).toEqual(["mention started"]);
+    });
+    socket.on.message(pressed("e-c"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(order).toEqual(["mention started"]);
+
+    gate.resolve();
+    await vi.waitFor(() => {
+      expect(order).toEqual(["mention started", "mention finished", "click"]);
+    });
+    h.stop();
+    await running;
+  });
+
+  it("keeps listening after a click's work throws", async () => {
+    const pressedOn: string[] = [];
+    const h = harness(
+      async () => "",
+      ["wss://one"],
+      undefined,
+      async (click) => {
+        pressedOn.push(click.value);
+        if (pressedOn.length === 1) {
+          throw new Error("the first one fails");
+        }
+      },
+    );
+    const running = listen(h.deps);
+    const socket = await socketAt(h.sockets, 0);
+
+    socket.on.message(pressed("e-1"));
+    socket.on.message(pressed("e-2"));
+
+    await vi.waitFor(() => {
+      expect(pressedOn).toHaveLength(2);
+    });
+    h.stop();
+    expect(await running).toMatchObject({ clicks: 2 });
+  });
+
   it("backs off a failing open, at least as long as a rate limit asked", async () => {
     const h = harness(
       async () => "",
@@ -399,6 +530,46 @@ describe("parseFrame", () => {
         ts: "1790779745.218229",
         threadTs: null,
       },
+    });
+  });
+
+  it("takes a click's person from the payload's user.id, never from its name", () => {
+    expect(parseFrame(pressed("e-4"))).toEqual({
+      kind: "click",
+      envelope: "e-4",
+      click: {
+        userId: "U0ME",
+        channel: "D0DIRECT",
+        messageTs: "1790779999.000100",
+        actionId: "draft_post",
+        value: "d-0123456789abcdef01234567",
+      },
+    });
+  });
+
+  it("finds a click's channel and message in the container when the payload names neither itself", () => {
+    const frame = parseFrame(pressed("e-5", { channel: undefined, message: undefined }));
+
+    expect(frame).toMatchObject({
+      kind: "click",
+      click: { channel: "D0DIRECT", messageTs: "1790779999.000100" },
+    });
+  });
+
+  it.each([
+    ["a modal's submission", { type: "view_submission" }, "interactive/view_submission"],
+    ["a payload with no type", { type: undefined }, "interactive/none"],
+    ["a block_actions naming no action", { actions: [] }, "interactive/block_actions"],
+    [
+      "a block_actions whose action has no id",
+      { actions: [{ value: "x" }] },
+      "interactive/block_actions",
+    ],
+  ])("reads %s as an interactive payload to acknowledge and ignore", (_name, overrides, type) => {
+    expect(parseFrame(pressed("e-6", overrides))).toEqual({
+      kind: "other",
+      envelope: "e-6",
+      type,
     });
   });
 

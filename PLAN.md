@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3746 tests in 114 files**, no build step.
+> **3887 tests in 119 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §82 and §83, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82 and §83, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §84. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §85. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -593,12 +593,28 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   prefix was traced to code and to no stored value, and the ticket says so. Unseen: the duplicate
   outcome, a comment on the existing issue, against a real thread, and whether one thread gives one
   outcome — two runs of the same text gave two, and nothing says the change between them was the
-  cause; a person judging whether a draft is worth filing; `slack:draft --dm`; a draft stopped with
+  cause; a person judging whether a draft is worth filing; a draft stopped with
   Ctrl-C, and the message it sends; a thread that names no repository; a thread past one page of
   `conversations.replies`. **What would show it:**
   `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
   times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
   a draft runs.
+- **The Post to Jira button has been sent and pressed once, and a press only rehearses.** On
+  2026-10-15 `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792009502102019 --dm`
+  sent a ticket draft to `U0BMCC38933` ($1.34, 241 s, exit 0): four sections, the longest exactly
+  3 000 characters, and the button, with the record kept under `state/pending-drafts/` and the
+  button's value equal to its id. Slack accepted those blocks, and `projectFacts` returned SSX's real
+  components and issue types, since the gate let `SSX Advisor` and `Oppgave` through. Five minutes
+  later the person pressed it against the daemon, started from the same directory with the live
+  Slack listener: `slack.post_pressed` logged `rehearsed` six seconds after the listener connected,
+  `<id>.issue.json` held `createJiraIssue` arguments for SSX, `Oppgave`, `SSX Advisor` and the whole
+  8 980-character body, and no `slack.post_reply_failed` followed. So the button is clickable in the
+  read-only direct message, interactivity reached the listener, and the press arrived in the shape
+  `parseFrame` reads. Unseen: the reply as it rendered in the thread, which nothing here has read;
+  whether switching interactivity on needed a reinstall, and whether the manifest import accepts
+  `interactivity` with no `request_url`, which Slack's manifest reference lists as optional —
+  neither was recorded; and every refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
+  `state/`, and after the component leaves SSX.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1188,55 +1204,60 @@ shares `FIX_DENIED_TOOLS` with.
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
 
-### 81. A drafted ticket still has to be filed by hand
+### 84. A drafted ticket can be pressed and rehearsed, and still has to be filed by hand
 
-**Branch:** none yet. It waits for `@Bencebot draft` to have produced drafts worth filing.
+**Branch:** none yet. It waits on the probe below, which is the first thing to build.
 
-**What is not built.** `@Bencebot draft` sends the asker a drafted ticket, or for a thread that
-duplicates an open issue the comment to add to it, as a direct message and writes nothing to Jira.
-The second half of SSX-4071 is filing it: the asker replies `post` in that direct message, the
-service creates the issue or adds the comment to the issue named, and the key and link are posted
-back into the thread. That is a new write, from text anyone in a channel wrote into a Jira issue,
-gated only by a person reading the exact draft — so it is a privilege of its own, and a branch of
-its own.
+**What is not built.** The **Post to Jira** button is on a drafted ticket, and a press by the asker
+rehearses: it judges the draft again against Jira and writes the `createJiraIssue` request a filing
+would make to `<OUTPUT_DIR>/slack/<id>.issue.json`, and the thread is told nothing was filed
+(`src/slack/post.ts`; split out of the entry that shipped the button). What is left is the press
+doing it. That is the first path on which text anyone in a channel wrote becomes a Jira issue, gated
+only by a person reading the exact draft — a privilege of its own, and a branch of its own.
 
-**The shape SSX-4071 settles:** `message.im` added to the manifest's events and a direct-message
-frame to `parseFrame`; `post` files the draft the asker read, verbatim, and never re-runs the
-session; the project must be on a new `DRAFT_PROJECTS` allowlist with no default, and the component
-one of that project's live components, or nothing is filed; the writer is a session in the poster's
-shape (`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here
-builds it; the issue is read back over REST; and the draft is marked as filing before the create,
-so a crash between the two can never file it twice. A comment adds to that: the key is the
-model's word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project
-and is open — and its writer, `addCommentToJiraIssue`, is a second MCP mutator whose withholding
-nobody has measured either.
+**The shape, as far as SSX-4071 and the button's entry decided it:** a press files the draft the
+asker read, verbatim, and never re-runs the session; the writer is a session in the poster's shape
+(`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here builds
+it; the issue is read back over REST and compared with what was sent; the draft's record gains a
+`filing` mark written before the create, so a crash between the two leaves a draft that says it may
+have been filed, never one that can be filed twice, and a press on it answers and does not create;
+and the key and link are posted back into the thread. **Proposed here and argued with no one:** the
+button comes off the message once the draft is filed; the shutdown signal does not kill a write that
+has begun, as the listener already finishes a command it has begun; and the rehearsal stays as the
+dry rung, `SLACK_LISTEN=dry` rehearsing and `live` the grant.
 
-**Nobody can reply in the bot's direct message today.** The manifest declares no `app_home`, so the
-Messages tab is not writable, and `message.im` is not subscribed (the operator could not type in
-it, 2026-10-14). A typed `post` needs both, and a reinstall an organisation admin may have to
-approve. A button on the draft needs interactivity switched on instead, and no typed reply; whether
-a button stays clickable in a read-only direct message is unprobed. A `@Bencebot post` in the thread
-needs neither, but the thread cannot see the direct message that holds the draft.
+**The probe comes first.** The drafting session holds no Jira writer only as far as
+`--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`), and the
+poster's own list denies `transitionJiraIssue` and `createJiraIssue` by name with whether MCP names
+are honoured there unverified (`src/triage/poster.ts`). A session holding `createJiraIssue` is where
+that has to be measured: one session given only that tool and told to call another it was not
+given, beside a control told to call the one it was, read from `permission_denials` on the `result`
+event (`sessionDenials` in `src/triage/session.ts`) and not from what the model says. If a denylist
+leaks, `BUILDING.md` already says what to do with one over a vocabulary nobody controls — invert it,
+or say why it cannot be — and the built-in tools' version of the same question is §76.
 
-**Where the pending draft lives is open.** `BUILDING.md` keeps state in the remote system, and the
-bot's own direct message already holds the draft verbatim: a `post` replied in that message's thread
-could read it back, rather than a file under `state/` that a restart or a second machine would not
-see.
+**A second half, separable: the comment a duplicate adds.** A duplicate's draft has no button. Its
+writer would be `addCommentToJiraIssue`, a second MCP mutator, aimed at a key that is the model's
+word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project and is
+open — before anything is written. It shares the probe, and could ship after the ticket or not at
+all.
 
 **What would make it the wrong idea:**
 
 - **The drafts are not worth filing.** If the first real ones need rewriting more than a person
-  writing from scratch would, `post` files that rewriting into Jira faster, and is not worth
+  writing from scratch would, a press files that rewriting into Jira faster, and is not worth
   building.
+- **A press is one click from a Jira issue, and the gate checks where the ticket goes, not what it
+  says.** Project, component and type are checked against Jira; the body is a model's reading of a
+  thread anyone in the channel could write, and the person reading it is the only check on it. A
+  confirmation step on the button has not been tried.
 - **The session cannot tell a duplicate from a neighbour.** The first run called a thread a clear
   duplicate while its own first question asked whether the thread meant the same thing as the
-  ticket. A comment aimed at the wrong issue is worse than a declined thread once `post` writes it.
+  ticket. A comment aimed at the wrong issue is worse than a declined thread once it is written.
 - **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
   person reading it once will stop.
-- **The containment is unverified at the write.** The draft session holds no Jira writer only as far
-  as `--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`). A
-  draft that can only reach a direct message tolerates that; a session holding `createJiraIssue` is
-  where it has to be measured first.
+- **The containment is unverified at the write.** See the probe above: a draft that can only reach a
+  direct message tolerates an unmeasured denylist, and a session holding `createJiraIssue` does not.
 
 ## Verification
 

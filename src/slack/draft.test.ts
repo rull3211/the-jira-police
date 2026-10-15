@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { DraftOffer } from "../draft/offer.ts";
 import type { DraftResult } from "../draft/runner.ts";
 import type { ThreadDraftOutcome } from "../draft/thread.ts";
 import { SessionAbortedError } from "../triage/session.ts";
@@ -57,14 +58,24 @@ function duplicate(): ThreadDraftOutcome {
 interface Harness {
   readonly deps: DraftMentionDeps;
   readonly replies: string[];
-  readonly sent: { readonly userId: string; readonly label: string; readonly text: string }[];
+  readonly sent: {
+    readonly userId: string;
+    readonly label: string;
+    readonly text: string;
+    readonly blocks?: readonly object[];
+  }[];
   readonly draft: ReturnType<typeof vi.fn>;
   readonly permalink: ReturnType<typeof vi.fn>;
 }
 
 function harness(overrides: Partial<DraftMentionDeps> = {}): Harness {
   const replies: string[] = [];
-  const sent: { userId: string; label: string; text: string }[] = [];
+  const sent: {
+    userId: string;
+    label: string;
+    text: string;
+    blocks?: readonly object[];
+  }[] = [];
   const draft = vi.fn(async () => drafted());
   const permalink = vi.fn(async () => LINK);
   const deps: DraftMentionDeps = {
@@ -72,8 +83,8 @@ function harness(overrides: Partial<DraftMentionDeps> = {}): Harness {
     dry: false,
     draft,
     permalink,
-    deliver: async (userId, label, text) => {
-      sent.push({ userId, label, text });
+    deliver: async (userId, label, text, blocks) => {
+      sent.push({ userId, label, text, ...(blocks === undefined ? {} : { blocks }) });
       return "9.9";
     },
     reply: async (_mention, text) => {
@@ -100,6 +111,23 @@ function held(): { readonly promise: Promise<ThreadDraftOutcome>; release(): voi
       resolve(drafted());
     },
   };
+}
+
+const BLOCKS = [{ type: "actions" }];
+
+/** An offer that gives every drafted ticket `blocks`, and shows by `(offer)` that its text is what was sent. */
+function offering(blocks: readonly object[] | null = BLOCKS): {
+  readonly offer: DraftOffer;
+  readonly prepare: ReturnType<typeof vi.fn>;
+  readonly discard: ReturnType<typeof vi.fn>;
+} {
+  const discard = vi.fn(async () => undefined);
+  const prepare = vi.fn(async (_outcome: unknown, text: string) => ({
+    text: `${text}\n(offer)`,
+    blocks,
+    discard,
+  }));
+  return { offer: { prepare } as DraftOffer, prepare, discard };
 }
 
 describe("isDraftMention", () => {
@@ -144,6 +172,94 @@ describe("createDraftHandler", () => {
     expect(h.sent[0]?.text).toContain(
       "*Comment to add to SSX-3534*\nRådgiver ber om å åpne kunden.",
     );
+  });
+
+  describe("with a Post button on offer", () => {
+    it("asks the offer about the outcome, naming who asked and which thread, and sends what it prepared", async () => {
+      const { offer, prepare } = offering();
+      const h = harness({ offer });
+      const handler = createDraftHandler(h.deps);
+
+      await handler.handle(mention());
+      await handler.settled();
+
+      expect(prepare).toHaveBeenCalledOnce();
+      expect(prepare.mock.calls[0]?.[0]).toMatchObject({ kind: "drafted" });
+      expect(prepare.mock.calls[0]?.[1]).toContain("*commerce-rest: raise the export timeout*");
+      expect(prepare.mock.calls[0]?.[2]).toEqual({
+        asker: ASKER,
+        thread: { channel: "C0THREAD1", threadTs: "1712345678.000100" },
+      });
+      expect(h.sent).toHaveLength(1);
+      expect(h.sent[0]?.text).toMatch(/\(offer\)$/u);
+      expect(h.sent[0]?.blocks).toBe(BLOCKS);
+    });
+
+    it("sends no blocks at all for a message the offer gave no button", async () => {
+      const { offer } = offering(null);
+      const h = harness({ offer });
+      const handler = createDraftHandler(h.deps);
+
+      await handler.handle(mention());
+      await handler.settled();
+
+      expect(h.sent[0]).not.toHaveProperty("blocks");
+    });
+
+    it("sends no blocks either when there is no offer at all", async () => {
+      const h = harness();
+      const handler = createDraftHandler(h.deps);
+
+      await handler.handle(mention());
+      await handler.settled();
+
+      expect(h.sent[0]).not.toHaveProperty("blocks");
+    });
+
+    it("forgets the record when the message that carried its button could not be sent", async () => {
+      const { offer, discard } = offering();
+      const h = harness({
+        offer,
+        deliver: async () => {
+          throw new Error("account_inactive");
+        },
+      });
+      const handler = createDraftHandler(h.deps);
+
+      await handler.handle(mention());
+      await handler.settled();
+
+      expect(discard).toHaveBeenCalledOnce();
+    });
+
+    it("keeps the record once the message is sent", async () => {
+      const { offer, discard } = offering();
+      const h = harness({ offer });
+      const handler = createDraftHandler(h.deps);
+
+      await handler.handle(mention());
+      await handler.settled();
+
+      expect(discard).not.toHaveBeenCalled();
+    });
+
+    it("asks the offer nothing when the draft did not finish, and says so without a button", async () => {
+      const { offer, prepare } = offering();
+      const h = harness({
+        offer,
+        draft: vi.fn(async () => {
+          throw new Error("the atlassian server never came up");
+        }),
+      });
+      const handler = createDraftHandler(h.deps);
+
+      await handler.handle(mention());
+      await handler.settled();
+
+      expect(prepare).not.toHaveBeenCalled();
+      expect(h.sent[0]?.text).toContain("did not finish");
+      expect(h.sent[0]).not.toHaveProperty("blocks");
+    });
   });
 
   it("returns once it has answered, while the draft is still running", async () => {
