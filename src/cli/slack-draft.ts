@@ -41,7 +41,9 @@ function usage(): never {
       "  Dry by default: sends nothing. --dm also sends that message to SLACK_OPERATOR_USER_ID.\n" +
       "  With DRAFT_PROJECTS set, a ticket draft in a listed project whose component and issue type\n" +
       "  Jira lists for it carries a Post to Jira button — in the message --dm sends, and in the\n" +
-      "  blocks written to .draft.json — and one that does not says why. With --dm the button is\n" +
+      "  pieces written to .draft.json — and one that does not says why. A draft over Slack's 40 000\n" +
+      "  characters goes in several pieces, the first a message and each later one a reply in its\n" +
+      "  thread, with the button under the last. With --dm the button is\n" +
       "  sent only if SLACK_OPERATOR_USER_ID is on SLACK_DRAFT_USERS, and its record is kept under\n" +
       "  the state directory. A press files nothing yet: slack:listen answers it by writing the\n" +
       "  request it would make to <OUTPUT_DIR>/slack/<id>.issue.json.\n" +
@@ -101,16 +103,17 @@ async function main(): Promise<void> {
     });
     throw error;
   }
-  const plain = renderDraftMessage(outcome, threadReference(link, thread.channel));
+  const rendered = renderDraftMessage(outcome, threadReference(link, thread.channel));
+  // `withheld` and an offer exclude each other; the note goes in before the cut, into the last piece.
+  const text = withheld === null ? rendered : `${rendered}\n_No Post button: ${withheld}._`;
   const prepared =
     offer === null
-      ? withoutButton(plain)
-      : await offer.prepare(outcome, plain, {
+      ? withoutButton(text)
+      : await offer.prepare(outcome, text, {
           asker: recipient ?? "(dry run)",
           thread,
         });
-  const message =
-    withheld === null ? prepared.text : `${prepared.text}\n_No Post button: ${withheld}._`;
+  const message = prepared.pieces.map((piece) => piece.text).join("\n");
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, `${name}.draft.md`), `${message}\n`, "utf8");
 
@@ -118,13 +121,7 @@ async function main(): Promise<void> {
     null;
   if (deliver !== null && recipient !== null) {
     try {
-      sent = {
-        to: recipient,
-        ts:
-          prepared.blocks === null
-            ? await deliver(recipient, name, message)
-            : await deliver(recipient, name, message, prepared.blocks),
-      };
+      sent = { to: recipient, ts: await deliver(recipient, name, prepared.pieces) };
     } catch (error) {
       await prepared.discard();
       sent = { failed: error instanceof Error ? error.message : String(error) };
@@ -134,14 +131,15 @@ async function main(): Promise<void> {
     ...run,
     outcome,
     message,
-    blocks: prepared.blocks,
+    pieces: prepared.pieces,
     sent,
   });
   log.info("slack-draft.done", {
     ...run,
     outcome: outcome.kind,
     sent,
-    button: prepared.blocks !== null,
+    messages: prepared.pieces.length,
+    button: prepared.pieces.some((piece) => piece.blocks !== null),
   });
 
   const said =

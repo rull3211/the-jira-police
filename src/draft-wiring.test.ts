@@ -70,8 +70,8 @@ interface Call {
 
 const ASKER = "U0ASKER1";
 
-function press(id: string, userId = ASKER): Click {
-  return { userId, channel: "D0DM", messageTs: "9.9", actionId: "draft_post", value: id };
+function press(id: string, userId = ASKER, threadTs: string | null = null): Click {
+  return { userId, channel: "D0DM", messageTs: "9.9", threadTs, actionId: "draft_post", value: id };
 }
 
 function postedMessages(calls: readonly Call[]): Call[] {
@@ -214,7 +214,12 @@ describe("the Post button, from a mention to a direct message", () => {
 
   /** Slack and Jira at `fetch`, answering as each would for one thread and one project. */
   function wire(
-    options: { readonly sendFails?: boolean; readonly components?: readonly string[] } = {},
+    options: {
+      readonly sendFails?: boolean;
+      /** The 1-based message from which `chat.postMessage` is refused, the ones before it sent. */
+      readonly refuseFrom?: number;
+      readonly components?: readonly string[];
+    } = {},
   ): { readonly calls: Call[] } {
     const calls: Call[] = [];
     vi.stubGlobal(
@@ -242,6 +247,18 @@ describe("the Post button, from a mention to a direct message", () => {
           }
           if (what === "chat.postMessage" && options.sendFails === true) {
             return reply({ ok: false, error: "account_inactive" });
+          }
+          if (what === "chat.postMessage") {
+            const posted = calls.filter((call) => call.what === "chat.postMessage").length;
+            if (options.refuseFrom !== undefined && posted >= options.refuseFrom) {
+              return reply({ ok: false, error: "msg_blocks_too_long" });
+            }
+            // The first message is 9.9 and each later one is another, so a reply under the wrong parent shows.
+            return reply({
+              ok: true,
+              ts: posted === 1 ? "9.9" : `7.${String(posted)}`,
+              channel: "D0DM",
+            });
           }
           return reply({ ok: true, ts: "9.9", channel: "D0DM" });
         }
@@ -339,6 +356,76 @@ describe("the Post button, from a mention to a direct message", () => {
     expect(readdirSync(join(root, "state", "pending-drafts"))).toEqual([]);
   });
 
+  describe("and a draft over one message", () => {
+    const LONG = Array.from(
+      { length: 2000 },
+      (_, index) => `line ${String(index)} ${"w".repeat(40)}`,
+    ).join("\n");
+    const LONG_RESULT = { ...RESULT, ticket: { ...RESULT.ticket, description: LONG } };
+
+    it("goes as a message and replies in its thread, each under the first, with the button under the last", async () => {
+      const root = checkoutRoot();
+      const { calls } = wire();
+      runDraftSession.mockResolvedValue(LONG_RESULT);
+
+      await ask(root, { DRAFT_PROJECTS: "SSX" });
+
+      const messages = postedMessages(calls);
+      expect(messages.length).toBeGreaterThan(2);
+      const [first, ...replies] = messages;
+      expect(first?.form.get("channel")).toBe(ASKER);
+      expect(first?.form.has("thread_ts")).toBe(false);
+      // The conversation Slack named for the first, and the first as the parent of every one.
+      expect(replies.map((message) => message.form.get("channel"))).toEqual(
+        replies.map(() => "D0DM"),
+      );
+      expect(replies.map((message) => message.form.get("thread_ts"))).toEqual(
+        replies.map(() => "9.9"),
+      );
+      expect(
+        messages.map((message) => message.form.get("blocks")?.includes('"actions"') ?? false),
+      ).toEqual(messages.map((_, index) => index === messages.length - 1));
+      const id = buttonValue(messages.at(-1)?.form ?? new URLSearchParams());
+      expect(readdirSync(join(root, "state", "pending-drafts"))).toEqual([`${id}.json`]);
+    });
+
+    it("forgets the record, and says only the first message went, when a later one is refused", async () => {
+      const root = checkoutRoot();
+      const { calls } = wire({ refuseFrom: 2 });
+      runDraftSession.mockResolvedValue(LONG_RESULT);
+
+      await ask(root, { DRAFT_PROJECTS: "SSX" });
+
+      expect(readdirSync(join(root, "state", "pending-drafts"))).toEqual([]);
+      // The mention's own reply came first; the admission that the draft was lost is the last.
+      const told = calls.findLast((call) => call.what === "chat.postEphemeral")?.form.get("text");
+      expect(told).toMatch(/only the first of \d+ messages was sent, and message 2 failed/u);
+      expect(told).toContain("msg_blocks_too_long");
+      // The first went and nothing after the refused one was tried.
+      expect(postedMessages(calls)).toHaveLength(2);
+    });
+
+    it("in a dry run writes the replies beside the first message and sends nothing", async () => {
+      const root = checkoutRoot();
+      const { calls } = wire();
+      runDraftSession.mockResolvedValue(LONG_RESULT);
+
+      await ask(root, { DRAFT_PROJECTS: "SSX" }, "dry");
+
+      expect(postedMessages(calls)).toEqual([]);
+      const written = JSON.parse(
+        readFileSync(join(root, "out", "slack", "C0THREAD1-1712345678.000100.dm.json"), "utf8"),
+      ) as {
+        blocks: { type: string }[];
+        replies: { thread_ts: string; blocks: { type: string }[] }[];
+      };
+      expect(written.blocks.every((block) => block.type === "section")).toBe(true);
+      expect(written.replies.length).toBeGreaterThan(0);
+      expect(written.replies.every((message) => message.thread_ts === "dry-run")).toBe(true);
+      expect(written.replies.at(-1)?.blocks.at(-1)?.type).toBe("actions");
+    });
+  });
+
   it("in a dry run writes the message with its blocks, sends nothing, and keeps no record", async () => {
     const root = checkoutRoot();
     const { calls } = wire();
@@ -404,6 +491,18 @@ describe("the Post button, from a mention to a direct message", () => {
       });
     });
 
+    it("answers in the thread of the first message when the button is on a reply in it", async () => {
+      const root = checkoutRoot();
+      const { id, calls } = await sent(root);
+
+      await clickHandlerFor(
+        configured(root, { DRAFT_PROJECTS: "SSX" }),
+        "live",
+      )(press(id, ASKER, "8.8"));
+
+      expect(postedMessages(calls).at(-1)?.form.get("thread_ts")).toBe("8.8");
+    });
+
     it("marks the answer as a dry run under a dry listener, and still writes the request", async () => {
       const root = checkoutRoot();
       const { id, calls } = await sent(root);
@@ -462,6 +561,7 @@ describe("clickHandlerFor", () => {
     userId: "U0ASKER1",
     channel: "D0DM",
     messageTs: "9.9",
+    threadTs: null,
     actionId: "draft_post",
     value: "d-0123456789abcdef01234567",
   };
@@ -502,17 +602,36 @@ describe("draftOfferFor", () => {
 });
 
 describe("draftDelivery", () => {
-  it("writes a dry message's blocks only when it has any", async () => {
+  it("writes a dry message's blocks only when it has any, and replies only when there are more pieces", async () => {
     const root = checkoutRoot();
     const settings = settingsAt(root, { OUTPUT_DIR: join(root, "out") });
     const deliver = draftDelivery(settings, "dry");
 
-    await deliver("U0ASKER1", "with", "text", [{ type: "divider" }]);
-    await deliver("U0ASKER1", "without", "text");
+    await deliver("U0ASKER1", "with", [{ text: "text", blocks: [{ type: "divider" }] }]);
+    await deliver("U0ASKER1", "without", [{ text: "text", blocks: null }]);
 
     const read = (name: string): Record<string, unknown> =>
       JSON.parse(readFileSync(join(root, "out", "slack", `${name}.dm.json`), "utf8"));
     expect(read("with")).toMatchObject({ blocks: [{ type: "divider" }] });
     expect(read("without")).not.toHaveProperty("blocks");
+    expect(read("with")).not.toHaveProperty("replies");
   });
+
+  it.each(["dry", "live"] as const)(
+    "refuses a draft with no piece to send, in a %s run",
+    async (mode) => {
+      const fetchMock = vi.fn<typeof fetch>();
+      vi.stubGlobal("fetch", fetchMock);
+      const root = checkoutRoot();
+
+      await expect(
+        draftDelivery(settingsAt(root, { OUTPUT_DIR: join(root, "out") }), mode)(
+          "U0ASKER1",
+          "x",
+          [],
+        ),
+      ).rejects.toThrow("the draft has no message to send");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });

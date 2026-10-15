@@ -2,61 +2,144 @@ import { describe, expect, it } from "vitest";
 
 import {
   BLOCKS_MAX,
+  MESSAGE_MAX,
   POST_ACTION_ID,
+  type Piece,
   SECTION_MAX,
-  draftBlocks,
+  buttonPieces,
+  plainPieces,
   splitSections,
 } from "./draft-blocks.ts";
 
 const ID = "d-0123456789abcdef01234567";
 
-interface Section {
-  readonly type: string;
-  readonly text: { readonly type: string; readonly text: string };
+/** Over three messages' worth, in lines short enough that no line is ever cut. */
+const LONG_LINES = Array.from(
+  { length: 2000 },
+  (_, index) => `line ${String(index)} ${"w".repeat(40)}`,
+);
+
+function typesOf(piece: Piece): readonly string[] {
+  return (piece.blocks ?? []).map((block) => (block as { type: string }).type);
 }
 
-describe("draftBlocks", () => {
-  it("shows a short draft as one section, with the Post button under it carrying the record's id", () => {
-    expect(draftBlocks("*Draft ticket*\nBody", ID)).toEqual([
-      { type: "section", text: { type: "mrkdwn", text: "*Draft ticket*\nBody" } },
+describe("buttonPieces", () => {
+  it("shows a short draft as one piece of one section, with the Post button under it carrying the record's id", () => {
+    expect(buttonPieces("*Draft ticket*\nBody", ID)).toEqual([
       {
-        type: "actions",
-        block_id: POST_ACTION_ID,
-        elements: [
+        text: "*Draft ticket*\nBody",
+        blocks: [
+          { type: "section", text: { type: "mrkdwn", text: "*Draft ticket*\nBody" } },
           {
-            type: "button",
-            action_id: POST_ACTION_ID,
-            text: { type: "plain_text", text: "Post to Jira" },
-            style: "primary",
-            value: ID,
+            type: "actions",
+            block_id: POST_ACTION_ID,
+            elements: [
+              {
+                type: "button",
+                action_id: POST_ACTION_ID,
+                text: { type: "plain_text", text: "Post to Jira" },
+                style: "primary",
+                value: ID,
+              },
+            ],
           },
         ],
       },
     ]);
   });
 
-  it("puts the button last, after every section of a long draft", () => {
-    const blocks = draftBlocks(Array.from({ length: 200 }, () => "x".repeat(60)).join("\n"), ID);
+  it("keeps a draft of several sections in one message, which is the size real drafts are", () => {
+    const pieces = buttonPieces(LONG_LINES.slice(0, 300).join("\n"), ID);
 
-    expect(blocks?.at(-1)).toMatchObject({ type: "actions" });
+    expect(pieces).toHaveLength(1);
+    expect((pieces[0]?.blocks ?? []).length).toBeGreaterThan(3);
+  });
+
+  it("cuts a draft over a message into pieces and loses none of its lines", () => {
+    const pieces = buttonPieces(LONG_LINES.join("\n"), ID);
+
+    expect(pieces.length).toBeGreaterThan(2);
     expect(
-      (blocks ?? []).slice(0, -1).every((block) => (block as Section).type === "section"),
-    ).toBe(true);
-    expect((blocks ?? []).length).toBeGreaterThan(2);
+      pieces
+        .map((piece) => piece.text)
+        .join("\n")
+        .split("\n"),
+    ).toEqual(LONG_LINES);
   });
 
-  it("offers no button for a draft Slack would refuse, rather than a message it would", () => {
-    const fits = "y".repeat(SECTION_MAX);
-    // Each line fills a section on its own, so n lines are n sections.
-    const lines = (count: number): string => Array.from({ length: count }, () => fits).join("\n");
+  it("keeps every piece within what Slack keeps of a message's text", () => {
+    const pieces = buttonPieces(LONG_LINES.join("\n"), ID);
 
-    expect(draftBlocks(lines(BLOCKS_MAX - 1), ID)).toHaveLength(BLOCKS_MAX);
-    expect(draftBlocks(lines(BLOCKS_MAX), ID)).toBeNull();
+    // Slack's documented cut-off, written out so raising MESSAGE_MAX past it fails here.
+    expect(MESSAGE_MAX).toBeLessThanOrEqual(40_000);
+    expect(pieces.every((piece) => piece.text.length <= MESSAGE_MAX)).toBe(true);
   });
 
-  it("offers no button for a draft with nothing in it", () => {
-    expect(draftBlocks("", ID)).toBeNull();
-    expect(draftBlocks("\n \n", ID)).toBeNull();
+  it("puts the button under the last piece only, so a press comes after the whole draft", () => {
+    const pieces = buttonPieces(LONG_LINES.join("\n"), ID);
+
+    expect(typesOf(pieces.at(-1) as Piece).at(-1)).toBe("actions");
+    for (const piece of pieces.slice(0, -1)) {
+      expect(typesOf(piece).every((type) => type === "section")).toBe(true);
+    }
+    expect(pieces.flatMap(typesOf).filter((type) => type === "actions")).toHaveLength(1);
+  });
+
+  it("gives every piece blocks, so the thread reads one way throughout", () => {
+    expect(buttonPieces(LONG_LINES.join("\n"), ID).every((piece) => piece.blocks !== null)).toBe(
+      true,
+    );
+  });
+
+  it("keeps the worst piece within Slack's blocks per message", () => {
+    // A line just over half a section: two never share one, so each is a section of its own.
+    const wide = "y".repeat(SECTION_MAX / 2 + 1);
+    const pieces = buttonPieces(
+      Array.from({ length: Math.ceil((MESSAGE_MAX / wide.length) * 4) }, () => wide).join("\n"),
+      ID,
+    );
+
+    expect(pieces.length).toBeGreaterThan(2);
+    expect(Math.max(...pieces.map((piece) => piece.blocks?.length ?? 0))).toBeLessThanOrEqual(
+      BLOCKS_MAX,
+    );
+    // Not a vacuous bound: the pieces really are the one-line-a-section kind.
+    expect(Math.max(...pieces.map((piece) => piece.blocks?.length ?? 0))).toBeGreaterThan(20);
+  });
+
+  it("has no piece for a draft with nothing in it", () => {
+    expect(buttonPieces("", ID)).toEqual([]);
+    expect(buttonPieces("\n \n", ID)).toEqual([]);
+  });
+});
+
+describe("plainPieces", () => {
+  it("sends a short draft as one piece of plain text", () => {
+    expect(plainPieces("*Draft ticket*\nBody")).toEqual([
+      { text: "*Draft ticket*\nBody", blocks: null },
+    ]);
+  });
+
+  it("keeps a draft of several sections in one message", () => {
+    expect(plainPieces(LONG_LINES.slice(0, 300).join("\n"))).toHaveLength(1);
+  });
+
+  it("cuts a draft over a message into pieces of plain text and loses none of its lines", () => {
+    const pieces = plainPieces(LONG_LINES.join("\n"));
+
+    expect(pieces.length).toBeGreaterThan(2);
+    expect(pieces.every((piece) => piece.blocks === null)).toBe(true);
+    expect(pieces.every((piece) => piece.text.length <= MESSAGE_MAX)).toBe(true);
+    expect(
+      pieces
+        .map((piece) => piece.text)
+        .join("\n")
+        .split("\n"),
+    ).toEqual(LONG_LINES);
+  });
+
+  it("has no piece for a draft with nothing in it", () => {
+    expect(plainPieces("")).toEqual([]);
   });
 });
 

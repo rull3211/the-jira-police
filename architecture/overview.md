@@ -102,8 +102,8 @@ any thread. It is not a `runLoop` but one Socket Mode connection with its own re
 and it writes nothing but a property write per command that changes the subscriber list and a label
 write per mention that starts or clears a ticket — though a start hands the solve loop a ticket it
 will pay to solve. A draft is the one thing it pays for itself: a read-only session per mention, one
-at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message.
-With `DRAFT_PROJECTS` set, a ticket draft the gate passes also carries a **Post to Jira** button, and a
+at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message,
+a long one as a message and replies in its thread. With `DRAFT_PROJECTS` set, a ticket draft the gate passes also carries a **Post to Jira** button, and a
 press re-judges the draft and writes the request a filing would make to a file, filing nothing. The
 record the button names is a file under `state/pending-drafts/`, not the direct message read back
 as `BUILDING.md`'s default would have it: what a writer needs is structured, and a rendered message

@@ -1,6 +1,7 @@
 /**
- * A draft message as Block Kit: the draft in as many sections as Slack's limit takes, and the Post
- * button under them carrying the id of the record it files.
+ * A draft as the messages that carry it: the text cut on lines into pieces Slack takes whole, the
+ * first sent as the message and each later one as a reply in its thread, and the Post button under
+ * the last of them, carrying the id of the record it files.
  */
 
 export const POST_ACTION_ID = "draft_post";
@@ -9,32 +10,52 @@ export const POST_ACTION_ID = "draft_post";
 export const SECTION_MAX = 3000;
 /** Slack's limit on the blocks of one message. */
 export const BLOCKS_MAX = 50;
+/** Where Slack cuts the `text` of a message off. */
+export const MESSAGE_MAX = 40_000;
 
-/** `null` when the draft would not fit in one message, which then goes without a button. */
-export function draftBlocks(text: string, pendingId: string): readonly object[] | null {
-  const sections = splitSections(text);
-  if (sections.length === 0 || sections.length + 1 > BLOCKS_MAX) {
-    return null;
-  }
-  return [
-    ...sections.map((section) => ({ type: "section", text: { type: "mrkdwn", text: section } })),
-    {
-      type: "actions",
-      block_id: POST_ACTION_ID,
-      elements: [
-        {
-          type: "button",
-          action_id: POST_ACTION_ID,
-          text: { type: "plain_text", text: "Post to Jira" },
-          style: "primary",
-          value: pendingId,
-        },
-      ],
-    },
-  ];
+/** One message of a draft; `blocks` is `null` for a message sent as plain text. */
+export interface Piece {
+  readonly text: string;
+  readonly blocks: readonly object[] | null;
 }
 
-/** Whole lines where they fit; a line longer than a section is cut at a space, never inside an entity or a character. */
+/** Empty only for a draft with nothing in it. */
+export function plainPieces(text: string): readonly Piece[] {
+  return splitSections(text, MESSAGE_MAX).map((piece) => ({ text: piece, blocks: null }));
+}
+
+/** Every piece in sections, so the thread reads one way throughout; the button is under the last. */
+export function buttonPieces(text: string, pendingId: string): readonly Piece[] {
+  const pieces = splitSections(text, MESSAGE_MAX);
+  return pieces.map((piece, index) => ({
+    text: piece,
+    blocks: [
+      ...splitSections(piece).map((section) => ({
+        type: "section",
+        text: { type: "mrkdwn", text: section },
+      })),
+      ...(index === pieces.length - 1 ? [postButton(pendingId)] : []),
+    ],
+  }));
+}
+
+function postButton(pendingId: string): object {
+  return {
+    type: "actions",
+    block_id: POST_ACTION_ID,
+    elements: [
+      {
+        type: "button",
+        action_id: POST_ACTION_ID,
+        text: { type: "plain_text", text: "Post to Jira" },
+        style: "primary",
+        value: pendingId,
+      },
+    ],
+  };
+}
+
+/** Whole lines where they fit; a line longer than `max` is cut at a space, never inside an entity or a character. */
 export function splitSections(text: string, max: number = SECTION_MAX): readonly string[] {
   const sections: string[] = [];
   let current = "";

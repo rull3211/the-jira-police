@@ -21,7 +21,7 @@ export interface PostClickDeps {
   readonly gate: FileGateDeps;
   /** Writes the request a filing would make and resolves to where; files nothing. */
   rehearse(draft: PendingDraft): Promise<string>;
-  /** In the thread of the message the button is on. */
+  /** In the draft's thread: `click.threadTs` when the button is on a reply, else its own message. */
   reply(click: Click, text: string): Promise<void>;
 }
 

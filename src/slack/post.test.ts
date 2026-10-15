@@ -52,6 +52,7 @@ function click(overrides: Partial<Click> = {}): Click {
     userId: ASKER,
     channel: "D0DIRECT",
     messageTs: "1790779999.000100",
+    threadTs: null,
     actionId: POST_ACTION_ID,
     value: ID,
     ...overrides,

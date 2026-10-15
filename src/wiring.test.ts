@@ -1712,7 +1712,9 @@ describe("draftDelivery", () => {
     try {
       const deliver = draftDelivery(settingsWith({ OUTPUT_DIR: output }), "dry");
 
-      expect(await deliver("U0ASKER1", "C0THREAD1-1.2", "the draft")).toBe("dry-run");
+      expect(
+        await deliver("U0ASKER1", "C0THREAD1-1.2", [{ text: "the draft", blocks: null }]),
+      ).toBe("dry-run");
       expect(fetchMock).not.toHaveBeenCalled();
       expect(
         JSON.parse(readFileSync(join(output, "slack", "C0THREAD1-1.2.dm.json"), "utf8")),
@@ -1720,6 +1722,33 @@ describe("draftDelivery", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("dry, writes each piece after the first as a reply in the first's thread", async () => {
+    const output = mkdtempSync(join(tmpdir(), "draft-delivery-"));
+    const deliver = draftDelivery(settingsWith({ OUTPUT_DIR: output }), "dry");
+
+    await deliver("U0ASKER1", "C0THREAD1-1.2", [
+      { text: "one", blocks: null },
+      { text: "two", blocks: [{ type: "divider" }] },
+    ]);
+
+    expect(
+      JSON.parse(readFileSync(join(output, "slack", "C0THREAD1-1.2.dm.json"), "utf8")),
+    ).toEqual({
+      method: "chat.postMessage",
+      channel: "U0ASKER1",
+      text: "one",
+      replies: [
+        {
+          method: "chat.postMessage",
+          channel: "U0ASKER1",
+          thread_ts: "dry-run",
+          text: "two",
+          blocks: [{ type: "divider" }],
+        },
+      ],
+    });
   });
 
   it("live, posts to the person's member ID, which Slack delivers as a direct message", async () => {
@@ -1734,7 +1763,9 @@ describe("draftDelivery", () => {
     try {
       const deliver = draftDelivery(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "live");
 
-      expect(await deliver("U0ASKER1", "C0THREAD1-1.2", "the draft")).toBe("9.9");
+      expect(
+        await deliver("U0ASKER1", "C0THREAD1-1.2", [{ text: "the draft", blocks: null }]),
+      ).toBe("9.9");
       const [url, init] = fetchMock.mock.calls[0] ?? [];
       expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
       const form = new URLSearchParams(String(init?.body));

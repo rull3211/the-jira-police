@@ -47,6 +47,7 @@ import {
   auditPasses,
   createAuditNotifier,
 } from "./slack/notifier.ts";
+import type { Piece } from "./slack/draft-blocks.ts";
 import { createPostHandler } from "./slack/post.ts";
 import { type PrLineSender, dryDelivery, prLineSender, slackDelivery } from "./slack/pr-line.ts";
 import { SLACK_USER_ID_PATTERN } from "./slack/render.ts";
@@ -684,7 +685,11 @@ export function clickHandlerFor(
       return join(directory, `${draft.id}.issue.json`);
     },
     reply: async (click, text) => {
-      await slack.post({ channel: click.channel, text, threadTs: click.messageTs });
+      await slack.post({
+        channel: click.channel,
+        text,
+        threadTs: click.threadTs ?? click.messageTs,
+      });
     },
   });
   return (click) => handler.handle(click);
@@ -940,31 +945,70 @@ export function draftReadDirs(settings: Settings): readonly string[] {
   return scope.dirs.filter((dir) => !missing.includes(dir));
 }
 
-/** Sends one rendered draft, with the blocks that carry its button when it has one, and resolves to the message's `ts`; may throw. */
+/** Sends the first piece of a draft as a message and the rest as replies in its thread, and resolves to the first's `ts`; may throw. */
 export type DraftDelivery = (
   userId: string,
   threadLabel: string,
-  text: string,
-  blocks?: readonly object[],
+  pieces: readonly Piece[],
 ) => Promise<string>;
+
+/** An empty draft is refused rather than sent as an empty message, which Slack would refuse in its own words. */
+function headAndReplies(pieces: readonly Piece[]): {
+  readonly head: Piece;
+  readonly replies: readonly Piece[];
+} {
+  const [head, ...replies] = pieces;
+  if (head === undefined) {
+    throw new Error("the draft has no message to send");
+  }
+  return { head, replies };
+}
+
+function content(piece: Piece): { readonly text: string; readonly blocks?: readonly object[] } {
+  return { text: piece.text, ...(piece.blocks === null ? {} : { blocks: piece.blocks }) };
+}
+
+function dryMessage(channel: string, piece: Piece, threadTs?: string): object {
+  return {
+    method: "chat.postMessage",
+    channel,
+    ...(threadTs === undefined ? {} : { thread_ts: threadTs }),
+    ...content(piece),
+  };
+}
 
 /** `live` sends the draft as a direct message; `dry` writes the request beside the draft instead. */
 export function draftDelivery(settings: Settings, mode: "dry" | "live"): DraftDelivery {
   if (mode === "dry") {
     const directory = join(settings.OUTPUT_DIR, "slack");
-    return async (userId, threadLabel, text, blocks) => {
+    return async (userId, threadLabel, pieces) => {
+      const { head, replies } = headAndReplies(pieces);
       await writeJson(directory, `${threadLabel}.dm.json`, {
-        method: "chat.postMessage",
-        channel: userId,
-        text,
-        ...(blocks === undefined ? {} : { blocks }),
+        ...dryMessage(userId, head),
+        ...(replies.length === 0
+          ? {}
+          : { replies: replies.map((piece) => dryMessage(userId, piece, "dry-run")) }),
       });
       return "dry-run";
     };
   }
   const slack = createBotClient(settings);
-  return async (userId, _threadLabel, text, blocks) =>
-    (await slack.post({ channel: userId, text, ...(blocks === undefined ? {} : { blocks }) })).ts;
+  return async (userId, _threadLabel, pieces) => {
+    const { head, replies } = headAndReplies(pieces);
+    const first = await slack.post({ channel: userId, ...content(head) });
+    for (const [index, piece] of replies.entries()) {
+      try {
+        await slack.post({ channel: first.channel, threadTs: first.ts, ...content(piece) });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `only the first of ${String(pieces.length)} messages was sent, and message ${String(index + 2)} failed (${reason})`,
+          { cause: error },
+        );
+      }
+    }
+    return first.ts;
+  };
 }
 
 function isDirectory(path: string): boolean {

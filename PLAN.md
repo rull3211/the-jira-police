@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3887 tests in 119 files**, no build step.
+> **3905 tests in 119 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -615,6 +615,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `interactivity` with no `request_url`, which Slack's manifest reference lists as optional —
   neither was recorded; and every refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
   `state/`, and after the component leaves SSX.
+- **A draft over one message has never been sent in pieces, and no real draft has needed it.** The
+  longest seen is 8 980 characters. The split is tested against a stubbed Slack: pieces of at most
+  40 000 characters, each later one a reply under the first message, the button under the last, and
+  a press answered under the first. Never sent to Slack: that a press on a button of a reply carries
+  `container.thread_ts` (when it does not, `parseFrame` falls back to the message's own `thread_ts`
+  and then to none, and the answer lands under the reply); that a piece of up to 28 blocks is accepted
+  rather than refused as `msg_blocks_too_long`; and that 40 000 is where `text` is cut, which the docs
+  say. A piece that fails after the first went out leaves a first message with no button and no
+  record, and an ephemeral reply admitting it, which only the stub has shown. Nothing drives it live yet:
+  a draft's length is the session's, and `slack:draft` cannot make one run over.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1206,8 +1216,7 @@ shares `FIX_DENIED_TOOLS` with.
 
 ### 84. A drafted ticket can be pressed and rehearsed, and still has to be filed by hand
 
-**Branch:** `feat/slack-draft-file`. The probe below is the first thing built on it, and the split of a
-long draft rides with it by the operator's choice; that one is not part of the privilege.
+**Branch:** `feat/slack-draft-file`. The probe below is the first thing built on it.
 
 **What is not built.** The **Post to Jira** button is on a drafted ticket, and a press by the asker
 rehearses: it judges the draft again against Jira and writes the `createJiraIssue` request a filing
@@ -1237,24 +1246,6 @@ event (`sessionDenials` in `src/triage/session.ts`) and not from what the model 
 leaks, `BUILDING.md` already says what to do with one over a vocabulary nobody controls — invert it,
 or say why it cannot be — and the built-in tools' version of the same question is §76.
 
-**Bundled, and not the privilege: a draft too long for one message continues in that message's
-thread.** Nothing splits a draft across messages today. `draftBlocks` carries it in one message of at
-most `BLOCKS_MAX` blocks, and one it cannot carry goes out as a single text-only message with no
-button (`src/draft/offer.ts`), which Slack cuts at 40,000 characters of text and which takes the
-footer with it, where the thread's words to the bot are reported. That is reached only by a body of
-tens of thousands of characters or one dense in entities, since `escape` turns an `&` into five. It is
-here because a filing is of a draft read whole, and a draft that cannot carry a button cannot be
-filed. **The shape, decided with the operator:** the draft is cut on lines into pieces; the first is
-the message and each later piece a reply in its thread, never a message of its own; the button is on
-the last piece, so a press can come only once the whole draft is on screen; and the answer to a press
-goes in the thread of the first message, not of the piece the button is on.
-
-**Unmeasured, and to be measured before it is relied on:** that Slack's press payload names the thread
-the button's message is in (`container.thread_ts`), without which a press on a reply has no parent to
-answer under (`src/slack/socket.ts` reads only `message_ts`); that 40,000 is the cap on `text` and
-cuts rather than refuses, which the docs say and nothing here has sent; and what a piece that fails
-after the first went out leaves behind, which has to be a draft with no button and no record.
-
 **A second half, separable: the comment a duplicate adds.** A duplicate's draft has no button. Its
 writer would be `addCommentToJiraIssue`, a second MCP mutator, aimed at a key that is the model's
 word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project and is
@@ -1275,9 +1266,6 @@ all.
   ticket. A comment aimed at the wrong issue is worse than a declined thread once it is written.
 - **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
   person reading it once will stop.
-- **The split is for a draft no one has yet received.** If every real draft fits one message, it is
-  built ahead of a case, which `BUILDING.md` says not to do, and it is only worth keeping if the
-  cases above are what a long thread produces.
 - **The containment is unverified at the write.** See the probe above: a draft that can only reach a
   direct message tolerates an unmeasured denylist, and a session holding `createJiraIssue` does not.
 

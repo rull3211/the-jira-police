@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BLOCKS_MAX, POST_ACTION_ID, SECTION_MAX } from "../slack/draft-blocks.ts";
+import { POST_ACTION_ID } from "../slack/draft-blocks.ts";
 import type { FileGateDeps } from "./gate.ts";
 import { createDraftOffer } from "./offer.ts";
 import { type PendingStore, discardingStore } from "./pending.ts";
@@ -86,8 +86,8 @@ describe("createDraftOffer", () => {
     const prepared = await offer.prepare(drafted(), TEXT, WHO);
 
     expect(created).toEqual([{ asker: "U0ASKER1", thread: WHO.thread, ticket: TICKET }]);
-    expect(prepared.text).toBe(TEXT);
-    expect(prepared.blocks?.at(-1)).toMatchObject({
+    expect(prepared.pieces).toHaveLength(1);
+    expect(prepared.pieces[0]?.blocks?.at(-1)).toMatchObject({
       type: "actions",
       elements: [{ action_id: POST_ACTION_ID, value: ID }],
     });
@@ -98,7 +98,8 @@ describe("createDraftOffer", () => {
 
     const prepared = await offer.prepare(drafted(), TEXT, WHO);
 
-    const shown = (prepared.blocks ?? [])
+    const shown = prepared.pieces
+      .flatMap((piece) => piece.blocks ?? [])
       .map((block) => (block as { text?: { text?: string } }).text?.text ?? "")
       .join("\n");
     expect(shown).toContain(TEXT);
@@ -121,7 +122,7 @@ describe("createDraftOffer", () => {
       WHO,
     );
 
-    const shown = JSON.stringify(prepared.blocks);
+    const shown = JSON.stringify(prepared.pieces);
     expect(shown).toContain("&lt;!channel&gt; &amp; co");
     expect(shown).not.toContain("<!channel>");
     expect(shown).not.toContain("<@U0X>");
@@ -134,7 +135,7 @@ describe("createDraftOffer", () => {
 
       const prepared = await offer.prepare(outcome, TEXT, WHO);
 
-      expect(prepared).toMatchObject({ text: TEXT, blocks: null });
+      expect(prepared.pieces).toEqual([{ text: TEXT, blocks: null }]);
       expect(created).toEqual([]);
       expect(facts).not.toHaveBeenCalled();
     },
@@ -149,10 +150,12 @@ describe("createDraftOffer", () => {
       WHO,
     );
 
-    expect(prepared.blocks).toBeNull();
-    expect(prepared.text).toBe(
-      `${TEXT}\n_Not offered for posting: &lt;b&gt;Payments&lt;/b&gt; is not a component of SSX._`,
-    );
+    expect(prepared.pieces).toEqual([
+      {
+        text: `${TEXT}\n_Not offered for posting: &lt;b&gt;Payments&lt;/b&gt; is not a component of SSX._`,
+        blocks: null,
+      },
+    ]);
     expect(created).toEqual([]);
   });
 
@@ -167,21 +170,30 @@ describe("createDraftOffer", () => {
 
     const prepared = await offer.prepare(drafted(), TEXT, WHO);
 
-    expect(prepared.blocks).toBeNull();
-    expect(prepared.text).toContain(
+    expect(prepared.pieces.every((piece) => piece.blocks === null)).toBe(true);
+    expect(prepared.pieces[0]?.text).toContain(
       "Not offered for posting: the draft could not be kept (ENOSPC: no space left on device).",
     );
   });
 
-  it("forgets the record, and says why, when the draft is too long for a message with a button", async () => {
-    const { offer, removed } = harness();
-    const long = Array.from({ length: BLOCKS_MAX }, () => "y".repeat(SECTION_MAX)).join("\n");
+  it("keeps one record for a draft over a message, and puts the button only under the last piece", async () => {
+    const { offer, created, removed } = harness();
+    const long = Array.from(
+      { length: 2000 },
+      (_, index) => `line ${String(index)} ${"y".repeat(40)}`,
+    ).join("\n");
 
     const prepared = await offer.prepare(drafted(), long, WHO);
 
-    expect(prepared.blocks).toBeNull();
-    expect(prepared.text).toContain("too long for a message that carries a button");
-    expect(removed).toEqual([ID]);
+    expect(prepared.pieces.length).toBeGreaterThan(1);
+    expect(created).toHaveLength(1);
+    expect(removed).toEqual([]);
+    const buttons = prepared.pieces.map((piece) =>
+      (piece.blocks ?? []).some((block) => (block as { type: string }).type === "actions"),
+    );
+    expect(buttons).toEqual(
+      prepared.pieces.map((_, index) => index === prepared.pieces.length - 1),
+    );
   });
 
   it("forgets the record when the message that carried its button was never sent", async () => {

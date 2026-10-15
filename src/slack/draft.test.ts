@@ -4,6 +4,7 @@ import type { DraftOffer } from "../draft/offer.ts";
 import type { DraftResult } from "../draft/runner.ts";
 import type { ThreadDraftOutcome } from "../draft/thread.ts";
 import { SessionAbortedError } from "../triage/session.ts";
+import type { Piece } from "./draft-blocks.ts";
 import { DRAFT_USAGE, type DraftMentionDeps, createDraftHandler, isDraftMention } from "./draft.ts";
 import type { Mention } from "./start.ts";
 
@@ -58,11 +59,13 @@ function duplicate(): ThreadDraftOutcome {
 interface Harness {
   readonly deps: DraftMentionDeps;
   readonly replies: string[];
+  /** What the delivery was given, as its first piece beside every piece. */
   readonly sent: {
     readonly userId: string;
     readonly label: string;
     readonly text: string;
     readonly blocks?: readonly object[];
+    readonly pieces: readonly Piece[];
   }[];
   readonly draft: ReturnType<typeof vi.fn>;
   readonly permalink: ReturnType<typeof vi.fn>;
@@ -70,12 +73,7 @@ interface Harness {
 
 function harness(overrides: Partial<DraftMentionDeps> = {}): Harness {
   const replies: string[] = [];
-  const sent: {
-    userId: string;
-    label: string;
-    text: string;
-    blocks?: readonly object[];
-  }[] = [];
+  const sent: Harness["sent"] = [];
   const draft = vi.fn(async () => drafted());
   const permalink = vi.fn(async () => LINK);
   const deps: DraftMentionDeps = {
@@ -83,8 +81,15 @@ function harness(overrides: Partial<DraftMentionDeps> = {}): Harness {
     dry: false,
     draft,
     permalink,
-    deliver: async (userId, label, text, blocks) => {
-      sent.push({ userId, label, text, ...(blocks === undefined ? {} : { blocks }) });
+    deliver: async (userId, label, pieces) => {
+      const [first] = pieces;
+      sent.push({
+        userId,
+        label,
+        text: first?.text ?? "",
+        ...(first === undefined || first.blocks === null ? {} : { blocks: first.blocks }),
+        pieces,
+      });
       return "9.9";
     },
     reply: async (_mention, text) => {
@@ -123,8 +128,7 @@ function offering(blocks: readonly object[] | null = BLOCKS): {
 } {
   const discard = vi.fn(async () => undefined);
   const prepare = vi.fn(async (_outcome: unknown, text: string) => ({
-    text: `${text}\n(offer)`,
-    blocks,
+    pieces: [{ text: `${text}\n(offer)`, blocks }],
     discard,
   }));
   return { offer: { prepare } as DraftOffer, prepare, discard };
@@ -214,6 +218,24 @@ describe("createDraftHandler", () => {
       await handler.settled();
 
       expect(h.sent[0]).not.toHaveProperty("blocks");
+    });
+
+    it("hands the delivery every piece of a draft that came in several, in one delivery", async () => {
+      const prepare = vi.fn(async () => ({
+        pieces: [
+          { text: "the first", blocks: [{ type: "section" }] },
+          { text: "the last", blocks: BLOCKS },
+        ],
+        discard: async () => undefined,
+      }));
+      const h = harness({ offer: { prepare } as unknown as DraftOffer });
+      const handler = createDraftHandler(h.deps);
+
+      await handler.handle(mention());
+      await handler.settled();
+
+      expect(h.sent).toHaveLength(1);
+      expect(h.sent[0]?.pieces.map((piece) => piece.text)).toEqual(["the first", "the last"]);
     });
 
     it("forgets the record when the message that carried its button could not be sent", async () => {
