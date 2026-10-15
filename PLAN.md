@@ -599,20 +599,21 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
   times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
   a draft runs.
-- **The Post to Jira button has been sent once and never pressed.** On 2026-10-15
-  `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792009502102019 --dm` sent a
-  ticket draft to `U0BMCC38933` ($1.34, 241 s, exit 0): four sections, the longest exactly 3 000
-  characters, and the button, with the record kept under `state/pending-drafts/` and the button's
-  value equal to its id. That shows Slack accepts these blocks at the section limit, and that
-  `projectFacts` returned SSX's real components and issue types, since the gate let `SSX Advisor` and
-  `Oppgave` through. It shows nothing about the button on screen. Unseen: that it renders and is
-  clickable in a direct message the manifest leaves read-only, that interactivity needs no reinstall,
-  a press arriving as the `interactive` frame `parseFrame` reads — shaped from Slack's documentation,
-  not from a captured one — and the dry press's answer and file. **What would show it:** the app
-  updated from `docs/slack-app-manifest.json`, `pnpm slack:listen` running from the directory that
-  holds that record with the recipient on `SLACK_DRAFT_USERS` and `DRAFT_PROJECTS=SSX`, and the
-  button pressed: the message's thread should answer that nothing was filed, `slack.post_pressed`
-  should log `rehearsed`, and `<OUTPUT_DIR>/slack/<id>.issue.json` should hold the request.
+- **The Post to Jira button has been sent and pressed once, and a press only rehearses.** On
+  2026-10-15 `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792009502102019 --dm`
+  sent a ticket draft to `U0BMCC38933` ($1.34, 241 s, exit 0): four sections, the longest exactly
+  3 000 characters, and the button, with the record kept under `state/pending-drafts/` and the
+  button's value equal to its id. Slack accepted those blocks, and `projectFacts` returned SSX's real
+  components and issue types, since the gate let `SSX Advisor` and `Oppgave` through. Five minutes
+  later the person pressed it against the daemon, started from the same directory with the live
+  Slack listener: `slack.post_pressed` logged `rehearsed` six seconds after the listener connected,
+  `<id>.issue.json` held `createJiraIssue` arguments for SSX, `Oppgave`, `SSX Advisor` and the whole
+  8 980-character body, and no `slack.post_reply_failed` followed. So the button is clickable in the
+  read-only direct message, interactivity reached the listener, and the press arrived in the shape
+  `parseFrame` reads. Unseen: the reply as it rendered in the thread, which nothing here has read;
+  whether switching interactivity on needed a reinstall, which was not recorded; and every
+  refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
+  `state/`, and after the component leaves SSX.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1243,9 +1244,9 @@ measured either.
 manifest declares no `app_home`, so the Messages tab is not writable, and `message.im` is not
 subscribed (the operator could not type in it, 2026-10-14). A typed `post` needs both, and a
 reinstall an organisation admin may have to approve; a button needs interactivity on and no typed
-reply, and the operator chose it. **Whether a button stays clickable in a read-only direct message
-is unprobed**, and so is whether switching interactivity on needs a reinstall: the first click is
-both probes. A `@Bencebot post` in the thread needs neither, but the thread cannot see the direct
+reply, and the operator chose it. **A button is clickable in that read-only direct message**,
+probed on 2026-10-15; whether switching interactivity on needed a reinstall was not recorded. A
+`@Bencebot post` in the thread needs neither, but the thread cannot see the direct
 message that holds the draft.
 
 **Where the pending draft lives, decided against `BUILDING.md`'s default.** A file under `state/`
