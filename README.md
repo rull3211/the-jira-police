@@ -759,7 +759,10 @@ name, `ZZNOPROJ`, does not exist, refusing to start if it does or if that cannot
 result, the tool's own reply included, is written to `<OUTPUT_DIR>/probe/draft-tools.<case>.json`.
 Exit 0 means every verdict was the one predicted, 1 that one was not, 3 that a session threw, 4 that
 the key exists or could not be shown not to. It measures the permission flags a session is started
-with, not a whole draft session, and it says nothing about built-in tools.
+with, not a whole draft session, and it says nothing about built-in tools. Run once, on 2026-10-15,
+every verdict was the predicted one: `deny-control`, `draft-readable` and `writer-granted` ran their
+call; `deny-wins` and `draft-writer` never had the tool listed, so no call was attempted; and
+`writer-ungranted` listed it and was refused.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
