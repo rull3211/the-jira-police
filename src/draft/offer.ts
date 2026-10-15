@@ -31,12 +31,15 @@ export interface DraftOffer {
   ): Promise<PreparedDraft>;
 }
 
+/** A message that carries no button, so has no record to forget. */
+export function withoutButton(text: string): PreparedDraft {
+  return { text, blocks: null, discard: async () => undefined };
+}
+
 function plain(text: string, withheld: string | null): PreparedDraft {
-  return {
-    text: withheld === null ? text : `${text}\n_Not offered for posting: ${escape(withheld)}._`,
-    blocks: null,
-    discard: async () => undefined,
-  };
+  return withoutButton(
+    withheld === null ? text : `${text}\n_Not offered for posting: ${escape(withheld)}._`,
+  );
 }
 
 export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {

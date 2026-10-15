@@ -15,6 +15,8 @@ const log = createLogger("slack");
 export interface PostClickDeps {
   /** `SLACK_DRAFT_USERS`: the people who may ask for a draft are the only ones who may post one. */
   readonly allowed: readonly string[];
+  /** Whether every reply is marked as a dry run, as the listener's other handlers mark theirs. */
+  readonly dry: boolean;
   readonly pending: PendingStore;
   readonly gate: FileGateDeps;
   /** Writes the request a filing would make and resolves to where; files nothing. */
@@ -29,8 +31,9 @@ export interface PostHandler {
 }
 
 export function createPostHandler(deps: PostClickDeps): PostHandler {
-  const answer = async (click: Click, decision: string, text: string): Promise<void> => {
-    log.info("slack.post_pressed", { user: click.userId, id: click.value, decision });
+  const answer = async (click: Click, decision: string, said: string): Promise<void> => {
+    const text = deps.dry ? `(dry run, nothing filed) ${said}` : said;
+    log.info("slack.post_pressed", { user: click.userId, id: click.value, decision, said });
     try {
       await deps.reply(click, text);
     } catch (error) {

@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3874 tests in 119 files**, no build step.
+> **3887 tests in 119 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -78,7 +78,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §84. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §85. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -611,8 +611,9 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   8 980-character body, and no `slack.post_reply_failed` followed. So the button is clickable in the
   read-only direct message, interactivity reached the listener, and the press arrived in the shape
   `parseFrame` reads. Unseen: the reply as it rendered in the thread, which nothing here has read;
-  whether switching interactivity on needed a reinstall, which was not recorded; and every
-  refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
+  whether switching interactivity on needed a reinstall, and whether the manifest import accepts
+  `interactivity` with no `request_url`, which Slack's manifest reference lists as optional —
+  neither was recorded; and every refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
   `state/`, and after the component leaves SSX.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the

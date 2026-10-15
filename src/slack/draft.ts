@@ -3,7 +3,7 @@
  * the listener's chain, the result sent to them as a direct message.
  */
 
-import type { DraftOffer, PreparedDraft } from "../draft/offer.ts";
+import { type DraftOffer, type PreparedDraft, withoutButton } from "../draft/offer.ts";
 import {
   type ThreadDraftOutcome,
   type ThreadRef,
@@ -52,10 +52,6 @@ export interface DraftHandler {
   settled(): Promise<void>;
 }
 
-function unoffered(text: string): PreparedDraft {
-  return { text, blocks: null, discard: async () => undefined };
-}
-
 export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
   const prefix = deps.dry ? "(dry run, nothing sent) " : "";
   let running: { readonly label: string; readonly done: Promise<void> } | null = null;
@@ -72,13 +68,13 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
       const text = renderDraftMessage(drafted, where);
       message =
         deps.offer === undefined
-          ? unoffered(text)
+          ? withoutButton(text)
           : await deps.offer.prepare(drafted, text, { asker: mention.userId, thread });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const stopped = error instanceof SessionAbortedError;
       outcome = stopped ? "stopped" : "failed";
-      message = unoffered(
+      message = withoutButton(
         stopped
           ? `Bencebot was stopped before the draft of ${where} finished, so nothing was drafted. Mention \`@Bencebot draft\` there again once it is back.`
           : `The draft of ${where} did not finish: ${escape(reason)}. Nothing was drafted; mention \`@Bencebot draft\` there again to retry.`,

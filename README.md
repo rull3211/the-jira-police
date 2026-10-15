@@ -691,7 +691,8 @@ lists for it carries a **Post to Jira** button, and the message says exactly wha
 other ticket draft says why it carries none. The draft is kept as a file under the state directory,
 named by the id the button carries, and **a press files nothing yet**: the listener checks the
 draft again, writes the request it would make to `<OUTPUT_DIR>/slack/<id>.issue.json`, and says so
-in the message's thread. Anyone else is refused before the thread is read, a mention outside a
+in the message's thread, the reply starting `(dry run, nothing filed)` under `slack:listen` and
+`SLACK_LISTEN=dry`. Anyone else is refused before the thread is read, a mention outside a
 thread is answered with usage, and one draft runs at a time: a second is refused until the first
 arrives. The session runs off the listener's chain, so `/bencebot` and `@Bencebot start` are
 answered while it works, and stopping the listener kills it and tells the asker so. It follows the

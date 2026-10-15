@@ -35,6 +35,18 @@ function drafted(ticket: DraftTicket = TICKET): ThreadDraftOutcome {
   return { kind: "drafted", ticket, result: result({ ticket }) };
 }
 
+/** Keyed by every outcome kind but a ticket, so a new kind is a type error here until it is covered. */
+const NOT_A_TICKET: Record<Exclude<ThreadDraftOutcome["kind"], "drafted">, ThreadDraftOutcome> = {
+  declined: { kind: "declined", result: result() },
+  empty: { kind: "empty" },
+  "too-long": { kind: "too-long", reason: "the thread is long" },
+  duplicate: {
+    kind: "duplicate",
+    duplicate: { key: "SSX-1", feedback: "More." },
+    result: result(),
+  },
+};
+
 function harness(
   options: { readonly gate?: Partial<FileGateDeps>; readonly pending?: Partial<PendingStore> } = {},
 ): {
@@ -115,21 +127,9 @@ describe("createDraftOffer", () => {
     expect(shown).not.toContain("<@U0X>");
   });
 
-  it.each([
-    ["declined", { kind: "declined", result: result() } as ThreadDraftOutcome],
-    ["empty", { kind: "empty" } as ThreadDraftOutcome],
-    ["too long", { kind: "too-long", reason: "the thread is long" } as ThreadDraftOutcome],
-    [
-      "a duplicate",
-      {
-        kind: "duplicate",
-        duplicate: { key: "SSX-1", feedback: "More." },
-        result: result(),
-      } as ThreadDraftOutcome,
-    ],
-  ])(
-    "sends %s unchanged, keeps no record and does not ask Jira anything",
-    async (_name, outcome) => {
+  it.each(Object.entries(NOT_A_TICKET))(
+    "sends the outcome %s unchanged, keeps no record and does not ask Jira anything",
+    async (_kind, outcome) => {
       const { offer, facts, created } = harness();
 
       const prepared = await offer.prepare(outcome, TEXT, WHO);

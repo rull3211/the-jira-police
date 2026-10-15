@@ -620,6 +620,7 @@ export function listenerFor(
   });
   const start = mentionHandlerFor(settings, mode);
   const draft = draftHandlerFor(settings, mode, signal);
+  const click = clickHandlerFor(settings, mode);
   const mention = async (heard: Mention): Promise<void> => {
     await (isDraftMention(heard.text) ? draft.handle(heard) : start(heard));
   };
@@ -629,7 +630,7 @@ export function listenerFor(
       connect: openWebSocket,
       handle,
       mention,
-      click: clickHandlerFor(settings),
+      click,
       signal,
     });
     // The same signal has already killed a running draft's session; this waits for its last message.
@@ -642,7 +643,10 @@ export function listenerFor(
  * With nobody on SLACK_DRAFT_USERS or nothing on DRAFT_PROJECTS a press is only logged and nothing is
  * built to answer it. Both lists are read first, so a malformed one stops the start whatever the other holds.
  */
-export function clickHandlerFor(settings: Settings): (click: Click) => Promise<void> {
+export function clickHandlerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+): (click: Click) => Promise<void> {
   const allowed = draftUsers(settings);
   const projects = draftProjects(settings);
   if (allowed.length === 0 || projects.length === 0) {
@@ -657,6 +661,7 @@ export function clickHandlerFor(settings: Settings): (click: Click) => Promise<v
   const slack = createBotClient(settings);
   const handler = createPostHandler({
     allowed,
+    dry: mode === "dry",
     pending: fileStore(pendingDirectory(settings)),
     gate: fileGate(settings, projects),
     rehearse: async (draft) => {

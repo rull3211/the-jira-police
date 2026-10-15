@@ -394,7 +394,7 @@ export const SETTINGS = [
   {
     name: "SLACK_LISTEN",
     description:
-      "Whether the daemon answers `/bencebot`, a mention from someone on SLACK_START_USERS, and a draft mention from someone on SLACK_DRAFT_USERS. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and tickets and writing what each would change under OUTPUT_DIR/slack/; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there, and a mention's label edit. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
+      "Whether the daemon answers `/bencebot`, a mention from someone on SLACK_START_USERS, a draft mention from someone on SLACK_DRAFT_USERS, and a press on a draft's Post to Jira button, whose reply `dry` marks. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and tickets and writing what each would change under OUTPUT_DIR/slack/; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there, and a mention's label edit. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
     fallback: "off",
   },
   {

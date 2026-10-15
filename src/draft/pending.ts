@@ -20,6 +20,7 @@ export interface PendingDraft {
   readonly asker: string;
   readonly thread: ThreadRef;
   readonly ticket: DraftTicket;
+  /** For a person pruning records, which never expire; nothing in the service reads it. */
   readonly createdAt: string;
 }
 
@@ -91,7 +92,7 @@ export function discardingStore(newId: () => string = newPendingId): PendingStor
   };
 }
 
-/** Fails closed: a record that is not wholly what `create` wrote is not a draft anyone may file. */
+/** Fails closed: a record missing a field `create` writes, or naming another draft, is not one anyone may file. */
 export function parsePending(raw: string, id: string): PendingDraft {
   let value: unknown;
   try {

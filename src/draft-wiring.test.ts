@@ -372,7 +372,7 @@ describe("the Post button, from a mention to a direct message", () => {
       const { id, calls } = await sent(root);
       const jiraBefore = calls.filter((call) => call.host === "jira").length;
 
-      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }))(press(id));
+      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "live")(press(id));
 
       expect(calls.filter((call) => call.host === "jira").length).toBeGreaterThan(jiraBefore);
       expect(
@@ -404,12 +404,24 @@ describe("the Post button, from a mention to a direct message", () => {
       });
     });
 
+    it("marks the answer as a dry run under a dry listener, and still writes the request", async () => {
+      const root = checkoutRoot();
+      const { id, calls } = await sent(root);
+
+      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "dry")(press(id));
+
+      expect(postedMessages(calls)[1]?.form.get("text")).toMatch(
+        /^\(dry run, nothing filed\) Nothing was filed: filing is not built yet\./u,
+      );
+      expect(existsSync(join(root, "out", "slack", `${id}.issue.json`))).toBe(true);
+    });
+
     it("refuses once Jira no longer lists the component the draft chose", async () => {
       const root = checkoutRoot();
       const { id } = await sent(root);
       const later = wire({ components: ["SSX Customer"] });
 
-      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }))(press(id));
+      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "live")(press(id));
 
       // `later` is a fresh log, so its one message is the answer to the press.
       expect(postedMessages(later.calls)).toHaveLength(1);
@@ -425,6 +437,7 @@ describe("the Post button, from a mention to a direct message", () => {
 
       await clickHandlerFor(
         configured(root, { DRAFT_PROJECTS: "SSX", SLACK_DRAFT_USERS: `${ASKER},U0OTHER2` }),
+        "live",
       )(press(id, "U0OTHER2"));
 
       expect(postedMessages(calls)[1]?.form.get("text")).toContain(`asked for by <@${ASKER}>`);
@@ -436,7 +449,7 @@ describe("the Post button, from a mention to a direct message", () => {
       const { id, calls } = await sent(root);
       rmSync(join(root, "state"), { recursive: true });
 
-      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }))(press(id));
+      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "live")(press(id));
 
       expect(postedMessages(calls)[1]?.form.get("text")).toContain("I no longer hold this draft");
       expect(existsSync(join(root, "out", "slack", `${id}.issue.json`))).toBe(false);
@@ -460,15 +473,15 @@ describe("clickHandlerFor", () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
 
-    await clickHandlerFor(settingsAt(checkoutRoot(), extra))(PRESS);
+    await clickHandlerFor(settingsAt(checkoutRoot(), extra), "live")(PRESS);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("refuses a malformed project at startup even with nobody on the draft list", () => {
-    expect(() => clickHandlerFor(settingsAt(checkoutRoot(), { DRAFT_PROJECTS: "ssx" }))).toThrow(
-      SettingsError,
-    );
+    expect(() =>
+      clickHandlerFor(settingsAt(checkoutRoot(), { DRAFT_PROJECTS: "ssx" }), "live"),
+    ).toThrow(SettingsError);
   });
 });
 

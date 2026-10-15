@@ -13,6 +13,7 @@ import {
   threadLabel,
   threadReference,
 } from "../draft/thread.ts";
+import { withoutButton } from "../draft/offer.ts";
 import { createLogger } from "../logger.ts";
 import { SettingsError, readSettings, withConfigErrors } from "../settings.ts";
 import { parseThreadLink } from "../slack/start.ts";
@@ -103,7 +104,7 @@ async function main(): Promise<void> {
   const plain = renderDraftMessage(outcome, threadReference(link, thread.channel));
   const prepared =
     offer === null
-      ? { text: plain, blocks: null, discard: async () => undefined }
+      ? withoutButton(plain)
       : await offer.prepare(outcome, plain, {
           asker: recipient ?? "(dry run)",
           thread,

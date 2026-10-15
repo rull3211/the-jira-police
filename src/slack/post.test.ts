@@ -23,6 +23,30 @@ const DRAFT: PendingDraft = {
   createdAt: "2026-10-14T12:00:00.000Z",
 };
 
+/** Every log line written while `run` runs; `vitest.config.ts` silences the logger otherwise. */
+async function logged(run: () => Promise<unknown>): Promise<Record<string, unknown>[]> {
+  const lines: string[] = [];
+  const keep = (chunk: unknown): boolean => {
+    lines.push(String(chunk));
+    return true;
+  };
+  const level = process.env["LOG_LEVEL"];
+  process.env["LOG_LEVEL"] = "info";
+  vi.spyOn(process.stdout, "write").mockImplementation(keep);
+  vi.spyOn(process.stderr, "write").mockImplementation(keep);
+  try {
+    await run();
+  } finally {
+    vi.restoreAllMocks();
+    if (level === undefined) {
+      delete process.env["LOG_LEVEL"];
+    } else {
+      process.env["LOG_LEVEL"] = level;
+    }
+  }
+  return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 function click(overrides: Partial<Click> = {}): Click {
   return {
     userId: ASKER,
@@ -52,6 +76,7 @@ function harness(overrides: Partial<PostClickDeps> = {}): Harness {
   const rehearse = vi.fn<PostClickDeps["rehearse"]>(async (draft) => `/out/${draft.id}.issue.json`);
   const deps: PostClickDeps = {
     allowed: [ASKER],
+    dry: false,
     pending: {
       create: async () => DRAFT,
       get,
@@ -245,6 +270,57 @@ describe("createPostHandler", () => {
       expect(h.rehearse).not.toHaveBeenCalled();
     },
   );
+
+  describe("marking a dry run", () => {
+    /** One press per decision, so a reply built outside `answer` could not escape the mark. */
+    const scenarios: [string, Partial<Click>, Partial<PostClickDeps>][] = [
+      ["rehearsed", {}, {}],
+      ["not-allowed", { userId: "U0STRANGER" }, {}],
+      ["gone", { value: "d-ffffffffffffffffffffffff" }, {}],
+      ["not-asker", { userId: "U0OTHER2" }, { allowed: [ASKER, "U0OTHER2"] }],
+      ["refused", {}, { gate: { projects: [], facts: vi.fn() } }],
+    ];
+
+    it.each(scenarios)(
+      "starts every reply with (dry run, nothing filed) when dry: %s",
+      async (_decision, change, deps) => {
+        const h = harness({ ...deps, dry: true });
+
+        await createPostHandler(h.deps).handle(click(change));
+
+        expect(h.replies).toHaveLength(1);
+        expect(h.replies[0]?.text).toMatch(/^\(dry run, nothing filed\) /u);
+      },
+    );
+
+    it.each(scenarios)("marks no reply when not dry: %s", async (_decision, change, deps) => {
+      const h = harness({ ...deps, dry: false });
+
+      await createPostHandler(h.deps).handle(click(change));
+
+      expect(h.replies[0]?.text).not.toMatch(/dry run/u);
+    });
+  });
+
+  it("logs what it told the person, so a reply Slack refuses does not take the reason with it", async () => {
+    const h = harness({
+      reply: async () => {
+        throw new Error("channel_not_found");
+      },
+    });
+    h.facts.mockResolvedValue({ components: ["SSX Customer"], issueTypes: ["Oppgave"] });
+
+    const lines = await logged(() => createPostHandler(h.deps).handle(click()));
+
+    expect(lines.find((line) => line["message"] === "slack.post_pressed")).toMatchObject({
+      decision: "refused",
+      id: ID,
+      said: "Not posted: SSX Advisor is not a component of SSX. Nothing was filed.",
+    });
+    expect(lines.find((line) => line["message"] === "slack.post_reply_failed")).toMatchObject({
+      reason: "channel_not_found",
+    });
+  });
 
   it("says in every refusal that nothing was filed", async () => {
     const refusals: [Partial<Click>, Partial<PostClickDeps>][] = [

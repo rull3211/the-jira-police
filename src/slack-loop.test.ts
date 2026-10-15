@@ -187,6 +187,15 @@ describe("createSlackListener", () => {
     ).toThrow(/SLACK_DRAFT_USERS \(expected member IDs such as U0123ABCD, got "@bence"\)/u);
   });
 
+  it("refuses at startup a malformed DRAFT_PROJECTS, even with nobody on SLACK_DRAFT_USERS", () => {
+    expect(() =>
+      createSlackListener(
+        settingsWith({ SLACK_LISTEN: "dry", SLACK_APP_TOKEN: "xapp-1-abc", DRAFT_PROJECTS: "ssx" }),
+        new AbortController().signal,
+      ),
+    ).toThrow(/DRAFT_PROJECTS \(expected project keys such as SSX, got "ssx"\)/u);
+  });
+
   it.each([
     [
       "a draft from someone only on the start list",
