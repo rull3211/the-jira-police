@@ -50,7 +50,7 @@ function flat(text: string): string {
   return text.toLowerCase().replaceAll(/[^\p{L}\p{N}]+/gu, "");
 }
 
-/** How much of a filing came back as sent: every difference found, and how much of the body arrived. */
+/** What differs between a filing and what was sent: the body's start, end and size are compared, never its middle. */
 export function compareFiled(
   ticket: DraftTicket,
   issue: FiledIssue,
@@ -214,7 +214,7 @@ export function createPostHandler(deps: PostClickDeps): PostHandler {
       );
       checked =
         differences.length === 0
-          ? `Read back from Jira: project, type, summary and component match, and the body arrived (${String(got)} of ${String(sent)} characters).`
+          ? `Read back from Jira: project, type, summary and component match, and the body begins and ends as the draft's does (${String(got)} of ${String(sent)} characters).`
           : `Jira's copy differs from the draft: ${escape(differences.join("; "))}. Check it before anyone relies on it.`;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

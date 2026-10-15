@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { createLogger } from "../logger.ts";
 import { readSettings, withConfigErrors } from "../settings.ts";
-import { draftUsers, listenerFor, rosterWhere, startUsers } from "../wiring.ts";
+import { draftProjects, draftUsers, listenerFor, rosterWhere, startUsers } from "../wiring.ts";
 
 const log = createLogger("slack-listen");
 
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const drafts =
     drafters === 0
       ? "No draft is answered: SLACK_DRAFT_USERS is empty."
-      : `${String(drafters)} ${drafters === 1 ? "person" : "people"} may draft a thread${write ? "" : ", dry, though each session is still paid for"}.`;
+      : `${String(drafters)} ${drafters === 1 ? "person" : "people"} may draft a thread${write ? "" : ", dry, though each session is still paid for"}.${write && draftProjects(settings).length > 0 ? " A press on a draft's Post to Jira button files it." : ""}`;
   process.stdout.write(
     write
       ? `Listening for /bencebot, writing ${where}. ${mentions} ${drafts} Ctrl-C stops.\n`

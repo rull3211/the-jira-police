@@ -11,6 +11,7 @@ import {
   sessionCost,
   sessionDenials,
 } from "../triage/session.ts";
+import { blocksOf, textOf } from "./filer.ts";
 
 /** A key no project holds, so a call that goes through still has nothing to write to; the CLI checks that first. */
 export const PROBE_PROJECT = "ZZNOPROJ";
@@ -242,31 +243,4 @@ export function verdictOf(evidence: ProbeEvidence): ProbeVerdict {
   return evidence.results.every((text) => text !== null && NO_SUCH_TOOL.test(text))
     ? "absent"
     : "executed";
-}
-
-function blocksOf(event: Record<string, unknown>): readonly Record<string, unknown>[] {
-  const message = event["message"];
-  const content =
-    typeof message === "object" && message !== null
-      ? (message as Record<string, unknown>)["content"]
-      : undefined;
-  return Array.isArray(content)
-    ? content.filter(
-        (block): block is Record<string, unknown> => typeof block === "object" && block !== null,
-      )
-    : [];
-}
-
-function textOf(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-  return Array.isArray(content)
-    ? content
-        .map((part) => {
-          const text = (part as Record<string, unknown> | null)?.["text"];
-          return typeof text === "string" ? text : "";
-        })
-        .join(" ")
-    : "";
 }

@@ -7,8 +7,6 @@ export const POST_ACTION_ID = "draft_post";
 
 /** Slack's limit on the text of one section block. */
 export const SECTION_MAX = 3000;
-/** Slack's limit on the blocks of one message. */
-export const BLOCKS_MAX = 50;
 /** Where Slack cuts the `text` of a message off. */
 export const MESSAGE_MAX = 40_000;
 

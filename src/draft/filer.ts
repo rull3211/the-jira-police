@@ -13,8 +13,8 @@ export const FILE_TOOL = "mcp__atlassian__createJiraIssue";
 export const FILER_ALLOWED_TOOLS: readonly string[] = [FILE_TOOL];
 
 /**
- * Taken from the analyst's list, which `pnpm draft:probe` measured removing MCP tools by name, less
- * the one tool this session exists for, plus the file readers it has no use for.
+ * The analyst's list less the one tool this session exists for, plus the file readers it has no use
+ * for. A mutator it misses is held by `dontAsk` refusing any tool not allowed, measured for one tool.
  */
 export const FILER_DENIED_TOOLS: readonly string[] = [
   ...ANALYST_DENIED_TOOLS.filter((tool) => tool !== FILE_TOOL),
@@ -140,8 +140,9 @@ export function collectCalls(): CallEvidence {
 }
 
 /**
- * Whether an issue exists, from the tool call and not from what the model says of it. A call whose
- * result cannot be read, a second call, or a model that disagrees with its own tool is `unclear`.
+ * Whether an issue exists, from the tool call and not from what the model says of it. Only a refusal
+ * Jira words as a client error is `not-created`; a call whose result cannot be read, an error worded
+ * any other way, a second call, or a model that disagrees with its own tool is `unclear`.
  */
 export function classify(
   calls: readonly (string | null)[],
@@ -163,7 +164,12 @@ export function classify(
   }
   const parsed = parseReply(reply);
   if (parsed.error !== null) {
-    return { kind: "not-created", reason: parsed.error };
+    return parsed.refused
+      ? { kind: "not-created", reason: parsed.error }
+      : {
+          kind: "unclear",
+          reason: `the tool reported an error that does not show nothing was written: ${parsed.error}`,
+        };
   }
   const candidates = parsed.keys.filter((key) => key.startsWith(`${project}-`));
   const key =
@@ -175,8 +181,8 @@ export function classify(
       kind: "unclear",
       reason:
         candidates.length === 0
-          ? "the call returned no issue key that could be read"
-          : "the call returned more than one key and the session's own report did not choose between them",
+          ? `the call returned no issue key that could be read: ${oneLine(reply)}`
+          : `the call returned more than one key (${candidates.join(", ")}) and the session's own report did not choose between them`,
     };
   }
   if ((said.key !== "" && said.key !== key) || !said.created) {
@@ -188,9 +194,22 @@ export function classify(
   return { kind: "created", key };
 }
 
-/** The tool's error as it said it, or the keys its reply names, the first of them from the reply's own `key` field. */
+/** The reply on one line and cut, for a message. */
+function oneLine(text: string): string {
+  return text.replaceAll(/\s+/gu, " ").slice(0, REPLY_CHARS);
+}
+
+/** How the tool words a request Jira turned away: a client error, which comes before any write. */
+const REFUSED_BEFORE_WRITING =
+  /^Failed to create issue: (?:Bad Request|Unauthorized|Forbidden|Not Found|Unprocessable Entity)\b/u;
+
+/**
+ * The tool's error as it said it, and whether it is worded as a refusal; or the keys its reply names,
+ * the first of them from the reply's own `key` field.
+ */
 function parseReply(reply: string): {
   readonly error: string | null;
+  readonly refused: boolean;
   readonly keys: readonly string[];
 } {
   let value: unknown;
@@ -203,12 +222,17 @@ function parseReply(reply: string): {
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
   if (object?.["error"] === true) {
     const message = typeof object["message"] === "string" ? object["message"] : reply;
-    return { error: message.replaceAll(/\s+/gu, " ").slice(0, REPLY_CHARS), keys: [] };
+    return {
+      error: oneLine(message),
+      refused: REFUSED_BEFORE_WRITING.test(message),
+      keys: [],
+    };
   }
   const own = object?.["key"];
   const pattern = /\b[A-Z][A-Z0-9]+-[1-9][0-9]*\b/gu;
   return {
     error: null,
+    refused: false,
     keys:
       typeof own === "string" && /^[A-Z][A-Z0-9]+-[1-9][0-9]*$/u.test(own)
         ? [own]
@@ -261,7 +285,7 @@ export async function runFiler(
   return classify(evidence.calls(), said, options.ticket.project);
 }
 
-function blocksOf(event: Record<string, unknown>): readonly Record<string, unknown>[] {
+export function blocksOf(event: Record<string, unknown>): readonly Record<string, unknown>[] {
   const message = event["message"];
   const content =
     typeof message === "object" && message !== null
@@ -274,7 +298,7 @@ function blocksOf(event: Record<string, unknown>): readonly Record<string, unkno
     : [];
 }
 
-function textOf(content: unknown): string {
+export function textOf(content: unknown): string {
   if (typeof content === "string") {
     return content;
   }

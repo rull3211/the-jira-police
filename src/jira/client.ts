@@ -191,14 +191,12 @@ export interface ProjectFacts {
 
 /** An issue as it reads back after a filing, to be compared with what was sent. */
 export interface FiledIssue {
-  readonly key: string;
   readonly project: string;
   readonly issueType: string;
   readonly summary: string;
   readonly components: readonly string[];
   /** ADF. */
   readonly description: unknown;
-  readonly url: string;
 }
 
 /** `elsewhere` is `moveBackFromInProgress` finding the ticket no longer in progress. */
@@ -477,7 +475,6 @@ export class JiraClient {
     const payload = (await response.json()) as FiledPayload;
     const f = payload.fields ?? {};
     return {
-      key: payload.key ?? key,
       project: f.project?.key ?? "",
       issueType: f.issuetype?.name ?? "",
       summary: f.summary ?? "",
@@ -485,7 +482,6 @@ export class JiraClient {
         .map((component) => component?.name)
         .filter((name): name is string => typeof name === "string" && name !== ""),
       description: f.description,
-      url: `${this.#baseUrl}/browse/${key}`,
     };
   }
 
@@ -840,7 +836,6 @@ interface DetailPayload {
 
 /** `GET .../issue/{key}`: only what `fetchFiled` reads of it. */
 interface FiledPayload {
-  readonly key?: string;
   readonly fields?: {
     readonly summary?: string;
     readonly issuetype?: { readonly name?: string };

@@ -62,7 +62,7 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
       const discard = async (): Promise<void> => {
         await deps.pending.remove(id).catch(() => undefined);
       };
-      const note = `Pressing *Post to Jira* checks this draft again and, on a listener that is live, files it once as ${escape(ticket.issueType)} in the component ${escape(ticket.component)} of ${escape(ticket.project)}; a dry listener only writes the request it would make.`;
+      const note = `Pressing *Post to Jira* checks this draft again and, on a listener that is live, files it once as ${escape(ticket.issueType)} in the component ${escape(ticket.component)} of ${escape(ticket.project)}, and links it in the thread this was drafted from; a dry listener only writes the request it would make.`;
       return { pieces: buttonPieces(`${text}\n\n${note}`, id), discard };
     },
   };

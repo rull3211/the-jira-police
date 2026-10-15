@@ -402,13 +402,11 @@ describe("JiraClient.fetchFiled", () => {
     const filed = await client().fetchFiled("SSX-4100");
 
     expect(filed).toEqual({
-      key: "SSX-4100",
       project: "SSX",
       issueType: "Oppgave",
       summary: "commerce-rest: raise the export timeout",
       components: ["SSX Advisor", "SSX Customer"],
       description: { type: "doc", version: 1, content: [] },
-      url: "https://example.invalid/browse/SSX-4100",
     });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       "https://example.invalid/rest/api/3/issue/SSX-4100?fields=summary,issuetype,project,components,description",
@@ -424,7 +422,6 @@ describe("JiraClient.fetchFiled", () => {
     );
 
     expect(await client().fetchFiled("SSX-4100")).toMatchObject({
-      key: "SSX-4100",
       project: "",
       issueType: "",
       components: [],

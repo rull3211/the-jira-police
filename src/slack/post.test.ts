@@ -397,7 +397,6 @@ describe("createPostHandler", () => {
 /** The issue as Jira would give it back for `ticket`: the body as the document form Jira keeps, one paragraph to a blank line. */
 function readBack(ticket: DraftTicket, overrides: Partial<FiledIssue> = {}): FiledIssue {
   return {
-    key: "SSX-4100",
     project: ticket.project,
     issueType: ticket.issueType,
     summary: ticket.summary,
@@ -410,7 +409,6 @@ function readBack(ticket: DraftTicket, overrides: Partial<FiledIssue> = {}): Fil
         content: [{ type: "text", text: paragraph }],
       })),
     },
-    url: "https://jira.example/browse/SSX-4100",
     ...overrides,
   };
 }
@@ -455,6 +453,15 @@ describe("compareFiled", () => {
 
     expect(head.differences.join("; ")).toMatch(/does not begin as the draft's does/u);
     expect(tail.differences.join("; ")).toMatch(/does not end as the draft's does/u);
+  });
+
+  it("does not compare what lies between a body's start and its end, so a changed middle of the same size passes", () => {
+    const changed = {
+      ...TICKET,
+      description: BODY.replace("large customer", "large supplier"),
+    };
+
+    expect(compareFiled(TICKET, readBack(changed)).differences).toEqual([]);
   });
 
   it("counts a body as arrived by the words in it, so a link's address does not make a difference", () => {
@@ -515,7 +522,7 @@ describe("a press on a live listener", () => {
     expect(h.rehearse).not.toHaveBeenCalled();
     expect(h.replies).toHaveLength(1);
     expect(h.replies[0]?.text).toMatch(
-      /^Filed as <https:\/\/jira\.example\/browse\/SSX-4100\|SSX-4100>\. Read back from Jira: project, type, summary and component match, and the body arrived \(\d+ of \d+ characters\)\. The link is posted in the thread the draft came from\.$/u,
+      /^Filed as <https:\/\/jira\.example\/browse\/SSX-4100\|SSX-4100>\. Read back from Jira: project, type, summary and component match, and the body begins and ends as the draft's does \(\d+ of \d+ characters\)\. The link is posted in the thread the draft came from\.$/u,
     );
   });
 
@@ -727,7 +734,7 @@ describe("a press on a live listener", () => {
   });
 
   describe("acknowledging the press", () => {
-    it("says filing has begun before the writer runs, in the draft's thread, so the press never looks dead", async () => {
+    it("says filing has begun before the mark is written and the writer runs, in the draft's thread, so the press never looks dead", async () => {
       const s = holding({ ...DRAFT, ticket: TICKET });
       const f = filing();
       const reply = vi.fn<PostClickDeps["reply"]>(async () => undefined);
@@ -738,6 +745,9 @@ describe("a press on a live listener", () => {
       expect(reply.mock.calls[0]?.[0]).toMatchObject({ threadTs: "8.8" });
       expect(reply.mock.calls[0]?.[1]).toMatch(
         /^Filing this draft now\. The writer takes about half a minute/u,
+      );
+      expect(reply.mock.invocationCallOrder[0]).toBeLessThan(
+        s.update.mock.invocationCallOrder[0] ?? 0,
       );
       expect(reply.mock.invocationCallOrder[0]).toBeLessThan(
         f.file.mock.invocationCallOrder[0] ?? 0,

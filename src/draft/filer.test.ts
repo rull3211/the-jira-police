@@ -35,7 +35,7 @@ describe("the writer's tool lists", () => {
     expect(FILER_DENIED_TOOLS).not.toContain(FILE_TOOL);
   });
 
-  it("denies every other Atlassian mutator by name, which the probe measured removing a tool", () => {
+  it("denies the four other Atlassian mutators the analyst's list names, of which the probe measured one", () => {
     for (const tool of [
       "mcp__atlassian__editJiraIssue",
       "mcp__atlassian__addCommentToJiraIssue",
@@ -150,6 +150,15 @@ describe("classify", () => {
     expect(classify(["done"], said, "SSX")).toMatchObject({ kind: "unclear" });
   });
 
+  it("keeps the reply of a call it could not read a key from, so the one who searches sees it", () => {
+    const refusal = "Permission to use mcp__atlassian__createJiraIssue has been denied.";
+
+    expect(classify([refusal], { created: false, key: "" }, "SSX")).toMatchObject({
+      kind: "unclear",
+      reason: expect.stringContaining(refusal),
+    });
+  });
+
   it("calls a session that made no call not-created, whatever it said", () => {
     expect(classify([], said, "SSX")).toEqual({
       kind: "not-created",
@@ -157,14 +166,64 @@ describe("classify", () => {
     });
   });
 
-  it("calls the tool's own error not-created, with what it said, on one line and cut", () => {
-    const error = JSON.stringify({ error: true, message: `Failed:\n${"x".repeat(1000)}` });
+  it("calls Jira's refusal not-created, with what it said, on one line and cut", () => {
+    const error = JSON.stringify({
+      error: true,
+      message: `Failed to create issue: Bad Request.\n${"x".repeat(1000)}`,
+    });
 
     const outcome = classify([error], { created: false, key: "" }, "SSX");
 
     expect(outcome.kind).toBe("not-created");
-    expect(outcome.kind === "not-created" ? outcome.reason : "").toMatch(/^Failed: x+$/u);
+    expect(outcome.kind === "not-created" ? outcome.reason : "").toMatch(
+      /^Failed to create issue: Bad Request\. x+$/u,
+    );
     expect(outcome.kind === "not-created" ? outcome.reason.length : 0).toBeLessThanOrEqual(300);
+  });
+
+  it("reads the reply the probe recorded for a project that does not exist as a refusal", () => {
+    const recorded = JSON.stringify({
+      error: true,
+      message:
+        'Failed to create issue: Bad Request. {"errorMessages":["Målprosjektet finnes ikke eller du har ikke tillatelse til å opprette saker i det."],"errors":{"project":"Målprosjektet finnes ikke eller du har ikke tillatelse til å opprette saker i det."}}',
+      repairHint: "Fix the project key and try again.",
+    });
+
+    expect(classify([recorded], { created: false, key: "" }, "SSX").kind).toBe("not-created");
+  });
+
+  it.each(["Bad Request", "Unauthorized", "Forbidden", "Not Found", "Unprocessable Entity"])(
+    "calls a %s not-created: Jira turned the request away before writing",
+    (reason) => {
+      const error = JSON.stringify({ error: true, message: `Failed to create issue: ${reason}.` });
+
+      expect(classify([error], { created: false, key: "" }, "SSX").kind).toBe("not-created");
+    },
+  );
+
+  it.each([
+    "Failed to create issue: Gateway Timeout.",
+    "Failed to create issue: Internal Server Error.",
+    "Failed to create issue: Bad Gateway.",
+    "Failed to create issue: Service Unavailable.",
+    "fetch failed",
+    "Failed to create issue: Gateway Timeout. The upstream had answered Bad Request.",
+    "The proxy said Failed to create issue: Bad Request.",
+  ])("calls the error %j unclear, since the write may have gone through", (message) => {
+    const outcome = classify(
+      [JSON.stringify({ error: true, message })],
+      { created: false, key: "" },
+      "SSX",
+    );
+
+    expect(outcome).toMatchObject({ kind: "unclear", reason: expect.stringContaining(message) });
+  });
+
+  it("calls an error that says nothing unclear, and keeps the reply it came in", () => {
+    expect(classify(['{"error":true}'], { created: false, key: "" }, "SSX")).toMatchObject({
+      kind: "unclear",
+      reason: expect.stringContaining('{"error":true}'),
+    });
   });
 
   it("calls more than one call unclear, since which of them made an issue is not known", () => {
@@ -283,16 +342,28 @@ describe("runFiler", () => {
     expect(started).not.toHaveProperty("signal");
   });
 
-  it("reports the tool's refusal as nothing created", async () => {
-    const session = playing([call, returned('{"error":true,"message":"no such project"}')], {
-      created: false,
-      key: "",
-    });
+  it("reports Jira's refusal as nothing created", async () => {
+    const session = playing(
+      [
+        call,
+        returned('{"error":true,"message":"Failed to create issue: Bad Request. no such project"}'),
+      ],
+      { created: false, key: "" },
+    );
 
     expect(await runFiler(options, session)).toEqual({
       kind: "not-created",
-      reason: "no such project",
+      reason: "Failed to create issue: Bad Request. no such project",
     });
+  });
+
+  it("reports an error that may have followed the write as unclear", async () => {
+    const session = playing(
+      [call, returned('{"error":true,"message":"Failed to create issue: Gateway Timeout."}')],
+      { created: false, key: "" },
+    );
+
+    expect(await runFiler(options, session)).toMatchObject({ kind: "unclear" });
   });
 
   it("takes a server that was never connected for nothing created, since the session stopped before any turn", async () => {

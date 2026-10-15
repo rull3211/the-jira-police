@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BLOCKS_MAX,
   MESSAGE_MAX,
   POST_ACTION_ID,
   type Piece,
@@ -10,6 +9,9 @@ import {
   plainPieces,
   splitSections,
 } from "./draft-blocks.ts";
+
+/** Slack's limit on the blocks of one message. */
+const BLOCKS_MAX = 50;
 
 const ID = "d-0123456789abcdef01234567";
 
