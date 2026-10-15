@@ -70,6 +70,7 @@ function harness(
         return await base.create(draft);
       },
       get: base.get,
+      update: base.update,
       remove: async (id) => {
         removed.push(id);
       },
@@ -107,7 +108,7 @@ describe("createDraftOffer", () => {
       .join("\n");
     expect(shown).toContain(TEXT);
     expect(shown).toContain(
-      "Pressing *Post to Jira* files nothing yet: it checks this draft again and writes the request it would make, for Oppgave in the component SSX Advisor of SSX.",
+      "Pressing *Post to Jira* checks this draft again and, on a listener that is live, files it once as Oppgave in the component SSX Advisor of SSX; a dry listener only writes the request it would make.",
     );
   });
 

@@ -383,6 +383,71 @@ describe("JiraClient.fetchDetail", () => {
   });
 });
 
+describe("JiraClient.fetchFiled", () => {
+  const body = {
+    key: "SSX-4100",
+    fields: {
+      summary: "commerce-rest: raise the export timeout",
+      issuetype: { id: "10007", name: "Oppgave" },
+      project: { id: "10001", key: "SSX" },
+      components: [{ name: "SSX Advisor" }, { name: "SSX Customer" }],
+      description: { type: "doc", version: 1, content: [] },
+    },
+  };
+
+  it("reads the fields a filing sets, and asks for no others", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filed = await client().fetchFiled("SSX-4100");
+
+    expect(filed).toEqual({
+      key: "SSX-4100",
+      project: "SSX",
+      issueType: "Oppgave",
+      summary: "commerce-rest: raise the export timeout",
+      components: ["SSX Advisor", "SSX Customer"],
+      description: { type: "doc", version: 1, content: [] },
+      url: "https://example.invalid/browse/SSX-4100",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://example.invalid/rest/api/3/issue/SSX-4100?fields=summary,issuetype,project,components,description",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
+
+  it("reads a field of the wrong shape as empty, which a comparison reports and never matches", async () => {
+    vi.stubGlobal("fetch", async () =>
+      jsonResponse({
+        fields: { summary: 7, project: "SSX", components: [{ name: 7 }, {}, null], issuetype: [] },
+      }),
+    );
+
+    expect(await client().fetchFiled("SSX-4100")).toMatchObject({
+      key: "SSX-4100",
+      project: "",
+      issueType: "",
+      components: [],
+    });
+  });
+
+  it("refuses a key that would escape the endpoint, before any request", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of ["SSX-1/../../myself", "SSX-1?expand=x", "SSX-1#x", "", "SSX 1", "SSX-"]) {
+      await expect(client().fetchFiled(bad)).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails when Jira refuses the read, so a missing issue is never a match", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse({ errorMessages: ["gone"] }, 404));
+
+    await expect(client().fetchFiled("SSX-4100")).rejects.toThrow(JiraError);
+  });
+});
+
 describe("JiraClient.projectFacts", () => {
   const issueTypes = [
     { id: "10007", name: "Oppgave", subtask: false },

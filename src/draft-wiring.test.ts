@@ -22,6 +22,13 @@ vi.mock("./draft/runner.ts", async (importOriginal) => ({
   runDraftSession,
 }));
 
+// Stubs the writer the same way, so a press on a live listener cannot start storecode either.
+const runFiler = vi.hoisted(() => vi.fn());
+vi.mock("./draft/filer.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./draft/filer.ts")>()),
+  runFiler,
+}));
+
 const {
   buttonWithheld,
   clickHandlerFor,
@@ -35,6 +42,7 @@ const {
 
 afterEach(() => {
   runDraftSession.mockReset();
+  runFiler.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -281,6 +289,26 @@ describe("the Post button, from a mention to a direct message", () => {
         if (what === "/rest/api/3/project/SSX") {
           return reply({ issueTypes: [{ name: "Oppgave", subtask: false }] });
         }
+        if (what === "/rest/api/3/issue/SSX-4100") {
+          // The issue as a filing of RESULT would leave it, the body in the document form Jira keeps.
+          return reply({
+            key: "SSX-4100",
+            fields: {
+              summary: RESULT.ticket.summary,
+              issuetype: { name: "Oppgave" },
+              project: { key: "SSX" },
+              components: [{ name: "SSX Advisor" }],
+              description: {
+                type: "doc",
+                version: 1,
+                content: RESULT.ticket.description.split("\n\n").map((paragraph) => ({
+                  type: "paragraph",
+                  content: [{ type: "text", text: paragraph }],
+                })),
+              },
+            },
+          });
+        }
         throw new Error(`unexpected request to ${href}`);
       }),
     );
@@ -331,7 +359,9 @@ describe("the Post button, from a mention to a direct message", () => {
       thread: { channel: "C0THREAD1", threadTs: "1712345678.000100" },
       ticket: RESULT.ticket,
     });
-    expect(inThread?.get("blocks")).toContain("Pressing *Post to Jira* files nothing yet");
+    expect(inThread?.get("blocks")).toContain(
+      "Pressing *Post to Jira* checks this draft again and, on a listener that is live, files it once as Oppgave",
+    );
   });
 
   it("sends the draft it always sent while nothing is on DRAFT_PROJECTS, and asks Jira nothing", async () => {
@@ -481,23 +511,81 @@ describe("the Post button, from a mention to a direct message", () => {
       return { id: buttonValue(lastOf(draftMessages(calls))), calls };
     }
 
-    it("judges the draft again, writes the request a filing would make, and files nothing", async () => {
+    it("under a live listener judges the draft again, files it through the writer, reads it back over REST, and answers in the thread", async () => {
       const root = checkoutRoot();
       const { id, calls } = await sent(root);
       const jiraBefore = calls.filter((call) => call.host === "jira").length;
+      runFiler.mockResolvedValue({ kind: "created", key: "SSX-4100" });
 
       await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "live")(press(id));
 
-      expect(calls.filter((call) => call.host === "jira").length).toBeGreaterThan(jiraBefore);
-      expect(
-        calls.filter((call) => call.host === "jira").every((call) => call.method === "GET"),
-      ).toBe(true);
+      expect(runFiler).toHaveBeenCalledOnce();
+      expect(runFiler.mock.calls[0]?.[0]).toMatchObject({
+        executable: "/opt/storecode",
+        cloudId: "storebrand.atlassian.net",
+        ticket: RESULT.ticket,
+      });
+      expect(runFiler.mock.calls[0]?.[0]).not.toHaveProperty("signal");
+      const jira = calls.filter((call) => call.host === "jira");
+      expect(jira.length).toBeGreaterThan(jiraBefore);
+      // The service itself never writes to Jira: the create is the writer's, and the rest are reads.
+      expect(jira.every((call) => call.method === "GET")).toBe(true);
+      expect(jira.some((call) => call.what === "/rest/api/3/issue/SSX-4100")).toBe(true);
       // The draft is a message and its reply; the one after them is the answer to the press.
       const answer = postedMessages(calls)[TICKET_MESSAGES];
       expect(postedMessages(calls)).toHaveLength(TICKET_MESSAGES + 1);
       expect(answer?.form.get("channel")).toBe("D0DM");
       expect(answer?.form.get("thread_ts")).toBe("9.9");
-      expect(answer?.form.get("text")).toContain("Nothing was filed: filing is not built yet.");
+      expect(answer?.form.get("text")).toMatch(
+        /^Filed as <https:\/\/storebrand\.atlassian\.net\/browse\/SSX-4100\|SSX-4100>\. Read back from Jira: project, type, summary and component match/u,
+      );
+      const kept = JSON.parse(
+        readFileSync(join(root, "state", "pending-drafts", `${id}.json`), "utf8"),
+      ) as { filing?: unknown; filed?: { key: string } };
+      expect(kept.filed?.key).toBe("SSX-4100");
+      expect(kept.filing).toBeDefined();
+      expect(existsSync(join(root, "out", "slack", `${id}.issue.json`))).toBe(false);
+    });
+
+    it("answers a second press on a filed draft with its key, and does not run the writer again", async () => {
+      const root = checkoutRoot();
+      const { id, calls } = await sent(root);
+      runFiler.mockResolvedValue({ kind: "created", key: "SSX-4100" });
+      const handler = clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "live");
+
+      await handler(press(id));
+      await handler(press(id));
+
+      expect(runFiler).toHaveBeenCalledOnce();
+      expect(postedMessages(calls).at(-1)?.form.get("text")).toContain(
+        "already posted as <https://storebrand.atlassian.net/browse/SSX-4100|SSX-4100>",
+      );
+    });
+
+    it("leaves a draft it cannot tell was filed marked, and says an issue may exist", async () => {
+      const root = checkoutRoot();
+      const { id, calls } = await sent(root);
+      runFiler.mockResolvedValue({ kind: "unclear", reason: "the session timed out" });
+      const handler = clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "live");
+
+      await handler(press(id));
+      await handler(press(id));
+
+      expect(runFiler).toHaveBeenCalledOnce();
+      expect(postedMessages(calls).at(-2)?.form.get("text")).toContain("An issue may exist");
+      expect(postedMessages(calls).at(-1)?.form.get("text")).toContain("cannot be posted again");
+    });
+
+    it("writes the request a filing would make under a dry listener, and runs no writer", async () => {
+      const root = checkoutRoot();
+      const { id, calls } = await sent(root);
+
+      await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "dry")(press(id));
+
+      expect(runFiler).not.toHaveBeenCalled();
+      expect(
+        calls.filter((call) => call.host === "jira").every((call) => call.method === "GET"),
+      ).toBe(true);
       const written: unknown = JSON.parse(
         readFileSync(join(root, "out", "slack", `${id}.issue.json`), "utf8"),
       );
@@ -521,6 +609,7 @@ describe("the Post button, from a mention to a direct message", () => {
     it("answers in the thread of the first message when the button is on a reply in it", async () => {
       const root = checkoutRoot();
       const { id, calls } = await sent(root);
+      runFiler.mockResolvedValue({ kind: "created", key: "SSX-4100" });
 
       await clickHandlerFor(
         configured(root, { DRAFT_PROJECTS: "SSX" }),
@@ -537,9 +626,10 @@ describe("the Post button, from a mention to a direct message", () => {
       await clickHandlerFor(configured(root, { DRAFT_PROJECTS: "SSX" }), "dry")(press(id));
 
       expect(postedMessages(calls)[TICKET_MESSAGES]?.form.get("text")).toMatch(
-        /^\(dry run, nothing filed\) Nothing was filed: filing is not built yet\./u,
+        /^\(dry run, nothing filed\) The request a live listener would make is written to /u,
       );
       expect(existsSync(join(root, "out", "slack", `${id}.issue.json`))).toBe(true);
+      expect(runFiler).not.toHaveBeenCalled();
     });
 
     it("refuses once Jira no longer lists the component the draft chose", async () => {

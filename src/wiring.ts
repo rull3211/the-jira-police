@@ -14,6 +14,7 @@ import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { createArguments, runFiler } from "./draft/filer.ts";
 import type { FileGateDeps } from "./draft/gate.ts";
 import { type DraftOffer, createDraftOffer } from "./draft/offer.ts";
 import { discardingStore, fileStore } from "./draft/pending.ts";
@@ -115,6 +116,9 @@ import {
 import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
 const draftLog = createLogger("draft");
+
+/** A filing is one tool call; a session that outlives this has stopped doing that. */
+const FILE_MAX_RUN_MS = 300_000;
 const pollLog = createLogger("poll");
 const reviewLog = createLogger("review");
 const slackLog = createLogger("slack");
@@ -660,24 +664,39 @@ export function clickHandlerFor(
     };
   }
   const slack = createBotClient(settings);
+  const cloudId = new URL(settings.JIRA_BASE_URL).hostname;
+  const jira = createJiraClient(settings);
   const handler = createPostHandler({
     allowed,
     dry: mode === "dry",
     pending: fileStore(pendingDirectory(settings)),
     gate: fileGate(settings, projects),
+    // A dry listener holds no writer at all, so nothing it is told to do can reach Jira.
+    ...(mode === "live"
+      ? {
+          filing: {
+            file: (draft) =>
+              runFiler({
+                executable: settings.STORECODE_PATH,
+                workingDirectory: process.cwd(),
+                idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+                maxRunMs: FILE_MAX_RUN_MS,
+                cloudId,
+                ticket: draft.ticket,
+              }),
+            readBack: (key) => jira.fetchFiled(key),
+            issueUrl: (key) => {
+              const url = new URL(`/browse/${key}`, settings.JIRA_BASE_URL).href;
+              return /^https:\/\/[^\s<>|]+$/u.test(url) ? url : null;
+            },
+          },
+        }
+      : {}),
     rehearse: async (draft) => {
       const directory = join(settings.OUTPUT_DIR, "slack");
       await writeJson(directory, `${draft.id}.issue.json`, {
         method: "createJiraIssue",
-        arguments: {
-          cloudId: new URL(settings.JIRA_BASE_URL).hostname,
-          projectKey: draft.ticket.project,
-          issueTypeName: draft.ticket.issueType,
-          summary: draft.ticket.summary,
-          description: draft.ticket.description,
-          contentFormat: "markdown",
-          additional_fields: { components: [{ name: draft.ticket.component }] },
-        },
+        arguments: createArguments(draft.ticket, cloudId),
         draft: draft.id,
         askedBy: draft.asker,
         thread: draft.thread,

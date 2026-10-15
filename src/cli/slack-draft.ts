@@ -42,12 +42,13 @@ function usage(): never {
       "  Dry by default: sends nothing. --dm also sends that message to SLACK_OPERATOR_USER_ID.\n" +
       "  With DRAFT_PROJECTS set, a ticket draft in a listed project whose component and issue type\n" +
       "  Jira lists for it carries a Post to Jira button — in the message --dm sends, and in the\n" +
-      "  pieces written to .draft.json — and one that does not says why. A draft over Slack's 40 000\n" +
-      "  characters goes in several pieces, the first a message and each later one a reply in its\n" +
-      "  thread, with the button under the last. With --dm the button is\n" +
+      "  pieces written to .draft.json — and one that does not says why. The draft's first paragraph\n" +
+      "  is the message and the rest is a reply in its thread, cut again at Slack's 40 000\n" +
+      "  characters, with the button under the last. With --dm the button is\n" +
       "  sent only if SLACK_OPERATOR_USER_ID is on SLACK_DRAFT_USERS, and its record is kept under\n" +
-      "  the state directory. A press files nothing yet: slack:listen answers it by writing the\n" +
-      "  request it would make to <OUTPUT_DIR>/slack/<id>.issue.json.\n" +
+      "  the state directory. This command files nothing; a press is answered by slack:listen, which\n" +
+      "  files the draft only when started with --write and otherwise writes the request it would make\n" +
+      "  to <OUTPUT_DIR>/slack/<id>.issue.json.\n" +
       "  --replay <file> skips the session: the message is built again from the outcome a .draft.json\n" +
       "  of the same thread holds, so a change to how a draft is laid out costs nothing to look at.\n" +
       "  A file of another thread, or one missing a field a message is worded from, is refused.\n" +

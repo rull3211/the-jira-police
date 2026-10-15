@@ -189,6 +189,18 @@ export interface ProjectFacts {
   readonly issueTypes: readonly string[];
 }
 
+/** An issue as it reads back after a filing, to be compared with what was sent. */
+export interface FiledIssue {
+  readonly key: string;
+  readonly project: string;
+  readonly issueType: string;
+  readonly summary: string;
+  readonly components: readonly string[];
+  /** ADF. */
+  readonly description: unknown;
+  readonly url: string;
+}
+
 /** `elsewhere` is `moveBackFromInProgress` finding the ticket no longer in progress. */
 export const STATUS_MOVE_OUTCOMES = [
   "moved",
@@ -449,6 +461,31 @@ export class JiraClient {
         .filter((type) => type.subtask !== true)
         .map((type) => type.name)
         .filter((name): name is string => typeof name === "string" && name !== ""),
+    };
+  }
+
+  /**
+   * The fields a filing sets, read back over REST. A field of the wrong shape reads as empty, which
+   * a comparison then reports as a difference, never as a match.
+   */
+  async fetchFiled(key: string): Promise<FiledIssue> {
+    assertIssueKey(key);
+    const response = await this.#get(
+      `/rest/api/3/issue/${key}?fields=summary,issuetype,project,components,description`,
+      "application/json",
+    );
+    const payload = (await response.json()) as FiledPayload;
+    const f = payload.fields ?? {};
+    return {
+      key: payload.key ?? key,
+      project: f.project?.key ?? "",
+      issueType: f.issuetype?.name ?? "",
+      summary: f.summary ?? "",
+      components: (Array.isArray(f.components) ? f.components : [])
+        .map((component) => component?.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+      description: f.description,
+      url: `${this.#baseUrl}/browse/${key}`,
     };
   }
 
@@ -798,6 +835,18 @@ interface DetailPayload {
     readonly environment?: unknown;
     readonly comment?: { readonly comments?: readonly RawComment[] };
     readonly attachment?: readonly RawAttachment[];
+  };
+}
+
+/** `GET .../issue/{key}`: only what `fetchFiled` reads of it. */
+interface FiledPayload {
+  readonly key?: string;
+  readonly fields?: {
+    readonly summary?: string;
+    readonly issuetype?: { readonly name?: string };
+    readonly project?: { readonly key?: string };
+    readonly components?: readonly ({ readonly name?: unknown } | null)[];
+    readonly description?: unknown;
   };
 }
 

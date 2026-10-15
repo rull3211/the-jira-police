@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3956 tests in 120 files**, no build step.
+> **4032 tests in 121 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -628,6 +628,18 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   first message with no button and no record and an ephemeral reply admitting it, shown only against a
   stub. **What would show it:** a saved `.draft.json` padded by hand and sent with
   `pnpm slack:draft <link> --dm --replay <file>`, since a session never writes a draft that long.
+- **The writer has never filed a real ticket.** Every step between a press and Jira is tested against
+  stubs, and its session's containment is measured at the flags, against a project key that does not
+  exist (`pnpm draft:probe`, 2026-10-15: a name in `--disallowedTools` leaves the session's tool list,
+  and a tool left out of `--allowedTools` stays listed with its call refused). Not seen: the shape
+  `createJiraIssue` returns on success, which `classify` reads as a `key` field, else the one key in
+  the text, and otherwise calls unclear; that Jira's conversion of the Markdown body keeps its words,
+  which the read-back compares by letters and digits; and what the daemon does with a new ticket on
+  its board. Not tried: the refusal of `transitionJiraIssue`, `editJiraIssue` and `createIssueLink`,
+  the same rule as the one tried, and a session with its skill, `--add-dir`s and hooks.
+  **What would show it:** `DRAFT_PROJECTS=SSX pnpm slack:listen --write`, a draft sent with
+  `pnpm slack:draft <link> --dm`, the button pressed. The reply must read `Filed as SSX-<n>` and
+  `Read back from Jira: … match`, and `state/pending-drafts/<id>.json` must carry both marks.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1217,48 +1229,19 @@ shares `FIX_DENIED_TOOLS` with.
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
 
-### 84. A drafted ticket can be pressed and rehearsed, and still has to be filed by hand
+### 84. A filed draft keeps its button, and a duplicate's comment is not posted
 
-**Branch:** `feat/slack-draft-file`. The probe below was the first thing built on it, and the writer is next.
+**Branch:** `feat/slack-draft-file`.
 
-**What is not built.** The **Post to Jira** button is on a drafted ticket, and a press by the asker
-rehearses: it judges the draft again against Jira and writes the `createJiraIssue` request a filing
-would make to `<OUTPUT_DIR>/slack/<id>.issue.json`, and the thread is told nothing was filed
-(`src/slack/post.ts`; split out of the entry that shipped the button). What is left is the press
-doing it. That is the first path on which text anyone in a channel wrote becomes a Jira issue, gated
-only by a person reading the exact draft — a privilege of its own, and a branch of its own.
-
-**The shape, as far as SSX-4071 and the button's entry decided it:** a press files the draft the
-asker read, verbatim, and never re-runs the session; the writer is a session in the poster's shape
-(`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here builds
-it; the issue is read back over REST and compared with what was sent; the draft's record gains a
-`filing` mark written before the create, so a crash between the two leaves a draft that says it may
-have been filed, never one that can be filed twice, and a press on it answers and does not create;
-and the key and link are posted back into the thread. **Proposed here and argued with no one:** the
-button comes off the message once the draft is filed; the shutdown signal does not kill a write that
-has begun, as the listener already finishes a command it has begun; and the rehearsal stays as the
-dry rung, `SLACK_LISTEN=dry` rehearsing and `live` the grant.
-
-**The probe has run, and every verdict was the one predicted.** `pnpm draft:probe` (2026-10-15, $1.13
-for six one-call sessions) asked each session for one Atlassian tool, always at a project key that
-does not exist, and read the verdict from the event stream, since a tool `--disallowedTools` removes
-leaves no entry in `permission_denials`. A tool named in `--disallowedTools` was missing from the
-session's init tool list: `createJiraIssue` under the drafting session's own lists, and
-`addCommentToJiraIssue` against an allowlist that named it too, so for MCP names the denylist beats
-the allowlist. A tool only left out of `--allowedTools` stayed listed and its call was refused by
-don't-ask mode, tried for `addCommentToJiraIssue` with `createJiraIssue` the only tool allowed. The
-granted tool, an allowed comment tool and an allowed read each reached Jira, which refused them for
-the missing project in its own words. So a writer holding only `createJiraIssue` is contained twice,
-by default-deny and by name. **What it did not measure:** the refusal of each other mutator
-(`transitionJiraIssue`, `editJiraIssue` and `createIssueLink` are the same rule, none tried); the
-flags only, not a whole session with its skill, `--add-dir`s and hooks; and a tool the MCP server
-adds later, which the allowlist would refuse by the same rule and no denylist names.
-
-**A second half, separable: the comment a duplicate adds.** A duplicate's draft has no button. Its
-writer would be `addCommentToJiraIssue`, a second MCP mutator, aimed at a key that is the model's
-word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project and is
-open — before anything is written. It shares the probe, and could ship after the ticket or not at
-all.
+**What is not built.** A press on a live listener files the draft (`architecture/invariants.md`
+invariant 20), and what is left of the entry that shipped the button is two things. **The button
+stays on a filed draft**: a second press answers with the key and files nothing, but taking the
+button off the message needs the message's blocks, which a press does not hand `parseFrame` on.
+**The comment a duplicate adds**, separable: a duplicate's draft has no button. Its writer would be
+`addCommentToJiraIssue`, a second MCP mutator, in a session holding that tool alone as the filer
+holds `createJiraIssue`, aimed at a key that is the model's word, so the issue is read over REST
+first — it exists, sits in a `DRAFT_PROJECTS` project and is open — before anything is written. It
+could ship after the ticket or not at all.
 
 **What would make it the wrong idea:**
 
@@ -1274,9 +1257,6 @@ all.
   ticket. A comment aimed at the wrong issue is worse than a declined thread once it is written.
 - **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
   person reading it once will stop.
-- **The containment is measured at the flags and not yet at the write.** The probe held for the tools
-  it tried, with Jira refusing every call for want of a project; a real filing is the first call
-  where the project exists, and `createJiraIssue` is the one tool the writer holds.
 
 ## Verification
 

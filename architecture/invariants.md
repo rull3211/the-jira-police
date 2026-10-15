@@ -381,3 +381,29 @@ Things that look like details and are not:
       the next event opens a second thread for the ticket.
     - A record save that fails after a broadcast leaves that broadcast in the channel, recorded
       nowhere, so it is never deleted.
+20. **A Jira issue is created by a press on a live listener, once, through a writer that holds one
+    tool.** The press is `createPostHandler` in `slack/post.ts`; only the person who asked for the
+    draft may press, only a project on `DRAFT_PROJECTS` is reached, and the gate is asked again
+    against Jira at the press, since Jira moves between a draft and its press. A dry listener holds
+    no writer at all and writes the request it would make. The writer is `runFiler` in
+    `draft/filer.ts`: a session allowed `createJiraIssue` and nothing else, with every other
+    Atlassian mutator and the file readers denied by name, lists whose effect on MCP names
+    `pnpm draft:probe` measured (`draft/probe.ts`). It is told the arguments a person read, never
+    re-runs the drafting session, and is never handed the listener's shutdown signal, so a write
+    that has begun is finished. What it reports is checked against its own tool call, and the issue
+    is read back over REST and compared. The REST credential never creates an issue: every Jira
+    call the service makes on a press is a read. Three writes to the draft's record, in this order,
+    are what keep it from being filed twice:
+    - **The `filing` mark is written before the writer runs.** If it cannot be written, nothing is
+      filed. A draft carrying it is never filed again, whatever happened after, and the reply says
+      an issue may exist and names the summary to search for. Only a call that provably created
+      nothing clears it: Jira's own error, a session that made no call, or an Atlassian server that
+      never connected. A writer that threw, called the tool twice, returned no key it can read, or
+      disagrees with its own tool is `unclear`, and the mark stays.
+    - **The `filed` mark, with the key, is written before the read-back**, so a read that fails or
+      differs cannot lose the key. A second press on a filed draft answers with it.
+    - **A mark that is there and unreadable fails the read of the record**, never reads as absent.
+      What this costs: a draft whose filing was unclear is spent, and re-drafting is the only way on;
+      the button is not taken off the message after a filing, so a second press only answers; and
+      the body is compared by its words, so a link's address in the first or last sixty characters
+      can read as a difference when nothing is wrong.

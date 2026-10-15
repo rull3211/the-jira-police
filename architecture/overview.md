@@ -99,12 +99,13 @@ every two minutes forever.
 **Beside them, with `SLACK_LISTEN` on, the same `Promise.all` holds the Slack listener** from
 `slack-loop.ts`, for `/bencebot`, for a mention in a ticket's thread, and for `@Bencebot draft` in
 any thread. It is not a `runLoop` but one Socket Mode connection with its own reconnect backoff,
-and it writes nothing but a property write per command that changes the subscriber list and a label
+and it writes nothing but a property write per command that changes the subscriber list, a label
 write per mention that starts or clears a ticket — though a start hands the solve loop a ticket it
-will pay to solve. A draft is the one thing it pays for itself: a read-only session per mention, one
+will pay to solve — and, on a live listener, one issue per press on a draft's button. A draft is the one thing it pays for itself: a read-only session per mention, one
 at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message,
 its first paragraph as the message and the rest in a reply in its thread. With `DRAFT_PROJECTS` set, a ticket draft the gate passes also carries a **Post to Jira** button, and a
-press re-judges the draft and writes the request a filing would make to a file, filing nothing. The
+press re-judges the draft and, on a dry listener, writes the request a filing would make to a file,
+while a live one files it (`architecture/invariants.md` invariant 20). The
 record the button names is a file under `state/pending-drafts/`, not the direct message read back
 as `BUILDING.md`'s default would have it: what a writer needs is structured, and a rendered message
 cannot be parsed back into it without a second reading that can drift from the first. The cost is
