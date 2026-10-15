@@ -1206,7 +1206,8 @@ shares `FIX_DENIED_TOOLS` with.
 
 ### 84. A drafted ticket can be pressed and rehearsed, and still has to be filed by hand
 
-**Branch:** none yet. It waits on the probe below, which is the first thing to build.
+**Branch:** `feat/slack-draft-file`. The probe below is the first thing built on it, and the split of a
+long draft rides with it by the operator's choice; that one is not part of the privilege.
 
 **What is not built.** The **Post to Jira** button is on a drafted ticket, and a press by the asker
 rehearses: it judges the draft again against Jira and writes the `createJiraIssue` request a filing
@@ -1236,6 +1237,24 @@ event (`sessionDenials` in `src/triage/session.ts`) and not from what the model 
 leaks, `BUILDING.md` already says what to do with one over a vocabulary nobody controls — invert it,
 or say why it cannot be — and the built-in tools' version of the same question is §76.
 
+**Bundled, and not the privilege: a draft too long for one message continues in that message's
+thread.** Nothing splits a draft across messages today. `draftBlocks` carries it in one message of at
+most `BLOCKS_MAX` blocks, and one it cannot carry goes out as a single text-only message with no
+button (`src/draft/offer.ts`), which Slack cuts at 40,000 characters of text and which takes the
+footer with it, where the thread's words to the bot are reported. That is reached only by a body of
+tens of thousands of characters or one dense in entities, since `escape` turns an `&` into five. It is
+here because a filing is of a draft read whole, and a draft that cannot carry a button cannot be
+filed. **The shape, decided with the operator:** the draft is cut on lines into pieces; the first is
+the message and each later piece a reply in its thread, never a message of its own; the button is on
+the last piece, so a press can come only once the whole draft is on screen; and the answer to a press
+goes in the thread of the first message, not of the piece the button is on.
+
+**Unmeasured, and to be measured before it is relied on:** that Slack's press payload names the thread
+the button's message is in (`container.thread_ts`), without which a press on a reply has no parent to
+answer under (`src/slack/socket.ts` reads only `message_ts`); that 40,000 is the cap on `text` and
+cuts rather than refuses, which the docs say and nothing here has sent; and what a piece that fails
+after the first went out leaves behind, which has to be a draft with no button and no record.
+
 **A second half, separable: the comment a duplicate adds.** A duplicate's draft has no button. Its
 writer would be `addCommentToJiraIssue`, a second MCP mutator, aimed at a key that is the model's
 word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project and is
@@ -1256,6 +1275,9 @@ all.
   ticket. A comment aimed at the wrong issue is worse than a declined thread once it is written.
 - **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
   person reading it once will stop.
+- **The split is for a draft no one has yet received.** If every real draft fits one message, it is
+  built ahead of a case, which `BUILDING.md` says not to do, and it is only worth keeping if the
+  cases above are what a long thread produces.
 - **The containment is unverified at the write.** See the probe above: a draft that can only reach a
   direct message tolerates an unmeasured denylist, and a session holding `createJiraIssue` does not.
 
