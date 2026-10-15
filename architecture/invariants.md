@@ -416,7 +416,9 @@ Things that look like details and are not:
       form the classifier reads; the button is not taken off the message after a filing, so a second
       press only answers; and the body is compared by its words at its start, its end and its
       size, so a link's address in the first or last sixty characters can read as a difference when
-      nothing is wrong, and a changed middle of the same size reads as a match. The marks also hold
+      nothing is wrong, and a changed middle of the same size reads as a match; a record never
+      expires and carries no version, so a draft kept by an older build files under the rules of
+      whichever build is listening when it is pressed. The marks also hold
       for one listener at a time: the presses of one process are queued, but the record is read and
       then rewritten with no check between, so two listeners on one app, a daemon's and a hand-run
       one among them, can each pass on one draft within the time it takes to ask Jira and post the
