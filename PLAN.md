@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §82 and §83, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82 and §83, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -1203,75 +1203,60 @@ shares `FIX_DENIED_TOOLS` with.
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
 
-### 81. A drafted ticket still has to be filed by hand
+### 84. A drafted ticket can be pressed and rehearsed, and still has to be filed by hand
 
-**Branch:** `feat/slack-draft-post`, which builds the button through the dry click and no write at
-all. The operator started it ahead of the evidence the first bullet below asks for, so it stops where
-being wrong costs nothing remote.
+**Branch:** none yet. It waits on the probe below, which is the first thing to build.
 
-**What is not built.** `@Bencebot draft` sends the asker a drafted ticket, or for a thread that
-duplicates an open issue the comment to add to it, as a direct message and writes nothing to Jira.
-The second half of SSX-4071 is filing it: the asker clicks **Post** on that direct message, the
-service creates the issue or adds the comment to the issue named, and the key and link are posted
-back into the thread. That is a new write, from text anyone in a channel wrote into a Jira issue,
-gated only by a person reading the exact draft — so it is a privilege of its own, and a branch of
-its own.
+**What is not built.** The **Post to Jira** button is on a drafted ticket, and a press by the asker
+rehearses: it judges the draft again against Jira and writes the `createJiraIssue` request a filing
+would make to `<OUTPUT_DIR>/slack/<id>.issue.json`, and the thread is told nothing was filed
+(`src/slack/post.ts`; split out of the entry that shipped the button). What is left is the press
+doing it. That is the first path on which text anyone in a channel wrote becomes a Jira issue, gated
+only by a person reading the exact draft — a privilege of its own, and a branch of its own.
 
-**What `feat/slack-draft-post` builds, in the order the privilege is phased.** Inert: interactivity
-on in the manifest, an `interactive` frame in `parseFrame`, a `DRAFT_PROJECTS` allowlist with no
-default, and a pending-draft record; with the list empty no draft carries a button and nothing a
-click could reach is constructed. Dry: a ticket draft in a listed project, whose component and issue
-type Jira lists for it, carries the button; a click by the asker runs the same gate over real Jira
-reads and writes the `createJiraIssue` request it would make to `OUTPUT_DIR/slack/<id>.issue.json`,
-filing nothing. **Not built, and waiting on one probe:** the writer. Whether `--disallowedTools` and
-`dontAsk` keep a session that holds `createJiraIssue` from `editJiraIssue`, `addCommentToJiraIssue`
-or a Confluence write is the last bullet below, and its answer decides the writer's tool surface, so
-building the writer first would build a guess. **Also not built:** the comment a duplicate adds, a
-second write on a key the model chose.
-
-**The shape SSX-4071 settles:** a **Post** button on the draft message, its click an `interactive`
-frame in `parseFrame`; Post files the draft the asker read, verbatim, and never re-runs the session;
-the project must be on a new `DRAFT_PROJECTS` allowlist with no default, and the component one of
-that project's live components, or nothing is filed; the writer is a session in the poster's shape
+**The shape, as far as SSX-4071 and the button's entry decided it:** a press files the draft the
+asker read, verbatim, and never re-runs the session; the writer is a session in the poster's shape
 (`createJiraIssue` over MCP, the body as Markdown), since REST v3 takes ADF and nothing here builds
-it; the issue is read back over REST; and the draft is marked as filing before the create, so a
-crash between the two can never file it twice. A comment adds to that: the key is the model's word,
-so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project and is open —
-and its writer, `addCommentToJiraIssue`, is a second MCP mutator whose withholding nobody has
-measured either.
+it; the issue is read back over REST and compared with what was sent; the draft's record gains a
+`filing` mark written before the create, so a crash between the two leaves a draft that says it may
+have been filed, never one that can be filed twice, and a press on it answers and does not create;
+and the key and link are posted back into the thread. **Proposed here and argued with no one:** the
+button comes off the message once the draft is filed; the shutdown signal does not kill a write that
+has begun, as the listener already finishes a command it has begun; and the rehearsal stays as the
+dry rung, `SLACK_LISTEN=dry` rehearsing and `live` the grant.
 
-**Why a button, and what is unprobed.** Nobody can reply in the bot's direct message today: the
-manifest declares no `app_home`, so the Messages tab is not writable, and `message.im` is not
-subscribed (the operator could not type in it, 2026-10-14). A typed `post` needs both, and a
-reinstall an organisation admin may have to approve; a button needs interactivity on and no typed
-reply, and the operator chose it. **A button is clickable in that read-only direct message**,
-probed on 2026-10-15; whether switching interactivity on needed a reinstall was not recorded. A
-`@Bencebot post` in the thread needs neither, but the thread cannot see the direct
-message that holds the draft.
+**The probe comes first.** The drafting session holds no Jira writer only as far as
+`--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`), and the
+poster's own list denies `transitionJiraIssue` and `createJiraIssue` by name with whether MCP names
+are honoured there unverified (`src/triage/poster.ts`). A session holding `createJiraIssue` is where
+that has to be measured: one session given only that tool and told to call another it was not
+given, beside a control told to call the one it was, read from `permission_denials` on the `result`
+event (`sessionDenials` in `src/triage/session.ts`) and not from what the model says. If a denylist
+leaks, `BUILDING.md` already says what to do with one over a vocabulary nobody controls — invert it,
+or say why it cannot be — and the built-in tools' version of the same question is §76.
 
-**Where the pending draft lives, decided against `BUILDING.md`'s default.** A file under `state/`
-keyed by the id the button carries, not the bot's own direct message read back. What the writer
-needs — project, component, type, summary, body — is structured, and a rendered message cannot be
-parsed back into it without a second reading of the same draft that can drift from the first. The
-cost is that a second machine, or a wiped `state/`, does not hold the draft. That fails closed: the
-click answers that the draft is gone and nothing is filed, and the marker that stops a double filing
-sits in the same file as the draft, so losing one loses both. The file is the only place the record
-exists, and a pending draft never expires.
+**A second half, separable: the comment a duplicate adds.** A duplicate's draft has no button. Its
+writer would be `addCommentToJiraIssue`, a second MCP mutator, aimed at a key that is the model's
+word, so the issue is read over REST first — it exists, sits in a `DRAFT_PROJECTS` project and is
+open — before anything is written. It shares the probe, and could ship after the ticket or not at
+all.
 
 **What would make it the wrong idea:**
 
 - **The drafts are not worth filing.** If the first real ones need rewriting more than a person
-  writing from scratch would, `post` files that rewriting into Jira faster, and is not worth
+  writing from scratch would, a press files that rewriting into Jira faster, and is not worth
   building.
+- **A press is one click from a Jira issue, and the gate checks where the ticket goes, not what it
+  says.** Project, component and type are checked against Jira; the body is a model's reading of a
+  thread anyone in the channel could write, and the person reading it is the only check on it. A
+  confirmation step on the button has not been tried.
 - **The session cannot tell a duplicate from a neighbour.** The first run called a thread a clear
   duplicate while its own first question asked whether the thread meant the same thing as the
-  ticket. A comment aimed at the wrong issue is worse than a declined thread once `post` writes it.
+  ticket. A comment aimed at the wrong issue is worse than a declined thread once it is written.
 - **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
   person reading it once will stop.
-- **The containment is unverified at the write.** The draft session holds no Jira writer only as far
-  as `--disallowedTools` withholds MCP tools, which nobody has measured (`src/triage/runner.ts`). A
-  draft that can only reach a direct message tolerates that; a session holding `createJiraIssue` is
-  where it has to be measured first.
+- **The containment is unverified at the write.** See the probe above: a draft that can only reach a
+  direct message tolerates an unmeasured denylist, and a session holding `createJiraIssue` does not.
 
 ## Verification
 

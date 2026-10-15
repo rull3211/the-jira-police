@@ -62,7 +62,9 @@ Things that look like details and are not:
     chose. `SLACK_START_USERS` names who rather than what — the people whose mention may write
     `agent:start` — and has no fallback for the same reason; nor has `SLACK_DRAFT_USERS`, the people
     whose mention may start a paid, read-only draft session over every configured checkout, kept a
-    list of its own because that is not the privilege `agent:start` is. Note this cuts the opposite way from
+    list of its own because that is not the privilege `agent:start` is. `DRAFT_PROJECTS` names what a draft may
+    be posted to, and has no fallback for the same reason: a default would hand a project back to
+    anyone who had taken it off. Note this cuts the opposite way from
     `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
     the restriction — the test to apply is not "does it have a default" but "does silence widen
     or narrow what the service may touch."
