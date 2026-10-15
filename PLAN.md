@@ -593,23 +593,26 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   prefix was traced to code and to no stored value, and the ticket says so. Unseen: the duplicate
   outcome, a comment on the existing issue, against a real thread, and whether one thread gives one
   outcome — two runs of the same text gave two, and nothing says the change between them was the
-  cause; a person judging whether a draft is worth filing; `slack:draft --dm`; a draft stopped with
+  cause; a person judging whether a draft is worth filing; a draft stopped with
   Ctrl-C, and the message it sends; a thread that names no repository; a thread past one page of
   `conversations.replies`. **What would show it:**
   `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
   times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
   a draft runs.
-- **The Post to Jira button has never been sent, pressed or checked against real Jira.** It exists
-  in tests and as blocks written to a file. Unseen: that Slack accepts the message (`chat.postMessage`
-  answers `invalid_blocks` otherwise), that a button is clickable in a direct message the manifest
-  leaves read-only, that interactivity needs no reinstall, a press arriving as the `interactive`
-  frame `parseFrame` reads — shaped from Slack's documentation, not from a captured one — and
-  `projectFacts` against Jira's `project/{key}` and `project/{key}/components`. **What would show
-  it:** with `DRAFT_PROJECTS=SSX` and the operator on `SLACK_DRAFT_USERS`,
-  `pnpm slack:draft <thread-link> --dm`, then `pnpm slack:listen` running while the button is
-  pressed: the message's thread should answer that nothing was filed, `slack.post_pressed` should
-  log `rehearsed`, and `<OUTPUT_DIR>/slack/<id>.issue.json` should hold the request. A direct
-  message with no button says why in its last line; one Slack refuses exits 4.
+- **The Post to Jira button has been sent once and never pressed.** On 2026-10-15
+  `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792009502102019 --dm` sent a
+  ticket draft to `U0BMCC38933` ($1.34, 241 s, exit 0): four sections, the longest exactly 3 000
+  characters, and the button, with the record kept under `state/pending-drafts/` and the button's
+  value equal to its id. That shows Slack accepts these blocks at the section limit, and that
+  `projectFacts` returned SSX's real components and issue types, since the gate let `SSX Advisor` and
+  `Oppgave` through. It shows nothing about the button on screen. Unseen: that it renders and is
+  clickable in a direct message the manifest leaves read-only, that interactivity needs no reinstall,
+  a press arriving as the `interactive` frame `parseFrame` reads — shaped from Slack's documentation,
+  not from a captured one — and the dry press's answer and file. **What would show it:** the app
+  updated from `docs/slack-app-manifest.json`, `pnpm slack:listen` running from the directory that
+  holds that record with the recipient on `SLACK_DRAFT_USERS` and `DRAFT_PROJECTS=SSX`, and the
+  button pressed: the message's thread should answer that nothing was filed, `slack.post_pressed`
+  should log `rehearsed`, and `<OUTPUT_DIR>/slack/<id>.issue.json` should hold the request.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
