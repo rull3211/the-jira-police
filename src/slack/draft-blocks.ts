@@ -1,7 +1,6 @@
 /**
- * A draft as the messages that carry it: its first paragraph is the message, the rest goes in
- * replies in its thread, cut on lines into pieces Slack takes whole, and the Post button is under
- * the last piece, carrying the id of the record it files.
+ * A draft as messages: its first paragraph is the message, the rest goes in replies in its thread cut
+ * on lines into pieces Slack takes whole, and the Post button is under the last piece.
  */
 
 export const POST_ACTION_ID = "draft_post";

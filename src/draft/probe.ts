@@ -1,7 +1,6 @@
 /**
- * The containment probe for a session that holds a Jira mutator: what it can still reach, read from
- * the event stream and never from what the model says. `src/cli/draft-probe.ts` is what spends money
- * on these cases; the cases, their predictions and the verdict are here so a test can hold them.
+ * The containment probe for a session holding a Jira mutator: what it can still reach, read from the
+ * event stream and never from the model's word. `src/cli/draft-probe.ts` is what spends the money.
  */
 
 import { JiraError } from "../jira/client.ts";
@@ -230,9 +229,8 @@ export function collectEvidence(tool: string): EvidenceCollector {
 }
 
 /**
- * A refusal first, then whether the tool ran. A call with no result seen, or a result in any other
- * words than Claude Code's own, reads as executed: the direction that over-reports a leak, and the
- * result text is kept so a person can overrule it.
+ * A refusal first, then whether the tool ran; a call with no result seen, or a result in words other
+ * than Claude Code's own, reads as executed, which over-reports a leak and keeps the text to overrule.
  */
 export function verdictOf(evidence: ProbeEvidence): ProbeVerdict {
   if (evidence.denied) {

@@ -1,7 +1,6 @@
 /**
- * The writer for a drafted ticket: one session that holds `createJiraIssue` and nothing else that
- * writes, told to make that one call with the arguments a person read. It never re-runs the drafting
- * session, and what it reports is checked against its own tool call and, later, against Jira.
+ * The writer for a drafted ticket: one session holding `createJiraIssue` and no other writing tool,
+ * told to make that one call with the arguments a person read; its report is checked, never trusted.
  */
 
 import { ANALYST_DENIED_TOOLS, childEnv } from "../triage/runner.ts";
@@ -218,9 +217,8 @@ function parseReply(reply: string): {
 }
 
 /**
- * Runs the writer. A session that ends in any way but a finished report is `unclear`, since the call
- * may have been made: only a server that was never connected, which stops the session before the
- * model's first turn, is known not to have created anything.
+ * A session that ends any way but a finished report is `unclear`, since the call may have been made;
+ * only a server never connected, which stops it before the first turn, is known to have created nothing.
  */
 export async function runFiler(
   options: FileOptions,

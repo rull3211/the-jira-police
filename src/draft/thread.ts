@@ -91,9 +91,8 @@ export function threadLabel(thread: ThreadRef): string {
 }
 
 /**
- * The outcome a `.draft.json` holds, for a message to be built again without paying for another
- * session. Throws unless the file is of this thread and holds every field a message is worded from:
- * a draft of one thread offered under another's name would file the wrong thread's words.
+ * The outcome a `.draft.json` holds, to build a message again without another session. Throws unless
+ * it is of this thread and holds every field a message is worded from: another thread's words would be filed.
  */
 export function replayOutcome(saved: unknown, thread: ThreadRef): ThreadDraftOutcome {
   const file = record(saved);

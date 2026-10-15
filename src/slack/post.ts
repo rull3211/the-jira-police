@@ -1,7 +1,6 @@
 /**
- * A press on a draft's Post to Jira button: the person and the draft are checked, and then a dry
- * listener writes the request a filing would make to a file, while a live one files the draft, reads
- * the issue back from Jira and says in the thread what it found.
+ * A press on a draft's Post to Jira button: the person and the draft are checked, then a dry listener
+ * writes the request it would make and a live one files the draft, reads it back and says what it found.
  */
 
 import { fileability, type FileGateDeps } from "../draft/gate.ts";
@@ -120,9 +119,8 @@ export function createPostHandler(deps: PostClickDeps): PostHandler {
   };
 
   /**
-   * The mark is written before the writer runs, so a crash anywhere after it leaves a draft that
-   * says it may have been filed, and the key is written before the read-back, so a read that fails
-   * cannot lose it.
+   * The mark is written before the writer runs, so a crash after it leaves a draft that says it may
+   * have been filed; the key is written before the read-back, so a failed read cannot lose it.
    */
   const fileIt = async (click: Click, draft: PendingDraft, filing: FilingDeps): Promise<void> => {
     const now = filing.now ?? (() => new Date());

@@ -522,7 +522,7 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 - **The analyst's denial list is a list of strings, and only four of its names have ever been
   measured** (`ANALYST_DENIED_TOOLS` in `triage/runner.ts`). The probe that measured them named four other built-ins; `WebFetch`,
   `WebSearch` and `Task` rest on the same mechanism and were not in it, and its effect on MCP names
-  is measured for two of the five (`pnpm draft:probe`, §84). A test asserts the three reach `--disallowedTools`, which is a claim
+  is measured for two of the five (`pnpm draft:probe`). A test asserts the three reach `--disallowedTools`, which is a claim
   about this service's command line and not about what the subprocess does with it. If a future MCP
   server offers a fetch under another name, nothing here would notice — and this is the denial the
   staged-image path was made safe by, so it is the one worth probing rather than asserting.
@@ -628,21 +628,24 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   first message with no button and no record and an ephemeral reply admitting it, shown only against a
   stub. **What would show it:** a saved `.draft.json` padded by hand and sent with
   `pnpm slack:draft <link> --dm --replay <file>`, since a session never writes a draft that long.
-- **The writer has filed one real ticket, and little else of it has been seen.** On 2026-10-15 a press
-  on a live listener filed SSX-4124: the writer session (3 turns, 0.30 dollars) made its one call about
-  thirty seconds after the press, the key came back in a form the classifier read, the read-back found
-  project, type, summary and component as sent and the body whole (7 275 of 7 275 characters), and
-  Jira lists the operator as the reporter, since the writer posts through the operator's own
-  Atlassian connection. A second press, queued behind the first, answered with the key and created
-  nothing. The reply came about 33 seconds after the press with nothing in between, which read as no
-  response and drew that second press; the acknowledgement, and the link posted in the thread the
-  draft came from, were built after and have not been watched. Not seen: how the body looks in Jira
-  beyond its words (links, code spans, headings), a refusal or an unclear outcome from a real
-  filing, what the daemon does with a new ticket on its board, a link posted to a channel the bot has
-  not joined, the refusal of `transitionJiraIssue`, `editJiraIssue` and `createIssueLink`, the same
-  rule as the one tried, and a session with its skill, `--add-dir`s and hooks. **What would show
-  it:** press the button of a fresh draft under `slack:listen --write`, and read the thread the draft
-  came from.
+- **The writer has filed two real tickets, and little else of it has been seen.** On 2026-10-15 a
+  press on a live listener filed SSX-4124: the writer session (3 turns, 0.30 dollars) made its one
+  call about thirty seconds after the press, the key came back in a form the classifier read, the
+  read-back found project, type, summary and component as sent and the body whole (7 275 of 7 275
+  characters), and Jira lists the operator as the reporter, since the writer posts through the
+  operator's own Atlassian connection. A second press, queued behind the first, answered with the
+  key and created nothing. The reply came about 33 seconds after the press with nothing in between,
+  which read as no response and drew that second press. A draft of a different thread, pressed
+  later that day, filed SSX-4125 (3 turns, 0.27 dollars, 22 seconds): the operator saw the
+  acknowledgement, the link posted in the thread the draft came from, and the answer; the read-back
+  matched (4 880 of 4 880 characters), and neither `slack.post_ack_failed` nor
+  `slack.post_link_failed` was logged. Not seen: how the body looks in Jira beyond its words (links,
+  code spans, headings), a refusal or an unclear outcome from a real filing, what the daemon does
+  with a new ticket on its board, a link posted to a channel the bot has not joined, the refusal of
+  `transitionJiraIssue`, `editJiraIssue` and `createIssueLink`, the same rule as the one tried, and a
+  session with its skill, `--add-dir`s and hooks. **What would show it:** open SSX-4124 and SSX-4125
+  in Jira and read the bodies; and the daemon's next sweep, read in its log, with a ticket the writer
+  filed on its board.
 - **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
   check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
   rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
@@ -1234,7 +1237,7 @@ shares `FIX_DENIED_TOOLS` with.
 
 ### 84. A filed draft keeps its button, and a duplicate's comment is not posted
 
-**Branch:** `feat/slack-draft-file`.
+**Branch:** none yet.
 
 **What is not built.** A press on a live listener files the draft (`architecture/invariants.md`
 invariant 20), and what is left of the entry that shipped the button is two things. **The button
