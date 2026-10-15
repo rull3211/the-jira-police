@@ -10,10 +10,19 @@ import {
   draftThread,
   renderDraftMessage,
   renderThread,
+  replayOutcome,
   threadReference,
 } from "./thread.ts";
 
 const THREAD = { channel: "C0THREAD1", threadTs: "1712345678.000100" };
+
+const TICKET = {
+  summary: "commerce-rest: raise the export timeout",
+  project: "SSX",
+  component: "SSX Advisor",
+  issueType: "Oppgave",
+  description: "## Where\n\n- `ExportService.ts:40`",
+};
 
 function message(overrides: Partial<ThreadMessage> = {}): ThreadMessage {
   return { ts: "1712345678.000100", user: "U0ASKER1", botId: null, text: "hello", ...overrides };
@@ -250,4 +259,83 @@ describe("threadReference", () => {
       expect(threadReference(link, "C1")).toBe("a thread in <#C1>");
     },
   );
+});
+
+describe("replayOutcome", () => {
+  /** What `slack:draft` writes to `.draft.json`: the outcome after a round trip through JSON. */
+  function saved(outcome: ThreadDraftOutcome, overrides: Record<string, unknown> = {}): unknown {
+    return JSON.parse(
+      JSON.stringify({ channel: THREAD.channel, threadTs: THREAD.threadTs, outcome, ...overrides }),
+    );
+  }
+
+  const OUTCOMES: Record<ThreadDraftOutcome["kind"], ThreadDraftOutcome> = {
+    empty: { kind: "empty" },
+    "too-long": { kind: "too-long", reason: "the thread is long" },
+    drafted: { kind: "drafted", ticket: TICKET, result: result({ ticket: TICKET }) },
+    duplicate: {
+      kind: "duplicate",
+      duplicate: DUPLICATE,
+      result: result({ ticket: null, duplicate: DUPLICATE, questions: ["Same thing?"] }),
+    },
+    declined: { kind: "declined", result: result({ ticket: null, reason: "No ask." }) },
+  };
+
+  it.each(Object.entries(OUTCOMES))(
+    "gives back the outcome %s a file holds, as it was",
+    (_kind, outcome) => {
+      expect(replayOutcome(saved(outcome), THREAD)).toEqual(outcome);
+    },
+  );
+
+  it("words the same message from the replay as from the run", () => {
+    const outcome = OUTCOMES.drafted;
+
+    expect(renderDraftMessage(replayOutcome(saved(outcome), THREAD), "this thread")).toBe(
+      renderDraftMessage(outcome, "this thread"),
+    );
+  });
+
+  it.each([
+    ["channel", { channel: "C0OTHER99" }],
+    ["thread", { threadTs: "1.1" }],
+  ])(
+    "refuses a draft of another %s, which a button would file under this one's name",
+    (_what, other) => {
+      expect(() => replayOutcome(saved(OUTCOMES.drafted, other), THREAD)).toThrow(
+        /not of C0THREAD1-1712345678\.000100/u,
+      );
+    },
+  );
+
+  it.each([
+    ["no outcome at all", undefined],
+    ["a kind it does not know", { kind: "filed" }],
+    ["a drafted ticket with no ticket", { kind: "drafted", result: result() }],
+    [
+      "a drafted ticket missing a field",
+      { kind: "drafted", ticket: { summary: "x" }, result: result() },
+    ],
+    [
+      "a ticket whose body is not text",
+      { kind: "drafted", ticket: { ...TICKET, description: 7 }, result: result() },
+    ],
+    [
+      "a duplicate with no comment",
+      { kind: "duplicate", duplicate: { key: "SSX-1" }, result: result() },
+    ],
+    [
+      "a result whose questions are not a list",
+      { kind: "declined", result: { ...result(), questions: "none" } },
+    ],
+    [
+      "a result whose ticket is half there",
+      { kind: "declined", result: { ...result(), ticket: { summary: "x" } } },
+    ],
+    ["a too-long outcome with no reason", { kind: "too-long" }],
+  ])("refuses %s rather than wording a message from what is left", (_what, outcome) => {
+    expect(() =>
+      replayOutcome({ channel: THREAD.channel, threadTs: THREAD.threadTs, outcome }, THREAD),
+    ).toThrow(/holds no outcome/u);
+  });
 });

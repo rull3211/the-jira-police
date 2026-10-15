@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { createLogger } from "../logger.ts";
 import { readSettings, withConfigErrors } from "../settings.ts";
-import { draftUsers, listenerFor, rosterWhere, startUsers } from "../wiring.ts";
+import { draftProjects, draftUsers, listenerFor, rosterWhere, startUsers } from "../wiring.ts";
 
 const log = createLogger("slack-listen");
 
@@ -19,8 +19,9 @@ function usage(): never {
       "  Holds a Socket Mode connection and answers /bencebot subscribe, unsubscribe, status and help\n" +
       "  until Ctrl-C, and @Bencebot start and clear in a ticket's thread from the people on\n" +
       "  SLACK_START_USERS, and @Bencebot draft in any thread from the people on SLACK_DRAFT_USERS.\n" +
-      "  With DRAFT_PROJECTS set it also answers a press on a draft's Post to Jira button, which files\n" +
-      "  nothing yet: it checks the draft again and writes <OUTPUT_DIR>/slack/<id>.issue.json.\n" +
+      "  With DRAFT_PROJECTS set it also answers a press on a draft's Post to Jira button: it checks\n" +
+      "  the draft again, and then dry it writes <OUTPUT_DIR>/slack/<id>.issue.json and files nothing,\n" +
+      "  while with --write it files the draft in Jira, reads it back and says what it found.\n" +
       "  Dry by default: reads the real jira-police.slack-subscribers list on JIRA_PROJECT and\n" +
       "  writes the would-be list to <OUTPUT_DIR>/slack/roster.json, a mention's would-be label edit\n" +
       "  to <OUTPUT_DIR>/slack/<KEY>.labels.json, and a draft's direct message to\n" +
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
   const drafts =
     drafters === 0
       ? "No draft is answered: SLACK_DRAFT_USERS is empty."
-      : `${String(drafters)} ${drafters === 1 ? "person" : "people"} may draft a thread${write ? "" : ", dry, though each session is still paid for"}.`;
+      : `${String(drafters)} ${drafters === 1 ? "person" : "people"} may draft a thread${write ? "" : ", dry, though each session is still paid for"}.${write && draftProjects(settings).length > 0 ? " A press on a draft's Post to Jira button files it." : ""}`;
   process.stdout.write(
     write
       ? `Listening for /bencebot, writing ${where}. ${mentions} ${drafts} Ctrl-C stops.\n`

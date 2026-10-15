@@ -40,8 +40,8 @@ export const COMMENTER_TOOLS: readonly string[] = [
 /**
  * Tools withheld. The allowlist above pre-approves; it does not deny, which is why
  * `--disallowedTools` is set on every session this service starts.
- * Whether MCP names are honoured by `--disallowedTools` is unverified, so the Atlassian
- * entries here are declared intent rather than confirmed enforcement.
+ * `pnpm draft:probe` measured two Atlassian names withheld by `--disallowedTools`; the entries
+ * here are the same flag and were not each tried.
  */
 export const COMMENTER_DENIED_TOOLS: readonly string[] = [
   ...DENIED_BUILTIN_TOOLS,

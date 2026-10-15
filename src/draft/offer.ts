@@ -3,7 +3,7 @@
  * record kept first so no button is ever sent that points at nothing.
  */
 
-import { draftBlocks } from "../slack/draft-blocks.ts";
+import { type Piece, buttonPieces, plainPieces } from "../slack/draft-blocks.ts";
 import { escape } from "../slack/render.ts";
 import { type FileGateDeps, fileability } from "./gate.ts";
 import type { PendingStore } from "./pending.ts";
@@ -15,9 +15,8 @@ export interface DraftOfferDeps {
 }
 
 export interface PreparedDraft {
-  readonly text: string;
-  /** `null` for a message with no button. */
-  readonly blocks: readonly object[] | null;
+  /** The message, then each reply in its thread; the button, when there is one, is under the last. */
+  readonly pieces: readonly Piece[];
   /** Forgets the record when the message that carried its button was never sent; never throws. */
   discard(): Promise<void>;
 }
@@ -33,7 +32,7 @@ export interface DraftOffer {
 
 /** A message that carries no button, so has no record to forget. */
 export function withoutButton(text: string): PreparedDraft {
-  return { text, blocks: null, discard: async () => undefined };
+  return { pieces: plainPieces(text), discard: async () => undefined };
 }
 
 function plain(text: string, withheld: string | null): PreparedDraft {
@@ -63,13 +62,8 @@ export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
       const discard = async (): Promise<void> => {
         await deps.pending.remove(id).catch(() => undefined);
       };
-      const note = `Pressing *Post to Jira* files nothing yet: it checks this draft again and writes the request it would make, for ${escape(ticket.issueType)} in the component ${escape(ticket.component)} of ${escape(ticket.project)}.`;
-      const blocks = draftBlocks(`${text}\n\n${note}`, id);
-      if (blocks === null) {
-        await discard();
-        return plain(text, "the draft is too long for a message that carries a button");
-      }
-      return { text, blocks, discard };
+      const note = `Pressing *Post to Jira* checks this draft again and, on a listener that is live, files it once as ${escape(ticket.issueType)} in the component ${escape(ticket.component)} of ${escape(ticket.project)}, and links it in the thread this was drafted from; a dry listener only writes the request it would make.`;
+      return { pieces: buttonPieces(`${text}\n\n${note}`, id), discard };
     },
   };
 }

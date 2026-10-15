@@ -25,9 +25,8 @@ const POSTER_READ_TOOLS: readonly string[] = [
 ];
 
 /**
- * The write tools, exactly as named in §11. `transitionJiraIssue` is absent deliberately, but
- * absence from `--allowedTools` alone denies nothing — enforcement depends on
- * `POSTER_DENIED_TOOLS`, and whether MCP names are honoured there is unverified.
+ * The write tools, exactly as named in §11. `transitionJiraIssue` is absent deliberately: under
+ * `dontAsk` an MCP tool left out of `--allowedTools` is refused, and `POSTER_DENIED_TOOLS` names it too.
  */
 const POSTER_WRITE_TOOLS: readonly string[] = [
   "mcp__atlassian__editJiraIssue",

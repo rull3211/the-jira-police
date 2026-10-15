@@ -90,6 +90,109 @@ export function threadLabel(thread: ThreadRef): string {
   return `${thread.channel}-${thread.threadTs}`;
 }
 
+/**
+ * The outcome a `.draft.json` holds, to build a message again without another session. Throws unless
+ * it is of this thread and holds every field a message is worded from: another thread's words would be filed.
+ */
+export function replayOutcome(saved: unknown, thread: ThreadRef): ThreadDraftOutcome {
+  const file = record(saved);
+  if (file["channel"] !== thread.channel || file["threadTs"] !== thread.threadTs) {
+    throw new Error(
+      `the saved draft is of ${String(file["channel"])}-${String(file["threadTs"])}, not of ${threadLabel(thread)}`,
+    );
+  }
+  const outcome = record(file["outcome"]);
+  const result = readResult(outcome["result"]);
+  switch (outcome["kind"]) {
+    case "empty":
+      return { kind: "empty" };
+    case "too-long":
+      if (typeof outcome["reason"] === "string") {
+        return { kind: "too-long", reason: outcome["reason"] };
+      }
+      break;
+    case "drafted": {
+      const ticket = readTicket(outcome["ticket"]);
+      if (ticket !== null && result !== null) {
+        return { kind: "drafted", ticket, result };
+      }
+      break;
+    }
+    case "duplicate": {
+      const duplicate = readDuplicate(outcome["duplicate"]);
+      if (duplicate !== null && result !== null) {
+        return { kind: "duplicate", duplicate, result };
+      }
+      break;
+    }
+    case "declined":
+      if (result !== null) {
+        return { kind: "declined", result };
+      }
+      break;
+  }
+  throw new Error("the saved draft holds no outcome a draft could have ended in");
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function strings(value: unknown): readonly string[] | null {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? (value as readonly string[])
+    : null;
+}
+
+function readTicket(value: unknown): DraftTicket | null {
+  const { summary, project, component, issueType, description } = record(value);
+  return typeof summary === "string" &&
+    typeof project === "string" &&
+    typeof component === "string" &&
+    typeof issueType === "string" &&
+    typeof description === "string"
+    ? { summary, project, component, issueType, description }
+    : null;
+}
+
+function readDuplicate(value: unknown): DraftDuplicate | null {
+  const { key, feedback } = record(value);
+  return typeof key === "string" && typeof feedback === "string" ? { key, feedback } : null;
+}
+
+function readResult(value: unknown): DraftResult | null {
+  const source = record(value);
+  const asked = strings(source["questions"]);
+  const reposRead = strings(source["reposRead"]);
+  const injectionNoticed = strings(source["injectionNoticed"]);
+  if (
+    typeof source["reason"] !== "string" ||
+    asked === null ||
+    reposRead === null ||
+    injectionNoticed === null
+  ) {
+    return null;
+  }
+  const ticket = source["ticket"] === null ? null : readTicket(source["ticket"]);
+  const duplicate = source["duplicate"] === null ? null : readDuplicate(source["duplicate"]);
+  if (
+    (source["ticket"] !== null && ticket === null) ||
+    (source["duplicate"] !== null && duplicate === null)
+  ) {
+    return null;
+  }
+  return {
+    ticket,
+    duplicate,
+    reason: source["reason"],
+    questions: asked,
+    reposRead,
+    injectionNoticed,
+  };
+}
+
 /** How a message names the thread: its link when one is known, its channel otherwise. */
 export function threadReference(link: string | null, channel: string): string {
   return link !== null && /^https:\/\/[^\s<>|]+$/u.test(link)
