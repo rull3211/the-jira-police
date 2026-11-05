@@ -381,3 +381,45 @@ Things that look like details and are not:
       the next event opens a second thread for the ticket.
     - A record save that fails after a broadcast leaves that broadcast in the channel, recorded
       nowhere, so it is never deleted.
+20. **A Jira issue is created by a press on a live listener, once, through a writer that holds one
+    tool.** The press is `createPostHandler` in `slack/post.ts`; only the person who asked for the
+    draft may press, only a project on `DRAFT_PROJECTS` is reached, and the gate is asked again
+    against Jira at the press, since Jira moves between a draft and its press. A dry listener holds
+    no writer at all and writes the request it would make. The writer is `runFiler` in
+    `draft/filer.ts`: a session allowed `createJiraIssue` and nothing else, with the Atlassian
+    mutators the analyst's list names and the file readers denied by name. `pnpm draft:probe`
+    (`draft/probe.ts`) measured that flag removing two such names; a mutator the list does not name is
+    held only by `dontAsk` refusing a tool that is not allowed, which was tried for one. It is told the arguments a person read, never
+    re-runs the drafting session, and is never handed the listener's shutdown signal, so a write
+    that has begun is finished. What it reports is checked against its own tool call, and the issue
+    is read back over REST and compared. The REST credential never creates an issue: every Jira
+    call the service makes on a press is a read. The press is acknowledged in the draft's thread
+    before the writer runs, since a call that takes half a minute looks dead and gets pressed
+    again, and once the key is recorded the link is posted in the thread the draft was asked for
+    in. Both are best effort: a Slack refusal is logged and said in the reply, and changes nothing
+    that was filed. Three writes to the draft's record, in this order, are what keep it from being
+    filed twice:
+    - **The `filing` mark is written before the writer runs.** If it cannot be written, nothing is
+      filed. A draft carrying it is never filed again, whatever happened after, and the reply says
+      an issue may exist and names the summary to search for. Only a call that provably created
+      nothing clears it: a refusal the tool words as a client error (`Bad Request`, `Unauthorized`,
+      `Forbidden`, `Not Found`, `Unprocessable Entity`), a session that made no call, or an
+      Atlassian server that never connected. A writer that threw, called the tool twice, returned
+      no key it can read, returned an error worded any other way, a timeout or a server error
+      among them, or disagrees with its own tool is `unclear`, and the mark stays; its reply is
+      kept in what the person is told.
+    - **The `filed` mark, with the key, is written before the read-back**, so a read that fails or
+      differs cannot lose the key. A second press on a filed draft answers with it.
+    - **A mark that is there and unreadable fails the read of the record**, never reads as absent.
+      What this costs: a draft whose filing was unclear is spent, and re-drafting is the only way on,
+      which includes a draft whose call was refused for want of a grant, since its reply is not a
+      form the classifier reads; the button is not taken off the message after a filing, so a second
+      press only answers; and the body is compared by its words at its start, its end and its
+      size, so a link's address in the first or last sixty characters can read as a difference when
+      nothing is wrong, and a changed middle of the same size reads as a match; a record never
+      expires and carries no version, so a draft kept by an older build files under the rules of
+      whichever build is listening when it is pressed. The marks also hold
+      for one listener at a time: the presses of one process are queued, but the record is read and
+      then rewritten with no check between, so two listeners on one app, a daemon's and a hand-run
+      one among them, can each pass on one draft within the time it takes to ask Jira and post the
+      acknowledgement, and file it twice. Nothing guards that; one listener per app is assumed.

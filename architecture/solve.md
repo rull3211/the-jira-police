@@ -213,9 +213,9 @@ Two further denials are worth their own sentences, because neither is obvious:
   description" to "a request leaving this machine", which removes exfiltration from the threat
   model rather than mitigating it.
 
-The Atlassian mutators are named in the denylist too, carrying the same caveat as the analyst's
-(§6): whether MCP tool names are honoured is unverified, an unrecognised name is inert, and
-nothing here should be read as mechanically enforced. It matters less in this direction — the
+The Atlassian mutators are named in the denylist too, with the standing the analyst's have (§6):
+two of the names have been measured withheld, and the rest are the same flag and not each tried.
+It matters less in this direction — the
 solve passes are given no MCP server at all (`requiredMcpServers: []` in `passes.ts`), because a
 solve pass reads the ticket as text handed to it and has no reason to hold a connection to
 something it could also write through.

@@ -1,6 +1,6 @@
 /**
- * Runs the `thread-draft` skill over one Slack thread. Read-only by `ANALYST_DENIED_TOOLS`, whose
- * Atlassian entries are unmeasured (`src/triage/runner.ts`); nothing here sends the draft anywhere.
+ * Runs the `thread-draft` skill over one Slack thread. Read-only by `ANALYST_DENIED_TOOLS`, which
+ * `pnpm draft:probe` saw withhold `createJiraIssue`; nothing here sends the draft anywhere.
  */
 
 import { sanitiseUntrusted } from "../solve/runner.ts";

@@ -22,9 +22,28 @@ export interface PendingDraft {
   readonly ticket: DraftTicket;
   /** For a person pruning records, which never expire; nothing in the service reads it. */
   readonly createdAt: string;
+  /** Written before the issue is created, and never cleared except by a create that provably did not happen. */
+  readonly filing?: FilingMark;
+  /** The issue this draft became; a press on a draft with one answers with it and creates nothing. */
+  readonly filed?: FiledMark;
 }
 
-export type NewPendingDraft = Omit<PendingDraft, "id" | "createdAt">;
+export interface FilingMark {
+  readonly startedAt: string;
+}
+
+export interface FiledMark {
+  readonly key: string;
+  readonly at: string;
+}
+
+export type NewPendingDraft = Omit<PendingDraft, "id" | "createdAt" | "filing" | "filed">;
+
+/** What `update` may change; `null` clears a mark. */
+export interface PendingChange {
+  readonly filing?: FilingMark | null;
+  readonly filed?: FiledMark;
+}
 
 export class PendingDraftError extends Error {}
 
@@ -32,8 +51,13 @@ export interface PendingStore {
   create(draft: NewPendingDraft): Promise<PendingDraft>;
   /** `null` for an id that is not one of ours or names no file; throws for a file it cannot trust. */
   get(id: string): Promise<PendingDraft | null>;
+  /** Reads the record, applies the change, writes it whole; throws for a record that is not there. */
+  update(id: string, change: PendingChange): Promise<PendingDraft>;
   remove(id: string): Promise<void>;
 }
+
+/** The only key shape a record may name as the issue it became: it ends up in a link. */
+const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9]+-[1-9][0-9]*$/u;
 
 export function newPendingId(): string {
   return `d-${randomBytes(12).toString("hex")}`;
@@ -46,6 +70,28 @@ export function fileStore(
   const newId = options.id ?? newPendingId;
   const now = options.now ?? (() => new Date());
   const pathOf = (id: string): string => join(directory, `${id}.json`);
+  const write = async (draft: PendingDraft): Promise<void> => {
+    await mkdir(directory, { recursive: true });
+    const temporary = `${pathOf(draft.id)}.${randomBytes(4).toString("hex")}.tmp`;
+    // A crash between the two leaves a .tmp nobody reads, never a half-written record.
+    await writeFile(temporary, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
+    await rename(temporary, pathOf(draft.id));
+  };
+  const read = async (id: string): Promise<PendingDraft | null> => {
+    if (!PENDING_ID_PATTERN.test(id)) {
+      return null;
+    }
+    let raw: string;
+    try {
+      raw = await readFile(pathOf(id), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+    return parsePending(raw, id);
+  };
   return {
     create: async (draft) => {
       const id = newId();
@@ -53,27 +99,24 @@ export function fileStore(
         throw new PendingDraftError(`refusing to keep a draft under the id ${JSON.stringify(id)}`);
       }
       const kept: PendingDraft = { ...draft, id, createdAt: now().toISOString() };
-      await mkdir(directory, { recursive: true });
-      const temporary = `${pathOf(id)}.${randomBytes(4).toString("hex")}.tmp`;
-      // A crash between the two leaves a .tmp nobody reads, never a half-written record.
-      await writeFile(temporary, `${JSON.stringify(kept, null, 2)}\n`, "utf8");
-      await rename(temporary, pathOf(id));
+      await write(kept);
       return kept;
     },
-    get: async (id) => {
-      if (!PENDING_ID_PATTERN.test(id)) {
-        return null;
+    get: read,
+    update: async (id, change) => {
+      const current = await read(id);
+      if (current === null) {
+        throw new PendingDraftError(`the record of ${id} is gone, so it cannot be marked`);
       }
-      let raw: string;
-      try {
-        raw = await readFile(pathOf(id), "utf8");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          return null;
-        }
-        throw error;
-      }
-      return parsePending(raw, id);
+      const { filing: _cleared, ...rest } = current;
+      const filing = change.filing === undefined ? current.filing : change.filing;
+      const updated: PendingDraft = {
+        ...rest,
+        ...(filing === null || filing === undefined ? {} : { filing }),
+        ...(change.filed === undefined ? {} : { filed: change.filed }),
+      };
+      await write(updated);
+      return updated;
     },
     remove: async (id) => {
       if (PENDING_ID_PATTERN.test(id)) {
@@ -88,6 +131,9 @@ export function discardingStore(newId: () => string = newPendingId): PendingStor
   return {
     create: async (draft) => ({ ...draft, id: newId(), createdAt: new Date().toISOString() }),
     get: async () => null,
+    update: async (id) => {
+      throw new PendingDraftError(`a store that keeps nothing cannot mark ${id}`);
+    },
     remove: async () => undefined,
   };
 }
@@ -131,7 +177,32 @@ export function parsePending(raw: string, id: string): PendingDraft {
       `the record of ${id} is not one this service wrote: ${missing.join(", ")} missing or wrong`,
     );
   }
-  return draft;
+  return { ...draft, ...marks(record, id) };
+}
+
+/** A mark that is there and unreadable throws: reading it as absent would let a filed draft be filed again. */
+function marks(
+  record: Record<string, unknown>,
+  id: string,
+): { readonly filing?: FilingMark; readonly filed?: FiledMark } {
+  const result: { filing?: FilingMark; filed?: FiledMark } = {};
+  if (record["filing"] !== undefined) {
+    const startedAt = text(object(record["filing"])["startedAt"]);
+    if (startedAt === "") {
+      throw new PendingDraftError(`the record of ${id} has a filing mark that cannot be read`);
+    }
+    result.filing = { startedAt };
+  }
+  if (record["filed"] !== undefined) {
+    const filed = object(record["filed"]);
+    const key = text(filed["key"]);
+    const at = text(filed["at"]);
+    if (!ISSUE_KEY_PATTERN.test(key) || at === "") {
+      throw new PendingDraftError(`the record of ${id} has a filed mark that cannot be read`);
+    }
+    result.filed = { key, at };
+  }
+  return result;
 }
 
 function object(value: unknown): Record<string, unknown> {

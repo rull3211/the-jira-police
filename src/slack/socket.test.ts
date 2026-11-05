@@ -409,6 +409,7 @@ describe("listen", () => {
       userId: "U0ME",
       channel: "D0DIRECT",
       messageTs: "1790779999.000100",
+      threadTs: null,
       actionId: "draft_post",
       value: "d-0123456789abcdef01234567",
     });
@@ -541,10 +542,39 @@ describe("parseFrame", () => {
         userId: "U0ME",
         channel: "D0DIRECT",
         messageTs: "1790779999.000100",
+        threadTs: null,
         actionId: "draft_post",
         value: "d-0123456789abcdef01234567",
       },
     });
+  });
+
+  it("takes the thread a click's message is a reply in from the container", () => {
+    const frame = parseFrame(
+      pressed("e-6", {
+        container: {
+          type: "message",
+          message_ts: "1790779999.000100",
+          channel_id: "D0DIRECT",
+          thread_ts: "1790779000.000050",
+        },
+      }),
+    );
+
+    expect(frame).toMatchObject({
+      kind: "click",
+      click: { messageTs: "1790779999.000100", threadTs: "1790779000.000050" },
+    });
+  });
+
+  it("falls back to the message's own thread_ts when the container names none", () => {
+    const frame = parseFrame(
+      pressed("e-7", {
+        message: { ts: "1790779999.000100", thread_ts: "1790779000.000050" },
+      }),
+    );
+
+    expect(frame).toMatchObject({ kind: "click", click: { threadTs: "1790779000.000050" } });
   });
 
   it("finds a click's channel and message in the container when the payload names neither itself", () => {

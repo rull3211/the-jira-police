@@ -30,6 +30,8 @@ export interface Click {
   readonly userId: string;
   readonly channel: string;
   readonly messageTs: string;
+  /** The thread the message is a reply in, `null` for one that is not; an answer goes here, not under a reply. */
+  readonly threadTs: string | null;
   readonly actionId: string;
   readonly value: string;
 }
@@ -120,13 +122,15 @@ export function parseFrame(data: string): Frame {
       return { kind: "other", envelope, type: `interactive/${kind === "" ? "none" : kind}` };
     }
     const container = record(payload["container"]);
+    const message = record(payload["message"]);
     return {
       kind: "click",
       envelope,
       click: {
         userId: stringOf(record(payload["user"])["id"]),
         channel: stringOf(record(payload["channel"])["id"]) || stringOf(container["channel_id"]),
-        messageTs: stringOf(container["message_ts"]) || stringOf(record(payload["message"])["ts"]),
+        messageTs: stringOf(container["message_ts"]) || stringOf(message["ts"]),
+        threadTs: stringOf(container["thread_ts"]) || stringOf(message["thread_ts"]) || null,
         actionId,
         value: stringOf(action["value"]),
       },

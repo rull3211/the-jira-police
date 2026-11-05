@@ -177,4 +177,79 @@ describe("discardingStore", () => {
     expect(await dry.get(ID)).toBeNull();
     await expect(dry.remove(ID)).resolves.toBeUndefined();
   });
+
+  it("refuses to mark a draft, since it keeps none that a mark could be read back from", async () => {
+    const dry = discardingStore(() => ID);
+
+    await expect(
+      dry.update(ID, { filing: { startedAt: "2026-10-15T09:00:00.000Z" } }),
+    ).rejects.toThrow(PendingDraftError);
+  });
+});
+
+describe("the marks on a record", () => {
+  const STARTED = { startedAt: "2026-10-15T09:00:00.000Z" };
+  const FILED = { key: "SSX-4100", at: "2026-10-15T09:01:00.000Z" };
+
+  it("keeps a filing mark and a filed mark across a read, beside everything the draft was", async () => {
+    const made = await store().create(draft());
+
+    await store().update(ID, { filing: STARTED });
+    await store().update(ID, { filed: FILED });
+
+    expect(await store().get(ID)).toEqual({ ...made, filing: STARTED, filed: FILED });
+  });
+
+  it("leaves a mark alone when a change names the other", async () => {
+    await store().create(draft());
+    await store().update(ID, { filing: STARTED });
+
+    await store().update(ID, { filed: FILED });
+
+    expect((await store().get(ID))?.filing).toEqual(STARTED);
+  });
+
+  it("clears the filing mark on null, and only that", async () => {
+    await store().create(draft());
+    await store().update(ID, { filing: STARTED });
+    await store().update(ID, { filed: FILED });
+
+    await store().update(ID, { filing: null });
+
+    expect(await store().get(ID)).toMatchObject({ filed: FILED });
+    expect((await store().get(ID))?.filing).toBeUndefined();
+  });
+
+  it("writes the record whole, leaving no half-written file for a crash to be read as", async () => {
+    await store().create(draft());
+
+    await store().update(ID, { filing: STARTED });
+
+    expect(await readdir(directory)).toEqual([`${ID}.json`]);
+  });
+
+  it("throws for a record that is gone, rather than making one that was never kept", async () => {
+    await expect(store().update(ID, { filing: STARTED })).rejects.toThrow(/is gone/u);
+    expect(await store().get(ID)).toBeNull();
+  });
+
+  it.each([
+    ["a filing mark that is not an object", { filing: "yes" }],
+    ["a filing mark with no start", { filing: {} }],
+    ["a filing mark with an empty start", { filing: { startedAt: "" } }],
+    ["a filed mark with no key", { filed: { at: "2026-10-15T09:01:00.000Z" } }],
+    ["a filed mark whose key is not an issue key", { filed: { key: "../x", at: "t" } }],
+    ["a filed mark with no time", { filed: { key: "SSX-1" } }],
+    ["a filed mark that is a string", { filed: "SSX-1" }],
+  ])(
+    "refuses a record with %s, since reading it as unmarked could file the draft twice",
+    async (_what, extra) => {
+      await store().create(draft());
+      const path = join(directory, `${ID}.json`);
+      const record = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      await writeFile(path, JSON.stringify({ ...record, ...extra }), "utf8");
+
+      await expect(store().get(ID)).rejects.toThrow(PendingDraftError);
+    },
+  );
 });

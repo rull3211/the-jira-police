@@ -50,7 +50,7 @@ const SOLVE_DENIED_COMMON: readonly string[] = [
   "WebFetch",
   "WebSearch",
   "Task",
-  // Whether `--disallowedTools` honours MCP names is UNVERIFIED; listed anyway since an unrecognised name is inert.
+  // `pnpm draft:probe` measured two Atlassian names withheld by the flag; these are the same flag, not each tried.
   "mcp__atlassian__editJiraIssue",
   "mcp__atlassian__addCommentToJiraIssue",
   "mcp__atlassian__createJiraIssue",

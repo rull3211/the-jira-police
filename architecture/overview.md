@@ -99,12 +99,13 @@ every two minutes forever.
 **Beside them, with `SLACK_LISTEN` on, the same `Promise.all` holds the Slack listener** from
 `slack-loop.ts`, for `/bencebot`, for a mention in a ticket's thread, and for `@Bencebot draft` in
 any thread. It is not a `runLoop` but one Socket Mode connection with its own reconnect backoff,
-and it writes nothing but a property write per command that changes the subscriber list and a label
+and it writes nothing but a property write per command that changes the subscriber list, a label
 write per mention that starts or clears a ticket — though a start hands the solve loop a ticket it
-will pay to solve. A draft is the one thing it pays for itself: a read-only session per mention, one
-at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message.
-With `DRAFT_PROJECTS` set, a ticket draft the gate passes also carries a **Post to Jira** button, and a
-press re-judges the draft and writes the request a filing would make to a file, filing nothing. The
+will pay to solve — and, on a live listener, one issue per press on a draft's button. A draft is the one thing it pays for itself: a read-only session per mention, one
+at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message,
+its first paragraph as the message and the rest in a reply in its thread. With `DRAFT_PROJECTS` set, a ticket draft the gate passes also carries a **Post to Jira** button, and a
+press re-judges the draft and, on a dry listener, writes the request a filing would make to a file,
+while a live one files it (`architecture/invariants.md` invariant 20). The
 record the button names is a file under `state/pending-drafts/`, not the direct message read back
 as `BUILDING.md`'s default would have it: what a writer needs is structured, and a rendered message
 cannot be parsed back into it without a second reading that can drift from the first. The cost is
@@ -217,12 +218,13 @@ storecode -p "/intake-triage SSX-1234 --no-write --no-html" \
   would authorise and the prose forbids. What actually catches a stray write is `escape.ts`, which
   snapshots the watched checkouts before and after each run; the only mechanism observed to _stop_
   one is a `PreToolUse` hook, which lives outside this repository. See PLAN.md §5b.
-- **Whether MCP tool names are honoured by `--disallowedTools` is _unverified_.** A bare
-  `storecode -p` run has no MCP server connected, so the probe returned `edit=NO get=NO` and
-  distinguished nothing. The Atlassian mutators are named in both denylists on principle, and an
-  unrecognised name is inert, but nothing in this service should be described as mechanically
-  unable to edit a Jira issue on that basis. What actually keeps the analyst from writing is
-  `--no-write` in the prompt plus `gate.ts` sitting between it and the poster.
+- **`--disallowedTools` removes an MCP tool named in it, for the two names that have been tried.**
+  A bare `storecode -p` run has no MCP server connected and distinguished nothing, so on 2026-10-15
+  `pnpm draft:probe` ran with one: `createJiraIssue` and `addCommentToJiraIssue`, each named in a
+  denylist, were absent from the session's tool list, even where `--allowedTools` named the same
+  tool. The other three Atlassian mutators in both lists are the same flag and were not each tried,
+  and a tool the server adds later is named nowhere. Under `dontAsk` a tool only left out of
+  `--allowedTools` stays listed and its call is refused, tried for `addCommentToJiraIssue`.
 - **`Skill` is withheld from the analyst, because its refusal told sessions not to triage.** From
   Claude Code 2.1.274 (2026-09-17) the session calls the Skill tool for the skill its prompt has
   already expanded, and `disable-model-invocation: true` answers "Do not replicate this skill's

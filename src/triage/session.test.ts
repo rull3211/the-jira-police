@@ -378,6 +378,26 @@ describe("runSession abort", () => {
     expect(value).toEqual({ ok: true });
     controller.abort();
   });
+
+  it("hands every event to the caller's observer, in order, before acting on it", async () => {
+    const seen: unknown[] = [];
+
+    await runSession(
+      {
+        ...fakeSession([
+          { type: "system", subtype: "init", session_id: "s-1", tools: ["Read"] },
+          { type: "assistant", message: { content: [] } },
+          { ...RESULT, structured_output: { ok: true } },
+        ]),
+        onEvent: (event) => {
+          seen.push(event["type"]);
+        },
+      },
+      (output) => output,
+    );
+
+    expect(seen).toEqual(["system", "assistant", "result"]);
+  });
 });
 
 describe("runSession cost reporting", () => {

@@ -13,6 +13,7 @@ import {
 } from "../draft/thread.ts";
 import { createLogger } from "../logger.ts";
 import { SessionAbortedError } from "../triage/session.ts";
+import type { Piece } from "./draft-blocks.ts";
 import { SLACK_USER_ID_PATTERN, escape } from "./render.ts";
 import { type Mention, mentionWords } from "./start.ts";
 
@@ -32,13 +33,8 @@ export interface DraftMentionDeps {
   readonly dry: boolean;
   draft(thread: ThreadRef): Promise<ThreadDraftOutcome>;
   permalink(channel: string, ts: string): Promise<string>;
-  /** `blocks` is present only for a message that carries a Post button. */
-  deliver(
-    userId: string,
-    threadLabel: string,
-    text: string,
-    blocks?: readonly object[],
-  ): Promise<string>;
+  /** Sends the first piece as a message and the rest as replies in its thread; resolves to the first's `ts`. */
+  deliver(userId: string, threadLabel: string, pieces: readonly Piece[]): Promise<string>;
   /** Absent while nothing is on `DRAFT_PROJECTS`: no draft then carries a button. */
   readonly offer?: DraftOffer;
   /** Seen only by the person, in the thread. */
@@ -82,17 +78,15 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
       log.warn("slack.draft_failed", { user: mention.userId, thread: label, outcome, reason });
     }
     try {
-      const ts =
-        message.blocks === null
-          ? await deps.deliver(mention.userId, label, message.text)
-          : await deps.deliver(mention.userId, label, message.text, message.blocks);
+      const ts = await deps.deliver(mention.userId, label, message.pieces);
       log.info("slack.draft_sent", {
         user: mention.userId,
         thread: label,
         outcome,
         messageTs: ts,
         dry: deps.dry,
-        button: message.blocks !== null,
+        messages: message.pieces.length,
+        button: message.pieces.some((piece) => piece.blocks !== null),
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
