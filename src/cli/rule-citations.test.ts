@@ -37,7 +37,6 @@ interface Fixture {
   /** Bodies by repository-relative path; the rest of `CITING_FILES` is empty. */
   readonly files?: Readonly<Record<string, string>>;
   readonly incidents?: string;
-  readonly today?: string;
   readonly population?: Readonly<Record<string, number>>;
   readonly unresolvedOnPurpose?: number;
   readonly authoringGaps?: readonly number[];
@@ -65,7 +64,6 @@ function fixture(over: Fixture = {}): RuleCitationInput {
     incidents,
     citing,
     slugOf,
-    today: new Date(over.today ?? "2026-09-09T12:00:00Z"),
     population: over.population ?? derived,
     unresolvedOnPurpose:
       over.unresolvedOnPurpose ??
@@ -371,18 +369,16 @@ describe("ruleCitationProblems — incident to rule", () => {
     );
   });
 
-  it("fails a dated **No rule yet** once it is more than thirty days old", () => {
-    const fresh = ruleCitationProblems(
-      fixture({ incidents: dated("2026-09-01"), today: "2026-09-09T12:00:00Z" }),
-    );
-    const stale = ruleCitationProblems(
-      fixture({ incidents: dated("2026-07-01"), today: "2026-09-09T12:00:00Z" }),
-    );
+  it("never fails a dated **No rule yet** for its age", () => {
+    const old = ruleCitationProblems(fixture({ incidents: dated("2001-01-01") }));
 
-    expect(fresh.problems).toEqual([]);
-    expect(
-      about(stale.problems, "has been waiting for a rule since 2026-07-01 — 70 days"),
-    ).toHaveLength(1);
+    expect(old.problems).toEqual([]);
+  });
+
+  it("fails a dated **No rule yet** whose date is not a date", () => {
+    const report = ruleCitationProblems(fixture({ incidents: dated("2026-13-45") }));
+
+    expect(about(report.problems, "as of 2026-13-45, which is not a date")).toHaveLength(1);
   });
 
   it("fails a counted **No rule yet** once that many entries share the tag", () => {
