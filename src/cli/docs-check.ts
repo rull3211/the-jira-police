@@ -798,7 +798,6 @@ const citations = ruleCitationProblems({
   incidents,
   citing: CITING_FILES.map((path) => ({ path, body: readFileSync(join(ROOT, path), "utf8") })),
   slugOf,
-  today: new Date(),
   authoringGaps,
 });
 problems.push(...citations.problems);
