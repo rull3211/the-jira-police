@@ -69,12 +69,16 @@ describe("slackPublisher", () => {
   it("reads a deleted message as gone, so a fresh one can be posted", async () => {
     expect(await failing("message_not_found").update("SSX-1", thread, message)).toBe("gone");
     expect(await failing("message_not_found").remove("SSX-1", thread, "2")).toBe("gone");
+    expect(await failing("message_not_found").amend("SSX-1", thread, "2", message)).toBe("gone");
   });
 
   it("does not read any other failure as gone", async () => {
     await expect(failing("not_in_channel").update("SSX-1", thread, message)).rejects.toThrow(
       "not_in_channel",
     );
+    await expect(
+      failing("cant_update_message").amend("SSX-1", thread, "2", message),
+    ).rejects.toThrow("cant_update_message");
     await expect(failing("cant_delete_message").remove("SSX-1", thread, "2")).rejects.toThrow(
       "cant_delete_message",
     );
@@ -88,7 +92,10 @@ describe("slackPublisher", () => {
           calls.push(args);
           return { ts: "9", channel: "C1", warnings: [] };
         },
-        update: async () => ({ ts: "1", warnings: [] }),
+        update: async (args) => {
+          calls.push(args);
+          return { ts: args.ts, warnings: [] };
+        },
         deleteMessage: async (args) => {
           calls.push(args);
         },
@@ -97,10 +104,15 @@ describe("slackPublisher", () => {
     );
 
     expect(await publisher.broadcast("SSX-1", { channel: "C-thread", ts: "1" }, message)).toBe("9");
+    expect(await publisher.amend("SSX-1", { channel: "C-thread", ts: "1" }, "9", message)).toBe(
+      "amended",
+    );
     await publisher.remove("SSX-1", { channel: "C-thread", ts: "1" }, "8");
 
     expect(calls).toEqual([
       { channel: "C-thread", text: "SSX-1: claimed", threadTs: "1", broadcast: true },
+      // The reply's own ts, never the card's, and text only, as the reply was posted.
+      { channel: "C-thread", ts: "9", text: "SSX-1: claimed" },
       { channel: "C-thread", ts: "8" },
     ]);
   });

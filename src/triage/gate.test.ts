@@ -122,9 +122,27 @@ describe("the comment body", () => {
   it("refuses a body missing the idempotency sentinel", () => {
     const body = `${BANNER}\n\nLooks fine.`;
 
-    expect(violations(payload({ mutation: mutation({ commentBody: body }) })).join(" ")).toContain(
-      "footer sentinel",
-    );
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([
+      expect.stringContaining("could not find it to update in place"),
+    ]);
+  });
+
+  it("refuses text after the sentinel without calling the sentinel missing", () => {
+    // A re-run finds a sentinel wherever it sits, so "missing" would send the reader after the wrong fault.
+    const body = `${BANNER}\n\nLooks fine.\n\n${FOOTER_SENTINEL}\n\`\`\``;
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([
+      expect.stringContaining("text after the footer sentinel"),
+    ]);
+  });
+
+  it("still refuses a legend below the sentinel when handed one directly", () => {
+    // Moving it is `withFitnessNote`'s job: relax this rule to "contains" and this fails.
+    const body = `${BANNER}\n\nLooks fine.\n\n${FOOTER_SENTINEL}\n_Legend: ✅accept ⛔reject._`;
+
+    expect(violations(payload({ mutation: mutation({ commentBody: body }) }))).toEqual([
+      expect.stringContaining("text after the footer sentinel"),
+    ]);
   });
 
   it("tolerates trailing whitespace after the sentinel", () => {

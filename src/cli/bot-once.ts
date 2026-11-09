@@ -74,6 +74,8 @@ async function main(): Promise<void> {
   }
 
   const options = buildTriageOptions(settings, issueKey);
+  // Built before triage, which is paid for: a half-set status pair is refused here rather than after it.
+  const client = createJiraClient(settings);
   log.info("bot-once.settings", {
     phase,
     issueKey,
@@ -115,7 +117,7 @@ async function main(): Promise<void> {
 
   // `null` cycle: there is no queue here, distinct from reporting the ticket absent from one.
   // `false`: `parseBotArgs` refuses `--repair`.
-  await runWriteRungs(settings, createJiraClient(settings), issueKey, phase, null, "named", false);
+  await runWriteRungs(settings, client, issueKey, phase, null, "named", false);
 }
 
 await withConfigErrors(main);

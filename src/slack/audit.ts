@@ -17,6 +17,10 @@ export const MAX_MAJOR_ENTRIES = 10;
 export const MAX_TIMELINE_ENTRIES = 40;
 export const MAX_ENTRY_CHARS = 200;
 
+const UNREACHABLE_ICON = "📡";
+/** Must exceed `REVIEW_POLL_MS`, or every look in one outage is a line of its own. */
+const OUTAGE_FOLD_MS = 60 * 60 * 1000;
+
 export type TriageState =
   | { readonly kind: "pending" }
   | {
@@ -107,7 +111,9 @@ export type AuditEvent =
   | { readonly kind: "pr-ready" }
   | { readonly kind: "pr-reworking" }
   | { readonly kind: "pr-ended"; readonly state: "merged" | "closed" }
-  | { readonly kind: "crashed"; readonly where: string; readonly message: string };
+  | { readonly kind: "crashed"; readonly where: string; readonly message: string }
+  /** A failure that is a fact about the network, not the ticket: a timeline line, never a broadcast. */
+  | { readonly kind: "unreachable"; readonly where: string; readonly message: string };
 
 export function newRecord(key: string, summary: string, url: string): AuditRecord {
   return {
@@ -134,6 +140,12 @@ export function addedMajor(before: AuditRecord, after: AuditRecord): Entry | nul
   return entry === undefined || entry === before.major.at(-1) ? null : entry;
 }
 
+/** The timeline entry `after` gained over `before`, or `null`; a minor entry edits the broadcast instead. */
+export function addedMinor(before: AuditRecord, after: AuditRecord): Entry | null {
+  const entry = after.timeline.at(-1);
+  return entry === undefined || entry === before.timeline.at(-1) ? null : entry;
+}
+
 /** `record` itself when the ticket's title and link are what it already holds. */
 export function retitle(record: AuditRecord, summary: string, url: string): AuditRecord {
   const title = bounded(summary);
@@ -143,11 +155,11 @@ export function retitle(record: AuditRecord, summary: string, url: string): Audi
 }
 
 /**
- * A crash describes the ticket only until the next event; its entry stays as history. An event that
- * changed nothing returns `record` itself, which is how the notifier knows to write nothing.
+ * A crash describes the ticket only until the next event about the ticket; its entry stays as history.
+ * An event that changed nothing returns `record` itself, which is how the notifier knows to write nothing.
  */
 export function applyEvent(record: AuditRecord, event: AuditEvent, now: Date): AuditRecord {
-  return event.kind === "crashed" || record.crash === null
+  return event.kind === "crashed" || event.kind === "unreachable" || record.crash === null
     ? transition(record, event, now)
     : transition({ ...record, crash: null }, event, now);
 }
@@ -182,11 +194,12 @@ function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRec
         `Triage refused by the gate — ${event.reason}`,
       );
     case "claimed":
-      return minor(
+      // Major so the channel sees a solve start: nothing else is until it ends, minutes later.
+      return major(
         { ...record, work: { kind: "claimed" }, repo: event.repo ?? record.repo },
         at,
         "🙋",
-        "claimed",
+        "Solve started",
       );
     case "pass-started":
       return minor(
@@ -247,6 +260,19 @@ function transition(record: AuditRecord, event: AuditEvent, now: Date): AuditRec
         "💥",
         `Crashed in ${event.where} — ${event.message}`,
       );
+    case "unreachable": {
+      // An outage fails every tick until it ends, and only its start is worth a line.
+      const last = record.timeline.at(-1);
+      if (last?.icon === UNREACHABLE_ICON && now.getTime() - Date.parse(last.at) < OUTAGE_FOLD_MS) {
+        return record;
+      }
+      return minor(
+        record,
+        at,
+        UNREACHABLE_ICON,
+        `Network failure in ${event.where} — ${event.message}`,
+      );
+    }
   }
 }
 

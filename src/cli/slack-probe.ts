@@ -1,7 +1,8 @@
 /**
  * Measures both halves of the audit thread's store against the real systems: a Slack message posted,
- * edited and deleted in SLACK_CHANNEL_ID, and a record written to, read back from and deleted on the
- * ticket named. With SLACK_OPERATOR_USER_ID set, also a direct message to that person, deleted.
+ * edited and deleted in SLACK_CHANNEL_ID, a reply to it sent to the channel, edited and deleted, and
+ * a record written to, read back from and deleted on the ticket named. With SLACK_OPERATOR_USER_ID
+ * set, also a direct message to that person, deleted.
  *
  *   pnpm slack:probe SSX-1234
  *   pnpm slack:probe SSX-1234 --keep
@@ -24,7 +25,8 @@ const log = createLogger("slack-probe");
 function usage(): never {
   process.stderr.write(
     "usage: pnpm slack:probe <ISSUE-KEY> [--keep]\n" +
-      "  Posts one message to SLACK_CHANNEL_ID, edits it and deletes it; with\n" +
+      "  Posts one message to SLACK_CHANNEL_ID and edits it, sends a reply to the channel,\n" +
+      "  edits that and deletes it, then deletes the message; with\n" +
       "  SLACK_OPERATOR_USER_ID set, sends that person a direct message and deletes it; then\n" +
       `  writes the ${PROBE_PROPERTY} issue property on the ticket, reads it back and deletes\n` +
       "  it. Writes the verdict per step to <OUTPUT_DIR>/slack-probe.md. --keep leaves all.\n" +
@@ -71,6 +73,9 @@ async function main(): Promise<void> {
   process.stdout.write(`\nreport: ${reportPath}\n`);
   if (result.messageLeft !== null) {
     process.stdout.write(`left in the channel: ts ${result.messageLeft}\n`);
+  }
+  if (result.replyLeft !== null) {
+    process.stdout.write(`left in the channel, as a broadcast reply: ts ${result.replyLeft}\n`);
   }
   if (result.directLeft !== null) {
     process.stdout.write(

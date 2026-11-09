@@ -383,6 +383,128 @@ describe("JiraClient.fetchDetail", () => {
   });
 });
 
+describe("JiraClient.fetchFiled", () => {
+  const body = {
+    key: "SSX-4100",
+    fields: {
+      summary: "commerce-rest: raise the export timeout",
+      issuetype: { id: "10007", name: "Oppgave" },
+      project: { id: "10001", key: "SSX" },
+      components: [{ name: "SSX Advisor" }, { name: "SSX Customer" }],
+      description: { type: "doc", version: 1, content: [] },
+    },
+  };
+
+  it("reads the fields a filing sets, and asks for no others", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const filed = await client().fetchFiled("SSX-4100");
+
+    expect(filed).toEqual({
+      project: "SSX",
+      issueType: "Oppgave",
+      summary: "commerce-rest: raise the export timeout",
+      components: ["SSX Advisor", "SSX Customer"],
+      description: { type: "doc", version: 1, content: [] },
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://example.invalid/rest/api/3/issue/SSX-4100?fields=summary,issuetype,project,components,description",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
+
+  it("reads a field of the wrong shape as empty, which a comparison reports and never matches", async () => {
+    vi.stubGlobal("fetch", async () =>
+      jsonResponse({
+        fields: { summary: 7, project: "SSX", components: [{ name: 7 }, {}, null], issuetype: [] },
+      }),
+    );
+
+    expect(await client().fetchFiled("SSX-4100")).toMatchObject({
+      project: "",
+      issueType: "",
+      components: [],
+    });
+  });
+
+  it("refuses a key that would escape the endpoint, before any request", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(body));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of ["SSX-1/../../myself", "SSX-1?expand=x", "SSX-1#x", "", "SSX 1", "SSX-"]) {
+      await expect(client().fetchFiled(bad)).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails when Jira refuses the read, so a missing issue is never a match", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse({ errorMessages: ["gone"] }, 404));
+
+    await expect(client().fetchFiled("SSX-4100")).rejects.toThrow(JiraError);
+  });
+});
+
+describe("JiraClient.projectFacts", () => {
+  const issueTypes = [
+    { id: "10007", name: "Oppgave", subtask: false },
+    { id: "10008", name: "Feil", subtask: false },
+    { id: "10009", name: "Deloppgave", subtask: true },
+  ];
+
+  function answering(components: unknown, project: unknown): FetchMock {
+    return vi.fn<typeof fetch>(async (input) =>
+      String(input).endsWith("/components") ? jsonResponse(components) : jsonResponse(project),
+    );
+  }
+
+  it("names the project's components and the issue types a ticket can be created as", async () => {
+    const fetchMock = answering([{ name: "SSX Advisor" }, { name: "SSX Customer" }], {
+      issueTypes,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const facts = await client().projectFacts("SSX");
+
+    expect(facts).toEqual({
+      components: ["SSX Advisor", "SSX Customer"],
+      issueTypes: ["Oppgave", "Feil"],
+    });
+    expect(fetchMock.mock.calls.map((call) => String(call[0])).toSorted()).toEqual([
+      "https://example.invalid/rest/api/3/project/SSX",
+      "https://example.invalid/rest/api/3/project/SSX/components",
+    ]);
+  });
+
+  it("leaves out a subtask type, which cannot be created without a parent", async () => {
+    vi.stubGlobal("fetch", answering([], { issueTypes }));
+
+    expect((await client().projectFacts("SSX")).issueTypes).not.toContain("Deloppgave");
+  });
+
+  it("reads an answer of the wrong shape as nothing listed, never as a throw or a guess", async () => {
+    vi.stubGlobal("fetch", answering({ not: "a list" }, { issueTypes: [{ name: 7 }, {}] }));
+
+    expect(await client().projectFacts("SSX")).toEqual({ components: [], issueTypes: [] });
+  });
+
+  it("refuses a project key that would escape the endpoint, before any request", async () => {
+    const fetchMock = answering([], { issueTypes });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of ["ssx", "SSX/../../myself", "SSX?expand=x", "", "SSX SSX"]) {
+      await expect(client().projectFacts(bad)).rejects.toThrow(JiraError);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails when Jira refuses either read, so a gate cannot read an outage as an empty list", async () => {
+    vi.stubGlobal("fetch", async () => jsonResponse({ errorMessages: ["no"] }, 404));
+
+    await expect(client().projectFacts("SSX")).rejects.toThrow(JiraError);
+  });
+});
+
 describe("JiraClient.fetchAttachmentText", () => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32"></svg>';
 
@@ -750,6 +872,120 @@ describe("JiraClient.moveToCodeReview", () => {
     });
 
     await expect(client("In Code Review").moveToCodeReview("SSX-3822")).rejects.toThrow(JiraError);
+  });
+});
+
+/** All three targets configured, by id, as this board's are: each move must aim at its own. */
+function statusClient(
+  statuses: { codeReviewStatus?: string; inProgressStatus?: string; returnStatus?: string } = {
+    codeReviewStatus: "10232",
+    inProgressStatus: "3",
+    returnStatus: "10213",
+  },
+): JiraClient {
+  return new JiraClient({
+    baseUrl: "https://example.invalid",
+    email: "someone@example.com",
+    auth: NEEDLE,
+    ...statuses,
+  });
+}
+
+/** The SSX workflow's transitions, trimmed: every one is global, so each is offered from anywhere. */
+const SSX_TRANSITIONS = [
+  { id: "21", to: { id: "3", name: "Under arbeid" } },
+  { id: "161", to: { id: "10213", name: "Prioritized" } },
+  { id: "191", to: { id: "10232", name: "In Code Review" } },
+];
+
+describe("JiraClient.moveToInProgress", () => {
+  it("is a guaranteed no-op when only another status was configured", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client("10232").moveToInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "disabled",
+      from: "",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("takes the transition landing on its own target, whatever the transition is called", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("Prioritized", "10213"))
+      .mockResolvedValueOnce(transitionsResponse(SSX_TRANSITIONS))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveToInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "moved",
+      from: "Prioritized",
+    });
+    expect(JSON.parse(String(callArgs(fetchMock, 2).init.body))).toEqual({
+      transition: { id: "21" },
+    });
+  });
+
+  it("leaves a ticket already in progress alone, which is what tells the caller not to undo it", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("Under arbeid", "3"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveToInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "already-there",
+      from: "Under arbeid",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("JiraClient.moveBackFromInProgress", () => {
+  it("is a guaranteed no-op without an in-progress status, even with a return status", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      statusClient({ returnStatus: "10213" }).moveBackFromInProgress("SSX-3822"),
+    ).resolves.toEqual({ outcome: "disabled", from: "" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("moves a ticket still in progress to the return status", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(statusResponse("Under arbeid", "3"))
+      .mockResolvedValueOnce(transitionsResponse(SSX_TRANSITIONS))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveBackFromInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "moved",
+      from: "Under arbeid",
+    });
+    expect(JSON.parse(String(callArgs(fetchMock, 2).init.body))).toEqual({
+      transition: { id: "161" },
+    });
+  });
+
+  it("leaves a ticket somebody moved out of progress where they put it, reading nothing more", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("Blokkert", "11130"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveBackFromInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "elsewhere",
+      from: "Blokkert",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls a ticket already at the return status there, rather than elsewhere", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => statusResponse("Prioritized", "10213"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(statusClient().moveBackFromInProgress("SSX-3822")).resolves.toEqual({
+      outcome: "already-there",
+      from: "Prioritized",
+    });
   });
 });
 

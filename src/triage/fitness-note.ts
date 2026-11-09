@@ -74,11 +74,11 @@ export function buildFitnessNote(
 
 const isSeparator = (line: string): boolean => line.trim() === "---";
 
+const isLegend = (line: string): boolean => line.trimStart().startsWith("_Legend:");
+
 /**
- * Removes existing agent-fitness blocks so the splice below is the only writer of one. A block
- * opens on a line starting with `FITNESS_MARKER` (column zero only, so a mention mid-sentence
- * doesn't count) and closes at the next `---` or the footer; the backward scan also eats the
- * separator/blank the renderer put before the marker, so no dangling `---` is left behind.
+ * Removes agent-fitness blocks so the splice below is the only writer of one. A block opens at a
+ * column-zero `FITNESS_MARKER` and closes at `---`, the legend line or the footer.
  */
 function stripFitnessBlocks(body: string): string {
   const lines = body.split("\n");
@@ -103,8 +103,12 @@ function stripFitnessBlocks(body: string): string {
       continue;
     }
 
-    if (isSeparator(line) || line.startsWith(FOOTER_SENTINEL)) {
+    if (isSeparator(line) || isLegend(line) || line.startsWith(FOOTER_SENTINEL)) {
       inBlock = false;
+      // The block's own `---` was popped above, so the legend would join the paragraph before it.
+      if (isLegend(line) && (kept.at(-1) ?? "").trim() !== "") {
+        kept.push("");
+      }
       kept.push(line);
     }
   }
@@ -113,27 +117,42 @@ function stripFitnessBlocks(body: string): string {
 }
 
 /**
- * Returns the payload with exactly one note in the comment, above the footer sentinel (the poster
- * matches that exact trailing line to update in place). The strip always runs, even with no note
- * to add, so a watch note is cleared once the ticket stops qualifying; a body with no sentinel is
- * returned untouched since `assertPostable` refuses it elsewhere.
+ * Moves the skill's legend line back above the sentinel when it is the one line below it, since
+ * upstream told the model to end the comment with each. Anything else below is left for the gate.
+ */
+function legendAboveSentinel(body: string): string {
+  const lines = body.trimEnd().split("\n");
+  const at = lines.findLastIndex((line) => line.trimEnd() === FOOTER_SENTINEL);
+  const below = lines.slice(at + 1).filter((line) => line.trim() !== "");
+  const legend = below[0];
+
+  if (at === -1 || below.length !== 1 || legend === undefined || !isLegend(legend)) {
+    return body;
+  }
+
+  return `${lines.slice(0, at).join("\n").trimEnd()}\n\n${legend.trim()}\n\n${FOOTER_SENTINEL}`;
+}
+
+/**
+ * Returns the payload with exactly one note, above the footer sentinel, which stays the last line.
+ * The strip runs even with no note, so a watch note is cleared once the ticket stops qualifying.
  */
 export function withFitnessNote(payload: TriagePayload): TriagePayload {
   const note = buildFitnessNote(payload.verdict, payload.agentFitness);
   const body = payload.mutation.commentBody;
-  const stripped = stripFitnessBlocks(body);
+  const tidied = legendAboveSentinel(stripFitnessBlocks(body));
 
-  if (note === null && stripped === body) {
+  if (note === null && tidied === body) {
     return payload;
   }
 
-  const at = stripped.lastIndexOf(FOOTER_SENTINEL);
+  const at = tidied.lastIndexOf(FOOTER_SENTINEL);
   if (at === -1) {
     return payload;
   }
 
-  const head = stripped.slice(0, at).trimEnd();
-  const tail = stripped.slice(at);
+  const head = tidied.slice(0, at).trimEnd();
+  const tail = tidied.slice(at);
   const commentBody = note === null ? `${head}\n\n${tail}` : `${head}\n\n${note}\n\n${tail}`;
 
   return { ...payload, mutation: { ...payload.mutation, commentBody } };

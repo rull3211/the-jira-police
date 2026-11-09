@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **3532 tests in 109 files**, no build step.
+> **4063 tests in 121 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75 and §77, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82 and §83, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -78,9 +78,11 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §78. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §85. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
-`feat/slack-audit-thread`, open when §71 was written.
+`feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
+§78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
+`main`.
 
 <!-- refs:on -->
 
@@ -455,6 +457,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   silence to the allowed comment. **What would show it:** a round with a colleague's thank-you beside
   a review must answer the review and add a `no reply to comment M` line to the marker.
 
+- **A review look failing on the network has never been watched becoming a 📡 line.**
+  `reviewFailureEvent`'s patterns were measured against gh, git and Node offline on 2026-10-12, and
+  SSX-3895's real record replayed through it turns its five `Crashed in review` broadcasts of
+  2026-10-05 to 2026-10-09 into timeline lines. The call in `runReviewSweep` has met no outage:
+  `HTTPS_PROXY` cannot break gh there, since `childEnv` in `solve/exec.ts` does not pass it on.
+  **What would show it:** `SLACK_MODE=dry pnpm solve:once --watch` with the network dropped
+  mid-run, or with a `gh` first on `PATH` that runs the real one through a dead proxy. Each watched
+  ticket's `<OUTPUT_DIR>/slack/<KEY>.record.json` must gain a 📡 timeline entry, and no
+  `<KEY>.broadcast.json` may carry `reply_broadcast`.
+
 - **A bump a review round introduces would not be named anywhere.** The pull request body is
   written once, and it is the only place the notice goes. A bump the pull request already carries
   is re-judged by every round that changes code, since each gates the whole diff: rounds 2 and 5 on
@@ -482,13 +494,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   channel or the thread would make the bump litter, and the deletion should go. **What would show
   it:** the same command again, looking at the channel and the thread: it posts another broadcast
   and deletes that one.
-- **The daemon has never answered `/bencebot`.** `SLACK_LISTEN` refuses a bad value and a missing
-  token at startup, driven on 2026-09-29; a daemon holding the connection has not been watched, nor
-  has Slack's own `disconnect` — every reconnect seen was a network drop, and Slack said the
-  connection lasts 18060s. The one command timed took seven seconds on a network that was dropping,
-  so the ack budget on a steady one is unmeasured too. **What would show it:** `SLACK_LISTEN=dry` in
-  the daemon's `.env` and a restart; `slack.listen_enabled`, then `slack.listen_connected`, then a
-  `/bencebot` answered as a dry run with no `slack.command_late`.
+- **Slack's own `disconnect` has never been watched.** Every reconnect seen was a network drop, and
+  Slack says a connection lasts 18060s, so a listener has to stay up five hours to meet one. **What
+  would show it:** a listener left running that long; `slack.listen_disconnect`, then
+  `slack.listen_connected` again, with no `slack.listen_dropped` between.
 - **No pull request's line has been sent.** The transport has: `slack:probe SSX-3991` on
   2026-09-29 posted to the operator's member ID with `chat:write` alone, Slack put it in their
   direct message with the bot, and the probe deleted it — the prediction that the manifest needs no
@@ -512,8 +521,8 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   and `source` for that reason.
 - **The analyst's denial list is a list of strings, and only four of its names have ever been
   measured** (`ANALYST_DENIED_TOOLS` in `triage/runner.ts`). The probe that measured them named four other built-ins; `WebFetch`,
-  `WebSearch` and `Task` rest on the same mechanism and were not in it, and the effect of the list
-  on MCP names is unverified. A test asserts the three reach `--disallowedTools`, which is a claim
+  `WebSearch` and `Task` rest on the same mechanism and were not in it, and its effect on MCP names
+  is measured for two of the five (`pnpm draft:probe`). A test asserts the three reach `--disallowedTools`, which is a claim
   about this service's command line and not about what the subprocess does with it. If a future MCP
   server offers a fetch under another name, nothing here would notice — and this is the denial the
   staged-image path was made safe by, so it is the one worth probing rather than asserting.
@@ -551,15 +560,115 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
+- **Two of a mention's refusals have run only in tests**: someone not on `SLACK_START_USERS`, and a
+  mention outside a thread. **What would show it:** a colleague's `@Bencebot start` in a ticket's
+  thread, and anyone's in the channel itself; each must get a reply only they see, and leave the
+  ticket's labels as they were.
+- **No solve has moved its ticket's status or edited its broadcast line.** Both are tested and
+  neither has run. The daemon's `.env` sets none of the `SOLVE_*_STATUS` settings, so the move to
+  code review has been inert there too, and nothing has sent `chat.update` to a `reply_broadcast`
+  reply: `slack:probe` measures that call and has not been run since it learned to, and its reply
+  names nobody, so whether an edit that keeps a line's mentions notifies them again is unmeasured.
+  Moving into progress costs two status notifications when recon declines. **What would show it:**
+  `pnpm slack:probe <KEY> --keep`, then look at the channel for the edited reply. Then set the
+  statuses by id and run one `solve:once <KEY> --pr` on a ticket in Prioritized. The ticket should
+  be in "Under arbeid" at the claim, and the channel should show "Solve started" with each pass edited
+  under it. A run that opens no pull request should put the ticket back in Prioritized.
+- **No triage has run on the skill text that puts the legend above the footer sentinel.** Three of
+  155 bodies, 2026-09-03 to 2026-09-30, put it below (`architecture/triage.md` §12, the legend
+  entry), too few for any number of runs to show the text changed the rate. `withFitnessNote` moves
+  a swapped legend back either way, so neither the gate nor the ticket will show one again. **What
+  would show it:** a session transcript's `StructuredOutput` with the legend after the sentinel. If
+  none turns up over the next weeks, the harness move guards nothing and is a candidate to delete.
+- **`@Bencebot draft` has run live once, from the daemon, and three times dry from the CLI.** On
+  2026-10-14 `pnpm slack:draft` read two threads in `C03AYDRGP0A`. The first, which the operator
+  confirms duplicates SSX-3534, was declined as that duplicate ($1.00, 159 s); read again after the
+  duplicate outcome was built, it was drafted as a ticket instead ($1.08, 238 s), on a reading of
+  "tilbakenavigasjon" as the in-app «Bytt kunde» button, with the doubt put in its questions. The
+  other, a one-line feedback-form post, was drafted whole, in Norwegian ($1.64, 350 s). Then the
+  daemon, with `SLACK_LISTEN=live`, answered `@Bencebot draft` on the second thread: a ticket
+  ($1.64, 273 s), sent as a direct message the operator reports reads well, a second mention while it
+  ran refused as busy, nothing in the log above info. Seven of the first run's `file:line` citations
+  were read against the checkouts and held; its claim that a cart row's `customerId` carries a `NO~`
+  prefix was traced to code and to no stored value, and the ticket says so. Unseen: the duplicate
+  outcome, a comment on the existing issue, against a real thread, and whether one thread gives one
+  outcome — two runs of the same text gave two, and nothing says the change between them was the
+  cause; a person judging whether a draft is worth filing; a draft stopped with
+  Ctrl-C, and the message it sends; a thread that names no repository; a thread past one page of
+  `conversations.replies`. **What would show it:**
+  `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
+  times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
+  a draft runs.
+- **The Post to Jira button has been sent and pressed once, and a press only rehearses.** On
+  2026-10-15 `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792009502102019 --dm`
+  sent a ticket draft to `U0BMCC38933` ($1.34, 241 s, exit 0): four sections, the longest exactly
+  3 000 characters, and the button, with the record kept under `state/pending-drafts/` and the
+  button's value equal to its id. Slack accepted those blocks, and `projectFacts` returned SSX's real
+  components and issue types, since the gate let `SSX Advisor` and `Oppgave` through. Five minutes
+  later the person pressed it against the daemon, started from the same directory with the live
+  Slack listener: `slack.post_pressed` logged `rehearsed` six seconds after the listener connected,
+  `<id>.issue.json` held `createJiraIssue` arguments for SSX, `Oppgave`, `SSX Advisor` and the whole
+  8 980-character body, and no `slack.post_reply_failed` followed. So the button is clickable in the
+  read-only direct message, interactivity reached the listener, and the press arrived in the shape
+  `parseFrame` reads. Unseen: the reply as it rendered in the thread, which nothing here has read;
+  whether switching interactivity on needed a reinstall, and whether the manifest import accepts
+  `interactivity` with no `request_url`, which Slack's manifest reference lists as optional —
+  neither was recorded; and every refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
+  `state/`, and after the component leaves SSX.
+- **A draft's messages have never been sent near their size limits.** On 2026-10-15 a drafted
+  ticket went out as its first paragraph (516 characters) and a reply holding the rest, 11 951
+  characters in five sections with the button under them. Slack took both. The operator pressed the
+  button on the reply, and the answer `(dry run, nothing filed) …` came back; so it did for a fresh
+  session's draft in the same layout ($1.30). The three presses logged on those two drafts each carry
+  `messageTs` of the reply and `threadTs` of the first message, so the payload names a reply's
+  parent, from its container or from its message, which the log does not say. A draft of
+  13 221 characters sent earlier that day as one plain message arrived whole. Not seen: that a piece of
+  up to 28 blocks is accepted rather than refused as `msg_blocks_too_long`, and that 40 000 is where
+  `text` is cut, which the docs say; and a later piece refused after the first went out, which leaves a
+  first message with no button and no record and an ephemeral reply admitting it, shown only against a
+  stub. **What would show it:** a saved `.draft.json` padded by hand and sent with
+  `pnpm slack:draft <link> --dm --replay <file>`, since a session never writes a draft that long.
+- **The writer has filed two real tickets, and little else of it has been seen.** On 2026-10-15 a
+  press on a live listener filed SSX-4124: the writer session (3 turns, 0.30 dollars) made its one
+  call about thirty seconds after the press, the key came back in a form the classifier read, the
+  read-back found project, type, summary and component as sent and the body whole (7 275 of 7 275
+  characters), and Jira lists the operator as the reporter, since the writer posts through the
+  operator's own Atlassian connection. A second press, queued behind the first, answered with the
+  key and created nothing. The reply came about 33 seconds after the press with nothing in between,
+  which read as no response and drew that second press. A draft of a different thread, pressed
+  later that day, filed SSX-4125 (3 turns, 0.27 dollars, 22 seconds): the operator saw the
+  acknowledgement, the link posted in the thread the draft came from, and the answer; the read-back
+  matched (4 880 of 4 880 characters), and neither `slack.post_ack_failed` nor
+  `slack.post_link_failed` was logged. Not seen: how the body looks in Jira beyond its words (links,
+  code spans, headings), a refusal or an unclear outcome from a real filing, what the daemon does
+  with a new ticket on its board, a link posted to a channel the bot has not joined, the refusal of
+  `transitionJiraIssue`, `editJiraIssue` and `createIssueLink`, the same rule as the one tried, and a
+  session with its skill, `--add-dir`s and hooks. **What would show it:** open SSX-4124 and SSX-4125
+  in Jira and read the bodies; and the daemon's next sweep, read in its log, with a ticket the writer
+  filed on its board.
+- **No sweep has re-triaged a ticket because a blocker was taken out of scope.** The relevance
+  check's removal path has run only by hand, on SSX-4023's content as of 2026-10-01: yes to the
+  rescoping edit, no to the comment alone and to a comment proposing the same removal, three runs
+  each (`architecture/triage.md`, the sendback watch). **What would show it:** after the merge and a
+  daemon restart, SSX-4023's next sweep logging `re-triaged` rather than `no re-triage:`; and a
+  watched ticket whose description is edited without dropping a blocker still being declined.
 
 ### 11. Loose ends recorded in no other file
 
-Four things that exist in neither `architecture/*.md`, `README.md` nor the source, and were being kept
-alive only by being carried forward in conversation. A fifth — the `dev-lens.md` calibration row
+Things that exist in neither `architecture/*.md`, `README.md` nor the source, and were being kept
+alive only by being carried forward in conversation. Another — the `dev-lens.md` calibration row
 scoring the SSX-3801 fix as failed — is closed: the row carries a dated annotation naming the
 `git-commit-id` harness failure and pointing at the `verified` re-run beneath it, and the file now
 states the rule that produced that shape, which is that a recorded verdict is never edited.
 
+- **A start from Slack is recorded on the ticket as the operator's.** `@Bencebot start` writes
+  `agent:start` with the service's Jira credential, so the ticket's history names the operator's
+  account, not the person who asked; the mention in the thread is the only record of who did. The
+  shape that closes it: look up the asker's email (`users:read.email`, already granted) and the
+  Jira account it belongs to, and name them on the ticket or in the audit card. Left open when the
+  feature shipped on `feat/slack-agent-start`, because one person is on `SLACK_START_USERS` today.
+  **What would make it the wrong idea:** a comment on every start is noise on the ticket, and the
+  audit card may be where the name belongs rather than Jira.
 - **A post-merge vacuous-test sweep.** Two shipped tests guard nothing: #1413's timezone test and
   #2661's run-date block. `checkFailFirst` is a one-shot at solve time and misses both, for two
   different reasons — #2661 is `guarded` and sound (7/7 red against the real bug; only the
@@ -1125,6 +1234,35 @@ shares `FIX_DENIED_TOOLS` with.
 - **Two solve sessions may be the whole rate.** Count them before building: if no solve outcome ever
   followed the refusal, only the analyst's inversion buys anything.
 - **One more flag to keep in step per session kind**, where one shared denylist prevents drift today.
+
+### 84. A filed draft keeps its button, and a duplicate's comment is not posted
+
+**Branch:** none yet.
+
+**What is not built.** A press on a live listener files the draft (`architecture/invariants.md`
+invariant 20), and what is left of the entry that shipped the button is two things. **The button
+stays on a filed draft**: a second press answers with the key and files nothing, but taking the
+button off the message needs the message's blocks, which a press does not hand `parseFrame` on.
+**The comment a duplicate adds**, separable: a duplicate's draft has no button. Its writer would be
+`addCommentToJiraIssue`, a second MCP mutator, in a session holding that tool alone as the filer
+holds `createJiraIssue`, aimed at a key that is the model's word, so the issue is read over REST
+first — it exists, sits in a `DRAFT_PROJECTS` project and is open — before anything is written. It
+could ship after the ticket or not at all.
+
+**What would make it the wrong idea:**
+
+- **The drafts are not worth filing.** If the first real ones need rewriting more than a person
+  writing from scratch would, a press files that rewriting into Jira faster, and is not worth
+  building.
+- **A press is one click from a Jira issue, and the gate checks where the ticket goes, not what it
+  says.** Project, component and type are checked against Jira; the body is a model's reading of a
+  thread anyone in the channel could write, and the person reading it is the only check on it. A
+  confirmation step on the button has not been tried.
+- **The session cannot tell a duplicate from a neighbour.** The first run called a thread a clear
+  duplicate while its own first question asked whether the thread meant the same thing as the
+  ticket. A comment aimed at the wrong issue is worse than a declined thread once it is written.
+- **The comment adds nothing the ticket lacks.** Then it is the thread pasted onto an issue, and a
+  person reading it once will stop.
 
 ## Verification
 

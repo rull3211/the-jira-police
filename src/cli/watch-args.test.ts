@@ -108,7 +108,7 @@ describe("describeRetriage", () => {
   });
 
   it("gives each refusal its own words rather than one shared skip", () => {
-    // The three are *nobody answered*, *the counter is broken* and *Jira would not take the
+    // The three are *no blocker dealt with*, *the counter is broken* and *Jira would not take the
     // write* — collapse them and a sweep reads the same either way.
     const lines = [
       describeRetriage({ kind: "irrelevant", reason: "it only promises the logs" }),

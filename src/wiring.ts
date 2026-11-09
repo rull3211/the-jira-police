@@ -10,11 +10,17 @@
  * (`runPost`), composed in that order so a bad verdict costs a retry, not an unreviewable write.
  */
 
-import { mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
-import { type IssueDetail, JiraClient } from "./jira/client.ts";
+import { createArguments, runFiler } from "./draft/filer.ts";
+import type { FileGateDeps } from "./draft/gate.ts";
+import { type DraftOffer, createDraftOffer } from "./draft/offer.ts";
+import { discardingStore, fileStore } from "./draft/pending.ts";
+import { runDraftSession } from "./draft/runner.ts";
+import { type ThreadDraftDeps, draftThread } from "./draft/thread.ts";
+import { type IssueDetail, JiraClient, assertProjectKey } from "./jira/client.ts";
 import {
   buildInFlightJql,
   buildNewIssuesJql,
@@ -42,6 +48,8 @@ import {
   auditPasses,
   createAuditNotifier,
 } from "./slack/notifier.ts";
+import type { Piece } from "./slack/draft-blocks.ts";
+import { createPostHandler } from "./slack/post.ts";
 import { type PrLineSender, dryDelivery, prLineSender, slackDelivery } from "./slack/pr-line.ts";
 import { SLACK_USER_ID_PATTERN } from "./slack/render.ts";
 import { syntheticSummary } from "./triage/single.ts";
@@ -53,8 +61,23 @@ import {
   loadRoster,
   propertyRosterStore,
 } from "./slack/roster.ts";
-import { type ListenDeps, type ListenSummary, listen, openWebSocket } from "./slack/socket.ts";
-import { dryPublisher, dryStore, propertyStore, slackPublisher } from "./slack/store.ts";
+import {
+  type Click,
+  type ListenDeps,
+  type ListenSummary,
+  listen,
+  openWebSocket,
+} from "./slack/socket.ts";
+import { type DraftHandler, createDraftHandler, isDraftMention } from "./slack/draft.ts";
+import { type Mention, type ThreadDeps, createMentionHandler } from "./slack/start.ts";
+import {
+  dryPublisher,
+  dryStore,
+  loadFromProperty,
+  propertyStore,
+  slackPublisher,
+  writeJson,
+} from "./slack/store.ts";
 import {
   type Settings,
   SettingsError,
@@ -92,8 +115,13 @@ import {
 } from "./triage/runner.ts";
 import { type RelevanceChecker, createRelevanceChecker } from "./watch/relevance.ts";
 
+const draftLog = createLogger("draft");
+
+/** A filing is one tool call; a session that outlives this has stopped doing that. */
+const FILE_MAX_RUN_MS = 300_000;
 const pollLog = createLogger("poll");
 const reviewLog = createLogger("review");
+const slackLog = createLogger("slack");
 const solveLog = createLogger("solve");
 const triageLog = createLogger("triage");
 
@@ -459,15 +487,25 @@ function ticketFacts(ticket: TicketRef): TicketFacts | undefined {
 }
 
 export function createJiraClient(settings: Settings): JiraClient {
-  // Blank means unset (`resolveDeclared` has no fallback for it), which leaves
-  // `moveToCodeReview` a guaranteed no-op — the capability ships inert until named. The key is
-  // omitted rather than set to `undefined`: `exactOptionalPropertyTypes` treats the two differently.
+  // Blank means unset (`resolveDeclared` has no fallback for these), which leaves the move to that
+  // status a guaranteed no-op — the capability ships inert until named. Keys are omitted rather
+  // than set to `undefined`: `exactOptionalPropertyTypes` treats the two differently.
   const codeReviewStatus = settings.SOLVE_CODE_REVIEW_STATUS.trim();
+  const inProgressStatus = settings.SOLVE_IN_PROGRESS_STATUS.trim();
+  const returnStatus = settings.SOLVE_RETURN_STATUS.trim();
+  if ((inProgressStatus === "") !== (returnStatus === "")) {
+    throw new SettingsError(
+      [inProgressStatus === "" ? "SOLVE_IN_PROGRESS_STATUS" : "SOLVE_RETURN_STATUS"],
+      "Missing the other half of a status pair",
+      "SOLVE_IN_PROGRESS_STATUS and SOLVE_RETURN_STATUS are set together or not at all: alone, the first leaves every run that opened no pull request in progress, and the second has nothing to move a ticket back from.",
+    );
+  }
   return new JiraClient({
     baseUrl: settings.JIRA_BASE_URL,
     email: settings.JIRA_EMAIL,
     auth: settings.JIRA_AUTH,
     ...(codeReviewStatus === "" ? {} : { codeReviewStatus }),
+    ...(inProgressStatus === "" ? {} : { inProgressStatus, returnStatus }),
   });
 }
 
@@ -479,23 +517,36 @@ export function createSlackTarget(settings: Settings): {
   readonly client: SlackClient;
   readonly channel: string;
 } {
-  const token = settings.SLACK_BOT_TOKEN.trim();
   const channel = settings.SLACK_CHANNEL_ID.trim();
-  const problems: string[] = [];
-  if (token === "") {
-    problems.push("SLACK_BOT_TOKEN (the bot token, xoxb-…, from OAuth & Permissions)");
-  } else if (!token.startsWith("xoxb-")) {
-    problems.push(
-      `SLACK_BOT_TOKEN (expected a bot token starting xoxb-, got one starting ${token.slice(0, 5)}…)`,
-    );
-  }
+  const problems = botTokenProblems(settings);
   if (channel === "") {
     problems.push("SLACK_CHANNEL_ID (the channel's ID, C…, not its name)");
   }
   if (problems.length > 0) {
     throw new SettingsError(problems);
   }
-  return { client: new SlackClient({ token }), channel };
+  return { client: new SlackClient({ token: settings.SLACK_BOT_TOKEN.trim() }), channel };
+}
+
+/** The bot client alone, for a caller that is handed its channel rather than configured with one. */
+export function createBotClient(settings: Settings): SlackClient {
+  const problems = botTokenProblems(settings);
+  if (problems.length > 0) {
+    throw new SettingsError(problems);
+  }
+  return new SlackClient({ token: settings.SLACK_BOT_TOKEN.trim() });
+}
+
+function botTokenProblems(settings: Settings): string[] {
+  const bot = settings.SLACK_BOT_TOKEN.trim();
+  if (bot === "") {
+    return ["SLACK_BOT_TOKEN (the bot token, xoxb-…, from OAuth & Permissions)"];
+  }
+  return bot.startsWith("xoxb-")
+    ? []
+    : [
+        `SLACK_BOT_TOKEN (expected a bot token starting xoxb-, got one starting ${bot.slice(0, 5)}…)`,
+      ];
 }
 
 /**
@@ -572,11 +623,422 @@ export function listenerFor(
     dry: mode === "dry",
     where: rosterWhere(settings),
   });
-  return () => run({ open: () => client.openConnection(), connect: openWebSocket, handle, signal });
+  const start = mentionHandlerFor(settings, mode);
+  const draft = draftHandlerFor(settings, mode, signal);
+  const click = clickHandlerFor(settings, mode);
+  const mention = async (heard: Mention): Promise<void> => {
+    await (isDraftMention(heard.text) ? draft.handle(heard) : start(heard));
+  };
+  return async () => {
+    const summary = await run({
+      open: () => client.openConnection(),
+      connect: openWebSocket,
+      handle,
+      mention,
+      click,
+      signal,
+    });
+    // The same signal has already killed a running draft's session; this waits for its last message.
+    await draft.settled();
+    return summary;
+  };
+}
+
+/**
+ * With nobody on SLACK_DRAFT_USERS or nothing on DRAFT_PROJECTS a press is only logged and nothing is
+ * built to answer it. Both lists are read first, so a malformed one stops the start whatever the other holds.
+ */
+export function clickHandlerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+): (click: Click) => Promise<void> {
+  const allowed = draftUsers(settings);
+  const projects = draftProjects(settings);
+  if (allowed.length === 0 || projects.length === 0) {
+    return async (click) => {
+      slackLog.info("slack.click_ignored", {
+        user: click.userId,
+        actionId: click.actionId,
+        note: "SLACK_DRAFT_USERS or DRAFT_PROJECTS is empty, so no press is answered",
+      });
+    };
+  }
+  const slack = createBotClient(settings);
+  const cloudId = new URL(settings.JIRA_BASE_URL).hostname;
+  const jira = createJiraClient(settings);
+  const handler = createPostHandler({
+    allowed,
+    dry: mode === "dry",
+    pending: fileStore(pendingDirectory(settings)),
+    gate: fileGate(settings, projects),
+    // A dry listener holds no writer at all, so nothing it is told to do can reach Jira.
+    ...(mode === "live"
+      ? {
+          filing: {
+            file: (draft) =>
+              runFiler({
+                executable: settings.STORECODE_PATH,
+                workingDirectory: process.cwd(),
+                idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+                maxRunMs: FILE_MAX_RUN_MS,
+                cloudId,
+                ticket: draft.ticket,
+              }),
+            readBack: (key) => jira.fetchFiled(key),
+            announce: async (thread, text) => {
+              await slack.post({ channel: thread.channel, text, threadTs: thread.threadTs });
+            },
+            issueUrl: (key) => {
+              const url = new URL(`/browse/${key}`, settings.JIRA_BASE_URL).href;
+              return /^https:\/\/[^\s<>|]+$/u.test(url) ? url : null;
+            },
+          },
+        }
+      : {}),
+    rehearse: async (draft) => {
+      const directory = join(settings.OUTPUT_DIR, "slack");
+      await writeJson(directory, `${draft.id}.issue.json`, {
+        method: "createJiraIssue",
+        arguments: createArguments(draft.ticket, cloudId),
+        draft: draft.id,
+        askedBy: draft.asker,
+        thread: draft.thread,
+      });
+      return join(directory, `${draft.id}.issue.json`);
+    },
+    reply: async (click, text) => {
+      await slack.post({
+        channel: click.channel,
+        text,
+        threadTs: click.threadTs ?? click.messageTs,
+      });
+    },
+  });
+  return (click) => handler.handle(click);
+}
+
+/**
+ * With nobody on SLACK_START_USERS a mention is logged and dropped, and nothing that could answer or
+ * write is built; with someone, a missing bot token stops the start here rather than every mention.
+ */
+export function mentionHandlerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+): (mention: Mention) => Promise<void> {
+  const allowed = startUsers(settings);
+  if (allowed.length === 0) {
+    return async (mention) => {
+      slackLog.info("slack.mention_ignored", {
+        user: mention.userId,
+        note: "SLACK_START_USERS is empty, so nobody may start or clear a ticket from Slack",
+      });
+    };
+  }
+  return createMentionHandler({
+    allowed,
+    deps: threadCommandDeps(settings, mode),
+    reply: ephemeralReply(createBotClient(settings)),
+  });
+}
+
+/**
+ * With nobody on SLACK_DRAFT_USERS a draft mention is logged and dropped, and no session can be
+ * built; with someone, a missing bot token stops the start here rather than every mention.
+ */
+export function draftHandlerFor(
+  settings: Settings,
+  mode: "dry" | "live",
+  signal: AbortSignal,
+): DraftHandler {
+  const allowed = draftUsers(settings);
+  if (allowed.length === 0) {
+    return {
+      handle: async (mention) => {
+        slackLog.info("slack.draft_ignored", {
+          user: mention.userId,
+          note: "SLACK_DRAFT_USERS is empty, so nobody may ask for a draft",
+        });
+      },
+      settled: async () => undefined,
+    };
+  }
+  const slack = createBotClient(settings);
+  const deps = threadDraftDeps(settings, signal);
+  const offer = draftOfferFor(settings, mode === "live");
+  return createDraftHandler({
+    allowed,
+    dry: mode === "dry",
+    draft: (thread) => draftThread(deps, thread),
+    permalink: (channel, ts) => slack.permalink({ channel, ts }),
+    deliver: draftDelivery(settings, mode),
+    reply: ephemeralReply(slack),
+    ...(offer === null ? {} : { offer }),
+  });
+}
+
+/**
+ * With nothing on DRAFT_PROJECTS nothing that could keep or file a draft is built. `persist` is
+ * whether the message is really sent: a dry run keeps no record, with no message to press.
+ */
+export function draftOfferFor(settings: Settings, persist: boolean): DraftOffer | null {
+  const projects = draftProjects(settings);
+  if (projects.length === 0) {
+    return null;
+  }
+  return createDraftOffer({
+    gate: fileGate(settings, projects),
+    pending: persist ? fileStore(pendingDirectory(settings)) : discardingStore(),
+  });
+}
+
+/** One gate for the offer and the press, so a draft is judged by the same rule at both. */
+function fileGate(settings: Settings, projects: readonly string[]): FileGateDeps {
+  const jira = createJiraClient(settings);
+  return { projects, facts: (project) => jira.projectFacts(project) };
+}
+
+/**
+ * Why `slack:draft --dm` sends the operator no button, or `null`: with projects listed, a draft sent
+ * to someone off SLACK_DRAFT_USERS would carry a button whose press the handler refuses.
+ */
+export function buttonWithheld(
+  settings: Settings,
+  recipient: string | null,
+  sending: boolean,
+): string | null {
+  if (!sending || draftProjects(settings).length === 0) {
+    return null;
+  }
+  return recipient !== null && draftUsers(settings).includes(recipient)
+    ? null
+    : "SLACK_OPERATOR_USER_ID is not on SLACK_DRAFT_USERS, so a press on it would be refused";
+}
+
+/** Beside the poll state, so wherever an operator keeps one they keep the other. */
+export function pendingDirectory(settings: Settings): string {
+  return join(dirname(settings.STATE_PATH), "pending-drafts");
+}
+
+/** DRAFT_PROJECTS as project keys; one entry that is not a project key refuses the whole list. */
+export function draftProjects(settings: Settings): readonly string[] {
+  const entries = list(settings, "DRAFT_PROJECTS");
+  const malformed = entries.filter((entry) => {
+    try {
+      assertProjectKey(entry);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (malformed.length > 0) {
+    throw new SettingsError([
+      `DRAFT_PROJECTS (expected project keys such as SSX, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
+    ]);
+  }
+  return [...new Set(entries)];
+}
+
+function ephemeralReply(slack: SlackClient): (mention: Mention, text: string) => Promise<void> {
+  return async (mention, text) => {
+    await slack.postEphemeral({
+      channel: mention.channel,
+      user: mention.userId,
+      text,
+      ...(mention.threadTs === null ? {} : { threadTs: mention.threadTs }),
+    });
+  };
+}
+
+/** SLACK_START_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
+export function startUsers(settings: Settings): readonly string[] {
+  return memberIds(settings, "SLACK_START_USERS");
+}
+
+/** SLACK_DRAFT_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
+export function draftUsers(settings: Settings): readonly string[] {
+  return memberIds(settings, "SLACK_DRAFT_USERS");
+}
+
+function memberIds(
+  settings: Settings,
+  name: "SLACK_START_USERS" | "SLACK_DRAFT_USERS",
+): readonly string[] {
+  const entries = list(settings, name);
+  const malformed = entries.filter((entry) => !SLACK_USER_ID_PATTERN.test(entry));
+  if (malformed.length > 0) {
+    throw new SettingsError([
+      `${name} (expected member IDs such as U0123ABCD, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
+    ]);
+  }
+  return [...new Set(entries)];
 }
 
 export function rosterWhere(settings: Settings): string {
   return `${ROSTER_PROPERTY} on ${settings.JIRA_PROJECT}`;
+}
+
+/**
+ * **`live` is the grant that lets a Slack thread write `agent:start` and remove `agent:failed`.** `dry`
+ * reads Slack and the ticket for real and writes the edit to a file instead.
+ */
+export function threadCommandDeps(settings: Settings, mode: "dry" | "live"): ThreadDeps {
+  const slack = createBotClient(settings);
+  const jira = createJiraClient(settings);
+  const directory = join(settings.OUTPUT_DIR, "slack");
+  let bot: Promise<string> | undefined;
+  return {
+    // Kept once known; a failed lookup is forgotten, so one network drop is not a listener's lifetime.
+    botId: () => {
+      bot ??= slack.authTest().then(
+        ({ botId }) => {
+          if (botId === null) {
+            throw new Error(
+              "auth.test named no bot_id, so no message can be told as the bot's own",
+            );
+          }
+          return botId;
+        },
+        (error: unknown) => {
+          bot = undefined;
+          throw error;
+        },
+      );
+      return bot;
+    },
+    root: (channel, ts) => slack.threadRoot({ channel, ts }),
+    record: (key) => loadFromProperty(jira, key),
+    labels: {
+      dry: mode === "dry",
+      read: async (key) => (await jira.fetchDetail(key)).labels,
+      apply: async (key, edit) => {
+        if (mode === "live") {
+          await jira.updateLabels(key, { add: edit.add, remove: edit.remove });
+          return;
+        }
+        await writeJson(directory, `${key}.labels.json`, {
+          method: "updateLabels",
+          key,
+          add: edit.add,
+          remove: edit.remove,
+        });
+      },
+    },
+  };
+}
+
+/** Reads only: the thread over the bot token, and a session that holds no writer and no token. */
+export function threadDraftDeps(settings: Settings, signal?: AbortSignal): ThreadDraftDeps {
+  const slack = createBotClient(settings);
+  const readDirs = draftReadDirs(settings);
+  return {
+    messages: (channel, ts, max) => slack.threadMessages({ channel, ts, max }),
+    draft: (thread, threadLabel) =>
+      runDraftSession({
+        threadLabel,
+        thread,
+        executable: settings.STORECODE_PATH,
+        workingDirectory: process.cwd(),
+        idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
+        maxRunMs: numeric(settings, "DRAFT_TIMEOUT_MS", 1),
+        readDirs,
+        vaultPath: settings.VAULT_PATH,
+        ...(signal === undefined ? {} : { signal }),
+      }),
+  };
+}
+
+/**
+ * Every checkout the solver knows — `SOLVE_REPOS` and `SOLVE_READ_DIRS` under `SOLVE_REPO_ROOT` — that
+ * is a directory here: an `--add-dir` naming a missing path fails the whole session at startup.
+ */
+export function draftReadDirs(settings: Settings): readonly string[] {
+  if (settings.SOLVE_REPO_ROOT === "") {
+    return [];
+  }
+  const scope = readScope(
+    settings.SOLVE_REPO_ROOT,
+    [...list(settings, "SOLVE_REPOS"), ...list(settings, "SOLVE_READ_DIRS")],
+    null,
+  );
+  const missing = scope.dirs.filter((dir) => !isDirectory(dir));
+  if (scope.rejected.length > 0 || missing.length > 0) {
+    draftLog.warn("draft.read_dirs_skipped", { rejected: scope.rejected, missing });
+  }
+  return scope.dirs.filter((dir) => !missing.includes(dir));
+}
+
+/** Sends the first piece of a draft as a message and the rest as replies in its thread, and resolves to the first's `ts`; may throw. */
+export type DraftDelivery = (
+  userId: string,
+  threadLabel: string,
+  pieces: readonly Piece[],
+) => Promise<string>;
+
+/** An empty draft is refused rather than sent as an empty message, which Slack would refuse in its own words. */
+function headAndReplies(pieces: readonly Piece[]): {
+  readonly head: Piece;
+  readonly replies: readonly Piece[];
+} {
+  const [head, ...replies] = pieces;
+  if (head === undefined) {
+    throw new Error("the draft has no message to send");
+  }
+  return { head, replies };
+}
+
+function content(piece: Piece): { readonly text: string; readonly blocks?: readonly object[] } {
+  return { text: piece.text, ...(piece.blocks === null ? {} : { blocks: piece.blocks }) };
+}
+
+function dryMessage(channel: string, piece: Piece, threadTs?: string): object {
+  return {
+    method: "chat.postMessage",
+    channel,
+    ...(threadTs === undefined ? {} : { thread_ts: threadTs }),
+    ...content(piece),
+  };
+}
+
+/** `live` sends the draft as a direct message; `dry` writes the request beside the draft instead. */
+export function draftDelivery(settings: Settings, mode: "dry" | "live"): DraftDelivery {
+  if (mode === "dry") {
+    const directory = join(settings.OUTPUT_DIR, "slack");
+    return async (userId, threadLabel, pieces) => {
+      const { head, replies } = headAndReplies(pieces);
+      await writeJson(directory, `${threadLabel}.dm.json`, {
+        ...dryMessage(userId, head),
+        ...(replies.length === 0
+          ? {}
+          : { replies: replies.map((piece) => dryMessage(userId, piece, "dry-run")) }),
+      });
+      return "dry-run";
+    };
+  }
+  const slack = createBotClient(settings);
+  return async (userId, _threadLabel, pieces) => {
+    const { head, replies } = headAndReplies(pieces);
+    const first = await slack.post({ channel: userId, ...content(head) });
+    for (const [index, piece] of replies.entries()) {
+      try {
+        await slack.post({ channel: first.channel, threadTs: first.ts, ...content(piece) });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `only the first of ${String(pieces.length)} messages was sent, and message ${String(index + 2)} failed (${reason})`,
+          { cause: error },
+        );
+      }
+    }
+    return first.ts;
+  };
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 let pipelineAudit: { readonly key: string; readonly notifier: AuditNotifier | null } | undefined;
@@ -691,7 +1153,7 @@ export function createSolveCommenter(settings: Settings): TicketCommenter {
 }
 
 /**
- * The watch's cheap gate: does what happened on the ticket answer the sendback?
+ * The watch's cheap gate: did what happened on the ticket supply or remove a blocker triage listed?
  *
  * Composed here for the same reason as the commenter above. `createRelevanceChecker` builds a
  * session with no MCP server and no tools, so there's nothing to withhold or scope. Budgeted on

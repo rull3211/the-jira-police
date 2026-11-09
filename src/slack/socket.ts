@@ -1,10 +1,11 @@
 /**
- * A Socket Mode connection held until shutdown, each slash command answered in its envelope's
- * acknowledgement. The daemon has no public URL, so this is the only way Slack can reach it.
+ * A Socket Mode connection held until shutdown: the daemon has no public URL, so this is the only
+ * way Slack can reach it, with a slash command, a mention of the bot or a press on one of its buttons.
  */
 
 import { createLogger } from "../logger.ts";
 import type { SlashCommand } from "./roster.ts";
+import type { Mention } from "./start.ts";
 
 const log = createLogger("slack");
 
@@ -24,11 +25,26 @@ export interface SocketHandle {
   close(): void;
 }
 
+/** A press on a button of one of the bot's own messages; `value` is what the button was posted carrying. */
+export interface Click {
+  readonly userId: string;
+  readonly channel: string;
+  readonly messageTs: string;
+  /** The thread the message is a reply in, `null` for one that is not; an answer goes here, not under a reply. */
+  readonly threadTs: string | null;
+  readonly actionId: string;
+  readonly value: string;
+}
+
 export interface ListenDeps {
   /** `apps.connections.open`, called once per connection. */
   readonly open: () => Promise<string>;
   readonly connect: (url: string, on: SocketHandlers) => SocketHandle;
   readonly handle: (command: SlashCommand) => Promise<string>;
+  /** A mention's envelope takes no reply payload, so whatever this says, it says out of band. */
+  readonly mention: (mention: Mention) => Promise<void>;
+  /** A click's envelope is acknowledged bare, so like a mention's, whatever this says is out of band. */
+  readonly click: (click: Click) => Promise<void>;
   readonly signal: AbortSignal;
   readonly pause?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly ackBudgetMs?: number;
@@ -37,6 +53,8 @@ export interface ListenDeps {
 export interface ListenSummary {
   readonly connections: number;
   readonly commands: number;
+  readonly mentions: number;
+  readonly clicks: number;
 }
 
 export type Frame =
@@ -48,10 +66,15 @@ export type Frame =
       readonly respond: boolean;
       readonly command: SlashCommand;
     }
+  | { readonly kind: "mention"; readonly envelope: string; readonly mention: Mention }
+  | { readonly kind: "click"; readonly envelope: string; readonly click: Click }
   | { readonly kind: "other"; readonly envelope: string; readonly type: string }
   | { readonly kind: "unreadable" };
 
-/** The subscriber is the payload's `user_id`, which Slack sets; the command's text only picks the verb. */
+/**
+ * The person is whoever Slack names — a command's `user_id`, a mention's `user`, a click's `user.id`
+ * — and the text only picks the verb. Only a `block_actions` payload is a click.
+ */
 export function parseFrame(data: string): Frame {
   let frame: Record<string, unknown>;
   try {
@@ -71,10 +94,51 @@ export function parseFrame(data: string): Frame {
   if (typeof envelope !== "string" || envelope === "") {
     return { kind: "unreadable" };
   }
+  const payload = record(frame["payload"]);
+  if (type === "events_api") {
+    const event = record(payload["event"]);
+    if (event["type"] !== "app_mention") {
+      return { kind: "other", envelope, type: `events_api/${String(event["type"] ?? "none")}` };
+    }
+    const threadTs = event["thread_ts"];
+    return {
+      kind: "mention",
+      envelope,
+      mention: {
+        userId: stringOf(event["user"]),
+        text: stringOf(event["text"]),
+        channel: stringOf(event["channel"]),
+        ts: stringOf(event["ts"]),
+        threadTs: typeof threadTs === "string" && threadTs !== "" ? threadTs : null,
+      },
+    };
+  }
+  if (type === "interactive") {
+    const kind = stringOf(payload["type"]);
+    const actions = payload["actions"];
+    const action = record(Array.isArray(actions) ? actions[0] : undefined);
+    const actionId = stringOf(action["action_id"]);
+    if (kind !== "block_actions" || actionId === "") {
+      return { kind: "other", envelope, type: `interactive/${kind === "" ? "none" : kind}` };
+    }
+    const container = record(payload["container"]);
+    const message = record(payload["message"]);
+    return {
+      kind: "click",
+      envelope,
+      click: {
+        userId: stringOf(record(payload["user"])["id"]),
+        channel: stringOf(record(payload["channel"])["id"]) || stringOf(container["channel_id"]),
+        messageTs: stringOf(container["message_ts"]) || stringOf(message["ts"]),
+        threadTs: stringOf(container["thread_ts"]) || stringOf(message["thread_ts"]) || null,
+        actionId,
+        value: stringOf(action["value"]),
+      },
+    };
+  }
   if (type !== "slash_commands") {
     return { kind: "other", envelope, type };
   }
-  const payload = record(frame["payload"]);
   return {
     kind: "command",
     envelope,
@@ -93,9 +157,11 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
   const budget = deps.ackBudgetMs ?? ACK_BUDGET_MS;
   let connections = 0;
   let commands = 0;
+  let mentions = 0;
+  let clicks = 0;
   let failures = 0;
 
-  // One at a time, so two commands never interleave the list's read and write in this process.
+  // One at a time, commands, mentions and clicks alike, so two never interleave a read and its write here.
   let chain: Promise<unknown> = Promise.resolve();
   const answer = async (command: SlashCommand): Promise<string> => {
     commands += 1;
@@ -114,6 +180,14 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
     });
     return withinBudget(handled, budget);
   };
+  const hear = (mention: Mention): void => {
+    mentions += 1;
+    chain = chain.then(() => deps.mention(mention)).catch(() => undefined);
+  };
+  const press = (click: Click): void => {
+    clicks += 1;
+    chain = chain.then(() => deps.click(click)).catch(() => undefined);
+  };
 
   while (!deps.signal.aborted) {
     let url: string;
@@ -127,7 +201,7 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
       continue;
     }
     connections += 1;
-    const { end, greeted } = await session(url, deps, answer);
+    const { end, greeted } = await session(url, deps, { answer, hear, press });
     if (end === "stopped") {
       break;
     }
@@ -138,15 +212,21 @@ export async function listen(deps: ListenDeps): Promise<ListenSummary> {
       await pause(wait, deps.signal);
     }
   }
-  // A write already begun is finished rather than cut off; only its reply is lost with the socket.
+  // A write already begun is finished rather than cut off; a command's reply is lost with the socket.
   await chain;
-  return { connections, commands };
+  return { connections, commands, mentions, clicks };
+}
+
+interface Routes {
+  readonly answer: (command: SlashCommand) => Promise<string>;
+  readonly hear: (mention: Mention) => void;
+  readonly press: (click: Click) => void;
 }
 
 function session(
   url: string,
   deps: ListenDeps,
-  answer: (command: SlashCommand) => Promise<string>,
+  routes: Routes,
 ): Promise<{ readonly end: SessionEnd; readonly greeted: boolean }> {
   return new Promise((resolve) => {
     let greeted = false;
@@ -182,7 +262,7 @@ function session(
         handle?.close();
         finish("refresh");
       } else if (frame.kind === "command") {
-        void answer(frame.command).then((text) => {
+        void routes.answer(frame.command).then((text) => {
           if (!frame.respond) {
             log.warn("slack.listen_reply_dropped", { note: "the envelope takes no reply payload" });
           }
@@ -192,6 +272,13 @@ function session(
               : { envelope_id: frame.envelope },
           );
         });
+      } else if (frame.kind === "mention") {
+        // Acknowledged before the work, since Slack resends an envelope it has not heard back on.
+        send({ envelope_id: frame.envelope });
+        routes.hear(frame.mention);
+      } else if (frame.kind === "click") {
+        send({ envelope_id: frame.envelope });
+        routes.press(frame.click);
       } else if (frame.kind === "other") {
         send({ envelope_id: frame.envelope });
         log.info("slack.listen_ignored", { type: frame.type });
@@ -286,6 +373,10 @@ function abortablePause(ms: number, signal: AbortSignal): Promise<void> {
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function stringOf(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function record(value: unknown): Record<string, unknown> {

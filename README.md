@@ -8,8 +8,8 @@ to be fixed by an agent. That queue claims a ticket, fixes it in an isolated wor
 mechanical verification, opens a draft pull request and works the review to a handover.
 
 A **third loop** watches tickets triage sent back as nearly-solvable, and re-triages one when the
-reporter answers — so a ticket that was one missing acceptance criterion away from being fixable
-does not sit there unread.
+reporter answers a blocker or takes it out of scope — so a ticket that was one missing acceptance
+criterion away from being fixable does not sit there unread.
 
 With `SLACK_MODE` set, every ticket the three touch also gets **one Slack thread** the bot keeps
 editing as the work moves — off by default, and described under [Commands](#commands).
@@ -530,39 +530,46 @@ SOLVE_ENABLED=true MAX_CONCURRENT_SOLVES=0 pnpm solve:once
 
 ## Commands
 
-| Command                                                | What it does                                                                                                                    | Writes?                                              |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                                                                            | no                                                   |
-| `pnpm poll:once`                                       | One full grooming cycle                                                                                                         | `state/`, `groomed/`; Jira with `WRITE_BACK=true`    |
-| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                                                                           | `groomed/<KEY>.md`                                   |
-| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                                                                          | Jira                                                 |
-| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                                                    | `groomed/<KEY>.md`                                   |
-| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                                                     | `groomed/solve-cycle.md`                             |
-| `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                                                 | Jira **and** GitHub                                  |
-| `pnpm recon:once <KEY>`                                | Recon alone against one real ticket: proceed or bail, no fix, no diff, no PR                                                    | a report + a worktree, removed                       |
-| `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                                               | no                                                   |
-| `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                                        | Jira                                                 |
-| `pnpm start`                                           | The daemon **and** the live log viewer, together. Takes `--skill`, `--interval`, `--for`                                        | per switch; triage with `WRITE_BACK=true`            |
-| `pnpm start:daemon`                                    | The same daemon, headless — what a redirect, cron or CI wants. Same flags                                                       | as above                                             |
-| `pnpm dev`                                             | The **headless** daemon with `--watch`; same flags. A restart would tear the viewer down anyway                                 | as above                                             |
-| `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind                          | a report + `tmpdir()`                                |
-| `pnpm daemon:status`                                   | Is a daemon running from any checkout of this repo? Reads `ps`; no credential, no network                                       | no                                                   |
-| `pnpm repair:ledger`                                   | Every repair round so far, as a distribution, and which green ones nobody has read. No credential                               | no                                                   |
-| `pnpm sweep:once`                                      | Report stale skill roots and staged-image directories past `STAGING_SWEEP_MAX_AGE_MS`                                           | a report                                             |
-| `pnpm sweep:once --write`                              | …and remove them. Never a live git worktree — see below                                                                         | filesystem: the worktree and staging roots           |
-| `pnpm slack:probe <KEY> [--keep]`                      | Post, edit and delete one message in `SLACK_CHANNEL_ID`; write, read back and delete a record on the ticket. A verdict per step | Slack and one Jira property, both removed + a report |
-| `pnpm slack:once <KEY>`                                | Draw the ticket's audit thread from its record, dry: the record and the exact Slack request                                     | `groomed/slack/`                                     |
-| `pnpm slack:once <KEY> --post`                         | …and post or edit the thread for real, saving the record on the ticket                                                          | Slack + the `jira-police.slack` property             |
-| `pnpm slack:once <KEY> --post --bump`                  | …and broadcast its latest major entry to the channel again, deleting the ticket's previous broadcast                            | Slack + the `jira-police.slack` property             |
-| `pnpm slack:listen`                                    | Answer `/bencebot` until Ctrl-C, dry: the real subscriber list read, what each command would make of it written                 | `groomed/slack/roster.json`                          |
-| `pnpm slack:listen --write`                            | …and write the list, reading it back after each change                                                                          | the `jira-police.slack-subscribers` project property |
-| `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                           | no                                                   |
-| `pnpm presentation`                                    | Build the 2026-09-29 demo decks, a dated snapshot — see [`presentation/README.md`](presentation/README.md)                      | `presentation/out/`                                  |
-| `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                        | no                                                   |
-| `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                        | no                                                   |
-| `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                                                  | no                                                   |
-| `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                                                   | no                                                   |
-| `pnpm check-types && pnpm lint && pnpm test`           | The code check. CI also runs `format:check`, `test:hooks` and `docs:check`                                                      | no                                                   |
+| Command                                                | What it does                                                                                                                                                                                                | Writes?                                                                   |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `pnpm poll:once --dry-run`                             | Discovery only. Free                                                                                                                                                                                        | no                                                                        |
+| `pnpm poll:once`                                       | One full grooming cycle                                                                                                                                                                                     | `state/`, `groomed/`; Jira with `WRITE_BACK=true`                         |
+| `pnpm triage:once <KEY> --skill intake-triage`         | Triage one ticket, preview the result                                                                                                                                                                       | `groomed/<KEY>.md`                                                        |
+| `pnpm triage:once <KEY> --skill intake-triage --write` | …and post it. The flag decides `WRITE_BACK` on its own                                                                                                                                                      | Jira                                                                      |
+| `pnpm triage:once <KEY>`                               | Same, but the skill comes from `SKILL_NAME` — **which defaults to the mock**                                                                                                                                | `groomed/<KEY>.md`                                                        |
+| `pnpm solve:once`                                      | One solve cycle. Needs `SOLVE_ENABLED=true`                                                                                                                                                                 | `groomed/solve-cycle.md`                                                  |
+| `pnpm bot:once <KEY> --review`                         | The whole chain on one ticket: triage, claim, solve, PR, rounds                                                                                                                                             | Jira **and** GitHub                                                       |
+| `pnpm recon:once <KEY>`                                | Recon alone against one real ticket: proceed or bail, no fix, no diff, no PR                                                                                                                                | a report + a worktree, removed                                            |
+| `pnpm watch:once`                                      | What the sendback watch would do to every `agent:watching` ticket                                                                                                                                           | no                                                                        |
+| `pnpm watch:once <KEY> --write`                        | …and do it: re-triage, or drop the watch                                                                                                                                                                    | Jira                                                                      |
+| `pnpm start`                                           | The daemon **and** the live log viewer, together. Takes `--skill`, `--interval`, `--for`                                                                                                                    | per switch; triage with `WRITE_BACK=true`                                 |
+| `pnpm start:daemon`                                    | The same daemon, headless — what a redirect, cron or CI wants. Same flags                                                                                                                                   | as above                                                                  |
+| `pnpm dev`                                             | The **headless** daemon with `--watch`; same flags. A restart would tear the viewer down anyway                                                                                                             | as above                                                                  |
+| `pnpm attach:stage <KEY> [--keep]`                     | Stage that ticket's images and print the block a pass would be given. `--keep` leaves the files behind                                                                                                      | a report + `tmpdir()`                                                     |
+| `pnpm daemon:status`                                   | Is a daemon running from any checkout of this repo? Reads `ps`; no credential, no network                                                                                                                   | no                                                                        |
+| `pnpm repair:ledger`                                   | Every repair round so far, as a distribution, and which green ones nobody has read. No credential                                                                                                           | no                                                                        |
+| `pnpm sweep:once`                                      | Report stale skill roots and staged-image directories past `STAGING_SWEEP_MAX_AGE_MS`                                                                                                                       | a report                                                                  |
+| `pnpm sweep:once --write`                              | …and remove them. Never a live git worktree — see below                                                                                                                                                     | filesystem: the worktree and staging roots                                |
+| `pnpm slack:probe <KEY> [--keep]`                      | Post, edit and delete a message and a reply broadcast from it; write, read, delete a record on the ticket. A verdict per step                                                                               | Slack and one Jira property, both removed + a report                      |
+| `pnpm slack:once <KEY>`                                | Draw the ticket's audit thread from its record, dry: the record and the exact Slack request                                                                                                                 | `groomed/slack/`                                                          |
+| `pnpm slack:once <KEY> --post`                         | …and post or edit the thread for real, saving the record on the ticket                                                                                                                                      | Slack + the `jira-police.slack` property                                  |
+| `pnpm slack:once <KEY> --post --bump`                  | …and broadcast its latest major entry to the channel again, deleting the ticket's previous broadcast                                                                                                        | Slack + the `jira-police.slack` property                                  |
+| `pnpm slack:listen`                                    | Answer `/bencebot`, `@Bencebot start` or `clear` from `SLACK_START_USERS`, and `@Bencebot draft` from `SLACK_DRAFT_USERS` and a press on its Post button, until Ctrl-C, dry: what each would change written | `groomed/slack/`                                                          |
+| `pnpm slack:listen --write`                            | …and write the list and the labels, reading each back, send each draft as a direct message, and file a draft its asker presses Post on                                                                      | the subscribers property; `agent:start`, `agent:failed`; a DM; Jira issue |
+| `pnpm slack:start <thread-link> [--clear]`             | `agent:start` for the ticket a Slack thread belongs to, or `agent:failed` off with `--clear`, dry: the edit written to a file                                                                               | `groomed/slack/`                                                          |
+| `pnpm slack:start <thread-link> [--clear] --write`     | …and send the edit to the ticket, reading it back                                                                                                                                                           | Jira labels: `agent:start` on, or `agent:failed` off                      |
+| `pnpm slack:draft <thread-link>`                       | Draft a Jira ticket from a Slack thread with a read-only session, dry: the direct message it would send, written to a file                                                                                  | `groomed/slack/`                                                          |
+| `pnpm slack:draft <thread-link> --dm`                  | …and send that message to `SLACK_OPERATOR_USER_ID` as a direct message                                                                                                                                      | a Slack direct message                                                    |
+| `pnpm slack:draft <thread-link> --replay <file>`       | …without the session: the message built again from the outcome a saved `.draft.json` of the same thread holds, so a change to the layout costs nothing to look at; add `--dm` to send it                    | `groomed/slack/`, or a Slack direct message with `--dm`                   |
+| `pnpm draft:probe`                                     | Print the six cases of the tool-surface probe and what each is predicted to show, dry: runs nothing                                                                                                         | no                                                                        |
+| `pnpm draft:probe --run [--only <case>]`               | …and run them: one-call sessions, paid, each verdict read from the event stream                                                                                                                             | `groomed/probe/`, and calls aimed at a project that does not exist        |
+| `pnpm logs`                                            | The log reader. Filters a piped or replayed stream by mark, level and source. Reads stdin, never Jira                                                                                                       | no                                                                        |
+| `pnpm presentation`                                    | Build the 2026-09-29 demo decks, a dated snapshot — see [`presentation/README.md`](presentation/README.md)                                                                                                  | `presentation/out/`                                                       |
+| `pnpm docs:check`                                      | Prose checked against the tree: cited numbers, links, pinned copies, reading length. ~3s                                                                                                                    | no                                                                        |
+| `pnpm test:hooks`                                      | The `.claude/hooks/` guards, which vitest does not cover                                                                                                                                                    | no                                                                        |
+| `pnpm hooks:brief`                                     | Print what a session gets injected after a compaction, without waiting for one                                                                                                                              | no                                                                        |
+| `pnpm hooks:commit-brief`                              | Print what a session gets told when it is about to commit, without committing                                                                                                                               | no                                                                        |
+| `pnpm check-types && pnpm lint && pnpm test`           | The code check. CI also runs `format:check`, `test:hooks` and `docs:check`                                                                                                                                  | no                                                                        |
 
 **The Writes? column is for `SLACK_MODE=off`, the default.** With `dry`, every row that triages or
 runs a model pass also writes `<OUTPUT_DIR>/slack/`; with `live`, it posts that ticket's Slack thread
@@ -611,13 +618,19 @@ there is no page, says outright that an absent file is not evidence that no roun
 
 **With `SLACK_MODE` set, every ticket the pipeline touches gets one Slack thread, and the bot keeps
 editing its first message,** drawn collapsed to the ticket's title, with the card inside. An edit
-never moves a message, so each line below that decides the ticket's fate is also posted as a
-one-line reply sent to the channel, and the ticket's previous one is deleted: the ticket resurfaces
-at the bottom once, as its latest event, mentioning everyone on the subscriber list below. Triage starting opens it; the verdict, a gate refusal, a claim, each
-model pass, the solve's outcome, the pull request, each review round, the undraft, the merge and
-any crash land on it — the ones that decide the ticket's fate as their own lines, the rest in the
-timeline, newest first. The undraft is one line per handover, however many looks find the pull
+never moves a message, so each line below that decides the ticket's fate, and a solve starting, is
+also posted as a one-line reply sent to the channel, and the ticket's previous one is deleted: the
+ticket resurfaces at the bottom once, as its latest event, mentioning everyone on the subscriber
+list below. Every timeline entry after it is edited into that reply as a second line, so the bottom
+of the channel follows a solve step by step without a new message. Triage starting opens it;
+the verdict, a gate refusal, a claim, each model pass, the solve's outcome, the pull request, each
+review round, the undraft, the merge and any crash land on it — the claim and the ones that decide
+the ticket's fate as their own lines, the rest in the timeline, newest first. The undraft is one line per handover, however many looks find the pull
 request ready; a round that pushes a change, or a person drafting it, makes the next one news. A
+review look, or a round that throws, failing because the network did — a timeout, a refused connection, a host that does
+not resolve — is not a crash: it is a 📡 timeline line, never broadcast, and taken into a recent one
+already newest on the timeline, so an outage leaves one line, not one per look; a crash already on
+the card stays there. A
 ticket already in review when the thread starts gets it from the review loop's first look, which
 fills in the title, the pull request, and triage as the ticket's labels state it. A thread started
 without a title, as a key typed at `triage:once` starts one, reads it from Jira once; if that read
@@ -640,9 +653,10 @@ and the command exits 1 saying so: deleting the property starts the thread afres
 
 **`slack:listen` answers `/bencebot`, and the subscriber list is what it changes.**
 `/bencebot subscribe` puts you on one list, for every ticket, and each broadcast then mentions you;
-`/bencebot unsubscribe` takes you off, and a bare `/bencebot` says which you are. The reply is only
-visible to you. Who is added is the Slack user who typed it, never a name in the text. The list is
-the `jira-police.slack-subscribers` property on `JIRA_PROJECT`, read at each broadcast, so a change
+`/bencebot unsubscribe` takes you off, and a bare `/bencebot` says which you are. `/bencebot help`
+lists these and the mentions below, without reading the list. The reply is only visible to you.
+Who is added is the Slack user who typed it, never a name in the text. The list is the
+`jira-police.slack-subscribers` property on `JIRA_PROJECT`, read at each broadcast, so a change
 applies from the next one; a list this version cannot read is left as found, each command says so,
 and broadcasts go out without mentions and log `slack.subscribers_unread`. The command holds a
 Socket Mode connection, because the daemon has no public URL, and reconnects whenever Slack drops
@@ -652,17 +666,111 @@ writes the property and reads it back, and a reply that cannot see its own chang
 credential needs Administer Projects on `JIRA_PROJECT` for that write, and nothing else here does.
 The daemon answers it too once `SLACK_LISTEN` is `dry` or `live`, the same two modes; off by
 default, and a missing or wrong `SLACK_APP_TOKEN` stops the start. A hand-run listener beside the
-daemon splits the commands between them, since Slack gives each to one connection, and two changes
-in the same second can lose one without either reply saying so (`architecture/invariants.md`
-invariant 18).
+daemon splits the commands and mentions between them, since Slack gives each to one connection, and
+two changes in the same second can lose one without either reply saying so (`architecture/invariants.md`
+invariant 18). A mention landing on a listener with no `SLACK_START_USERS` is dropped with only
+`slack.mention_ignored` in its log, so run both with the same list or only one.
 On a network that drops, Slack can report a command as failed that went through: `/bencebot` says
 where you stand, and `slack.command_late` in the log says the reply missed Slack's budget.
+
+**`@Bencebot start` in a ticket's audit thread starts it, from someone on `SLACK_START_USERS`.** The
+listener takes the mention, ties the thread to its ticket and makes the edit `slack:start` below
+describes — `@Bencebot clear` takes `agent:failed` off — and answers in the thread with a reply
+only the asker sees. Anyone else is refused before anything is read, and the person is the one
+Slack names, never a name in the text. It follows the listener's mode: `slack:listen` and
+`SLACK_LISTEN=dry` write the edit to `<OUTPUT_DIR>/slack/<KEY>.labels.json` and mark every reply,
+`--write` and `live` write the label. With `SLACK_START_USERS` empty, the default, no mention is
+answered at all: each is acknowledged and logged as `slack.mention_ignored`. Set, the listener
+needs `SLACK_BOT_TOKEN` as well, and refuses to start without it. Slack will not dispatch a slash
+command typed in a thread, which is why this is a mention rather than `/bencebot start`.
+
+**`@Bencebot draft` in any thread the bot is in drafts a Jira ticket from it, for someone on
+`SLACK_DRAFT_USERS`.** The listener answers at once with a reply only the asker sees, then does what
+`slack:draft` below does — reads the whole thread and runs the read-only `thread-draft` session over
+it — and sends the asker the draft, or, when an open ticket already asks for the same, the comment to add to
+it, or why the thread makes neither, as a direct message: the draft's first paragraph — what it is,
+where it would go and why — is the message, and the rest is a reply in its thread, cut again at 40 000
+characters, Slack's cap on a message's text, with the button under the last.
+Drafting writes nothing to Jira, and the session's own Atlassian writers are withheld by
+`--disallowedTools`, measured for two of its five names.
+With `DRAFT_PROJECTS` set, a ticket draft in a listed project whose component and issue type Jira
+lists for it carries a **Post to Jira** button, and the message says exactly what it would file; any
+other ticket draft says why it carries none. The draft is kept as a file under the state directory,
+named by the id the button carries. **A press by the person who asked** checks the draft again
+against Jira and then depends on the listener. Under `slack:listen` and `SLACK_LISTEN=dry` it writes
+the request it would make to `<OUTPUT_DIR>/slack/<id>.issue.json`, files nothing, and says so in the
+thread of the draft's first message, the reply starting `(dry run, nothing filed)`. Under
+`slack:listen --write` and `SLACK_LISTEN=live` **it files the draft**: a session that holds
+`createJiraIssue` and no other tool makes the one call, the issue is read back from Jira and
+compared, and the key and a link go into that thread with what the read-back found. The press is
+acknowledged there first, since the call takes about half a minute, and once the issue exists the
+link is also posted in the thread the draft was asked for in, which is best effort and never changes
+what was filed. The draft's record is marked before the call, so a draft already filed answers with its key, and one whose
+filing began and did not end, which may have made an issue, is never filed again: its reply says
+which summary to search for. Anyone else is refused before the thread is read, a mention outside a
+thread is answered with usage, and one draft runs at a time: a second is refused until the first
+arrives. The session runs off the listener's chain, so `/bencebot` and `@Bencebot start` are
+answered while it works, and stopping the listener kills it and tells the asker so. It follows the
+listener's mode: `slack:listen` and `SLACK_LISTEN=dry` write the direct message to
+`<OUTPUT_DIR>/slack/<channel>-<ts>.dm.json`, its replies under `replies`, and mark every reply — the session itself still runs,
+and is paid for — while `--write` and `live` send it. With `SLACK_DRAFT_USERS` empty, the default,
+no draft mention is answered: each is acknowledged and logged as `slack.draft_ignored`. The bot must
+be a member of the thread's channel to read it.
+
+**`slack:start <thread-link>` starts a ticket from its Slack thread, by hand.** Give it Slack's
+**Copy link** on a ticket's audit thread or on any reply in it. The ticket is the one the bot's own
+top message names, and only when that ticket's `jira-police.slack` record names the same thread;
+either disagreeing exits 1 and says which. It adds `agent:start`, the go-ahead manual mode waits
+for, and is refused unless the solve queue would then claim the ticket — one without
+`agent:solvable`, or carrying `agent:failed` or anything else the queue skips, is left as found.
+`--clear` takes `agent:failed` off instead, so a ticket the solver already tried can be started
+again. Dry by default: the edit goes to `<OUTPUT_DIR>/slack/<KEY>.labels.json` and nothing remote
+changes. `--write` sends it to the ticket and reads it back, exiting 4 when the ticket does not show
+it. Every run writes its outcome to `<OUTPUT_DIR>/slack/<channel>-<ts>.thread.json`. Reading the
+thread needs the bot's `channels:history` scope. A start is the same go-ahead as adding the label
+by hand: with `SOLVE_ENABLED` on, the next solve tick claims the ticket and pays for its passes.
+
+**`slack:draft <thread-link>` drafts a ticket from any Slack thread, by hand.** Give it Slack's
+**Copy link** on any message in a thread the bot can read. It reads the whole thread and runs the
+`thread-draft` session over it: read-only, with the analyst's tools — Jira and Confluence through
+the Atlassian MCP — the vault, and every checkout `SOLVE_REPOS` and `SOLVE_READ_DIRS` name under
+`SOLVE_REPO_ROOT`, and no Jira or Slack credential. The direct message `@Bencebot draft` would send
+— the drafted ticket; or, for a thread that duplicates an open issue, that issue's key and the comment the
+thread adds to it; or why the thread makes neither, with its open questions — goes to
+`<OUTPUT_DIR>/slack/<channel>-<ts>.draft.md`, and the outcome beside it as `.draft.json`. Dry by
+default, nothing is sent; this command never writes to Jira, and the session's own Atlassian writers are withheld by `--disallowedTools`, measured for two of its five names. A thread over 500 messages or 100 000 characters is refused
+before the session is paid for. `--dm` also sends the message to `SLACK_OPERATOR_USER_ID`, checked
+before the session runs, as a direct message from the bot — with the **Post to Jira** button when
+`DRAFT_PROJECTS` lists the draft's project and the operator is on `SLACK_DRAFT_USERS`, and the
+message says so when it carries none. Without `--dm` the button is evaluated and its pieces' blocks written
+to `.draft.json`, and no record is kept. `--replay <file>` skips the session and builds the message
+again from the outcome a `.draft.json` of the same thread holds, refusing a file of another thread
+or one missing a field a message is worded from. Exit 0 means a ticket or a duplicate's comment
+was drafted (`.draft.json` says which), 1 that neither was and why, 3 that the run threw, 4 that the message was written and `--dm` could not
+send it.
+
+**`draft:probe` measures whether a session's tool lists keep it off a Jira mutator.** Six one-call
+sessions, in pairs of a case and its control, each told to call one Atlassian tool: `createJiraIssue`
+given alone and an ungiven `addCommentToJiraIssue` asked for, the same comment tool allowed and then
+allowed and denied at once, and the drafting session's own two lists asked for a read and for a
+create. The verdict is read from the event stream, as a refusal, a call that ran, a tool that was not
+there, or no call, never from what the model says. Dry by default, it prints the cases and what each
+is predicted to show; `--run` is paid, and first asks Jira over REST that the project key the calls
+name, `ZZNOPROJ`, does not exist, refusing to start if it does or if that cannot be shown. Each
+result, the tool's own reply included, is written to `<OUTPUT_DIR>/probe/draft-tools.<case>.json`.
+Exit 0 means every verdict was the one predicted, 1 that one was not, 3 that a session threw, 4 that
+the key exists or could not be shown not to. It measures the permission flags a session is started
+with, not a whole draft session, and it says nothing about built-in tools. Run once, on 2026-10-15,
+every verdict was the predicted one: `deny-control`, `draft-readable` and `writer-granted` ran their
+call; `deny-wins` and `draft-writer` never had the tool listed, so no call was attempted; and
+`writer-ungranted` listed it and was refused.
 
 **`slack:probe <KEY>` measures what that rests on.**
 The audit thread is a Slack message the bot keeps editing, with its state — which message, and
 the record it shows — kept on the ticket as the `jira-police.slack` issue property. So before
 anything relies on either, this command checks both against the real systems: one message posted,
-edited and deleted in `SLACK_CHANNEL_ID`, and a record the size of a full one written to the named
+edited and deleted in `SLACK_CHANNEL_ID`, a reply to it sent to the channel and edited in place as a
+solve's steps are, then deleted, and a record the size of a full one written to the named
 ticket as `jira-police.slack-probe`, read back, and deleted. With `SLACK_OPERATOR_USER_ID` set it
 also sends that person a direct message and deletes it, which is how the line for the team's pull
 request channel arrives when a solve opens one. Every step prints `PASS` or `FAIL` with
@@ -675,17 +783,43 @@ declares it, and a declared one cannot hold a list of timeline entries.
 To set it up, create the app from the manifest rather than by hand:
 
 1. [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From an app manifest**,
-   then paste `docs/slack-app-manifest.json`. It asks for `chat:write` and `commands`, declares
-   `/bencebot`, turns Socket Mode on and both token rotations off, since nothing here refreshes a
-   token. An app made from an earlier copy takes the new one under **App Manifest**, then a
-   reinstall.
+   then paste `docs/slack-app-manifest.json`. It declares `/bencebot` and the `app_mention` event,
+   turns Socket Mode and interactivity on and both token rotations off, since nothing here refreshes
+   a token, and asks for the scopes in the table below. Interactivity needs no request URL under
+   Socket Mode; it is what lets Slack send the listener a press on a button of the bot's. An app made
+   from an earlier copy takes the new one under **App Manifest**, then a reinstall.
 2. **Install to Workspace**, then copy **OAuth & Permissions → Bot User OAuth Token** (`xoxb-…`)
    into `SLACK_BOT_TOKEN`. The **App Configuration Token** on the apps page is a different thing: it
    starts `xoxe.xoxp-`, expires in twelve hours, drives only the manifest API, and cannot post.
 3. In a public channel, `/invite @Bencebot`, and copy the channel ID from the bottom of its details
    pane into `SLACK_CHANNEL_ID`.
-4. For `/bencebot` only: **Basic Information → App-Level Tokens → Generate Token and Scopes**, with
-   the `connections:write` scope, into `SLACK_APP_TOKEN` (`xapp-…`), best as `keychain:<name>`.
+4. For `/bencebot` and mentions only: **Basic Information → App-Level Tokens → Generate Token and
+   Scopes**, with the `connections:write` scope, into `SLACK_APP_TOKEN` (`xapp-…`), best as
+   `keychain:<name>`.
+5. For `@Bencebot start` only: the member ID of each person who may start a ticket, comma-separated,
+   into `SLACK_START_USERS` — from their Slack profile, ⋮ → Copy member ID.
+6. For `@Bencebot draft` only: the member ID of each person who may ask for a draft, the same way,
+   into `SLACK_DRAFT_USERS`.
+
+**The manifest asks for more scopes than the code uses, on purpose.** A scope added later means a
+reinstall, which an organisation admin may have to approve, so the operator chose on 2026-09-30 to
+ask once for what planned Slack features would need. The cost is that a leaked bot token can do
+everything in the right-hand column. A scope whose feature is dropped should come out of the
+manifest in the same change.
+
+| scope                                          | used by                                                                                               |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `chat:write`                                   | the audit thread, broadcasts, the pull request line, a draft's direct message, every reply            |
+| `commands`                                     | `/bencebot`                                                                                           |
+| `app_mentions:read`                            | `@Bencebot start`, `clear` and `draft`                                                                |
+| `channels:history`                             | reading a thread's top message, to tie it to its ticket, and a whole thread, to draft from it         |
+| `reactions:write`                              | **not yet** — marking a mention as taken, so the thread sees it and not only the asker                |
+| `reactions:read`                               | **not yet** — starting a ticket by reacting to its card                                               |
+| `users:read`, `users:read.email`               | **not yet** — finding the asker's Jira account, so a start or a created task names them on the ticket |
+| `groups:history`                               | reading a whole thread to draft from, in a private channel the bot was invited to                     |
+| `groups:read`                                  | **not yet** — the rest of the reads in a private channel                                              |
+| `im:history`, `mpim:history`                   | **not yet** — commands in a direct message, and threads in a group one                                |
+| `channels:read`, `channels:join`, `files:read` | **not yet** — creating a Jira task from any thread: whether the bot is in it, joining, its images     |
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch, or with `solve:once --watch`, which polls pull
@@ -698,7 +832,9 @@ termination...` and will wait indefinitely, because its watcher never escalates 
 second signal exits immediately and skips the `finally` that releases `agent:solving`, and nothing
 reclaims that label on its own — with `MAX_CONCURRENT_SOLVES=1` the solve half then does nothing
 until you remove it by hand. Same applies to editing a file under `pnpm dev`, which is a restart:
-`pnpm daemon:status` says whether one is running.
+`pnpm daemon:status` says whether one is running. A draft is the exception: the first signal kills
+its session rather than waiting for it, since it holds nothing to release, and its asker is told
+to ask again.
 
 Pressing `q` under `pnpm start` is a graceful stop, not a detach: the viewer leaves, and the shell
 then waits on the daemon while it finishes the ticket in flight. An unresponsive prompt straight after
@@ -901,39 +1037,39 @@ there is no build step here.
 
 Full table in `architecture/configuration.md` §10. The ones that matter for a demo:
 
-| Setting                         | Default       | Notes                                                                                                                   |
-| ------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, a status move if `SOLVE_CODE_REVIEW_STATUS` is set       |
-| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                                                 |
-| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                                                        |
-| `WRITE_BACK`                    | `false`       | Whether triage posts its comment and labels. Strict `"true"`                                                            |
-| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank brings the default back**, not every column — see below                              |
-| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below                                                 |
-| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                                                                      |
-| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                                                                  |
-| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in                                               |
-| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed                                                    |
-| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write                                                     |
-| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it                                                 |
-| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory                                                          |
-| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it                                                 |
-| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built                                                     |
-| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days                                                  |
-| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend                                                  |
-| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot                                                     |
-| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are outside it by design, not outside the total                         |
-| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above                                                  |
-| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see                                                      |
-| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                                                                         |
-| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back                                                 |
-| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none                                                |
-| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed                                   |
-| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                                                   |
-| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                                                |
-| `SLACK_MODE`                    | `off`         | `dry` writes each thread and PR line to `groomed/slack/`; `live` posts them, and saves the record. A typo fails startup |
-| `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only, best as `keychain:<name>`. `live` refuses an `xoxe.` or user token. Never reaches a model session        |
-| `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                                           |
-| `SLACK_OPERATOR_USER_ID`        | —             | Your Slack member ID, `U…`. Each PR the bot opens DMs you the line for the team's PR channel                            |
+| Setting                         | Default       | Notes                                                                                                                                |
+| ------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `JIRA_EMAIL`, `JIRA_AUTH`       | —             | Required. Reads, `agent:*` labels, `jira-police.*` properties, status moves where a `SOLVE_*_STATUS` setting names one               |
+| `VAULT_PATH`                    | —             | Required by the real skill; checked at startup, not on the first ticket                                                              |
+| `SKILL_NAME`                    | `mock-triage` | **Defaults to the mock**, so an unconfigured service cannot post                                                                     |
+| `WRITE_BACK`                    | `false`       | Whether triage posts its comment and labels. Strict `"true"`                                                                         |
+| `TRIAGE_ONLY_STATUS`            | 4 status ids  | Which columns get triaged. **Blank brings the default back**, not every column — see below                                           |
+| `TRIAGE_STATUS_PRIORITY`        | —             | Which column is triaged **first**. Blank keeps oldest-first — see below                                                              |
+| `SOLVE_ENABLED`                 | `false`       | Master switch for the solve queue. Strict `"true"`                                                                                   |
+| `SOLVE_MODE`                    | `manual`      | `manual` also requires the human's `agent:start` label                                                                               |
+| `SOLVE_REPO_ROOT`               | —             | **Required to solve anything.** The directory the local checkouts live in                                                            |
+| `SOLVE_REPOS`                   | —             | Repository allowlist, **no default**. Unset means nothing is allowed                                                                 |
+| `SOLVE_READ_DIRS`               | —             | Other checkouts under the root a pass may **read**. Grants no write                                                                  |
+| `SOLVE_GITHUB_OWNER`            | —             | Owner a PR is opened against, **no default**. `--pr` refuses without it                                                              |
+| `SOLVE_WORKTREE_ROOT`           | —             | Where worktrees are cut. Blank means the system temp directory                                                                       |
+| `STAGING_SWEEP_MAX_AGE_MS`      | `86400000`    | 24h. How old a directory must be before `sweep:once --write` removes it                                                              |
+| `WATCH_ENABLED`                 | `false`       | Master switch for the sendback watch. Off ⇒ the loop is never built                                                                  |
+| `WATCH_POLL_MS`                 | `21600000`    | Six hours. Its trigger is a person editing a ticket — measured in days                                                               |
+| `MAX_RETRIAGE_PER_TICKET`       | `3`           | Then the watch is dropped with a comment. The bound on re-triage spend                                                               |
+| `MAX_CONCURRENT_SOLVES`         | `1`           | Counts `agent:solving` only, so a PR awaiting a human holds no slot                                                                  |
+| `MAX_REVIEW_ITERATIONS`         | `3`           | Rounds against a **bot** reviewer. Human rounds are outside it by design, not outside the total                                      |
+| `MAX_PR_ROUNDS_TOTAL`           | `20`          | Absolute per-PR brake. Deliberately not the same knob as the one above                                                               |
+| `MAX_FAILED_STARTS`             | `3`           | Rounds decided on and never reached — the one no other cap can see                                                                   |
+| `MAX_SOLVE_ATTEMPTS_PER_TICKET` | `3`           | Daemon-only. A hand-typed run never consults it                                                                                      |
+| `SESSION_IDLE_TIMEOUT_MS`       | `600000`      | A **silence** budget, not a wall clock. A slept laptop is credited back                                                              |
+| `FAIL_FIRST_CHECK`              | `true`        | One of two on unless set to `false` — off withdraws a check, grants none                                                             |
+| `REPAIR_ROUND`                  | `true`        | The other. One repair pass per failed solve or review round; acted on only when armed                                                |
+| `REPAIR_PUBLISH`                | `false`       | The daemon's `--repair`. Only `true`, and only with `REPAIR_ROUND` on                                                                |
+| `DEPENDENCY_BUMPS`              | `true`        | A pom.xml change of dependency versions or comments. Only `true` arms it                                                             |
+| `SLACK_MODE`                    | `off`         | `dry` writes each thread and PR line to `groomed/slack/`; `live` posts them, and saves the record. A typo fails startup              |
+| `SLACK_BOT_TOKEN`               | —             | `xoxb-…` only, best as `keychain:<name>`. `live` refuses an `xoxe.` or user token. Never reaches a model session                     |
+| `SLACK_CHANNEL_ID`              | —             | The channel's ID, not its name. The bot must be invited to it                                                                        |
+| `SLACK_OPERATOR_USER_ID`        | —             | Your Slack member ID, `U…`. Each PR the bot opens DMs you the line for the team's PR channel, and `slack:draft --dm` DMs you a draft |
 
 Anything that grants privilege reads silence as "no". A blank or misspelled `WRITE_BACK` does not
 post; an empty `SOLVE_REPOS` allows no repository; an unset `SOLVE_GITHUB_OWNER` opens no pull

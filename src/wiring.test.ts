@@ -1,8 +1,15 @@
-import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { JqlError } from "./jira/jql.ts";
 import type { JiraClient } from "./jira/client.ts";
@@ -24,19 +31,24 @@ import {
   buildSolveRequest,
   buildTriageOptions,
   createDiscover,
+  createJiraClient,
   createPollDeps,
   createReviewCycleDeps,
+  createBotClient,
   createListenClient,
   createSlackTarget,
   pipelineAuditNotifier,
   pipelinePrLineSender,
   createSolveDeps,
   createSolveRunDeps,
+  draftDelivery,
+  draftReadDirs,
   githubRepoFor,
   imageStageOptions,
   pollIntervalMs,
   reviewIntervalMs,
   shouldPost,
+  threadCommandDeps,
 } from "./wiring.ts";
 
 /** Minimum environment that satisfies the required settings. */
@@ -1045,6 +1057,57 @@ describe("buildPublishRequest", () => {
   });
 });
 
+describe("createJiraClient", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses half of the in-progress pair, naming the half that is missing", () => {
+    expect(() => createJiraClient(settingsWith({ SOLVE_IN_PROGRESS_STATUS: "3" }))).toThrow(
+      SettingsError,
+    );
+    expect(() => createJiraClient(settingsWith({ SOLVE_IN_PROGRESS_STATUS: "3" }))).toThrow(
+      /: SOLVE_RETURN_STATUS\./u,
+    );
+    expect(() => createJiraClient(settingsWith({ SOLVE_RETURN_STATUS: "10213" }))).toThrow(
+      /: SOLVE_IN_PROGRESS_STATUS\./u,
+    );
+    expect(() => createJiraClient(settingsWith({}))).not.toThrow();
+  });
+
+  it("hands each status setting to the move that goes there", async () => {
+    const posted: unknown[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        posted.push(JSON.parse(String(init.body)));
+        return new Response(null, { status: 204 });
+      }
+      const body = url.endsWith("/transitions")
+        ? {
+            transitions: [
+              { id: "21", to: { id: "3" } },
+              { id: "161", to: { id: "10213" } },
+              { id: "191", to: { id: "10232" } },
+            ],
+          }
+        : { fields: { status: { id: "3", name: "Under arbeid" } } };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    const client = createJiraClient(
+      settingsWith({
+        SOLVE_IN_PROGRESS_STATUS: "3",
+        SOLVE_RETURN_STATUS: "10213",
+        SOLVE_CODE_REVIEW_STATUS: "10232",
+      }),
+    );
+
+    await client.moveBackFromInProgress("SSX-1");
+    await client.moveToCodeReview("SSX-1");
+
+    expect(posted).toEqual([{ transition: { id: "161" } }, { transition: { id: "191" } }]);
+  });
+});
+
 describe("createSolveRunDeps", () => {
   it("composes the two objects that can change something", () => {
     // The phase C privilege grant: asserting its shape asserts the grant is exactly these two.
@@ -1492,6 +1555,231 @@ describe("createSlackTarget", () => {
       expect(attempt).not.toThrow(token);
     },
   );
+});
+
+describe("createBotClient", () => {
+  it("builds the client from a bot token alone, with no channel set", () => {
+    expect(createBotClient(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }))).toBeInstanceOf(
+      SlackClient,
+    );
+  });
+
+  it("refuses what createSlackTarget refuses, without echoing more than the prefix", () => {
+    expect(() => createBotClient(settingsWith({}))).toThrow(/SLACK_BOT_TOKEN \(the bot token/u);
+    const attempt = (): unknown =>
+      createBotClient(settingsWith({ SLACK_BOT_TOKEN: "xoxe.xoxb-1-rotating" }));
+    expect(attempt).toThrow(/expected a bot token starting xoxb-/u);
+    expect(attempt).not.toThrow("xoxe.xoxb-1-rotating");
+  });
+});
+
+function authTest(body: object): Response {
+  return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+}
+
+describe("threadCommandDeps", () => {
+  it("forgets a failed bot lookup, so one dropped call does not last the listener's life", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("socket hang up"))
+      .mockResolvedValueOnce(authTest({ ok: true, user_id: "U1", bot_id: "B1", team: "T" }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deps = threadCommandDeps(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "dry");
+
+      await expect(deps.botId()).rejects.toThrow(/network/u);
+      expect(await deps.botId()).toBe("B1");
+      expect(await deps.botId()).toBe("B1");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses a token Slack names no bot for, rather than matching every message against null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => authTest({ ok: true, user_id: "U1", team: "T" })),
+    );
+    try {
+      const deps = threadCommandDeps(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "dry");
+
+      await expect(deps.botId()).rejects.toThrow(/no bot_id/u);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("dry, writes the edit under OUTPUT_DIR and says so, rather than sending it", async () => {
+    const output = mkdtempSync(join(tmpdir(), "thread-deps-"));
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deps = threadCommandDeps(
+        settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc", OUTPUT_DIR: output }),
+        "dry",
+      );
+
+      await deps.labels.apply("SSX-4003", { add: ["agent:start"], remove: [] });
+
+      expect(deps.labels.dry).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(readFileSync(join(output, "slack", "SSX-4003.labels.json"), "utf8")),
+      ).toEqual({ method: "updateLabels", key: "SSX-4003", add: ["agent:start"], remove: [] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("live, sends the edit to the ticket as a label delta and writes no file", async () => {
+    const output = mkdtempSync(join(tmpdir(), "thread-deps-"));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deps = threadCommandDeps(
+        settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc", OUTPUT_DIR: output }),
+        "live",
+      );
+
+      await deps.labels.apply("SSX-4003", { add: [], remove: ["agent:failed"] });
+
+      expect(deps.labels.dry).toBe(false);
+      const [url, init] = fetchMock.mock.calls[0] ?? [];
+      expect(String(url)).toMatch(/\/rest\/api\/3\/issue\/SSX-4003$/u);
+      expect(init?.method).toBe("PUT");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        update: { labels: [{ remove: "agent:failed" }] },
+      });
+      expect(existsSync(join(output, "slack"))).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("draftReadDirs", () => {
+  it("opens every checkout SOLVE_REPOS and SOLVE_READ_DIRS name that is a directory here", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+    for (const name of ["commerce-rest", "advisor-web"]) {
+      mkdirSync(join(root, name));
+    }
+
+    const dirs = draftReadDirs(
+      settingsWith({
+        SOLVE_REPO_ROOT: root,
+        SOLVE_REPOS: "commerce-rest",
+        SOLVE_READ_DIRS: "advisor-web, commerce-rest",
+      }),
+    );
+
+    expect(dirs).toEqual([join(root, "commerce-rest"), join(root, "advisor-web")]);
+  });
+
+  it("skips a name that is no directory here, since --add-dir on it fails the whole session", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+    mkdirSync(join(root, "commerce-rest"));
+
+    const dirs = draftReadDirs(
+      settingsWith({
+        SOLVE_REPO_ROOT: root,
+        SOLVE_REPOS: "commerce-rest",
+        SOLVE_READ_DIRS: "gone",
+      }),
+    );
+
+    expect(dirs).toEqual([join(root, "commerce-rest")]);
+  });
+
+  it("refuses a name that would climb out of the root", () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), "draft-reads-"));
+
+    expect(
+      draftReadDirs(settingsWith({ SOLVE_REPO_ROOT: join(root, "inner"), SOLVE_READ_DIRS: ".." })),
+    ).toEqual([]);
+  });
+
+  it("opens nothing with no SOLVE_REPO_ROOT, rather than resolving names against the working directory", () => {
+    expect(draftReadDirs(settingsWith({ SOLVE_REPOS: "src", SOLVE_READ_DIRS: "src" }))).toEqual([]);
+  });
+});
+
+describe("draftDelivery", () => {
+  it("dry, writes the request beside the draft and sends nothing", async () => {
+    const output = mkdtempSync(join(tmpdir(), "draft-delivery-"));
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deliver = draftDelivery(settingsWith({ OUTPUT_DIR: output }), "dry");
+
+      expect(
+        await deliver("U0ASKER1", "C0THREAD1-1.2", [{ text: "the draft", blocks: null }]),
+      ).toBe("dry-run");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(readFileSync(join(output, "slack", "C0THREAD1-1.2.dm.json"), "utf8")),
+      ).toEqual({ method: "chat.postMessage", channel: "U0ASKER1", text: "the draft" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("dry, writes each piece after the first as a reply in the first's thread", async () => {
+    const output = mkdtempSync(join(tmpdir(), "draft-delivery-"));
+    const deliver = draftDelivery(settingsWith({ OUTPUT_DIR: output }), "dry");
+
+    await deliver("U0ASKER1", "C0THREAD1-1.2", [
+      { text: "one", blocks: null },
+      { text: "two", blocks: [{ type: "divider" }] },
+    ]);
+
+    expect(
+      JSON.parse(readFileSync(join(output, "slack", "C0THREAD1-1.2.dm.json"), "utf8")),
+    ).toEqual({
+      method: "chat.postMessage",
+      channel: "U0ASKER1",
+      text: "one",
+      replies: [
+        {
+          method: "chat.postMessage",
+          channel: "U0ASKER1",
+          thread_ts: "dry-run",
+          text: "two",
+          blocks: [{ type: "divider" }],
+        },
+      ],
+    });
+  });
+
+  it("live, posts to the person's member ID, which Slack delivers as a direct message", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () =>
+        new Response(JSON.stringify({ ok: true, ts: "9.9", channel: "D0DM1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const deliver = draftDelivery(settingsWith({ SLACK_BOT_TOKEN: "xoxb-1-abc" }), "live");
+
+      expect(
+        await deliver("U0ASKER1", "C0THREAD1-1.2", [{ text: "the draft", blocks: null }]),
+      ).toBe("9.9");
+      const [url, init] = fetchMock.mock.calls[0] ?? [];
+      expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
+      const form = new URLSearchParams(String(init?.body));
+      expect(form.get("channel")).toBe("U0ASKER1");
+      expect(form.get("text")).toBe("the draft");
+      expect(form.get("thread_ts")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("live, refuses to build without a bot token", () => {
+    expect(() => draftDelivery(settingsWith({}), "live")).toThrow(SettingsError);
+  });
 });
 
 describe("createListenClient", () => {

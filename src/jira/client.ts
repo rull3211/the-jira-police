@@ -1,23 +1,22 @@
 /**
- * Minimal Jira Cloud client — discovery reads, and three narrow writes (`updateLabels`,
- * `moveToCodeReview`, and issue and project properties under `jira-police.`, which
- * `assertOwnedPropertyKey` holds to the service's own bookkeeping).
+ * Minimal Jira Cloud client — discovery reads, and three narrow writes (`updateLabels`, the status
+ * moves, and issue and project properties under `jira-police.`, which `assertOwnedPropertyKey`
+ * holds to the service's own bookkeeping).
  *
  * `updateLabels` exists because the MCP tool surface only offers `fields` (set semantics), so
  * adding one label means read-all-N/append/write-all-N-back — destroying any label a human added
- * in between. This credential may touch `agent:`-namespaced labels (`assertOwnedLabel`), exactly
- * one Jira status, named once at construction and never per call, and `jira-police.*` issue and
- * project properties; nothing else — never a field or a comment, which stay on the MCP path since
- * ADF conversion lives there.
+ * in between. This credential may touch `agent:`-namespaced labels (`assertOwnedLabel`), the Jira
+ * statuses named once at construction and never per call, and `jira-police.*` issue and project
+ * properties; nothing else — never a field or a comment, which stay on the MCP path since ADF
+ * conversion lives there.
  *
- * `moveToCodeReview` is the status write, and it is a workflow **transition**, not a field edit —
- * Jira does not accept `status` as a settable field. Unconfigured (`codeReviewStatus` unset at
- * construction), it is a guaranteed no-op: the capability ships inert until an operator names a
- * target. This is the one deliberate narrowing of the "never a status" guarantee invariant 11
- * (`architecture/invariants.md` §14) used to state unconditionally; touching status from a headless
- * model session is still refused everywhere else — `src/triage/poster.ts` denies
- * `mcp__atlassian__transitionJiraIssue` for exactly that reason — and this is a different write
- * because nothing but this deterministic harness code ever calls it.
+ * `moveToInProgress`, `moveBackFromInProgress` and `moveToCodeReview` are the status writes, each a
+ * workflow **transition**, not a field edit — Jira does not accept `status` as a settable field.
+ * Each is a guaranteed no-op until its target is named at construction: the capability ships inert.
+ * They are the deliberate narrowing of invariant 11 (`architecture/invariants.md` §14) to one kind of
+ * status write; touching status from a headless model session is refused everywhere — `src/triage/poster.ts` denies
+ * `mcp__atlassian__transitionJiraIssue` for exactly that reason — and these are different writes
+ * because nothing but this deterministic harness code ever calls them.
  *
  * `search` uses `/rest/api/3/search/jql`, paginated by opaque `nextPageToken` with no total count
  * or numeric offset, and asks a narrow `FIELDS` list since it runs on a timer over every ticket;
@@ -136,12 +135,15 @@ export interface JiraClientOptions {
   readonly auth: string;
   readonly timeoutMs?: number;
   /**
-   * The one status `moveToCodeReview` may transition a ticket to, by id or by name. Fixed here
+   * The statuses the status moves may transition a ticket to, each by id or by name. Fixed here
    * rather than accepted as a call argument, the same way `WRITABLE_LABEL_PREFIX` is fixed rather
-   * than passed in — a caller cannot aim this write anywhere but the one place the operator named.
-   * Unset means the method is inert.
+   * than passed in — a caller cannot aim a status write anywhere but where the operator named.
+   * Unset means the method moving there is inert.
    */
   readonly codeReviewStatus?: string;
+  readonly inProgressStatus?: string;
+  /** Where `moveBackFromInProgress` puts a ticket; inert unless `inProgressStatus` is set too. */
+  readonly returnStatus?: string;
 }
 
 /** One comment, with its body left as raw ADF for `renderAdf` to deal with. */
@@ -181,9 +183,34 @@ export interface IssueDetail {
   readonly url: string;
 }
 
-/** What `moveToCodeReview` did, or why it did nothing; `from` is the status found before the attempt. */
-export interface CodeReviewMoveResult {
-  readonly outcome: "moved" | "already-there" | "unreachable" | "disabled";
+/** Names exactly as Jira spells them, which is how a draft's component and type are compared. */
+export interface ProjectFacts {
+  readonly components: readonly string[];
+  readonly issueTypes: readonly string[];
+}
+
+/** An issue as it reads back after a filing, to be compared with what was sent. */
+export interface FiledIssue {
+  readonly project: string;
+  readonly issueType: string;
+  readonly summary: string;
+  readonly components: readonly string[];
+  /** ADF. */
+  readonly description: unknown;
+}
+
+/** `elsewhere` is `moveBackFromInProgress` finding the ticket no longer in progress. */
+export const STATUS_MOVE_OUTCOMES = [
+  "moved",
+  "already-there",
+  "unreachable",
+  "disabled",
+  "elsewhere",
+] as const;
+
+/** What a status move did, or why it did nothing; `from` is the status found before the attempt. */
+export interface StatusMoveResult {
+  readonly outcome: (typeof STATUS_MOVE_OUTCOMES)[number];
   readonly from: string;
 }
 
@@ -236,12 +263,16 @@ export class JiraClient {
   readonly #authHeader: string;
   readonly #timeoutMs: number;
   readonly #codeReviewStatus: string | undefined;
+  readonly #inProgressStatus: string | undefined;
+  readonly #returnStatus: string | undefined;
 
   constructor(options: JiraClientOptions) {
     this.#baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.#authHeader = `Basic ${Buffer.from(`${options.email}:${options.auth}`).toString("base64")}`;
     this.#timeoutMs = options.timeoutMs ?? 30_000;
     this.#codeReviewStatus = options.codeReviewStatus?.trim() || undefined;
+    this.#inProgressStatus = options.inProgressStatus?.trim() || undefined;
+    this.#returnStatus = options.returnStatus?.trim() || undefined;
   }
 
   async #post(path: string, body: unknown): Promise<unknown> {
@@ -405,6 +436,52 @@ export class JiraClient {
       comments,
       attachments,
       url: `${this.#baseUrl}/browse/${key}`,
+    };
+  }
+
+  /**
+   * What a ticket drafted for `project` may name: its components and the issue types it can be
+   * created as. A subtask type is left out, since one cannot be created without a parent.
+   */
+  async projectFacts(project: string): Promise<ProjectFacts> {
+    assertProjectKey(project);
+    const [components, detail] = await Promise.all([
+      this.#get(`/rest/api/3/project/${project}/components`, "application/json"),
+      this.#get(`/rest/api/3/project/${project}`, "application/json"),
+    ]);
+    const listed = (await components.json()) as unknown;
+    const described = (await detail.json()) as ProjectPayload;
+    return {
+      components: (Array.isArray(listed) ? (listed as readonly { name?: unknown }[]) : [])
+        .map((component) => component.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+      issueTypes: (described.issueTypes ?? [])
+        .filter((type) => type.subtask !== true)
+        .map((type) => type.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+    };
+  }
+
+  /**
+   * The fields a filing sets, read back over REST. A field of the wrong shape reads as empty, which
+   * a comparison then reports as a difference, never as a match.
+   */
+  async fetchFiled(key: string): Promise<FiledIssue> {
+    assertIssueKey(key);
+    const response = await this.#get(
+      `/rest/api/3/issue/${key}?fields=summary,issuetype,project,components,description`,
+      "application/json",
+    );
+    const payload = (await response.json()) as FiledPayload;
+    const f = payload.fields ?? {};
+    return {
+      project: f.project?.key ?? "",
+      issueType: f.issuetype?.name ?? "",
+      summary: f.summary ?? "",
+      components: (Array.isArray(f.components) ? f.components : [])
+        .map((component) => component?.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+      description: f.description,
     };
   }
 
@@ -621,32 +698,59 @@ export class JiraClient {
     return true;
   }
 
+  /** Moves an issue to the configured code-review status, on `#moveTo`'s terms. */
+  async moveToCodeReview(key: string): Promise<StatusMoveResult> {
+    return await this.#moveTo(key, this.#codeReviewStatus);
+  }
+
+  /** Moves an issue to the configured in-progress status, on `#moveTo`'s terms. */
+  async moveToInProgress(key: string): Promise<StatusMoveResult> {
+    return await this.#moveTo(key, this.#inProgressStatus);
+  }
+
   /**
-   * Moves an issue to the configured code-review status via a workflow **transition** — the only
-   * shape Jira accepts for a status change; `fields.status` cannot be set directly like a label can.
-   * Unconfigured (`codeReviewStatus` unset at construction), this is a guaranteed no-op, so the
-   * capability ships inert until an operator names a target.
+   * Moves an issue from the configured in-progress status to the configured return status, and only
+   * from there: a ticket found anywhere else was moved by someone else, and is left where they put it.
+   */
+  async moveBackFromInProgress(key: string): Promise<StatusMoveResult> {
+    if (this.#inProgressStatus === undefined) {
+      return { outcome: "disabled", from: "" };
+    }
+    return await this.#moveTo(key, this.#returnStatus, this.#inProgressStatus);
+  }
+
+  /**
+   * A workflow **transition** to `target` — the only shape Jira accepts for a status change;
+   * `fields.status` cannot be set directly like a label can. An unset target is a guaranteed no-op.
    *
    * Tolerant by design, on both ends. An issue already at the target status is left alone rather
    * than sent a redundant transition — including one another actor (a human, or the board's own
    * "Automation for Jira" rule) already moved there. One with no transition to the target from its
    * current status — moved somewhere the workflow does not connect from, or the workflow's shape
-   * changed since this was configured — is reported rather than thrown: a Jira hiccup here must
-   * never be the failure that stops a pull request from being marked ready.
+   * changed since this was configured — is reported rather than thrown: a status is bookkeeping,
+   * and must never be the failure that stops the solve or the pull request it describes.
    */
-  async moveToCodeReview(key: string): Promise<CodeReviewMoveResult> {
-    if (this.#codeReviewStatus === undefined) {
+  async #moveTo(
+    key: string,
+    target: string | undefined,
+    onlyFrom?: string,
+  ): Promise<StatusMoveResult> {
+    if (target === undefined) {
       return { outcome: "disabled", from: "" };
     }
     assertIssueKey(key);
-    const target = this.#codeReviewStatus;
 
     const current = await this.#get(`/rest/api/3/issue/${key}?fields=status`, "application/json");
     const currentPayload = (await current.json()) as DetailPayload;
     const status = currentPayload.fields?.status;
     const from = status?.name ?? "";
-    if (from === target || status?.id === target) {
+    const isAt = (named: string): boolean => from === named || status?.id === named;
+    if (isAt(target)) {
       return { outcome: "already-there", from };
+    }
+    if (onlyFrom !== undefined && !isAt(onlyFrom)) {
+      log.info("jira.status_left_alone", { key, from, expected: onlyFrom, target });
+      return { outcome: "elsewhere", from };
     }
 
     const response = await this.#get(`/rest/api/3/issue/${key}/transitions`, "application/json");
@@ -728,6 +832,22 @@ interface DetailPayload {
     readonly comment?: { readonly comments?: readonly RawComment[] };
     readonly attachment?: readonly RawAttachment[];
   };
+}
+
+/** `GET .../issue/{key}`: only what `fetchFiled` reads of it. */
+interface FiledPayload {
+  readonly fields?: {
+    readonly summary?: string;
+    readonly issuetype?: { readonly name?: string };
+    readonly project?: { readonly key?: string };
+    readonly components?: readonly ({ readonly name?: unknown } | null)[];
+    readonly description?: unknown;
+  };
+}
+
+/** `GET .../project/{key}`: only what `projectFacts` reads of it. */
+interface ProjectPayload {
+  readonly issueTypes?: readonly { readonly name?: unknown; readonly subtask?: unknown }[];
 }
 
 interface RawHistory {

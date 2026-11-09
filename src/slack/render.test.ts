@@ -92,8 +92,9 @@ describe("renderRecord", () => {
 
     const rendered = renderRecord(record);
     const bump = renderBump(record, forged);
+    const followed = renderBump(record, forged, [], forged);
 
-    for (const text of [...texts(rendered.blocks), rendered.text, bump.text]) {
+    for (const text of [...texts(rendered.blocks), rendered.text, bump.text, followed.text]) {
       expect(text).not.toMatch(
         /<(?:!(?!date\^\d+\^\{date_short_pretty\} \{time\}\|[\dT:.Z-]+>)|@)/u,
       );
@@ -162,15 +163,38 @@ describe("renderRecord", () => {
     expect(bump.text).toBe(`👀 *PR ready for review* — <${URL}|SSX-1 · t> <@U0ME>`);
   });
 
+  it("draws the step a minor entry edited in on a second line, under the mentions", () => {
+    const record = applyEvent(newRecord("SSX-1", "t", URL), { kind: "claimed", repo: null }, NOW);
+    const step = applyEvent(record, { kind: "pass-started", pass: "fix" }, NOW).timeline[0] ?? null;
+
+    const bump = renderBump(
+      record,
+      record.major[0] ?? { at: "", icon: "", text: "" },
+      ["U0ME"],
+      step,
+    );
+
+    const stamp = `<!date^${String(NOW.getTime() / 1000)}^{date_short_pretty} {time}|${NOW.toISOString()}>`;
+    expect(bump.text).toBe(
+      `🙋 *Solve started* — <${URL}|SSX-1 · t> <@U0ME>\n↳ ${stamp}  ▶️ fix started`,
+    );
+  });
+
   it("puts the newest timeline entry first", () => {
     let record = newRecord("SSX-1", "summary", URL);
     record = applyEvent(record, { kind: "triage-started" }, new Date("2026-09-28T10:00:00Z"));
-    record = applyEvent(record, { kind: "claimed", repo: null }, new Date("2026-09-28T11:00:00Z"));
+    record = applyEvent(
+      record,
+      { kind: "pass-started", pass: "recon" },
+      new Date("2026-09-28T11:00:00Z"),
+    );
 
     const timeline = texts(renderRecord(record).blocks).find((text) =>
       text.startsWith("*Timeline*"),
     );
-    expect(timeline?.indexOf("claimed")).toBeLessThan(timeline?.indexOf("triage started") ?? 0);
+    expect(timeline?.indexOf("recon started")).toBeLessThan(
+      timeline?.indexOf("triage started") ?? 0,
+    );
   });
 
   it("lets a crash outrank every other state on the card", () => {

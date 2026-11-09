@@ -1,6 +1,6 @@
 /**
- * Four functions from `solve-run.ts`, tested here because `solve-run.ts` has no general test
- * harness for the rest of its dependencies.
+ * Functions from `solve-run.ts`, tested here because `solve-run.ts` has no general test harness for
+ * the rest of its dependencies. `runWriteRungs` is driven only as far as a run with no pull request.
  *
  * `sleep` runs as a child process because a unit test cannot observe "the event loop stayed
  * alive" from inside a runner that is itself holding the loop open. `createReviewAct`'s
@@ -12,12 +12,19 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fileURLToPath } from "node:url";
 
 import { readSettings } from "../settings.ts";
-import { createReviewAct, keepsEvidence, moveReviewStage, runWriteRungs } from "./solve-run.ts";
-import type { CodeReviewMoveResult, JiraClient } from "../jira/client.ts";
+import {
+  createReviewAct,
+  enterInProgress,
+  keepsEvidence,
+  moveReviewStage,
+  returnFromInProgress,
+  runWriteRungs,
+} from "./solve-run.ts";
+import { STATUS_MOVE_OUTCOMES, type JiraClient, type StatusMoveResult } from "../jira/client.ts";
 import { AGENT_LABELS } from "../solve/labels.ts";
 import type { AdvanceRequest, PendingRound } from "../solve/delivery.ts";
 import type { SolveDependencies } from "../solve/orchestrator.ts";
@@ -326,6 +333,159 @@ describe("runWriteRungs", () => {
   });
 });
 
+/**
+ * A ticket the claim, the ticket reader and both status moves can run against, logging every write
+ * in the order it landed. `fetchDetail` serves the claim's label reads and the solver's ticket read.
+ */
+function lifecycleClient(
+  movedIn: StatusMoveResult["outcome"],
+  failWrite?: number,
+): {
+  client: JiraClient;
+  writes: string[];
+} {
+  let labels: string[] = [AGENT_LABELS.solvable, "svc:somewhere-not-allowed"];
+  const writes: string[] = [];
+  let labelWrites = 0;
+  const client = {
+    fetchDetail: async (key: string) => ({
+      key,
+      summary: "Cache",
+      issueTypeName: "Feil",
+      status: "Prioritized",
+      labels: [...labels],
+      description: undefined,
+      comments: [],
+      attachments: [],
+      url: `https://example.invalid/browse/${key}`,
+    }),
+    updateLabels: async (
+      _key: string,
+      change: { readonly add?: readonly string[]; readonly remove?: readonly string[] },
+    ) => {
+      labelWrites += 1;
+      if (labelWrites === failWrite) {
+        throw new Error("Jira is down");
+      }
+      const add = change.add ?? [];
+      const remove = change.remove ?? [];
+      writes.push(`labels +${add.join(",")} -${remove.join(",")}`);
+      labels = [...labels.filter((label) => !remove.includes(label)), ...add];
+    },
+    moveToInProgress: async () => {
+      writes.push("status in");
+      return { outcome: movedIn, from: "Prioritized" };
+    },
+    moveBackFromInProgress: async () => {
+      writes.push("status back");
+      return { outcome: "moved", from: "Under arbeid" };
+    },
+  } as unknown as JiraClient;
+  return { client, writes };
+}
+
+function quietly(): void {
+  vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+}
+
+describe("runWriteRungs and the ticket's status", () => {
+  const exitCode = process.exitCode;
+  afterEach(() => {
+    process.exitCode = exitCode;
+    vi.restoreAllMocks();
+  });
+
+  it("moves a claimed ticket in progress, and back after the release when no pull request opened", async () => {
+    quietly();
+    const { client, writes } = lifecycleClient("moved");
+    const settings = readSettings({
+      JIRA_EMAIL: "a@b.c",
+      JIRA_AUTH: "placeholder",
+      SOLVE_REPO_ROOT: "/nonexistent",
+      SOLVE_REPOS: "allowed-repo",
+    });
+
+    await runWriteRungs(settings, client, "SSX-1", "solve", null, "named", false);
+
+    expect(writes).toEqual([
+      `labels +${AGENT_LABELS.solving} -`,
+      "status in",
+      // The release: a request refused before any work reached no verdict about the ticket.
+      `labels + -${AGENT_LABELS.solving}`,
+      "status back",
+    ]);
+  });
+
+  it("moves a ticket back when the run throws, too", async () => {
+    quietly();
+    const { client, writes } = lifecycleClient("moved");
+    const settings = readSettings({ JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" });
+
+    await expect(
+      runWriteRungs(settings, client, "SSX-1", "solve", null, "named", false),
+    ).rejects.toThrow(/SOLVE_REPO_ROOT/u);
+    expect(writes.at(-1)).toBe("status back");
+  });
+
+  it("moves a ticket back even when the release itself throws", async () => {
+    quietly();
+    const { client, writes } = lifecycleClient("moved", 2);
+    const settings = readSettings({
+      JIRA_EMAIL: "a@b.c",
+      JIRA_AUTH: "placeholder",
+      SOLVE_REPO_ROOT: "/nonexistent",
+      SOLVE_REPOS: "allowed-repo",
+    });
+
+    await expect(
+      runWriteRungs(settings, client, "SSX-1", "solve", null, "named", false),
+    ).rejects.toThrow();
+    expect(writes).toEqual([`labels +${AGENT_LABELS.solving} -`, "status in", "status back"]);
+  });
+
+  it("never moves back a ticket it did not move in, which somebody else put in progress", async () => {
+    quietly();
+    for (const outcome of STATUS_MOVE_OUTCOMES.filter((kind) => kind !== "moved")) {
+      const { client, writes } = lifecycleClient(outcome);
+      const settings = readSettings({ JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" });
+
+      await expect(
+        runWriteRungs(settings, client, "SSX-1", "solve", null, "named", false),
+      ).rejects.toThrow(/SOLVE_REPO_ROOT/u);
+      expect(writes).not.toContain("status back");
+    }
+  });
+
+  it("moves nothing on the claim rehearsal, which solves nothing", async () => {
+    quietly();
+    const { client, writes } = lifecycleClient("moved");
+    const settings = readSettings({ JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" });
+
+    await runWriteRungs(settings, client, "SSX-1", "claim", null, "named", false).catch(
+      () => undefined,
+    );
+
+    expect(writes.filter((write) => write.startsWith("status"))).toEqual([]);
+  });
+});
+
+describe("enterInProgress and returnFromInProgress", () => {
+  it("never throw, since a status is bookkeeping and the solve goes on without it", async () => {
+    const client = {
+      moveToInProgress: async () => {
+        throw new Error("Jira is down");
+      },
+      moveBackFromInProgress: async () => {
+        throw new Error("Jira is down");
+      },
+    } as unknown as JiraClient;
+
+    await expect(enterInProgress(client, "SSX-1")).resolves.toBe(false);
+    await expect(returnFromInProgress(client, "SSX-1")).resolves.toBeUndefined();
+  });
+});
+
 describe("keepsEvidence", () => {
   it("keeps a refused round's checkout, where the diff the gate judged lives", () => {
     expect(keepsEvidence({ kind: "refused", stage: "diff-gate", reasons: ["pom.xml"] })).toBe(true);
@@ -361,7 +521,7 @@ describe("keepsEvidence", () => {
  */
 function fakeClient(
   initialLabels: readonly string[],
-  moveToCodeReview: (key: string) => Promise<CodeReviewMoveResult> = async () => ({
+  moveToCodeReview: (key: string) => Promise<StatusMoveResult> = async () => ({
     outcome: "disabled",
     from: "",
   }),

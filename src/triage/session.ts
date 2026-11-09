@@ -108,6 +108,14 @@ export class SessionTimeoutError extends SessionError {
   }
 }
 
+/** The caller's signal fired, and the child was killed for it. */
+export class SessionAbortedError extends SessionError {
+  constructor(label: string) {
+    super(`${label} was stopped before it finished`);
+    this.name = "SessionAbortedError";
+  }
+}
+
 export interface McpServerStatus {
   readonly name: string;
   readonly status: string;
@@ -133,6 +141,10 @@ export interface SessionOptions {
   readonly requiredMcpServers: readonly string[];
   /** Used in log lines and error messages, e.g. `Triage of SSX-1234`. */
   readonly label: string;
+  /** Kills the child when it fires. Absent for every pass the daemon lets finish at shutdown. */
+  readonly signal?: AbortSignal;
+  /** Sees every parsed event before the run acts on it. Must not throw: the line reader would log the throw as an unparsed line. */
+  readonly onEvent?: (event: Record<string, unknown>) => void;
 }
 
 /**
@@ -268,6 +280,9 @@ export async function runSession<T>(
   options: SessionOptions,
   parse: (structuredOutput: unknown) => T,
 ): Promise<T> {
+  if (options.signal?.aborted === true) {
+    throw new SessionAbortedError(options.label);
+  }
   return await new Promise<T>((resolve, reject) => {
     const child = spawn(options.executable, [...options.args], {
       cwd: options.workingDirectory,
@@ -293,6 +308,7 @@ export async function runSession<T>(
       }
       settled = true;
       clearInterval(watchdog);
+      options.signal?.removeEventListener("abort", abort);
       if (error !== null) {
         reject(error);
       } else if (value !== undefined) {
@@ -304,6 +320,13 @@ export async function runSession<T>(
       child.kill("SIGKILL");
       finish(new SessionTimeoutError(options.label, kind, elapsedMs, sessionId));
     };
+
+    function abort(): void {
+      child.kill("SIGKILL");
+      log.info("session.aborted", { label: options.label, sessionId });
+      finish(new SessionAbortedError(options.label));
+    }
+    options.signal?.addEventListener("abort", abort, { once: true });
 
     /**
      * The watchdog is also the sleep detector: a suspended machine and a genuinely idle one look
@@ -348,6 +371,7 @@ export async function runSession<T>(
     }, tickMs);
 
     const handleEvent = (event: Record<string, unknown>): void => {
+      options.onEvent?.(event);
       if (event["type"] === "system" && event["subtype"] === "init") {
         const id = event["session_id"];
         if (typeof id === "string" && id !== "") {
