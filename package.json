@@ -26,6 +26,7 @@
     "draft:probe": "node --env-file-if-exists=.env src/cli/draft-probe.ts",
     "daemon:status": "node src/cli/daemon-status.ts",
     "logs": "node src/cli/logs.ts",
+    "presentation": "pnpm --dir presentation install --frozen-lockfile && pnpm --dir presentation build",
     "check-types": "tsc --noEmit",
     "lint": "oxlint",
     "format": "oxfmt",
