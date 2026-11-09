@@ -28,6 +28,16 @@ export interface SlackPostResult extends SlackWriteResult {
   readonly channel: string;
 }
 
+/** One message of a thread; `user` is null for a message a bot or an integration posted. */
+export interface ThreadMessage {
+  readonly ts: string;
+  readonly user: string | null;
+  readonly botId: string | null;
+  readonly text: string;
+}
+
+const THREAD_PAGE_SIZE = 200;
+
 export class SlackError extends Error {
   readonly method: string;
   /** Slack's `error` code, `http_<status>` for a non-JSON failure, or `network`. */
@@ -135,7 +145,7 @@ export class SlackClient {
     readonly text: string;
     readonly botId: string | null;
   } | null> {
-    const body = await this.#call("conversations.replies", {
+    const body = await this.#replies({
       channel: args.channel,
       ts: args.ts,
       limit: 1,
@@ -154,6 +164,54 @@ export class SlackClient {
     };
   }
 
+  /**
+   * Every message in a thread, the top one first, paged to the end; `complete` is false once more
+   * than `max` arrived, and reading stops there. The same scopes as `threadRoot`.
+   */
+  async threadMessages(args: {
+    readonly channel: string;
+    readonly ts: string;
+    readonly max: number;
+  }): Promise<{ readonly messages: readonly ThreadMessage[]; readonly complete: boolean }> {
+    const messages: ThreadMessage[] = [];
+    let cursor: string | undefined;
+    do {
+      const body = await this.#replies({
+        channel: args.channel,
+        ts: args.ts,
+        limit: THREAD_PAGE_SIZE,
+        inclusive: true,
+        cursor,
+      });
+      const page = body["messages"];
+      for (const entry of Array.isArray(page) ? page : []) {
+        const message = record(entry);
+        messages.push({
+          ts: str(message["ts"]),
+          user: optionalStr(message["user"]),
+          botId: optionalStr(message["bot_id"]),
+          text: str(message["text"]),
+        });
+      }
+      if (messages.length > args.max) {
+        return { messages: messages.slice(0, args.max), complete: false };
+      }
+      // Slack ends paging with an empty `next_cursor`, not an absent one.
+      const next = str(record(body["response_metadata"])["next_cursor"]);
+      cursor = next === "" ? undefined : next;
+    } while (cursor !== undefined);
+    return { messages, complete: true };
+  }
+
+  /** The message's link as Slack's Copy link writes it, workspace domain included. */
+  async permalink(args: { readonly channel: string; readonly ts: string }): Promise<string> {
+    const body = await this.#call("chat.getPermalink", {
+      channel: args.channel,
+      message_ts: args.ts,
+    });
+    return str(body["permalink"]);
+  }
+
   /** Only an app-level `xapp-` token may call it, and Slack generates the URL per call, so one per connect. */
   async openConnection(): Promise<string> {
     const body = await this.#call("apps.connections.open", {});
@@ -162,6 +220,22 @@ export class SlackClient {
       throw new SlackError("apps.connections.open", "no_url", "the answer held no wss:// URL");
     }
     return url;
+  }
+
+  /** Slack answers a thread read in a channel the bot has not joined with `not_in_channel` alone. */
+  async #replies(params: Params): Promise<Readonly<Record<string, unknown>>> {
+    try {
+      return await this.#call("conversations.replies", params);
+    } catch (error) {
+      if (error instanceof SlackError && error.code === "not_in_channel") {
+        throw new SlackError(
+          error.method,
+          error.code,
+          "the bot is not a member of that channel: invite it there first",
+        );
+      }
+      throw error;
+    }
   }
 
   /** Form-encoded, objects as JSON strings: the one body shape every Slack method accepts. */

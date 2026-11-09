@@ -50,7 +50,7 @@ const SOLVE_DENIED_COMMON: readonly string[] = [
   "WebFetch",
   "WebSearch",
   "Task",
-  // Whether `--disallowedTools` honours MCP names is UNVERIFIED; listed anyway since an unrecognised name is inert.
+  // `pnpm draft:probe` measured two Atlassian names withheld by the flag; these are the same flag, not each tried.
   "mcp__atlassian__editJiraIssue",
   "mcp__atlassian__addCommentToJiraIssue",
   "mcp__atlassian__createJiraIssue",
@@ -152,7 +152,7 @@ export interface SolveRunOptions {
 
 /** Anything a model would plausibly read as the end of a data block: three or more dashes, either keyword, either block name, tolerant of spacing and case. */
 const DELIMITER_PATTERN =
-  /-{3,}\s*(?:BEGIN|END)\s+(?:TICKET|DIFF|REVIEW|CONFLICT|VERIFICATION FAILURE)\s+DATA\s*-{3,}/gi;
+  /-{3,}\s*(?:BEGIN|END)\s+(?:TICKET|DIFF|REVIEW|CONFLICT|VERIFICATION FAILURE|SLACK\s+THREAD)\s+DATA\s*-{3,}/gi;
 
 /** NUL terminates a C string; `spawn` refuses an argv containing one (`ERR_INVALID_ARG_VALUE`), failing the whole pass since the prompt is one argv element. */
 const ARGV_HOSTILE_PATTERN = /\0/g;
