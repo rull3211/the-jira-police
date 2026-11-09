@@ -84,11 +84,11 @@ export function reviewOutcomeEvents(outcome: AdvanceOutcome): readonly AuditEven
 }
 
 /**
- * The runner's own timeout, local commands included, and what Node's `fetch`, gh and git print when
- * the far end never answered. Matched on text, so a source rewording one makes it a crash again.
+ * What the runner, Node's `fetch`, gh and git print when a remote never answered or its gateway gave
+ * up, local timeouts included; matched on text, so a source rewording one makes it a crash again.
  */
 const NETWORK_FAILURE =
-  /\btimed out\b|aborted due to timeout|fetch failed|error connecting to|\bdial tcp\b|could not resolve host|handshake timeout/iu;
+  /\btimed out\b|aborted due to timeout|fetch failed|error connecting to|\bdial tcp\b|could not resolve host|handshake timeout|\b(?:HTTP|Jira returned) 50[234]\b/iu;
 
 /** A review look, or a round, that threw. Retried every tick, so a network failure must not broadcast. */
 export function reviewFailureEvent(reason: string): AuditEvent {
