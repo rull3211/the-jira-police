@@ -29,6 +29,16 @@
       "rules": {
         "no-console": "off"
       }
+    },
+    {
+      "files": [
+        "presentation/full.en.mjs",
+        "presentation/full.no.mjs",
+        "presentation/simple.en.mjs"
+      ],
+      "rules": {
+        "unicorn/consistent-function-scoping": "off"
+      }
     }
   ]
 }
