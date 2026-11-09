@@ -408,4 +408,14 @@ describe("exitHeld, the ending of solve:once, bot:once, triage:once and recon:on
     ).rejects.toBe(crash);
     expect(process.exitCode).not.toBe(3);
   });
+
+  it.each(["solve-once.ts", "bot-once.ts", "triage-once.ts", "recon-once.ts"])(
+    "is what %s runs its main under",
+    (file) => {
+      // Pinned by text: these modules run `main` on import, so no test can call them.
+      const source = readFileSync(join(import.meta.dirname, file), "utf8");
+
+      expect(source).toContain("await withConfigErrors(() => exitHeld(main));");
+    },
+  );
 });

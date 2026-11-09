@@ -63,6 +63,7 @@ async function main(): Promise<void> {
     skipped: outcome.skipped,
     triaged: outcome.triaged,
     failed: outcome.failed,
+    held: outcome.held,
     abandoned: outcome.abandoned,
     cursor: outcome.state.cursor,
     skill: settings.SKILL_NAME,

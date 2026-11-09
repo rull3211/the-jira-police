@@ -446,8 +446,7 @@ async function gitDiff(
  *
  * `passes.run` throws both on a session timeout/non-zero exit and on
  * `SolveParseError`; an uncaught throw here would take the whole process down
- * and orphan the worktree once the daemon runs unattended. A hold is the one
- * throw meant to get out: it unwinds to the release instead of becoming an outcome.
+ * and orphan the worktree once the daemon runs unattended.
  */
 type PassResult<T> =
   | { readonly ok: true; readonly value: T }
