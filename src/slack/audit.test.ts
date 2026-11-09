@@ -69,6 +69,14 @@ const EVERY_EVENT: Record<
     event: { kind: "crashed", where: "fix pass", message: "error_max_structured_output_retries" },
     bucket: "major",
   },
+  unreachable: {
+    event: {
+      kind: "unreachable",
+      where: "review",
+      message: "gh could not list pull requests (timed out)",
+    },
+    bucket: "timeline",
+  },
 };
 
 function observed(
@@ -189,6 +197,43 @@ describe("applyEvent", () => {
     expect(
       applyEvent(once, { kind: "crashed", where: "fix pass", message: "another" }, NOW).major,
     ).toHaveLength(2);
+  });
+
+  it("leaves a crash on the card standing through a network failure, which says nothing about the ticket", () => {
+    const crashed = applyEvent(BASE, EVERY_EVENT.crashed.event, NOW);
+    const offline = applyEvent(crashed, EVERY_EVENT.unreachable.event, NOW);
+
+    expect(offline.crash).toEqual(crashed.crash);
+    expect(offline.major).toBe(crashed.major);
+    expect(offline.timeline.map((entry) => `${entry.icon} ${entry.text}`)).toEqual([
+      "📡 Network failure in review — gh could not list pull requests (timed out)",
+    ]);
+  });
+
+  it("folds a network failure into a recent one newest on the timeline, whatever its reason", () => {
+    const once = applyEvent(BASE, EVERY_EVENT.unreachable.event, NOW);
+    const other = {
+      kind: "unreachable",
+      where: "review",
+      message: "Request to /rest/api/3/issue/SSX-1 failed: fetch failed",
+    } as const;
+    const minutes = (count: number) => new Date(NOW.getTime() + count * 60_000);
+
+    expect(applyEvent(once, other, minutes(58))).toBe(once);
+
+    const between = applyEvent(once, EVERY_EVENT["review-round"].event, NOW);
+    expect(applyEvent(between, other, NOW).timeline).toHaveLength(3);
+  });
+
+  it("logs a network failure hours after the last as an outage of its own, as SSX-3895's were", () => {
+    const once = applyEvent(BASE, EVERY_EVENT.unreachable.event, NOW);
+    const later = applyEvent(once, EVERY_EVENT.unreachable.event, new Date("2026-09-28T16:25:00Z"));
+
+    expect(later.timeline.map((entry) => entry.at)).toEqual([
+      NOW.toISOString(),
+      "2026-09-28T16:25:00.000Z",
+    ]);
+    expect(later.major).toEqual([]);
   });
 
   it("keeps the newest entries at the caps, and counts what it dropped", () => {

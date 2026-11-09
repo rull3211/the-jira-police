@@ -180,7 +180,7 @@ describe("running a re-triage", () => {
 });
 
 describe("the four refusals, which are the point of the ordering", () => {
-  it("spends nothing when the activity does not answer the sendback", async () => {
+  it("spends nothing when the activity deals with no blocker", async () => {
     const { deps: d, updateLabels, groom } = deps({ answers: false });
 
     const outcome = await runRetriage(d, signals());

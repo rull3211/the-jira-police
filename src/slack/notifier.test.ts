@@ -357,6 +357,35 @@ describe("createAuditNotifier", () => {
     expect(s.saved()?.bump).toBe("b-1");
   });
 
+  it("edits a network failure into the broadcast once per outage, where a crash broadcasts", async () => {
+    const s = store(threaded());
+    const p = publisher();
+    const audit = notifier(s.store, p.publisher);
+    const offline = { kind: "unreachable", where: "review" } as const;
+
+    await audit.record("SSX-1", { kind: "claimed", repo: null });
+    await audit.record("SSX-1", {
+      ...offline,
+      message: "gh could not list pull requests (timed out)",
+    });
+    const folded = await audit.record("SSX-1", { ...offline, message: "fetch failed" });
+    await audit.record("SSX-1", { kind: "crashed", where: "review", message: "HTTP 401" });
+
+    expect(folded.kind).toBe("skipped");
+    expect(p.calls).toEqual([
+      "update ts-0",
+      "broadcast b-1 in ts-0",
+      "update ts-0",
+      "amend b-1 in ts-0",
+      "update ts-0",
+      "broadcast b-2 in ts-0",
+      "remove b-1",
+    ]);
+    expect(p.amends[0]).toMatch(
+      /\n↳ .* 📡 Network failure in review — gh could not list pull requests \(timed out\)$/u,
+    );
+  });
+
   it("edits nothing into a ticket with no broadcast yet", async () => {
     const p = publisher();
 

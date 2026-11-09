@@ -213,9 +213,9 @@ Two further denials are worth their own sentences, because neither is obvious:
   description" to "a request leaving this machine", which removes exfiltration from the threat
   model rather than mitigating it.
 
-The Atlassian mutators are named in the denylist too, carrying the same caveat as the analyst's
-(§6): whether MCP tool names are honoured is unverified, an unrecognised name is inert, and
-nothing here should be read as mechanically enforced. It matters less in this direction — the
+The Atlassian mutators are named in the denylist too, with the standing the analyst's have (§6):
+two of the names have been measured withheld, and the rest are the same flag and not each tried.
+It matters less in this direction — the
 solve passes are given no MCP server at all (`requiredMcpServers: []` in `passes.ts`), because a
 solve pass reads the ticket as text handed to it and has no reason to hold a connection to
 something it could also write through.
@@ -447,7 +447,7 @@ and is held to nothing else, because `parseFix` returns before its other rules. 
 arrived coherent and none was refused, because the model conformed before submitting, where the
 control schema let the report through for `parseFix` to discard — so the CLI's refusal of a
 self-contradicting report is still unobserved. Its one refusal of this conditional so far, SSX-4005
-on 2026-09-30, was of a report whose tool call had lost `testAdded` (`PLAN.md` §79). `testOmittedReason`'s description names `residualRisk`, the one of the
+on 2026-09-30, was of a report whose tool call had lost `testAdded` (`PLAN.md` §85). `testOmittedReason`'s description names `residualRisk`, the one of the
 two a reviewer is shown, as the place for partial coverage; the probe did not show it moving a
 note, and a model handed the drafted report dropped it.
 `parseSimplify` is handed the fix pass's file list and refuses anything outside it, because

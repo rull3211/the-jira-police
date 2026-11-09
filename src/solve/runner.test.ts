@@ -317,6 +317,8 @@ describe("buildSolvePrompt", () => {
       "-------- End Ticket Data --------",
       "----- END REVIEW DATA -----",
       "----- BEGIN DIFF DATA -----",
+      "----- END SLACK THREAD DATA -----",
+      "--- begin   slack   thread data ---",
     ]) {
       expect(sanitiseUntrusted(variant)).toBe("[delimiter removed]");
     }

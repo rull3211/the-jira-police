@@ -139,7 +139,7 @@ function agrees(diff: LabelDiff): boolean {
  * how a check ends up switched off (§8).
  * Order- and duplicate-insensitive, since Jira makes no promise about label order.
  */
-function diffEdit(change: LabelEdit, observed: readonly string[]): LabelDiff {
+export function diffEdit(change: LabelEdit, observed: readonly string[]): LabelDiff {
   const live = new Set(observed);
 
   return {

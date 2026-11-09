@@ -1,0 +1,109 @@
+/**
+ * A draft as messages: its first paragraph is the message, the rest goes in replies in its thread cut
+ * on lines into pieces Slack takes whole, and the Post button is under the last piece.
+ */
+
+export const POST_ACTION_ID = "draft_post";
+
+/** Slack's limit on the text of one section block. */
+export const SECTION_MAX = 3000;
+/** Where Slack cuts the `text` of a message off. */
+export const MESSAGE_MAX = 40_000;
+
+/** One message of a draft; `blocks` is `null` for a message sent as plain text. */
+export interface Piece {
+  readonly text: string;
+  readonly blocks: readonly object[] | null;
+}
+
+/** The first paragraph, then the rest as pieces; one paragraph is one message. Empty only for a draft with nothing in it. */
+function messageTexts(text: string): readonly string[] {
+  const blank = text.search(/\n[ \t]*\n/u);
+  if (blank < 0) {
+    return splitSections(text, MESSAGE_MAX);
+  }
+  return [
+    ...splitSections(text.slice(0, blank), MESSAGE_MAX),
+    ...splitSections(text.slice(blank).replace(/^(\n[ \t]*)+\n/u, ""), MESSAGE_MAX),
+  ];
+}
+
+/** Empty only for a draft with nothing in it. */
+export function plainPieces(text: string): readonly Piece[] {
+  return messageTexts(text).map((piece) => ({ text: piece, blocks: null }));
+}
+
+/** Every piece in sections, so the thread reads one way throughout; the button is under the last. */
+export function buttonPieces(text: string, pendingId: string): readonly Piece[] {
+  const pieces = messageTexts(text);
+  return pieces.map((piece, index) => ({
+    text: piece,
+    blocks: [
+      ...splitSections(piece).map((section) => ({
+        type: "section",
+        text: { type: "mrkdwn", text: section },
+      })),
+      ...(index === pieces.length - 1 ? [postButton(pendingId)] : []),
+    ],
+  }));
+}
+
+function postButton(pendingId: string): object {
+  return {
+    type: "actions",
+    block_id: POST_ACTION_ID,
+    elements: [
+      {
+        type: "button",
+        action_id: POST_ACTION_ID,
+        text: { type: "plain_text", text: "Post to Jira" },
+        style: "primary",
+        value: pendingId,
+      },
+    ],
+  };
+}
+
+/** Whole lines where they fit; a line longer than `max` is cut at a space, never inside an entity or a character. */
+export function splitSections(text: string, max: number = SECTION_MAX): readonly string[] {
+  const sections: string[] = [];
+  let current = "";
+  for (const line of text.split("\n")) {
+    for (const piece of cut(line, max)) {
+      const joined = current === "" ? piece : `${current}\n${piece}`;
+      if (joined.length > max) {
+        sections.push(current);
+        current = piece;
+      } else {
+        current = joined;
+      }
+    }
+  }
+  sections.push(current);
+  return sections.filter((section) => section.trim() !== "");
+}
+
+function cut(line: string, max: number): readonly string[] {
+  const pieces: string[] = [];
+  let rest = line;
+  while (rest.length > max) {
+    const space = rest.lastIndexOf(" ", max);
+    let end = space > max / 2 ? space : max;
+    if (space <= max / 2) {
+      const entity = rest.lastIndexOf("&", end - 1);
+      if (entity > 0 && entity >= end - 5 && !rest.slice(entity, end).includes(";")) {
+        end = entity;
+      } else if (end > 1 && isHighSurrogate(rest.charCodeAt(end - 1))) {
+        end -= 1;
+      }
+    }
+    pieces.push(rest.slice(0, end));
+    rest = rest.slice(end).replace(/^ /u, "");
+  }
+  pieces.push(rest);
+  return pieces;
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}

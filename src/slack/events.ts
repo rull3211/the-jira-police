@@ -83,6 +83,20 @@ export function reviewOutcomeEvents(outcome: AdvanceOutcome): readonly AuditEven
   }
 }
 
+/**
+ * The runner's own timeout, local commands included, and what Node's `fetch`, gh and git print when
+ * the far end never answered. Matched on text, so a source rewording one makes it a crash again.
+ */
+const NETWORK_FAILURE =
+  /\btimed out\b|aborted due to timeout|fetch failed|error connecting to|\bdial tcp\b|could not resolve host|handshake timeout/iu;
+
+/** A review look, or a round, that threw. Retried every tick, so a network failure must not broadcast. */
+export function reviewFailureEvent(reason: string): AuditEvent {
+  return NETWORK_FAILURE.test(reason)
+    ? { kind: "unreachable", where: "review", message: reason }
+    : { kind: "crashed", where: "review", message: reason };
+}
+
 export function prEndedEvent(state: "MERGED" | "CLOSED"): AuditEvent {
   return { kind: "pr-ended", state: state === "MERGED" ? "merged" : "closed" };
 }

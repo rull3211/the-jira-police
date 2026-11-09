@@ -18,7 +18,7 @@ Things that look like details and are not:
    would be a second way to post unchecked.
 3. **Neither the Jira REST credential nor the Slack token ever reaches a model session.**
    `childEnv` in `triage/runner.ts` withholds every `JIRA_` and `SLACK_` variable from each model
-   session, triage and solve passes alike, and the tests asserting their absence are the proof —
+   session, triage, solve and draft sessions alike, and the tests asserting their absence are the proof —
    one per name Slack's own tooling injects, because a denylist naming one token leaks the others.
    A credential written `keychain:<name>` is resolved into the settings object only, so
    `process.env` — which every child inherits — never holds it at all.
@@ -42,9 +42,14 @@ Things that look like details and are not:
    refusal, never a default yes.
 9. **Triage cannot authorise its own downstream work.** It may set `agent:solvable`; `agent:start`
    belongs to a human and the rest of the `agent:` namespace to the solver. Its only input is
-   attacker-controlled ticket text, so this is a boundary rather than a convention.
+   attacker-controlled ticket text, so this is a boundary rather than a convention. The service
+   writes `agent:start`, and takes `agent:failed` off, only when a person asks for it by name:
+   `slack:start --write` at a terminal, or `@Bencebot start` and `clear` in the ticket's thread from
+   someone on `SLACK_START_USERS`, who is the event's `user` as Slack sets it. Nothing a model or a
+   ticket produced reaches that path: no session holds a Slack token (invariant 3), and the bot's
+   own messages raise no mention.
 10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
-    value is missing _or blank_ (`settings.ts:333`) — the two are indistinguishable to it. So a
+    value is missing _or blank_ — the two are indistinguishable to it. So a
     default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
     an operator emptying the allowlist to take the solver off a repository would have it handed
     straight back, revocable only by editing source. It is one of several solve settings with no
@@ -54,7 +59,13 @@ Things that look like details and are not:
     written to — **`SOLVE_GITHUB_OWNER` is the other one**, and carries a second reason of its
     own: an owner inferred from the checkout's remote is correct right up until somebody adds a
     fork as `origin`, at which point a bot opens a pull request against a repository nobody
-    chose. Note this cuts the opposite way from `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
+    chose. `SLACK_START_USERS` names who rather than what — the people whose mention may write
+    `agent:start` — and has no fallback for the same reason; nor has `SLACK_DRAFT_USERS`, the people
+    whose mention may start a paid, read-only draft session over every configured checkout, kept a
+    list of its own because that is not the privilege `agent:start` is. `DRAFT_PROJECTS` names what a draft may
+    be posted to, and has no fallback for the same reason: a default would hand a project back to
+    anyone who had taken it off. Note this cuts the opposite way from
+    `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
     the restriction — the test to apply is not "does it have a default" but "does silence widen
     or narrow what the service may touch."
 11. **A label write names the labels it changes, and nothing else.** Every label edit goes
@@ -327,11 +338,13 @@ Things that look like details and are not:
     not tidiness either — the ordering above is the whole of the safety property, and a safety
     property with no test is a comment.
 
-    The `/bencebot` listener is held to the same rule without being a loop. `createSlackListener`
-    in `src/slack-loop.ts` reads `SLACK_LISTEN` first and returns `null` when it is off; when it is
-    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks; and what it returns resolves
-    rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves the loops
-    running.
+    The Slack listener is held to the same rule without being a loop. `createSlackListener` in
+    `src/slack-loop.ts` reads `SLACK_LISTEN` first and returns `null` when it is off; when it is
+    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks, and so are `SLACK_START_USERS`,
+    `SLACK_DRAFT_USERS` and — once anyone is on either — `SLACK_BOT_TOKEN`; and what it returns
+    resolves rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves
+    the loops running. A draft's session runs off the listener's one promise chain, so minutes of
+    it hold no `/bencebot` back, and the shutdown signal kills it rather than waiting it out.
 
 18. **A property write names a key under `jira-police.`, and nothing else.** The REST credential
     reads and writes a ticket's properties only through `getIssueProperty`, `setIssueProperty` and
@@ -368,3 +381,45 @@ Things that look like details and are not:
       the next event opens a second thread for the ticket.
     - A record save that fails after a broadcast leaves that broadcast in the channel, recorded
       nowhere, so it is never deleted.
+20. **A Jira issue is created by a press on a live listener, once, through a writer that holds one
+    tool.** The press is `createPostHandler` in `slack/post.ts`; only the person who asked for the
+    draft may press, only a project on `DRAFT_PROJECTS` is reached, and the gate is asked again
+    against Jira at the press, since Jira moves between a draft and its press. A dry listener holds
+    no writer at all and writes the request it would make. The writer is `runFiler` in
+    `draft/filer.ts`: a session allowed `createJiraIssue` and nothing else, with the Atlassian
+    mutators the analyst's list names and the file readers denied by name. `pnpm draft:probe`
+    (`draft/probe.ts`) measured that flag removing two such names; a mutator the list does not name is
+    held only by `dontAsk` refusing a tool that is not allowed, which was tried for one. It is told the arguments a person read, never
+    re-runs the drafting session, and is never handed the listener's shutdown signal, so a write
+    that has begun is finished. What it reports is checked against its own tool call, and the issue
+    is read back over REST and compared. The REST credential never creates an issue: every Jira
+    call the service makes on a press is a read. The press is acknowledged in the draft's thread
+    before the writer runs, since a call that takes half a minute looks dead and gets pressed
+    again, and once the key is recorded the link is posted in the thread the draft was asked for
+    in. Both are best effort: a Slack refusal is logged and said in the reply, and changes nothing
+    that was filed. Three writes to the draft's record, in this order, are what keep it from being
+    filed twice:
+    - **The `filing` mark is written before the writer runs.** If it cannot be written, nothing is
+      filed. A draft carrying it is never filed again, whatever happened after, and the reply says
+      an issue may exist and names the summary to search for. Only a call that provably created
+      nothing clears it: a refusal the tool words as a client error (`Bad Request`, `Unauthorized`,
+      `Forbidden`, `Not Found`, `Unprocessable Entity`), a session that made no call, or an
+      Atlassian server that never connected. A writer that threw, called the tool twice, returned
+      no key it can read, returned an error worded any other way, a timeout or a server error
+      among them, or disagrees with its own tool is `unclear`, and the mark stays; its reply is
+      kept in what the person is told.
+    - **The `filed` mark, with the key, is written before the read-back**, so a read that fails or
+      differs cannot lose the key. A second press on a filed draft answers with it.
+    - **A mark that is there and unreadable fails the read of the record**, never reads as absent.
+      What this costs: a draft whose filing was unclear is spent, and re-drafting is the only way on,
+      which includes a draft whose call was refused for want of a grant, since its reply is not a
+      form the classifier reads; the button is not taken off the message after a filing, so a second
+      press only answers; and the body is compared by its words at its start, its end and its
+      size, so a link's address in the first or last sixty characters can read as a difference when
+      nothing is wrong, and a changed middle of the same size reads as a match; a record never
+      expires and carries no version, so a draft kept by an older build files under the rules of
+      whichever build is listening when it is pressed. The marks also hold
+      for one listener at a time: the presses of one process are queued, but the record is read and
+      then rewritten with no check between, so two listeners on one app, a daemon's and a hand-run
+      one among them, can each pass on one draft within the time it takes to ask Jira and post the
+      acknowledgement, and file it twice. Nothing guards that; one listener per app is assumed.

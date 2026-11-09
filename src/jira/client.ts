@@ -183,6 +183,22 @@ export interface IssueDetail {
   readonly url: string;
 }
 
+/** Names exactly as Jira spells them, which is how a draft's component and type are compared. */
+export interface ProjectFacts {
+  readonly components: readonly string[];
+  readonly issueTypes: readonly string[];
+}
+
+/** An issue as it reads back after a filing, to be compared with what was sent. */
+export interface FiledIssue {
+  readonly project: string;
+  readonly issueType: string;
+  readonly summary: string;
+  readonly components: readonly string[];
+  /** ADF. */
+  readonly description: unknown;
+}
+
 /** `elsewhere` is `moveBackFromInProgress` finding the ticket no longer in progress. */
 export const STATUS_MOVE_OUTCOMES = [
   "moved",
@@ -420,6 +436,52 @@ export class JiraClient {
       comments,
       attachments,
       url: `${this.#baseUrl}/browse/${key}`,
+    };
+  }
+
+  /**
+   * What a ticket drafted for `project` may name: its components and the issue types it can be
+   * created as. A subtask type is left out, since one cannot be created without a parent.
+   */
+  async projectFacts(project: string): Promise<ProjectFacts> {
+    assertProjectKey(project);
+    const [components, detail] = await Promise.all([
+      this.#get(`/rest/api/3/project/${project}/components`, "application/json"),
+      this.#get(`/rest/api/3/project/${project}`, "application/json"),
+    ]);
+    const listed = (await components.json()) as unknown;
+    const described = (await detail.json()) as ProjectPayload;
+    return {
+      components: (Array.isArray(listed) ? (listed as readonly { name?: unknown }[]) : [])
+        .map((component) => component.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+      issueTypes: (described.issueTypes ?? [])
+        .filter((type) => type.subtask !== true)
+        .map((type) => type.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+    };
+  }
+
+  /**
+   * The fields a filing sets, read back over REST. A field of the wrong shape reads as empty, which
+   * a comparison then reports as a difference, never as a match.
+   */
+  async fetchFiled(key: string): Promise<FiledIssue> {
+    assertIssueKey(key);
+    const response = await this.#get(
+      `/rest/api/3/issue/${key}?fields=summary,issuetype,project,components,description`,
+      "application/json",
+    );
+    const payload = (await response.json()) as FiledPayload;
+    const f = payload.fields ?? {};
+    return {
+      project: f.project?.key ?? "",
+      issueType: f.issuetype?.name ?? "",
+      summary: f.summary ?? "",
+      components: (Array.isArray(f.components) ? f.components : [])
+        .map((component) => component?.name)
+        .filter((name): name is string => typeof name === "string" && name !== ""),
+      description: f.description,
     };
   }
 
@@ -770,6 +832,22 @@ interface DetailPayload {
     readonly comment?: { readonly comments?: readonly RawComment[] };
     readonly attachment?: readonly RawAttachment[];
   };
+}
+
+/** `GET .../issue/{key}`: only what `fetchFiled` reads of it. */
+interface FiledPayload {
+  readonly fields?: {
+    readonly summary?: string;
+    readonly issuetype?: { readonly name?: string };
+    readonly project?: { readonly key?: string };
+    readonly components?: readonly ({ readonly name?: unknown } | null)[];
+    readonly description?: unknown;
+  };
+}
+
+/** `GET .../project/{key}`: only what `projectFacts` reads of it. */
+interface ProjectPayload {
+  readonly issueTypes?: readonly { readonly name?: unknown; readonly subtask?: unknown }[];
 }
 
 interface RawHistory {
