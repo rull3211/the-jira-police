@@ -50,6 +50,8 @@ export function jqlValue(value: string, label: string): string {
   return /^[0-9]+$/.test(trimmed) ? trimmed : `"${trimmed}"`;
 }
 
+const NOT_IGNORED = `labels NOT IN (${jqlValue(AGENT_LABELS.ignore, "label")})`;
+
 export interface WindowOptions {
   /** ISO-8601 timestamp of the newest issue already processed, or null. */
   readonly cursor: string | null;
@@ -126,6 +128,9 @@ export function buildNewIssuesJql(options: NewIssuesJqlOptions): string {
     clauses.push(`issuetype NOT IN (${ids})`);
   }
 
+  // `IS EMPTY` is load-bearing: with no positive label clause here, a bare `NOT IN` drops every unlabelled ticket.
+  clauses.push(`(labels IS EMPTY OR ${NOT_IGNORED})`);
+
   // Ascending: `client.ts` truncates at `MAX_PAGES`, and this way the unfetched page holds the newest
   // issues, which come back next cycle rather than being lost past the cursor for good.
   return `${clauses.join(" AND ")} ORDER BY created ASC`;
@@ -152,6 +157,7 @@ export function buildInFlightJql(options: InFlightJqlOptions): string {
     clauses.push(`component IN (${values})`);
   }
 
+  // Not `NOT_IGNORED`: a claimed ticket a person has since ignored still holds its slot until the run releases it.
   clauses.push(`labels = ${jqlValue(AGENT_LABELS.solving, "label")}`);
 
   return clauses.join(" AND ");
@@ -169,7 +175,8 @@ export interface ReviewQueueJqlOptions {
  * exactly the ending §6.1 of the plan was written to remove, reintroduced through a label instead of a
  * `return`. No `statusCategory != Done` either — a ticket closed while its pull request is open still
  * needs the look that writes `agent:done`/`agent:closed`; filtering it out would leave the label on it
- * forever, the leak §3c names, arriving through the query instead of the state machine.
+ * forever, the leak §3c names, arriving through the query instead of the state machine. The one exclusion is
+ * `agent:ignore`, a person's hold, which does leave the label standing until they lift it.
  */
 export function buildReviewQueueJql(options: ReviewQueueJqlOptions): string {
   const clauses = [`project = ${assertSafe(options.project, "project")}`];
@@ -183,6 +190,7 @@ export function buildReviewQueueJql(options: ReviewQueueJqlOptions): string {
     .map((label) => jqlValue(label, "label"))
     .join(", ");
   clauses.push(`labels IN (${watched})`);
+  clauses.push(NOT_IGNORED);
 
   return `${clauses.join(" AND ")} ORDER BY updated ASC`;
 }
@@ -197,7 +205,7 @@ export interface SendbackWatchJqlOptions {
  *
  * Deliberately does NOT filter `statusCategory != Done`, though §7c argued it should: a ticket the
  * query cannot see is one nothing can unsubscribe, so excluding closed tickets would leave
- * `agent:watching` on them forever — the same leak `buildReviewQueueJql` refuses above.
+ * `agent:watching` on them forever — the same leak `buildReviewQueueJql` refuses above, except for `agent:ignore`.
  */
 export function buildSendbackWatchJql(options: SendbackWatchJqlOptions): string {
   const clauses = [`project = ${assertSafe(options.project, "project")}`];
@@ -208,6 +216,7 @@ export function buildSendbackWatchJql(options: SendbackWatchJqlOptions): string 
   }
 
   clauses.push(`labels = ${jqlValue(AGENT_LABELS.watching, "label")}`);
+  clauses.push(NOT_IGNORED);
 
   return `${clauses.join(" AND ")} ORDER BY updated ASC`;
 }

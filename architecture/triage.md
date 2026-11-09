@@ -139,7 +139,9 @@ the reason: a ticket body can now talk the skill into putting itself on a watch 
 re-triage runs, and it still cannot talk it into `agent:start`, which costs a pull request. The
 solver's own six — `agent:solving`, `agent:reviewing`, `agent:review-done`, `agent:done`,
 `agent:closed`, `agent:failed` — are excluded for a different reason: the solve queue has no local
-cursor, and its idempotency rests entirely on those labels having one writer.
+cursor, and its idempotency rests entirely on those labels having one writer. `agent:ignore` is
+excluded for a third reason: it is a person's hold, which a ticket body must not be able to ask the
+skill to place or to lift.
 
 ### post — `src/triage/poster.ts`
 
@@ -201,6 +203,17 @@ somebody is actively working. **It cannot be a status category.** Measured again
 `In Progress Concept` is `indeterminate` and is wanted, while `Prioritized` is `new` and is not — so
 the eligible set straddles the taxonomy and the columns have to be named one by one. In the component
 scope this narrows 106 eligible tickets to 65.
+
+**A person's hold, and the one label clause in this query.** A ticket carrying `agent:ignore` is
+not discovered: `(labels IS EMPTY OR labels NOT IN ("agent:ignore"))`. The `IS EMPTY` half is
+load-bearing for the reason the solve queue's section below gives about `NOT IN`, and this query is
+the one with no positive label clause to hide behind — it selects on time, so a bare `NOT IN` would drop
+every ticket nobody has labelled yet, which is nearly every new one. Measured on SSX, 2026-10-27,
+over the tickets created in 30 days: 208 in all, 71 with no labels; `labels NOT IN ("agent:ignore")`
+returned 137, and the two-part form returned all 208. A ticket labelled after the query returned it
+but before its turn — the poller triages one at a time, so it can wait out the backlog ahead of
+it — is stopped by the gate at the top of `createGroom` (invariant 21), and is not marked seen, so
+a ticket whose label comes off while it is still inside the window is triaged then.
 
 **`TRIAGE_STATUS_PRIORITY` is the second status setting, and its blank means "change nothing".**
 It does not select, it orders: an ordered list of statuses, leftmost column first, unlisted last,
@@ -289,7 +302,9 @@ the tickets counting against `MAX_CONCURRENT_SOLVES` are precisely the ones the 
 a bound computed from the queue result would cap claims _per cycle_ and let the next tick start
 another. `buildInFlightJql` deliberately omits `statusCategory != Done` — a solve whose ticket
 someone closed mid-run is still in flight, and **undercounting** a concurrency limit is the
-failure that lets a second claim through. Over-counting only causes waiting.
+failure that lets a second claim through. Over-counting only causes waiting. For the same reason
+it does not exclude `agent:ignore`: a claimed ticket a person has since ignored still holds its
+slot until the run notices and releases it.
 
 **The target repository is read from the ticket, not carried alongside it.** `repoFromLabels`
 reads the existing `svc:<repo>` convention that triage already writes. Every ambiguous reading —
@@ -333,13 +348,21 @@ work, and a pull request waiting on a person is not that — the in-flight set i
 minutes and this one in days. Sharing a query would have made one merge-request-in-review hold the
 only solve slot for as long as a human took to read it.
 
-**No `statusCategory != Done` and no `labels NOT IN (...)`**, and both omissions are arguments —
+**No `statusCategory != Done` and no exclusion of the terminals**, and both omissions are arguments —
 which is the whole of the point, because every other query here settles those two clauses
 differently and none of them is a default. A ticket somebody closed while its pull request was open still has that
 pull request, and the look is what writes `agent:done` or `agent:closed` when it ends — filter the
 ticket out and the label is stranded with nothing that could ever clear it. The terminals are
 written in the same edit that removes the two watched labels, so a ticket carrying one is already
 outside the positive clause, and a second copy of that rule is a second thing to keep in step.
+
+**The one exclusion is `labels NOT IN ("agent:ignore")`, and it is not that rule's second copy.** No
+edit this service makes writes the label, so a ticket carrying it is _not_ already outside the
+positive clause, and nothing else would stop a round on it. It does bring back the stranding the
+paragraph above refuses: a pull request merged while its ticket is ignored keeps `agent:reviewing`
+until the person lifts the hold, and the look that would write `agent:done` runs then. That is the
+cost of leaving a ticket alone completely (invariant 21). The look re-reads the ticket's labels as
+well (`createReviewLook`), since the ticket can be labelled between this query and its turn.
 
 The cycle over that set is a **cheap look for everyone, a paid round for the few**, which is the
 split `surveyReview` made possible (see Delivery). Four rules, each of them a bug avoided:
@@ -397,13 +420,17 @@ looks again — `isUnseen` checks a permanent `seenKeys` list, so a ticket triag
 never re-enter the grooming poller. The watch is the subscription that closes that.
 
 ```
-project = SSX AND component IN (...) AND labels = "agent:watching" ORDER BY updated ASC
+project = SSX AND component IN (...) AND labels = "agent:watching" AND labels NOT IN ("agent:ignore") ORDER BY updated ASC
 ```
 
-**No `statusCategory != Done` and no `labels NOT IN (...)`**, for the review queue's reasons
+**No `statusCategory != Done`, and no exclusion of the terminals**, for the review queue's reasons
 arriving through the same clauses: excluding closed tickets would strand `agent:watching` on them
 forever, and a ticket that has moved on already lost the label in the same edit that wrote whatever
-replaced it. A closed ticket here is a look that decides "unsubscribe" and pays for nothing.
+replaced it. A closed ticket here is a look that decides "unsubscribe" and pays for nothing. The
+one exclusion is `agent:ignore`, for the review queue's reason, and with its cost: an ignored
+ticket is neither unsubscribed nor commented on when it closes, so its `agent:watching` stands
+until the hold is lifted. `runWatchSweep` re-reads the labels off the activity it has just fetched
+and counts the ticket as `held`, which covers one labelled after this query ran.
 
 **This is the one loop in the service that spends money with nobody having asked for anything**,
 and every module in `src/watch/` is shaped by that. The others spend because a ticket was labelled,

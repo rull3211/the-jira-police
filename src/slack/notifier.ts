@@ -8,6 +8,7 @@
  */
 
 import { createLogger } from "../logger.ts";
+import { type WriteGate, mayWrite } from "../solve/hold.ts";
 import type { PassRunner } from "../solve/orchestrator.ts";
 import {
   AUDIT_PROPERTY,
@@ -54,6 +55,8 @@ export interface NotifierDeps {
   readonly lookup?: (key: string) => Promise<TicketFacts>;
   /** Who each broadcast mentions; read per broadcast, so a `/bencebot` change applies at the next one. */
   readonly subscribers?: () => Promise<readonly string[]>;
+  /** Required: a notifier built without one would post for a ticket a person has taken back. */
+  readonly gate: WriteGate;
   readonly now?: () => Date;
 }
 
@@ -73,6 +76,10 @@ export function createAuditNotifier(deps: NotifierDeps): AuditNotifier {
     const previous = queues.get(key) ?? Promise.resolve();
     const next = previous.then(async (): Promise<AuditOutcome> => {
       try {
+        // Inside the queue, so the answer is read when this post would be made and not when it was asked for.
+        if (!(await mayWrite(deps.gate, key, `the audit thread (${label})`))) {
+          return { kind: "skipped", reason: `${key} is held: nothing is posted for it` };
+        }
         return await work();
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);

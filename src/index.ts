@@ -148,11 +148,13 @@ async function main(): Promise<void> {
           skipped: outcome.skipped,
           triaged: outcome.triaged,
           failed: outcome.failed,
+          held: outcome.held,
           abandoned: outcome.abandoned,
           cursor: outcome.state.cursor,
         },
         // `found`/`skipped` aren't news: most cycles see everything and change nothing.
-        // Only spending something (a triage, a failure, an abandonment) is news.
+        // Only spending something (a triage, a failure, an abandonment) is news; a held ticket is
+        // already its own `poll.issue_held` line.
         {
           quiet: outcome.triaged === 0 && outcome.failed === 0 && outcome.abandoned === 0,
         },

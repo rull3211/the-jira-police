@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { SlackError } from "./client.ts";
-import { dryDelivery, prLineSender, slackDelivery } from "./pr-line.ts";
+import { dryDelivery, gatePrLine, prLineSender, slackDelivery } from "./pr-line.ts";
 
 const LINE = "<https://github.com/o/r/pull/7|PR-Bencebot> Fiks på cache eviction";
 
@@ -25,6 +25,55 @@ describe("prLineSender", () => {
       kind: "failed",
       reason: "Slack chat.postMessage failed: missing_scope — needs scope im:write",
     });
+  });
+});
+
+describe("gatePrLine", () => {
+  it("sends the line when the ticket is clear", async () => {
+    const sent: string[] = [];
+    const sender = gatePrLine(
+      prLineSender(async (_key, line) => {
+        sent.push(line);
+        return "ts-1";
+      }),
+      async () => true,
+    );
+
+    expect(await sender.send("SSX-1", LINE)).toEqual({ kind: "sent", ts: "ts-1" });
+    expect(sent).toEqual([LINE]);
+  });
+
+  it("sends nothing for a ticket a person has labelled agent:ignore, and says it skipped", async () => {
+    // Unplug the gate and the direct message goes out for a pull request nobody was meant to be told about.
+    const sent: string[] = [];
+    const sender = gatePrLine(
+      prLineSender(async (_key, line) => {
+        sent.push(line);
+        return "ts-1";
+      }),
+      async () => false,
+    );
+
+    expect(await sender.send("SSX-1", LINE)).toEqual({
+      kind: "skipped",
+      reason: "SSX-1 is held",
+    });
+    expect(sent).toEqual([]);
+  });
+
+  it("asks about the ticket the line is for", async () => {
+    const asked: string[] = [];
+    const sender = gatePrLine(
+      prLineSender(async () => "ts-1"),
+      async (key) => {
+        asked.push(key);
+        return true;
+      },
+    );
+
+    await sender.send("SSX-12", LINE);
+
+    expect(asked).toEqual(["SSX-12"]);
   });
 });
 

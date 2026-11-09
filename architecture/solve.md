@@ -19,7 +19,9 @@ of what is left is worth stating precisely rather than as "mostly done". **`adva
 the reviewer stops or a bound fires. **The label state machine is wired too**, since 2026-09-05:
 nothing on the solve path is moved by hand any more. A ticket goes
 `agent:solving → agent:reviewing → agent:review-done` and ends on `agent:done`, `agent:closed` or
-`agent:failed`, and every outcome that spent a claim says so on the ticket.
+`agent:failed`, and every outcome that spent a claim says so on the ticket. A person's
+`agent:ignore` is outside that machine, and stops a run at the next place it would write
+(`A ticket a person has taken back`, below).
 
 **The Jira status field optionally follows the same lifecycle, at three points.** The claim moves
 the ticket to `SOLVE_IN_PROGRESS_STATUS` (`enterInProgress` in `src/cli/solve-run.ts`, straight
@@ -1314,6 +1316,54 @@ the unwatched-phrase sweep that exists to catch facts nobody declared — the sw
 and the checker's are the same blind spot, so neither covers the other. The third is that a claim
 about a count is the cheap half: the table above it was also short a row, and no counter would have
 said so.
+
+### A ticket a person has taken back
+
+`agent:ignore` is not a state of the machine above: nothing here writes it and nothing here lifts
+it. `architecture/invariants.md` §14 (invariant 21) has the contract; this is what it looks like on
+the solve path, in the order a run meets it.
+
+- **Before a claim.** The solve queue excludes it, and `eligibility` refuses it for every authority,
+  so `solve:once KEY` and `@Bencebot start` on an ignored ticket are refused, naming the label. A
+  typed key says "may this run", never "may this be touched".
+- **During the passes.** `createSolveRunDeps` wraps the pass runner in `gatePasses`, outermost, so a
+  pass that will not run is not announced either. Before each pass it reads the labels; after each
+  one it reads them again, and a label that arrived meanwhile discards that pass's result rather than
+  carrying it into a push. The check throws `TicketHeldError`, and `runPass` is the one place that
+  would have turned a throw into a `crashed` outcome — it lets this one out instead. It unwinds
+  through `solveTicket`'s `finally` (which removes only the staged skill root) to `runWriteRungs`:
+  no `crashed` entry on the audit thread, and the `finally` releases the claim as it does for any
+  run that reached no verdict — `agent:start` restored, the status moved back — written as a delta,
+  so the person's label is never part of what is undone. `runSolveClaims` logs it as
+  `solve.claim.dropped`, at information, and goes on to the next ticket.
+- **Before the publish.** Verification can take minutes after the last pass, so `publish` asks once
+  more before its commit and push.
+- **After a pull request exists.** Nothing is undone: it is left as it is, a draft. The audit post
+  and the direct message skip, the labels still move to `agent:reviewing` (the run's own
+  bookkeeping, and what lets the claim go), and the review queue no longer offers the ticket. If the
+  hold comes off, rounds resume.
+
+**Rounds follow the same rule at the places a round writes.** `advance` checks before the survey
+(which can undraft), before the attach (which can push a base merge) and before recording a failed
+start. The daemon splits that across its two halves: `createReviewLook` throws on the labels it has
+just read, ahead of the survey, and `createReviewAct` checks before the attach and before a failed
+start. `runRound` and `runMergeRound` check before
+reserving, so a held ticket is not charged a round it never ran, and `runRound` checks again after
+the pass and its verification, ahead of the push, the replies, the comment, the re-request and the
+undraft. A hold after the reservation spends that round and leaves it unlanded, which the survey
+reads as "not finished" (`Last landed`), so nothing hands the pull request over as ready on the
+strength of it. The merge round aborts the merge it began, before the commit.
+
+**What a person sees is nothing**, on the ticket, the thread and the pull request, and that is the
+design: a note saying "I stopped" is a write to a ticket they asked to be left alone. The log is the
+record — `labels.write_held`, naming where and why (`warn` when the read failed), then
+`solve.claim.dropped`, an `unlooked` review entry, `poll.issue_held` or a `held` watch count.
+
+**What it leaves behind.** A dropped solve leaves its worktree and branch where a crashed run leaves
+them; `removeWorktree` never forces, so nothing deletes them, and the next solve of that ticket
+salvages the checkout. A hold in the middle of a round leaves the worktree kept as evidence, as any
+throw does (`createReviewAct`). The hand-driven `--advance` refuses a held ticket outright (exit 3),
+and reports a hold that arrives mid-round with the same exit code and the checkout kept.
 
 ### What is inert, and why that is the plan
 

@@ -55,6 +55,7 @@ import {
   resolveConflict,
   resolveReview,
 } from "./orchestrator.ts";
+import { assertMayWrite } from "./hold.ts";
 import { type ReviewRepairRecord, recordReviewRepairRound } from "./repair-ledger.ts";
 import type { CommitMessage, ReviewReport, SilentComment, ThreadAnswer } from "./runner.ts";
 import { quietFor } from "./silence.ts";
@@ -110,6 +111,9 @@ export async function publish(
 ): Promise<PublishOutcome> {
   const { commands } = deps;
   const { worktree, repo, timeoutMs } = request;
+
+  // Before the push, the first thing here anyone else can see; the verification this follows can take minutes.
+  await assertMayWrite(deps.gate, worktree.issueKey, "the publish");
 
   const committed = await commitAll(commands, {
     worktreePath: worktree.path,
@@ -857,15 +861,20 @@ export async function advance(
   deps: SolveDependencies,
   request: AdvanceRequest,
 ): Promise<AdvanceOutcome> {
+  // A survey that finds a finished pull request undrafts it, which is a write.
+  await assertMayWrite(deps.gate, request.issueKey, "surveying the pull request");
   const surveyed = await surveyReview(deps.commands, request);
   if (surveyed.outcome === "settled") {
     return surveyed.result;
   }
 
+  // Before the attach: it can push a base merge to the branch.
+  await assertMayWrite(deps.gate, request.issueKey, "attaching the round's checkout");
   const attached = await request.attach();
   if (attached.outcome === "refused") {
     // Before the reservation, so no *round* has been counted, only the attempt — the
     // only counting that happens on this side of the reservation.
+    await assertMayWrite(deps.gate, request.issueKey, "recording the failed start");
     return await recordFailedStart(deps.commands, request, surveyed.pending, attached.reason);
   }
   if (attached.outcome === "conflicted") {
@@ -915,6 +924,8 @@ export async function runMergeRound(
       `round ${String(round + 1)} — merge, ${String(conflict.behind)} commit(s) behind ${request.baseRef} and conflicting in ${conflict.files.join(", ")}`,
     ],
   };
+  // Before the reservation, so a held ticket is not charged a round it never ran.
+  await assertMayWrite(deps.gate, issueKey, "reserving the merge round");
   const reserved = await reserve(commands, {
     ...target,
     marker: reservation,
@@ -1030,6 +1041,8 @@ export async function runRound(
   };
   // The reservation comes before the pass on purpose: writing it afterwards means a
   // failed write hands back a free round every tick, the runaway this mechanism closes.
+  // The hold is checked first, so a held ticket is not charged a round it never ran.
+  await assertMayWrite(deps.gate, issueKey, "reserving the round");
   const reserved = await reserve(commands, {
     ...gh,
     marker: reservation,
@@ -1049,6 +1062,9 @@ export async function runRound(
     members: memberSources(comments, threads),
     silenceable: silenceable(comments),
   });
+  // Before anything below reaches the pull request: the pass and its verification take minutes, and every
+  // outcome from here on posts, pushes or replies.
+  await assertMayWrite(deps.gate, issueKey, "answering the round");
   const silences = silenceLines(round + 1, resolved.report?.silent ?? [], comments);
   const closing: Marker = { ...reservation, rounds: [...reservation.rounds, ...silences] };
   const landed = async (): Promise<void> =>

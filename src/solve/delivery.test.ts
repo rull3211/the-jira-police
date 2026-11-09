@@ -14,6 +14,7 @@ import {
   reviewerComments,
   unansweredThreads,
 } from "./delivery.ts";
+import { TicketHeldError, gatePasses } from "./hold.ts";
 import { BOT_PREFIX, MARKER_PREFIX, NEVER_READ, parseMarker } from "./marker.ts";
 import type { PassRunner, SolveDependencies } from "./orchestrator.ts";
 import {
@@ -443,7 +444,7 @@ function harness(
     },
   };
 
-  return { deps: { commands, passes }, calls, seen };
+  return { deps: { commands, passes, gate: async () => true }, calls, seen };
 }
 
 /** Matches the first time only, so a two-state git read (e.g. `--diff-filter=U` before and after a merge round) can be scripted. */
@@ -2854,5 +2855,259 @@ describe("a comment left unanswered", () => {
       expect.objectContaining({ round: 1, reason: expect.stringContaining("HTTP 502") }),
     );
     warn.mockRestore();
+  });
+});
+
+/** A gate that clears every write except those at the places named. */
+const holdingAt =
+  (...places: readonly string[]) =>
+  async (_key: string, where: string): Promise<boolean> =>
+    !places.includes(where);
+
+describe("a ticket a person has labelled agent:ignore", () => {
+  /** The marker, the replies, the push, the re-request and the undraft: everything a round does to the pull request. */
+  const touchedPullRequest = (h: Harness): boolean =>
+    ran(h, "push") ||
+    ran(h, "pr", "edit") ||
+    ran(h, "pr", "ready") ||
+    markerWritten(h) ||
+    posts(h).length > 0 ||
+    replies(h).length > 0;
+
+  describe("publish", () => {
+    it("neither commits, pushes nor opens a pull request", async () => {
+      const h = harness();
+
+      await expect(
+        publish({ ...h.deps, gate: holdingAt("the publish") }, publishRequest),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      // Unplug the check at the top of `publish` and the push goes through.
+      expect(ran(h, "commit")).toBe(false);
+      expect(ran(h, "push")).toBe(false);
+      expect(ran(h, "pr", "create")).toBe(false);
+    });
+
+    it("asks about the ticket the worktree belongs to", async () => {
+      const h = harness();
+      const questions: string[] = [];
+
+      await publish(
+        {
+          ...h.deps,
+          gate: async (key) => {
+            questions.push(key);
+            return true;
+          },
+        },
+        publishRequest,
+      );
+
+      expect(questions).toEqual(["SSX-3822"]);
+    });
+  });
+
+  describe("advance", () => {
+    it("does not undraft a finished pull request, which the survey would otherwise do", async () => {
+      const finished: Rule = {
+        match: saw("pr", "view"),
+        reply: {
+          stdout: JSON.stringify({
+            state: "OPEN",
+            isDraft: true,
+            createdAt: "2026-09-05T09:00:00Z",
+            reviews: [{ author: { login: "copilot" }, body: "" }],
+            comments: [],
+            reviewRequests: [],
+          }),
+        },
+      };
+      const h = harness({}, [finished]);
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("surveying the pull request") }, advanceRequest),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(ran(h, "pr", "ready")).toBe(false);
+      expect(h.calls).toEqual([]);
+    });
+
+    it("does not cut a checkout, which can push a base merge to the branch", async () => {
+      const attach = vi.fn(advanceRequest.attach);
+      const h = harness({ review: review() });
+
+      await expect(
+        advance(
+          { ...h.deps, gate: holdingAt("attaching the round's checkout") },
+          { ...advanceRequest, attach },
+        ),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(attach).not.toHaveBeenCalled();
+      expect(touchedPullRequest(h)).toBe(false);
+      expect(h.seen).toEqual([]);
+    });
+
+    it("does not record a failed start on a ticket that is held", async () => {
+      const h = harness({}, [
+        board({ count: 0, reviewerCount: 0, reviews: [fromHuman("please fix this")] }),
+      ]);
+
+      await expect(
+        advance(
+          { ...h.deps, gate: holdingAt("recording the failed start") },
+          { ...advanceRequest, attach: () => Promise.resolve(refusedCheckout) },
+        ),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(markerWritten(h)).toBe(false);
+    });
+
+    it("does not reserve a round, so a held ticket is not charged one it never ran", async () => {
+      const h = harness({ review: review() });
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("reserving the round") }, advanceRequest),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      // The reservation is the first write of a round, and it is what spends one.
+      expect(markerWritten(h)).toBe(false);
+      expect(h.seen).toEqual([]);
+    });
+
+    it("drops a round whose ticket was labelled while the pass ran", async () => {
+      const h = harness({ review: review() });
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("answering the round") }, advanceRequest),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      // The pass ran and the round was reserved: that spend is real. What must not follow is any of its output.
+      expect(h.seen.map((run) => run.pass)).toEqual(["review"]);
+      expect(markerWrites(h)).toHaveLength(1);
+      expect(ran(h, "push")).toBe(false);
+      expect(ran(h, "pr", "edit")).toBe(false);
+      expect(ran(h, "pr", "ready")).toBe(false);
+      expect(replies(h)).toEqual([]);
+      expect(posts(h).filter((body) => !body.startsWith(MARKER_PREFIX))).toEqual([]);
+    });
+
+    it("drops a round that changed nothing and would only have replied and undrafted", async () => {
+      const h = harness({ review: review({ changed: false }) });
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("answering the round") }, advanceRequest),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(ran(h, "pr", "ready")).toBe(false);
+      expect(replies(h)).toEqual([]);
+    });
+
+    it("leaves the round unlanded, so the survey does not hand the pull request over as finished", async () => {
+      const h = harness({ review: review() });
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("answering the round") }, advanceRequest),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      // The reservation says round 1 is under way and `landed` stays where it was; a landing is only written after the answers are public.
+      expect(markerWrites(h)).toEqual([expect.stringContaining("Last landed: 0")]);
+    });
+
+    it("runs a round in full when nothing holds the ticket", async () => {
+      // The control for the tests above: the same request, gated open, does all of it.
+      const h = harness({ review: review() });
+
+      const outcome = await advance({ ...h.deps, gate: holdingAt() }, advanceRequest);
+
+      expect(outcome).toMatchObject({ kind: "iterated", pushed: true });
+      expect(touchedPullRequest(h)).toBe(true);
+    });
+  });
+
+  describe("a merge round", () => {
+    const CONFLICTED_FILE = "src/utils/DateUtils.ts";
+    const conflicted: AdvanceRequest = {
+      ...advanceRequest,
+      attach: () =>
+        Promise.resolve({
+          outcome: "conflicted",
+          worktree,
+          behind: 7,
+          files: [CONFLICTED_FILE],
+        } as const),
+    };
+    const WAITING = dated("this still allocates on every render", "2026-09-05T10:00:00Z");
+    const BEHIND_BY_SEVEN: Rule = { match: saw("rev-list", "--count"), reply: { stdout: "7\n" } };
+    const MERGE_REPORT = {
+      resolved: true,
+      resolutions: [{ path: CONFLICTED_FILE, took: "both", why: "kept both sides" }],
+      summary: "merged origin/main",
+      abandoned: "",
+      injectionNoticed: "",
+    };
+    /** A function, not a constant: `once` spends itself, so a list shared between tests is spent by the first. */
+    const conflicting = (): readonly Rule[] => [
+      board({ count: 0, reviewerCount: 0, reviews: [WAITING] }),
+      BEHIND_BY_SEVEN,
+      { match: saw("merge", "--no-edit"), reply: { exitCode: 1, stderr: "CONFLICT (content)" } },
+      { match: once(saw("--diff-filter=U")), reply: { stdout: `${CONFLICTED_FILE}\n` } },
+      { match: saw("grep"), reply: { exitCode: 1 } },
+    ];
+
+    it("does not reserve the round, or touch the branch", async () => {
+      const h = harness({}, [
+        board({ count: 0, reviewerCount: 0, reviews: [WAITING] }),
+        BEHIND_BY_SEVEN,
+      ]);
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("reserving the merge round") }, conflicted),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(markerWritten(h)).toBe(false);
+      expect(ran(h, "merge")).toBe(false);
+      expect(ran(h, "push")).toBe(false);
+    });
+
+    it("does not push a merge that went in clean", async () => {
+      const h = harness({}, [
+        board({ count: 0, reviewerCount: 0, reviews: [WAITING] }),
+        BEHIND_BY_SEVEN,
+      ]);
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("the merge push") }, conflicted),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(ran(h, "push")).toBe(false);
+    });
+
+    it("aborts the merge in progress when the pass is stopped, so the checkout is not left half-merged", async () => {
+      const h = harness({ merge: MERGE_REPORT }, conflicting());
+      const stopping = gatePasses(h.deps.passes, holdingAt("before the merge pass"));
+
+      await expect(advance({ ...h.deps, passes: stopping }, conflicted)).rejects.toBeInstanceOf(
+        TicketHeldError,
+      );
+
+      expect(h.seen).toEqual([]);
+      expect(ran(h, "merge", "--abort")).toBe(true);
+      expect(ran(h, "push")).toBe(false);
+    });
+
+    it("aborts the merge, and does not commit or push it, when the ticket is held after verification", async () => {
+      const h = harness({ merge: MERGE_REPORT }, conflicting());
+
+      await expect(
+        advance({ ...h.deps, gate: holdingAt("the merge push") }, conflicted),
+      ).rejects.toBeInstanceOf(TicketHeldError);
+
+      // The pass ran and its result was accepted; only the write is held, and the merge it would have committed is undone.
+      expect(h.seen.map((run) => run.pass)).toEqual(["merge"]);
+      expect(ran(h, "merge", "--abort")).toBe(true);
+      expect(ran(h, "commit")).toBe(false);
+      expect(ran(h, "push")).toBe(false);
+    });
   });
 });

@@ -9,6 +9,7 @@ import {
   claimTransition,
   completionTransition,
   eligibility,
+  isIgnored,
   isNoopEdit,
   isTerminal,
   labelEdit,
@@ -99,6 +100,26 @@ describe("eligibility", () => {
     expect(eligibility([...AUTHORISED, AGENT_LABELS.reviewDone], "manual").eligible).toBe(false);
   });
 
+  it.each<ClaimAuthority>(["manual", "auto", "named"])(
+    "refuses a ticket a person labelled agent:ignore, under the %s authority",
+    (authority) => {
+      // An operator typing the key is still not a person lifting the hold: `named` answers "may this run", not "may this be touched".
+      const verdict = eligibility([...AUTHORISED, AGENT_LABELS.ignore], authority);
+      expect(verdict.eligible).toBe(false);
+      expect(verdict).toMatchObject({ reason: expect.stringContaining("agent:ignore") });
+    },
+  );
+
+  it("refuses an ignored ticket whose label was typed in another case", () => {
+    expect(eligibility([...AUTHORISED, "Agent:Ignore"], "named").eligible).toBe(false);
+  });
+
+  it("refuses to build a claim on an ignored ticket, so a caller with a stale check finds out here", () => {
+    expect(() => claimTransition([...AUTHORISED, AGENT_LABELS.ignore], "manual")).toThrow(
+      LabelStateError,
+    );
+  });
+
   it("refuses a claim on every label the queue query excludes", () => {
     // The local check decides; the query is an optimisation — anything the query filters must also be refused here.
     for (const blocker of SOLVE_QUEUE_EXCLUDED_LABELS) {
@@ -112,6 +133,24 @@ describe("eligibility", () => {
     expect(verdict).toMatchObject({
       reason: expect.stringContaining("agent:solving, agent:done"),
     });
+  });
+});
+
+describe("isIgnored", () => {
+  it("is true for exactly the one label", () => {
+    expect(isIgnored([AGENT_LABELS.solvable, AGENT_LABELS.ignore])).toBe(true);
+    expect(isIgnored([AGENT_LABELS.solvable, AGENT_LABELS.start, AGENT_LABELS.failed])).toBe(false);
+    expect(isIgnored([])).toBe(false);
+  });
+
+  it("is not fooled by a label that merely contains the name", () => {
+    expect(isIgnored(["agent:ignored", "agent:ignore-me", "ignore", "agent: ignore"])).toBe(false);
+  });
+
+  it("reads a hand-typed case as the same label, because JQL does", () => {
+    // An exact match would let a ticket every queue skips be worked on by a run that already held it.
+    expect(isIgnored(["Agent:Ignore"])).toBe(true);
+    expect(isIgnored(["AGENT:IGNORE"])).toBe(true);
   });
 });
 

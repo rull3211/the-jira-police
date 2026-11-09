@@ -441,6 +441,18 @@ describe("the agent: namespace, which triage only partly owns", () => {
     expect(violations(input).join(" ")).toContain("agent:start is a human's authorisation");
   });
 
+  it("refuses to add or remove agent:ignore, which only a person writes", () => {
+    // A ticket body could ask the skill to ignore a ticket, or to lift a person's hold; neither is triage's to say.
+    const adding = payload({
+      labels: ["dor:gaps", "route:ours", "agent:ignore"],
+      mutation: mutation({ labelsAdd: ["agent:ignore"] }),
+    });
+    const removing = payload({ mutation: mutation({ labelsRemove: ["agent:ignore"] }) });
+
+    expect(violations(adding).join(" ")).toContain('"agent:ignore"');
+    expect(violations(removing).join(" ")).toContain('"agent:ignore"');
+  });
+
   it.each(["agent:solving", "agent:done", "agent:failed"])(
     "refuses to remove the solver's own %s",
     (label) => {

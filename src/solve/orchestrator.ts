@@ -49,6 +49,7 @@ import {
   plannedPathRefusals,
 } from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
+import { TicketHeldError, type WriteGate, assertMayWrite } from "./hold.ts";
 import { type BotIdentity, type CommitResult, commitAll } from "./pr.ts";
 import {
   type AbandonCause,
@@ -102,6 +103,8 @@ export interface PassRunner {
 export interface SolveDependencies {
   readonly commands: CommandRunner;
   readonly passes: PassRunner;
+  /** Required, not optional: an optional guard is one a caller leaves off by not mentioning it. See `hold.ts`. */
+  readonly gate: WriteGate;
 }
 
 export interface SolveRequest {
@@ -439,11 +442,12 @@ async function gitDiff(
 }
 
 /**
- * A pass that ran, or the reason it did not — never an exception.
+ * A pass that ran, or the reason it did not — never an exception, except a `TicketHeldError`.
  *
  * `passes.run` throws both on a session timeout/non-zero exit and on
  * `SolveParseError`; an uncaught throw here would take the whole process down
- * and orphan the worktree once the daemon runs unattended.
+ * and orphan the worktree once the daemon runs unattended. A hold is the one
+ * throw meant to get out: it unwinds to the release instead of becoming an outcome.
  */
 type PassResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -458,7 +462,7 @@ function crashed(issueKey: string, pass: Pass, reason: string, worktree: Worktre
   return { kind: "crashed", pass, reason, worktree };
 }
 
-/** Never lets a pass throw past it. */
+/** Never lets a pass throw past it, except a hold: a ticket a person has taken back is not a crashed pass, and must not be reported as one. */
 async function runPass<T>(
   passes: PassRunner,
   pass: Pass,
@@ -468,6 +472,9 @@ async function runPass<T>(
   try {
     return { ok: true, value: await passes.run(pass, options, parse) };
   } catch (error) {
+    if (error instanceof TicketHeldError) {
+      throw error;
+    }
     // The message only — a stack trace would be the harness's own frames, and this string reaches a ticket comment.
     const reason = error instanceof Error ? error.message : String(error);
     return { ok: false, reason };
@@ -1362,6 +1369,7 @@ async function runConflictRound(
   }
   if (started.outcome === "merged") {
     // Conflicted on the attach path but not now, since the base moved between the two; push and spend nothing else.
+    await assertMayWrite(deps.gate, issueKey, "the merge push");
     const pushed = await pushBranch(commands, sync);
     return pushed.outcome === "pushed"
       ? { kind: "merged", behind: started.behind }
@@ -1375,19 +1383,33 @@ async function runConflictRound(
     return outcome;
   };
 
-  const mergeRun = await runPass(
-    passes,
-    "merge",
-    {
-      issueKey,
-      worktreePath: worktree.path,
-      ticket: request.ticket,
-      conflict: renderConflict(request.baseRef, behind, files),
-      skillRootPath,
-      ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
-      ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
-    },
-    (output) => parseMerge(output, issueKey),
+  /** A hold unwinds, so it has to take the merge in progress with it rather than leave the checkout half-merged. */
+  const unlessHeld = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof TicketHeldError) {
+        await abortMerge(commands, worktree.path, request.gitTimeoutMs);
+      }
+      throw error;
+    }
+  };
+
+  const mergeRun = await unlessHeld(() =>
+    runPass(
+      passes,
+      "merge",
+      {
+        issueKey,
+        worktreePath: worktree.path,
+        ticket: request.ticket,
+        conflict: renderConflict(request.baseRef, behind, files),
+        skillRootPath,
+        ...(request.vaultPath === undefined ? {} : { vaultPath: request.vaultPath }),
+        ...(request.readDirs === undefined ? {} : { readDirs: request.readDirs }),
+      },
+      (output) => parseMerge(output, issueKey),
+    ),
   );
   if (!mergeRun.ok) {
     log.info("solve.crashed", {
@@ -1437,6 +1459,9 @@ async function runConflictRound(
     // Aborted rather than pushed: a red merge commit replaces a problem a reviewer can see with one they cannot.
     return await undo({ kind: "failed", reason: verification.reason, verification });
   }
+
+  // Before the commit, while `merge --abort` still has a merge to abort.
+  await unlessHeld(() => assertMayWrite(deps.gate, issueKey, "the merge push"));
 
   const committed = await commitMerge(commands, sync);
   if (failed(committed)) {

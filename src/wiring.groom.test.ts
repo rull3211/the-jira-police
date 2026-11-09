@@ -10,9 +10,10 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TicketRef } from "./jira/types.ts";
+import { TicketHeldError } from "./solve/hold.ts";
 import { FOOTER_SENTINEL } from "./triage/gate.ts";
 import type { Mutation, TriagePayload } from "./triage/runner.ts";
 
@@ -109,7 +110,21 @@ function settings(overrides: Partial<Record<string, string>> = {}) {
   });
 }
 
+/** What Jira says the ticket's labels are right now; the real gate reads it through `fetchLabels`, so no network is reached. */
+let labelsOnTicket: readonly string[] = [];
+
 beforeEach(() => {
+  labelsOnTicket = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ key: "SSX-1234", fields: { labels: labelsOnTicket } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    ),
+  );
   runTriage.mockReset();
   runPost.mockReset();
   runPost.mockResolvedValue({
@@ -118,6 +133,10 @@ beforeEach(() => {
     linksCreated: [],
     problems: [],
   });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("createGroom with WRITE_BACK off", () => {
@@ -334,5 +353,116 @@ describe("createGroom with WRITE_BACK on", () => {
     await createGroom(on())(TICKET);
 
     expect(runTriage.mock.calls[0]?.[0]).not.toHaveProperty("noWrite", false);
+  });
+});
+
+describe("createGroom for a ticket a person has labelled agent:ignore", () => {
+  const on = () => settings({ WRITE_BACK: "true" });
+
+  it("starts nothing for a ticket that is already held", async () => {
+    // The analysis is the spend: the poller triages one ticket at a time, so this one may have waited out the backlog ahead of it.
+    labelsOnTicket = ["agent:ignore"];
+    runTriage.mockResolvedValue(payload());
+
+    await expect(createGroom(on())(TICKET)).rejects.toBeInstanceOf(TicketHeldError);
+
+    expect(runTriage).not.toHaveBeenCalled();
+    expect(runPost).not.toHaveBeenCalled();
+  });
+
+  it("holds with WRITE_BACK off too, since the analysis is paid for either way", async () => {
+    labelsOnTicket = ["agent:ignore"];
+    runTriage.mockResolvedValue(payload());
+
+    await expect(createGroom(settings())(TICKET)).rejects.toBeInstanceOf(TicketHeldError);
+
+    expect(runTriage).not.toHaveBeenCalled();
+  });
+
+  it("drops the verdict when the label arrives while the analysis runs", async () => {
+    // Unplug the check before `runPost` and this fails: the first check passed, and only this one can still save the post.
+    runTriage.mockImplementation(async () => {
+      labelsOnTicket = ["agent:ignore"];
+      return payload();
+    });
+
+    await expect(createGroom(on())(TICKET)).rejects.toBeInstanceOf(TicketHeldError);
+
+    expect(runTriage).toHaveBeenCalledOnce();
+    expect(runPost).not.toHaveBeenCalled();
+  });
+
+  it("holds when Jira cannot say what the labels are", async () => {
+    vi.stubGlobal("fetch", async () => new Response("unavailable", { status: 503 }));
+    runTriage.mockResolvedValue(payload());
+
+    await expect(createGroom(on())(TICKET)).rejects.toBeInstanceOf(TicketHeldError);
+
+    expect(runTriage).not.toHaveBeenCalled();
+    expect(runPost).not.toHaveBeenCalled();
+  });
+
+  it("reads the labels of the ticket it was handed", async () => {
+    runTriage.mockResolvedValue(payload());
+    await createGroom(on())(TICKET);
+
+    const asked = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+    expect(asked.every((url) => url.includes("/rest/api/3/issue/SSX-1234?fields=labels"))).toBe(
+      true,
+    );
+    expect(asked.length).toBeGreaterThan(0);
+  });
+
+  it("is not recorded on the audit thread as a crash, even if the hold lifts before the record is written", async () => {
+    // The notifier asks the gate for itself, so with the label still on it would skip the crash anyway and hide
+    // this. Reads, in order: the start, the thread's first post, the check before the post (held), the crash record.
+    const directory = await mkdtemp(join(tmpdir(), "groom-held-"));
+    const answers: (readonly string[])[] = [[], [], ["agent:ignore"], []];
+    let read = 0;
+    vi.stubGlobal("fetch", async (url: string | URL) =>
+      String(url).includes("fields=labels")
+        ? new Response(JSON.stringify({ fields: { labels: answers[read++] ?? [] } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : new Response("not found", { status: 404 }),
+    );
+    runTriage.mockResolvedValue(payload());
+
+    await expect(
+      createGroom(settings({ WRITE_BACK: "true", SLACK_MODE: "dry", OUTPUT_DIR: directory }))(
+        TICKET,
+      ),
+    ).rejects.toBeInstanceOf(TicketHeldError);
+
+    const record = JSON.parse(
+      await readFile(join(directory, "slack", "SSX-1234.record.json"), "utf8"),
+    ) as { crash: unknown };
+    expect(record.crash).toBeNull();
+  });
+
+  it("does record an ordinary failure as a crash", async () => {
+    // The control for the test above: the same wiring, the same reads, and an error that is not a hold.
+    const directory = await mkdtemp(join(tmpdir(), "groom-crash-"));
+    vi.stubGlobal("fetch", async (url: string | URL) =>
+      String(url).includes("fields=labels")
+        ? new Response(JSON.stringify({ fields: { labels: [] } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : new Response("not found", { status: 404 }),
+    );
+    runTriage.mockRejectedValue(new Error("the session fell over"));
+
+    await expect(
+      createGroom(settings({ WRITE_BACK: "true", SLACK_MODE: "dry", OUTPUT_DIR: directory }))(
+        TICKET,
+      ),
+    ).rejects.toThrow("the session fell over");
+
+    const record = JSON.parse(
+      await readFile(join(directory, "slack", "SSX-1234.record.json"), "utf8"),
+    ) as { crash: unknown };
+    expect(record.crash).toMatchObject({ where: "triage", message: "the session fell over" });
   });
 });

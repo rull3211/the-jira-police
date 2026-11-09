@@ -11,6 +11,7 @@
 import { createLogger } from "./logger.ts";
 import type { OutputSink, TriageResult } from "./output/sink.ts";
 import type { TicketRef } from "./jira/types.ts";
+import { TicketHeldError } from "./solve/hold.ts";
 import { type PollState, isUnseen, recordSeen, saveState } from "./state/store.ts";
 import { byCreatedAscending, settledCursor } from "./triage/order.ts";
 import type { TriagePayload } from "./triage/runner.ts";
@@ -45,6 +46,8 @@ export interface PollOutcome {
   readonly skipped: number;
   readonly triaged: number;
   readonly failed: number;
+  /** Left alone because a person labelled them `agent:ignore` after the query returned them. Not a failure. */
+  readonly held: number;
   /** Fresh issues never attempted, because shutdown was requested mid-cycle. */
   readonly abandoned: number;
   readonly state: PollState;
@@ -78,7 +81,15 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
 
   if (fresh.length === 0) {
     log.debug("poll.nothing_new", { found: candidates.length, skipped });
-    return { found: candidates.length, skipped, triaged: 0, failed: 0, abandoned: 0, state };
+    return {
+      found: candidates.length,
+      skipped,
+      triaged: 0,
+      failed: 0,
+      held: 0,
+      abandoned: 0,
+      state,
+    };
   }
 
   log.info("poll.candidates", { found: candidates.length, skipped, fresh: fresh.length });
@@ -101,6 +112,7 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
   const succeeded = new Set<string>();
   let triaged = 0;
   let failed = 0;
+  let held = 0;
 
   for (const ticket of queue) {
     if (deps.signal?.aborted === true) {
@@ -119,26 +131,33 @@ export async function runPollCycle(state: PollState, deps: PollDeps): Promise<Po
       await saveState(deps.statePath, current);
       triaged += 1;
     } catch (error) {
+      if (error instanceof TicketHeldError) {
+        // Not marked seen: a ticket whose label comes off while still inside the window is triaged then.
+        held += 1;
+        log.info("poll.issue_held", { issueKey: ticket.key, where: error.where });
+        continue;
+      }
       failed += 1;
       // Nothing to do to the cursor: `settledCursor` already stops at any issue not in `succeeded`.
       log.error("poll.issue_failed", { issueKey: ticket.key, error });
     }
   }
 
-  const abandoned = fresh.length - triaged - failed;
+  const abandoned = fresh.length - triaged - failed - held;
   if (abandoned > 0) {
     // Not an error: still unseen, so the next run picks them up. Logged so fewer results
     // than found doesn't read as tickets going missing.
     log.warn("poll.interrupted", { abandoned, note: "left for the next cycle" });
   }
 
-  log.info("poll.done", { triaged, failed, abandoned });
+  log.info("poll.done", { triaged, failed, held, abandoned });
 
   return {
     found: candidates.length,
     skipped,
     triaged,
     failed,
+    held,
     abandoned,
     state: current,
   };

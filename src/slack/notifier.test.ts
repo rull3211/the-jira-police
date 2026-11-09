@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { WriteGate } from "../solve/hold.ts";
 import type { PassRunner } from "../solve/orchestrator.ts";
 import type { SolveRunOptions } from "../solve/runner.ts";
 import { type AuditRecord, newRecord } from "./audit.ts";
@@ -121,12 +122,18 @@ function threaded(bump: string | null = null): Loaded {
   };
 }
 
-function notifier(s: AuditStore, p: Publisher, lookup?: (key: string) => Promise<TicketFacts>) {
+function notifier(
+  s: AuditStore,
+  p: Publisher,
+  lookup?: (key: string) => Promise<TicketFacts>,
+  gate: WriteGate = async () => true,
+) {
   return createAuditNotifier({
     store: s,
     publisher: p,
     jiraBaseUrl: BASE_URL,
     now: () => NOW,
+    gate,
     ...(lookup === undefined ? {} : { lookup }),
   });
 }
@@ -164,6 +171,81 @@ describe("createAuditNotifier", () => {
     ]);
 
     expect(s.saved()?.timeline.map((entry) => entry.text)).toEqual(["fix started", "fix finished"]);
+  });
+
+  describe("for a ticket a person has labelled agent:ignore", () => {
+    it("posts nothing and saves nothing, and says it skipped", async () => {
+      const s = store();
+      const p = publisher();
+      const audit = notifier(s.store, p.publisher, undefined, async () => false);
+
+      const outcome = await audit.record("SSX-1", { kind: "triage-started" });
+
+      // Unplug the check in `enqueue` and the first post goes out.
+      expect(outcome.kind).toBe("skipped");
+      expect(p.calls).toEqual([]);
+      expect(s.saved()).toBeNull();
+    });
+
+    it("leaves an existing thread alone too, rather than editing it", async () => {
+      const s = store(threaded());
+      const p = publisher();
+      const audit = notifier(s.store, p.publisher, undefined, async () => false);
+
+      await audit.record("SSX-1", { kind: "pass-started", pass: "recon" });
+      await audit.redraw("SSX-1", undefined, true);
+
+      expect(p.calls).toEqual([]);
+      expect(s.saved()?.timeline).toEqual([]);
+    });
+
+    it("asks when the post would be made, not when it was asked for", async () => {
+      // Two events fired together queue behind one another; the label can arrive during the first one's round trips.
+      const s = store();
+      const p = publisher();
+      const answers = [true, false];
+      const audit = notifier(s.store, p.publisher, undefined, async () => answers.shift() ?? false);
+
+      const [first, second] = await Promise.all([
+        audit.record("SSX-1", { kind: "pass-started", pass: "fix" }),
+        audit.record("SSX-1", { kind: "pass-finished", pass: "fix" }),
+      ]);
+
+      expect([first.kind, second.kind]).toEqual(["posted", "skipped"]);
+      expect(s.saved()?.timeline.map((entry) => entry.text)).toEqual(["fix started"]);
+    });
+
+    it("asks about the ticket the event is for, and names the event", async () => {
+      const asked: [string, string][] = [];
+      const audit = notifier(
+        store().store,
+        publisher().publisher,
+        undefined,
+        async (key, where) => {
+          asked.push([key, where]);
+          return true;
+        },
+      );
+
+      await audit.record("SSX-9", { kind: "claimed", repo: null });
+
+      expect(asked).toEqual([["SSX-9", "the audit thread (claimed)"]]);
+    });
+
+    it("keeps a model pass's start and finish off a held ticket's thread", async () => {
+      const s = store();
+      const p = publisher();
+      const audit = notifier(s.store, p.publisher, undefined, async () => false);
+      const passes: PassRunner = { run: async (_pass, _options, parse) => parse({}) };
+
+      await auditPasses(passes, audit).run(
+        "recon",
+        { issueKey: "SSX-1", worktreePath: "/tmp/w", ticket: "t" } as SolveRunOptions,
+        (output) => output,
+      );
+
+      expect(p.calls).toEqual([]);
+    });
   });
 
   it("leaves a record it cannot read alone, and says what to do about it", async () => {
@@ -338,6 +420,7 @@ describe("createAuditNotifier", () => {
       jiraBaseUrl: BASE_URL,
       now: () => NOW,
       subscribers: async () => ["U0ME"],
+      gate: async () => true,
     });
 
     await audit.record("SSX-1", { kind: "claimed", repo: null });
@@ -497,6 +580,7 @@ describe("createAuditNotifier", () => {
         jiraBaseUrl: BASE_URL,
         now: () => NOW,
         subscribers,
+        gate: async () => true,
       });
       const outcome = await audit.record("SSX-1", { kind: "pr-ended", state: "merged" });
       seen.push([outcome.kind, p.bumps[0]]);

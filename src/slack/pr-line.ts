@@ -4,6 +4,7 @@
  */
 
 import { createLogger } from "../logger.ts";
+import { type WriteGate, mayWrite } from "../solve/hold.ts";
 import type { SlackClient } from "./client.ts";
 import { writeJson } from "./store.ts";
 
@@ -11,10 +12,21 @@ const log = createLogger("slack");
 
 export type PrLineOutcome =
   | { readonly kind: "sent"; readonly ts: string }
+  | { readonly kind: "skipped"; readonly reason: string }
   | { readonly kind: "failed"; readonly reason: string };
 
 export interface PrLineSender {
   send(key: string, line: string): Promise<PrLineOutcome>;
+}
+
+/** A held ticket's pull request is announced to no one; the pull request itself is open either way. */
+export function gatePrLine(sender: PrLineSender, gate: WriteGate): PrLineSender {
+  return {
+    send: async (key, line) =>
+      (await mayWrite(gate, key, "the pull request direct message"))
+        ? await sender.send(key, line)
+        : { kind: "skipped", reason: `${key} is held` },
+  };
 }
 
 /** Delivers one message and resolves to its `ts`; may throw, since `prLineSender` catches. */

@@ -439,6 +439,17 @@ export class JiraClient {
     };
   }
 
+  /** The ticket's labels as they are now. An answer with no `labels` array is an error, not an empty list: "no labels" would clear a write. */
+  async fetchLabels(key: string): Promise<readonly string[]> {
+    assertIssueKey(key);
+    const response = await this.#get(`/rest/api/3/issue/${key}?fields=labels`, "application/json");
+    const labels = ((await response.json()) as DetailPayload).fields?.labels;
+    if (!Array.isArray(labels)) {
+      throw new JiraError(0, `Jira's answer for ${key} carried no labels array`);
+    }
+    return labels.filter((label): label is string => typeof label === "string");
+  }
+
   /**
    * What a ticket drafted for `project` may name: its components and the issue types it can be
    * created as. A subtask type is left out, since one cannot be created without a parent.

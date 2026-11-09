@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4063 tests in 121 files**, no build step.
+> **4165 tests in 123 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82 and §83, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83 and §86, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -68,21 +68,22 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   already named §40, and closed in `82d6079`, a deletion-only commit that removed the §38 and §40
   entries without adding either to this list. Both numbers had been picked by reading the last
   heading rather than this line.
-- **No revision reachable by `git log --all` holds §30, §36, §42, §43 or §50 as a heading**, so for
-  these five the history has no entry to show. §30 was the daemon check and the rule it put in
+- **No revision reachable by `git log --all` holds §30, §36, §42, §43, §50 or §86 as a heading**, so
+  for these six the history has no entry to show. §30 was the daemon check and the rule it put in
   `STARTING.md`; §36 was `branch-stack.sh` counting commit identity instead of commit content; §42
   routed every non-`verified`, non-`escaped` outcome to `agent:failed`; §43 had every worktree's
   `.git/info/exclude` list `.claude/` and `.storecode/`; §50 was the fix for a literal `""` in a
-  recon field, `6e78ce7`.
+  recon field, `6e78ce7`; §86 was `agent:ignore`, written and deleted before `feat/agent-ignore`'s
+  first commit.
 - **§24 is absent from the list and is not a hole** — it was skipped rather than spent, for the
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §85. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §87. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
-`main`.
+`main`, and §85 was taken by `docs/plan-structured-output-leak`, open when §86 was written.
 
 <!-- refs:on -->
 
@@ -652,6 +653,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   each (`architecture/triage.md`, the sendback watch). **What would show it:** after the merge and a
   daemon restart, SSX-4023's next sweep logging `re-triaged` rather than `no re-triage:`; and a
   watched ticket whose description is edited without dropping a blocker still being declined.
+
+- **`agent:ignore` has never been put on a real ticket, so nothing has watched a hold land.** The
+  queries' clauses were measured against SSX read-only on 2026-10-27 (`architecture/triage.md` §4),
+  and every other seam rests on tests and on 41 mutations, each killed. No run has been stopped by
+  the label, so `labels.write_held` has never been read from a live log, and the cost of one Jira
+  read before every write has not been counted. **What would show it:** on a throwaway ticket,
+  `pnpm solve:once <KEY> --claim` with the label on must print `Not claimed` and write nothing; then
+  start `pnpm solve:once <KEY> --pr` on one without it, add the label while the fix pass runs, and
+  read `labels.write_held` naming a pass, no pull request, and the claim released with `agent:start`
+  back. Count the `fields=labels` reads in that run against the passes it made.
 
 ### 11. Loose ends recorded in no other file
 

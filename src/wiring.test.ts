@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { JqlError } from "./jira/jql.ts";
 import type { JiraClient } from "./jira/client.ts";
+import { TicketHeldError } from "./solve/hold.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { type Settings, SettingsError, readSettings } from "./settings.ts";
 import { SlackClient } from "./slack/client.ts";
@@ -37,6 +38,7 @@ import {
   createBotClient,
   createListenClient,
   createSlackTarget,
+  createSolveCommenter,
   pipelineAuditNotifier,
   pipelinePrLineSender,
   createSolveDeps,
@@ -56,6 +58,22 @@ const ENV = { JIRA_EMAIL: "a@b.c", JIRA_AUTH: "placeholder" };
 
 function settingsWith(overrides: Partial<Record<string, string>>): Settings {
   return readSettings({ ...ENV, ...overrides });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** What Jira answers when the gate asks for a ticket's labels; any other request is a 404, so a test cannot lean on one it did not mean to. */
+function stubJiraLabels(labels: readonly string[]): void {
+  vi.stubGlobal("fetch", async (url: string | URL) =>
+    String(url).includes("fields=labels")
+      ? new Response(JSON.stringify({ key: "SSX-1", fields: { labels } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      : new Response("not found", { status: 404 }),
+  );
 }
 
 /** Never called: proves the off switch skips the extra Jira fetch entirely. */
@@ -1111,11 +1129,41 @@ describe("createJiraClient", () => {
 describe("createSolveRunDeps", () => {
   it("composes the two objects that can change something", () => {
     // The phase C privilege grant: asserting its shape asserts the grant is exactly these two.
+    // `gate` is the one thing here that withholds rather than grants, so it is not a third capability.
     const deps = createSolveRunDeps(settingsWith(SOLVE_ENV));
 
-    expect(Object.keys(deps).toSorted()).toEqual(["commands", "passes"]);
+    expect(Object.keys(deps).toSorted()).toEqual(["commands", "gate", "passes"]);
     expect(typeof deps.commands.run).toBe("function");
     expect(typeof deps.passes.run).toBe("function");
+    expect(typeof deps.gate).toBe("function");
+  });
+
+  it("holds a pass on a ticket a person has labelled agent:ignore, before any session starts", async () => {
+    // Unplug `gatePasses` in `createSolveRunDeps` and this reaches for the model instead of refusing.
+    stubJiraLabels(["agent:ignore"]);
+    const deps = createSolveRunDeps(settingsWith(SOLVE_ENV));
+
+    await expect(
+      deps.passes.run(
+        "recon",
+        { issueKey: "SSX-1", worktreePath: "/tmp/never", ticket: "t" },
+        (output) => output,
+      ),
+    ).rejects.toBeInstanceOf(TicketHeldError);
+  });
+
+  it("hands the same gate to the writes the pipeline makes outside a pass", async () => {
+    stubJiraLabels(["agent:ignore"]);
+    const deps = createSolveRunDeps(settingsWith(SOLVE_ENV));
+
+    expect(await deps.gate("SSX-1", "the publish")).toBe(false);
+  });
+
+  it("clears a ticket that carries no hold", async () => {
+    stubJiraLabels(["agent:solvable"]);
+    const deps = createSolveRunDeps(settingsWith(SOLVE_ENV));
+
+    expect(await deps.gate("SSX-1", "the publish")).toBe(true);
   });
 
   it("refuses to build a solver with no vault", () => {
@@ -1489,11 +1537,40 @@ describe("pipelineAuditNotifier", () => {
     );
   });
 
+  it("posts nothing for a ticket a person has labelled agent:ignore, in either mode", async () => {
+    // Unplug the `gate` passed to `createAuditNotifier` and the outcome stops being a hold.
+    stubJiraLabels(["agent:ignore"]);
+    const directory = mkdtempSync(join(tmpdir(), "audit-held-"));
+    const audit = pipelineAuditNotifier(settingsWith({ SLACK_MODE: "dry", OUTPUT_DIR: directory }));
+
+    const outcome = await audit?.record("SSX-1", { kind: "triage-started" });
+
+    expect(outcome).toMatchObject({ kind: "skipped", reason: expect.stringContaining("is held") });
+    expect(existsSync(join(directory, "slack"))).toBe(false);
+  });
+
   it("hands every call site the same notifier, so they share one queue per ticket", () => {
     const settings = settingsWith({ SLACK_MODE: "dry" });
 
     expect(pipelineAuditNotifier(settings)).not.toBeNull();
     expect(pipelineAuditNotifier({ ...settings })).toBe(pipelineAuditNotifier(settings));
+  });
+});
+
+describe("createSolveCommenter", () => {
+  it("comments on no ticket a person has labelled agent:ignore, and throws so the caller records no comment", async () => {
+    // Unplug the gate and this starts a model session against a path that does not exist, which fails differently.
+    stubJiraLabels(["agent:ignore"]);
+    const commenter = createSolveCommenter(settingsWith({ STORECODE_PATH: "/never/run" }));
+
+    await expect(commenter.comment("SSX-1", "a report")).rejects.toBeInstanceOf(TicketHeldError);
+  });
+
+  it("holds a comment when the labels cannot be read", async () => {
+    vi.stubGlobal("fetch", async () => new Response("unavailable", { status: 503 }));
+    const commenter = createSolveCommenter(settingsWith({ STORECODE_PATH: "/never/run" }));
+
+    await expect(commenter.comment("SSX-1", "a report")).rejects.toBeInstanceOf(TicketHeldError);
   });
 });
 
@@ -1510,6 +1587,33 @@ describe("pipelinePrLineSender", () => {
 
   it("builds a sender for an operator and a mode that is on", () => {
     expect(pipelinePrLineSender(settingsWith({ ...OPERATOR, SLACK_MODE: "dry" }))).not.toBeNull();
+  });
+
+  describe("for a ticket a person has labelled agent:ignore", () => {
+    const dry = (directory: string) =>
+      settingsWith({ ...OPERATOR, SLACK_MODE: "dry", OUTPUT_DIR: directory });
+
+    it("sends nothing, and writes no request a live run would have sent", async () => {
+      // Unplug `gatePrLine` in `pipelinePrLineSender` and the file below exists.
+      const directory = mkdtempSync(join(tmpdir(), "pr-line-held-"));
+      stubJiraLabels(["agent:ignore"]);
+
+      const outcome = await pipelinePrLineSender(dry(directory))?.send("SSX-1", "a line");
+
+      expect(outcome).toMatchObject({ kind: "skipped" });
+      expect(existsSync(join(directory, "slack", "SSX-1.pr-line.json"))).toBe(false);
+    });
+
+    it("sends the same line for a ticket that carries no hold", async () => {
+      // The control: the gate is the only thing between these two tests.
+      const directory = mkdtempSync(join(tmpdir(), "pr-line-clear-"));
+      stubJiraLabels([]);
+
+      const outcome = await pipelinePrLineSender(dry(directory))?.send("SSX-1", "a line");
+
+      expect(outcome).toMatchObject({ kind: "sent" });
+      expect(existsSync(join(directory, "slack", "SSX-1.pr-line.json"))).toBe(true);
+    });
   });
 
   it("refuses something that is not a member ID, whatever the mode, rather than messaging no one", () => {

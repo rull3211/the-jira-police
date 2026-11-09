@@ -254,6 +254,15 @@ describe("decide", () => {
     }
   });
 
+  it("refuses a start on a ticket a person has labelled agent:ignore, however it was typed", () => {
+    // A start is a person asking for work; the hold is a person asking for none, and the later word is not assumed to be the start.
+    for (const label of [AGENT_LABELS.ignore, "Agent:Ignore"]) {
+      const decision = decide("start", [AGENT_LABELS.solvable, label]);
+      expect(decision, label).toMatchObject({ kind: "refused" });
+      expect(decision.kind === "refused" && decision.reason).toContain("agent:ignore");
+    }
+  });
+
   it("points a refused start on a failed ticket at clear", () => {
     const decision = decide("start", [AGENT_LABELS.solvable, AGENT_LABELS.failed]);
     expect(decision.kind === "refused" && decision.reason).toContain("@Bencebot clear");

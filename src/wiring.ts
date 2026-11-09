@@ -50,7 +50,13 @@ import {
 } from "./slack/notifier.ts";
 import type { Piece } from "./slack/draft-blocks.ts";
 import { createPostHandler } from "./slack/post.ts";
-import { type PrLineSender, dryDelivery, prLineSender, slackDelivery } from "./slack/pr-line.ts";
+import {
+  type PrLineSender,
+  dryDelivery,
+  gatePrLine,
+  prLineSender,
+  slackDelivery,
+} from "./slack/pr-line.ts";
 import { SLACK_USER_ID_PATTERN } from "./slack/render.ts";
 import { syntheticSummary } from "./triage/single.ts";
 import {
@@ -91,6 +97,13 @@ import {
 } from "./settings.ts";
 import type { ClaimCapabilities } from "./solve/claim.ts";
 import { createCommandRunner } from "./solve/exec.ts";
+import {
+  TicketHeldError,
+  type WriteGate,
+  assertMayWrite,
+  createWriteGate,
+  gatePasses,
+} from "./solve/hold.ts";
 import { repoFromLabels } from "./solve/labels.ts";
 import type { SolveDependencies, SolveOutcome, SolveRequest } from "./solve/orchestrator.ts";
 import type { AdvanceRequest, PublishRequest, WorktreeSource } from "./solve/delivery.ts";
@@ -385,6 +398,7 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
   const imageClient = flag(settings, "TRIAGE_IMAGES") ? createJiraClient(settings) : null;
   const imageOptions = imageStageOptions(settings);
   const audit = pipelineAuditNotifier(settings);
+  const gate = writeGateFor(settings);
 
   const triageOne = async (ticket: TicketRef): Promise<TriagePayload> => {
     // Only the key crosses over; the skill reads everything else over its own session.
@@ -448,6 +462,8 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
     // standing as the explanation for a new problem.
     await clearRejection(settings.OUTPUT_DIR, ticket.key);
 
+    // After the paid analysis, which takes minutes: this is the check that can still save the post.
+    await assertMayWrite(gate, ticket.key, "the triage post");
     await runPost({
       issueKey: ticket.key,
       mutation: payload.mutation,
@@ -462,12 +478,14 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
   };
 
   return async (ticket: TicketRef) => {
+    // Before any spend: the poller triages one ticket at a time, so this one may have waited out the whole backlog ahead of it.
+    await assertMayWrite(gate, ticket.key, "starting triage");
     await audit?.record(ticket.key, { kind: "triage-started" }, ticketFacts(ticket));
     try {
       return await triageOne(ticket);
     } catch (error) {
-      // A gate refusal is already its own entry; anything else stopped triage partway.
-      if (!(error instanceof UnpostableError)) {
+      // A gate refusal is already its own entry, and a hold is not a crash; anything else stopped triage partway.
+      if (!(error instanceof UnpostableError) && !(error instanceof TicketHeldError)) {
         await audit?.record(ticket.key, {
           kind: "crashed",
           where: "triage",
@@ -477,6 +495,12 @@ export function createGroom(settings: Settings): (ticket: TicketRef) => Promise<
       throw error;
     }
   };
+}
+
+/** The check in front of every outward write: the ticket's labels as Jira has them now. */
+export function writeGateFor(settings: Settings): WriteGate {
+  const jira = createJiraClient(settings);
+  return createWriteGate((key) => jira.fetchLabels(key));
 }
 
 /** A key somebody typed carries a placeholder summary, which must not become the thread's title. */
@@ -555,6 +579,8 @@ function botTokenProblems(settings: Settings): string[] {
  */
 export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): AuditNotifier {
   const jira = createJiraClient(settings);
+  // In both modes: a dry run shows what a live one would do, and a live one posts nothing for a held ticket.
+  const gate = createWriteGate((key) => jira.fetchLabels(key));
   const directory = join(settings.OUTPUT_DIR, "slack");
   const lookup = async (key: string): Promise<TicketFacts> => {
     const detail = await jira.fetchDetail(key);
@@ -575,6 +601,7 @@ export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): Audi
       jiraBaseUrl: settings.JIRA_BASE_URL,
       lookup,
       subscribers,
+      gate,
     });
   }
   const { client, channel } = createSlackTarget(settings);
@@ -584,6 +611,7 @@ export function auditNotifierFor(settings: Settings, mode: "dry" | "live"): Audi
     jiraBaseUrl: settings.JIRA_BASE_URL,
     lookup,
     subscribers,
+    gate,
   });
 }
 
@@ -1068,10 +1096,17 @@ export function pipelinePrLineSender(settings: Settings): PrLineSender | null {
   if (mode === "off" || operator === null) {
     return null;
   }
+  const gate = writeGateFor(settings);
   if (mode === "dry") {
-    return prLineSender(dryDelivery(join(settings.OUTPUT_DIR, "slack"), operator));
+    return gatePrLine(
+      prLineSender(dryDelivery(join(settings.OUTPUT_DIR, "slack"), operator)),
+      gate,
+    );
   }
-  return prLineSender(slackDelivery(createSlackTarget(settings).client, operator));
+  return gatePrLine(
+    prLineSender(slackDelivery(createSlackTarget(settings).client, operator)),
+    gate,
+  );
 }
 
 /** SLACK_OPERATOR_USER_ID, `null` when unset; anything but a member ID is refused rather than messaged. */
@@ -1142,7 +1177,7 @@ function toSolveCandidate(ticket: TicketRef): SolveCandidate {
  * calling one Atlassian tool, the same shape as the triage poster, not a model reading a repo.
  */
 export function createSolveCommenter(settings: Settings): TicketCommenter {
-  return createTicketCommenter({
+  const commenter = createTicketCommenter({
     executable: settings.STORECODE_PATH,
     workingDirectory: process.cwd(),
     // Floored at 1ms on the same grounds as everywhere else: zero is not "no
@@ -1150,6 +1185,14 @@ export function createSolveCommenter(settings: Settings): TicketCommenter {
     idleMs: numeric(settings, "SESSION_IDLE_TIMEOUT_MS", 1),
     maxRunMs: numeric(settings, "TRIAGE_TIMEOUT_MS", 1),
   });
+  const gate = writeGateFor(settings);
+  return {
+    // Throws, never returns quietly: a caller that reads a return as "posted" would record a comment nobody can see.
+    comment: async (issueKey, body) => {
+      await assertMayWrite(gate, issueKey, "a ticket comment");
+      await commenter.comment(issueKey, body);
+    },
+  };
 }
 
 /**
@@ -1313,9 +1356,12 @@ export function createSolveRunDeps(settings: Settings): SolveDependencies {
     maxRunMs: numeric(settings, "SOLVE_TIMEOUT_MS", 1),
   });
   const audit = pipelineAuditNotifier(settings);
+  const gate = writeGateFor(settings);
   return {
     commands: createCommandRunner(),
-    passes: audit === null ? passes : auditPasses(passes, audit),
+    // Outermost, so a pass that will not run is not announced either.
+    passes: gatePasses(audit === null ? passes : auditPasses(passes, audit), gate),
+    gate,
   };
 }
 

@@ -182,6 +182,17 @@ claim's re-read and its write, since there is no compare-and-swap. `agent:review
 a pull request waiting on a human reviewer does not hold the only concurrency slot for days.
 `agent:done` means **merged**, and is therefore the honest count of bugs this tool has fixed.
 
+**`agent:ignore` is yours, and not a state of the machine.** Add it to a ticket in Jira and none of
+the loops offers it — not triage, the solve queue, the review rounds or the sendback watch — and a
+`start` for it is refused. A run already working on it stops at the next place it would write: before
+each model pass, and before a push, a pull request, a reply, a comment or a Slack post. It releases
+the claim it holds and says nothing on the ticket, the thread or the pull request, so the record is
+the log (`labels.write_held`). An open pull request is left exactly as it is. Remove the label and
+the ticket carries on from whatever its other labels say. The label is checked live, so one typed by
+hand in another case counts; if Jira cannot be read at that moment the write is held too, which can
+cost a paid run on a Jira outage. Nothing in this service ever adds or removes it. What that does
+and does not cover is invariant 21 in `architecture/invariants.md`.
+
 ### What a full run looks like
 
 SSX-3834, 2026-09-06 — the first ticket to travel the entire chain, with a person typing two

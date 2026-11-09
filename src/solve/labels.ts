@@ -67,6 +67,8 @@ export const AGENT_LABELS = {
    * lifecycle labels so the two vocabularies cannot drift — not a sixth state of the machine.
    */
   watching: "agent:watching",
+  /** A person's instruction to leave the ticket alone. Only a person writes or removes it; no queue offers the ticket and no outward write is made for it. */
+  ignore: "agent:ignore",
 } as const;
 
 /**
@@ -99,6 +101,7 @@ export const SOLVE_QUEUE_EXCLUDED_LABELS: readonly string[] = [
   AGENT_LABELS.done,
   AGENT_LABELS.closed,
   AGENT_LABELS.failed,
+  AGENT_LABELS.ignore,
 ];
 
 /**
@@ -200,6 +203,14 @@ export type Eligibility =
 export function eligibility(labels: readonly string[], authority: ClaimAuthority): Eligibility {
   const present = new Set(labels);
 
+  // First, and for every authority: an operator typing a key is not a person lifting the hold.
+  if (isIgnored(labels)) {
+    return {
+      eligible: false,
+      reason: `carries ${AGENT_LABELS.ignore} — a person has told this service to leave the ticket alone`,
+    };
+  }
+
   // Checked for every authority, including `named`: naming a ticket authorises the run, not the fix — only triage decides fixability.
   if (!present.has(AGENT_LABELS.solvable)) {
     return {
@@ -221,6 +232,11 @@ export function eligibility(labels: readonly string[], authority: ClaimAuthority
   }
 
   return { eligible: true };
+}
+
+/** Whether a person has told this service to leave the ticket alone. Case-insensitive because JQL is, so a queue and this check never disagree about a hand-typed `Agent:Ignore`. */
+export function isIgnored(labels: readonly string[]): boolean {
+  return labels.some((label) => label.toLowerCase() === AGENT_LABELS.ignore);
 }
 
 /**
