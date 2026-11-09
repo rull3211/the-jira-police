@@ -437,7 +437,8 @@ Things that look like details and are not:
     - **A work boundary** calls `assertMayWrite`, which throws `TicketHeldError`. `runPass` is the
       one catch that lets it out, so it unwinds through `runWriteRungs`'s release,
       `createReviewAct`'s `finally` and the per-ticket catches already there, and builds no
-      `crashed` outcome, comment or audit entry. The boundaries: before and after every model pass
+      `crashed` outcome, comment or audit entry; a one-shot command ends in `exitHeld`, one line and
+      exit 3. The boundaries: before and after every model pass
       (`gatePasses`); `publish`; a round's survey, attach and failed-start record; the reservation
       of a round and of a merge round, so a held ticket is not charged one it never ran; after a
       round's pass and verification, before anything it produced is pushed, replied or undrafted;

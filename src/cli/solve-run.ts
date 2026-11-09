@@ -647,12 +647,10 @@ export async function runAdvance(
       buildAdvanceRequest(settings, base, attach, found.number, promoteRepair),
     );
   } catch (error) {
-    if (!(error instanceof TicketHeldError)) {
+    // Left where it is: a round that stopped partway leaves a checkout a person may want to read, as a thrown round does in the daemon.
+    if (!reportHeld(error)) {
       throw error;
     }
-    // Left where it is: a round that stopped partway leaves a checkout a person may want to read, as a thrown round does in the daemon.
-    process.stderr.write(`\n${error.message}\n`);
-    process.exitCode = 3;
     return null;
   }
   process.stdout.write(`\n${describeAdvanceOutcome(result)}\n`);
@@ -1095,6 +1093,27 @@ export async function runWatch(
 
     process.stdout.write(`\n${describeReviewSweep(pass, outcome)}\n`);
     await sleep(pollMs);
+  }
+}
+
+/** A hold reaching a terminal: one line and exit 3, never a crash's trace. Returns whether `error` was one. */
+export function reportHeld(error: unknown): boolean {
+  if (!(error instanceof TicketHeldError)) {
+    return false;
+  }
+  process.stderr.write(`\n${error.message}\n`);
+  process.exitCode = 3;
+  return true;
+}
+
+/** An entry point's ending for a hold; whatever the run claimed has been released by the time it gets here. */
+export async function exitHeld(main: () => Promise<void>): Promise<void> {
+  try {
+    await main();
+  } catch (error) {
+    if (!reportHeld(error)) {
+      throw error;
+    }
   }
 }
 

@@ -18,6 +18,7 @@ import { FileSink } from "../output/sink.ts";
 import { type Settings, readSettings, withConfigErrors } from "../settings.ts";
 import { syntheticTicket, toTriageResult } from "../triage/single.ts";
 import { buildTriageOptions, createGroom, shouldPost } from "../wiring.ts";
+import { exitHeld } from "./solve-run.ts";
 
 const log = createLogger("triage-once");
 
@@ -81,4 +82,4 @@ async function main(): Promise<void> {
   });
 }
 
-await withConfigErrors(main);
+await withConfigErrors(() => exitHeld(main));

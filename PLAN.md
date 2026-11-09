@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4171 tests in 123 files**, no build step.
+> **4173 tests in 123 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -653,15 +653,17 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   daemon restart, SSX-4023's next sweep logging `re-triaged` rather than `no re-triage:`; and a
   watched ticket whose description is edited without dropping a blocker still being declined.
 
-- **`agent:ignore` has never been put on a real ticket, so nothing has watched a hold land.** The
-  queries' clauses were measured against SSX read-only on 2026-10-27 (`architecture/triage.md` §4),
-  and every other seam rests on tests and on 41 mutations, each killed. No run has been stopped by
-  the label, so `labels.write_held` has never been read from a live log, and the cost of one Jira
-  read before every write has not been counted. **What would show it:** on a throwaway ticket,
-  `pnpm solve:once <KEY> --claim` with the label on must print `Not claimed` and write nothing; then
-  start `pnpm solve:once <KEY> --pr` on one without it, add the label while the fix pass runs, and
-  read `labels.write_held` naming a pass, no pull request, and the claim released with `agent:start`
-  back. Count the `fields=labels` reads in that run against the passes it made.
+- **`agent:ignore` has stopped a live run after recon, never after a fix pass or at a push, and
+  what the reads cost is uncounted.** SSX-2246 on 2026-11-09, temporarily labelled solvable:
+  `--claim` with the label on printed `Not claimed` and wrote nothing; a `--pr` run labelled by hand
+  during its recon pass logged `labels.write_held` after that pass and at the audit post, then
+  released the claim with `agent:start` back and the status returned, no comment and no pull
+  request; `triage:once` held at its start. That run also found the one-shot commands ending a hold
+  in a stack trace and exit 1, now `exitHeld`'s one line and exit 3. The `fields=labels` reads
+  were not counted: the session refused the preload that would have counted them. **What would
+  show it:** a label added while a fix pass runs, read as a hold after that pass with nothing
+  pushed; and a request count from the same run against the two reads a pass costs plus one per
+  audit post, comment and publish.
 
 ### 11. Loose ends recorded in no other file
 

@@ -27,7 +27,7 @@ vi.mock("../solve/orchestrator.ts", async (importOriginal) => ({
   solveWithRetry,
 }));
 
-const { runAdvance, runReviewSweep, runSolveClaims, runWriteRungs } =
+const { exitHeld, runAdvance, runReviewSweep, runSolveClaims, runWriteRungs } =
   await import("./solve-run.ts");
 
 const REPO_LABEL = "svc:allowed-repo";
@@ -381,5 +381,31 @@ describe("runAdvance on a held ticket", () => {
     expect(process.exitCode).toBe(3);
     expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toContain("agent:ignore");
     expect(writes).toEqual([]);
+  });
+});
+
+describe("exitHeld, the ending of solve:once, bot:once, triage:once and recon:once", () => {
+  it("ends a held run with one line and exit 3, not a thrown trace", async () => {
+    const stderr = vi.spyOn(process.stderr, "write");
+
+    await exitHeld(async () => {
+      throw held();
+    });
+
+    expect(process.exitCode).toBe(3);
+    expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toContain(
+      "SSX-1 is held at after the fix pass",
+    );
+  });
+
+  it("lets every other failure through, so a crash still reads as one", async () => {
+    const crash = new Error("the pass crashed");
+
+    await expect(
+      exitHeld(async () => {
+        throw crash;
+      }),
+    ).rejects.toBe(crash);
+    expect(process.exitCode).not.toBe(3);
   });
 });

@@ -32,6 +32,7 @@ import {
 } from "../wiring.ts";
 import type { IssueDetail } from "../jira/client.ts";
 import { exitCodeFor, formatReport } from "./recon-once-report.ts";
+import { exitHeld } from "./solve-run.ts";
 
 const log = createLogger("recon-once");
 
@@ -98,4 +99,4 @@ async function main(): Promise<void> {
   process.exitCode = exitCodeFor(outcome);
 }
 
-await withConfigErrors(main);
+await withConfigErrors(() => exitHeld(main));

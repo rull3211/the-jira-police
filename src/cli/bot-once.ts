@@ -27,7 +27,7 @@ import type { AgentFitness } from "../triage/runner.ts";
 import { buildTriageOptions, createGroom, createJiraClient } from "../wiring.ts";
 import { USAGE, parseBotArgs } from "./bot-args.ts";
 import { type SolvePhase, unavailable, writes } from "./solve-args.ts";
-import { runWriteRungs } from "./solve-run.ts";
+import { exitHeld, runWriteRungs } from "./solve-run.ts";
 
 const log = createLogger("bot-once");
 
@@ -120,4 +120,4 @@ async function main(): Promise<void> {
   await runWriteRungs(settings, client, issueKey, phase, null, "named", false);
 }
 
-await withConfigErrors(main);
+await withConfigErrors(() => exitHeld(main));

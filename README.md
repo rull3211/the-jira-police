@@ -187,7 +187,8 @@ the loops offers it — not triage, the solve queue, the review rounds or the se
 `start` for it is refused. A run already working on it stops at the next place it would write: before
 each model pass, and before a push, a pull request, a reply, a comment or a Slack post. It releases
 the claim it holds and says nothing on the ticket, the thread or the pull request, so the record is
-the log (`labels.write_held`). An open pull request is left exactly as it is. Remove the label and
+the log (`labels.write_held`); a command run by hand ends on one line saying so, and exit 3. An open
+pull request is left exactly as it is. Remove the label and
 the ticket carries on from whatever its other labels say. The label is checked live, so one typed by
 hand in another case counts; if Jira cannot be read at that moment the write is held too, which can
 cost a paid run on a Jira outage. Nothing in this service ever adds or removes it. What that does
