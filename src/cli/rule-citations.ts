@@ -62,6 +62,9 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
  * Counted against declarations in the file, not against entries nothing cites — those are
  * different failures, each reported on its own. Exact, not a ceiling: fewer means a paid debt is
  * still being claimed, more means a new entry took the exemption without writing one.
+ *
+ * Deliberately no grandfather list — a declaration sits in the entry it exempts and is counted
+ * here, where a path exemption would be neither.
  */
 export const UNRESOLVED_ON_PURPOSE = 11;
 
