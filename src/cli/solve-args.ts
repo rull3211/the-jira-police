@@ -24,6 +24,7 @@ const PHASE_FLAGS: ReadonlyMap<string, SolvePhase> = new Map([
 export const USAGE =
   "usage: solve-once [<ISSUE-KEY>] [--claim | --solve | --pr | --review]\n" +
   "       solve-once <ISSUE-KEY> --pr --repair\n" +
+  "       solve-once <ISSUE-KEY> --pr --moves\n" +
   "       solve-once <ISSUE-KEY> --advance [--repair]\n" +
   "  (no arguments)          the whole queue, reporting the claims it would make\n" +
   "  <ISSUE-KEY>             one ticket, same reporting\n" +
@@ -45,6 +46,12 @@ export const USAGE =
   "                          the pull request. Without it the round's verdict is\n" +
   "                          recorded and discarded. Needs a round to run, so\n" +
   "                          REPAIR_ROUND must not be false.\n" +
+  "\n" +
+  "  --moves                 with --solve, --pr or --review: the harness makes the\n" +
+  "                          moves recon plans (files renamed or relocated, content\n" +
+  "                          unchanged) with git mv before the fix pass. Without it\n" +
+  "                          a plan with moves stops before the fix pass. The\n" +
+  "                          daemon's copy is SOLVE_MOVES.\n" +
   "\n" +
   "  <ISSUE-KEY> --advance   one review round on the pull request that already\n" +
   "                          exists; does not claim, solve, or open anything\n" +
@@ -87,6 +94,9 @@ const WATCH_FLAG = "--watch";
  */
 const REPAIR_FLAG = "--repair";
 
+/** A modifier on `--solve` and above, never a rung: it lets the harness make the moves recon plans, before a first fix pass. */
+const MOVES_FLAG = "--moves";
+
 export type SolveInvocation =
   | {
       readonly mode: "ladder";
@@ -95,6 +105,8 @@ export type SolveInvocation =
       readonly phase: SolvePhase;
       /** `--repair`. Only ever true at a phase that includes `pr`; the review modes carry their own. */
       readonly repair: boolean;
+      /** `--moves`. Only ever true at a phase that includes `solve`. */
+      readonly moves: boolean;
     }
   /** `repair`: a green repair round of a failed review round may push. */
   | { readonly mode: "advance"; readonly issueKey: string; readonly repair: boolean }
@@ -182,11 +194,16 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   let advance = false;
   let watch = false;
   let repair = false;
+  let moves = false;
   let namedRung = false;
 
   for (const arg of argv) {
     if (!arg.startsWith("-")) {
       positional.push(arg);
+      continue;
+    }
+    if (arg === MOVES_FLAG) {
+      moves = true;
       continue;
     }
     if (arg === ADVANCE_FLAG) {
@@ -220,6 +237,14 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
   }
 
   const issueKey = positional[0] ?? null;
+
+  // Before the review modes: they run rounds on a pull request that exists, and a round never moves a file.
+  if (moves && (watch || advance || !includes(phase, "solve"))) {
+    return {
+      ok: false,
+      error: `${MOVES_FLAG} needs --solve, --pr or --review — the harness makes recon's moves before a first fix pass, and ${watch ? WATCH_FLAG : advance ? ADVANCE_FLAG : phase === "plan" ? "a run with no rung" : `--${phase}`} runs none`,
+    };
+  }
 
   if (watch) {
     // `--advance --watch` reads fine as "watch" but is refused anyway: the two differ by whether
@@ -270,5 +295,5 @@ export function parseSolveArgs(argv: readonly string[]): ParsedArgs {
     };
   }
 
-  return { ok: true, invocation: { mode: "ladder", issueKey, phase, repair } };
+  return { ok: true, invocation: { mode: "ladder", issueKey, phase, repair, moves } };
 }

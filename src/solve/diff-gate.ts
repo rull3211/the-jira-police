@@ -1,5 +1,5 @@
 /**
- * A pure, mechanical check over `git diff --numstat -z` output that refuses on the evidence
+ * A pure, mechanical check over `git diff --numstat -z` and `--name-status -z` output that refuses on the evidence
  * rather than the model's account of itself. `-z` matters: without it, git quotes and
  * C-escapes unusual paths, letting a ticket-controlled filename with an embedded newline
  * forge a second numstat record past a line-oriented parser.
@@ -211,6 +211,72 @@ export function parseNumstat(raw: string): readonly FileChange[] {
     changes.push({ path: to, added, removed });
   }
   return changes;
+}
+
+/** One entry of `git diff --name-status -z`, read with copy detection on. */
+export interface NameStatus {
+  /** git's status letter: A, C, D, M, R, T, U or X. */
+  readonly status: string;
+  /** For R and C, git's similarity score, where 100 is byte-identical; `null` otherwise. */
+  readonly score: number | null;
+  /** The path, or for R and C the destination. */
+  readonly path: string;
+  /** For R and C, the source; `null` otherwise. */
+  readonly from: string | null;
+}
+
+/** Parses `git diff --name-status -z`. Throws, as `parseNumstat` does, on a stream it cannot read. */
+export function parseNameStatus(raw: string): readonly NameStatus[] {
+  if (raw === "") {
+    return [];
+  }
+  const fields = raw.split("\0");
+  if (fields.at(-1) === "") {
+    fields.pop();
+  }
+
+  const records: NameStatus[] = [];
+  let index = 0;
+  while (index < fields.length) {
+    const head = fields[index] ?? "";
+    index += 1;
+    const parsed = /^([ACDMRTUX])(\d{0,3})$/u.exec(head);
+    if (parsed === null) {
+      throw new DiffParseError(`expected a status letter, got ${JSON.stringify(head)}`);
+    }
+    const status = parsed[1] ?? "";
+    const digits = parsed[2] ?? "";
+    if (status === "R" || status === "C") {
+      const from = fields[index];
+      const to = fields[index + 1];
+      index += 2;
+      if (from === undefined || to === undefined || digits === "") {
+        throw new DiffParseError(`${status} record truncated after ${JSON.stringify(head)}`);
+      }
+      records.push({ status, score: Number(digits), path: to, from });
+      continue;
+    }
+    const path = fields[index];
+    index += 1;
+    if (path === undefined) {
+      throw new DiffParseError(`record truncated after ${JSON.stringify(head)}`);
+    }
+    records.push({ status, score: null, path, from: null });
+  }
+  return records;
+}
+
+/**
+ * A file added as a byte-identical copy of one still in the tree, which is what a pass holding only
+ * `Write` makes of a rename: the new file passes every check while the original stays behind.
+ */
+export function copyRefusals(records: readonly NameStatus[]): readonly string[] {
+  return records
+    .filter((record) => record.status === "C" && record.score === 100)
+    .map(
+      (record) =>
+        `${record.path}: a byte-identical copy of ${record.from ?? "another file"}, which is still in the tree — a file that needs a new name is moved by the harness (recon's plannedMoves), not rewritten beside its original`,
+    );
 }
 
 function match(rules: readonly Rule[], path: string): Rule | undefined {

@@ -132,9 +132,11 @@ about the model has to survive that.
     ↓
   recon         read-only. may say no, and saying no is a success
     ↓
-  plan check    a plan naming a path the diff gate refuses stops here
+  plan check    a refused path, or a move the harness would not make, stops here
     ↓
-  fix           the only pass that makes the change
+  moves         the harness's git mv for each planned move, under --moves or SOLVE_MOVES
+    ↓
+  fix           the only pass that edits the change
     ↓
   simplify      a cold read of the diff; usually changes nothing
     ↓
@@ -731,6 +733,42 @@ never shows up as untracked, so it is never staged and never reaches the gate to
 along with the legitimate change beside it. The method is optional on `CommandRunner` so a test
 runner with no interest in it needs nothing extra; `exec.ts` is the only implementation that wires
 it to the real filesystem.
+
+**One rule reads git's copy detection rather than the numstat.** `gateDiff` also reads `git diff
+--name-status -z -M -C --find-copies-harder` and refuses every `C100` record: a file added
+byte-identical to one still in the tree (`copyRefusals`). That is what a rename looks like from a
+pass holding only `Write`, and without the rule it passes everything, because Vite, tsc and Vitest
+all resolve `.ts` before `.tsx` and the original goes on compiling unread (SSX-4204's recon,
+2026-11-11). Only `C100` is refused, since a near copy is new code that resembles old code. A
+name-status read that fails or does not parse refuses the run, and the refusal is unattributable, so
+a review round's rollback leaves it whole.
+
+### Moves are made by the harness, behind `--moves`
+
+The fix pass holds `Write` and `Edit` and no shell, so it can create a file and never delete one,
+and a ticket that only renames files (SSX-4204: 27 `.tsx` files to `.ts`) was unsolvable for that
+reason alone. Recon plans moves in `plannedMoves`, `{ from, to }` with the content unchanged, and
+`moves.ts` makes them:
+
+- **Checked before anything moves** (`moveRefusals`). Both ends must be inside the worktree and pass
+  `plannedPathRefusals` with the dependency-bump exception off, no move may land on itself, and each
+  path may be the end of one move only, which refuses a duplicate, a chain and a swap with one rule.
+  A refusal is a plan refusal, posted like one.
+- **Withheld without the privilege.** `SolveRequest.moves` is set by `solve:once <KEY>
+--solve|--pr|--review --moves`, or under the daemon by `SOLVE_MOVES`, off unless it reads `true`
+  and reported as `movesFiles` at startup. Without it a plan with moves stops before the fix pass as
+  `bailed` with `withheldMoves`, and the ticket is told the command that would run it. The loop's
+  copy arrived with the capability rather than after a watched hand run, at the operator's request
+  on 2026-11-11.
+- **Made with git, one at a time** (`applyMoves`). `git --literal-pathspecs ls-files -z -- <from>`
+  must list exactly that one file, then `git mv -- <from> <to>` runs. The first refusal stops the
+  run in git's own words; the moves already made stay staged, and `removeWorktree` will not force
+  them away.
+- **Checked after the fix pass** (`moveViolations`, inside `gateDiff`). Each `from` must be gone and
+  each `to` present in git's name-status, for the first solve and for its repair round.
+
+`recon:once` prints a plan's moves, which is the dry run of all of this. SSX-4204 was the first run,
+on 2026-11-11: 27 moves made, every one held, and a commit of 27 `R100` renames and one doc edit.
 
 ### `verify.ts` and its three outcomes
 

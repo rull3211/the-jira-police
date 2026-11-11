@@ -111,6 +111,15 @@ honestly: **is this task actually safe for an agent to do?**
 
 Anything else is `proceed: false`. See §5.
 
+**A file that needs a new name or a new place, and no change to its content, goes in
+`plannedMoves`.** The fix pass can create a file but never delete one, so it cannot rename
+anything: asked to, it writes a copy beside the original, and the gate refuses a byte-identical
+copy (§4). The harness makes each move itself, with `git mv`, before the fix pass starts. It only
+does so in a run an operator armed for it, with `--moves` or `SOLVE_MOVES`; any other run stops
+before the fix pass and says why. That is still the right plan to return, so never leave a move out to get past it. Both
+ends of a move obey §4, a path may be the end of only one move, and a destination's directory must
+already exist. If the fix pass must also edit a moved file, list its new path in `plannedFiles`.
+
 ### Recon output
 
 ```json
@@ -121,6 +130,7 @@ Anything else is `proceed: false`. See §5.
   "devLensAccurate": true,
   "devLensCorrection": "where triage was wrong, or empty",
   "plannedFiles": ["src/…"],
+  "plannedMoves": [],
   "approach": "the change, concretely enough that the fix pass needs no further judgement",
   "testPlan": "the test to add, or why none is possible",
   "estimatedLines": 20,
@@ -132,7 +142,8 @@ Anything else is `proceed: false`. See §5.
 ```
 
 The three bail fields are non-empty **iff** `proceed` is false. Any of them set on a `proceed`,
-or any of them missing on a bail, is a malformed run — see §5 for what each one is for.
+or any of them missing on a bail, is a malformed run — see §5 for what each one is for. A bail plans
+no moves, and a `proceed` names at least one file, in `plannedFiles` or as a move.
 
 **An empty field is a zero-length string, not the two characters `""`.** The quote marks above are
 JSON syntax, not content: send the field empty, not holding a pair of quotes. A field holding `""`
@@ -145,6 +156,11 @@ reads as a bail that was never declared.
 `Write` and `Edit` are available. You are given the recon verdict as a brief. **Implement that
 brief.** If you now believe it was wrong, stop and say so in `abandoned` rather than substituting
 a different change — the brief is what the bound was calculated against.
+
+**If the brief lists `plannedMoves`, the harness has already made them.** Each `from` is gone and
+each `to` holds that file's exact content, so read and edit moved files at their new paths. Never
+write a file at a moved file's old path, and never write a second copy of one: the gate checks that
+every move held, and refuses a byte-identical copy of a file still in the tree.
 
 1. **Re-read the target files.** Do not edit from memory of the recon pass.
 2. **Make the smallest change that satisfies the requirement.** Not the best change you can think
@@ -680,6 +696,9 @@ happily allow is a question for §5, not a permission.
 
 - **no binary files.** A diff nobody can read in a review is not a diff this service opens a pull
   request for.
+- **no copy left beside its original.** A file added byte-identical to one still in the tree is
+  refused, because it is what a rename looks like from a pass that cannot delete. A file that needs
+  a new name is moved by the harness (§1, `plannedMoves`).
 - **nothing outside the worktree — including the readable checkouts of §0a.** Those are the one
   place this bound is easy to cross by accident, because they are open to your tools and the fix
   they suggest often looks like it belongs there. It does not. A write outside the worktree is
@@ -690,8 +709,8 @@ If the honest change needs any of these, that is a bail with a clear reason, not
 that avoids the check.
 
 **A plan naming a path the gate refuses never reaches the fix pass.** When recon says `proceed`,
-the harness checks `plannedFiles` against the list above and stops the run there, posting a comment
-of its own. If the honest change needs one of those paths, say so in the bail yourself: you know
+the harness checks `plannedFiles`, and both ends of every planned move, against the list above and
+stops the run there, posting a comment of its own. If the honest change needs one of those paths, say so in the bail yourself: you know
 why the ticket needs it, and the harness does not.
 
 ---

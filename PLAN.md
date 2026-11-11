@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4178 tests in 123 files**, no build step.
+> **4235 tests in 124 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83 and §86, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86 and §87, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -79,7 +79,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §87. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §88. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -663,6 +663,17 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   pushed; and a request count from the same run against the two reads a pass costs plus one per
   audit post, comment and publish.
 
+- **The harness's moves have run once, under the daemon, and none of their refusals has run
+  live.** SSX-4204 on 2026-11-11, with `SOLVE_MOVES=true`: recon planned 27 moves, the harness made
+  them with `git mv`, the gate found every move held and no copy, verification passed, and the
+  commit is 27 `R100` renames and one doc edit (storebrand-digital/buy-insurance-advisor-web#2760).
+  Fail-first read the moved tests as `inconclusive` and simplify changed nothing, both as predicted.
+  A hand-run `solve:once --moves`, a withheld plan's comment, a `git mv` refusal, a move written
+  back and a `C100` copy have run only in tests, and the copy read's cost on a large repository is
+  unmeasured. **What would show it:** a plan with moves under a daemon without `SOLVE_MOVES`, read
+  as one comment naming the command; and the next fix pass that writes a copy, read as a refusal
+  naming both paths.
+
 ### 11. Loose ends recorded in no other file
 
 Things that exist in neither `architecture/*.md`, `README.md` nor the source, and were being kept
@@ -760,7 +771,7 @@ not a plan item. What is left below is only what is still missing.
 - **`docs:check` is narrower than three documents claim.** Only `.md`-suffixed links, so a reference
   to a directory rather than a file is still invisible to it — which is why the "where the truth
   lives" row for `dev-house-rules` had to be pointed at `SKILL.md` to be checked at all. The
-  repository's real cross-reference system — **130 section references** in the tree's TypeScript, mostly
+  repository's real cross-reference system — **131 section references** in the tree's TypeScript, mostly
   into the two instruction skills — is no longer unresolved: `§N` tokens are now checked against the
   headings that define them, and **exactly 40 point at sections that do not exist** (below,
   "The citations that were never written down"). Which _document_ a bare citation meant, since almost

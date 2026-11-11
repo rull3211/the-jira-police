@@ -941,6 +941,7 @@ function verifiedOutcome(): Extract<SolveOutcome, { kind: "verified" }> {
       devLensAccurate: true,
       devLensCorrection: "",
       plannedFiles: [],
+      plannedMoves: [],
       approach: "",
       testPlan: "",
       estimatedLines: 1,

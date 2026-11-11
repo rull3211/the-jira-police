@@ -23,6 +23,7 @@ export const RECON_SCHEMA = {
     "devLensAccurate",
     "devLensCorrection",
     "plannedFiles",
+    "plannedMoves",
     "approach",
     "testPlan",
     "estimatedLines",
@@ -63,6 +64,24 @@ export const RECON_SCHEMA = {
       items: { type: "string" },
       description:
         "Repository-relative paths the fix pass would change, including any test file. Always present: an empty array when `proceed` is false, never omitted. The harness bounds the eventual diff, so an honest list here that looks too long is a reason to return false rather than to shorten the list. A path the diff gate refuses by name (SOLVE_INSTRUCTIONS.md §4) stops the run before the fix pass, so if the honest change needs one, return false and say why.",
+    },
+    plannedMoves: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["from", "to"],
+        properties: {
+          from: { type: "string", description: "The file's repository-relative path today." },
+          to: {
+            type: "string",
+            description:
+              "Its new repository-relative path. Its directory must already exist, and nothing may be there yet.",
+          },
+        },
+      },
+      description:
+        "Files that need a new name or place and no change to their content. The harness moves each with git before the fix pass, because the fix pass can create a file but never delete one, so a rename it attempted would leave the original behind. Always present: an empty array when nothing moves or `proceed` is false. Both ends obey the same path rules as plannedFiles (SOLVE_INSTRUCTIONS.md §4), and a path may be the end of only one move. List a moved file's new path in plannedFiles too only if the fix pass also edits it.",
     },
     approach: {
       type: "string",
@@ -107,14 +126,18 @@ export const RECON_SCHEMA = {
   // oxlint-disable-next-line unicorn/no-thenable
   then: {
     properties: {
-      plannedFiles: { minItems: 1 },
       bailReason: { pattern: EMPTY },
       bailBlockers: { maxItems: 0 },
       bailRemedy: { pattern: EMPTY },
     },
+    anyOf: [
+      { properties: { plannedFiles: { minItems: 1 } } },
+      { properties: { plannedMoves: { minItems: 1 } } },
+    ],
   },
   else: {
     properties: {
+      plannedMoves: { maxItems: 0 },
       bailReason: { pattern: FILLED },
       bailBlockers: { minItems: 1 },
       bailRemedy: { pattern: FILLED },

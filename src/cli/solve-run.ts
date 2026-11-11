@@ -173,6 +173,7 @@ export async function runSolver(
   issueKey: string,
   cycle: SolveCycleOutcome | null,
   promoteRepair: boolean,
+  moves = false,
 ): Promise<SolveOutcome | null> {
   process.stdout.write(queueNote(issueKey, cycle));
 
@@ -188,12 +189,17 @@ export async function runSolver(
   if (built === null) {
     return null;
   }
-  const request = { ...built, promoteRepair };
+  const request = { ...built, promoteRepair, moves };
 
   process.stdout.write(`Repository: ${request.repoPath} @ ${request.baseRef}\n\n`);
   if (promoteRepair) {
     process.stdout.write(
       `Armed to act on a repair round (--repair, or REPAIR_PUBLISH under the daemon): one that turns a failed verification green opens the pull request.\n\n`,
+    );
+  }
+  if (moves) {
+    process.stdout.write(
+      `Armed to move files (--moves): the harness makes the moves recon plans, with git mv, before the fix pass.\n\n`,
     );
   }
 
@@ -1132,6 +1138,8 @@ export async function runWriteRungs(
   cycle: SolveCycleOutcome | null,
   authority: ClaimAuthority,
   promoteRepair: boolean,
+  /** `--moves` by hand, or `SOLVE_MOVES` for the daemon. Off unless one of them says so. */
+  moves = false,
 ): Promise<void> {
   // Before the claim: a live-mode misconfiguration throws here, and after the claim it would strand it.
   const audit = pipelineAuditNotifier(settings);
@@ -1167,7 +1175,7 @@ export async function runWriteRungs(
       repo: cycle?.planned.find((candidate) => candidate.issueKey === issueKey)?.repo ?? null,
     });
     movedIn = await enterInProgress(client, issueKey);
-    const outcome = await runSolver(settings, client, issueKey, cycle, promoteRepair);
+    const outcome = await runSolver(settings, client, issueKey, cycle, promoteRepair, moves);
     // Read before the early return: the outcomes that decide a ticket's fate are exactly the
     // ones that never reach a pull request.
     terminal = outcome === null ? null : terminalLabelAfter(outcome);
@@ -1260,6 +1268,8 @@ export async function runSolveClaims(
   ledger: AttemptLedger,
   /** Decided once by `createReviewLoop`, which logs it, so the startup report is the value acted on. */
   promoteRepair: boolean,
+  /** `SOLVE_MOVES`, decided and logged the same way. */
+  moves = false,
 ): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
   const cycle = await runSolveCycle(queueDeps);
   const authority = queueDeps.mode;
@@ -1287,7 +1297,7 @@ export async function runSolveClaims(
 
     const before = process.exitCode;
     try {
-      await runWriteRungs(settings, client, key, "pr", cycle, authority, promoteRepair);
+      await runWriteRungs(settings, client, key, "pr", cycle, authority, promoteRepair, moves);
       started += 1;
     } catch (error) {
       if (error instanceof TicketHeldError) {

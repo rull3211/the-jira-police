@@ -42,14 +42,25 @@ import {
 } from "./base-sync.ts";
 import { type DependencyBump, judgeBumps } from "./dependency-bump.ts";
 import {
+  DiffParseError,
   type DiffVerdict,
   type FileChange,
+  type NameStatus,
   checkDiff,
+  copyRefusals,
+  parseNameStatus,
   parseNumstat,
   plannedPathRefusals,
 } from "./diff-gate.ts";
 import { describeEscape, escapedRepos, snapshotRepos } from "./escape.ts";
 import { TicketHeldError, type WriteGate, assertMayWrite } from "./hold.ts";
+import {
+  type PlannedMove,
+  applyMoves,
+  moveRefusals,
+  moveViolations,
+  resolveMoves,
+} from "./moves.ts";
 import { type BotIdentity, type CommitResult, commitAll } from "./pr.ts";
 import {
   type AbandonCause,
@@ -138,6 +149,8 @@ export interface SolveRequest {
   readonly repairRound?: boolean;
   /** `DEPENDENCY_BUMPS`: whether a pom.xml change that only moves dependency versions and edits comments is allowed. Absent means no. */
   readonly dependencyBumps?: boolean;
+  /** `--moves` by hand or `SOLVE_MOVES` for the daemon: whether the harness may make the moves recon plans. Absent means no. */
+  readonly moves?: boolean;
   /**
    * `--repair` typed per run, or `REPAIR_PUBLISH` under the daemon: a green repair round becomes the
    * outcome. Off unless set, and must be — green is reachable by weakening the assertion that failed.
@@ -203,10 +216,12 @@ export type SolveOutcome =
       /** The model's own verdict, never edited — under `refusedPlan` it still says `proceed`. */
       readonly recon: ReconVerdict;
       /**
-       * Set when recon said `proceed` and the harness stopped the run anyway, because the plan named
-       * paths the diff gate refuses by name: one `path: why` per path. See `plannedPathRefusals`.
+       * Set when recon said `proceed` and the harness would not carry out the plan: a path the gate
+       * refuses by name, or a move it would not or could not make (`moves.ts`). One reason each.
        */
       readonly refusedPlan?: readonly string[];
+      /** Set when recon said `proceed` with moves the harness would make, and the run was armed for neither `--moves` nor `SOLVE_MOVES`. */
+      readonly withheldMoves?: readonly PlannedMove[];
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
       /** What became of the worktree. `kept` if git refused, with its reason. */
@@ -344,7 +359,11 @@ function lensOf(recon: ReconVerdict): DevLensFeedback {
 
 /** `bailed.reason` when the harness, not recon, stopped the run; the model's plan is on `recon`, unedited. */
 export const PLAN_REFUSED_REASON =
-  "recon planned a change to a path no run may make, so the harness stopped the run before the fix pass";
+  "recon planned a change the harness will not make, so it stopped the run before the fix pass";
+
+/** `bailed.reason` when the plan's moves were sound and the run lacked the privilege to make them. */
+export const MOVES_WITHHELD_REASON =
+  "recon planned to move files, which only a run started with --moves, or a daemon with SOLVE_MOVES=true, may do, so the harness stopped the run before the fix pass";
 
 /**
  * The two reads of the worktree, kept separate rather than shared.
@@ -371,22 +390,68 @@ async function readNumstat(
   return await gitDiff(runner, worktreePath, timeoutMs, ["--numstat", "-z", baseRef]);
 }
 
-/** The gate over `changes`, with each changed `pom.xml` judged first — the one exception `checkDiff` cannot decide from paths. */
+/** The gate over `changes` and git's copy-detecting read, with each changed `pom.xml` judged first — the one exception `checkDiff` cannot decide from paths. */
 async function gateDiff(
   runner: CommandRunner,
   request: Pick<SolveRequest, "baseRef" | "gitTimeoutMs" | "dependencyBumps">,
   worktreePath: string,
   changes: readonly FileChange[],
+  /** The moves the harness made in this worktree, each checked to have held. Empty except on a first solve. */
+  moves: readonly PlannedMove[] = [],
 ): Promise<DiffVerdict> {
-  if (request.dependencyBumps !== true) {
-    return checkDiff(changes);
+  const verdict =
+    request.dependencyBumps === true
+      ? checkDiff(
+          changes,
+          await judgeBumps(
+            runner,
+            { worktreePath, baseRef: request.baseRef, timeoutMs: request.gitTimeoutMs },
+            changes.map((change) => change.path),
+          ),
+        )
+      : checkDiff(changes);
+  const records = await readNameStatus(runner, worktreePath, request.baseRef, request.gitTimeoutMs);
+  const reasons =
+    records === null
+      ? ["could not read git's account of copies and renames, so a copy could not be ruled out"]
+      : [...copyRefusals(records), ...moveViolations(moves, records)];
+  if (reasons.length === 0) {
+    return verdict;
   }
-  const bumps = await judgeBumps(
-    runner,
-    { worktreePath, baseRef: request.baseRef, timeoutMs: request.gitTimeoutMs },
-    changes.map((change) => change.path),
-  );
-  return checkDiff(changes, bumps);
+  // `null` paths: a copy or a broken move is a file the run created or removed, which a rollback to HEAD cannot undo.
+  return {
+    ok: false,
+    reasons: [...(verdict.ok ? [] : verdict.reasons), ...reasons],
+    refusedPaths: null,
+  };
+}
+
+/** The diff with copy detection on, which the numstat read leaves off, or `null` when it cannot be read. */
+async function readNameStatus(
+  runner: CommandRunner,
+  worktreePath: string,
+  baseRef: string,
+  timeoutMs: number,
+): Promise<readonly NameStatus[] | null> {
+  const raw = await gitDiff(runner, worktreePath, timeoutMs, [
+    "--name-status",
+    "-z",
+    "-M",
+    "-C",
+    "--find-copies-harder",
+    baseRef,
+  ]);
+  if (raw === null) {
+    return null;
+  }
+  try {
+    return parseNameStatus(raw);
+  } catch (error) {
+    if (error instanceof DiffParseError) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /** The human-readable read, for a prompt. No `-z`: nothing here is parsed, so the gate's newline-in-filename defense does not apply. */
@@ -698,7 +763,14 @@ export async function runReconOnly(
     });
 
     const refusedPlan = recon.proceed
-      ? plannedPathRefusals(recon.plannedFiles, worktree.path, request.dependencyBumps === true)
+      ? [
+          ...plannedPathRefusals(
+            recon.plannedFiles,
+            worktree.path,
+            request.dependencyBumps === true,
+          ),
+          ...moveRefusals(recon.plannedMoves, worktree.path),
+        ]
       : [];
     if (refusedPlan.length > 0) {
       log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
@@ -792,6 +864,8 @@ async function attemptRepair(
   worktree: Worktree,
   options: SolveRunOptions,
   verification: Extract<VerificationResult, { outcome: "failed" }>,
+  /** The moves the harness made before the fix pass this repairs, held to the same check again. */
+  moves: readonly PlannedMove[] = [],
 ): Promise<RepairAttempt> {
   const { issueKey } = request;
   const { commands, passes } = deps;
@@ -834,7 +908,7 @@ async function attemptRepair(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = await gateDiff(commands, request, worktree.path, changes);
+  const verdict = await gateDiff(commands, request, worktree.path, changes, moves);
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons };
@@ -889,6 +963,7 @@ export async function runRepairRound(
     worktree,
     { ...base, brief: JSON.stringify(recon, null, 2) },
     verification,
+    resolveMoves(recon.plannedMoves, worktree.path) ?? [],
   );
   switch (attempt.kind) {
     case "crashed": {
@@ -1051,11 +1126,10 @@ async function runPipeline(
   }
 
   // Before the fix pass, so a plan the gate was always going to refuse costs no `Write` and no spend.
-  const refusedPlan = plannedPathRefusals(
-    recon.plannedFiles,
-    worktree.path,
-    request.dependencyBumps === true,
-  );
+  const refusedPlan = [
+    ...plannedPathRefusals(recon.plannedFiles, worktree.path, request.dependencyBumps === true),
+    ...moveRefusals(recon.plannedMoves, worktree.path),
+  ];
   if (refusedPlan.length > 0) {
     log.warn("solve.plan.refused", { issueKey, reasons: refusedPlan });
     const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
@@ -1068,6 +1142,41 @@ async function runPipeline(
       worktree,
       cleanup,
     };
+  }
+
+  // ---- moves -------------------------------------------------------------
+  // The refusals above returned, so every move resolves here.
+  const moves = resolveMoves(recon.plannedMoves, worktree.path) ?? [];
+  if (moves.length > 0) {
+    if (request.moves !== true) {
+      log.warn("solve.moves.withheld", { issueKey, moves: moves.length });
+      const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
+      return {
+        kind: "bailed",
+        reason: MOVES_WITHHELD_REASON,
+        recon,
+        withheldMoves: moves,
+        devLens,
+        worktree,
+        cleanup,
+      };
+    }
+    const moved = await applyMoves(commands, worktree.path, moves, request.gitTimeoutMs);
+    if (moved.outcome === "refused") {
+      log.warn("solve.moves.refused", { issueKey, reason: moved.reason, done: moved.done });
+      // Not forced: the moves already made are staged, so git keeps the worktree and says why.
+      const cleanup = await removeWorktree(commands, worktree, "discard", request.gitTimeoutMs);
+      return {
+        kind: "bailed",
+        reason: PLAN_REFUSED_REASON,
+        recon,
+        refusedPlan: [moved.reason],
+        devLens,
+        worktree,
+        cleanup,
+      };
+    }
+    log.info("solve.moves.made", { issueKey, moves: moves.length });
   }
 
   // ---- fix ---------------------------------------------------------------
@@ -1140,7 +1249,7 @@ async function runPipeline(
     };
   }
   const changes = parseNumstat(finalDiff);
-  const verdict = await gateDiff(commands, request, worktree.path, changes);
+  const verdict = await gateDiff(commands, request, worktree.path, changes, moves);
   if (!verdict.ok) {
     log.warn("solve.diff_gate.refused", { issueKey, reasons: verdict.reasons });
     return { kind: "refused", stage: "diff-gate", reasons: verdict.reasons, devLens, worktree };

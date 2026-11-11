@@ -32,6 +32,7 @@ function verified(overrides: Partial<Verified> = {}): Verified {
       devLensAccurate: true,
       devLensCorrection: "",
       plannedFiles: ["src/app/layout.tsx"],
+      plannedMoves: [],
       approach: "read the environment",
       testPlan: "unit",
       estimatedLines: 12,

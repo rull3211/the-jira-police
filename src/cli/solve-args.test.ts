@@ -261,6 +261,37 @@ describe("--repair, the modifier that is not a rung", () => {
   });
 });
 
+/** Whether a ladder parse carries `--moves`, or a thrown assertion naming what came back instead. */
+function movesFiles(argv: readonly string[]): boolean {
+  const result = parseSolveArgs(argv);
+  if (!result.ok || result.invocation.mode !== "ladder") {
+    throw new Error(`expected a ladder parse, got: ${JSON.stringify(result)}`);
+  }
+  return result.invocation.moves;
+}
+
+describe("--moves, the modifier that lets the harness move files", () => {
+  it.each(RUNG_FLAGS)("is off on %s unless it is typed", (flag) => {
+    expect(movesFiles(["SSX-4204", flag])).toBe(false);
+  });
+
+  it.each(["--solve", "--pr", "--review"])("arms %s without moving the rung", (flag) => {
+    expect(movesFiles(["SSX-4204", flag, "--moves"])).toBe(true);
+    expect(parsed(["--moves", "SSX-4204", flag]).phase).toBe(flag.slice(2));
+  });
+
+  it.each([
+    [["SSX-4204", "--moves"], "a run with no rung"],
+    [["SSX-4204", "--claim", "--moves"], "--claim"],
+    [["SSX-4204", "--advance", "--moves"], "--advance"],
+    [["--watch", "--moves"], "--watch"],
+  ])("refuses %j, which runs no first fix pass for a move to come before", (argv, named) => {
+    const reason = error(argv);
+    expect(reason).toContain("--moves needs --solve, --pr or --review");
+    expect(reason).toContain(named);
+  });
+});
+
 describe("repairUnavailable", () => {
   it("refuses when REPAIR_ROUND=false, since no round would run for it to act on", () => {
     // Otherwise the flag is accepted and silently does nothing — the run reads as armed.

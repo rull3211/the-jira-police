@@ -218,25 +218,47 @@ describe("runWriteRungs when the ticket is held mid-solve", () => {
   });
 });
 
-describe("runSolveClaims when a ticket is held", () => {
-  function queueOf(...keys: readonly string[]): SolveDeps {
-    return {
-      enabled: true,
-      mode: "manual",
-      allowedRepos: ["allowed-repo"],
-      maxConcurrent: 5,
-      fetchQueue: async () =>
-        keys.map((key) => ({
-          key,
-          summary: "Cache",
-          url: `https://example.invalid/browse/${key}`,
-          labels: [...CLAIMABLE],
-          updated: "2026-09-05T09:00:00Z",
-        })),
-      countInFlight: async () => 0,
-    };
-  }
+function queueOf(...keys: readonly string[]): SolveDeps {
+  return {
+    enabled: true,
+    mode: "manual",
+    allowedRepos: ["allowed-repo"],
+    maxConcurrent: 5,
+    fetchQueue: async () =>
+      keys.map((key) => ({
+        key,
+        summary: "Cache",
+        url: `https://example.invalid/browse/${key}`,
+        labels: [...CLAIMABLE],
+        updated: "2026-09-05T09:00:00Z",
+      })),
+    countInFlight: async () => 0,
+  };
+}
 
+describe("runSolveClaims and the moves it may make", () => {
+  it.each([
+    ["off unless the loop passes it", undefined, false],
+    ["on when the loop passes SOLVE_MOVES", true, true],
+  ])("is %s", async (_label, passed, armed) => {
+    stubJira();
+    board.set("SSX-1", [...CLAIMABLE]);
+    solveWithRetry.mockRejectedValue(new Error("stop after the request is built"));
+
+    await runSolveClaims(
+      settingsIn(directory),
+      queueOf("SSX-1"),
+      client(),
+      createAttemptLedger(3),
+      false,
+      ...(passed === undefined ? [] : [passed]),
+    );
+
+    expect(solveWithRetry.mock.calls[0]?.[1]).toMatchObject({ moves: armed });
+  });
+});
+
+describe("runSolveClaims when a ticket is held", () => {
   it("logs a drop as information, not as a failed claim, and carries on to the next ticket", async () => {
     stubJira();
     board.set("SSX-1", [...CLAIMABLE]);

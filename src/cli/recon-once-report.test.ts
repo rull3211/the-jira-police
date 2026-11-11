@@ -22,6 +22,7 @@ function verdict(overrides: Partial<ReconVerdict> = {}): ReconVerdict {
     devLensAccurate: true,
     devLensCorrection: "",
     plannedFiles: ["src/app/head.tsx"],
+    plannedMoves: [],
     approach: "add the link element",
     testPlan: "assert the head contains the link",
     estimatedLines: 8,
@@ -161,6 +162,39 @@ describe("formatReport", () => {
     expect(report.indexOf("## Stopped by the harness")).toBeGreaterThan(
       report.indexOf("## Planned files"),
     );
+  });
+
+  it("prints the moves a plan would have the harness make, which is the dry run of --moves", () => {
+    const outcome: ReconOnlyOutcome = {
+      kind: "proceed",
+      recon: verdict({
+        plannedFiles: ["docs/flows.md"],
+        plannedMoves: [{ from: "src/app/hooks.tsx", to: "src/app/hooks.ts" }],
+      }),
+      devLens: { accurate: true, correction: "" },
+      cleanup: { outcome: "removed", path: WORKTREE.path, branch: { outcome: "deleted" } },
+    };
+
+    const report = formatReport("SSX-4204", outcome, NOW);
+
+    expect(report).toContain("## Planned moves");
+    expect(report).toContain("only under `--moves`, or `SOLVE_MOVES` for the daemon");
+    expect(report).toContain("- src/app/hooks.tsx → src/app/hooks.ts");
+  });
+
+  it("prints no moves section for a plan that moves nothing", () => {
+    const report = formatReport(
+      "SSX-4001",
+      {
+        kind: "proceed",
+        recon: verdict(),
+        devLens: { accurate: true, correction: "" },
+        cleanup: { outcome: "removed", path: WORKTREE.path, branch: { outcome: "deleted" } },
+      },
+      NOW,
+    );
+
+    expect(report).not.toContain("## Planned moves");
   });
 
   it("cannot be made to forge a heading out of recon's own prose", () => {
