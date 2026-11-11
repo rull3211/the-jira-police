@@ -63,13 +63,10 @@ export const RULE_PARAGRAPHS: Record<string, number> = {
  * different failures, each reported on its own. Exact, not a ceiling: fewer means a paid debt is
  * still being claimed, more means a new entry took the exemption without writing one.
  *
- * Deliberately no grandfather list — a path exemption never expires the way a dated declaration
- * does.
+ * Deliberately no grandfather list — a declaration sits in the entry it exempts and is counted
+ * here, where a path exemption would be neither.
  */
 export const UNRESOLVED_ON_PURPOSE = 11;
-
-/** How stale a dated `**No rule yet**` is allowed to get. */
-export const UNRESOLVED_DAYS = 30;
 
 /**
  * Fenced code blocks, blanked line by line so every line number after them stays true.
@@ -204,7 +201,7 @@ export type Unresolved =
  * `**No rule yet** — <what would have to be true>, and <a date, or a count>.`
  *
  * Parsed rather than read: a deliberate exemption nothing can check is a comment. The trailing
- * clause must be the last thing on the line so a date in the reason isn't mistaken for the deadline.
+ * clause must be the last thing on the line so a date in the reason isn't mistaken for the declaration's.
  */
 const NO_RULE_YET = /\*\*No rule yet\*\*\s*—\s*(.+?),\s+and\s+(.+?)\.\s*$/u;
 
@@ -308,8 +305,6 @@ export interface RuleCitationInput {
   readonly citing: readonly SourceFile[];
   /** `slugOf` from `docs-check.ts`, passed in rather than copied — a fact with two homes drifts. */
   readonly slugOf: (heading: string) => string;
-  /** Passed in so the dated exemption can be tested without waiting a month. */
-  readonly today: Date;
   /**
    * Minutes between an incident being written and its rule citing it, most
    * recent first. Reported, never guarded — see the header.
@@ -343,8 +338,6 @@ export function median(values: readonly number[]): number | null {
 
 /** How many of the most recent gaps the reported median is taken over. */
 export const GAP_WINDOW = 15;
-
-const DAY = 24 * 60 * 60 * 1000;
 
 /**
  * `git log` arguments finding when an incident heading was first written.
@@ -490,20 +483,10 @@ export function ruleCitationProblems(input: RuleCitationInput): RuleCitationRepo
     }
 
     if (unresolved.kind === "dated") {
-      const due = Date.parse(unresolved.on);
-      if (Number.isNaN(due)) {
+      // The date records when the exemption was taken, and is never a deadline.
+      if (Number.isNaN(Date.parse(unresolved.on))) {
         problems.push(
           `${input.incidentsPath}:${entry.line} declares **No rule yet** as of ${unresolved.on}, which is not a date.`,
-        );
-        continue;
-      }
-      const days = Math.floor((input.today.getTime() - due) / DAY);
-      if (days > UNRESOLVED_DAYS) {
-        problems.push(
-          `${input.incidentsPath}:${entry.line} has been waiting for a rule since ${unresolved.on} — ${days} days.\n` +
-            `  "${entry.title}"\n` +
-            `  A dated exemption is a promise with a deadline, and ${UNRESOLVED_DAYS} days is it. Write the\n` +
-            `  rule, or replace the date with what is actually still missing.`,
         );
       }
       continue;
