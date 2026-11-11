@@ -445,6 +445,57 @@ describe("JiraClient.fetchFiled", () => {
   });
 });
 
+describe("JiraClient.fetchLabels", () => {
+  it("reads the labels alone, with a GET", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ id: "1", key: "SSX-1", fields: { labels: ["agent:solvable", "svc:web"] } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client().fetchLabels("SSX-1")).resolves.toEqual(["agent:solvable", "svc:web"]);
+
+    const { url, init } = callArgs(fetchMock, 0);
+    expect(url).toBe("https://example.invalid/rest/api/3/issue/SSX-1?fields=labels");
+    expect(init.method).toBe("GET");
+  });
+
+  it("returns an empty list for a ticket that has no labels", async () => {
+    vi.stubGlobal("fetch", async () =>
+      jsonResponse({ id: "1", key: "SSX-1", fields: { labels: [] } }),
+    );
+
+    await expect(client().fetchLabels("SSX-1")).resolves.toEqual([]);
+  });
+
+  it("refuses an answer with no labels array rather than reading it as no labels", async () => {
+    // The plausible wrong version defaults to `[]`, and an empty list is what a write is cleared on.
+    vi.stubGlobal("fetch", async () => jsonResponse({ id: "1", key: "SSX-1", fields: {} }));
+    await expect(client().fetchLabels("SSX-1")).rejects.toThrow(JiraError);
+
+    vi.stubGlobal("fetch", async () => jsonResponse({ id: "1", key: "SSX-1" }));
+    await expect(client().fetchLabels("SSX-1")).rejects.toThrow(JiraError);
+
+    vi.stubGlobal("fetch", async () =>
+      jsonResponse({ id: "1", key: "SSX-1", fields: { labels: null } }),
+    );
+    await expect(client().fetchLabels("SSX-1")).rejects.toThrow(JiraError);
+  });
+
+  it("surfaces a Jira error rather than an empty list", async () => {
+    vi.stubGlobal("fetch", async () => new Response("down", { status: 503 }));
+
+    await expect(client().fetchLabels("SSX-1")).rejects.toThrow(JiraError);
+  });
+
+  it("refuses an issue key that would escape the endpoint, before any request", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ fields: { labels: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(client().fetchLabels("../../rest/api/3/myself")).rejects.toThrow(JiraError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("JiraClient.projectFacts", () => {
   const issueTypes = [
     { id: "10007", name: "Oppgave", subtask: false },

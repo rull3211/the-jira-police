@@ -10,7 +10,7 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 ## 7. Module map
 
-138 production modules, 121 test files. Grouped by what they belong to rather than alphabetically,
+139 production modules, 123 test files. Grouped by what they belong to rather than alphabetically,
 because the grouping is the architecture.
 
 **The shell — scheduling and composition**
@@ -37,13 +37,13 @@ because the grouping is the architecture.
 
 **Jira**
 
-| Path                 | Role                                                                                                                                                                                                                         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/jira/client.ts` | `/rest/api/3/search/jql`, token pagination, Basic auth, the changelog and activity reads, `projectFacts`: the components and creatable issue types a drafted ticket may name, and `fetchFiled`: what a filing set, read back |
-| `src/jira/jql.ts`    | Query builders — new-issue, solve queue, in-flight, review, sendback watch. Injection-safe                                                                                                                                   |
-| `src/jira/types.ts`  | The slice of the Jira payload actually read, plus `TicketRef`                                                                                                                                                                |
-| `src/jira/adf.ts`    | Atlassian Document Format rendered down to plain text. No I/O, so testable against real payloads                                                                                                                             |
-| `src/state/store.ts` | Cursor + seen keys, atomic write                                                                                                                                                                                             |
+| Path                 | Role                                                                                                                                                                                                                                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/jira/client.ts` | `/rest/api/3/search/jql`, token pagination, Basic auth, the changelog and activity reads, `fetchLabels` (a ticket's labels as they are now, for the write gate), `projectFacts`: the components and creatable issue types a drafted ticket may name, and `fetchFiled`: what a filing set, read back |
+| `src/jira/jql.ts`    | Query builders — new-issue, solve queue, in-flight, review, sendback watch. Injection-safe. Every one but the in-flight count leaves out `agent:ignore`                                                                                                                                             |
+| `src/jira/types.ts`  | The slice of the Jira payload actually read, plus `TicketRef`                                                                                                                                                                                                                                       |
+| `src/jira/adf.ts`    | Atlassian Document Format rendered down to plain text. No I/O, so testable against real payloads                                                                                                                                                                                                    |
+| `src/state/store.ts` | Cursor + seen keys, atomic write                                                                                                                                                                                                                                                                    |
 
 **Attachments — the image path, and triage and recon each construct their own staging call**
 
@@ -89,7 +89,8 @@ inheritance.
 
 | Path                           | Role                                                                                                                                                    |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/solve/labels.ts`          | The `agent:` state machine as pure functions; `repoFromLabels`                                                                                          |
+| `src/solve/labels.ts`          | The `agent:` state machine as pure functions; `repoFromLabels`; `isIgnored`, the one check of a person's `agent:ignore`                                 |
+| `src/solve/hold.ts`            | A person's hold, enforced where this service writes: the live-read `WriteGate`, `TicketHeldError`, and `gatePasses`                                     |
 | `src/solve/poller.ts`          | One solve cycle: selection, capacity, and the planned claim                                                                                             |
 | `src/solve/report.ts`          | The cycle as `groomed/solve-cycle.md`, so a dry phase can be judged after the fact                                                                      |
 | `src/solve/claim.ts`           | The claim and its release. Read, re-check, write, read back                                                                                             |

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { IssueActivity, JiraClient } from "../jira/client.ts";
 import type { OutputSink } from "../output/sink.ts";
 import type { TicketCommenter } from "../solve/feedback.ts";
+import { TicketHeldError } from "../solve/hold.ts";
 import { FOOTER_TEXT } from "./decide.ts";
 import { createWatchMemo } from "./memo.ts";
 import type { Relevance, RelevanceChecker } from "./relevance.ts";
@@ -180,5 +181,126 @@ describe("what the sweep pays for", () => {
     expect(outcome.retriage).toBe(1);
     expect(outcome.skipped).toBe(0);
     expect(outcome.retriaged).toBe(0);
+  });
+});
+
+describe("a watched ticket a person has labelled agent:ignore", () => {
+  /** The harness, with the board saying what the test needs it to say about one ticket and a spy on every write. */
+  function held(
+    activity: (key: string) => IssueActivity,
+    options: { readonly groom?: RetriageDeps["groom"]; readonly answers?: boolean } = {},
+  ) {
+    const labelWrites: string[] = [];
+    const comments: string[] = [];
+    const base = harness({
+      memo: createWatchMemo(),
+      answer: () => (options.answers === true ? { answers: true, reason: "a baseline" } : null),
+    });
+    const acting = base.deps.acting;
+    if (acting === null) {
+      throw new Error("the harness is meant to act");
+    }
+    return {
+      ...base,
+      labelWrites,
+      comments,
+      deps: {
+        ...base.deps,
+        client: { fetchActivity: async (key: string) => activity(key) } as unknown as Pick<
+          JiraClient,
+          "fetchActivity"
+        >,
+        acting: {
+          ...acting,
+          commenter: { comment: async (_key: string, body: string) => void comments.push(body) },
+          retriage: {
+            ...acting.retriage,
+            client: {
+              updateLabels: async (key: string) => void labelWrites.push(key),
+            } as unknown as Pick<JiraClient, "updateLabels">,
+            ...(options.groom === undefined ? {} : { groom: options.groom }),
+          },
+        },
+      } satisfies WatchSweepDeps,
+    };
+  }
+
+  const ignored = (key: string): IssueActivity => ({
+    ...answered(key),
+    labels: ["agent:watching", "agent:ignore"],
+  });
+
+  it("is not re-triaged, and the paid relevance check is not bought", async () => {
+    const { deps, checked, labelWrites } = held(ignored);
+
+    const outcome = await runWatchSweep(deps, ["SSX-1234"]);
+
+    // Unplug the check after the look and the model is asked about a ticket a person said to leave.
+    expect(checked).toEqual([]);
+    expect(labelWrites).toEqual([]);
+    expect(outcome).toMatchObject({ held: 1, retriage: 0, failed: 0, retriaged: 0 });
+  });
+
+  it("is not unsubscribed or commented on when it closes, which is a write too", async () => {
+    const { deps, labelWrites, comments } = held((key) => ({
+      ...ignored(key),
+      statusCategoryKey: "done",
+    }));
+
+    const outcome = await runWatchSweep(deps, ["SSX-1234"]);
+
+    expect(labelWrites).toEqual([]);
+    expect(comments).toEqual([]);
+    expect(outcome).toMatchObject({ held: 1, unsubscribe: 0, ended: 0 });
+  });
+
+  it("is unsubscribed when it closes and nothing holds it", async () => {
+    // The control: the same closed ticket without the label is ended, so the silence above is the check.
+    const { deps, labelWrites } = held((key) => ({ ...answered(key), statusCategoryKey: "done" }));
+
+    const outcome = await runWatchSweep(deps, ["SSX-1234"]);
+
+    expect(labelWrites).toEqual(["SSX-1234"]);
+    expect(outcome).toMatchObject({ held: 0, ended: 1 });
+  });
+
+  it("goes on to the next ticket", async () => {
+    const { deps, checked } = held((key) => (key === "SSX-1111" ? ignored(key) : answered(key)), {
+      answers: true,
+      groom: async () => {
+        throw new Error("no test here gets as far as a triage run");
+      },
+    });
+
+    const outcome = await runWatchSweep(deps, ["SSX-1111", "SSX-2222"]);
+
+    expect(checked).toEqual(["SSX-2222"]);
+    expect(outcome.held).toBe(1);
+  });
+
+  it("is counted as held, not failed, when the label arrives after the look and the triage refuses to start", async () => {
+    const { deps } = held(answered, {
+      answers: true,
+      groom: async () => {
+        throw new TicketHeldError("SSX-1234", "starting triage");
+      },
+    });
+
+    const outcome = await runWatchSweep(deps, ["SSX-1234"]);
+
+    expect(outcome).toMatchObject({ held: 1, failed: 0 });
+  });
+
+  it("still counts an ordinary triage failure as one", async () => {
+    const { deps } = held(answered, {
+      answers: true,
+      groom: async () => {
+        throw new Error("the session fell over");
+      },
+    });
+
+    const outcome = await runWatchSweep(deps, ["SSX-1234"]);
+
+    expect(outcome).toMatchObject({ held: 0, failed: 1 });
   });
 });

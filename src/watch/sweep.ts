@@ -13,6 +13,8 @@ import type { OutputSink } from "../output/sink.ts";
 import { toTriageResult } from "../triage/single.ts";
 import { describeDecision, describeRetriage } from "../cli/watch-args.ts";
 import type { TicketCommenter } from "../solve/feedback.ts";
+import { TicketHeldError } from "../solve/hold.ts";
+import { isIgnored } from "../solve/labels.ts";
 import { decideWatch, newestForeignAt, type WatchDecision, type WatchSignals } from "./decide.ts";
 import { endWatch } from "./end.ts";
 import type { WatchMemo } from "./memo.ts";
@@ -50,6 +52,8 @@ export interface WatchSweepOutcome {
   readonly failed: number;
   /** Tickets whose trigger the memo had already paid to decline. */
   readonly skipped: number;
+  /** Tickets a person has labelled `agent:ignore`: not unsubscribed, not commented on, not re-triaged. */
+  readonly held: number;
 }
 
 interface Look {
@@ -98,9 +102,17 @@ export async function runWatchSweep(
   let retriaged = 0;
   let failed = 0;
   let skipped = 0;
+  let held = 0;
 
   for (const key of keys) {
     const { activity, signals, decision } = await look(deps.client, key, deps.maxRetriage);
+    // From the activity just read, not the query's list. Every write below, the unsubscribe and its
+    // comment included, is one a person has asked not to have made.
+    if (isIgnored(activity.labels)) {
+      held += 1;
+      deps.report(`${key}: held — it carries agent:ignore, so nothing is done for it`);
+      continue;
+    }
     counts[decision.kind] += 1;
     deps.report(describeDecision(key, decision));
 
@@ -141,13 +153,19 @@ export async function runWatchSweep(
           await deps.acting.sink.write(toTriageResult(outcome.ticket, outcome.payload));
         }
       } catch (error) {
-        failed += 1;
         const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof TicketHeldError) {
+          // Labelled after the look above; the reservation may already be written, which is the cost of writing it first.
+          held += 1;
+          deps.report(`          ↳ held: ${message}`);
+          continue;
+        }
+        failed += 1;
         deps.report(`          ↳ re-triage failed: ${message}`);
         log.warn("watch.sweep.retriage_failed", { key, error: message });
       }
     }
   }
 
-  return { looked: keys.length, ...counts, ended, retriaged, failed, skipped };
+  return { looked: keys.length, ...counts, ended, retriaged, failed, skipped, held };
 }

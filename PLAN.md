@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4070 tests in 121 files**, no build step.
+> **4178 tests in 123 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82 and §83, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83 and §86, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -68,17 +68,18 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   already named §40, and closed in `82d6079`, a deletion-only commit that removed the §38 and §40
   entries without adding either to this list. Both numbers had been picked by reading the last
   heading rather than this line.
-- **No revision reachable by `git log --all` holds §30, §36, §42, §43 or §50 as a heading**, so for
-  these five the history has no entry to show. §30 was the daemon check and the rule it put in
+- **No revision reachable by `git log --all` holds §30, §36, §42, §43, §50 or §86 as a heading**, so
+  for these six the history has no entry to show. §30 was the daemon check and the rule it put in
   `STARTING.md`; §36 was `branch-stack.sh` counting commit identity instead of commit content; §42
   routed every non-`verified`, non-`escaped` outcome to `agent:failed`; §43 had every worktree's
   `.git/info/exclude` list `.claude/` and `.storecode/`; §50 was the fix for a literal `""` in a
-  recon field, `6e78ce7`.
+  recon field, `6e78ce7`; §86 was `agent:ignore`, written and deleted before `feat/agent-ignore`'s
+  first commit.
 - **§24 is absent from the list and is not a hole** — it was skipped rather than spent, for the
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §86. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §87. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -651,6 +652,16 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   each (`architecture/triage.md`, the sendback watch). **What would show it:** after the merge and a
   daemon restart, SSX-4023's next sweep logging `re-triaged` rather than `no re-triage:`; and a
   watched ticket whose description is edited without dropping a blocker still being declined.
+
+- **`agent:ignore` has stopped a live run after recon, never after a fix pass or at a push, and
+  what the reads cost is uncounted.** SSX-2246 on 2026-11-09, temporarily labelled solvable:
+  `--claim` with the label on printed `Not claimed` and wrote nothing; a `--pr` run labelled by hand
+  during its recon pass logged `labels.write_held` after that pass and at the audit post, then
+  released the claim with `agent:start` back and the status returned, no comment and no pull
+  request; `triage:once` held at its start. The `fields=labels` reads were not counted: the session refused the preload that would have counted them. **What would
+  show it:** a label added while a fix pass runs, read as a hold after that pass with nothing
+  pushed; and a request count from the same run against the two reads a pass costs plus one per
+  audit post, comment and publish.
 
 ### 11. Loose ends recorded in no other file
 

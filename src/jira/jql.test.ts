@@ -75,8 +75,15 @@ describe("lookbackMinutes", () => {
 describe("buildNewIssuesJql", () => {
   it("builds the expected query", () => {
     expect(buildNewIssuesJql(BASE)).toBe(
-      "project = SSX AND created >= -60m AND statusCategory != Done AND issuetype NOT IN (10009) ORDER BY created ASC",
+      'project = SSX AND created >= -60m AND statusCategory != Done AND issuetype NOT IN (10009) AND (labels IS EMPTY OR labels NOT IN ("agent:ignore")) ORDER BY created ASC',
     );
+  });
+
+  it("leaves out a ticket a person labelled agent:ignore, and keeps every unlabelled one", () => {
+    // A bare `labels NOT IN (...)` is the plausible version and drops every ticket with no labels, which is most new ones.
+    const jql = buildNewIssuesJql(BASE);
+    expect(jql).toContain('(labels IS EMPTY OR labels NOT IN ("agent:ignore"))');
+    expect(jql).not.toMatch(/AND labels NOT IN/);
   });
 
   it("skips closed tickets, which a paid triage has nothing to say about", () => {
@@ -132,7 +139,7 @@ describe("buildNewIssuesJql", () => {
 
   it("omits the exclusion clause when nothing is excluded", () => {
     expect(buildNewIssuesJql({ ...BASE, excludedTypeIds: [] })).toBe(
-      "project = SSX AND created >= -60m AND statusCategory != Done ORDER BY created ASC",
+      'project = SSX AND created >= -60m AND statusCategory != Done AND (labels IS EMPTY OR labels NOT IN ("agent:ignore")) ORDER BY created ASC',
     );
   });
 
@@ -181,7 +188,7 @@ describe("jqlValue", () => {
 describe("buildNewIssuesJql component filter", () => {
   it("restricts to a single named component", () => {
     expect(buildNewIssuesJql({ ...BASE, components: ["SSX Advisor"] })).toBe(
-      'project = SSX AND created >= -60m AND statusCategory != Done AND component IN ("SSX Advisor") AND issuetype NOT IN (10009) ORDER BY created ASC',
+      'project = SSX AND created >= -60m AND statusCategory != Done AND component IN ("SSX Advisor") AND issuetype NOT IN (10009) AND (labels IS EMPTY OR labels NOT IN ("agent:ignore")) ORDER BY created ASC',
     );
   });
 
@@ -216,7 +223,7 @@ describe("buildSolveQueueJql", () => {
       'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
         'AND labels = "agent:solvable" AND labels = "agent:start" ' +
         'AND labels NOT IN ("agent:solving", "agent:reviewing", "agent:review-done", ' +
-        '"agent:done", "agent:closed", "agent:failed") ORDER BY updated ASC',
+        '"agent:done", "agent:closed", "agent:failed", "agent:ignore") ORDER BY updated ASC',
     );
   });
 
@@ -226,7 +233,7 @@ describe("buildSolveQueueJql", () => {
       'project = SSX AND component IN ("SSX Advisor") AND statusCategory != Done ' +
         'AND labels = "agent:solvable" AND issuetype IN ("Feil") ' +
         'AND labels NOT IN ("agent:solving", "agent:reviewing", "agent:review-done", ' +
-        '"agent:done", "agent:closed", "agent:failed") ORDER BY updated ASC',
+        '"agent:done", "agent:closed", "agent:failed", "agent:ignore") ORDER BY updated ASC',
     );
   });
 
@@ -288,8 +295,13 @@ describe("buildSolveQueueJql", () => {
     // This exclusion is the entire dedupe mechanism: there is no seenKeys list or cursor behind it.
     expect(buildSolveQueueJql(QUEUE)).toContain(
       'labels NOT IN ("agent:solving", "agent:reviewing", "agent:review-done", ' +
-        '"agent:done", "agent:closed", "agent:failed")',
+        '"agent:done", "agent:closed", "agent:failed", "agent:ignore")',
     );
+  });
+
+  it("leaves out a ticket a person labelled agent:ignore, in either mode", () => {
+    expect(buildSolveQueueJql(QUEUE)).toContain('"agent:ignore"');
+    expect(buildSolveQueueJql({ ...QUEUE, mode: "auto" })).toContain('"agent:ignore"');
   });
 
   it("excludes the two states a pull request sits in, which the claim no longer covers", () => {
@@ -364,6 +376,11 @@ describe("buildInFlightJql", () => {
     expect(buildInFlightJql(SCOPE)).not.toContain("statusCategory");
   });
 
+  it("counts a claimed ticket a person has since labelled agent:ignore", () => {
+    // The run is still in flight until it notices and releases; hiding it here would free a slot it still holds.
+    expect(buildInFlightJql(SCOPE)).not.toContain("agent:ignore");
+  });
+
   it("has no ordering clause, because a count does not need one", () => {
     expect(buildInFlightJql(SCOPE)).not.toContain("ORDER BY");
   });
@@ -395,7 +412,8 @@ describe("buildReviewQueueJql", () => {
   it("builds the query verbatim", () => {
     expect(buildReviewQueueJql(SCOPE)).toBe(
       'project = SSX AND component IN ("SSX Advisor") ' +
-        'AND labels IN ("agent:reviewing", "agent:review-done") ORDER BY updated ASC',
+        'AND labels IN ("agent:reviewing", "agent:review-done") ' +
+        'AND labels NOT IN ("agent:ignore") ORDER BY updated ASC',
     );
   });
 
@@ -419,7 +437,12 @@ describe("buildReviewQueueJql", () => {
 
   it("does not restate the terminals as an exclusion", () => {
     // Terminals are written in the same edit that removes the labels above.
-    expect(buildReviewQueueJql(SCOPE)).not.toContain("NOT IN");
+    expect(buildReviewQueueJql(SCOPE)).not.toMatch(/agent:(done|closed|failed)/);
+  });
+
+  it("leaves out a pull request whose ticket a person labelled agent:ignore", () => {
+    // The only exclusion, and the one that is not written by this service's own edits.
+    expect(buildReviewQueueJql(SCOPE)).toContain('labels NOT IN ("agent:ignore")');
   });
 
   it("stays inside the configured scope, and omits the clause when there is none", () => {
@@ -441,7 +464,7 @@ describe("buildSendbackWatchJql", () => {
   it("builds the query verbatim", () => {
     expect(buildSendbackWatchJql(SCOPE)).toBe(
       'project = SSX AND component IN ("SSX Advisor") ' +
-        'AND labels = "agent:watching" ORDER BY updated ASC',
+        'AND labels = "agent:watching" AND labels NOT IN ("agent:ignore") ORDER BY updated ASC',
     );
   });
 
@@ -452,7 +475,11 @@ describe("buildSendbackWatchJql", () => {
 
   it("does not restate the terminals as an exclusion", () => {
     // agent:watching is removed in the same edit that writes whatever replaced it.
-    expect(buildSendbackWatchJql(SCOPE)).not.toContain("NOT IN");
+    expect(buildSendbackWatchJql(SCOPE)).not.toMatch(/agent:(done|closed|failed|solving)/);
+  });
+
+  it("leaves out a ticket a person labelled agent:ignore", () => {
+    expect(buildSendbackWatchJql(SCOPE)).toContain('labels NOT IN ("agent:ignore")');
   });
 
   it("selects the watch label and nothing broader", () => {

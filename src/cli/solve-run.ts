@@ -31,6 +31,7 @@ import {
   surveyReview,
 } from "../solve/delivery.ts";
 import { reportOutcome } from "../solve/feedback.ts";
+import { TicketHeldError, assertMayWrite } from "../solve/hold.ts";
 import {
   type ClaimAuthority,
   type LabelEdit,
@@ -38,6 +39,7 @@ import {
   type ReviewStage,
   type SolveOutcomeLabel,
   completionTransition,
+  isIgnored,
   isNoopEdit,
   isTerminal,
   labelEdit,
@@ -553,6 +555,14 @@ export async function runAdvance(
   const { text, detail } = await read(issueKey);
   const facts = { summary: detail.summary, url: detail.url };
 
+  if (isIgnored(detail.labels)) {
+    process.stderr.write(
+      `refusing --advance: ${issueKey} carries agent:ignore, so nothing is written to it or to its pull request.\n`,
+    );
+    process.exitCode = 3;
+    return null;
+  }
+
   const base = requestOrRefusal(settings, detail, text, "--advance");
   if (base === null) {
     return null;
@@ -630,10 +640,19 @@ export async function runAdvance(
     return attached;
   };
 
-  const result = await advance(
-    deps,
-    buildAdvanceRequest(settings, base, attach, found.number, promoteRepair),
-  );
+  let result: AdvanceOutcome;
+  try {
+    result = await advance(
+      deps,
+      buildAdvanceRequest(settings, base, attach, found.number, promoteRepair),
+    );
+  } catch (error) {
+    // Left where it is: a round that stopped partway leaves a checkout a person may want to read, as a thrown round does in the daemon.
+    if (!reportHeld(error)) {
+      throw error;
+    }
+    return null;
+  }
   process.stdout.write(`\n${describeAdvanceOutcome(result)}\n`);
   if (isAdvanceFailureExit(result)) {
     process.exitCode = 1;
@@ -798,6 +817,10 @@ function createReviewLook(
     const facts = { summary: ticket.summary, url: ticket.url };
     seen.set(ticket.key, { facts, observed: null });
     const { text, detail } = await read(ticket.key);
+    // The labels just read, not the watched set's: the survey below can undraft a finished pull request.
+    if (isIgnored(detail.labels)) {
+      throw new TicketHeldError(ticket.key, "looking at the pull request");
+    }
     // Throws `NotSolvableError` for a repository the operator has not allowed — not caught here,
     // since the cycle records it as a real answer about one ticket.
     const base = buildSolveRequest(settings, detail, text);
@@ -887,11 +910,14 @@ export function createReviewAct(
     // is the log, and the watch sees it as JSON among the pass's own JSON.
     reviewLog.info("review.round.started", { issueKey: ticket.key, number });
 
+    // Before the attach, which can push a base merge; the look that decided on this round may be minutes old.
+    await assertMayWrite(deps.gate, ticket.key, "attaching the round's checkout");
     const attached = await target.request.attach();
     if (attached.outcome === "refused") {
       // No round has been reserved, so the next tick decides the same thing again — right for a
       // checkout that failed locally, a wedge if it stays wrong, so the attempt is counted where
       // every round cap can see it: the marker comment.
+      await assertMayWrite(deps.gate, ticket.key, "recording the failed start");
       return await recordFailedStart(deps.commands, target.request, pending, attached.reason);
     }
 
@@ -1070,6 +1096,27 @@ export async function runWatch(
   }
 }
 
+/** A hold reaching a terminal: one line and exit 3, never a crash's trace. Returns whether `error` was one. */
+export function reportHeld(error: unknown): boolean {
+  if (!(error instanceof TicketHeldError)) {
+    return false;
+  }
+  process.stderr.write(`\n${error.message}\n`);
+  process.exitCode = 3;
+  return true;
+}
+
+/** An entry point's ending for a hold; whatever the run claimed has been released by the time it gets here. */
+export async function exitHeld(main: () => Promise<void>): Promise<void> {
+  try {
+    await main();
+  } catch (error) {
+    if (!reportHeld(error)) {
+      throw error;
+    }
+  }
+}
+
 /**
  * The write rungs, in order, with the release and then the status as the last things that happen.
  *
@@ -1153,11 +1200,14 @@ export async function runWriteRungs(
       }
     }
   } catch (error) {
-    await audit?.record(issueKey, {
-      kind: "crashed",
-      where: "solve",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    // A hold is a person's decision and not a crash: the `finally` below releases the claim, and nothing is said on the ticket's thread.
+    if (!(error instanceof TicketHeldError)) {
+      await audit?.record(issueKey, {
+        kind: "crashed",
+        where: "solve",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     throw error;
   } finally {
     // Three endings: a run that reached a verdict about the ticket must not be released —
@@ -1240,6 +1290,11 @@ export async function runSolveClaims(
       await runWriteRungs(settings, client, key, "pr", cycle, authority, promoteRepair);
       started += 1;
     } catch (error) {
+      if (error instanceof TicketHeldError) {
+        // Dropped on purpose; the release already ran. The queue excludes the ticket from here on.
+        solveLog.info("solve.claim.dropped", { key, where: error.where });
+        continue;
+      }
       // One ticket's failure is not the tick's — `runWriteRungs` releases in a `finally`, so the
       // claim is already back; abandoning the rest of the queue here would hide them behind it.
       solveLog.error("solve.claim.failed", {

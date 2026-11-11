@@ -166,6 +166,25 @@ describe("runSolveCycle", () => {
       },
     );
 
+    it.each([AGENT_LABELS.ignore, "Agent:Ignore"])(
+      "skips a ticket a person has labelled %s even if the query returned it",
+      async (hold) => {
+        // The query leaves it out, but a ticket can be labelled between the query and this check.
+        const outcome = await runSolveCycle(
+          deps({
+            fetchQueue: async () => [
+              candidate("SSX-1", {
+                labels: [AGENT_LABELS.solvable, AGENT_LABELS.start, SVC, hold],
+              }),
+            ],
+          }),
+        );
+
+        expect(outcome.planned).toEqual([]);
+        expect(outcome.skipped[0]?.reason).toContain("agent:ignore");
+      },
+    );
+
     it("picks nothing up for a second instance once the first has claimed", async () => {
       const first = await runSolveCycle(deps({ fetchQueue: async () => [candidate("SSX-1")] }));
       const claimed = first.planned[0];

@@ -26,6 +26,7 @@ import {
 } from "./solve-run.ts";
 import { STATUS_MOVE_OUTCOMES, type JiraClient, type StatusMoveResult } from "../jira/client.ts";
 import { AGENT_LABELS } from "../solve/labels.ts";
+import { TicketHeldError } from "../solve/hold.ts";
 import type { AdvanceRequest, PendingRound } from "../solve/delivery.ts";
 import type { SolveDependencies } from "../solve/orchestrator.ts";
 import type { WatchedTicket } from "../solve/review-cycle.ts";
@@ -168,7 +169,10 @@ const CONFLICTED_ATTACH: AdvanceRequest["attach"] = () =>
  * `passes` throws rather than stubs, so a pass running on a round that never got a worktree
  * fails loudly instead of passing silently.
  */
-function actHarness(attach: AdvanceRequest["attach"] = REFUSING_ATTACH): ActHarness {
+function actHarness(
+  attach: AdvanceRequest["attach"] = REFUSING_ATTACH,
+  gate: SolveDependencies["gate"] = async () => true,
+): ActHarness {
   const calls: (readonly string[])[] = [];
   const commands: CommandRunner = {
     run: (argv) => {
@@ -198,6 +202,7 @@ function actHarness(attach: AdvanceRequest["attach"] = REFUSING_ATTACH): ActHarn
         throw new Error("a round ran without a checkout");
       },
     },
+    gate,
   };
 
   const request: AdvanceRequest = {
@@ -234,6 +239,12 @@ const written = (h: ActHarness): string =>
       (argv.find((element) => element.startsWith("body=")) ?? "").slice("body=".length),
     )
     .at(-1) ?? "";
+
+/** A gate that clears every write except the one at `place`. */
+const holdingAt =
+  (place: string) =>
+  async (_key: string, where: string): Promise<boolean> =>
+    where !== place;
 
 describe("createReviewAct", () => {
   it("reports a refused checkout without pretending a round ran", async () => {
@@ -281,6 +292,36 @@ describe("createReviewAct", () => {
     expect(written(h)).toContain("bot: iteration count 1");
     expect(written(h)).toContain("Reviewer rounds: 1");
     expect(written(h)).toContain("Last read: 2026-09-05T08:00:00Z");
+  });
+
+  describe("for a ticket a person has labelled agent:ignore", () => {
+    it("cuts no checkout, which could push a base merge", async () => {
+      // Unplug the check before `attach()` and the attach runs, and with it the push.
+      const attach = vi.fn(CONFLICTED_ATTACH);
+      const h = actHarness(attach, holdingAt("attaching the round's checkout"));
+
+      await expect(h.act(ticket, pending, 2663)).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(attach).not.toHaveBeenCalled();
+      expect(written(h)).toBe("");
+    });
+
+    it("does not record a failed start, which is a comment on the pull request", async () => {
+      const h = actHarness(REFUSING_ATTACH, holdingAt("recording the failed start"));
+
+      await expect(h.act(ticket, pending, 2663)).rejects.toBeInstanceOf(TicketHeldError);
+
+      expect(written(h)).toBe("");
+    });
+
+    it("still records the failed start when nothing holds the ticket", async () => {
+      // The control: the same round, gated open, writes the marker the tests above found absent.
+      const h = actHarness(REFUSING_ATTACH, holdingAt("nowhere"));
+
+      await h.act(ticket, pending, 2663);
+
+      expect(written(h)).toContain("Failed starts: 2");
+    });
   });
 });
 

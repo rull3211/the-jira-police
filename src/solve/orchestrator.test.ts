@@ -19,6 +19,7 @@ import {
   solveWithRetry,
 } from "./orchestrator.ts";
 import { createLogger } from "../logger.ts";
+import { TicketHeldError, gatePasses } from "./hold.ts";
 import type { CommandResult, CommandRunner, Worktree } from "./worktree.ts";
 import type { VerificationResult } from "./verify.ts";
 
@@ -260,7 +261,9 @@ function harness(
     },
   };
 
-  return { h: { deps: { commands, passes }, timeline, calls, passesBefore, seen } };
+  return {
+    h: { deps: { commands, passes, gate: async () => true }, timeline, calls, passesBefore, seen },
+  };
 }
 
 const request: SolveRequest = {
@@ -2645,7 +2648,7 @@ describe("solveWithRetry", () => {
       },
     };
 
-    return { deps: { commands, passes }, calls };
+    return { deps: { commands, passes, gate: base.deps.gate }, calls };
   }
 
   const stopped = (cause: "judgement" | "environment"): Partial<Record<Pass, unknown>> => ({
@@ -2887,5 +2890,71 @@ describe("runReconOnly", () => {
 
     expect(outcome.kind).toBe("no-worktree");
     expect(h.seen).toEqual([]);
+  });
+});
+
+/** A gate that clears the first `clear` questions and holds every one after. */
+const clearFor = (clear: number) => {
+  let asked = 0;
+  return async (): Promise<boolean> => {
+    asked += 1;
+    return asked <= clear;
+  };
+};
+
+describe("a ticket a person has labelled agent:ignore", () => {
+  it("surfaces a held pass as the hold, not as a crashed pass", async () => {
+    // `runPass` turns every other throw into `crashed`, whose reason reaches a ticket comment; a hold must not become one.
+    const { h } = harness(FULL);
+    const held = { ...h.deps, passes: gatePasses(h.deps.passes, async () => false) };
+
+    await expect(solveTicket(held, request)).rejects.toBeInstanceOf(TicketHeldError);
+  });
+
+  it("starts no pass on a ticket that is held when the run begins", async () => {
+    const { h } = harness(FULL);
+    const held = { ...h.deps, passes: gatePasses(h.deps.passes, async () => false) };
+
+    await expect(solveTicket(held, request)).rejects.toThrow();
+
+    expect(h.seen).toEqual([]);
+  });
+
+  it("stops before the next pass once the label arrives, and runs nothing after it", async () => {
+    // Two questions per pass: before it, and before its result is used. Clear for recon's two, held at the first of fix's.
+    const { h } = harness(FULL);
+    const held = { ...h.deps, passes: gatePasses(h.deps.passes, clearFor(2)) };
+
+    await expect(solveTicket(held, request)).rejects.toBeInstanceOf(TicketHeldError);
+
+    expect(h.seen.map((run) => run.pass)).toEqual(["recon"]);
+  });
+
+  it("discards a pass's work when the label arrives while it runs", async () => {
+    const { h } = harness(FULL);
+    // Clear before recon, held after it: recon ran, and nothing it produced is used.
+    const held = { ...h.deps, passes: gatePasses(h.deps.passes, clearFor(1)) };
+
+    await expect(solveTicket(held, request)).rejects.toBeInstanceOf(TicketHeldError);
+
+    expect(h.seen.map((run) => run.pass)).toEqual(["recon"]);
+    expect(h.calls.some((argv) => argv.includes("commit"))).toBe(false);
+    expect(h.calls.some((argv) => argv.includes("push"))).toBe(false);
+  });
+
+  it("still turns an ordinary pass failure into a crashed outcome", async () => {
+    // The control: only a hold is let out of `runPass`.
+    const { h } = harness({}, [], { recon: "session timed out" });
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({ kind: "crashed", pass: "recon" });
+  });
+
+  it("stops a recon-only run the same way", async () => {
+    const { h } = harness({ recon: recon() });
+    const held = { ...h.deps, passes: gatePasses(h.deps.passes, async () => false) };
+
+    await expect(runReconOnly(held, request)).rejects.toBeInstanceOf(TicketHeldError);
   });
 });

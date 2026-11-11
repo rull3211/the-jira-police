@@ -32,7 +32,7 @@ import { runSolveCycle } from "../solve/poller.ts";
 import { decisionLines, writeSolveReport } from "../solve/report.ts";
 import { createJiraClient, createSolveDeps } from "../wiring.ts";
 import { USAGE, parseSolveArgs, repairUnavailable, unavailable, writes } from "./solve-args.ts";
-import { runAdvance, runWatch, runWriteRungs } from "./solve-run.ts";
+import { exitHeld, runAdvance, runWatch, runWriteRungs } from "./solve-run.ts";
 
 const log = createLogger("solve-once");
 
@@ -148,4 +148,4 @@ async function main(): Promise<void> {
   });
 }
 
-await withConfigErrors(main);
+await withConfigErrors(() => exitHeld(main));

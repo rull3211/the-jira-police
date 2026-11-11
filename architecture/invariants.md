@@ -47,7 +47,8 @@ Things that look like details and are not:
    `slack:start --write` at a terminal, or `@Bencebot start` and `clear` in the ticket's thread from
    someone on `SLACK_START_USERS`, who is the event's `user` as Slack sets it. Nothing a model or a
    ticket produced reaches that path: no session holds a Slack token (invariant 3), and the bot's
-   own messages raise no mention.
+   own messages raise no mention. `agent:ignore` is a person's in the other direction — a hold
+   rather than a go-ahead — and triage may neither add nor lift it (invariant 21).
 10. **A privilege allowlist gets no default.** `readSettings` substitutes the fallback whenever a
     value is missing _or blank_ — the two are indistinguishable to it. So a
     default on `SOLVE_REPOS` would be a write privilege that survives being deleted from `.env`:
@@ -423,3 +424,43 @@ Things that look like details and are not:
       then rewritten with no check between, so two listeners on one app, a daemon's and a hand-run
       one among them, can each pass on one draft within the time it takes to ask Jira and post the
       acknowledgement, and file it twice. Nothing guards that; one listener per app is assumed.
+
+21. **A person's `agent:ignore` is read live before every outward write, and a read that fails holds
+    the write.** The queues leave the label out (`jira/jql.ts`, every query but `buildInFlightJql`,
+    which must still count a claimed ticket), and `eligibility` refuses it for every authority, so a
+    typed key does not lift it. But a ticket can be labelled after a queue returned it and while a
+    paid run is under way, so `WriteGate` (`solve/hold.ts`) asks `JiraClient.fetchLabels` for the
+    labels as Jira has them _now_ and clears a write only when it could read them and `isIgnored`
+    finds nothing. `isIgnored` is case-insensitive because JQL is, so a hand-typed `Agent:Ignore` is
+    skipped by the queues and held here alike. Only `true` clears: any other answer from a gate is a
+    bug in the gate and holds the write. Two shapes, by what the caller can do about it:
+    - **A work boundary** calls `assertMayWrite`, which throws `TicketHeldError`. `runPass` is the
+      one catch that lets it out, so it unwinds through `runWriteRungs`'s release,
+      `createReviewAct`'s `finally` and the per-ticket catches already there, and builds no
+      `crashed` outcome, comment or audit entry; a one-shot command ends in `exitHeld`, one line and
+      exit 3. The boundaries: before and after every model pass
+      (`gatePasses`); `publish`; a round's survey, attach and failed-start record; the reservation
+      of a round and of a merge round, so a held ticket is not charged one it never ran; after a
+      round's pass and verification, before anything it produced is pushed, replied or undrafted;
+      the merge push; and the triage start and the triage post. A mid-merge hold aborts the merge.
+    - **A report site** is wrapped where it is built and skips: every audit post
+      (`createAuditNotifier`'s `gate`, answered `skipped`), the pull request direct message
+      (`gatePrLine`), and a ticket comment (`createSolveCommenter`, which throws, because a caller
+      that read a quiet return as "posted" would record a comment nobody can see).
+
+    `SolveDependencies.gate` and `NotifierDeps.gate` are required, not optional: a guard a caller
+    leaves off by not mentioning it is one that fails open, and the compiler found every
+    construction site instead. No path writes the label, and triage's gate refuses it either way
+    (invariant 9). What is _not_ held is the run's own bookkeeping — releasing the claim it holds,
+    moving the labels of a pull request it opened, moving the status back — all written as deltas,
+    so the person's label is never part of what they undo. What this costs:
+    - A check is a window. A label added between the read and the push still loses the race, and
+      the window is one write sequence, not zero. A paid pass running when the label arrives runs to
+      its end, and its result is discarded.
+    - A hold in the middle of a round leaves its reservation spent and the round unlanded, which
+      the survey reads as "not finished", so the pull request is not undrafted on the strength of it.
+    - A dropped solve leaves its worktree and branch where a crashed one does: `removeWorktree` never
+      forces, and the next solve of that ticket salvages it.
+    - A pull request merged while its ticket is ignored keeps `agent:reviewing` until somebody lifts
+      the label, since the review queue no longer looks at it.
+    - A Jira read that fails during a paid run drops the run, which is the price of failing closed.

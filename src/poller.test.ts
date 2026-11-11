@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createLogger } from "./logger.ts";
 import { type PollDeps, runPollCycle } from "./poller.ts";
+import { TicketHeldError } from "./solve/hold.ts";
 import type { OutputSink, TriageResult } from "./output/sink.ts";
 import type { TicketRef } from "./jira/types.ts";
 import { EMPTY_STATE, loadState } from "./state/store.ts";
@@ -181,6 +182,53 @@ describe("runPollCycle", () => {
 
     expect(outcome.state.cursor).toBeNull();
     expect(outcome.state.seenKeys).toEqual(["SSX-2"]);
+  });
+
+  describe("a ticket a person labelled agent:ignore after the query returned it", () => {
+    const heldFirst: Partial<PollDeps> = {
+      fetchCandidates: async () => [
+        ticket("SSX-1", "2026-09-02T10:00:00Z"),
+        ticket("SSX-2", "2026-09-02T10:05:00Z"),
+      ],
+      triage: async (t) => {
+        if (t.key === "SSX-1") {
+          throw new TicketHeldError(t.key, "starting triage");
+        }
+        return PAYLOAD;
+      },
+    };
+
+    it("is counted as held, neither a failure nor an abandonment, and the cycle goes on", async () => {
+      const outcome = await runPollCycle(EMPTY_STATE, deps(heldFirst));
+
+      expect(outcome).toMatchObject({ triaged: 1, failed: 0, held: 1, abandoned: 0 });
+      expect(sink.written.map((r) => r.issueKey)).toEqual(["SSX-2"]);
+    });
+
+    it("is not marked seen, so it is triaged if the label comes off while it is still in the window", async () => {
+      const outcome = await runPollCycle(EMPTY_STATE, deps(heldFirst));
+
+      expect(outcome.state.seenKeys).toEqual(["SSX-2"]);
+    });
+
+    it("is not reported as an error", async () => {
+      const error = vi.spyOn(createLogger("poll"), "error").mockImplementation(() => {});
+
+      await runPollCycle(EMPTY_STATE, deps(heldFirst));
+
+      expect(error).not.toHaveBeenCalledWith("poll.issue_failed", expect.anything());
+      error.mockRestore();
+    });
+
+    it("still counts an ordinary failure as one", async () => {
+      // The control: only a hold is let off.
+      const outcome = await runPollCycle(
+        EMPTY_STATE,
+        deps({ ...heldFirst, triage: async () => Promise.reject(new Error("triage blew up")) }),
+      );
+
+      expect(outcome).toMatchObject({ failed: 2, held: 0 });
+    });
   });
 
   it("never marks an issue seen when writing its report failed", async () => {
