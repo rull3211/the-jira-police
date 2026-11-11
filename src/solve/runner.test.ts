@@ -61,6 +61,7 @@ const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown>
   devLensAccurate: true,
   devLensCorrection: "",
   plannedFiles: ["src/app/head.tsx"],
+  plannedMoves: [],
   approach: "add the link element",
   testPlan: "assert the head contains the link",
   estimatedLines: 12,
@@ -541,6 +542,8 @@ describe("parseRecon", () => {
       devLensAccurate: false,
       devLensCorrection: "Test",
       plannedFiles: [],
+      // Not in the recording, which predates the field; without it the verdict is refused before this check.
+      plannedMoves: [],
       approach: "Test",
       testPlan: "Test",
       estimatedLines: 0,
@@ -694,12 +697,17 @@ function parserAccepts(verdict: Record<string, unknown>): boolean {
 
 describe("RECON_SCHEMA's conditional, against parseRecon", () => {
   function schemaAccepts(verdict: Record<string, unknown>): boolean {
-    const branch =
+    const branch: {
+      readonly properties: Readonly<Record<string, Rule>>;
+      readonly anyOf?: readonly { readonly properties: Readonly<Record<string, Rule>> }[];
+    } =
       verdict["proceed"] === RECON_SCHEMA.if.properties.proceed.const
         ? RECON_SCHEMA.then
         : RECON_SCHEMA.else;
-    return Object.entries(branch.properties).every(([field, rule]) =>
-      satisfies(verdict[field], rule),
+    return (
+      holds(verdict, branch.properties) &&
+      (branch.anyOf === undefined ||
+        branch.anyOf.some((choice) => holds(verdict, choice.properties)))
     );
   }
 
@@ -721,6 +729,13 @@ describe("RECON_SCHEMA's conditional, against parseRecon", () => {
     "a proceed with n/a in the remedy": recon({ bailRemedy: "n/a" }),
     "a proceed with a blocker saying there are none": recon({ bailBlockers: ["none"] }),
     "a proceed naming no files": recon({ plannedFiles: [] }),
+    "a proceed that only moves files": recon({
+      plannedFiles: [],
+      plannedMoves: [{ from: "src/a.tsx", to: "src/a.ts" }],
+    }),
+    "a bail that still plans a move": bail({
+      plannedMoves: [{ from: "src/a.tsx", to: "src/a.ts" }],
+    }),
     "a proceed with only whitespace in a bail field": recon({ bailReason: "  " }),
     "a clean bail": bail(),
     "a bail naming the files it would have changed": bail({ plannedFiles: ["pom.xml"] }),

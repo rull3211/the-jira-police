@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { issueKey, phase, repair } = args.invocation;
+  const { issueKey, phase, repair, moves } = args.invocation;
 
   // Checked before the board is read: a rung that cannot run should not cost a Jira round trip,
   // let alone claim and solve a ticket before discovering it was never configured to open a pull request.
@@ -128,7 +128,16 @@ async function main(): Promise<void> {
   // narrowing a type rather than guarding.
   const attemptedWrites = writes(phase) && issueKey !== null;
   if (attemptedWrites) {
-    await runWriteRungs(settings, client, issueKey, phase, outcome, solveMode(settings), repair);
+    await runWriteRungs(
+      settings,
+      client,
+      issueKey,
+      phase,
+      outcome,
+      solveMode(settings),
+      repair,
+      moves,
+    );
   }
 
   // Named `cycleDryRun`, not `dryRun`: it's true of the planning pass only, and every write this

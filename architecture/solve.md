@@ -599,13 +599,46 @@ Two refusal families, and a third that was deleted:
   been applied here. `files` and `lines` are still computed and still printed on every verified
   run — the measurement survived, only the veto went.
 
-  The evidence was PR #2663: a review round answering a human's request to widen a type touched
-  six files, was refused at the gate after $1.77 had been spent on the pass, and posted nothing
-  public. Four of the six files were one line each. The prose the cap shipped with claimed the
-  recovery path was that _"a human looks, and either widens the cap for that ticket or agrees the
-  ticket was mis-assessed"_ — there was no way to widen it for a ticket, and a `refused` round
-  wrote nothing to the pull request then, so nobody looked. One now replies to whoever asked; see
-  "A round that lands nothing says why" under Delivery.
+**One rule reads git's copy detection rather than the numstat.** `gateDiff` also reads `git diff
+--name-status -z -M -C --find-copies-harder` and refuses every `C100` record: a file added
+byte-identical to one still in the tree (`copyRefusals`). That is what a rename looks like from a
+pass holding only `Write`, and without the rule it passes everything, because Vite, tsc and Vitest
+all resolve `.ts` before `.tsx` and the original goes on compiling unread (SSX-4204's recon,
+2026-11-11). Only `C100` is refused, since a near copy is new code that resembles old code. A
+name-status read that fails or does not parse refuses the run, and the refusal is unattributable, so
+a review round's rollback leaves it whole.
+
+### Moves are made by the harness, behind `--moves`
+
+The fix pass holds `Write` and `Edit` and no shell, so it can create a file and never delete one,
+and a ticket that only renames files (SSX-4204: 27 `.tsx` files to `.ts`) was unsolvable for that
+reason alone. Recon plans moves in `plannedMoves`, `{ from, to }` with the content unchanged, and
+`moves.ts` makes them:
+
+- **Checked before anything moves** (`moveRefusals`). Both ends must be inside the worktree and pass
+  `plannedPathRefusals` with the dependency-bump exception off, no move may land on itself, and each
+  path may be the end of one move only, which refuses a duplicate, a chain and a swap with one rule.
+  A refusal is a plan refusal, posted like one.
+- **Withheld without the privilege.** Only `solve:once <KEY> --solve|--pr|--review --moves` sets
+  `SolveRequest.moves`. Without it a plan with moves stops before the fix pass as `bailed` with
+  `withheldMoves`, and the ticket is told the command that would run it. The daemon never sets it,
+  because the loop is not built.
+- **Made with git, one at a time** (`applyMoves`). `git --literal-pathspecs ls-files -z -- <from>`
+  must list exactly that one file, then `git mv -- <from> <to>` runs. The first refusal stops the
+  run in git's own words; the moves already made stay staged, and `removeWorktree` will not force
+  them away.
+- **Checked after the fix pass** (`moveViolations`, inside `gateDiff`). Each `from` must be gone and
+  each `to` present in git's name-status, for the first solve and for its repair round.
+
+`recon:once` prints a plan's moves, which is the dry run of all of this.
+
+The evidence was PR #2663: a review round answering a human's request to widen a type touched
+six files, was refused at the gate after $1.77 had been spent on the pass, and posted nothing
+public. Four of the six files were one line each. The prose the cap shipped with claimed the
+recovery path was that _"a human looks, and either widens the cap for that ticket or agrees the
+ticket was mis-assessed"_ — there was no way to widen it for a ticket, and a `refused` round
+wrote nothing to the pull request then, so nobody looked. One now replies to whoever asked; see
+"A round that lands nothing says why" under Delivery.
 
 An empty diff is refused too. A run that edits a file and reverts it, or writes only to an ignored
 path, otherwise reaches the end looking exactly like success and opens an empty pull request.

@@ -430,6 +430,23 @@ describe("describeSolveOutcome", () => {
     expect(line).toContain("Worktree removed");
   });
 
+  it("says withheld moves only needed --moves, and lists each one", () => {
+    const line = describeSolveOutcome({
+      kind: "bailed",
+      reason: "recon planned to move files",
+      withheldMoves: [{ from: "src/app/hooks.tsx", to: "src/app/hooks.ts" }],
+      devLens: lens,
+      worktree,
+      recon: {} as never,
+      cleanup: { outcome: "removed", path: worktree.path, branch: { outcome: "deleted" } },
+    });
+
+    expect(line).toMatch(/^STOPPED AT THE PLAN — recon said proceed and planned 1 move\(s\)/u);
+    expect(line).toContain("\n  src/app/hooks.tsx → src/app/hooks.ts\n");
+    expect(line).toContain("Re-run with --moves");
+    expect(line).not.toContain("base branch");
+  });
+
   it("warns that the kept worktree is kept, not held", () => {
     // The next run for this ticket salvages the directory to a `-salvaged-<timestamp>` sibling
     // and puts a fresh checkout at the same path — it can be renamed out from under you mid-command.

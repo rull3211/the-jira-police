@@ -173,6 +173,7 @@ export async function runSolver(
   issueKey: string,
   cycle: SolveCycleOutcome | null,
   promoteRepair: boolean,
+  moves = false,
 ): Promise<SolveOutcome | null> {
   process.stdout.write(queueNote(issueKey, cycle));
 
@@ -188,12 +189,17 @@ export async function runSolver(
   if (built === null) {
     return null;
   }
-  const request = { ...built, promoteRepair };
+  const request = { ...built, promoteRepair, moves };
 
   process.stdout.write(`Repository: ${request.repoPath} @ ${request.baseRef}\n\n`);
   if (promoteRepair) {
     process.stdout.write(
       `Armed to act on a repair round (--repair, or REPAIR_PUBLISH under the daemon): one that turns a failed verification green opens the pull request.\n\n`,
+    );
+  }
+  if (moves) {
+    process.stdout.write(
+      `Armed to move files (--moves): the harness makes the moves recon plans, with git mv, before the fix pass.\n\n`,
     );
   }
 
@@ -1132,6 +1138,8 @@ export async function runWriteRungs(
   cycle: SolveCycleOutcome | null,
   authority: ClaimAuthority,
   promoteRepair: boolean,
+  /** `--moves`. Off unless a person typed it; the daemon's caller never passes it. */
+  moves = false,
 ): Promise<void> {
   // Before the claim: a live-mode misconfiguration throws here, and after the claim it would strand it.
   const audit = pipelineAuditNotifier(settings);
@@ -1167,7 +1175,7 @@ export async function runWriteRungs(
       repo: cycle?.planned.find((candidate) => candidate.issueKey === issueKey)?.repo ?? null,
     });
     movedIn = await enterInProgress(client, issueKey);
-    const outcome = await runSolver(settings, client, issueKey, cycle, promoteRepair);
+    const outcome = await runSolver(settings, client, issueKey, cycle, promoteRepair, moves);
     // Read before the early return: the outcomes that decide a ticket's fate are exactly the
     // ones that never reach a pull request.
     terminal = outcome === null ? null : terminalLabelAfter(outcome);

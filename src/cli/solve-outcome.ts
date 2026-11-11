@@ -132,9 +132,17 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
         outcome.cleanup.outcome === "removed"
           ? `Worktree removed — recon writes nothing, so there was nothing in it`
           : `Worktree kept at ${outcome.cleanup.path} — ${outcome.cleanup.reason}`;
+      if (outcome.withheldMoves !== undefined) {
+        return [
+          `STOPPED AT THE PLAN — recon said proceed and planned ${String(outcome.withheldMoves.length)} move(s), which only a run started with --moves may make, so no fix pass ran:`,
+          ...outcome.withheldMoves.map((move) => `  ${move.from} → ${move.to}`),
+          `Re-run with --moves to let the harness make them.`,
+          cleanup,
+        ].join("\n");
+      }
       if (outcome.refusedPlan !== undefined) {
         return [
-          `STOPPED AT THE PLAN — recon said proceed, but its plan names paths no run may change, so no fix pass ran:`,
+          `STOPPED AT THE PLAN — recon said proceed, but the harness would not carry out its plan, so no fix pass ran:`,
           ...outcome.refusedPlan.map((reason) => `  ${reason}`),
           `If the ticket needs that change, make it on the base branch and re-run; if not, the plan overreached.`,
           cleanup,

@@ -951,6 +951,7 @@ pnpm solve:once SSX-1234 --solve   # ... and runs the solver; nothing is pushed
 pnpm solve:once SSX-1234 --pr      # ... and opens the draft PR, reviewer @copilot
 pnpm solve:once SSX-1234 --review  # ... and works the review through to a handover
 pnpm solve:once SSX-1234 --pr --repair  # --pr, and a repair round that goes green opens it
+pnpm solve:once SSX-1234 --pr --moves   # --pr, and the harness first makes the moves recon plans
 pnpm solve:once SSX-1234 --advance # one review round on a PR an earlier run opened
 pnpm solve:once SSX-1234 --advance --repair  # ... and a repair of a failed round that goes green is pushed
 pnpm solve:once --watch            # poll every ticket under review until none is left
@@ -971,6 +972,13 @@ to act on), and by `bot:once`. **The daemon's copy is `REPAIR_PUBLISH`**, off un
 and the daemon's startup line says `promotesRepairs` either way; leave it off until you have read
 what `--repair` produces by hand. `architecture/solve.md` §15 has why both exist before the
 evidence that was meant to justify them.
+
+**`--moves` is a modifier on `--solve`, `--pr` and `--review`.** The fix pass can create a file and
+never delete one, so a rename is recon's to plan (`plannedMoves`) and the harness's to make, with
+git, before the fix pass. Without the flag a plan with moves stops before the fix pass, and the
+ticket is told the command that would run it. The daemon never moves files. Both ends of a move go
+through the diff gate's path rules, and the gate checks afterwards that every move held. `recon:once`
+prints the moves a plan would make. `architecture/solve.md` §15 has the rest.
 
 **`bot:once` is `solve:once` with triage in front.** It takes the same rungs. The difference is
 that it triages the ticket first and refuses to claim one the fitness call declines — so it is the

@@ -551,7 +551,7 @@ describe("renderSolveComment, on a bail", () => {
     } as SolveOutcome);
 
     expect(body.split("\n")[2]).toBe(
-      "An agent read the code and planned a change to files no run of this pipeline may edit, so it was stopped before changing anything.",
+      "An agent read the code and planned a change the harness would not make, so it was stopped before changing anything.",
     );
     expect(body).toContain("**What is in the way**\n\n* pom.xml: the Maven build is defined here");
     expect(body).toContain("a person makes it on the base branch and re-runs this ticket");
@@ -559,6 +559,26 @@ describe("renderSolveComment, on a bail", () => {
     expect(body.indexOf("**To make this agent-solvable**")).toBeGreaterThan(
       body.indexOf("**What is in the way**"),
     );
+  });
+
+  it("says a sound plan only lacked --moves, lists the moves, and gives the operator the command", () => {
+    const body = renderSolveComment("SSX-4204", {
+      ...bailWith({ proceed: true, bailReason: "" }),
+      reason: "recon planned to move files",
+      withheldMoves: [
+        { from: "src/app/hooks.tsx", to: "src/app/hooks.ts" },
+        { from: "src/products/Person/types.tsx", to: "src/products/Person/types.ts" },
+      ],
+    } as SolveOutcome);
+
+    expect(body.split("\n")[2]).toBe(
+      "An agent read the code and planned to move 2 file(s), which only a run an operator starts with --moves may do, so it was stopped before changing anything.",
+    );
+    expect(body).toContain("* src/app/hooks.tsx → src/app/hooks.ts");
+    expect(body).toContain("Nothing about the ticket needs to change.");
+    expect(body).toContain("`pnpm solve:once SSX-4204 --pr --moves`");
+    // The plan-refused remedy sends a person to the base branch, which is the wrong instruction here.
+    expect(body).not.toContain("base branch");
   });
 
   it("caps the refused paths the way it caps recon's blockers, and says so", () => {
@@ -629,6 +649,16 @@ describe("calibrationRow", () => {
 
     expect(stopped).toContain("| bailed (plan refused) |");
     expect(calibrationRow("SSX-1", bailed(true), NOW)).toContain("| bailed |");
+  });
+
+  it("does not score moves a run had no privilege for as recon declining either", () => {
+    const withheld = calibrationRow(
+      "SSX-1",
+      { ...bailed(true), withheldMoves: [{ from: "a.tsx", to: "a.ts" }] } as SolveOutcome,
+      NOW,
+    );
+
+    expect(withheld).toContain("| bailed (moves withheld) |");
   });
 
   it("distinguishes no reading from an accurate one", () => {

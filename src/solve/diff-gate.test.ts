@@ -6,6 +6,8 @@ import {
   type FileChange,
   VERIFICATION_PATHS,
   checkDiff,
+  copyRefusals,
+  parseNameStatus,
   parseNumstat,
   pathEscapes,
   plannedPathRefusals,
@@ -410,5 +412,81 @@ describe("plannedPathRefusals", () => {
         `${JSON.stringify(planned)}: not a path inside the worktree`,
       ]);
     }
+  });
+});
+
+describe("parseNameStatus", () => {
+  it("reads plain records, and a rename or copy with its score and both paths", () => {
+    const raw = [
+      "M",
+      "src/a.ts",
+      "A",
+      "src/new.ts",
+      "D",
+      "src/old.ts",
+      "R100",
+      "src/b.tsx",
+      "src/b.ts",
+      "C075",
+      "src/c.ts",
+      "src/d.ts",
+      "",
+    ].join(NUL);
+
+    expect(parseNameStatus(raw)).toEqual([
+      { status: "M", score: null, path: "src/a.ts", from: null },
+      { status: "A", score: null, path: "src/new.ts", from: null },
+      { status: "D", score: null, path: "src/old.ts", from: null },
+      { status: "R", score: 100, path: "src/b.ts", from: "src/b.tsx" },
+      { status: "C", score: 75, path: "src/d.ts", from: "src/c.ts" },
+    ]);
+  });
+
+  it("keeps a path holding a tab or a newline whole, since -z leaves names unquoted", () => {
+    expect(parseNameStatus(["A", "src/odd\tname\n.ts", ""].join(NUL))).toEqual([
+      { status: "A", score: null, path: "src/odd\tname\n.ts", from: null },
+    ]);
+  });
+
+  it("is empty for an empty diff", () => {
+    expect(parseNameStatus("")).toEqual([]);
+  });
+
+  it("throws on a stream it cannot read, rather than reading part of it", () => {
+    for (const raw of [
+      ["Q", "x", ""].join(NUL),
+      ["R100", "only-one-path", ""].join(NUL),
+      ["R", "a", "b", ""].join(NUL),
+      "M",
+    ]) {
+      expect(() => parseNameStatus(raw)).toThrow(DiffParseError);
+    }
+  });
+});
+
+const nameStatus = (status: string, score: number | null, path: string, from: string | null) => ({
+  status,
+  score,
+  path,
+  from,
+});
+
+describe("copyRefusals", () => {
+  it("refuses a byte-identical copy of a file still in the tree", () => {
+    expect(copyRefusals([nameStatus("C", 100, "src/a.ts", "src/a.tsx")])).toEqual([
+      expect.stringMatching(
+        /^src\/a\.ts: a byte-identical copy of src\/a\.tsx, which is still in the tree/u,
+      ),
+    ]);
+  });
+
+  it("passes a rename, a near copy, and an ordinary change", () => {
+    expect(
+      copyRefusals([
+        nameStatus("R", 100, "src/a.ts", "src/a.tsx"),
+        nameStatus("C", 99, "src/b.ts", "src/c.ts"),
+        nameStatus("M", null, "src/d.ts", null),
+      ]),
+    ).toEqual([]);
   });
 });

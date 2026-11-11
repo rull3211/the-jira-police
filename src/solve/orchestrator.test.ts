@@ -7,6 +7,7 @@ import type { Pass, SolveRunOptions } from "./runner.ts";
 import { parseFix, parseRecon, parseSimplify } from "./runner.ts";
 import {
   type ConflictRoundRequest,
+  MOVES_WITHHELD_REASON,
   PLAN_REFUSED_REASON,
   type PassRunner,
   type SolveDependencies,
@@ -104,6 +105,7 @@ const recon = (overrides: Record<string, unknown> = {}): Record<string, unknown>
   devLensAccurate: true,
   devLensCorrection: "",
   plannedFiles: ["src/app/head.tsx"],
+  plannedMoves: [],
   approach: "add the link element",
   testPlan: "assert the head contains the link",
   estimatedLines: 12,
@@ -221,6 +223,8 @@ function harness(
     { match: SHOWS_POM, reply: { exitCode: 128 } },
     { match: saw("show"), reply: { stdout: MANIFEST } },
     { match: saw("--name-only"), reply: { stdout: "" } },
+    // The gate's copy-detecting read: no copies and no renames unless a test says otherwise.
+    { match: saw("--name-status"), reply: { stdout: "" } },
     { match: saw("--numstat"), reply: { stdout: NUMSTAT } },
     // The patch read; must answer differently from the numstat rule above or the two are indistinguishable here.
     {
@@ -555,6 +559,176 @@ describe("solveTicket, when recon's plan names a path the gate refuses", () => {
     const outcome = await solveTicket(h.deps, request);
 
     expect(outcome.kind === "bailed" ? outcome.refusedPlan : "not a bail").toBeUndefined();
+  });
+});
+
+/** The `git mv` commands a run made. */
+const mvCalls = (h: Harness): readonly (readonly string[])[] =>
+  h.calls.filter((argv) => argv.includes("mv"));
+
+describe("solveTicket, when recon plans moves", () => {
+  const MOVE = { from: "src/a.tsx", to: "src/a.ts" };
+  const planned = recon({ plannedFiles: ["docs/flows.md"], plannedMoves: [MOVE] });
+  const tracked: Rule = {
+    match: saw("ls-files", "src/a.tsx"),
+    reply: { stdout: `src/a.tsx${NUL}` },
+  };
+  const renamed: Rule = {
+    match: saw("--name-status"),
+    reply: { stdout: ["R100", "src/a.tsx", "src/a.ts", "M", "docs/flows.md", ""].join(NUL) },
+  };
+  const moved = { ...request, moves: true };
+
+  it("withholds the moves, and the fix pass, from a run not started with --moves", async () => {
+    const { h } = harness({ recon: planned }, [tracked]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      reason: MOVES_WITHHELD_REASON,
+      withheldMoves: [MOVE],
+    });
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
+    expect(mvCalls(h)).toEqual([]);
+  });
+
+  it("makes each move with git mv once recon has run and before the fix pass, under --moves", async () => {
+    const { h } = harness({ ...FULL, recon: planned }, [tracked, renamed]);
+
+    const outcome = await solveTicket(h.deps, moved);
+
+    expect(outcome.kind).toBe("verified");
+    expect(mvCalls(h)).toEqual([["git", "-C", worktree.path, "mv", "--", "src/a.tsx", "src/a.ts"]]);
+    const index = h.calls.findIndex((argv) => argv.includes("mv"));
+    expect(h.passesBefore[index]).toBe(1);
+  });
+
+  it("hands the fix pass the moves in its brief, so it edits the files where they now are", async () => {
+    const { h } = harness({ ...FULL, recon: planned }, [tracked, renamed]);
+
+    await solveTicket(h.deps, moved);
+
+    expect(h.seen.find((entry) => entry.pass === "fix")?.options.brief).toContain(
+      '"to": "src/a.ts"',
+    );
+  });
+
+  it("refuses a move whose source is not one tracked file, before the fix pass", async () => {
+    const { h } = harness({ recon: planned });
+
+    const outcome = await solveTicket(h.deps, moved);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      reason: PLAN_REFUSED_REASON,
+      refusedPlan: [
+        expect.stringMatching(/^src\/a\.tsx → src\/a\.ts: the source is not one tracked file/u),
+      ],
+    });
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
+    expect(mvCalls(h)).toEqual([]);
+  });
+
+  it("stops in git's own words when git mv refuses", async () => {
+    const { h } = harness({ recon: planned }, [
+      tracked,
+      { match: saw("mv"), reply: { exitCode: 128, stderr: "fatal: destination exists" } },
+    ]);
+
+    const outcome = await solveTicket(h.deps, moved);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      refusedPlan: [expect.stringContaining("fatal: destination exists")],
+    });
+    expect(h.seen.map((entry) => entry.pass)).toEqual(["recon"]);
+  });
+
+  it("refuses a move onto a path no run may change, and moves nothing, even under --moves", async () => {
+    const { h } = harness({
+      recon: recon({
+        plannedFiles: [],
+        plannedMoves: [{ from: "ci.yml", to: ".github/workflows/ci.yml" }],
+      }),
+    });
+
+    const outcome = await solveTicket(h.deps, moved);
+
+    expect(outcome).toMatchObject({
+      kind: "bailed",
+      refusedPlan: [expect.stringContaining(".github/workflows/ci.yml: GitHub config")],
+    });
+    expect(mvCalls(h)).toEqual([]);
+  });
+
+  it("refuses at the gate a moved file written back at its old path", async () => {
+    const { h } = harness({ ...FULL, recon: planned }, [
+      tracked,
+      {
+        match: saw("--name-status"),
+        reply: { stdout: ["A", "src/a.ts", "M", "src/a.tsx", ""].join(NUL) },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, moved);
+
+    expect(outcome).toMatchObject({
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: [
+        expect.stringMatching(
+          /^src\/a\.tsx: the harness moved this file to src\/a\.ts, and it is back/u,
+        ),
+      ],
+    });
+  });
+});
+
+describe("solveTicket, and a copy left beside its original", () => {
+  it("refuses it at the gate on any run, with or without --moves", async () => {
+    const { h } = harness(FULL, [
+      {
+        match: saw("--name-status"),
+        reply: { stdout: ["C100", "src/app/head.tsx", "src/app/head2.tsx", ""].join(NUL) },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: [
+        expect.stringMatching(
+          /^src\/app\/head2\.tsx: a byte-identical copy of src\/app\/head\.tsx/u,
+        ),
+      ],
+    });
+  });
+
+  it("refuses when git's account of copies cannot be read, rather than passing unread", async () => {
+    const { h } = harness(FULL, [{ match: saw("--name-status"), reply: { exitCode: 128 } }]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome).toMatchObject({
+      kind: "refused",
+      reasons: [expect.stringContaining("so a copy could not be ruled out")],
+    });
+  });
+
+  it("passes a near copy, which is new code that resembles old code", async () => {
+    const { h } = harness(FULL, [
+      {
+        match: saw("--name-status"),
+        reply: { stdout: ["C095", "src/app/head.tsx", "src/app/head2.tsx", ""].join(NUL) },
+      },
+    ]);
+
+    const outcome = await solveTicket(h.deps, request);
+
+    expect(outcome.kind).toBe("verified");
   });
 });
 
@@ -1892,6 +2066,27 @@ describe("runRepairRound", () => {
     const outcome = await runRepair(h);
 
     expect(outcome).toMatchObject({ kind: "refused", stage: "diff-gate" });
+  });
+
+  it("holds the moves the harness made to the same check, so a repair cannot write one back", async () => {
+    const moving = parseRecon(
+      recon({ plannedMoves: [{ from: "src/a.tsx", to: "src/a.ts" }] }),
+      request.issueKey,
+    );
+    const { h } = harness({ repair: repair() }, [
+      {
+        match: saw("--name-status"),
+        reply: { stdout: ["A", "src/a.ts", "M", "src/a.tsx", ""].join(NUL) },
+      },
+    ]);
+
+    const outcome = await runRepair(h, { recon: moving });
+
+    expect(outcome).toMatchObject({
+      kind: "refused",
+      stage: "diff-gate",
+      reasons: [expect.stringMatching(/^src\/a\.tsx: the harness moved this file/u)],
+    });
   });
 
   it("carries a dependency bump through to a green repair's outcome", async () => {

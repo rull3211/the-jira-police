@@ -33,6 +33,7 @@
 import { oneLine, shorten } from "../text.ts";
 import { DENIED_BUILTIN_TOOLS } from "../triage/session.ts";
 import type { StagedImagePrompt } from "../triage/runner.ts";
+import type { PlannedMove } from "./moves.ts";
 import { memberLabel } from "./pr.ts";
 import { describeReadScope } from "./read-scope.ts";
 import {
@@ -396,6 +397,8 @@ export interface ReconVerdict {
   readonly devLensAccurate: boolean;
   readonly devLensCorrection: string;
   readonly plannedFiles: readonly string[];
+  /** Files the harness moves before the fix pass, content unchanged. Empty when `proceed` is false. */
+  readonly plannedMoves: readonly PlannedMove[];
   readonly approach: string;
   readonly testPlan: string;
   readonly estimatedLines: number;
@@ -612,6 +615,23 @@ function strings(record: Record<string, unknown>, key: string): readonly string[
   return value as readonly string[];
 }
 
+function isMove(item: unknown): item is PlannedMove {
+  return (
+    typeof item === "object" &&
+    item !== null &&
+    typeof (item as Record<string, unknown>)["from"] === "string" &&
+    typeof (item as Record<string, unknown>)["to"] === "string"
+  );
+}
+
+function moves(record: Record<string, unknown>, key: string): readonly PlannedMove[] {
+  const value = record[key];
+  if (!Array.isArray(value) || !value.every(isMove)) {
+    throw new SolveParseError(`${key} was not an array of { from, to } paths`);
+  }
+  return value.map((item) => ({ from: item.from, to: item.to }));
+}
+
 /** Validates a recon verdict, coherence included: `RECON_SCHEMA` repeats these rules so the model is corrected in-session, and this is the net. Same shape as `assertDorCoherent` in triage. */
 export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
   const record = asRecord(value, `recon verdict for ${issueKey}`);
@@ -631,6 +651,7 @@ export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
     devLensAccurate: bool(record, "devLensAccurate"),
     devLensCorrection: str(record, "devLensCorrection"),
     plannedFiles: strings(record, "plannedFiles"),
+    plannedMoves: moves(record, "plannedMoves"),
     approach: str(record, "approach"),
     testPlan: str(record, "testPlan"),
     estimatedLines,
@@ -671,8 +692,15 @@ export function parseRecon(value: unknown, issueKey: string): ReconVerdict {
       `${issueKey}: declined to proceed without saying why — the reason is the only calibration the fitness assessment ever gets`,
     );
   }
-  if (verdict.proceed && verdict.plannedFiles.length === 0) {
-    throw new SolveParseError(`${issueKey}: proceed is true but no files were named`);
+  if (verdict.proceed && verdict.plannedFiles.length === 0 && verdict.plannedMoves.length === 0) {
+    throw new SolveParseError(
+      `${issueKey}: proceed is true but no files were named, to change or to move`,
+    );
+  }
+  if (!verdict.proceed && verdict.plannedMoves.length > 0) {
+    throw new SolveParseError(
+      `${issueKey}: declined to proceed but planned ${String(verdict.plannedMoves.length)} move(s) — the run contradicted itself, so neither reading is safe to act on`,
+    );
   }
 
   // The bail's other two fields, held to the same iff as the headline: a diagnosis without a remedy would post under a heading promising the part that's missing.

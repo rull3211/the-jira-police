@@ -20,6 +20,7 @@
 import { createLogger } from "../logger.ts";
 import { shorten } from "../text.ts";
 import { appendLedgerRow, safeText } from "./ledger.ts";
+import type { PlannedMove } from "./moves.ts";
 import type { SolveOutcome } from "./orchestrator.ts";
 import { recordRepairRound } from "./repair-ledger.ts";
 
@@ -103,8 +104,11 @@ function headline(outcome: SolveOutcome): string {
     }
     case "bailed": {
       // Not "the agent stopped": recon said proceed, and whoever acts next needs to know the harness overruled it.
+      if (outcome.withheldMoves !== undefined) {
+        return `An agent read the code and planned to move ${String(outcome.withheldMoves.length)} file(s), which only a run an operator starts with --moves may do, so it was stopped before changing anything.`;
+      }
       if (outcome.refusedPlan !== undefined) {
-        return "An agent read the code and planned a change to files no run of this pipeline may edit, so it was stopped before changing anything.";
+        return "An agent read the code and planned a change the harness would not make, so it was stopped before changing anything.";
       }
       // Capped as well as sectioned: `bailReason` is one sentence here, and detail lives below.
       return `An agent read the code and stopped before changing anything: ${shorten(
@@ -204,11 +208,14 @@ function correctionBlock(outcome: SolveOutcome): readonly string[] {
  * gets the most room and the last word before the footer. Absent fields render nothing rather
  * than an empty heading.
  */
-function bailDetail(outcome: SolveOutcome): readonly string[] {
+function bailDetail(issueKey: string, outcome: SolveOutcome): readonly string[] {
   // No other member of the union carries these fields; `tsc` enforces this at compile time even
   // though it's inert at run time — same standing as the `crashed` clause in `lensOf`.
   if (outcome.kind !== "bailed") {
     return [];
+  }
+  if (outcome.withheldMoves !== undefined) {
+    return withheldMovesDetail(issueKey, outcome.withheldMoves);
   }
   if (outcome.refusedPlan !== undefined) {
     return refusedPlanDetail(outcome.refusedPlan);
@@ -261,6 +268,26 @@ function refusedPlanDetail(refusedPlan: readonly string[]): readonly string[] {
   ];
 }
 
+/** A sound plan the run had no privilege for: the remedy is a command for an operator, not a change to the ticket. */
+function withheldMovesDetail(issueKey: string, moves: readonly PlannedMove[]): readonly string[] {
+  const extra = moves.length - LIMITS.blockers;
+  return [
+    "",
+    "**What is in the way**",
+    "",
+    ...moves
+      .slice(0, LIMITS.blockers)
+      .map(
+        (move) => `* ${shorten(`${safeText(move.from)} → ${safeText(move.to)}`, LIMITS.blocker)}`,
+      ),
+    ...(extra > 0 ? [`* …and ${String(extra)} more, in the run's own report.`] : []),
+    "",
+    "**To make this agent-solvable**",
+    "",
+    `Nothing about the ticket needs to change. An operator re-runs it with \`pnpm solve:once ${issueKey} --pr --moves\`, which lets the harness make these moves itself before the fix pass. The daemon never moves files.`,
+  ];
+}
+
 /**
  * The ticket comment. Pure, so it is testable without a Jira account.
  * Never renders for `verified` — the only outcome with a pull request — because `reportsToTicket`
@@ -271,7 +298,7 @@ export function renderSolveComment(issueKey: string, outcome: SolveOutcome): str
     `## Solve attempt — ${issueKey}`,
     "",
     headline(outcome),
-    ...bailDetail(outcome),
+    ...bailDetail(issueKey, outcome),
     ...correctionBlock(outcome),
     "",
     SOLVE_SENTINEL,
@@ -312,6 +339,9 @@ function outcomeLabel(outcome: SolveOutcome): string {
     return `abandoned (${outcome.cause})`;
   }
   // Recon said proceed here, so counting this as recon declining would score the wrong judgement.
+  if (outcome.kind === "bailed" && outcome.withheldMoves !== undefined) {
+    return "bailed (moves withheld)";
+  }
   return outcome.kind === "bailed" && outcome.refusedPlan !== undefined
     ? "bailed (plan refused)"
     : outcome.kind;

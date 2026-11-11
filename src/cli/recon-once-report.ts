@@ -54,6 +54,16 @@ function reconSection(recon: ReconVerdict): readonly string[] {
       ...(recon.plannedFiles.length === 0
         ? ["None named."]
         : recon.plannedFiles.map((file) => `- ${oneLine(file)}`)),
+      ...(recon.plannedMoves.length === 0
+        ? []
+        : [
+            "",
+            "## Planned moves",
+            "",
+            "The harness makes these with `git mv` before the fix pass, only under `solve:once --moves`:",
+            "",
+            ...recon.plannedMoves.map((move) => `- ${oneLine(move.from)} → ${oneLine(move.to)}`),
+          ]),
       "",
       "## Approach",
       "",
@@ -115,7 +125,7 @@ export function formatReport(issueKey: string, outcome: ReconOnlyOutcome, now: D
         "",
         "## Stopped by the harness",
         "",
-        "Recon said proceed, but the plan names paths the diff gate refuses, so `solve:once` would stop here before the fix pass:",
+        "Recon said proceed, but the harness would not carry out the plan, so `solve:once` would stop here before the fix pass:",
         "",
         ...outcome.refusedPlan.map((reason) => `- ${oneLine(reason)}`),
       );
