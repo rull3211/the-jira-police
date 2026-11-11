@@ -79,7 +79,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §87. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §88. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -1321,6 +1321,51 @@ garbled has been accepted.
 - **The slip is the model's, and may move.** It hit five different fields, so renaming `summary`
   would not have helped, and a model or CLI release could change the rate either way, leaving
   item 2 guarding a shape nothing produces.
+
+### 87. The solve pipeline cannot move a file, so a rename ticket is never agent-solvable
+
+**Branch:** `feat/solve-rename`.
+
+**What happened.** Recon declined SSX-4204 (advisor-web: rename 27 non-JSX `.tsx` files to `.ts`)
+twice on 2026-11-11, the second time after the ticket had been split down to nothing but renames and
+two doc lines. The fix pass holds `Write` and `Edit` and no shell (`FIX_ALLOWED_TOOLS` in
+`src/solve/runner.ts`), so it can create a file and never remove one. A rename it attempted anyway
+would leave 27 copies beside their originals, and nothing mechanical would object: the diff gate
+refuses by path alone, and Vite, tsc and Vitest resolve `.ts` before `.tsx`, so verification passes.
+
+**What is being built.**
+
+1. **Recon plans the moves, and the harness makes them.** `RECON_SCHEMA` gains `plannedMoves`,
+   `{ from, to }` pairs of repository-relative paths whose content does not change. After the plan
+   check and before the fix pass, the harness runs `git mv` for each through its `CommandRunner`, so
+   no model holds the move. Both ends of every move go through `plannedPathRefusals`: a move can
+   neither reach a refused path nor give one a new name. A move onto itself, two moves sharing an
+   end, and a chain are refused. The fix pass's brief carries the list, and it edits the files where
+   they now are.
+2. **Phased.** Off by default and never on under the daemon: a plan with moves is refused before the
+   fix pass unless the run was started with `pnpm solve:once <KEY> --solve|--pr --moves`.
+   `recon:once` prints the moves and what the harness would make of them, which is the dry run. The
+   loop is not part of this entry.
+3. **The moves are checked after the fix pass.** Each `from` must be absent and each `to` present
+   when the diff gate runs, so a fix pass that writes a moved file back at its old path is refused.
+4. **A copy is refused on every run.** The gate also reads `git diff --name-status
+--find-copies-harder`, and a file added as an exact copy of one still in the tree (`C100`) is
+   refused, with or without `--moves`. That is the shape a `Write`-only pass gives a rename, and
+   today it passes.
+
+**What would make it the wrong idea:**
+
+- **Renames are rare enough to leave to people.** SSX-4204 and SSX-4205 are the two in the queue,
+  both from one refactoring epic. If no third appears, this is a privilege kept for two tickets.
+- **A move the model chose is still a move the model chose.** The harness executes it, but the list
+  is recon's. Path rules bound where a file can go, and nothing bounds whether it was the right
+  file. Review sees `R100` lines, which are easy to approve without reading.
+- **Copy detection compares every added file with the whole tree.** On the largest repository it may
+  be slow, and an intended duplicate such as a fixture would be refused. Only `C100` is refused for
+  that reason.
+- **The rest of the pipeline assumes a diff of edits.** Fail-first reads both ends of a moved test
+  and reports `inconclusive`, and the simplify and review passes are handed a patch that is mostly
+  rename headers. Each was read, not run, before this entry.
 
 ## Verification
 
