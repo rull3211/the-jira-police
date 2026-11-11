@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83 and §86, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86 and §87, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -662,6 +662,17 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   show it:** a label added while a fix pass runs, read as a hold after that pass with nothing
   pushed; and a request count from the same run against the two reads a pass costs plus one per
   audit post, comment and publish.
+
+- **The harness's moves have run once, under the daemon, and none of their refusals has run
+  live.** SSX-4204 on 2026-11-11, with `SOLVE_MOVES=true`: recon planned 27 moves, the harness made
+  them with `git mv`, the gate found every move held and no copy, verification passed, and the
+  commit is 27 `R100` renames and one doc edit (storebrand-digital/buy-insurance-advisor-web#2760).
+  Fail-first read the moved tests as `inconclusive` and simplify changed nothing, both as predicted.
+  A hand-run `solve:once --moves`, a withheld plan's comment, a `git mv` refusal, a move written
+  back and a `C100` copy have run only in tests, and the copy read's cost on a large repository is
+  unmeasured. **What would show it:** a plan with moves under a daemon without `SOLVE_MOVES`, read
+  as one comment naming the command; and the next fix pass that writes a copy, read as a refusal
+  naming both paths.
 
 ### 11. Loose ends recorded in no other file
 
@@ -1321,52 +1332,6 @@ garbled has been accepted.
 - **The slip is the model's, and may move.** It hit five different fields, so renaming `summary`
   would not have helped, and a model or CLI release could change the rate either way, leaving
   item 2 guarding a shape nothing produces.
-
-### 87. The solve pipeline cannot move a file, so a rename ticket is never agent-solvable
-
-**Branch:** `feat/solve-rename`.
-
-**What happened.** Recon declined SSX-4204 (advisor-web: rename 27 non-JSX `.tsx` files to `.ts`)
-twice on 2026-11-11, the second time after the ticket had been split down to nothing but renames and
-two doc lines. The fix pass holds `Write` and `Edit` and no shell (`FIX_ALLOWED_TOOLS` in
-`src/solve/runner.ts`), so it can create a file and never remove one. A rename it attempted anyway
-would leave 27 copies beside their originals, and nothing mechanical would object: the diff gate
-refuses by path alone, and Vite, tsc and Vitest resolve `.ts` before `.tsx`, so verification passes.
-
-**What is being built.**
-
-1. **Recon plans the moves, and the harness makes them.** `RECON_SCHEMA` gains `plannedMoves`,
-   `{ from, to }` pairs of repository-relative paths whose content does not change. After the plan
-   check and before the fix pass, the harness runs `git mv` for each through its `CommandRunner`, so
-   no model holds the move. Both ends of every move go through `plannedPathRefusals`: a move can
-   neither reach a refused path nor give one a new name. A move onto itself, two moves sharing an
-   end, and a chain are refused. The fix pass's brief carries the list, and it edits the files where
-   they now are.
-2. **Phased.** Off by default: a plan with moves is refused before the fix pass unless the run was
-   started with `pnpm solve:once <KEY> --solve|--pr --moves`, or the daemon reads `SOLVE_MOVES=true`.
-   `recon:once` prints the moves and what the harness would make of them, which is the dry run. The
-   loop's copy was asked for by the operator on 2026-11-11, before any hand run had been watched,
-   so the fourth phase arrives with the first three rather than after them.
-3. **The moves are checked after the fix pass.** Each `from` must be absent and each `to` present
-   when the diff gate runs, so a fix pass that writes a moved file back at its old path is refused.
-4. **A copy is refused on every run.** The gate also reads `git diff --name-status
---find-copies-harder`, and a file added as an exact copy of one still in the tree (`C100`) is
-   refused, with or without `--moves`. That is the shape a `Write`-only pass gives a rename, and
-   today it passes.
-
-**What would make it the wrong idea:**
-
-- **Renames are rare enough to leave to people.** SSX-4204 and SSX-4205 are the two in the queue,
-  both from one refactoring epic. If no third appears, this is a privilege kept for two tickets.
-- **A move the model chose is still a move the model chose.** The harness executes it, but the list
-  is recon's. Path rules bound where a file can go, and nothing bounds whether it was the right
-  file. Review sees `R100` lines, which are easy to approve without reading.
-- **Copy detection compares every added file with the whole tree.** On the largest repository it may
-  be slow, and an intended duplicate such as a fixture would be refused. Only `C100` is refused for
-  that reason.
-- **The rest of the pipeline assumes a diff of edits.** Fail-first reads both ends of a moved test
-  and reports `inconclusive`, and the simplify and review passes are handed a patch that is mostly
-  rename headers. Each was read, not run, before this entry.
 
 ## Verification
 
