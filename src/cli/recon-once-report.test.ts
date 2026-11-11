@@ -178,7 +178,7 @@ describe("formatReport", () => {
     const report = formatReport("SSX-4204", outcome, NOW);
 
     expect(report).toContain("## Planned moves");
-    expect(report).toContain("only under `solve:once --moves`");
+    expect(report).toContain("only under `--moves`, or `SOLVE_MOVES` for the daemon");
     expect(report).toContain("- src/app/hooks.tsx → src/app/hooks.ts");
   });
 

@@ -115,8 +115,8 @@ Anything else is `proceed: false`. See §5.
 `plannedMoves`.** The fix pass can create a file but never delete one, so it cannot rename
 anything: asked to, it writes a copy beside the original, and the gate refuses a byte-identical
 copy (§4). The harness makes each move itself, with `git mv`, before the fix pass starts. It only
-does so in a run an operator started with `--moves`; any other run stops before the fix pass and
-says why. That is still the right plan to return, so never leave a move out to get past it. Both
+does so in a run an operator armed for it, with `--moves` or `SOLVE_MOVES`; any other run stops
+before the fix pass and says why. That is still the right plan to return, so never leave a move out to get past it. Both
 ends of a move obey §4, a path may be the end of only one move, and a destination's directory must
 already exist. If the fix pass must also edit a moved file, list its new path in `plannedFiles`.
 

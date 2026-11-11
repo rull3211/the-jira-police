@@ -572,7 +572,7 @@ describe("renderSolveComment, on a bail", () => {
     } as SolveOutcome);
 
     expect(body.split("\n")[2]).toBe(
-      "An agent read the code and planned to move 2 file(s), which only a run an operator starts with --moves may do, so it was stopped before changing anything.",
+      "An agent read the code and planned to move 2 file(s), which only a run started with --moves, or a daemon with SOLVE_MOVES=true, may do, so it was stopped before changing anything.",
     );
     expect(body).toContain("* src/app/hooks.tsx → src/app/hooks.ts");
     expect(body).toContain("Nothing about the ticket needs to change.");

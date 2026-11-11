@@ -619,10 +619,12 @@ reason alone. Recon plans moves in `plannedMoves`, `{ from, to }` with the conte
   `plannedPathRefusals` with the dependency-bump exception off, no move may land on itself, and each
   path may be the end of one move only, which refuses a duplicate, a chain and a swap with one rule.
   A refusal is a plan refusal, posted like one.
-- **Withheld without the privilege.** Only `solve:once <KEY> --solve|--pr|--review --moves` sets
-  `SolveRequest.moves`. Without it a plan with moves stops before the fix pass as `bailed` with
-  `withheldMoves`, and the ticket is told the command that would run it. The daemon never sets it,
-  because the loop is not built.
+- **Withheld without the privilege.** `SolveRequest.moves` is set by `solve:once <KEY>
+--solve|--pr|--review --moves`, or under the daemon by `SOLVE_MOVES`, off unless it reads `true`
+  and reported as `movesFiles` at startup. Without it a plan with moves stops before the fix pass as
+  `bailed` with `withheldMoves`, and the ticket is told the command that would run it. The loop's
+  copy arrived with the capability rather than after a watched hand run, at the operator's request
+  on 2026-11-11.
 - **Made with git, one at a time** (`applyMoves`). `git --literal-pathspecs ls-files -z -- <from>`
   must list exactly that one file, then `git mv -- <from> <to>` runs. The first refusal stops the
   run in git's own words; the moves already made stay staged, and `removeWorktree` will not force

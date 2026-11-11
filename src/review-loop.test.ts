@@ -227,6 +227,31 @@ describe("what the daemon's tick is armed with", () => {
     expect(vi.mocked(runReviewSweep).mock.calls[0]?.[4]).toBe(armed);
     expect(vi.mocked(runSolveClaims).mock.calls[0]?.[4]).toBe(armed);
   });
+
+  it.each([
+    ["unset", {}, false],
+    ["SOLVE_MOVES=true", { SOLVE_MOVES: "true" }, true],
+    ["SOLVE_MOVES=TRUE", { SOLVE_MOVES: "TRUE" }, true],
+    ["a typo", { SOLVE_MOVES: "ture" }, false],
+  ])(
+    "hands the claims the moves %s allows, and says so at startup",
+    async (_label, overrides, armed) => {
+      vi.mocked(runSolveClaims).mockClear();
+      const settings = settingsWith({ ...ARMED, ...overrides });
+      const loop = createReviewLoop(
+        settings,
+        recordingClient([]),
+        new AbortController().signal,
+        900_000,
+        UNUSED_LEDGER,
+      );
+
+      await loop?.runCycle();
+
+      expect(vi.mocked(runSolveClaims).mock.calls[0]?.[5]).toBe(armed);
+      expect(said(startupLog(overrides), "review.loop.start")?.["movesFiles"]).toBe(armed);
+    },
+  );
 });
 
 /** Answers every query with nothing and records what it was asked, in order. */

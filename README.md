@@ -976,7 +976,8 @@ evidence that was meant to justify them.
 **`--moves` is a modifier on `--solve`, `--pr` and `--review`.** The fix pass can create a file and
 never delete one, so a rename is recon's to plan (`plannedMoves`) and the harness's to make, with
 git, before the fix pass. Without the flag a plan with moves stops before the fix pass, and the
-ticket is told the command that would run it. The daemon never moves files. Both ends of a move go
+ticket is told the command that would run it. **The daemon's copy is `SOLVE_MOVES`**, off unless it
+reads `true` (any case), and its startup line reports `movesFiles` either way. Both ends of a move go
 through the diff gate's path rules, and the gate checks afterwards that every move held. `recon:once`
 prints the moves a plan would make. `architecture/solve.md` §15 has the rest.
 

@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4229 tests in 124 files**, no build step.
+> **4235 tests in 124 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -1342,10 +1342,11 @@ refuses by path alone, and Vite, tsc and Vitest resolve `.ts` before `.tsx`, so 
    neither reach a refused path nor give one a new name. A move onto itself, two moves sharing an
    end, and a chain are refused. The fix pass's brief carries the list, and it edits the files where
    they now are.
-2. **Phased.** Off by default and never on under the daemon: a plan with moves is refused before the
-   fix pass unless the run was started with `pnpm solve:once <KEY> --solve|--pr --moves`.
+2. **Phased.** Off by default: a plan with moves is refused before the fix pass unless the run was
+   started with `pnpm solve:once <KEY> --solve|--pr --moves`, or the daemon reads `SOLVE_MOVES=true`.
    `recon:once` prints the moves and what the harness would make of them, which is the dry run. The
-   loop is not part of this entry.
+   loop's copy was asked for by the operator on 2026-11-11, before any hand run had been watched,
+   so the fourth phase arrives with the first three rather than after them.
 3. **The moves are checked after the fix pass.** Each `from` must be absent and each `to` present
    when the diff gate runs, so a fix pass that writes a moved file back at its old path is refused.
 4. **A copy is refused on every run.** The gate also reads `git diff --name-status

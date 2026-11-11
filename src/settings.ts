@@ -358,6 +358,12 @@ export const SETTINGS = [
     fallback: "false",
   },
   {
+    name: "SOLVE_MOVES",
+    description:
+      "Whether the daemon may make the moves recon plans — files renamed or relocated with their content unchanged, moved by the harness with git mv before the fix pass — the loop's copy of `--moves`, which a person types per run. Off by default: the list of moves is recon's, and the path rules bound where a file may go but not whether it was the right file, so with this on nobody reads the plan before the files move. Off, a plan with moves stops before the fix pass and the ticket is told the command that would run it. Only `true` arms it, in any case, so a typo fails closed. Either way the gate checks after the fix pass that every move held.",
+    fallback: "false",
+  },
+  {
     name: "DEPENDENCY_BUMPS",
     description:
       "Whether a solve run may change a pom.xml when the only change is the version of a dependency the file already declares, the text of a comment, or both — the one exception to the rule that no run edits a file defining what passing means (architecture/solve.md §15). The pull request names every bump above anything a model wrote; a comment edit, which Maven never reads, gets no notice. On by default, by the operator's decision, against the house rule that a setting granting a privilege defaults off: bumping a library to get what a ticket needs is treated as ordinary work, and comment edits ride the same switch, as proposed to the operator on 2026-09-24 and accepted, since Maven discards comments. Read through `flag`, so only `true` arms it and a typo turns it off rather than on. Off, a plan naming pom.xml is stopped before the fix pass and any pom.xml change is refused at the diff gate, exactly as before the exception existed.",

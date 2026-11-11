@@ -134,7 +134,7 @@ export function describeSolveOutcome(outcome: SolveOutcome): string {
           : `Worktree kept at ${outcome.cleanup.path} — ${outcome.cleanup.reason}`;
       if (outcome.withheldMoves !== undefined) {
         return [
-          `STOPPED AT THE PLAN — recon said proceed and planned ${String(outcome.withheldMoves.length)} move(s), which only a run started with --moves may make, so no fix pass ran:`,
+          `STOPPED AT THE PLAN — recon said proceed and planned ${String(outcome.withheldMoves.length)} move(s), which only a run started with --moves, or a daemon with SOLVE_MOVES=true, may make, so no fix pass ran:`,
           ...outcome.withheldMoves.map((move) => `  ${move.from} → ${move.to}`),
           `Re-run with --moves to let the harness make them.`,
           cleanup,

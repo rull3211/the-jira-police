@@ -51,7 +51,7 @@ export const USAGE =
   "                          moves recon plans (files renamed or relocated, content\n" +
   "                          unchanged) with git mv before the fix pass. Without it\n" +
   "                          a plan with moves stops before the fix pass. The\n" +
-  "                          daemon never moves files.\n" +
+  "                          daemon's copy is SOLVE_MOVES.\n" +
   "\n" +
   "  <ISSUE-KEY> --advance   one review round on the pull request that already\n" +
   "                          exists; does not claim, solve, or open anything\n" +

@@ -1138,7 +1138,7 @@ export async function runWriteRungs(
   cycle: SolveCycleOutcome | null,
   authority: ClaimAuthority,
   promoteRepair: boolean,
-  /** `--moves`. Off unless a person typed it; the daemon's caller never passes it. */
+  /** `--moves` by hand, or `SOLVE_MOVES` for the daemon. Off unless one of them says so. */
   moves = false,
 ): Promise<void> {
   // Before the claim: a live-mode misconfiguration throws here, and after the claim it would strand it.
@@ -1268,6 +1268,8 @@ export async function runSolveClaims(
   ledger: AttemptLedger,
   /** Decided once by `createReviewLoop`, which logs it, so the startup report is the value acted on. */
   promoteRepair: boolean,
+  /** `SOLVE_MOVES`, decided and logged the same way. */
+  moves = false,
 ): Promise<{ readonly found: number; readonly started: number; readonly held: number }> {
   const cycle = await runSolveCycle(queueDeps);
   const authority = queueDeps.mode;
@@ -1295,7 +1297,7 @@ export async function runSolveClaims(
 
     const before = process.exitCode;
     try {
-      await runWriteRungs(settings, client, key, "pr", cycle, authority, promoteRepair);
+      await runWriteRungs(settings, client, key, "pr", cycle, authority, promoteRepair, moves);
       started += 1;
     } catch (error) {
       if (error instanceof TicketHeldError) {

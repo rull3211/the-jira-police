@@ -105,7 +105,7 @@ function headline(outcome: SolveOutcome): string {
     case "bailed": {
       // Not "the agent stopped": recon said proceed, and whoever acts next needs to know the harness overruled it.
       if (outcome.withheldMoves !== undefined) {
-        return `An agent read the code and planned to move ${String(outcome.withheldMoves.length)} file(s), which only a run an operator starts with --moves may do, so it was stopped before changing anything.`;
+        return `An agent read the code and planned to move ${String(outcome.withheldMoves.length)} file(s), which only a run started with --moves, or a daemon with SOLVE_MOVES=true, may do, so it was stopped before changing anything.`;
       }
       if (outcome.refusedPlan !== undefined) {
         return "An agent read the code and planned a change the harness would not make, so it was stopped before changing anything.";
@@ -284,7 +284,7 @@ function withheldMovesDetail(issueKey: string, moves: readonly PlannedMove[]): r
     "",
     "**To make this agent-solvable**",
     "",
-    `Nothing about the ticket needs to change. An operator re-runs it with \`pnpm solve:once ${issueKey} --pr --moves\`, which lets the harness make these moves itself before the fix pass. The daemon never moves files.`,
+    `Nothing about the ticket needs to change. An operator re-runs it with \`pnpm solve:once ${issueKey} --pr --moves\`, which lets the harness make these moves itself before the fix pass. A daemon makes them only with SOLVE_MOVES=true.`,
   ];
 }
 

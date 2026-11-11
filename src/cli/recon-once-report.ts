@@ -60,7 +60,7 @@ function reconSection(recon: ReconVerdict): readonly string[] {
             "",
             "## Planned moves",
             "",
-            "The harness makes these with `git mv` before the fix pass, only under `solve:once --moves`:",
+            "The harness makes these with `git mv` before the fix pass, only under `--moves`, or `SOLVE_MOVES` for the daemon:",
             "",
             ...recon.plannedMoves.map((move) => `- ${oneLine(move.from)} → ${oneLine(move.to)}`),
           ]),

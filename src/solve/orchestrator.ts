@@ -149,7 +149,7 @@ export interface SolveRequest {
   readonly repairRound?: boolean;
   /** `DEPENDENCY_BUMPS`: whether a pom.xml change that only moves dependency versions and edits comments is allowed. Absent means no. */
   readonly dependencyBumps?: boolean;
-  /** `--moves`: whether the harness may make the moves recon plans. Absent means no, and the daemon never sets it. */
+  /** `--moves` by hand or `SOLVE_MOVES` for the daemon: whether the harness may make the moves recon plans. Absent means no. */
   readonly moves?: boolean;
   /**
    * `--repair` typed per run, or `REPAIR_PUBLISH` under the daemon: a green repair round becomes the
@@ -221,7 +221,7 @@ export type SolveOutcome =
        * make. One reason each. See `plannedPathRefusals` and `moves.ts`.
        */
       readonly refusedPlan?: readonly string[];
-      /** Set when recon said `proceed` with moves the harness would make, and the run was not started with `--moves`. */
+      /** Set when recon said `proceed` with moves the harness would make, and the run was armed for neither `--moves` nor `SOLVE_MOVES`. */
       readonly withheldMoves?: readonly PlannedMove[];
       readonly devLens: DevLensFeedback;
       readonly worktree: Worktree;
@@ -364,7 +364,7 @@ export const PLAN_REFUSED_REASON =
 
 /** `bailed.reason` when the plan's moves were sound and the run lacked the privilege to make them. */
 export const MOVES_WITHHELD_REASON =
-  "recon planned to move files, which only a run started with --moves may do, so the harness stopped the run before the fix pass";
+  "recon planned to move files, which only a run started with --moves, or a daemon with SOLVE_MOVES=true, may do, so the harness stopped the run before the fix pass";
 
 /**
  * The two reads of the worktree, kept separate rather than shared.
