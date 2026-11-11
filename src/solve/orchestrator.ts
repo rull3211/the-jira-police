@@ -216,9 +216,8 @@ export type SolveOutcome =
       /** The model's own verdict, never edited — under `refusedPlan` it still says `proceed`. */
       readonly recon: ReconVerdict;
       /**
-       * Set when recon said `proceed` and the harness stopped the run anyway, because it would not
-       * carry out the plan: a path the diff gate refuses by name, or a move it would not or could not
-       * make. One reason each. See `plannedPathRefusals` and `moves.ts`.
+       * Set when recon said `proceed` and the harness would not carry out the plan: a path the gate
+       * refuses by name, or a move it would not or could not make (`moves.ts`). One reason each.
        */
       readonly refusedPlan?: readonly string[];
       /** Set when recon said `proceed` with moves the harness would make, and the run was armed for neither `--moves` nor `SOLVE_MOVES`. */
