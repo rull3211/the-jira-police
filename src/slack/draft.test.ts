@@ -77,7 +77,8 @@ function harness(overrides: Partial<DraftMentionDeps> = {}): Harness {
   const draft = vi.fn(async () => drafted());
   const permalink = vi.fn(async () => LINK);
   const deps: DraftMentionDeps = {
-    allowed: [ASKER],
+    allowed: [ASKER, OTHER],
+    concurrency: 3,
     dry: false,
     draft,
     permalink,
@@ -115,6 +116,30 @@ function held(): { readonly promise: Promise<ThreadDraftOutcome>; release(): voi
     promise,
     release: () => {
       resolve(drafted());
+    },
+  };
+}
+
+const OTHER = "U0ASKER2";
+const FIRST = "1712345678.000100";
+const SECOND = "1712340000.000300";
+const THIRD = "1712340000.000400";
+
+/** Drafts that each run until the test releases their thread. */
+function heldByThread(): {
+  readonly draft: DraftMentionDeps["draft"];
+  release(threadTs: string): void;
+} {
+  const runs = new Map<string, ReturnType<typeof held>>();
+  const runOf = (threadTs: string): ReturnType<typeof held> => {
+    const run = runs.get(threadTs) ?? held();
+    runs.set(threadTs, run);
+    return run;
+  };
+  return {
+    draft: vi.fn<DraftMentionDeps["draft"]>(async (thread) => await runOf(thread.threadTs).promise),
+    release: (threadTs) => {
+      runOf(threadTs).release();
     },
   };
 }
@@ -309,32 +334,93 @@ describe("createDraftHandler", () => {
     expect(h.sent).toHaveLength(0);
   });
 
-  it("refuses a second draft while one runs, and starts no second session", async () => {
-    const run = held();
-    const h = harness({ draft: vi.fn(async () => await run.promise) });
+  it("drafts two threads of one channel at once, each sent to whoever asked for it", async () => {
+    const runs = heldByThread();
+    const h = harness({ draft: runs.draft });
     const handler = createDraftHandler(h.deps);
 
     await handler.handle(mention());
-    await handler.handle(mention({ threadTs: "1712340000.000300" }));
-
-    expect(h.replies[1]).toMatch(/already drafting another thread/u);
-    run.release();
-    await handler.settled();
-    expect(h.draft).toHaveBeenCalledTimes(1);
-    expect(h.sent).toHaveLength(1);
-  });
-
-  it("takes a new draft once the last one has been sent", async () => {
-    const h = harness();
-    const handler = createDraftHandler(h.deps);
-
-    await handler.handle(mention());
-    await handler.settled();
-    await handler.handle(mention({ threadTs: "1712340000.000300" }));
-    await handler.settled();
+    await handler.handle(mention({ userId: OTHER, threadTs: SECOND }));
 
     expect(h.draft).toHaveBeenCalledTimes(2);
+    expect(h.replies).toEqual([
+      expect.stringMatching(/^Drafting/u),
+      expect.stringMatching(/^Drafting/u),
+    ]);
+    runs.release(SECOND);
+    runs.release(FIRST);
+    await handler.settled();
+    expect(h.sent.map((sent) => [sent.userId, sent.label])).toEqual([
+      [OTHER, `C0THREAD1-${SECOND}`],
+      [ASKER, `C0THREAD1-${FIRST}`],
+    ]);
+  });
+
+  it("refuses a second mention of a thread already being drafted, and starts no second session", async () => {
+    const runs = heldByThread();
+    const h = harness({ draft: runs.draft });
+    const handler = createDraftHandler(h.deps);
+
+    await handler.handle(mention());
+    await handler.handle(mention({ userId: OTHER }));
+
+    expect(h.replies[1]).toMatch(/already drafting this thread/u);
+    runs.release(FIRST);
+    await handler.settled();
+    expect(h.draft).toHaveBeenCalledTimes(1);
+    expect(h.sent.map((sent) => sent.userId)).toEqual([ASKER]);
+  });
+
+  it("refuses a thread past the cap, saying how many are running, and starts no session for it", async () => {
+    const runs = heldByThread();
+    const h = harness({ draft: runs.draft, concurrency: 2 });
+    const handler = createDraftHandler(h.deps);
+
+    await handler.handle(mention());
+    await handler.handle(mention({ threadTs: SECOND }));
+    await handler.handle(mention({ threadTs: THIRD }));
+
+    expect(h.replies[2]).toMatch(/already drafting 2 other threads, the most I draft at once/u);
+    runs.release(FIRST);
+    runs.release(SECOND);
+    await handler.settled();
+    expect(h.draft).toHaveBeenCalledTimes(2);
     expect(h.sent).toHaveLength(2);
+  });
+
+  it("is settled only once every running draft has been sent", async () => {
+    const runs = heldByThread();
+    const h = harness({ draft: runs.draft });
+    const handler = createDraftHandler(h.deps);
+    await handler.handle(mention());
+    await handler.handle(mention({ threadTs: SECOND }));
+    let settled = false;
+    const waiting = handler.settled().then(() => {
+      settled = true;
+    });
+
+    runs.release(FIRST);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(h.sent).toHaveLength(1);
+    runs.release(SECOND);
+    await waiting;
+    expect(h.sent).toHaveLength(2);
+  });
+
+  it("frees a finished draft's place, for another thread under the cap and for the same thread again", async () => {
+    const h = harness({ concurrency: 1 });
+    const handler = createDraftHandler(h.deps);
+
+    await handler.handle(mention());
+    await handler.settled();
+    await handler.handle(mention({ threadTs: SECOND }));
+    await handler.settled();
+    await handler.handle(mention({ threadTs: SECOND }));
+    await handler.settled();
+
+    expect(h.draft).toHaveBeenCalledTimes(3);
+    expect(h.sent).toHaveLength(3);
   });
 
   it("tells the person when the service stopped the draft, rather than going quiet", async () => {

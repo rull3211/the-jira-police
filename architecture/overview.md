@@ -102,7 +102,7 @@ any thread. It is not a `runLoop` but one Socket Mode connection with its own re
 and it writes nothing but a property write per command that changes the subscriber list, a label
 write per mention that starts or clears a ticket — though a start hands the solve loop a ticket it
 will pay to solve — and, on a live listener, one issue per press on a draft's button. A draft is the one thing it pays for itself: a read-only session per mention, one
-at a time and off the chain the commands wait on, whose draft goes to the asker as a direct message,
+per thread, at most `DRAFT_CONCURRENCY` at once, and off the chain the commands wait on, whose draft goes to the asker as a direct message,
 its first paragraph as the message and the rest in a reply in its thread. With `DRAFT_PROJECTS` set, a ticket draft the gate passes also carries a **Post to Jira** button, and a
 press re-judges the draft and, on a dry listener, writes the request a filing would make to a file,
 while a live one files it (`architecture/invariants.md` invariant 20). The

@@ -398,6 +398,33 @@ describe("the Post button, from a mention to a direct message", () => {
     expect(existsSync(join(root, "state", "pending-drafts"))).toBe(false);
   });
 
+  it("drafts as many threads at once as DRAFT_CONCURRENCY allows, and refuses the next", async () => {
+    const root = checkoutRoot();
+    const { calls } = wire();
+    const session = Promise.withResolvers<typeof RESULT>();
+    runDraftSession.mockReturnValue(session.promise);
+    const settings = configured(root, { DRAFT_CONCURRENCY: "1" });
+    const handler = draftHandlerFor(settings, "dry", new AbortController().signal);
+
+    await handler.handle(MENTION);
+    await handler.handle({ ...MENTION, threadTs: "1712340000.000300" });
+
+    const told = calls
+      .filter((call) => call.what === "chat.postEphemeral")
+      .map((call) => call.form.get("text"));
+    expect(told[1]).toMatch(/already drafting 1 other thread, the most I draft at once/u);
+    session.resolve(RESULT);
+    await handler.settled();
+    expect(runDraftSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["0", "three"])("refuses to build a listener whose DRAFT_CONCURRENCY is %s", (value) => {
+    const settings = configured(checkoutRoot(), { DRAFT_CONCURRENCY: value });
+    expect(() => draftHandlerFor(settings, "dry", new AbortController().signal)).toThrow(
+      /DRAFT_CONCURRENCY/u,
+    );
+  });
+
   it("forgets the record when Slack refuses the message that carried its button", async () => {
     const root = checkoutRoot();
     wire({ sendFails: true });

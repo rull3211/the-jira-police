@@ -666,7 +666,7 @@ export function listenerFor(
       click,
       signal,
     });
-    // The same signal has already killed a running draft's session; this waits for its last message.
+    // The same signal has already killed every running draft's session; this waits for their last messages.
     await draft.settled();
     return summary;
   };
@@ -794,6 +794,7 @@ export function draftHandlerFor(
   const deps = threadDraftDeps(settings, signal);
   return createDraftHandler({
     allowed,
+    concurrency: numeric(settings, "DRAFT_CONCURRENCY", 1),
     dry: mode === "dry",
     draft: (thread) => draftThread(deps, thread),
     permalink: (channel, ts) => slack.permalink({ channel, ts }),

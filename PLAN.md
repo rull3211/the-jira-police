@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4235 tests in 124 files**, no build step.
+> **4241 tests in 124 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87 and §88, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87, §88 and §90, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -79,7 +79,7 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §90. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §91. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
@@ -613,6 +613,15 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
   times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
   a draft runs.
+- **Two drafts at once have run only in tests.** `DRAFT_CONCURRENCY` lets drafts of different
+  threads run side by side; the suite covers the cap, a second mention of a running thread, a slot
+  freed on finishing and `settled` waiting for all, each watched failing under a mutation. Unseen:
+  two sessions and their direct messages at once on real Slack, Jira and the Atlassian MCP, which
+  may rate-limit three; and a Ctrl-C with two running. **What would show it:** the daemon live with
+  `DRAFT_CONCURRENCY=2`, `@Bencebot draft` in threads A, B, A again and C within a few seconds —
+  `slack.draft_mention` logging `started`, `started`, `same-thread`, `busy` with `running` 1, 2, 2,
+  2, then two `slack.draft_sent` with different `messageTs` — and once more with a Ctrl-C while two
+  run, each asker sent the stopped message.
 - **The Post to Jira button has been sent and pressed once, and a press only rehearses.** On
   2026-10-15 `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792009502102019 --dm`
   sent a ticket draft to `U0BMCC38933` ($1.34, 241 s, exit 0): four sections, the longest exactly

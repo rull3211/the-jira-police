@@ -145,6 +145,12 @@ export const SETTINGS = [
     fallback: "1200000",
   },
   {
+    name: "DRAFT_CONCURRENCY",
+    description:
+      "How many `@Bencebot draft` sessions may run at once, each for a different thread. A mention past it, or of a thread already being drafted, is refused with a reply saying so and starts nothing. A cap because each draft is a paid session, sized like a triage, that may read every configured checkout. Floor of 1.",
+    fallback: "3",
+  },
+  {
     name: "SOLVE_ENABLED",
     description:
       'Master switch for the solve queue. Off means the second poller never starts, so no ticket is ever claimed. Separate from SOLVE_MODE because they answer different questions — whether the machinery runs at all, and how much human approval it needs when it does — and collapsing them into one setting would mean the only way to test the plumbing was to arm it. Strict "true", so a typo fails closed.',
