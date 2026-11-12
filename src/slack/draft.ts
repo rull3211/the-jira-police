@@ -1,6 +1,6 @@
 /**
- * `@Bencebot draft` in any thread the bot is in: the asker checked first, one session at a time off
- * the listener's chain, the result sent to them as a direct message.
+ * `@Bencebot draft` in any thread the bot is in: the asker checked first, one session per thread off
+ * the listener's chain, up to a cap at once, the result sent to them as a direct message.
  */
 
 import { type DraftOffer, type PreparedDraft, withoutButton } from "../draft/offer.ts";
@@ -29,6 +29,8 @@ export const DRAFT_USAGE =
 
 export interface DraftMentionDeps {
   readonly allowed: readonly string[];
+  /** `DRAFT_CONCURRENCY`: how many threads may be drafted at once. */
+  readonly concurrency: number;
   /** Whether `deliver` writes the message to a file rather than sending it. */
   readonly dry: boolean;
   draft(thread: ThreadRef): Promise<ThreadDraftOutcome>;
@@ -50,7 +52,8 @@ export interface DraftHandler {
 
 export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
   const prefix = deps.dry ? "(dry run, nothing sent) " : "";
-  let running: { readonly label: string; readonly done: Promise<void> } | null = null;
+  /** By thread label, so one thread is never drafted twice at once. */
+  const running = new Map<string, Promise<void>>();
 
   const run = async (mention: Mention, thread: ThreadRef): Promise<void> => {
     const label = threadLabel(thread);
@@ -121,13 +124,20 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
         text: `Nothing was drafted: this is not a thread. ${DRAFT_USAGE}`,
       };
     }
-    if (running !== null) {
+    const thread = { channel: mention.channel, threadTs: mention.threadTs };
+    const label = threadLabel(thread);
+    if (running.has(label)) {
       return {
-        decision: "busy",
-        text: "I am already drafting another thread, and draft one at a time, so nothing was started. Ask again once that draft arrives.",
+        decision: "same-thread",
+        text: "I am already drafting this thread, so nothing was started. The draft goes to whoever asked first.",
       };
     }
-    const thread = { channel: mention.channel, threadTs: mention.threadTs };
+    if (running.size >= deps.concurrency) {
+      return {
+        decision: "busy",
+        text: `I am already drafting ${String(running.size)} other threads, the most I draft at once, so nothing was started. Ask again once one of those drafts arrives.`,
+      };
+    }
     const done = run(mention, thread)
       .catch((error: unknown) => {
         log.error("slack.draft_crashed", {
@@ -136,9 +146,9 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
         });
       })
       .finally(() => {
-        running = null;
+        running.delete(label);
       });
-    running = { label: threadLabel(thread), done };
+    running.set(label, done);
     return {
       decision: "started",
       text: "Drafting a ticket from this thread. I will send it to you as a direct message when it is done, which takes minutes.",
@@ -154,6 +164,7 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
         channel: mention.channel,
         threadTs: mention.threadTs,
         decision,
+        running: running.size,
       });
       try {
         await deps.reply(mention, reply);
@@ -166,7 +177,9 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
       }
     },
     settled: async () => {
-      await running?.done;
+      while (running.size > 0) {
+        await Promise.all(running.values());
+      }
     },
   };
 }
