@@ -79,13 +79,46 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §88. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §90. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
 `main`, and `docs/plan-structured-output-leak` issued a second §79 and took §85 when it did.
 
 <!-- refs:on -->
+
+### 88. A drafted ticket has no length budget, and a draft with no button does not say why
+
+**Branch:** `fix/draft-length`
+
+**What is being attempted.** On 2026-11-12 `@Bencebot draft` sent the operator a ticket for a
+400-to-2000-character limit change of an estimated ten thousand characters in four messages: three
+checkouts' full commits, twenty-two bullets under `Where`, nine acceptance criteria, and the same
+`reason`-constant doubt in the questions, the verified facts and `Not in scope`. The operator called
+it far too long. `thread-draft`'s `SKILL.md` asks for every section and names no length; the only
+bound is `DESCRIPTION_MAX`, Jira's. The fix is a budget in the skill that scales with the ask, a
+target and a ceiling, with what to cut first. `DESCRIPTION_MAX` stays: `parseDraft` cuts past it
+mid-sentence. The same draft came with no Post button and no word why, because `DRAFT_PROJECTS` was
+empty and `offer` was never built; the message will say so.
+
+**What would make it the wrong idea.** A rerun of the same thread that comes back inside the budget
+but drops a fact the implementer needs — a file to edit, the deploy order, the trap — so the length
+was carrying content. **What would show it:** `pnpm slack:draft <link>` on the 2026-11-12 thread,
+the body's length measured, and the dropped facts listed against the long draft.
+
+### 89. A draft cites lines from whatever branch each checkout is on
+
+**Branch:** none yet.
+
+**What is not built.** The draft session reads the configured checkouts as they lie. On 2026-11-12
+it cited `buy-insurance-advisor-web` on `feat/SSX-4310-single-car-bonus-input`,
+`insurance-ssx-mono-repo` on `feat/SSX-3984-internal-usable-area` and
+`insurance-commerce-rest-api` on `revert/SSX-4271-store-advice-document-id-on-bought-cart`, and said
+so, but an implementer branches from `main`, where the lines can differ and the code read can be
+unmerged. The shape that closes it: the harness fetches and hands the session a detached worktree at
+each checkout's `origin/HEAD`, as solve does for its one repository, and removes them after. **What
+would make it the wrong idea:** fetching and checking out every configured repository per draft
+costing more than a wrong line number does.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 
