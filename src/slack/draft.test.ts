@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { DraftOffer } from "../draft/offer.ts";
+import { type DraftOffer, unofferedDraft } from "../draft/offer.ts";
 import type { DraftResult } from "../draft/runner.ts";
 import type { ThreadDraftOutcome } from "../draft/thread.ts";
 import { SessionAbortedError } from "../triage/session.ts";
@@ -95,6 +95,7 @@ function harness(overrides: Partial<DraftMentionDeps> = {}): Harness {
     reply: async (_mention, text) => {
       replies.push(text);
     },
+    offer: unofferedDraft("nothing is on DRAFT_PROJECTS"),
     ...overrides,
   };
   // The spies the handler actually holds, overrides included.
@@ -204,16 +205,6 @@ describe("createDraftHandler", () => {
     it("sends no blocks at all for a message the offer gave no button", async () => {
       const { offer } = offering(null);
       const h = harness({ offer });
-      const handler = createDraftHandler(h.deps);
-
-      await handler.handle(mention());
-      await handler.settled();
-
-      expect(h.sent[0]).not.toHaveProperty("blocks");
-    });
-
-    it("sends no blocks either when there is no offer at all", async () => {
-      const h = harness();
       const handler = createDraftHandler(h.deps);
 
       await handler.handle(mention());
