@@ -16,7 +16,7 @@ import { basename, dirname, join } from "node:path";
 
 import { createArguments, runFiler } from "./draft/filer.ts";
 import type { FileGateDeps } from "./draft/gate.ts";
-import { type DraftOffer, createDraftOffer } from "./draft/offer.ts";
+import { type DraftOffer, createDraftOffer, unofferedDraft } from "./draft/offer.ts";
 import { discardingStore, fileStore } from "./draft/pending.ts";
 import { runDraftSession } from "./draft/runner.ts";
 import { type ThreadDraftDeps, draftThread } from "./draft/thread.ts";
@@ -792,7 +792,6 @@ export function draftHandlerFor(
   }
   const slack = createBotClient(settings);
   const deps = threadDraftDeps(settings, signal);
-  const offer = draftOfferFor(settings, mode === "live");
   return createDraftHandler({
     allowed,
     concurrency: numeric(settings, "DRAFT_CONCURRENCY", 1),
@@ -801,7 +800,7 @@ export function draftHandlerFor(
     permalink: (channel, ts) => slack.permalink({ channel, ts }),
     deliver: draftDelivery(settings, mode),
     reply: ephemeralReply(slack),
-    ...(offer === null ? {} : { offer }),
+    offer: draftOfferFor(settings, mode === "live"),
   });
 }
 
@@ -809,10 +808,10 @@ export function draftHandlerFor(
  * With nothing on DRAFT_PROJECTS nothing that could keep or file a draft is built. `persist` is
  * whether the message is really sent: a dry run keeps no record, with no message to press.
  */
-export function draftOfferFor(settings: Settings, persist: boolean): DraftOffer | null {
+export function draftOfferFor(settings: Settings, persist: boolean): DraftOffer {
   const projects = draftProjects(settings);
   if (projects.length === 0) {
-    return null;
+    return unofferedDraft("nothing is on DRAFT_PROJECTS");
   }
   return createDraftOffer({
     gate: fileGate(settings, projects),

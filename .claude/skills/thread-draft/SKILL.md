@@ -48,26 +48,37 @@ that is the work.
 - **Component.** On the SSX project, follow `.claude/skills/intake-triage/SSX_COMPONENTS.md`: only
   the four team streams are assignable. Elsewhere, take it from sibling issues. Leave it empty
   rather than guess.
-- **What you did not trace is unverified, and the ticket says so.**
+- **What you did not trace is never stated as fact.** It is a question in `questions`, or one clause
+  in the body marking it unverified — not a list of its own.
 
 ## 3. The ticket body (`description`, Markdown)
 
-Write it in the language the thread is written in.
+Write it in the language the thread is written in, in short plain sentences.
 
-1. **Opening, two or three sentences**: what is needed, who needs it, the one hard constraint in
-   bold, then a sentence sizing the work honestly ("one repository, one file, no frontend").
-2. **`## Where`**: the repository and the commit the lines come from, then one bullet per symbol the
-   implementer will touch, `File:line` and its role. Then a separate list headed _Supporting facts,
-   already verified_ — keep what you checked apart from what you are instructing.
-3. **`## Why it matters`**: the consequence of not doing it, in the asker's terms. Two sentences.
-4. **`## What to do`**: numbered and imperative. A short code block of the intended change when it
+**The body has a length budget, the one the schema gives, and a small change uses a fraction of
+it.** A ticket longer than the change it describes does not get read: one task is shorter than an
+epic that plans several. Size it to the ask — a constant and a validation rule are a few bullets,
+not a document. When it runs long, cut in this order: what the implementer finds in a minute from
+the lines you cite; facts that do not change what they do; anything said twice. **Never cut** a file
+they must edit, an order things must ship in, or the trap. **Each doubt is said once**: in
+`questions` or in the body, not both, and not again under `Not in scope`.
+
+1. **Opening, two or three sentences**: what is needed, who needs it and why, the one hard
+   constraint in bold, then a sentence sizing the work honestly ("one repository, one file, no
+   frontend").
+2. **`## Where`**: one line naming each repository that changes and the commit or branch its lines
+   come from (the commit's first nine characters are enough). Then one bullet per place the
+   implementer edits, `File:line` and its role in a clause. A repository you only read gets a clause,
+   not a section. Facts you checked that change what the implementer does go in a short list after,
+   at most three.
+3. **`## What to do`**: numbered and imperative. A short code block of the intended change when it
    removes ambiguity. Prohibitions in bold where they bite.
-5. **A trap section when there is a trap**, titled with the rule: the plausible wrong
+4. **A trap section when there is a trap**, titled with the rule, one paragraph: the plausible wrong
    implementation, why it is tempting, and exactly what it breaks.
-6. **`## Acceptance criteria`**: each independently testable, more negative than positive — the
-   positive case with its cardinality, every case that must not trigger it, the blank and absent
-   cases, and neighbouring behaviour left unchanged.
-7. **`## Not in scope`**: the adjacent work, and where it lives.
+5. **`## Acceptance criteria`**: at most six, each independently testable, more negative than
+   positive — the positive case with its cardinality, the cases that must not trigger it, the blank
+   and absent cases, and neighbouring behaviour left unchanged.
+6. **`## Not in scope`**: the adjacent work and where it lives, one line each.
 
 The summary is `<service-or-area>: <imperative action>` — no ticket-speak, no "As a user".
 
