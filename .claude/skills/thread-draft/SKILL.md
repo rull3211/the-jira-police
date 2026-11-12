@@ -55,8 +55,8 @@ that is the work.
 
 Write it in the language the thread is written in, in short plain sentences.
 
-**The body has a length budget, the one the schema gives, and a small change uses a fraction of
-it.** A ticket longer than the change it describes does not get read: one task is shorter than an
+**The body has a length budget, the schema's `maxLength`, and a small change uses a fraction of
+it.** A longer body is refused and has to be rewritten, so write to fit the first time. A ticket longer than the change it describes does not get read: one task is shorter than an
 epic that plans several. Size it to the ask — a constant and a validation rule are a few bullets,
 not a document. When it runs long, cut in this order: what the implementer finds in a minute from
 the lines you cite; facts that do not change what they do; anything said twice. **Never cut** a file

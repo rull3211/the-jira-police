@@ -743,7 +743,7 @@ describe("clickHandlerFor", () => {
 });
 
 describe("draftOfferFor", () => {
-  it("builds nothing that keeps or gates a draft while no project is listed, and so reaches no Jira", async () => {
+  it("answers with the empty-list offer while no project is listed, keeping nothing and reaching no Jira", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
     const root = checkoutRoot();
@@ -770,6 +770,10 @@ describe("draftOfferFor", () => {
     );
 
     expect(prepared.pieces.every((piece) => piece.blocks === null)).toBe(true);
+    // A gate built over an empty list would refuse too, but as "SSX is not on DRAFT_PROJECTS".
+    expect(prepared.pieces.at(-1)?.text).toContain(
+      "Not offered for posting: nothing is on DRAFT_PROJECTS.",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
     expect(existsSync(join(root, "state", "pending-drafts"))).toBe(false);
   });

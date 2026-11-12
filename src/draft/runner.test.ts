@@ -307,9 +307,10 @@ describe("parseDraft", () => {
     }
   });
 
-  it("tells the model the body's budget, never the cut the parser makes far past it", () => {
+  it("holds the body to its budget as a maxLength the CLI refuses past, never to the parser's far cut", () => {
     const { description } = DRAFT_SCHEMA.properties;
 
+    expect(description.maxLength).toBe(DESCRIPTION_BUDGET);
     expect(description.description).toContain(`at most ${String(DESCRIPTION_BUDGET)} characters`);
     expect(description.description).not.toContain(String(DESCRIPTION_MAX));
     expect(DESCRIPTION_BUDGET).toBeLessThan(DESCRIPTION_MAX);
