@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86 and §87, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87 and §88, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -86,25 +86,6 @@ from their own base, and it read §72 here after §73 and §74 had been issued. 
 `main`, and `docs/plan-structured-output-leak` issued a second §79 and took §85 when it did.
 
 <!-- refs:on -->
-
-### 88. A drafted ticket has no length budget, and a draft with no button does not say why
-
-**Branch:** `fix/draft-length`
-
-**What is being attempted.** On 2026-11-12 `@Bencebot draft` sent the operator a ticket for a
-400-to-2000-character limit change of an estimated ten thousand characters in four messages: three
-checkouts' full commits, twenty-two bullets under `Where`, nine acceptance criteria, and the same
-`reason`-constant doubt in the questions, the verified facts and `Not in scope`. The operator called
-it far too long. `thread-draft`'s `SKILL.md` asks for every section and names no length; the only
-bound is `DESCRIPTION_MAX`, Jira's. The fix is a budget in the skill that scales with the ask, a
-target and a ceiling, with what to cut first. `DESCRIPTION_MAX` stays: `parseDraft` cuts past it
-mid-sentence. The same draft came with no Post button and no word why, because `DRAFT_PROJECTS` was
-empty and `offer` was never built; the message will say so.
-
-**What would make it the wrong idea.** A rerun of the same thread that comes back inside the budget
-but drops a fact the implementer needs — a file to edit, the deploy order, the trap — so the length
-was carrying content. **What would show it:** `pnpm slack:draft <link>` on the 2026-11-12 thread,
-the body's length measured, and the dropped facts listed against the long draft.
 
 ### 89. A draft cites lines from whatever branch each checkout is on
 
