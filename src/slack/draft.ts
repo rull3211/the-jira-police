@@ -135,7 +135,7 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
     if (running.size >= deps.concurrency) {
       return {
         decision: "busy",
-        text: `I am already drafting ${String(running.size)} other threads, the most I draft at once, so nothing was started. Ask again once one of those drafts arrives.`,
+        text: `I am already drafting ${String(running.size)} other ${running.size === 1 ? "thread" : "threads"}, the most I draft at once, so nothing was started. Ask again once a draft arrives.`,
       };
     }
     const done = run(mention, thread)
@@ -177,9 +177,7 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
       }
     },
     settled: async () => {
-      while (running.size > 0) {
-        await Promise.all(running.values());
-      }
+      await Promise.all(running.values());
     },
   };
 }
