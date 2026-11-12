@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87 and §88, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87, §88 and §90, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -86,22 +86,6 @@ from their own base, and it read §72 here after §73 and §74 had been issued. 
 `main`, and `docs/plan-structured-output-leak` issued a second §79 and took §85 when it did.
 
 <!-- refs:on -->
-
-### 90. A second `@Bencebot draft` is refused while one runs
-
-**Branch:** `feat/draft-parallel`
-
-**What is being attempted.** On 2026-11-12 the operator asked for several drafts at once: a mention
-in a second thread while one draft runs is answered "I am already drafting another thread", from the
-single `running` slot in `createDraftHandler`. The slot becomes one entry per thread, so a second
-mention of the same thread is still refused, under a cap, `DRAFT_CONCURRENCY`, since each draft is a
-paid session reading every configured checkout. `settled` waits for all of them at shutdown.
-
-**What would make it the wrong idea.** Something per run that two sessions share — a temporary
-directory, an output file named by something other than the thread, the abort signal, the pending
-store's ids — so that two drafts at once corrupt each other or one's stop strands the other. **What
-would show it:** the daemon live with two mentions in two threads at once, both drafts arriving
-whole as separate direct messages, and a third mention into a running thread refused.
 
 ### 89. A draft cites lines from whatever branch each checkout is on
 
@@ -629,6 +613,15 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792008181243809` a few more
   times, counting the `outcome.kind` in each `.draft.json`; then the daemon stopped with Ctrl-C while
   a draft runs.
+- **Two drafts at once have run only in tests.** `DRAFT_CONCURRENCY` lets drafts of different
+  threads run side by side; the suite covers the cap, a second mention of a running thread, a slot
+  freed on finishing and `settled` waiting for all, each watched failing under a mutation. Unseen:
+  two sessions and their direct messages at once on real Slack, Jira and the Atlassian MCP, which
+  may rate-limit three; and a Ctrl-C with two running. **What would show it:** the daemon live with
+  `DRAFT_CONCURRENCY=2`, `@Bencebot draft` in threads A, B, A again and C within a few seconds —
+  `slack.draft_mention` logging `started`, `started`, `same-thread`, `busy` with `running` 1, 2, 2,
+  2, then two `slack.draft_sent` with different `messageTs` — and once more with a Ctrl-C while two
+  run, each asker sent the stopped message.
 - **The Post to Jira button has been sent and pressed once, and a press only rehearses.** On
   2026-10-15 `pnpm slack:draft https://storebrand.slack.com/archives/C03AYDRGP0A/p1792009502102019 --dm`
   sent a ticket draft to `U0BMCC38933` ($1.34, 241 s, exit 0): four sections, the longest exactly
