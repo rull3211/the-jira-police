@@ -79,13 +79,29 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §90. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §91. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
 `main`, and `docs/plan-structured-output-leak` issued a second §79 and took §85 when it did.
 
 <!-- refs:on -->
+
+### 90. A second `@Bencebot draft` is refused while one runs
+
+**Branch:** `feat/draft-parallel`
+
+**What is being attempted.** On 2026-11-12 the operator asked for several drafts at once: a mention
+in a second thread while one draft runs is answered "I am already drafting another thread", from the
+single `running` slot in `createDraftHandler`. The slot becomes one entry per thread, so a second
+mention of the same thread is still refused, under a cap, `DRAFT_CONCURRENCY`, since each draft is a
+paid session reading every configured checkout. `settled` waits for all of them at shutdown.
+
+**What would make it the wrong idea.** Something per run that two sessions share — a temporary
+directory, an output file named by something other than the thread, the abort signal, the pending
+store's ids — so that two drafts at once corrupt each other or one's stop strands the other. **What
+would show it:** the daemon live with two mentions in two threads at once, both drafts arriving
+whole as separate direct messages, and a third mention into a running thread refused.
 
 ### 88. A drafted ticket has no length budget, and a draft with no button does not say why
 
