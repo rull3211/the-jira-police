@@ -364,7 +364,7 @@ describe("the Post button, from a mention to a direct message", () => {
     );
   });
 
-  it("sends the draft it always sent while nothing is on DRAFT_PROJECTS, and asks Jira nothing", async () => {
+  it("says a draft has no button because nothing is on DRAFT_PROJECTS, keeping nothing and asking Jira nothing", async () => {
     const root = checkoutRoot();
     const { calls } = wire();
     runDraftSession.mockResolvedValue(RESULT);
@@ -373,8 +373,8 @@ describe("the Post button, from a mention to a direct message", () => {
 
     const messages = draftMessages(calls);
     expect(messages.some((form) => form.has("blocks"))).toBe(false);
-    expect(messages.some((form) => form.get("text")?.includes("Not offered for posting"))).toBe(
-      false,
+    expect(lastOf(messages).get("text")).toContain(
+      "Not offered for posting: nothing is on DRAFT_PROJECTS.",
     );
     expect(messages[0]?.get("text")).not.toContain("## Where");
     expect(calls.filter((call) => call.host === "jira")).toEqual([]);
@@ -716,12 +716,35 @@ describe("clickHandlerFor", () => {
 });
 
 describe("draftOfferFor", () => {
-  it("builds nothing while no project is listed, and so reaches no Jira", () => {
+  it("builds nothing that keeps or gates a draft while no project is listed, and so reaches no Jira", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
+    const root = checkoutRoot();
+    const ticket = {
+      summary: "s",
+      project: "SSX",
+      component: "SSX Advisor",
+      issueType: "Oppgave",
+      description: "d",
+    };
+    const result = {
+      ticket,
+      duplicate: null,
+      reason: "r",
+      questions: [],
+      reposRead: [],
+      injectionNoticed: [],
+    };
 
-    expect(draftOfferFor(settingsAt(checkoutRoot()), true)).toBeNull();
+    const prepared = await draftOfferFor(settingsAt(root), true).prepare(
+      { kind: "drafted", ticket, result },
+      "draft",
+      { asker: ASKER, thread: { channel: "C0THREAD1", threadTs: "1712345678.000100" } },
+    );
+
+    expect(prepared.pieces.every((piece) => piece.blocks === null)).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(existsSync(join(root, "state", "pending-drafts"))).toBe(false);
   });
 
   it("refuses a malformed project at startup rather than at the first draft", () => {

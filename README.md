@@ -705,9 +705,9 @@ where it would go and why — is the message, and the rest is a reply in its thr
 characters, Slack's cap on a message's text, with the button under the last.
 Drafting writes nothing to Jira, and the session's own Atlassian writers are withheld by
 `--disallowedTools`, measured for two of its five names.
-With `DRAFT_PROJECTS` set, a ticket draft in a listed project whose component and issue type Jira
-lists for it carries a **Post to Jira** button, and the message says exactly what it would file; any
-other ticket draft says why it carries none. The draft is kept as a file under the state directory,
+A ticket draft in a project on `DRAFT_PROJECTS` whose component and issue type Jira lists for it
+carries a **Post to Jira** button, and the message says exactly what it would file; any other ticket
+draft says why it carries none, an empty `DRAFT_PROJECTS` included. The draft is kept as a file under the state directory,
 named by the id the button carries. **A press by the person who asked** checks the draft again
 against Jira and then depends on the listener. Under `slack:listen` and `SLACK_LISTEN=dry` it writes
 the request it would make to `<OUTPUT_DIR>/slack/<id>.issue.json`, files nothing, and says so in the

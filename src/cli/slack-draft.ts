@@ -40,9 +40,9 @@ function usage(): never {
       "  SOLVE_REPO_ROOT — and writes the direct message @Bencebot draft would send to\n" +
       "  <OUTPUT_DIR>/slack/<channel>-<ts>.draft.md, the outcome beside it as .draft.json.\n" +
       "  Dry by default: sends nothing. --dm also sends that message to SLACK_OPERATOR_USER_ID.\n" +
-      "  With DRAFT_PROJECTS set, a ticket draft in a listed project whose component and issue type\n" +
-      "  Jira lists for it carries a Post to Jira button — in the message --dm sends, and in the\n" +
-      "  pieces written to .draft.json — and one that does not says why. The draft's first paragraph\n" +
+      "  A ticket draft in a project on DRAFT_PROJECTS whose component and issue type Jira lists for\n" +
+      "  it carries a Post to Jira button — in the message --dm sends, and in the pieces written to\n" +
+      "  .draft.json — and one that does not says why, an empty DRAFT_PROJECTS included. The draft's first paragraph\n" +
       "  is the message and the rest is a reply in its thread, cut again at Slack's 40 000\n" +
       "  characters, with the button under the last. With --dm the button is\n" +
       "  sent only if SLACK_OPERATOR_USER_ID is on SLACK_DRAFT_USERS, and its record is kept under\n" +

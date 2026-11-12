@@ -35,7 +35,7 @@ export interface DraftMentionDeps {
   permalink(channel: string, ts: string): Promise<string>;
   /** Sends the first piece as a message and the rest as replies in its thread; resolves to the first's `ts`. */
   deliver(userId: string, threadLabel: string, pieces: readonly Piece[]): Promise<string>;
-  /** Absent while nothing is on `DRAFT_PROJECTS`: no draft then carries a button. */
+  /** Absent: no draft carries a button, and none says why. */
   readonly offer?: DraftOffer;
   /** Seen only by the person, in the thread. */
   reply(mention: Mention, text: string): Promise<void>;

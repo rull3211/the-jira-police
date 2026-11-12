@@ -41,6 +41,13 @@ function plain(text: string, withheld: string | null): PreparedDraft {
   );
 }
 
+/** Keeps and gates nothing; a ticket says why it has no button rather than leaving its absence unexplained. */
+export function unofferedDraft(withheld: string): DraftOffer {
+  return {
+    prepare: async (outcome, text) => plain(text, outcome.kind === "drafted" ? withheld : null),
+  };
+}
+
 export function createDraftOffer(deps: DraftOfferDeps): DraftOffer {
   return {
     prepare: async (outcome, text, who) => {
