@@ -46,7 +46,10 @@ export interface DraftMentionDeps {
 export interface DraftHandler {
   /** Never throws, and returns once the reply is sent, not once the draft is done. */
   handle(mention: Mention): Promise<void>;
-  /** Resolves once no draft is running: what the listener waits for at shutdown. */
+  /**
+   * Resolves once the drafts running when it is called are done: what the listener waits for at
+   * shutdown, correct only because the listener has stopped taking mentions by then.
+   */
   settled(): Promise<void>;
 }
 
@@ -142,6 +145,7 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
       .catch((error: unknown) => {
         log.error("slack.draft_crashed", {
           user: mention.userId,
+          thread: label,
           reason: error instanceof Error ? error.message : String(error),
         });
       })

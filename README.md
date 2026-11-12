@@ -721,7 +721,7 @@ what was filed. The draft's record is marked before the call, so a draft already
 filing began and did not end, which may have made an issue, is never filed again: its reply says
 which summary to search for. Anyone else is refused before the thread is read, a mention outside a
 thread is answered with usage, and drafts of different threads run side by side up to
-`DRAFT_CONCURRENCY` (3 by default): one past it, or a second mention of a thread already being
+`DRAFT_CONCURRENCY`: one past it, or a second mention of a thread already being
 drafted, is refused and starts nothing. Each session runs off the listener's chain, so `/bencebot` and `@Bencebot start` are
 answered while it works, and stopping the listener kills every one and tells each asker so. It follows the
 listener's mode: `slack:listen` and `SLACK_LISTEN=dry` write the direct message to
