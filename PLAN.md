@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86 and §87, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87 and §88, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -79,13 +79,27 @@ holds the entry and the commit that deleted it, so what follows is only what tha
   reason recorded in `INCIDENTS.md`'s 2026-09-18 entry, "The dangling count that fell because an
   unrelated edit repaired nothing."
 
-The next entry is §88. The pointer is a per-branch guess: two branches open at once each read it
+The next entry is §90. The pointer is a per-branch guess: two branches open at once each read it
 from their own base, and it read §72 here after §73 and §74 had been issued. §68–70 were taken by
 `feat/slack-audit-thread`, open when §71 was written, and §77 by `feat/solve-lifecycle`, open when
 §78 was. `feat/slack-agent-start` issued a second §77 alongside it and took §79 when it merged
 `main`, and `docs/plan-structured-output-leak` issued a second §79 and took §85 when it did.
 
 <!-- refs:on -->
+
+### 89. A draft cites lines from whatever branch each checkout is on
+
+**Branch:** none yet.
+
+**What is not built.** The draft session reads the configured checkouts as they lie. On 2026-11-12
+it cited `buy-insurance-advisor-web` on `feat/SSX-4310-single-car-bonus-input`,
+`insurance-ssx-mono-repo` on `feat/SSX-3984-internal-usable-area` and
+`insurance-commerce-rest-api` on `revert/SSX-4271-store-advice-document-id-on-bought-cart`, and said
+so, but an implementer branches from `main`, where the lines can differ and the code read can be
+unmerged. The shape that closes it: the harness fetches and hands the session a detached worktree at
+each checkout's `origin/HEAD`, as solve does for its one repository, and removes them after. **What
+would make it the wrong idea:** fetching and checking out every configured repository per draft
+costing more than a wrong line number does.
 
 ### 65. A review round's answers are not tied to the comments and threads they answer
 

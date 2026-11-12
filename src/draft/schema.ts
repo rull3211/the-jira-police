@@ -7,6 +7,8 @@
 export const SUMMARY_MAX = 255;
 /** Under Jira's description limit, and leaves a direct message room for the rest under Slack's. */
 export const DESCRIPTION_MAX = 30_000;
+/** The body's `maxLength`, which the CLI refuses past in-session; `DESCRIPTION_MAX` is only the parser's cut. */
+export const DESCRIPTION_BUDGET = 4_000;
 export const REASON_MAX = 600;
 export const FEEDBACK_MAX = 3_000;
 export const LIST_ITEM_MAX = 300;
@@ -65,7 +67,8 @@ export const DRAFT_SCHEMA = {
     },
     description: {
       type: "string",
-      description: `The whole ticket body in Markdown, in the shape SKILL.md gives, at most ${String(DESCRIPTION_MAX)} characters. Empty when not draftable.`,
+      maxLength: DESCRIPTION_BUDGET,
+      description: `The whole ticket body in Markdown, in the shape SKILL.md gives, at most ${String(DESCRIPTION_BUDGET)} characters, and a small change far fewer: a longer one is refused and must be rewritten shorter, and SKILL.md says what to cut. Empty when not draftable.`,
     },
     duplicateOf: {
       type: "string",

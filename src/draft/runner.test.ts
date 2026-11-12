@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ANALYST_DENIED_TOOLS } from "../triage/runner.ts";
 import {
+  DESCRIPTION_BUDGET,
   DESCRIPTION_MAX,
   DRAFT_SCHEMA,
   DRAFT_SCHEMA_JSON,
@@ -293,19 +294,26 @@ describe("parseDraft", () => {
     expect(`${kept} `).toBe(sentence.repeat(Math.round((kept.length + 1) / sentence.length)));
   });
 
-  it("tells the model each limit the parser enforces, from the constants it enforces them with", () => {
-    const { reason, questions, summary, description, feedback, injectionNoticed } =
-      DRAFT_SCHEMA.properties;
+  it("tells the model the parser's limit on every field but the body, from the constants it enforces them with", () => {
+    const { reason, questions, summary, feedback, injectionNoticed } = DRAFT_SCHEMA.properties;
 
     expect(reason.description).toContain(`${String(REASON_MAX)} characters`);
     expect(feedback.description).toContain(`${String(FEEDBACK_MAX)} characters`);
     expect(summary.description).toContain(`${String(SUMMARY_MAX)} characters`);
-    expect(description.description).toContain(`${String(DESCRIPTION_MAX)} characters`);
     for (const list of [questions, injectionNoticed]) {
       expect(list.description).toContain(
         `${String(LIST_MAX)} of at most ${String(LIST_ITEM_MAX)} characters`,
       );
     }
+  });
+
+  it("holds the body to its budget as a maxLength the CLI refuses past, never to the parser's far cut", () => {
+    const { description } = DRAFT_SCHEMA.properties;
+
+    expect(description.maxLength).toBe(DESCRIPTION_BUDGET);
+    expect(description.description).toContain(`at most ${String(DESCRIPTION_BUDGET)} characters`);
+    expect(description.description).not.toContain(String(DESCRIPTION_MAX));
+    expect(DESCRIPTION_BUDGET).toBeLessThan(DESCRIPTION_MAX);
   });
 
   it("offers the model every field the parser reads, and requires all of them", () => {

@@ -35,8 +35,8 @@ export interface DraftMentionDeps {
   permalink(channel: string, ts: string): Promise<string>;
   /** Sends the first piece as a message and the rest as replies in its thread; resolves to the first's `ts`. */
   deliver(userId: string, threadLabel: string, pieces: readonly Piece[]): Promise<string>;
-  /** Absent while nothing is on `DRAFT_PROJECTS`: no draft then carries a button. */
-  readonly offer?: DraftOffer;
+  /** Whether a ticket draft carries the Post button, and what it says when it does not. */
+  readonly offer: DraftOffer;
   /** Seen only by the person, in the thread. */
   reply(mention: Mention, text: string): Promise<void>;
 }
@@ -62,10 +62,7 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
       const drafted = await deps.draft(thread);
       outcome = drafted.kind;
       const text = renderDraftMessage(drafted, where);
-      message =
-        deps.offer === undefined
-          ? withoutButton(text)
-          : await deps.offer.prepare(drafted, text, { asker: mention.userId, thread });
+      message = await deps.offer.prepare(drafted, text, { asker: mention.userId, thread });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const stopped = error instanceof SessionAbortedError;
