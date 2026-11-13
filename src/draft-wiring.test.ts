@@ -656,7 +656,7 @@ describe("the Post button, from a mention to a direct message", () => {
       expect(existsSync(join(root, "out", "slack", `${id}.issue.json`))).toBe(false);
     });
 
-    it("refuses someone else on the draft list, writing nothing", async () => {
+    it("refuses someone else on the whitelist, writing nothing", async () => {
       const root = checkoutRoot();
       const { id, calls } = await sent(root);
 
@@ -708,7 +708,7 @@ describe("clickHandlerFor", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("refuses a malformed project at startup even with nobody on the draft list", () => {
+  it("refuses a malformed project at startup even with nobody on the whitelist", () => {
     expect(() =>
       clickHandlerFor(settingsAt(checkoutRoot(), { DRAFT_PROJECTS: "ssx" }), "live"),
     ).toThrow(SettingsError);

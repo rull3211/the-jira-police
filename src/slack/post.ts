@@ -241,7 +241,7 @@ export function createPostHandler(deps: PostClickDeps): PostHandler {
         await answer(
           click,
           "not-allowed",
-          "Only the people on the draft list may post a draft, and you are not one of them, so nothing was read and nothing was filed.",
+          "Only the people on the command whitelist may post a draft, and you are not one of them, so nothing was read and nothing was filed.",
         );
         return;
       }

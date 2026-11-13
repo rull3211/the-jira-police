@@ -346,7 +346,9 @@ Things that look like details and are not:
     on, `SLACK_APP_TOKEN` is checked there, before any loop ticks, and so is
     `SLACK_COMMAND_WHITELIST` and — once anyone is on it — `SLACK_BOT_TOKEN`; and what it returns
     resolves rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves
-    the loops running. A draft's session runs off the listener's one promise chain, so minutes of
+    the loops running. The one exception to "only when it is on" is a retired list name: `readSettings`
+    refuses `SLACK_START_USERS` or `SLACK_DRAFT_USERS` before anything else, whatever `SLACK_LISTEN`
+    says, since a listener switched off today would otherwise lose its list unseen. A draft's session runs off the listener's one promise chain, so minutes of
     it hold no `/bencebot` back, and the shutdown signal kills it rather than waiting it out.
 
 18. **A property write names a key under `jira-police.`, and nothing else.** The REST credential

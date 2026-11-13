@@ -466,7 +466,7 @@ describe("retired settings", () => {
     );
   });
 
-  it("reads a blank retired line as unset, since a line copied from .env.example is empty", () => {
+  it("reads a blank retired line as unset, since a line left empty is unset", () => {
     expect(() =>
       readSettings({ ...MINIMAL, SLACK_START_USERS: "", SLACK_DRAFT_USERS: "  " }),
     ).not.toThrow();

@@ -504,21 +504,21 @@ function resolveDeclared(env: NodeJS.ProcessEnv): {
   return { settings: resolved as Settings, missing };
 }
 
-/**
- * Resolves every declared setting, reporting all missing ones at once, then every `keychain:`
- * reference — after the missing check, so an incomplete configuration asks for no secret.
- */
 /** Names that no longer mean anything, each with what replaced it; one still set is refused, since ignoring it would quietly take access from everyone it listed. */
 export const RETIRED_SETTINGS: Readonly<Record<string, SettingName>> = {
   SLACK_START_USERS: "SLACK_COMMAND_WHITELIST",
   SLACK_DRAFT_USERS: "SLACK_COMMAND_WHITELIST",
 };
 
+/**
+ * Refuses a retired name still set, then resolves every declared setting, reporting all missing ones
+ * at once, then every `keychain:` reference — after the missing check, so an incomplete configuration asks for no secret.
+ */
 export function readSettings(
   env: NodeJS.ProcessEnv = process.env,
   lookup: SecretLookup = lookupInKeychain,
 ): Settings {
-  // A blank value is unset, as everywhere else, so an `.env.example` line copied empty is not a refusal.
+  // A blank value is unset, as everywhere else, so a line left empty in `.env` is not a refusal.
   const retired = Object.entries(RETIRED_SETTINGS)
     .filter(([name]) => (env[name]?.trim() ?? "") !== "")
     .map(([name, replacement]) => `${name} (replaced by ${replacement})`);

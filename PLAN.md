@@ -563,6 +563,10 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   mention outside a thread. **What would show it:** a colleague's `@Bencebot start` in a ticket's
   thread, and anyone's in the channel itself; each must get a reply only they see, and leave the
   ticket's labels as they were.
+- **One list now covers every command, and nobody has watched it on real Slack.** Someone who could
+  only draft can now start and clear. **What would show it:** a person on `SLACK_COMMAND_WHITELIST`
+  who was only on the draft list sending `@Bencebot start` in a ticket's thread (it must act), and a
+  stranger sending `draft` (it must be refused with a reply only they see).
 - **The status moves have run; the broadcast line's edits have not been looked at.** SSX-4005 on
   2026-09-30 took all three moves over two daemon runs, read back from its changelog: Received → In
   Progress at the claim and back to Prioritized when the fix pass crashed (§85), then Prioritized →
@@ -1384,8 +1388,9 @@ start hands the solve loop a ticket it will pay to solve and open a pull request
   will have taught everyone to expect one. Grants per person (`U…:start+draft`) keep the merge and
   the separation; they were offered and declined.
 - **A retired setting left in `.env`** is refused at startup rather than ignored, because ignoring it
-  would quietly take access from everyone it listed. Every command then fails until `.env` is edited,
-  which is loud and is the point.
+  would quietly take access from everyone it listed. Every command that reads its settings through
+  `readSettings` then fails until `.env` is edited, which is loud and is the point; `repair:ledger` and
+  `sweep:once` read them through `readLocalSettings` and do not notice.
 
 ## Verification
 
