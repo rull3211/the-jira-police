@@ -204,6 +204,8 @@ describe("createGithubSource.mergedSince", () => {
     const source = createGithubSource(runner, OPTIONS);
     await expect(source.mergedSince("repo a;rm", "2026-11-05")).rejects.toThrow(GithubLookupError);
     await expect(source.mergedSince("repo-a", "yesterday")).rejects.toThrow(GithubLookupError);
+    await expect(source.mergedSince("..", "2026-11-05")).rejects.toThrow(GithubLookupError);
+    await expect(source.mergedSince("-x", "2026-11-05")).rejects.toThrow(GithubLookupError);
     expect(calls).toEqual([]);
   });
 });

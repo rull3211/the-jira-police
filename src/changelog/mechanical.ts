@@ -6,7 +6,7 @@ const isWeb = (facts: Facts, issue: IssueFacts): boolean =>
 
 /**
  * The report with no model: Jira's summary as the title, the description's opening paragraph under it.
- * Built from nothing a model said, so it is also what a failed session leaves behind.
+ * Built from nothing a model said.
  */
 export function mechanicalProse(facts: Facts): Prose {
   const web = facts.issues.filter((issue) => isWeb(facts, issue));

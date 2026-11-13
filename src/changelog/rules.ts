@@ -5,6 +5,21 @@
 
 export const MAX_DAYS = 31;
 
+export const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
 export class ChangelogArgError extends Error {}
 
 /** `7` or `7d`; absent means a week. Anything else is refused, never rounded into a window. */

@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4323 tests in 130 files**, no build step.
+> **4324 tests in 130 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -428,6 +428,11 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
 
 ### 10. Still unobserved
 
+- **`pnpm changelog:once` has never run against real Jira.** Fakes drove it, and three `gh` calls were
+  checked by hand against real GitHub. **What would show it:** with the `CHANGELOG_*` settings in
+  place, `pnpm changelog:once 7`. The page's issue count must equal what Jira returns for the query in
+  the `.facts.json` beside it, every issue with a merged pull request must show it, and an issue
+  resolved but not in a done status must carry its note.
 - **The repair round has been watched twice, both times on SSX-3944, and `--repair` has never
   promoted one.** The 2026-09-22 round, honest on inspection (`architecture/solve.md` §15),
   predates `repair-rounds.md`; a 2026-09-23 round is the page's one real row, still `unread`. Both

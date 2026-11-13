@@ -175,8 +175,8 @@ Rules that making one by hand turned up, each in code with a test:
 - **The facts are written before the gate reads them.** `assertReportable` refuses a report whose
   issues are not exactly the ones the query returned, and a refusal leaves the facts and no page.
 
-It reads and writes nothing in Jira, GitHub or Slack, so `architecture/invariants.md`'s write-path
-rules are untouched; what it widens is what the discovery credential reads, named in §1.
+It writes nothing to Jira, GitHub or Slack, only the two files it names, so
+`architecture/invariants.md`'s write-path rules are untouched; what it widens is what the discovery credential reads, named in §1.
 
 ---
 

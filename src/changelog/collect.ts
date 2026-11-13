@@ -6,6 +6,7 @@ import { shorten } from "../text.ts";
 import type { PullRequestSource } from "./github.ts";
 import {
   DEFAULT_EXCLUSIONS,
+  MONTHS,
   type PullRequest,
   issueKind,
   judge,
@@ -49,20 +50,6 @@ export const SEARCH_FIELDS = [
 const DESCRIPTION_CHARS = 1500;
 /** A pull request can merge well before its issue is closed, so the branch search looks further back than the window. */
 const BRANCH_LOOKBACK_DAYS = 14;
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
 
 const obj = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

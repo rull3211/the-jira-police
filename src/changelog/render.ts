@@ -1,29 +1,16 @@
+import { MONTHS } from "./rules.ts";
 import type { Facts, Prose } from "./types.ts";
 
 const PLACEHOLDER = "/*__REPORT_JSON__*/ null";
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
+const part = (day: string) => ({
+  y: day.slice(0, 4),
+  m: MONTHS[Number(day.slice(5, 7)) - 1] ?? "?",
+  d: String(Number(day.slice(8, 10))),
+});
 
 /** `5–12 Nov 2026`, or `30 Oct–5 Nov 2026` across a month. */
 export function formatRange(start: string, end: string): string {
-  const part = (day: string) => ({
-    y: day.slice(0, 4),
-    m: MONTHS[Number(day.slice(5, 7)) - 1] ?? "?",
-    d: String(Number(day.slice(8, 10))),
-  });
   const a = part(start);
   const b = part(end);
   const first = a.m === b.m && a.y === b.y ? a.d : `${a.d} ${a.m}${a.y === b.y ? "" : ` ${a.y}`}`;
