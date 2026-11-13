@@ -47,6 +47,8 @@ const doc = (text: string): unknown => ({
   content: [{ type: "paragraph", content: [{ type: "text", text }] }],
 });
 
+const text = (value: string, ...marks: object[]): object => ({ type: "text", text: value, marks });
+
 const detail = (key: string): IssueDetail => ({
   key,
   summary: "",
@@ -175,6 +177,83 @@ describe("collectFacts", () => {
       { key: "IT-6", label: "is blocked by", open: false },
     ]);
     expect(facts.keyPrefixes).toEqual(["SSX", "IT"]);
+  });
+
+  it("lists an issue linked by two link types once, with both labels", async () => {
+    const other = { key: "SSX-5", fields: { status: { statusCategory: { key: "new" } } } };
+    const h = harness([
+      raw("SSX-1", {
+        issuelinks: [
+          {
+            type: { name: "Relates", inward: "relates to", outward: "relates to" },
+            outwardIssue: other,
+          },
+          {
+            type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
+            outwardIssue: other,
+          },
+          {
+            type: { name: "Relates", inward: "relates to", outward: "relates to" },
+            inwardIssue: other,
+          },
+        ],
+      }),
+    ]);
+    const { facts } = await collectFacts(h.deps, settings, 7);
+    expect(facts.issues[0]?.links).toEqual([
+      { key: "SSX-5", label: "relates to, blocks", open: true },
+    ]);
+  });
+
+  it("keeps a merged link to a finished issue closed", async () => {
+    const finished = { key: "SSX-6", fields: { status: { statusCategory: { key: "done" } } } };
+    const h = harness([
+      raw("SSX-1", {
+        issuelinks: [
+          {
+            type: { name: "Blocks", inward: "is blocked by", outward: "blocks" },
+            outwardIssue: finished,
+          },
+          {
+            type: { name: "Relates", inward: "relates to", outward: "relates to" },
+            outwardIssue: finished,
+          },
+        ],
+      }),
+    ]);
+    const { facts } = await collectFacts(h.deps, settings, 7);
+    expect(facts.issues[0]?.links).toEqual([
+      { key: "SSX-6", label: "blocks, relates to", open: false },
+    ]);
+  });
+
+  it("reads the description without bold, italic, code or link marks, and keeps the text", async () => {
+    const h = harness([raw("SSX-1")]);
+    h.fetchDetail.mockImplementationOnce(async (key: string) => ({
+      ...detail(key),
+      description: {
+        type: "doc",
+        version: 1,
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              text("Mails from "),
+              text("a@b.no", { type: "code" }),
+              text(" reach "),
+              text("Observed", { type: "strong" }, { type: "em" }),
+              text(": see "),
+              text("the doc", { type: "link", attrs: { href: "https://x.test/d" } }),
+              text(" and src/**/*.ts."),
+            ],
+          },
+        ],
+      },
+    }));
+    const { facts } = await collectFacts(h.deps, settings, 7);
+    expect(facts.issues[0]?.description).toBe(
+      "Mails from a@b.no reach Observed: see the doc and src/**/*.ts.",
+    );
   });
 
   it("does not count a pull request that merely mentions the issue, and lists it as not counted", async () => {
