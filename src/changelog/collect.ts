@@ -95,6 +95,30 @@ interface Read {
   readonly links: IssueFacts["links"];
 }
 
+/** The document with every text mark (bold, italic, code, link) removed, so its rendering holds no markup characters. */
+const unmarked = (adf: unknown): unknown =>
+  JSON.parse(JSON.stringify(adf ?? null), (key, value: unknown) =>
+    key === "marks" ? undefined : value,
+  );
+
+/** Two link types between one pair of issues are one piece of linked work, listed once. */
+function onePerIssue(links: IssueFacts["links"]): IssueFacts["links"] {
+  const byKey = new Map<string, { labels: Set<string>; open: boolean }>();
+  for (const link of links) {
+    const seen = byKey.get(link.key);
+    if (seen === undefined) {
+      byKey.set(link.key, { labels: new Set([link.label]), open: link.open });
+    } else {
+      seen.labels.add(link.label);
+    }
+  }
+  return [...byKey].map(([key, one]) => ({
+    key,
+    label: [...one.labels].join(", "),
+    open: one.open,
+  }));
+}
+
 function read(raw: JiraIssue): Read {
   const fields = obj(raw.fields);
   const status = obj(fields["status"]);
@@ -125,7 +149,7 @@ function read(raw: JiraIssue): Read {
     resolution: str(obj(fields["resolution"])["name"]),
     resolved: str(fields["resolutiondate"]),
     reporter: str(obj(fields["reporter"])["displayName"]),
-    links,
+    links: onePerIssue(links),
   };
 }
 
@@ -215,7 +239,7 @@ export async function collectFacts(
       statusNote: verdict.statusStale
         ? `Jira shows ${one.status.name} although the issue was resolved ${one.resolved.slice(0, 16).replace("T", " ")}.`
         : null,
-      description: shorten(renderAdf(detail.description), DESCRIPTION_CHARS),
+      description: shorten(renderAdf(unmarked(detail.description)), DESCRIPTION_CHARS),
       prs,
       others: judged.others,
     });

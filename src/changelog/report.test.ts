@@ -243,9 +243,56 @@ describe("mechanicalProse", () => {
     expect(entry?.title.endsWith("…")).toBe(true);
   });
 
-  it("takes the line under the title from the first paragraph of the description only", () => {
+  it("takes the line under the title from the opening prose, not the whole description", () => {
     const entry = mechanicalProse(facts([issue("SSX-1")])).entries[0];
     expect(entry?.what).toBe("First sentence of the description. Second sentence.");
+  });
+
+  const whatOf = (description: string): string | undefined =>
+    mechanicalProse(facts([issue("SSX-1", { description })])).entries[0]?.what;
+
+  it("skips a heading and a code fence, closed or cut off by the description's length limit", () => {
+    expect(whatOf("## Background\n\nAn advisor opens the form.\n\n## Scope\n\nMore.")).toBe(
+      "An advisor opens the form.",
+    );
+    expect(whatOf("```ts\nconst a = 1;\n\nconst b = 2;\n```\n\nThe sentence.")).toBe(
+      "The sentence.",
+    );
+    expect(whatOf("A sentence.\n\n```\ncode that was cut\n\nmore code")).toBe("A sentence.");
+    expect(whatOf("- one\n- two\n\n```\ncode that was cut")).toBe("one · two");
+  });
+
+  it.each([
+    ["a table", "A | B"],
+    ["an attachment", "[attachment: shot.png]"],
+    ["a bare link", "https://x.test/a"],
+  ])("skips %s to the paragraph after it", (_name, lead) => {
+    expect(whatOf(`${lead}\n\nThe sentence.`)).toBe("The sentence.");
+  });
+
+  it("falls back to the first list, whatever its markers, and to nothing without one", () => {
+    expect(whatOf("## Background\n\n- one\n  more of one\n- two")).toBe("one more of one · two");
+    expect(whatOf("1. one\n2. two")).toBe("one · two");
+    expect(whatOf("* one\n* two")).toBe("one · two");
+    expect(whatOf("## Background\n\n---")).toBe("");
+    expect(whatOf("")).toBe("");
+  });
+
+  it("reads a paragraph as prose when it opens with a year, a comparison or an asterisk", () => {
+    for (const text of [
+      "2026. The release moved.",
+      ">= 5 items are required.",
+      "*.ts files are renamed.",
+      "Keys like SSX-* and IT-* stay, and **kwargs is a name.",
+    ]) {
+      expect(whatOf(text)).toBe(text);
+    }
+  });
+
+  it("drops the quote marker from a note that opens the description", () => {
+    expect(whatOf("> Split, 2026-11-11. This ticket used to cover more.\n\nRename files.")).toBe(
+      "Split, 2026-11-11. This ticket used to cover more.",
+    );
   });
 
   it("ends a long first paragraph at a sentence and marks the cut, inside the limit", () => {

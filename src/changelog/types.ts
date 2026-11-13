@@ -31,7 +31,7 @@ export interface IssueFacts {
     readonly open: boolean;
   }[];
   readonly statusNote: string | null;
-  /** Plain text, cut; its opening paragraph is the line under the title. */
+  /** `renderAdf`'s text with no bold, italic, code or link marks, cut; headings, lists and fences remain. */
   readonly description: string;
   readonly prs: readonly PrFact[];
   readonly others: readonly OtherPullRequest[];
