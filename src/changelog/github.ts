@@ -1,3 +1,4 @@
+import { isRepoName } from "../solve/labels.ts";
 import { type CommandRunner, failed, why } from "../solve/worktree.ts";
 import type { PullRequest } from "./rules.ts";
 
@@ -23,7 +24,6 @@ const SEARCH_LIMIT = 30;
 const LIST_LIMIT = 200;
 const VIEW_FIELDS = "number,title,headRefName,state,mergedAt,additions,deletions";
 const KEY = /^[A-Za-z][A-Za-z0-9]*-\d+$/u;
-const REPO = /^[A-Za-z0-9._-]+$/u;
 const SINCE = /^\d{4}-\d{2}-\d{2}$/u;
 
 const record = (value: unknown, what: string): Record<string, unknown> => {
@@ -128,7 +128,7 @@ export function createGithubSource(
         const repoFull = text(record(entry["repository"], `a search hit for ${key}`)["name"]);
         const number = count(entry["number"]);
         const id = `${repoFull}#${String(number)}`;
-        if (!REPO.test(repoFull) || number < 1 || seen.has(id)) {
+        if (!isRepoName(repoFull) || number < 1 || seen.has(id)) {
           continue;
         }
         seen.add(id);
@@ -150,7 +150,7 @@ export function createGithubSource(
     },
 
     mergedSince: async (repoFull, since) => {
-      if (!REPO.test(repoFull) || !SINCE.test(since)) {
+      if (!isRepoName(repoFull) || !SINCE.test(since)) {
         throw new GithubLookupError(
           `unusable repository or date: ${JSON.stringify(repoFull.slice(0, 40))} ${JSON.stringify(since.slice(0, 20))}`,
         );

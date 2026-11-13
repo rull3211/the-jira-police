@@ -111,6 +111,19 @@ describe("readChangelogSettings", () => {
     );
   });
 
+  it("refuses a repository or organisation that is a path or a flag, not only one with odd characters", () => {
+    // `..` is made of legal characters, and `-x` would be read by gh as an option.
+    for (const repos of ["..", "-x", "a=..", "a=-x"]) {
+      expect(
+        problemsOf({ ...THIS_TEAM, CHANGELOG_REPOS: repos, CHANGELOG_WEBAPPS: "" }),
+        repos,
+      ).toMatch(/expected alias=repository/u);
+    }
+    expect(problemsOf({ ...THIS_TEAM, CHANGELOG_GITHUB_ORG: "-x" })).toMatch(
+      /CHANGELOG_GITHUB_ORG/u,
+    );
+  });
+
   it("reports every problem at once", () => {
     expect(
       problemsOf({

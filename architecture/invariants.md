@@ -70,7 +70,9 @@ Things that look like details and are not:
     anyone who had taken it off. Note this cuts the opposite way from
     `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
     the restriction — the test to apply is not "does it have a default" but "does silence widen
-    or narrow what the service may touch."
+    or narrow what the service may touch. The `CHANGELOG_*` settings that name what a report is about
+    (`CHANGELOG_COMPONENT`, `CHANGELOG_TEAM_ID`, `CHANGELOG_GITHUB_ORG`, `CHANGELOG_REPOS`) have no
+    fallback for the first reason: a default would put one team's scope in another team's query."
 11. **A label write names the labels it changes, and nothing else.** Every label edit goes
     through `JiraClient.updateLabels`, which sends Jira's `update.labels.add` / `.remove` and
     refuses any label failing `/^agent:[a-z][a-z0-9-]{0,60}$/`. So the write is physically
@@ -430,7 +432,7 @@ Things that look like details and are not:
       acknowledgement, and file it twice. Nothing guards that; one listener per app is assumed.
 
 21. **A person's `agent:ignore` is read live before every outward write, and a read that fails holds
-    the write.** The queues leave the label out (`jira/jql.ts`, every query but `buildInFlightJql`,
+    the write.** The queues leave the label out (`jira/jql.ts`, every query but `buildChangelogJql`, which reports finished work whatever hold it carried, and `buildInFlightJql`,
     which must still count a claimed ticket), and `eligibility` refuses it for every authority, so a
     typed key does not lift it. But a ticket can be labelled after a queue returned it and while a
     paid run is under way, so `WriteGate` (`solve/hold.ts`) asks `JiraClient.fetchLabels` for the

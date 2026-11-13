@@ -1,10 +1,10 @@
 import { TEAM_ID } from "../jira/jql.ts";
 import { type Settings, SettingsError, list } from "../settings.ts";
+import { isRepoName } from "../solve/labels.ts";
 import type { ChangelogSettings } from "./collect.ts";
 import type { RepoInfo } from "./types.ts";
 
-const NAME = /^[A-Za-z0-9._-]+$/u;
-const ORG = /^[A-Za-z0-9-]+$/u;
+const ORG = /^[A-Za-z0-9][A-Za-z0-9-]*$/u;
 
 /** Every refusal is a startup error, so a mistyped scope never becomes a report about the wrong thing. */
 export function readChangelogSettings(settings: Settings): ChangelogSettings {
@@ -37,7 +37,7 @@ export function readChangelogSettings(settings: Settings): ChangelogSettings {
     const parts = entry.split("=").map((part) => part.trim());
     const alias = parts[0] ?? "";
     const full = parts.length === 1 ? alias : (parts[1] ?? "");
-    if (parts.length > 2 || !NAME.test(alias) || !NAME.test(full)) {
+    if (parts.length > 2 || !isRepoName(alias) || !isRepoName(full)) {
       problems.push(
         `CHANGELOG_REPOS (expected alias=repository or a repository name, got ${JSON.stringify(entry)})`,
       );

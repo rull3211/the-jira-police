@@ -1,7 +1,8 @@
 /**
  * The queries this service runs, and the validation all of them share.
  *
- * `buildNewIssuesJql` selects on time and carries the only cursor; the rest select on board state,
+ * `buildNewIssuesJql` selects on time and carries the only cursor, `buildChangelogJql` on resolution
+ * date with no labels; the rest select on board state,
  * with labels as the dedupe, so a ticket triaged on Monday can re-enter any of them on Friday. The
  * new-issue query uses a relative minute offset (`created >= -90m`) rather than an absolute timestamp,
  * since JQL dates resolve in the server's timezone; Jira's date filters are minute-precision, so the
