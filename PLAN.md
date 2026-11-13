@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86 and §87, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87 and §91, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -1370,32 +1370,6 @@ garbled has been accepted.
   the message may be the part people read.
 - **The upload path is inferred from Slack's documentation**, and the first live one may want another
   scope.
-
-### 91. Every Slack command has had a list of people of its own, and the next command would add a third
-
-**Branch:** `feat/slack-command-whitelist`, stacked on `chore/ssx-advisor-changelog-report`.
-
-**What is being attempted.** One setting, `SLACK_COMMAND_WHITELIST`, naming the Slack member IDs who
-may run any Bencebot command, in place of `SLACK_START_USERS` and `SLACK_DRAFT_USERS`. The changelog
-mention, when it is built, reads the same list instead of adding `SLACK_CHANGELOG_USERS`.
-
-**Why now.** Each command so far brought a list, an operator keeps them in step by hand, and the
-changelog would have brought a third. The operator asked for one.
-
-**What it gives up, and it is a choice, not an oversight.** `architecture/invariants.md` invariant 10
-separates the two lists because starting a paid session that reads every checkout is not the privilege
-`agent:start` is. One flat list ends that: whoever could only draft can now also start and clear, and a
-start hands the solve loop a ticket it will pay to solve and open a pull request for.
-
-**What would make it the wrong idea:**
-
-- **The first person who should draft and not start.** That is a second list again, and this change
-  will have taught everyone to expect one. Grants per person (`U…:start+draft`) keep the merge and
-  the separation; they were offered and declined.
-- **A retired setting left in `.env`** is refused at startup rather than ignored, because ignoring it
-  would quietly take access from everyone it listed. Every command that reads its settings through
-  `readSettings` then fails until `.env` is edited, which is loud and is the point; `repair:ledger` and
-  `sweep:once` read them through `readLocalSettings` and do not notice.
 
 ## Verification
 
