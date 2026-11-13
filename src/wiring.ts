@@ -14,6 +14,9 @@ import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import type { ChangelogSettings, CollectDeps } from "./changelog/collect.ts";
+import { readChangelogSettings } from "./changelog/config.ts";
+import { createGithubSource } from "./changelog/github.ts";
 import { createArguments, runFiler } from "./draft/filer.ts";
 import type { FileGateDeps } from "./draft/gate.ts";
 import { type DraftOffer, createDraftOffer } from "./draft/offer.ts";
@@ -1599,4 +1602,24 @@ export function createTicketReader(
     }
     return { ...rendered, detail };
   };
+}
+
+const CHANGELOG_GH_TIMEOUT_MS = 60_000;
+
+/**
+ * What a changelog reads with: Jira over REST and GitHub through `gh`. Nothing here writes, and the
+ * scope is read here, so a mistyped one stops before the first request.
+ */
+export function createChangelogDeps(settings: Settings): {
+  readonly deps: CollectDeps;
+  readonly scope: ChangelogSettings;
+} {
+  const scope = readChangelogSettings(settings);
+  const github = createGithubSource(createCommandRunner(), {
+    org: scope.org,
+    repos: scope.repos.map(({ name, full }) => ({ name, full })),
+    cwd: process.cwd(),
+    timeoutMs: CHANGELOG_GH_TIMEOUT_MS,
+  });
+  return { deps: { jira: createJiraClient(settings), github, now: () => new Date() }, scope };
 }

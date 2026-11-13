@@ -419,6 +419,37 @@ export const SETTINGS = [
       "Comma-separated Jira project keys (such as SSX) a drafted ticket may be posted to. Only a draft that names one of them, with a component and an issue type that project lists, carries a Post to Jira button in its direct message; any other says why it does not. No fallback, like SOLVE_REPOS, so emptying it takes the power away: empty, no draft carries a button and nothing a press could reach is built. An entry that is not a project key is a startup error. Only matters to someone on SLACK_DRAFT_USERS. A press checks the draft again against Jira. On a dry listener it writes the request it would make to OUTPUT_DIR/slack/<id>.issue.json and files nothing; on a live one (`slack:listen --write`, SLACK_LISTEN=live) it files the draft as one issue, reads it back from Jira and says in the thread what it found. A draft already filed, or whose filing began and did not end, is never filed again.",
   },
   {
+    name: "CHANGELOG_COMPONENT",
+    description:
+      "The component whose finished issues `changelog:once` reports, by name or id. An issue counts if it has this component or the team in CHANGELOG_TEAM_ID. Unset, the component is left out; unset here and in CHANGELOG_TEAM_ID is a startup error, since the report would be the whole project. No fallback, like SOLVE_REPOS: another team's report must not inherit this one's scope. Read-only: nothing here writes to Jira.",
+  },
+  {
+    name: "CHANGELOG_TEAM_ID",
+    description:
+      "The UUID of the Jira Team field value a changelog also counts, as the `Team` field shows it on an issue. A JQL query naming the team by its name is valid and matches nothing, so a name is a startup error. Unset, the team is left out. No fallback, for the reason CHANGELOG_COMPONENT gives.",
+  },
+  {
+    name: "CHANGELOG_LABEL",
+    description:
+      "The name the changelog carries in its title. Unset, the component's, or the project's when there is none.",
+  },
+  {
+    name: "CHANGELOG_GITHUB_ORG",
+    description:
+      "The GitHub organisation whose pull requests a changelog reads, with the `gh` the service already runs. Reads only.",
+    fallback: "storebrand-digital",
+  },
+  {
+    name: "CHANGELOG_REPOS",
+    description:
+      "Comma-separated repositories a changelog knows by a shorter name: `alias=repository`, or a bare repository name that is its own. Also where a pull request is looked for when only its branch names the issue. A repository not listed still appears, under its own name, as a service. No fallback: a default would send another organisation's lookups to repositories that are not theirs.",
+  },
+  {
+    name: "CHANGELOG_WEBAPPS",
+    description:
+      "Comma-separated names from CHANGELOG_REPOS that are web apps. Each gets its own filter chip under Web apps, the rest under Services, and a tile counts the pull requests that touched one. A name CHANGELOG_REPOS does not list is a startup error. No fallback; unset, there are no web apps.",
+  },
+  {
     name: "LOG_LEVEL",
     description: "debug | info | warn | error",
     fallback: "info",

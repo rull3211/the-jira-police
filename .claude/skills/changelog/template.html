@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Changelog</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #f4f3f0;
+        --surface: #fcfcfb;
+        --ink: #0b0b0b;
+        --ink-2: #52514e;
+        --ink-3: #6b6a66;
+        --line: #e3e2dd;
+        --grid: #ecebe7;
+        --chip: #f0efec;
+        --link: #1c5cab;
+        --focus: #2a78d6;
+        --series-1: #2a78d6;
+        --series-2: #eb6834;
+        --series-3: #1baf7a;
+        --series-4: #eda100;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:where(:not([data-theme="light"])) {
+          color-scheme: dark;
+          --page: #121211;
+          --surface: #1a1a19;
+          --ink: #f0efec;
+          --ink-2: #c3c2b7;
+          --ink-3: #9a998f;
+          --line: #2e2e2b;
+          --grid: #262624;
+          --chip: #262624;
+          --link: #86b6ef;
+          --focus: #6da7ec;
+          --series-1: #3987e5;
+          --series-2: #d95926;
+          --series-3: #199e70;
+          --series-4: #c98500;
+        }
+      }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --page: #121211;
+        --surface: #1a1a19;
+        --ink: #f0efec;
+        --ink-2: #c3c2b7;
+        --ink-3: #9a998f;
+        --line: #2e2e2b;
+        --grid: #262624;
+        --chip: #262624;
+        --link: #86b6ef;
+        --focus: #6da7ec;
+        --series-1: #3987e5;
+        --series-2: #d95926;
+        --series-3: #199e70;
+        --series-4: #c98500;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--ink);
+        font:
+          15px/1.5 system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+      a {
+        color: var(--link);
+      }
+      :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 28px 20px 64px;
+      }
+      header {
+        display: flex;
+        gap: 16px;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 26px;
+        line-height: 1.2;
+        margin: 0 0 4px;
+      }
+      .sub {
+        color: var(--ink-2);
+        margin: 0;
+        max-width: 62ch;
+      }
+      .btn {
+        font: inherit;
+        font-size: 13px;
+        color: var(--ink);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      .btn:hover {
+        border-color: var(--ink-3);
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin: 22px 0 14px;
+      }
+      .kpi {
+        padding: 14px 16px;
+      }
+      .kpi .l {
+        font-size: 12px;
+        color: var(--ink-2);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .kpi .v {
+        font-size: 36px;
+        font-weight: 650;
+        line-height: 1.15;
+        font-variant-numeric: tabular-nums;
+      }
+      .kpi .s {
+        font-size: 12.5px;
+        color: var(--ink-3);
+      }
+
+      .panel {
+        padding: 16px 18px;
+        margin-bottom: 14px;
+      }
+      .panel h2 {
+        font-size: 14px;
+        margin: 0 0 2px;
+      }
+      .panel .hint {
+        font-size: 12.5px;
+        color: var(--ink-3);
+        margin: 0 0 10px;
+      }
+
+      .chart {
+        position: relative;
+        height: 150px;
+        margin: 6px 0 4px 26px;
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        background:
+          linear-gradient(var(--grid), var(--grid)) 0 0/100% 1px no-repeat,
+          linear-gradient(var(--grid), var(--grid)) 0 50%/100% 1px no-repeat,
+          linear-gradient(var(--line), var(--line)) 0 100%/100% 1px no-repeat;
+      }
+      .ylab {
+        position: absolute;
+        left: -26px;
+        font-size: 11px;
+        color: var(--ink-3);
+        transform: translateY(-50%);
+        width: 20px;
+        text-align: right;
+      }
+      .col {
+        flex: 1;
+        height: 100%;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        background: none;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+        position: relative;
+      }
+      .col .bar {
+        width: min(46px, 70%);
+        background: var(--series-1);
+        border-radius: 4px 4px 0 0;
+        min-height: 0;
+        transition: opacity 0.15s;
+      }
+      .col.zero .bar {
+        height: 2px !important;
+        background: var(--line);
+        border-radius: 0;
+      }
+      .col .peak {
+        position: absolute;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .chart.has-day .col:not(.sel) .bar {
+        opacity: 0.3;
+      }
+      .col:hover .bar,
+      .col:focus-visible .bar {
+        filter: brightness(1.1);
+      }
+      .xlabels {
+        display: flex;
+        gap: 10px;
+        margin: 0 0 0 26px;
+      }
+      .xlabels span {
+        flex: 1;
+        text-align: center;
+        font-size: 11.5px;
+        color: var(--ink-3);
+      }
+      .xlabels span.we {
+        font-style: italic;
+      }
+      .tip {
+        position: fixed;
+        z-index: 20;
+        pointer-events: none;
+        background: var(--ink);
+        color: var(--surface);
+        font-size: 12px;
+        padding: 6px 9px;
+        border-radius: 6px;
+        max-width: 260px;
+        opacity: 0;
+        transition: opacity 0.08s;
+        white-space: pre-line;
+      }
+      .tip.on {
+        opacity: 1;
+      }
+      details.tbl summary {
+        cursor: pointer;
+        font-size: 12.5px;
+        color: var(--ink-2);
+        margin-top: 8px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 12.5px;
+        margin-top: 6px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        color: var(--ink-2);
+        font-weight: 600;
+      }
+
+      .heads {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .heads .h {
+        padding: 11px 13px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 13.5px;
+        background: var(--surface);
+      }
+      .heads .h b {
+        display: block;
+        margin-bottom: 2px;
+      }
+      .heads .h .src {
+        display: block;
+        margin-top: 4px;
+        font-size: 11.5px;
+        color: var(--ink-3);
+      }
+      .heads .h.computed {
+        border-style: dashed;
+      }
+
+      .filters {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--page);
+        padding: 10px 0 8px;
+        margin-top: 6px;
+      }
+      .frow {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .frow .lab {
+        font-size: 12px;
+        color: var(--ink-3);
+        min-width: 46px;
+      }
+      .frow .grp {
+        font-size: 11.5px;
+        color: var(--ink-3);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-left: 6px;
+      }
+      input[type="search"] {
+        font: inherit;
+        font-size: 14px;
+        color: var(--ink);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 10px;
+        width: min(340px, 100%);
+      }
+      .chip {
+        font: inherit;
+        font-size: 13px;
+        color: var(--ink);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 11px;
+        cursor: pointer;
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .chip[aria-pressed="true"] {
+        background: var(--chip);
+        border-color: var(--ink-2);
+        font-weight: 600;
+      }
+      .chip .n {
+        color: var(--ink-3);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        flex: none;
+      }
+      .status {
+        font-size: 12.5px;
+        color: var(--ink-2);
+      }
+
+      .day {
+        margin: 22px 0 8px;
+        font-size: 13px;
+        font-weight: 650;
+        color: var(--ink-2);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+      }
+      .day .c {
+        font-weight: 400;
+        color: var(--ink-3);
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .entry {
+        padding: 13px 16px;
+        margin-bottom: 10px;
+      }
+      .eh {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 12.5px;
+        color: var(--ink-2);
+      }
+      .key {
+        font-weight: 650;
+        font-size: 13px;
+      }
+      .badge {
+        border: 1px solid var(--line);
+        background: var(--chip);
+        border-radius: 6px;
+        padding: 0 7px;
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+      .theme {
+        display: inline-flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .time {
+        margin-left: auto;
+        color: var(--ink-3);
+        font-variant-numeric: tabular-nums;
+      }
+      .entry h3 {
+        font-size: 16px;
+        margin: 5px 0 3px;
+        line-height: 1.3;
+      }
+      .what {
+        margin: 0 0 8px;
+        color: var(--ink-2);
+      }
+      .prs {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .pr {
+        font-size: 12px;
+        text-decoration: none;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 1px 7px;
+        background: var(--surface);
+        color: var(--link);
+        font-variant-numeric: tabular-nums;
+      }
+      .pr:hover {
+        border-color: var(--link);
+      }
+      .pr .d {
+        color: var(--ink-3);
+      }
+      .pr .r {
+        color: var(--ink-2);
+        font-style: italic;
+      }
+      .pr.web {
+        border-left: 3px solid var(--link);
+      }
+      .flag {
+        font-size: 12px;
+        color: var(--ink-2);
+        margin-top: 6px;
+      }
+      .flag::before {
+        content: "ⓘ ";
+      }
+      details.more {
+        margin-top: 8px;
+      }
+      details.more summary {
+        cursor: pointer;
+        font-size: 12.5px;
+        color: var(--ink-2);
+      }
+      .more .body {
+        padding: 6px 0 0;
+        font-size: 13.5px;
+      }
+      .more .body p {
+        margin: 4px 0;
+      }
+      .more .lab {
+        color: var(--ink-3);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .empty {
+        padding: 24px;
+        text-align: center;
+        color: var(--ink-3);
+      }
+      footer {
+        margin-top: 34px;
+        font-size: 12.5px;
+        color: var(--ink-3);
+      }
+      footer code {
+        background: var(--chip);
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 12px;
+        word-break: break-all;
+      }
+      footer p {
+        margin: 5px 0;
+      }
+      @media (max-width: 760px) {
+        .kpis {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .heads {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media print {
+        .filters,
+        .btn {
+          display: none;
+        }
+        .entry {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div>
+          <h1 id="title"></h1>
+          <p class="sub" id="sub"></p>
+        </div>
+        <button class="btn" id="themeBtn" type="button" aria-label="Toggle colour theme">
+          Theme: auto
+        </button>
+      </header>
+
+      <noscript
+        ><p class="panel card">This report needs JavaScript to render its entries.</p></noscript
+      >
+
+      <section class="kpis" id="kpis" aria-label="Summary"></section>
+
+      <section class="panel card" aria-labelledby="chartH">
+        <h2 id="chartH">Tasks shipped per day</h2>
+        <p class="hint">Click a day to filter the changelog below. Weekend days are italic.</p>
+        <div class="chart" id="chart" role="group" aria-label="Tasks shipped per day"></div>
+        <div class="xlabels" id="xlabels"></div>
+        <details class="tbl">
+          <summary>Table view</summary>
+          <table id="dayTable"></table>
+        </details>
+      </section>
+
+      <section class="panel card" aria-labelledby="headsH" id="headsPanel">
+        <h2 id="headsH">Worth knowing</h2>
+        <p class="hint">Dashed boxes are computed from the data. The others are written.</p>
+        <div class="heads" id="heads"></div>
+      </section>
+
+      <div class="filters" id="filters">
+        <div class="frow">
+          <input
+            type="search"
+            id="q"
+            placeholder="Search key, title or text…"
+            aria-label="Search the changelog"
+          />
+          <button class="btn" id="expand" type="button">Expand all details</button>
+          <button class="btn" id="clear" type="button">Clear filters</button>
+          <span class="status" id="status" aria-live="polite"></span>
+        </div>
+        <div class="frow" id="repoChips"><span class="lab">Where</span></div>
+        <div class="frow" id="themeChips"><span class="lab">Theme</span></div>
+        <div class="frow" id="typeChips"><span class="lab">Type</span></div>
+        <div class="frow" id="dayPill" hidden></div>
+      </div>
+
+      <main id="list"></main>
+
+      <footer id="foot"></footer>
+    </div>
+    <div class="tip" id="tip" role="tooltip"></div>
+
+    <script>
+      "use strict";
+      const REPORT = /*__REPORT_JSON__*/ null;
+
+      const TYPES = { bug: "Bug", task: "Task", story: "Story", sub: "Sub-task", other: "Other" };
+      const SLOTS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
+
+      /* ---------- helpers ---------- */
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) =>
+        String(s).replace(
+          /[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+        );
+      const keyRe = new RegExp(
+        "\\b(" +
+          REPORT.keyPrefixes.map((p) => p.replace(/[^A-Za-z0-9]/g, "")).join("|") +
+          ")-(\\d+)\\b",
+        "g",
+      );
+      const linkKeys = (s) =>
+        esc(s).replace(keyRe, (m) => '<a href="' + REPORT.jiraBase + m + '">' + m + "</a>");
+      const repoOf = (name) =>
+        REPORT.repos.find((r) => r.name === name) || { name: name, full: name, kind: "service" };
+      const prUrl = (p) => REPORT.githubBase + repoOf(p.repo).full + "/pull/" + p.n;
+      const dayKey = (e) => e.resolved.slice(0, 10);
+      const dayLabel = (k, long) =>
+        new Date(k + "T12:00:00Z").toLocaleDateString("en-GB", {
+          weekday: long ? "long" : "short",
+          day: "numeric",
+          month: "short",
+          timeZone: "UTC",
+        });
+      const isWeekend = (k) => {
+        const d = new Date(k + "T12:00:00Z").getUTCDay();
+        return d === 0 || d === 6;
+      };
+      const themeOf = (e) => {
+        const i = REPORT.themes.findIndex((t) => t.id === e.theme);
+        return {
+          label: i < 0 ? "Other" : REPORT.themes[i].label,
+          color: i < 0 ? "var(--ink-3)" : SLOTS[i],
+        };
+      };
+      const isWeb = (name) => repoOf(name).kind === "web";
+      const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+      const days = [];
+      for (
+        let t = Date.parse(REPORT.window.start + "T12:00:00Z");
+        t <= Date.parse(REPORT.window.end + "T12:00:00Z");
+        t += 864e5
+      )
+        days.push(new Date(t).toISOString().slice(0, 10));
+      const ENTRIES = REPORT.entries;
+      const state = {
+        q: "",
+        repos: new Set(),
+        themes: new Set(),
+        types: new Set(),
+        day: null,
+        open: false,
+      };
+
+      /* ---------- header, summary ---------- */
+      function renderHead() {
+        document.title = REPORT.title;
+        $("title").textContent = REPORT.title;
+        $("sub").textContent = REPORT.subtitle;
+      }
+      function renderKpis() {
+        const unique = new Map();
+        ENTRIES.forEach((e) => e.prs.forEach((p) => unique.set(p.repo + "#" + p.n, p)));
+        const prs = [...unique.values()];
+        const repos = new Set(prs.map((p) => p.repo));
+        const reverts = prs.filter((p) => p.flags.includes("revert")).length;
+        const web = prs.filter((p) => isWeb(p.repo));
+        const webRepos = new Set(web.map((p) => p.repo));
+        const by = (t) => ENTRIES.filter((e) => e.type === t).length;
+        const tiles = [
+          [
+            "Tasks shipped",
+            ENTRIES.length,
+            REPORT.excluded.length
+              ? REPORT.excluded.length + " resolved but not counted"
+              : "all resolved issues counted",
+          ],
+          [
+            "PRs merged",
+            prs.length,
+            repos.size + " repos" + (reverts ? ", " + reverts + " reverts" : ""),
+          ],
+          [
+            "Web app PRs",
+            web.length,
+            webRepos.size
+              ? webRepos.size +
+                " of " +
+                REPORT.repos.filter((r) => r.kind === "web").length +
+                " web apps touched"
+              : "no web app configured or touched",
+          ],
+          [
+            "Bugs fixed",
+            by("bug"),
+            plural(by("task"), "task", "tasks") +
+              ", " +
+              plural(by("sub"), "sub-task", "sub-tasks") +
+              ", " +
+              plural(by("story"), "story", "stories"),
+          ],
+        ];
+        $("kpis").innerHTML = tiles
+          .map(
+            (t) =>
+              '<div class="kpi card"><div class="l">' +
+              t[0] +
+              '</div><div class="v">' +
+              t[1] +
+              '</div><div class="s">' +
+              esc(t[2]) +
+              "</div></div>",
+          )
+          .join("");
+      }
+
+      function renderChart() {
+        const counts = days.map((d) => ENTRIES.filter((e) => dayKey(e) === d));
+        const top = Math.max.apply(
+          null,
+          counts.map((c) => c.length),
+        );
+        const max = Math.max(2, Math.ceil(top / 2) * 2);
+        const chart = $("chart");
+        chart.innerHTML = [0, max / 2, max]
+          .map(
+            (v) =>
+              '<span class="ylab" style="top:' + (100 - (v / max) * 100) + '%">' + v + "</span>",
+          )
+          .join("");
+        counts.forEach((list, i) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "col" + (list.length ? "" : " zero");
+          b.dataset.day = days[i];
+          b.setAttribute(
+            "aria-label",
+            dayLabel(days[i], true) + ": " + list.length + " tasks shipped. Click to filter.",
+          );
+          const h = (list.length / max) * 100;
+          b.innerHTML =
+            '<span class="bar" style="height:' +
+            h +
+            '%"></span>' +
+            (top > 0 && list.length === top
+              ? '<span class="peak" style="bottom:calc(' +
+                h +
+                '% + 3px)">' +
+                list.length +
+                "</span>"
+              : "");
+          const tip =
+            dayLabel(days[i], true) +
+            ": " +
+            list.length +
+            " shipped" +
+            (list.length ? "\n" + list.map((e) => e.key).join(", ") : "");
+          b.addEventListener("mouseenter", (ev) => showTip(ev, tip));
+          b.addEventListener("mousemove", (ev) => showTip(ev, tip));
+          b.addEventListener("focus", (ev) => showTip(ev, tip));
+          b.addEventListener("mouseleave", hideTip);
+          b.addEventListener("blur", hideTip);
+          b.addEventListener("click", () => {
+            state.day = state.day === days[i] ? null : days[i];
+            update();
+          });
+          chart.appendChild(b);
+        });
+        $("xlabels").innerHTML = days
+          .map((d) => '<span class="' + (isWeekend(d) ? "we" : "") + '">' + dayLabel(d) + "</span>")
+          .join("");
+        $("dayTable").innerHTML =
+          "<tr><th>Day</th><th>Shipped</th><th>Tasks</th></tr>" +
+          days
+            .map(
+              (d, i) =>
+                "<tr><td>" +
+                dayLabel(d) +
+                "</td><td>" +
+                counts[i].length +
+                "</td><td>" +
+                (counts[i].map((e) => e.key).join(", ") || "–") +
+                "</td></tr>",
+            )
+            .join("");
+      }
+      function showTip(ev, text) {
+        const t = $("tip");
+        t.textContent = text;
+        const r = ev.currentTarget.getBoundingClientRect();
+        const x = ev.type === "mousemove" ? ev.clientX : r.left + r.width / 2;
+        t.style.left = Math.min(window.innerWidth - 270, Math.max(8, x - 20)) + "px";
+        t.style.top = Math.max(8, r.top - 56) + "px";
+        t.classList.add("on");
+      }
+      function hideTip() {
+        $("tip").classList.remove("on");
+      }
+
+      function renderHeads() {
+        const items = REPORT.notices
+          .map((n) => ({ t: n.title, x: n.text, computed: true }))
+          .concat(REPORT.callouts.map((c) => ({ t: c.title, x: c.text, computed: false })));
+        $("headsPanel").hidden = items.length === 0;
+        $("heads").innerHTML = items
+          .map(
+            (h) =>
+              '<div class="h' +
+              (h.computed ? " computed" : "") +
+              '"><b>' +
+              esc(h.t) +
+              "</b>" +
+              linkKeys(h.x) +
+              "</div>",
+          )
+          .join("");
+      }
+
+      /* ---------- filters ---------- */
+      function addChip(host, id, label, color, count, set) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "chip";
+        b.setAttribute("aria-pressed", "false");
+        b.dataset.id = id;
+        b.innerHTML =
+          (color ? '<i class="dot" style="background:' + color + '"></i>' : "") +
+          esc(label) +
+          ' <span class="n">' +
+          count +
+          "</span>";
+        b.addEventListener("click", () => {
+          set.has(id) ? set.delete(id) : set.add(id);
+          update();
+        });
+        $(host).appendChild(b);
+      }
+      function renderChips() {
+        const touched = (name) => ENTRIES.filter((e) => e.prs.some((p) => p.repo === name)).length;
+        const web = REPORT.repos.filter((r) => r.kind === "web");
+        const svc = REPORT.repos.filter((r) => r.kind !== "web");
+        const group = (label, list) => {
+          if (!list.length) return;
+          const g = document.createElement("span");
+          g.className = "grp";
+          g.textContent = label;
+          $("repoChips").appendChild(g);
+          list.forEach((r) =>
+            addChip("repoChips", r.name, r.name, null, touched(r.name), state.repos),
+          );
+        };
+        group("Web apps", web);
+        group("Services", svc);
+        if (!REPORT.repos.length) $("repoChips").hidden = true;
+        REPORT.themes.forEach((t, i) =>
+          addChip(
+            "themeChips",
+            t.id,
+            t.label,
+            SLOTS[i],
+            ENTRIES.filter((e) => e.theme === t.id).length,
+            state.themes,
+          ),
+        );
+        Object.keys(TYPES)
+          .filter((k) => ENTRIES.some((e) => e.type === k))
+          .forEach((k) =>
+            addChip(
+              "typeChips",
+              k,
+              TYPES[k],
+              null,
+              ENTRIES.filter((e) => e.type === k).length,
+              state.types,
+            ),
+          );
+      }
+      function matches(e) {
+        if (state.repos.size && !e.prs.some((p) => state.repos.has(p.repo))) return false;
+        if (state.themes.size && !state.themes.has(e.theme)) return false;
+        if (state.types.size && !state.types.has(e.type)) return false;
+        if (state.day && dayKey(e) !== state.day) return false;
+        if (state.q) {
+          const hay = [e.key, e.title, e.what, e.why || "", (e.notes || []).join(" ")]
+            .join(" ")
+            .toLowerCase();
+          if (!hay.includes(state.q.toLowerCase())) return false;
+        }
+        return true;
+      }
+
+      /* ---------- list ---------- */
+      function entryHtml(e) {
+        const th = themeOf(e);
+        const chips = e.prs
+          .map(
+            (p) =>
+              '<a class="pr' +
+              (isWeb(p.repo) ? " web" : "") +
+              '" href="' +
+              prUrl(p) +
+              '" title="' +
+              esc("merged " + p.merged) +
+              '">' +
+              esc(p.repo) +
+              "#" +
+              p.n +
+              ' <span class="d">+' +
+              p.add +
+              " −" +
+              p.del +
+              "</span>" +
+              (p.flags.length ? ' <span class="r">' + esc(p.flags.join(", ")) + "</span>" : "") +
+              "</a>",
+          )
+          .join("");
+        const rows = e.prs
+          .map(
+            (p) =>
+              '<tr><td><a href="' +
+              prUrl(p) +
+              '">' +
+              esc(p.repo) +
+              "#" +
+              p.n +
+              "</a></td><td>" +
+              (isWeb(p.repo) ? "web app" : "service") +
+              "</td><td>+" +
+              p.add +
+              " −" +
+              p.del +
+              "</td><td>" +
+              esc(p.merged) +
+              "</td><td>" +
+              esc(p.flags.join(", ")) +
+              "</td></tr>",
+          )
+          .join("");
+        const others = e.others.length
+          ? '<p><span class="lab">Not counted</span><br>' +
+            e.others.map((o) => esc(o.repo) + "#" + o.n + ": " + esc(o.why)).join("; ") +
+            "</p>"
+          : "";
+        const links = e.links.map((l) => esc(l.label) + ": " + linkKeys(l.key)).join(" · ");
+        const details =
+          (e.why ? '<p><span class="lab">Why</span><br>' + linkKeys(e.why) + "</p>" : "") +
+          (e.notes || []).map((n) => "<p>" + linkKeys(n) + "</p>").join("") +
+          (rows
+            ? "<table><tr><th>PR</th><th>Kind</th><th>Diff</th><th>Merged</th><th>Flags</th></tr>" +
+              rows +
+              "</table>"
+            : "") +
+          others +
+          '<p class="lab" style="margin-top:8px">Reporter: ' +
+          esc(e.reporter || "unknown") +
+          (links ? " · " + links : "") +
+          "</p>";
+        const flags =
+          (e.statusNote ? '<div class="flag">' + esc(e.statusNote) + "</div>" : "") +
+          (e.prs.length
+            ? ""
+            : '<div class="flag">No merged pull request found for this issue.</div>');
+        return (
+          '<article class="entry card" id="' +
+          esc(e.key) +
+          '">' +
+          '<div class="eh"><a class="key" href="' +
+          REPORT.jiraBase +
+          esc(e.key) +
+          '">' +
+          esc(e.key) +
+          '</a><span class="badge">' +
+          esc(TYPES[e.type] || TYPES.other) +
+          "</span>" +
+          '<span class="theme"><i class="dot" style="background:' +
+          th.color +
+          '"></i>' +
+          esc(th.label) +
+          "</span>" +
+          '<span class="time">' +
+          esc(e.resolved.slice(11, 16)) +
+          "</span></div>" +
+          "<h3>" +
+          esc(e.title) +
+          '</h3><p class="what">' +
+          esc(e.what) +
+          '</p><div class="prs">' +
+          chips +
+          "</div>" +
+          flags +
+          '<details class="more"' +
+          (state.open ? " open" : "") +
+          '><summary>Details</summary><div class="body">' +
+          details +
+          "</div></details></article>"
+        );
+      }
+      function renderList() {
+        const shown = ENTRIES.filter(matches);
+        let html = "";
+        days
+          .slice()
+          .reverse()
+          .forEach((d) => {
+            const items = shown
+              .filter((e) => dayKey(e) === d)
+              .sort((a, b) => b.resolved.localeCompare(a.resolved));
+            if (!items.length) return;
+            html +=
+              '<h2 class="day">' +
+              dayLabel(d, true) +
+              ' <span class="c">' +
+              items.length +
+              " shipped</span></h2>" +
+              items.map(entryHtml).join("");
+          });
+        $("list").innerHTML = html || '<div class="empty card">No tasks match these filters.</div>';
+        $("status").textContent = "Showing " + shown.length + " of " + ENTRIES.length;
+      }
+      function update() {
+        [
+          ["repoChips", state.repos],
+          ["themeChips", state.themes],
+          ["typeChips", state.types],
+        ].forEach(([host, set]) =>
+          document
+            .querySelectorAll("#" + host + " .chip")
+            .forEach((b) => b.setAttribute("aria-pressed", set.has(b.dataset.id))),
+        );
+        $("chart").classList.toggle("has-day", !!state.day);
+        document
+          .querySelectorAll(".col")
+          .forEach((c) => c.classList.toggle("sel", c.dataset.day === state.day));
+        const pill = $("dayPill");
+        pill.hidden = !state.day;
+        pill.innerHTML = state.day
+          ? '<span class="lab">Day</span><button type="button" class="chip" aria-label="Remove day filter">' +
+            dayLabel(state.day, true) +
+            " ✕</button>"
+          : "";
+        if (state.day)
+          pill.querySelector("button").addEventListener("click", () => {
+            state.day = null;
+            update();
+          });
+        renderList();
+      }
+
+      /* ---------- footer, theme, wiring ---------- */
+      function renderFoot() {
+        const ex = REPORT.excluded.length
+          ? "<p><b>Resolved but not counted:</b> " +
+            REPORT.excluded.map((x) => linkKeys(x.key) + " (" + esc(x.reason) + ")").join(", ") +
+            ".</p>"
+          : "";
+        $("foot").innerHTML =
+          "<p><b>Scope.</b> " +
+          esc(REPORT.scope.summary) +
+          " Times are as Jira reports them.</p>" +
+          "<p><code>" +
+          esc(REPORT.scope.jql) +
+          "</code></p>" +
+          ex +
+          "<p>Facts (issues, dates, pull requests, counts) were read by the harness; titles and sentences were written by a model from those facts and checked against them. Generated " +
+          esc(REPORT.generated) +
+          ".</p>";
+      }
+      const themeBtn = $("themeBtn");
+      const modes = ["auto", "light", "dark"];
+      let mode = 0;
+      themeBtn.addEventListener("click", () => {
+        mode = (mode + 1) % 3;
+        if (modes[mode] === "auto") document.documentElement.removeAttribute("data-theme");
+        else document.documentElement.setAttribute("data-theme", modes[mode]);
+        themeBtn.textContent = "Theme: " + modes[mode];
+      });
+      $("q").addEventListener("input", (ev) => {
+        state.q = ev.target.value.trim();
+        update();
+      });
+      $("expand").addEventListener("click", () => {
+        state.open = !state.open;
+        $("expand").textContent = state.open ? "Collapse all details" : "Expand all details";
+        update();
+      });
+      $("clear").addEventListener("click", () => {
+        state.q = "";
+        $("q").value = "";
+        state.repos.clear();
+        state.themes.clear();
+        state.types.clear();
+        state.day = null;
+        update();
+      });
+
+      renderHead();
+      renderKpis();
+      renderChart();
+      renderHeads();
+      renderChips();
+      renderFoot();
+      update();
+    </script>
+  </body>
+</html>

@@ -12,10 +12,10 @@ Index: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
 
 **Two credentials, two jobs, and they never swap.**
 
-|           | Credential                                                    | Used for                                                                                                                                                                     | Never used for                                 |
-| --------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Discovery | Jira REST (`JIRA_EMAIL` + `JIRA_AUTH`, HTTP Basic)            | Learning _which_ issues are new; one ticket's detail for a solve; `agent:` labels, named status moves and `jira-police.*` issue properties, each bounded in `jira/client.ts` | Comments, and every other field on the ticket. |
-| Grooming  | The Atlassian **MCP session** inside the storecode subprocess | Reading what is _in_ an issue, and writing the verdict back.                                                                                                                 | Discovery.                                     |
+|           | Credential                                                    | Used for                                                                                                                                                                                                                         | Never used for                                 |
+| --------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Discovery | Jira REST (`JIRA_EMAIL` + `JIRA_AUTH`, HTTP Basic)            | Learning _which_ issues are new; one ticket's detail for a solve, and for each ticket a changelog reports, read only; `agent:` labels, named status moves and `jira-police.*` issue properties, each bounded in `jira/client.ts` | Comments, and every other field on the ticket. |
+| Grooming  | The Atlassian **MCP session** inside the storecode subprocess | Reading what is _in_ an issue, and writing the verdict back.                                                                                                                                                                     | Discovery.                                     |
 
 This is not stylistic. It buys three things:
 
@@ -153,6 +153,30 @@ Ordering rules, all in `createReviewLoop` and all covered by `src/review-loop.te
   long, and a stop that arrived during one must not be answered by starting another.
 
 Plainly: the three loops can spend at the same time and no setting spans them.
+
+### The changelog, which writes nothing but a file
+
+`pnpm changelog:once [days]` reports what a team finished: the issues resolved in the window that carry
+the component or the team (`buildChangelogJql`), each read over REST, each with the pull requests that
+delivered it (`gh`). **The harness states every fact and counts every number**, and the page is the
+template in `.claude/skills/changelog/`. What a model may add is prose keyed by issue key, bounded in
+`src/changelog/types.ts`; none is wired in yet, so the titles are Jira's own and the command is free.
+
+Rules that making one by hand turned up, each in code with a test:
+
+- **A team is its UUID.** `Team = "SSX Advisor"` is a valid query that matches nothing and says
+  nothing, so `buildChangelogJql` and `readChangelogSettings` refuse a name.
+- **Resolved is not finished, and done is not resolved.** An issue is excluded by its status as well as
+  its resolution, since a rejected one can read `Solved`; one resolved but not in a done status is
+  counted and says so.
+- **An issue owns a pull request by naming it in the title or the branch.** A body that mentions it, a
+  pull request that is open, and one closed without merging are listed as not counted; an issue with
+  none found is searched for by branch name in the configured repositories.
+- **The facts are written before the gate reads them.** `assertReportable` refuses a report whose
+  issues are not exactly the ones the query returned, and a refusal leaves the facts and no page.
+
+It reads and writes nothing in Jira, GitHub or Slack, so `architecture/invariants.md`'s write-path
+rules are untouched; what it widens is what the discovery credential reads, named in §1.
 
 ---
 

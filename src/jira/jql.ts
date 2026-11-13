@@ -289,3 +289,44 @@ export function buildSolveQueueJql(options: SolveQueueJqlOptions): string {
   // Oldest touched first, so a backlog drains in a fair order.
   return `${clauses.join(" AND ")} ORDER BY updated ASC`;
 }
+
+export interface ChangelogJqlOptions {
+  readonly project: string;
+  /** A component name or id; at least one of this and `teamId` is required. */
+  readonly component: string | null;
+  /** The Team field's UUID. */
+  readonly teamId: string | null;
+  readonly days: number;
+}
+
+export const TEAM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/**
+ * Issues resolved in the last `days` that belong to a component or a team. The team must be its UUID:
+ * `Team = "SSX Advisor"` is a valid query that matches nothing and says nothing, so a name is refused.
+ */
+export function buildChangelogJql(options: ChangelogJqlOptions): string {
+  const project = assertSafe(options.project, "project");
+  if (!Number.isInteger(options.days) || options.days < 1) {
+    throw new JqlError(`days must be a positive whole number, got ${String(options.days)}`);
+  }
+  const scope: string[] = [];
+  if (options.component !== null) {
+    scope.push(`component = ${jqlValue(options.component, "component")}`);
+  }
+  if (options.teamId !== null) {
+    const team = options.teamId.trim();
+    if (!TEAM_ID.test(team)) {
+      throw new JqlError(
+        `The team must be given by its UUID, not its name: ${JSON.stringify(options.teamId)}`,
+      );
+    }
+    scope.push(`Team = "${team}"`);
+  }
+  if (scope.length === 0) {
+    throw new JqlError(
+      "A changelog needs a component or a team: with neither it would list the whole project",
+    );
+  }
+  return `project = ${project} AND resolved >= -${String(options.days)}d AND (${scope.join(" OR ")}) ORDER BY resolved DESC`;
+}

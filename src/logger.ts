@@ -26,6 +26,7 @@ export const LOG_SOURCES = [
   "attach-stage",
   "attachments",
   "bot-once",
+  "changelog-once",
   "cycle",
   "draft",
   "draft-probe",

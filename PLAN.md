@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4235 tests in 124 files**, no build step.
+> **4318 tests in 130 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -1332,6 +1332,36 @@ garbled has been accepted.
 - **The slip is the model's, and may move.** It hit five different fields, so renaming `summary`
   would not have helped, and a model or CLI release could change the rate either way, leaving
   item 2 guarding a shape nothing produces.
+
+### 90. The changelog has no written prose, and no way to reach Slack
+
+**Branch:** none yet. `pnpm changelog:once [days]` is built: the harness reads, classifies, checks and
+renders (`architecture/overview.md`, "The changelog"), with Jira's own summaries as the titles.
+
+**What is not built.**
+
+1. **The prose.** One session holding **no tools**, handed the facts as data (ticket text and pull
+   request bodies fenced as untrusted), returning titles, sentences, themes and callouts keyed by
+   issue key. The parser checks them against `Prose`'s bounds and `assertReportable` against the
+   facts before anything renders. `.claude/skills/changelog/SKILL.md` carries the writing rules, and
+   must say not to repeat the computed notices the page already shows. `--run` pays for it and
+   `--replay <file>` does not.
+2. **Delivery.** A direct message with the page attached, through `files.getUploadURLExternal` and
+   `files.completeUploadExternal`. The manifest already asks for `files:write`.
+3. **The mention.** `@Bencebot changelog <days>`. `listenerFor` dispatches on a hard-coded ternary, so
+   the verb falls through to the start handler today; it needs its own branch, behind the Slack
+   command whitelist.
+
+**What would make it the wrong idea:**
+
+- **The prose may not earn a paid session.** If a report built from Jira's own summaries is read as
+  well as one with written sentences, the model is the wrong spend. The first live runs compare the two.
+- **The scope is one project's convention.** Component and team are settings, but nothing makes another
+  team tag its tickets, so "shareable" may promise more than the tagging allows.
+- **Slack shows an HTML file as a download.** The page is interactive only once opened, so a summary in
+  the message may be the part people read.
+- **The upload path is inferred from Slack's documentation**, and the first live one may want another
+  scope.
 
 ## Verification
 

@@ -4,6 +4,7 @@ import type { SolveMode } from "../settings.ts";
 import {
   JqlError,
   assertSafe,
+  buildChangelogJql,
   buildNewIssuesJql,
   buildInFlightJql,
   buildReviewQueueJql,
@@ -500,5 +501,44 @@ describe("buildSendbackWatchJql", () => {
     expect(() => buildSendbackWatchJql({ ...SCOPE, components: ['x") OR labels = "y'] })).toThrow(
       JqlError,
     );
+  });
+});
+
+describe("buildChangelogJql", () => {
+  const TEAM = "3536e3e8-eddf-4306-9991-173a45afc8a2";
+  const OPTIONS = { project: "SSX", component: "SSX Advisor", teamId: TEAM, days: 7 };
+
+  it("asks for the issues resolved in the window that belong to the component or the team", () => {
+    expect(buildChangelogJql(OPTIONS)).toBe(
+      `project = SSX AND resolved >= -7d AND (component = "SSX Advisor" OR Team = "${TEAM}") ORDER BY resolved DESC`,
+    );
+  });
+
+  it("works from the component alone or the team alone", () => {
+    expect(buildChangelogJql({ ...OPTIONS, teamId: null })).toContain(
+      '(component = "SSX Advisor")',
+    );
+    expect(buildChangelogJql({ ...OPTIONS, component: null })).toContain(`(Team = "${TEAM}")`);
+  });
+
+  it("refuses a team given by name, which Jira would answer with nothing and no error", () => {
+    expect(() => buildChangelogJql({ ...OPTIONS, teamId: "SSX Advisor" })).toThrow(/UUID/u);
+    expect(() => buildChangelogJql({ ...OPTIONS, teamId: `${TEAM}x` })).toThrow(JqlError);
+  });
+
+  it("refuses to run with neither a component nor a team, which would list the whole project", () => {
+    expect(() => buildChangelogJql({ ...OPTIONS, component: null, teamId: null })).toThrow(
+      /whole project/u,
+    );
+  });
+
+  it("refuses an unsafe project or component, and a window that is not a positive whole number", () => {
+    expect(() => buildChangelogJql({ ...OPTIONS, project: 'X" OR "1"="1' })).toThrow(JqlError);
+    expect(() => buildChangelogJql({ ...OPTIONS, component: 'x") OR labels = "y' })).toThrow(
+      JqlError,
+    );
+    for (const days of [0, -1, 1.5, Number.NaN]) {
+      expect(() => buildChangelogJql({ ...OPTIONS, days }), String(days)).toThrow(JqlError);
+    }
   });
 });

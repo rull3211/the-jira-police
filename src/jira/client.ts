@@ -364,20 +364,26 @@ export class JiraClient {
 
   /** Runs a JQL search, following pagination, and normalises the results. */
   async search(jql: string): Promise<readonly TicketRef[]> {
-    const collected: TicketRef[] = [];
+    const issues = await this.searchFields(jql, FIELDS);
+    return issues.map((issue) => toTicketRef(issue, this.#baseUrl));
+  }
+
+  /** As `search`, for the fields the caller names; the payload comes back as Jira sent it. */
+  async searchFields(jql: string, fields: readonly string[]): Promise<readonly JiraIssue[]> {
+    const collected: JiraIssue[] = [];
     let nextPageToken: string | undefined;
     let page = 0;
 
     do {
       const payload = (await this.#post("/rest/api/3/search/jql", {
         jql,
-        fields: FIELDS,
+        fields,
         maxResults: MAX_RESULTS_PER_PAGE,
         ...(nextPageToken === undefined ? {} : { nextPageToken }),
       })) as JiraSearchResponse;
 
       for (const issue of payload.issues ?? []) {
-        collected.push(toTicketRef(issue as JiraIssue, this.#baseUrl));
+        collected.push(issue as JiraIssue);
       }
 
       nextPageToken = payload.isLast === true ? undefined : payload.nextPageToken;

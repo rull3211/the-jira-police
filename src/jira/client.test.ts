@@ -59,6 +59,41 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("JiraClient.searchFields", () => {
+  it("asks for the fields it is given, follows the pages, and returns Jira's payload unread", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          issues: [issue("SSX-1", "2026-09-02T10:00:00Z", { resolution: { name: "Solved" } })],
+          isLast: false,
+          nextPageToken: "page-2",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ issues: [issue("SSX-2", "2026-09-02T11:00:00Z")], isLast: true }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const issues = await client().searchFields("project = SSX", [
+      "resolution",
+      "customfield_10001",
+    ]);
+
+    expect(issues.map((found) => found.key)).toEqual(["SSX-1", "SSX-2"]);
+    const firstFields = issues[0]?.fields as unknown as
+      | { resolution: { name: string } }
+      | undefined;
+    expect(firstFields?.resolution.name).toBe("Solved");
+    const first = JSON.parse(String(callArgs(fetchMock, 0).init.body)) as { fields: string[] };
+    expect(first.fields).toEqual(["resolution", "customfield_10001"]);
+    const second = JSON.parse(String(callArgs(fetchMock, 1).init.body)) as {
+      nextPageToken?: string;
+    };
+    expect(second.nextPageToken).toBe("page-2");
+  });
+});
+
 describe("JiraClient.search", () => {
   it("sends the JQL and normalises the results", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
