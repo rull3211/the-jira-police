@@ -1,6 +1,6 @@
 /**
- * `pnpm changelog:once [days]`: what `@Bencebot changelog` would report, for the last `days` days. `usage()`
- * below says what it reads, writes and exits with.
+ * `pnpm changelog:once [days]`: the changelog page for the last `days` days. `usage()` below says what it
+ * reads, writes and exits with.
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";

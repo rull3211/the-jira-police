@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4323 tests in 130 files**, no build step.
+> **4328 tests in 130 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -1335,8 +1335,7 @@ garbled has been accepted.
 
 ### 90. The changelog has no written prose, and no way to reach Slack
 
-**Branch:** none yet. `pnpm changelog:once [days]` is built: the harness reads, classifies, checks and
-renders (`architecture/overview.md`, "The changelog"), with Jira's own summaries as the titles.
+**Branch:** none yet.
 
 **What is not built.**
 

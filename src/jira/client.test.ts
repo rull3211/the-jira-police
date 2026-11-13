@@ -92,6 +92,24 @@ describe("JiraClient.searchFields", () => {
     };
     expect(second.nextPageToken).toBe("page-2");
   });
+
+  it("refuses a result cut at the page cap, which search alone only warns about", async () => {
+    // A report compared against a cut list looks complete, so this one has to fail.
+    const endless = () =>
+      vi.fn<typeof fetch>(async () =>
+        jsonResponse({
+          issues: [issue("SSX-1", "2026-09-02T10:00:00Z")],
+          isLast: false,
+          nextPageToken: "more",
+        }),
+      );
+    vi.stubGlobal("fetch", endless());
+    await expect(client().searchFields("project = SSX", ["summary"])).rejects.toThrow(
+      /stopped after 500 issues/u,
+    );
+    vi.stubGlobal("fetch", endless());
+    expect(await client().search("project = SSX")).toHaveLength(10);
+  });
 });
 
 describe("JiraClient.search", () => {

@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { IssueDetail } from "../jira/client.ts";
 import type { JiraIssue } from "../jira/types.ts";
 import { type ChangelogSettings, SEARCH_FIELDS, collectFacts } from "./collect.ts";
-import type { FoundPullRequest, PullRequestSource } from "./github.ts";
-import { DEFAULT_EXCLUSIONS } from "./rules.ts";
+import type { PullRequestSource } from "./github.ts";
+import type { PullRequest } from "./rules.ts";
 
 const TEAM = "3536e3e8-eddf-4306-9991-173a45afc8a2";
 
@@ -19,7 +19,6 @@ const settings: ChangelogSettings = {
     { name: "advisor-web", full: "buy-insurance-advisor-web", kind: "web" },
     { name: "commerce-rest", full: "insurance-commerce-rest-api", kind: "service" },
   ],
-  exclusions: DEFAULT_EXCLUSIONS,
 };
 
 const NOW = (): Date => new Date(2026, 10, 12, 15, 0, 0);
@@ -55,22 +54,12 @@ const detail = (key: string): IssueDetail => ({
   status: "Ferdig",
   labels: [],
   description: doc(`Description of ${key}.`),
-  comments: [
-    {
-      id: "1",
-      author: "Bo",
-      created: "2026-11-09T10:00:00.000+0100",
-      updated: "",
-      body: doc("A  comment\n\nwith   spaces"),
-    },
-  ],
+  comments: [],
   attachments: [],
   url: "",
 });
 
-const pr = (
-  over: Partial<FoundPullRequest> & Pick<FoundPullRequest, "number">,
-): FoundPullRequest => ({
+const pr = (over: Partial<PullRequest> & Pick<PullRequest, "number">): PullRequest => ({
   repo: "advisor-web",
   title: "feat(SSX-1): a change",
   branch: "feat/other",
@@ -78,14 +67,13 @@ const pr = (
   additions: 10,
   deletions: 2,
   mergedAt: "2026-11-10T09:00:00Z",
-  body: "the body",
   ...over,
 });
 
 function harness(
   issues: readonly JiraIssue[],
-  byKey: Record<string, readonly FoundPullRequest[]> = {},
-  merged: readonly FoundPullRequest[] = [],
+  byKey: Record<string, readonly PullRequest[]> = {},
+  merged: readonly PullRequest[] = [],
 ) {
   const searchFields = vi.fn(async () => issues);
   const fetchDetail = vi.fn(async (key: string) => detail(key));
@@ -103,7 +91,7 @@ function harness(
 
 describe("collectFacts", () => {
   it("asks Jira for the scoped query over the window and reads an issue into facts", async () => {
-    const h = harness([raw("SSX-1", { parent: { key: "SSX-100" } })], {
+    const h = harness([raw("SSX-1")], {
       "SSX-1": [pr({ number: 5 })],
     });
     const { facts, queryKeys } = await collectFacts(h.deps, settings, 7);
@@ -119,10 +107,8 @@ describe("collectFacts", () => {
       summary: "Summary of SSX-1",
       resolved: "2026-11-10T12:00:00.000+0100",
       reporter: "Ada",
-      parent: "SSX-100",
       statusNote: null,
       description: "Description of SSX-1.",
-      comments: [{ author: "Bo", text: "A comment with spaces" }],
       prs: [
         {
           repo: "advisor-web",
@@ -130,7 +116,6 @@ describe("collectFacts", () => {
           additions: 10,
           deletions: 2,
           merged: "10 Nov",
-          body: "the body",
           flags: [],
         },
       ],
@@ -208,14 +193,11 @@ describe("collectFacts", () => {
       number: 9,
       title: "feat(advisorsupport): move button",
       branch: "ssx-2-move-button",
-      body: "Flytt en knapp",
     });
     const h = harness([raw("SSX-2"), raw("SSX-3")], {}, [branchOnly]);
     const { facts } = await collectFacts(h.deps, settings, 7);
 
-    expect(facts.issues.find((i) => i.key === "SSX-2")?.prs).toMatchObject([
-      { number: 9, body: "Flytt en knapp" },
-    ]);
+    expect(facts.issues.find((i) => i.key === "SSX-2")?.prs).toMatchObject([{ number: 9 }]);
     expect(facts.issues.find((i) => i.key === "SSX-3")?.prs).toEqual([]);
     // Two issues both needed the fallback, but each repository is listed once.
     expect(h.mergedSince.mock.calls.map((c) => c[0]).toSorted()).toEqual([
@@ -254,7 +236,6 @@ describe("collectFacts", () => {
       summary: "SSX-1",
       kind: "other",
       reporter: null,
-      parent: null,
       statusNote: "Jira shows unknown although the issue was resolved 2026-11-10 12:00.",
     });
   });

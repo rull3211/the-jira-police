@@ -41,7 +41,6 @@ const view = (over: Record<string, unknown> = {}) => ({
   mergedAt: "2026-11-10T10:00:00Z",
   additions: 12,
   deletions: 3,
-  body: "line one\n\n\nline   two",
   ...over,
 });
 
@@ -88,16 +87,24 @@ describe("createGithubSource.search", () => {
     expect(calls[1]).toContain("acme/repo-a");
   });
 
-  it("puts a body on one line and cuts it", async () => {
-    const { runner } = fake((argv) =>
-      argv[1] === "search"
-        ? ok([{ number: 5, repository: { name: "repo-a" } }])
-        : ok(view({ body: `${"word ".repeat(300)}\n\nmore` })),
-    );
-    const [pr] = await createGithubSource(runner, OPTIONS).search("SSX-1");
-    expect(pr?.body).not.toContain("\n");
-    expect(pr?.body.length).toBeLessThanOrEqual(701);
-    expect(pr?.body.endsWith("…")).toBe(true);
+  it("refuses a search that returned all it was allowed to, and accepts one fewer", async () => {
+    const searching = (n: number) =>
+      createGithubSource(
+        fake((argv) =>
+          argv[1] === "search"
+            ? ok(
+                Array.from({ length: n }, (_, i) => ({
+                  number: i + 1,
+                  repository: { name: "repo-a" },
+                })),
+              )
+            : ok(view({ number: Number(argv[3]) })),
+        ).runner,
+        OPTIONS,
+      ).search("SSX-1");
+    // A list at its limit may have been cut, and a report built on it would look complete.
+    await expect(searching(30)).rejects.toThrow(/returned the 30 it was limited to/u);
+    expect(await searching(29)).toHaveLength(29);
   });
 
   it("reads a pull request that was never merged as having no merge time", async () => {
@@ -174,6 +181,22 @@ describe("createGithubSource.mergedSince", () => {
       "--json",
       expect.stringContaining("headRefName"),
     ]);
+  });
+
+  it("refuses a listing that returned all it was allowed to, and accepts one fewer", async () => {
+    const listing = (n: number) =>
+      createGithubSource(
+        fake(() => ok(Array.from({ length: n }, (_, i) => view({ number: i + 1 })))).runner,
+        OPTIONS,
+      ).mergedSince("repo-a", "2026-11-05");
+    await expect(listing(200)).rejects.toThrow(/returned the 200 it was limited to/u);
+    expect(await listing(199)).toHaveLength(199);
+  });
+
+  it("does not ask gh for bodies, which on a busy repository would pass the runner's output cap", async () => {
+    const { runner, calls } = fake(() => ok([]));
+    await createGithubSource(runner, OPTIONS).mergedSince("repo-a", "2026-11-05");
+    expect(calls[0]?.at(-1)).not.toContain("body");
   });
 
   it("refuses a repository or date that is not plain", async () => {

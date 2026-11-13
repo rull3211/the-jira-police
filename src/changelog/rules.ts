@@ -8,16 +8,16 @@ export const MAX_DAYS = 31;
 export class ChangelogArgError extends Error {}
 
 /** `7` or `7d`; absent means a week. Anything else is refused, never rounded into a window. */
-export function parseDays(raw: string | undefined, max: number = MAX_DAYS): number {
+export function parseDays(raw: string | undefined): number {
   const text = (raw ?? "").trim();
   if (text === "") {
     return 7;
   }
   const match = /^(\d{1,3})d?$/iu.exec(text);
   const days = match?.[1] === undefined ? Number.NaN : Number(match[1]);
-  if (!Number.isInteger(days) || days < 1 || days > max) {
+  if (!Number.isInteger(days) || days < 1 || days > MAX_DAYS) {
     throw new ChangelogArgError(
-      `days must be a whole number from 1 to ${String(max)}, got "${text.slice(0, 20)}"`,
+      `days must be a whole number from 1 to ${String(MAX_DAYS)}, got "${text.slice(0, 20)}"`,
     );
   }
   return days;

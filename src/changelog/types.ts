@@ -11,8 +11,6 @@ export interface PrFact {
   readonly repo: string;
   readonly number: number;
   readonly title: string;
-  /** Cut and fenced before a model reads it; never rendered. */
-  readonly body: string;
   readonly additions: number;
   readonly deletions: number;
   /** `12 Nov`: the day the pull request merged, in UTC. */
@@ -27,20 +25,14 @@ export interface IssueFacts {
   /** Jira's timestamp, kept as written: its first ten characters are the day the report files it under. */
   readonly resolved: string;
   readonly reporter: string | null;
-  readonly parent: string | null;
   readonly links: readonly {
     readonly key: string;
     readonly label: string;
     readonly open: boolean;
   }[];
   readonly statusNote: string | null;
-  /** Plain text, cut. Read by a model; the page shows only what the model wrote from it. */
+  /** Plain text, cut; its opening paragraph is the line under the title. */
   readonly description: string;
-  readonly comments: readonly {
-    readonly author: string;
-    readonly created: string;
-    readonly text: string;
-  }[];
   readonly prs: readonly PrFact[];
   readonly others: readonly OtherPullRequest[];
 }
@@ -66,7 +58,7 @@ export interface ProseEntry {
   readonly notes: readonly string[];
 }
 
-/** Everything a model writes: sentences keyed by issue key, and nothing a harness already knows. */
+/** The sentences a report shows, keyed by issue key and holding nothing the facts already say. */
 export interface Prose {
   readonly themes: readonly { readonly id: string; readonly label: string }[];
   readonly entries: readonly ProseEntry[];
@@ -76,15 +68,5 @@ export interface Prose {
 /** The most categorical colours the page has validated slots for. */
 export const MAX_THEMES = 4;
 
-/** Bounds on what a model may write; the parser enforces them and the schema's descriptions state them. */
-export const LIMITS = {
-  title: 90,
-  what: 400,
-  why: 240,
-  note: 240,
-  notes: 3,
-  callouts: 4,
-  calloutTitle: 60,
-  calloutText: 320,
-  themeLabel: 24,
-} as const;
+/** The longest a title, and the line under it, may be. */
+export const LIMITS = { title: 90, what: 400 } as const;

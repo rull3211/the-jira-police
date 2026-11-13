@@ -3,8 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { IssueDetail } from "../jira/client.ts";
 import type { JiraIssue } from "../jira/types.ts";
 import type { ChangelogSettings } from "./collect.ts";
-import type { FoundPullRequest } from "./github.ts";
-import { DEFAULT_EXCLUSIONS } from "./rules.ts";
+import type { PullRequest } from "./rules.ts";
 import { runChangelog } from "./run.ts";
 
 const scope: ChangelogSettings = {
@@ -15,7 +14,6 @@ const scope: ChangelogSettings = {
   jiraBase: "https://example.atlassian.net/browse/",
   org: "acme",
   repos: [{ name: "advisor-web", full: "buy-insurance-advisor-web", kind: "web" }],
-  exclusions: DEFAULT_EXCLUSIONS,
 };
 
 const raw = (key: string, resolved: string, fields: Record<string, unknown> = {}): JiraIssue =>
@@ -44,7 +42,7 @@ const detail = (key: string): IssueDetail => ({
   url: "",
 });
 
-const pr = (key: string): FoundPullRequest => ({
+const pr = (key: string): PullRequest => ({
   repo: "advisor-web",
   number: 5,
   title: `feat(${key}): change`,
@@ -53,7 +51,6 @@ const pr = (key: string): FoundPullRequest => ({
   additions: 3,
   deletions: 1,
   mergedAt: "2026-11-10T10:00:00Z",
-  body: "",
 });
 
 const TEMPLATE = "<script>const REPORT = /*__REPORT_JSON__*/ null;</script>";

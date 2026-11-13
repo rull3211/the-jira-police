@@ -2,9 +2,16 @@ import type { IssueDetail } from "../jira/client.ts";
 import { renderAdf } from "../jira/adf.ts";
 import { buildChangelogJql } from "../jira/jql.ts";
 import type { JiraIssue } from "../jira/types.ts";
-import { oneLine, shorten } from "../text.ts";
-import type { FoundPullRequest, PullRequestSource } from "./github.ts";
-import { type ExclusionRules, issueKind, judge, judgePullRequests, names } from "./rules.ts";
+import { shorten } from "../text.ts";
+import type { PullRequestSource } from "./github.ts";
+import {
+  DEFAULT_EXCLUSIONS,
+  type PullRequest,
+  issueKind,
+  judge,
+  judgePullRequests,
+  names,
+} from "./rules.ts";
 import type { Facts, IssueFacts, PrFact, RepoInfo } from "./types.ts";
 
 export interface ChangelogSettings {
@@ -17,7 +24,6 @@ export interface ChangelogSettings {
   readonly jiraBase: string;
   readonly org: string;
   readonly repos: readonly RepoInfo[];
-  readonly exclusions: ExclusionRules;
 }
 
 export interface CollectDeps {
@@ -37,13 +43,10 @@ export const SEARCH_FIELDS = [
   "resolution",
   "resolutiondate",
   "reporter",
-  "parent",
   "issuelinks",
 ] as const;
 
 const DESCRIPTION_CHARS = 1500;
-const COMMENT_CHARS = 400;
-const COMMENTS_KEPT = 8;
 /** A pull request can merge well before its issue is closed, so the branch search looks further back than the window. */
 const BRANCH_LOOKBACK_DAYS = 14;
 const MONTHS = [
@@ -102,7 +105,6 @@ interface Read {
   readonly resolution: string | null;
   readonly resolved: string | null;
   readonly reporter: string | null;
-  readonly parent: string | null;
   readonly links: IssueFacts["links"];
 }
 
@@ -136,7 +138,6 @@ function read(raw: JiraIssue): Read {
     resolution: str(obj(fields["resolution"])["name"]),
     resolved: str(fields["resolutiondate"]),
     reporter: str(obj(fields["reporter"])["displayName"]),
-    parent: str(obj(fields["parent"])["key"]),
     links,
   };
 }
@@ -163,8 +164,8 @@ export async function collectFacts(
   const raw = await deps.jira.searchFields(jql, SEARCH_FIELDS);
   const queryKeys = raw.map((issue) => issue.key);
 
-  const merged = new Map<string, Promise<readonly FoundPullRequest[]>>();
-  const mergedIn = (repoFull: string): Promise<readonly FoundPullRequest[]> => {
+  const merged = new Map<string, Promise<readonly PullRequest[]>>();
+  const mergedIn = (repoFull: string): Promise<readonly PullRequest[]> => {
     const cached =
       merged.get(repoFull) ??
       deps.github.mergedSince(repoFull, dayString(daysBefore(now, days + BRANCH_LOOKBACK_DAYS)));
@@ -179,7 +180,7 @@ export async function collectFacts(
     const one = read(issue);
     const verdict = judge(
       { key: one.key, status: one.status, resolution: one.resolution, resolved: one.resolved },
-      settings.exclusions,
+      DEFAULT_EXCLUSIONS,
     );
     if (verdict.kind === "excluded" || one.resolved === null) {
       excluded.push({
@@ -192,13 +193,12 @@ export async function collectFacts(
     const detail = await deps.jira.fetchDetail(one.key);
     const found = await deps.github.search(one.key);
     let judged = judgePullRequests(one.key, found);
-    let bodies = new Map(found.map((pr) => [`${pr.repo}#${String(pr.number)}`, pr.body] as const));
     if (judged.counted.length === 0) {
       // A key only a branch name carries is invisible to the search, so look where the branches are.
-      const extra: FoundPullRequest[] = [];
+      const extra: PullRequest[] = [];
       for (const repo of settings.repos) {
         for (const pr of await mergedIn(repo.full)) {
-          const seen = (list: readonly FoundPullRequest[]): boolean =>
+          const seen = (list: readonly PullRequest[]): boolean =>
             list.some((f) => f.repo === pr.repo && f.number === pr.number);
           if (names(one.key, pr.branch) && !seen(found) && !seen(extra)) {
             extra.push(pr);
@@ -206,17 +206,12 @@ export async function collectFacts(
         }
       }
       judged = judgePullRequests(one.key, [...found, ...extra]);
-      bodies = new Map([
-        ...bodies,
-        ...extra.map((pr) => [`${pr.repo}#${String(pr.number)}`, pr.body] as const),
-      ]);
     }
 
     const prs: PrFact[] = judged.counted.map((pr) => ({
       repo: pr.repo,
       number: pr.number,
       title: pr.title,
-      body: bodies.get(`${pr.repo}#${String(pr.number)}`) ?? "",
       additions: pr.additions,
       deletions: pr.deletions,
       merged: mergedDay(pr.mergedAt),
@@ -229,17 +224,11 @@ export async function collectFacts(
       summary: one.summary,
       resolved: one.resolved,
       reporter: one.reporter,
-      parent: one.parent,
       links: one.links,
       statusNote: verdict.statusStale
         ? `Jira shows ${one.status.name} although the issue was resolved ${one.resolved.slice(0, 16).replace("T", " ")}.`
         : null,
       description: shorten(renderAdf(detail.description), DESCRIPTION_CHARS),
-      comments: detail.comments.slice(-COMMENTS_KEPT).map((comment) => ({
-        author: comment.author,
-        created: comment.created,
-        text: shorten(oneLine(renderAdf(comment.body)), COMMENT_CHARS),
-      })),
       prs,
       others: judged.others,
     });

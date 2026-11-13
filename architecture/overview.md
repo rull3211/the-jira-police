@@ -159,8 +159,8 @@ Plainly: the three loops can spend at the same time and no setting spans them.
 `pnpm changelog:once [days]` reports what a team finished: the issues resolved in the window that carry
 the component or the team (`buildChangelogJql`), each read over REST, each with the pull requests that
 delivered it (`gh`). **The harness states every fact and counts every number**, and the page is the
-template in `.claude/skills/changelog/`. What a model may add is prose keyed by issue key, bounded in
-`src/changelog/types.ts`; none is wired in yet, so the titles are Jira's own and the command is free.
+template in `.claude/skills/changelog/`. What a model may add is prose keyed by issue key (`Prose` in
+`src/changelog/types.ts`); none is wired in yet, so the titles are Jira's own and the command is free.
 
 Rules that making one by hand turned up, each in code with a test:
 
