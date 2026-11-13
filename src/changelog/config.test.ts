@@ -10,6 +10,7 @@ const settingsWith = (extra: Record<string, string> = {}) =>
 const THIS_TEAM = {
   CHANGELOG_COMPONENT: "SSX Advisor",
   CHANGELOG_TEAM_ID: "3536e3e8-eddf-4306-9991-173a45afc8a2",
+  CHANGELOG_GITHUB_ORG: "storebrand-digital",
   CHANGELOG_REPOS:
     "advisor-web=buy-insurance-advisor-web,edh2-admin,commerce-rest=insurance-commerce-rest-api,ssx-mono-repo=insurance-ssx-mono-repo",
   CHANGELOG_WEBAPPS: "advisor-web,edh2-admin",
@@ -73,6 +74,16 @@ describe("readChangelogSettings", () => {
   it("carries nothing over from another team: with nothing configured it refuses", () => {
     // A fallback on the component or the team would put this team's scope in another team's query.
     expect(problemsOf({})).toMatch(/CHANGELOG_COMPONENT or CHANGELOG_TEAM_ID/u);
+  });
+
+  it("carries nothing over in the repositories, web apps or organisation either", () => {
+    // A fallback on any of them would send another team's lookups to this team's repositories.
+    expect(problemsOf({ CHANGELOG_COMPONENT: "X" })).toMatch(/CHANGELOG_GITHUB_ORG/u);
+    const read = readChangelogSettings(
+      settingsWith({ CHANGELOG_COMPONENT: "X", CHANGELOG_GITHUB_ORG: "acme" }),
+    );
+    expect(read.repos).toEqual([]);
+    expect(read.label).toBe("X");
   });
 
   it("refuses a team given by name, which Jira would answer with nothing", () => {

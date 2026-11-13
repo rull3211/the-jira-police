@@ -833,6 +833,7 @@ manifest in the same change.
 | `groups:read`                                  | **not yet** — the rest of the reads in a private channel                                              |
 | `im:history`, `mpim:history`                   | **not yet** — commands in a direct message, and threads in a group one                                |
 | `channels:read`, `channels:join`, `files:read` | **not yet** — creating a Jira task from any thread: whether the bot is in it, joining, its images     |
+| `files:write`                                  | **not yet** — attaching the changelog page to the direct message that carries it                      |
 
 **`pnpm dev`'s `--watch` is Node's file watcher and has nothing to do with `watch:once` or
 `WATCH_ENABLED`**, which are the sendback watch, or with `solve:once --watch`, which polls pull

@@ -13,17 +13,14 @@ const issue = (key: string, over: Partial<IssueFacts> = {}): IssueFacts => ({
   summary: `Summary of ${key}`,
   resolved: "2026-11-10T12:00:00.000+0100",
   reporter: "Ada",
-  parent: null,
   links: [],
   statusNote: null,
   description: "First sentence of the description. Second sentence.\n\nA second paragraph.",
-  comments: [],
   prs: [
     {
       repo: "advisor-web",
       number: 1,
       title: "t",
-      body: "",
       additions: 3,
       deletions: 1,
       merged: "10 Nov",
@@ -172,6 +169,29 @@ describe("assertReportable", () => {
     ]);
   });
 
+  it("refuses a theme declared twice, and one with no id or no label", () => {
+    const f = facts([issue("SSX-1")]);
+    const twice: Prose = {
+      ...prose(["SSX-1"]),
+      themes: [
+        { id: "a", label: "A" },
+        { id: "a", label: "Again" },
+      ],
+    };
+    expect(problemsOf(() => assertReportable(f, twice, ["SSX-1"]))).toEqual([
+      "theme a is declared twice",
+    ]);
+    for (const theme of [
+      { id: " ", label: "A" },
+      { id: "a", label: " " },
+    ]) {
+      const bad: Prose = { ...prose(["SSX-1"]), themes: [theme] };
+      expect(problemsOf(() => assertReportable(f, bad, ["SSX-1"]))).toContain(
+        "a theme has an empty id or label",
+      );
+    }
+  });
+
   it("reports every problem at once and says how many", () => {
     const error = (() => {
       try {
@@ -194,7 +214,6 @@ describe("mechanicalProse", () => {
           repo: "commerce-rest",
           number: 2,
           title: "t",
-          body: "",
           additions: 1,
           deletions: 1,
           merged: "10 Nov",

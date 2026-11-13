@@ -436,8 +436,7 @@ export const SETTINGS = [
   {
     name: "CHANGELOG_GITHUB_ORG",
     description:
-      "The GitHub organisation whose pull requests a changelog reads, with the `gh` the service already runs. Reads only.",
-    fallback: "storebrand-digital",
+      "The GitHub organisation whose pull requests a changelog reads, with the `gh` the service already runs. Reads only. Unset is a startup error. No fallback, for the reason CHANGELOG_REPOS gives: a default would search another organisation's keys in this one.",
   },
   {
     name: "CHANGELOG_REPOS",

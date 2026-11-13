@@ -1,7 +1,6 @@
 import { TEAM_ID } from "../jira/jql.ts";
 import { type Settings, SettingsError, list } from "../settings.ts";
 import type { ChangelogSettings } from "./collect.ts";
-import { DEFAULT_EXCLUSIONS } from "./rules.ts";
 import type { RepoInfo } from "./types.ts";
 
 const NAME = /^[A-Za-z0-9._-]+$/u;
@@ -74,6 +73,5 @@ export function readChangelogSettings(settings: Settings): ChangelogSettings {
     jiraBase: `${settings.JIRA_BASE_URL.replace(/\/+$/u, "")}/browse/`,
     org,
     repos,
-    exclusions: DEFAULT_EXCLUSIONS,
   };
 }

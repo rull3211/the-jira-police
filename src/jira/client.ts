@@ -21,7 +21,7 @@
  * `search` uses `/rest/api/3/search/jql`, paginated by opaque `nextPageToken` with no total count
  * or numeric offset, and asks a narrow `FIELDS` list since it runs on a timer over every ticket;
  * `description`/`comment`/`attachment` are fetched only in `fetchDetail`, for the one ticket a solve
- * acts on.
+ * acts on and each issue a changelog reports.
  */
 
 import { createLogger } from "../logger.ts";
@@ -364,15 +364,30 @@ export class JiraClient {
 
   /** Runs a JQL search, following pagination, and normalises the results. */
   async search(jql: string): Promise<readonly TicketRef[]> {
-    const issues = await this.searchFields(jql, FIELDS);
+    const { issues } = await this.#searchPages(jql, FIELDS);
     return issues.map((issue) => toTicketRef(issue, this.#baseUrl));
   }
 
-  /** As `search`, for the fields the caller names; the payload comes back as Jira sent it. */
+  /** As `search`, for the fields the caller names, but a result cut at the page cap is refused: a report built on it looks complete. */
   async searchFields(jql: string, fields: readonly string[]): Promise<readonly JiraIssue[]> {
+    const { issues, truncated } = await this.#searchPages(jql, fields);
+    if (truncated) {
+      throw new JiraError(
+        0,
+        `Search stopped after ${String(MAX_PAGES * MAX_RESULTS_PER_PAGE)} issues with more to read: ${jql}`,
+      );
+    }
+    return issues;
+  }
+
+  async #searchPages(
+    jql: string,
+    fields: readonly string[],
+  ): Promise<{ readonly issues: readonly JiraIssue[]; readonly truncated: boolean }> {
     const collected: JiraIssue[] = [];
     let nextPageToken: string | undefined;
     let page = 0;
+    let truncated = false;
 
     do {
       const payload = (await this.#post("/rest/api/3/search/jql", {
@@ -391,15 +406,16 @@ export class JiraClient {
 
       if (page >= MAX_PAGES && nextPageToken !== undefined) {
         log.warn("jira.pagination_truncated", { pages: page, jql });
+        truncated = true;
         break;
       }
     } while (nextPageToken !== undefined);
 
     log.debug("jira.search_complete", { found: collected.length, pages: page });
-    return collected;
+    return { issues: collected, truncated };
   }
 
-  /** Everything one ticket says, for the one ticket a solve is about to act on; asks for `comment` and `attachment` explicitly, unlike `search`'s `FIELDS`. */
+  /** Everything one ticket says, for a solve about to act on it and for each issue a changelog reports; asks for `comment` and `attachment` explicitly, unlike `search`'s `FIELDS`. */
   async fetchDetail(key: string): Promise<IssueDetail> {
     assertIssueKey(key);
     const fields = "summary,issuetype,status,labels,description,comment,attachment";
