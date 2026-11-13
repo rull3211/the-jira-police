@@ -45,7 +45,7 @@ Things that look like details and are not:
    attacker-controlled ticket text, so this is a boundary rather than a convention. The service
    writes `agent:start`, and takes `agent:failed` off, only when a person asks for it by name:
    `slack:start --write` at a terminal, or `@Bencebot start` and `clear` in the ticket's thread from
-   someone on `SLACK_START_USERS`, who is the event's `user` as Slack sets it. Nothing a model or a
+   someone on `SLACK_COMMAND_WHITELIST`, who is the event's `user` as Slack sets it. Nothing a model or a
    ticket produced reaches that path: no session holds a Slack token (invariant 3), and the bot's
    own messages raise no mention. `agent:ignore` is a person's in the other direction — a hold
    rather than a go-ahead — and triage may neither add nor lift it (invariant 21).
@@ -60,10 +60,12 @@ Things that look like details and are not:
     written to — **`SOLVE_GITHUB_OWNER` is the other one**, and carries a second reason of its
     own: an owner inferred from the checkout's remote is correct right up until somebody adds a
     fork as `origin`, at which point a bot opens a pull request against a repository nobody
-    chose. `SLACK_START_USERS` names who rather than what — the people whose mention may write
-    `agent:start` — and has no fallback for the same reason; nor has `SLACK_DRAFT_USERS`, the people
-    whose mention may start a paid, read-only draft session over every configured checkout, kept a
-    list of its own because that is not the privilege `agent:start` is. `DRAFT_PROJECTS` names what a draft may
+    chose. `SLACK_COMMAND_WHITELIST` names who rather than what — the people whose mention may write
+    `agent:start`, or start a paid, read-only draft session over every configured checkout — and has
+    no fallback for the same reason. It is one list for every command, so being on it is all of those
+    powers at once, and any command added later; keeping them apart takes a list each, and the
+    retired `SLACK_START_USERS` and `SLACK_DRAFT_USERS` are refused at startup, not ignored.
+    `DRAFT_PROJECTS` names what a draft may
     be posted to, and has no fallback for the same reason: a default would hand a project back to
     anyone who had taken it off. Note this cuts the opposite way from
     `SOLVE_AUTO_ISSUE_TYPES`, where the fallback _is_
@@ -341,8 +343,8 @@ Things that look like details and are not:
 
     The Slack listener is held to the same rule without being a loop. `createSlackListener` in
     `src/slack-loop.ts` reads `SLACK_LISTEN` first and returns `null` when it is off; when it is
-    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks, and so are `SLACK_START_USERS`,
-    `SLACK_DRAFT_USERS` and — once anyone is on either — `SLACK_BOT_TOKEN`; and what it returns
+    on, `SLACK_APP_TOKEN` is checked there, before any loop ticks, and so is
+    `SLACK_COMMAND_WHITELIST` and — once anyone is on it — `SLACK_BOT_TOKEN`; and what it returns
     resolves rather than rejects, so a listener that breaks logs `slack.listen_crashed` and leaves
     the loops running. A draft's session runs off the listener's one promise chain, so minutes of
     it hold no `/bencebot` back, and the shutdown signal kills it rather than waiting it out.

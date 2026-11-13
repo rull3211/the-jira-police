@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { KeychainError } from "./keychain.ts";
 import {
+  RETIRED_SETTINGS,
   SETTINGS,
   SettingsError,
   daemonPromotesRepair,
@@ -443,5 +444,41 @@ describe("keychain: references", () => {
 
   it("is left as written by the local reader, so a command that needs no secret raises no dialog", () => {
     expect(readLocalSettings(REFERENCED).JIRA_AUTH).toBe("keychain:the-jira-police.JIRA_AUTH");
+  });
+});
+
+describe("retired settings", () => {
+  it.each(Object.keys(RETIRED_SETTINGS))(
+    "refuses %s, naming what replaced it, instead of ignoring it",
+    (name) => {
+      // Ignored, it would quietly take access from everyone it listed.
+      const run = () => readSettings({ ...MINIMAL, [name]: "U0ME" });
+      expect(run).toThrow(SettingsError);
+      expect(run).toThrow(`${name} (replaced by SLACK_COMMAND_WHITELIST)`);
+    },
+  );
+
+  it("names every retired setting that is set, in one refusal", () => {
+    expect(() =>
+      readSettings({ ...MINIMAL, SLACK_START_USERS: "U0A", SLACK_DRAFT_USERS: "U0B" }),
+    ).toThrow(
+      /SLACK_START_USERS \(replaced by SLACK_COMMAND_WHITELIST\), SLACK_DRAFT_USERS \(replaced by SLACK_COMMAND_WHITELIST\)/u,
+    );
+  });
+
+  it("reads a blank retired line as unset, since a line copied from .env.example is empty", () => {
+    expect(() =>
+      readSettings({ ...MINIMAL, SLACK_START_USERS: "", SLACK_DRAFT_USERS: "  " }),
+    ).not.toThrow();
+  });
+
+  it("refuses before it reports a missing required setting, so the migration is the first thing read", () => {
+    expect(() => readSettings({ SLACK_START_USERS: "U0ME" })).toThrow(/^Retired configuration/u);
+  });
+
+  it("names, as each replacement, a setting that is declared", () => {
+    for (const replacement of Object.values(RETIRED_SETTINGS)) {
+      expect(SETTINGS.map((spec) => spec.name)).toContain(replacement);
+    }
   });
 });

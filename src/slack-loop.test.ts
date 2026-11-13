@@ -68,7 +68,7 @@ describe("createSlackListener", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it("with nobody on SLACK_START_USERS, asks for no bot token and answers a mention by doing nothing", async () => {
+  it("with nobody on SLACK_COMMAND_WHITELIST, asks for no bot token and answers a mention by doing nothing", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
     try {
@@ -92,22 +92,26 @@ describe("createSlackListener", () => {
     }
   });
 
-  it("with someone on SLACK_START_USERS, refuses at startup a missing bot token and an entry that is not a member ID", () => {
+  it("with someone on SLACK_COMMAND_WHITELIST, refuses at startup a missing bot token and an entry that is not a member ID", () => {
     const signal = new AbortController().signal;
     const on = { SLACK_LISTEN: "dry", SLACK_APP_TOKEN: "xapp-1-abc" };
 
     expect(() =>
-      createSlackListener(settingsWith({ ...on, SLACK_START_USERS: "U0ME" }), signal),
+      createSlackListener(settingsWith({ ...on, SLACK_COMMAND_WHITELIST: "U0ME" }), signal),
     ).toThrow(/SLACK_BOT_TOKEN \(the bot token/u);
     expect(() =>
       createSlackListener(
-        settingsWith({ ...on, SLACK_START_USERS: "U0ME, @bence", SLACK_BOT_TOKEN: "xoxb-1-abc" }),
+        settingsWith({
+          ...on,
+          SLACK_COMMAND_WHITELIST: "U0ME, @bence",
+          SLACK_BOT_TOKEN: "xoxb-1-abc",
+        }),
         signal,
       ),
-    ).toThrow(/SLACK_START_USERS \(expected member IDs such as U0123ABCD, got "@bence"\)/u);
+    ).toThrow(/SLACK_COMMAND_WHITELIST \(expected member IDs such as U0123ABCD, got "@bence"\)/u);
   });
 
-  it("with someone on SLACK_START_USERS, refuses anyone else in the thread, reading nothing first", async () => {
+  it("with someone on SLACK_COMMAND_WHITELIST, refuses anyone else in the thread, reading nothing first", async () => {
     const fetchMock = vi.fn<typeof fetch>(
       async () =>
         new Response(JSON.stringify({ ok: true }), {
@@ -122,7 +126,7 @@ describe("createSlackListener", () => {
           SLACK_LISTEN: "live",
           SLACK_APP_TOKEN: "xapp-1-abc",
           SLACK_BOT_TOKEN: "xoxb-1-abc",
-          SLACK_START_USERS: "U0ME",
+          SLACK_COMMAND_WHITELIST: "U0ME",
         }),
         new AbortController().signal,
         async (deps) => {
@@ -148,7 +152,7 @@ describe("createSlackListener", () => {
     }
   });
 
-  it("with nobody on SLACK_DRAFT_USERS, asks for no bot token and answers a draft mention by doing nothing", async () => {
+  it("with nobody on SLACK_COMMAND_WHITELIST, asks for no bot token and answers a draft mention by doing nothing", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
     try {
@@ -172,22 +176,7 @@ describe("createSlackListener", () => {
     }
   });
 
-  it("with someone on SLACK_DRAFT_USERS, refuses at startup a missing bot token and an entry that is not a member ID", () => {
-    const signal = new AbortController().signal;
-    const on = { SLACK_LISTEN: "dry", SLACK_APP_TOKEN: "xapp-1-abc" };
-
-    expect(() =>
-      createSlackListener(settingsWith({ ...on, SLACK_DRAFT_USERS: "U0ME" }), signal),
-    ).toThrow(/SLACK_BOT_TOKEN \(the bot token/u);
-    expect(() =>
-      createSlackListener(
-        settingsWith({ ...on, SLACK_DRAFT_USERS: "U0ME, @bence", SLACK_BOT_TOKEN: "xoxb-1-abc" }),
-        signal,
-      ),
-    ).toThrow(/SLACK_DRAFT_USERS \(expected member IDs such as U0123ABCD, got "@bence"\)/u);
-  });
-
-  it("refuses at startup a malformed DRAFT_PROJECTS, even with nobody on SLACK_DRAFT_USERS", () => {
+  it("refuses at startup a malformed DRAFT_PROJECTS, even with nobody on SLACK_COMMAND_WHITELIST", () => {
     expect(() =>
       createSlackListener(
         settingsWith({ SLACK_LISTEN: "dry", SLACK_APP_TOKEN: "xapp-1-abc", DRAFT_PROJECTS: "ssx" }),
@@ -196,54 +185,50 @@ describe("createSlackListener", () => {
     ).toThrow(/DRAFT_PROJECTS \(expected project keys such as SSX, got "ssx"\)/u);
   });
 
-  it.each([
-    [
-      "a draft from someone only on the start list",
-      "<@U0BOT> draft",
-      { SLACK_START_USERS: "U0ME" },
-    ],
-    [
-      "a start from someone only on the draft list",
-      "<@U0BOT> start",
-      { SLACK_DRAFT_USERS: "U0ME" },
-    ],
-  ])("keeps the two lists apart: refuses %s, reading nothing first", async (_name, text, lists) => {
-    const fetchMock = vi.fn<typeof fetch>(
-      async () =>
-        new Response(JSON.stringify({ ok: true }), {
-          headers: { "content-type": "application/json" },
-        }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      let heard: ListenDeps["mention"] | undefined;
-      const listener = createSlackListener(
-        settingsWith({
-          SLACK_LISTEN: "live",
-          SLACK_APP_TOKEN: "xapp-1-abc",
-          SLACK_BOT_TOKEN: "xoxb-1-abc",
-          SLACK_START_USERS: "U0OTHER",
-          SLACK_DRAFT_USERS: "U0OTHER",
-          ...lists,
-        }),
-        new AbortController().signal,
-        async (deps) => {
-          heard = deps.mention;
-          return { connections: 0, commands: 0, mentions: 0, clicks: 0 };
-        },
+  it.each(["start", "draft"])(
+    "one list covers every command: %s is refused to a stranger and not to someone on SLACK_COMMAND_WHITELIST",
+    async (verb) => {
+      const fetchMock = vi.fn<typeof fetch>(
+        async () =>
+          new Response(JSON.stringify({ ok: true, messages: [] }), {
+            headers: { "content-type": "application/json" },
+          }),
       );
-      await listener?.();
+      vi.stubGlobal("fetch", fetchMock);
+      try {
+        const listener = createSlackListener(
+          settingsWith({
+            SLACK_LISTEN: "live",
+            SLACK_APP_TOKEN: "xapp-1-abc",
+            SLACK_BOT_TOKEN: "xoxb-1-abc",
+            SLACK_COMMAND_WHITELIST: "U0ME",
+          }),
+          new AbortController().signal,
+          async (deps) => {
+            // Inside the runner, so the listener waits for a draft's session before the stub is removed.
+            for (const userId of ["U0ME", "U0STRANGER"]) {
+              try {
+                await deps.mention({ ...MENTION, userId, text: `<@U0BOT> ${verb}` });
+              } catch {
+                // What a handler does once it has let someone in is not what this asks.
+              }
+            }
+            return { connections: 1, commands: 0, mentions: 2, clicks: 0 };
+          },
+        );
+        await listener?.();
 
-      await heard?.({ ...MENTION, text });
-
-      const urls = fetchMock.mock.calls.map(([url]) => String(url));
-      expect(urls).toEqual(["https://slack.com/api/chat.postEphemeral"]);
-      const form = new URLSearchParams(String(fetchMock.mock.calls[0]?.[1]?.body));
-      expect(form.get("text")).toContain("not one of them");
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
+        const refused = fetchMock.mock.calls
+          .filter(([url]) => String(url).endsWith("chat.postEphemeral"))
+          .map(([, init]) => new URLSearchParams(String(init?.body)))
+          .filter((form) => form.get("text")?.includes("not one of them") === true)
+          .map((form) => form.get("user"));
+        expect(refused).toEqual(["U0STRANGER"]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it("returns only once a running draft has sent its message", async () => {
     const urls: string[] = [];
@@ -272,7 +257,7 @@ describe("createSlackListener", () => {
           SLACK_LISTEN: "live",
           SLACK_APP_TOKEN: "xapp-1-abc",
           SLACK_BOT_TOKEN: "xoxb-1-abc",
-          SLACK_DRAFT_USERS: "U0ME",
+          SLACK_COMMAND_WHITELIST: "U0ME",
         }),
         new AbortController().signal,
         async (deps) => {
