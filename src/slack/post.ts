@@ -31,7 +31,7 @@ export interface FilingDeps {
 }
 
 export interface PostClickDeps {
-  /** `SLACK_DRAFT_USERS`: the people who may ask for a draft are the only ones who may post one. */
+  /** `SLACK_COMMAND_WHITELIST`: the people who may ask for a draft are the only ones who may post one. */
   readonly allowed: readonly string[];
   /** Whether every reply is marked as a dry run, as the listener's other handlers mark theirs. */
   readonly dry: boolean;
@@ -241,7 +241,7 @@ export function createPostHandler(deps: PostClickDeps): PostHandler {
         await answer(
           click,
           "not-allowed",
-          "Only the people on the draft list may post a draft, and you are not one of them, so nothing was read and nothing was filed.",
+          "Only the people on the command whitelist may post a draft, and you are not one of them, so nothing was read and nothing was filed.",
         );
         return;
       }

@@ -112,7 +112,7 @@ cannot be parsed back into it without a second reading that can drift from the f
 that a wiped `state/`, or a second machine, does not hold the draft; that fails closed, as a press
 that answers the draft is gone. A record never expires.
 It follows the loops' rule all the same (`architecture/invariants.md` invariant 17): `null` when
-off, its tokens and both lists checked at startup, and a listener that breaks resolves rather than rejects, leaving
+off, its tokens, `SLACK_COMMAND_WHITELIST` and `DRAFT_PROJECTS` checked at startup, and a listener that breaks resolves rather than rejects, leaving
 the three loops running.
 
 #### The review loop advances and then claims, in one tick

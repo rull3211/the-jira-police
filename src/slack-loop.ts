@@ -6,12 +6,12 @@
 import { createLogger } from "./logger.ts";
 import { type Settings, slackListen } from "./settings.ts";
 import { type ListenDeps, type ListenSummary, listen } from "./slack/socket.ts";
-import { draftUsers, listenerFor, rosterWhere, startUsers } from "./wiring.ts";
+import { commandWhitelist, listenerFor, rosterWhere } from "./wiring.ts";
 
 const log = createLogger("slack");
 
 /**
- * A bad SLACK_APP_TOKEN, or a start or draft list with no bot token to act on it, throws here at startup; the
+ * A bad SLACK_APP_TOKEN, or a command whitelist with no bot token to act on it, throws here at startup; the
  * runner it returns never rejects, so a broken listener cannot take the daemon's `Promise.all` with it.
  */
 export function createSlackListener(
@@ -27,8 +27,7 @@ export function createSlackListener(
   log.info("slack.listen_enabled", {
     mode,
     list: rosterWhere(settings),
-    mayStart: startUsers(settings).length,
-    mayDraft: draftUsers(settings).length,
+    whitelisted: commandWhitelist(settings).length,
   });
   return async () => {
     try {

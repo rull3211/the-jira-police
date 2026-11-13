@@ -161,7 +161,7 @@ describe("createPostHandler", () => {
     expect(h.replies).toEqual([]);
   });
 
-  it("refuses someone off the draft list before reading the record", async () => {
+  it("refuses someone off the whitelist before reading the record", async () => {
     const h = harness();
 
     await createPostHandler(h.deps).handle(click({ userId: "U0STRANGER" }));
@@ -169,10 +169,12 @@ describe("createPostHandler", () => {
     expect(h.get).not.toHaveBeenCalled();
     expect(h.facts).not.toHaveBeenCalled();
     expect(h.rehearse).not.toHaveBeenCalled();
-    expect(h.replies[0]?.text).toMatch(/^Only the people on the draft list may post a draft/u);
+    expect(h.replies[0]?.text).toMatch(
+      /^Only the people on the command whitelist may post a draft/u,
+    );
   });
 
-  it("refuses the asker too once they have left the draft list", async () => {
+  it("refuses the asker too once they have left the whitelist", async () => {
     const h = harness({ allowed: ["U0SOMEONE"] });
 
     await createPostHandler(h.deps).handle(click());

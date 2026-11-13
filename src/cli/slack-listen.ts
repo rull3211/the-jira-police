@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { createLogger } from "../logger.ts";
 import { readSettings, withConfigErrors } from "../settings.ts";
-import { draftProjects, draftUsers, listenerFor, rosterWhere, startUsers } from "../wiring.ts";
+import { commandWhitelist, draftProjects, listenerFor, rosterWhere } from "../wiring.ts";
 
 const log = createLogger("slack-listen");
 
@@ -17,8 +17,8 @@ function usage(): never {
   process.stderr.write(
     "usage: pnpm slack:listen [--write]\n" +
       "  Holds a Socket Mode connection and answers /bencebot subscribe, unsubscribe, status and help\n" +
-      "  until Ctrl-C, and @Bencebot start and clear in a ticket's thread from the people on\n" +
-      "  SLACK_START_USERS, and @Bencebot draft in any thread from the people on SLACK_DRAFT_USERS.\n" +
+      "  until Ctrl-C, and @Bencebot start and clear in a ticket's thread, and @Bencebot draft in\n" +
+      "  any thread, from the people on SLACK_COMMAND_WHITELIST.\n" +
       "  With DRAFT_PROJECTS set it also answers a press on a draft's Post to Jira button: it checks\n" +
       "  the draft again, and then dry it writes <OUTPUT_DIR>/slack/<id>.issue.json and files nothing,\n" +
       "  while with --write it files the draft in Jira, reads it back and says what it found.\n" +
@@ -50,20 +50,15 @@ async function main(): Promise<void> {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
-  const starters = startUsers(settings).length;
+  const people = commandWhitelist(settings).length;
   const mentions =
-    starters === 0
-      ? "No mention is answered: SLACK_START_USERS is empty."
-      : `${String(starters)} ${starters === 1 ? "person" : "people"} may start or clear a ticket from its thread${write ? "" : ", dry"}.`;
-  const drafters = draftUsers(settings).length;
-  const drafts =
-    drafters === 0
-      ? "No draft is answered: SLACK_DRAFT_USERS is empty."
-      : `${String(drafters)} ${drafters === 1 ? "person" : "people"} may draft a thread${write ? "" : ", dry, though each session is still paid for"}.${write && draftProjects(settings).length > 0 ? " A press on a draft's Post to Jira button files it." : ""}`;
+    people === 0
+      ? "No mention is answered: SLACK_COMMAND_WHITELIST is empty."
+      : `${String(people)} ${people === 1 ? "person" : "people"} may start, clear or draft${write ? "" : ", dry, though each draft's session is still paid for"}.${write && draftProjects(settings).length > 0 ? " A press on a draft's Post to Jira button files it." : ""}`;
   process.stdout.write(
     write
-      ? `Listening for /bencebot, writing ${where}. ${mentions} ${drafts} Ctrl-C stops.\n`
-      : `Listening for /bencebot, dry: ${where} is read, and ${join(settings.OUTPUT_DIR, "slack", "roster.json")} written. ${mentions} ${drafts} Ctrl-C stops.\n`,
+      ? `Listening for /bencebot, writing ${where}. ${mentions} Ctrl-C stops.\n`
+      : `Listening for /bencebot, dry: ${where} is read, and ${join(settings.OUTPUT_DIR, "slack", "roster.json")} written. ${mentions} Ctrl-C stops.\n`,
   );
   const summary = await start();
   process.stdout.write(

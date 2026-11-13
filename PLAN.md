@@ -6,7 +6,7 @@
 > ticket for whatever happened, watches the ones it sent back for an answer, and renders its log to a
 > reader; run by hand, `pnpm sweep:once` sweeps the skill roots and staged images its own abandoned
 > runs left behind.
-> **4334 tests in 130 files**, no build step.
+> **4339 tests in 130 files**, no build step.
 >
 > **It loops, and it claims.** `main` in `src/index.ts` awaits a `Promise.all` over three loops — grooming,
 > review and watch — and, with `SLACK_LISTEN` on, the `/bencebot` listener; `runCycle` in
@@ -50,7 +50,7 @@ every file that cited them has been repointed there, and what is still open from
 
 <!-- refs:off -->
 
-**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86 and §87, and this line names them rather than
+**The holes are §4, §7, §12, §15, §16, §18, §19, §20, §21, §22, §23, §25, §26, §27, §28, §29, §30, §32, §34, §35, §36, §37, §38, §40, §41, §42, §43, §44, §45, §49, §50, §51, §52, §53, §55, §62, §63, §64, §66, §67, §68, §69, §70, §71, §73, §75, §77, §78, §79, §80, §81, §82, §83, §86, §87 and §91, and this line names them rather than
 citing them.** A catalogue of deleted sections dangles by construction — the targets are gone and can
 never be repointed — so it belongs in a `refs:off` region rather than in `KNOWN_DANGLING`, which
 holds a debt still and would be holding entries nobody could ever pay.
@@ -566,10 +566,14 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `## ROUTE-planning`, both of which pass. **What would show it:** a `groomed/<KEY>.rejected.md`
   naming the missing banner — either a session that stopped for some reason other than the
   refusal, or a real report the pattern misses.
-- **Two of a mention's refusals have run only in tests**: someone not on `SLACK_START_USERS`, and a
+- **Two of a mention's refusals have run only in tests**: someone not on `SLACK_COMMAND_WHITELIST`, and a
   mention outside a thread. **What would show it:** a colleague's `@Bencebot start` in a ticket's
   thread, and anyone's in the channel itself; each must get a reply only they see, and leave the
   ticket's labels as they were.
+- **One list now covers every command, and nobody has watched it on real Slack.** Someone who could
+  only draft can now start and clear. **What would show it:** a person on `SLACK_COMMAND_WHITELIST`
+  who was only on the draft list sending `@Bencebot start` in a ticket's thread (it must act), and a
+  stranger sending `draft` (it must be refused with a reply only they see).
 - **The status moves have run; the broadcast line's edits have not been looked at.** SSX-4005 on
   2026-09-30 took all three moves over two daemon runs, read back from its changelog: Received → In
   Progress at the claim and back to Prioritized when the fix pass crashed (§85), then Prioritized →
@@ -620,7 +624,7 @@ nothing sets it, so the child resolves the _machine's_ zone, which is exactly th
   `parseFrame` reads. Unseen: the reply as it rendered in the thread, which nothing here has read;
   whether switching interactivity on needed a reinstall, and whether the manifest import accepts
   `interactivity` with no `request_url`, which Slack's manifest reference lists as optional —
-  neither was recorded; and every refusal on real Slack and Jira — a press by someone else on the draft list, after a wiped
+  neither was recorded; and every refusal on real Slack and Jira — a press by someone else on the whitelist, after a wiped
   `state/`, and after the component leaves SSX.
 - **A draft's messages have never been sent near their size limits.** On 2026-10-15 a drafted
   ticket went out as its first paragraph (516 characters) and a reply holding the rest, 11 951
@@ -694,7 +698,7 @@ states the rule that produced that shape, which is that a recorded verdict is ne
   account, not the person who asked; the mention in the thread is the only record of who did. The
   shape that closes it: look up the asker's email (`users:read.email`, already granted) and the
   Jira account it belongs to, and name them on the ticket or in the audit card. Left open when the
-  feature shipped on `feat/slack-agent-start`, because one person is on `SLACK_START_USERS` today.
+  feature shipped on `feat/slack-agent-start`, because one person is on `SLACK_COMMAND_WHITELIST` today.
   **What would make it the wrong idea:** a comment on every start is noise on the ticket, and the
   audit card may be where the name belongs rather than Jira.
 - **A post-merge vacuous-test sweep.** Two shipped tests guard nothing: #1413's timezone test and

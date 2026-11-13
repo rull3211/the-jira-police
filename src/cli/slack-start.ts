@@ -1,6 +1,6 @@
 /**
  * The edit `@Bencebot start` and `@Bencebot clear` make, for one thread named at a terminal, where
- * being at the terminal is the authority and the start list does not apply.
+ * being at the terminal is the authority and the whitelist does not apply.
  *
  *   pnpm slack:start <thread-link> [--clear] [--write]
  *

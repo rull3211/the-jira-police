@@ -120,7 +120,7 @@ const SUBSCRIBE_USAGE =
 
 export const USAGE_REPLY = `${SUBSCRIBE_USAGE} \`/bencebot help\` lists everything the bot answers.`;
 
-export const HELP_REPLY = `${SUBSCRIBE_USAGE}\n${MENTION_USAGE} Only the people on the start list may use those two.\n${DRAFT_USAGE} Only the people on the draft list may ask for one.`;
+export const HELP_REPLY = `${SUBSCRIBE_USAGE}\n${MENTION_USAGE}\n${DRAFT_USAGE}\nOnly the people on the command whitelist may use those two.`;
 
 /**
  * Load, apply, write, read back. Never throws: the reply is the only place the person who typed the

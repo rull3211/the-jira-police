@@ -252,7 +252,7 @@ export function createMentionHandler(options: {
       return MENTION_USAGE;
     }
     if (!options.allowed.includes(mention.userId)) {
-      return "Only the people on the start list may start or clear a ticket from Slack, and you are not one of them, so nothing changed.";
+      return "Only the people on the command whitelist may start or clear a ticket from Slack, and you are not one of them, so nothing changed.";
     }
     if (mention.threadTs === null) {
       return `Nothing changed: this is not a thread. ${MENTION_USAGE}`;

@@ -112,7 +112,7 @@ export function createDraftHandler(deps: DraftMentionDeps): DraftHandler {
     if (!deps.allowed.includes(mention.userId)) {
       return {
         decision: "not-allowed",
-        text: "Only the people on the draft list may ask for a draft, and you are not one of them, so nothing was read.",
+        text: "Only the people on the command whitelist may ask for a draft, and you are not one of them, so nothing was read.",
       };
     }
     if (mention.threadTs === null) {

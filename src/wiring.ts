@@ -676,21 +676,21 @@ export function listenerFor(
 }
 
 /**
- * With nobody on SLACK_DRAFT_USERS or nothing on DRAFT_PROJECTS a press is only logged and nothing is
+ * With nobody on SLACK_COMMAND_WHITELIST or nothing on DRAFT_PROJECTS a press is only logged and nothing is
  * built to answer it. Both lists are read first, so a malformed one stops the start whatever the other holds.
  */
 export function clickHandlerFor(
   settings: Settings,
   mode: "dry" | "live",
 ): (click: Click) => Promise<void> {
-  const allowed = draftUsers(settings);
+  const allowed = commandWhitelist(settings);
   const projects = draftProjects(settings);
   if (allowed.length === 0 || projects.length === 0) {
     return async (click) => {
       slackLog.info("slack.click_ignored", {
         user: click.userId,
         actionId: click.actionId,
-        note: "SLACK_DRAFT_USERS or DRAFT_PROJECTS is empty, so no press is answered",
+        note: "SLACK_COMMAND_WHITELIST or DRAFT_PROJECTS is empty, so no press is answered",
       });
     };
   }
@@ -749,19 +749,19 @@ export function clickHandlerFor(
 }
 
 /**
- * With nobody on SLACK_START_USERS a mention is logged and dropped, and nothing that could answer or
+ * With nobody on SLACK_COMMAND_WHITELIST a mention is logged and dropped, and nothing that could answer or
  * write is built; with someone, a missing bot token stops the start here rather than every mention.
  */
 export function mentionHandlerFor(
   settings: Settings,
   mode: "dry" | "live",
 ): (mention: Mention) => Promise<void> {
-  const allowed = startUsers(settings);
+  const allowed = commandWhitelist(settings);
   if (allowed.length === 0) {
     return async (mention) => {
       slackLog.info("slack.mention_ignored", {
         user: mention.userId,
-        note: "SLACK_START_USERS is empty, so nobody may start or clear a ticket from Slack",
+        note: "SLACK_COMMAND_WHITELIST is empty, so nobody may start or clear a ticket from Slack",
       });
     };
   }
@@ -773,7 +773,7 @@ export function mentionHandlerFor(
 }
 
 /**
- * With nobody on SLACK_DRAFT_USERS a draft mention is logged and dropped, and no session can be
+ * With nobody on SLACK_COMMAND_WHITELIST a draft mention is logged and dropped, and no session can be
  * built; with someone, a missing bot token stops the start here rather than every mention.
  */
 export function draftHandlerFor(
@@ -781,13 +781,13 @@ export function draftHandlerFor(
   mode: "dry" | "live",
   signal: AbortSignal,
 ): DraftHandler {
-  const allowed = draftUsers(settings);
+  const allowed = commandWhitelist(settings);
   if (allowed.length === 0) {
     return {
       handle: async (mention) => {
         slackLog.info("slack.draft_ignored", {
           user: mention.userId,
-          note: "SLACK_DRAFT_USERS is empty, so nobody may ask for a draft",
+          note: "SLACK_COMMAND_WHITELIST is empty, so nobody may ask for a draft",
         });
       },
       settled: async () => undefined,
@@ -830,7 +830,7 @@ function fileGate(settings: Settings, projects: readonly string[]): FileGateDeps
 
 /**
  * Why `slack:draft --dm` sends the operator no button, or `null`: with projects listed, a draft sent
- * to someone off SLACK_DRAFT_USERS would carry a button whose press the handler refuses.
+ * to someone off SLACK_COMMAND_WHITELIST would carry a button whose press the handler refuses.
  */
 export function buttonWithheld(
   settings: Settings,
@@ -840,9 +840,9 @@ export function buttonWithheld(
   if (!sending || draftProjects(settings).length === 0) {
     return null;
   }
-  return recipient !== null && draftUsers(settings).includes(recipient)
+  return recipient !== null && commandWhitelist(settings).includes(recipient)
     ? null
-    : "SLACK_OPERATOR_USER_ID is not on SLACK_DRAFT_USERS, so a press on it would be refused";
+    : "SLACK_OPERATOR_USER_ID is not on SLACK_COMMAND_WHITELIST, so a press on it would be refused";
 }
 
 /** Beside the poll state, so wherever an operator keeps one they keep the other. */
@@ -880,25 +880,13 @@ function ephemeralReply(slack: SlackClient): (mention: Mention, text: string) =>
   };
 }
 
-/** SLACK_START_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
-export function startUsers(settings: Settings): readonly string[] {
-  return memberIds(settings, "SLACK_START_USERS");
-}
-
-/** SLACK_DRAFT_USERS as member IDs; one entry that is not a member ID refuses the whole list. */
-export function draftUsers(settings: Settings): readonly string[] {
-  return memberIds(settings, "SLACK_DRAFT_USERS");
-}
-
-function memberIds(
-  settings: Settings,
-  name: "SLACK_START_USERS" | "SLACK_DRAFT_USERS",
-): readonly string[] {
-  const entries = list(settings, name);
+/** SLACK_COMMAND_WHITELIST as member IDs; one entry that is not a member ID refuses the whole list. */
+export function commandWhitelist(settings: Settings): readonly string[] {
+  const entries = list(settings, "SLACK_COMMAND_WHITELIST");
   const malformed = entries.filter((entry) => !SLACK_USER_ID_PATTERN.test(entry));
   if (malformed.length > 0) {
     throw new SettingsError([
-      `${name} (expected member IDs such as U0123ABCD, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
+      `SLACK_COMMAND_WHITELIST (expected member IDs such as U0123ABCD, got ${malformed.map((entry) => `"${entry}"`).join(", ")})`,
     ]);
   }
   return [...new Set(entries)];

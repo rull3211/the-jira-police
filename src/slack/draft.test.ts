@@ -301,7 +301,7 @@ describe("createDraftHandler", () => {
   });
 
   it.each<[string, Partial<Mention>, RegExp]>([
-    ["someone not on the draft list", { userId: "U0STRANGER" }, /not one of them/u],
+    ["someone not on the whitelist", { userId: "U0STRANGER" }, /not one of them/u],
     ["a mention outside a thread", { threadTs: null }, /this is not a thread/u],
     ["draft with another word", { text: "<@U0BENCEBOT> draft now" }, /^In any thread/u],
     ["a mention Slack named no user for", { userId: "" }, /Slack named no user/u],

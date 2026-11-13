@@ -45,7 +45,7 @@ function usage(): never {
       "  pieces written to .draft.json — and one that does not says why. The draft's first paragraph\n" +
       "  is the message and the rest is a reply in its thread, cut again at Slack's 40 000\n" +
       "  characters, with the button under the last. With --dm the button is\n" +
-      "  sent only if SLACK_OPERATOR_USER_ID is on SLACK_DRAFT_USERS, and its record is kept under\n" +
+      "  sent only if SLACK_OPERATOR_USER_ID is on SLACK_COMMAND_WHITELIST, and its record is kept under\n" +
       "  the state directory. This command files nothing; a press is answered by slack:listen, which\n" +
       "  files the draft only when started with --write and otherwise writes the request it would make\n" +
       "  to <OUTPUT_DIR>/slack/<id>.issue.json.\n" +

@@ -172,7 +172,7 @@ describe("draftProjects", () => {
 });
 
 describe("buttonWithheld", () => {
-  const on = { DRAFT_PROJECTS: "SSX", SLACK_DRAFT_USERS: "U0ME" };
+  const on = { DRAFT_PROJECTS: "SSX", SLACK_COMMAND_WHITELIST: "U0ME" };
   const withheld = (
     extra: Record<string, string>,
     recipient: string | null,
@@ -183,11 +183,11 @@ describe("buttonWithheld", () => {
     expect(withheld(on, "U0ME", true)).toBeNull();
   });
 
-  it("withholds the button from an operator off the draft list, and says so", () => {
+  it("withholds the button from an operator off the whitelist, and says so", () => {
     expect(withheld(on, "U0OTHER", true)).toMatch(
-      /SLACK_OPERATOR_USER_ID is not on SLACK_DRAFT_USERS/u,
+      /SLACK_OPERATOR_USER_ID is not on SLACK_COMMAND_WHITELIST/u,
     );
-    expect(withheld({ ...on, SLACK_DRAFT_USERS: "" }, "U0ME", true)).not.toBeNull();
+    expect(withheld({ ...on, SLACK_COMMAND_WHITELIST: "" }, "U0ME", true)).not.toBeNull();
   });
 
   it("withholds it when no operator is named, since nobody could press it", () => {
@@ -196,7 +196,7 @@ describe("buttonWithheld", () => {
 
   it("has nothing to withhold while nothing is sent, or while no project is listed", () => {
     expect(withheld(on, "U0OTHER", false)).toBeNull();
-    expect(withheld({ SLACK_DRAFT_USERS: "U0ME" }, "U0OTHER", true)).toBeNull();
+    expect(withheld({ SLACK_COMMAND_WHITELIST: "U0ME" }, "U0OTHER", true)).toBeNull();
   });
 });
 
@@ -318,7 +318,7 @@ describe("the Post button, from a mention to a direct message", () => {
   /** The settings a listener for `ASKER` would hold, with its state and output under `root`. */
   function configured(root: string, extra: Record<string, string>): Settings {
     return settingsAt(root, {
-      SLACK_DRAFT_USERS: ASKER,
+      SLACK_COMMAND_WHITELIST: ASKER,
       STATE_PATH: join(root, "state", "poll.json"),
       OUTPUT_DIR: join(root, "out"),
       ...extra,
@@ -656,12 +656,12 @@ describe("the Post button, from a mention to a direct message", () => {
       expect(existsSync(join(root, "out", "slack", `${id}.issue.json`))).toBe(false);
     });
 
-    it("refuses someone else on the draft list, writing nothing", async () => {
+    it("refuses someone else on the whitelist, writing nothing", async () => {
       const root = checkoutRoot();
       const { id, calls } = await sent(root);
 
       await clickHandlerFor(
-        configured(root, { DRAFT_PROJECTS: "SSX", SLACK_DRAFT_USERS: `${ASKER},U0OTHER2` }),
+        configured(root, { DRAFT_PROJECTS: "SSX", SLACK_COMMAND_WHITELIST: `${ASKER},U0OTHER2` }),
         "live",
       )(press(id, "U0OTHER2"));
 
@@ -697,8 +697,8 @@ describe("clickHandlerFor", () => {
   };
 
   it.each([
-    ["nobody on SLACK_DRAFT_USERS", { DRAFT_PROJECTS: "SSX" }],
-    ["nothing on DRAFT_PROJECTS", { SLACK_DRAFT_USERS: "U0ASKER1" }],
+    ["nobody on SLACK_COMMAND_WHITELIST", { DRAFT_PROJECTS: "SSX" }],
+    ["nothing on DRAFT_PROJECTS", { SLACK_COMMAND_WHITELIST: "U0ASKER1" }],
   ])("only logs a press with %s, reaching neither Slack nor Jira", async (_name, extra) => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
@@ -708,7 +708,7 @@ describe("clickHandlerFor", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("refuses a malformed project at startup even with nobody on the draft list", () => {
+  it("refuses a malformed project at startup even with nobody on the whitelist", () => {
     expect(() =>
       clickHandlerFor(settingsAt(checkoutRoot(), { DRAFT_PROJECTS: "ssx" }), "live"),
     ).toThrow(SettingsError);

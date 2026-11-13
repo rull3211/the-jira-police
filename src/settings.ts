@@ -400,23 +400,18 @@ export const SETTINGS = [
   {
     name: "SLACK_LISTEN",
     description:
-      "Whether the daemon answers `/bencebot`, a mention from someone on SLACK_START_USERS, a draft mention from someone on SLACK_DRAFT_USERS, and a press on a draft's Post to Jira button, whose reply `dry` marks. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and tickets and writing what each would change under OUTPUT_DIR/slack/; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there, and a mention's label edit. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
+      "Whether the daemon answers `/bencebot`, a mention from someone on SLACK_COMMAND_WHITELIST, and a press on a draft's Post to Jira button, whose reply `dry` marks. `off`, the default; `dry`, as `slack:listen`, reading the real subscriber list and tickets and writing what each would change under OUTPUT_DIR/slack/; or `live`, as `slack:listen --write`, writing the list as the `jira-police.slack-subscribers` property on JIRA_PROJECT, which needs Administer Projects there, and a mention's label edit. Either needs SLACK_APP_TOKEN, checked at startup. An unrecognised value is a startup error rather than a fallback, like SLACK_MODE; the two are separate switches, posting and listening.",
     fallback: "off",
   },
   {
-    name: "SLACK_START_USERS",
+    name: "SLACK_COMMAND_WHITELIST",
     description:
-      "Comma-separated Slack member IDs (`U…`) of the people who may mention the bot in a ticket's audit thread to start or clear it: `@Bencebot start` adds agent:start, manual mode's go-ahead for an unattended solve, and `@Bencebot clear` takes agent:failed off. Nobody else may, whatever they type. Empty, the listener answers no mention: it acknowledges each and logs `slack.mention_ignored`. No fallback, like SOLVE_REPOS, so emptying it takes the power away. Set, the listener also needs SLACK_BOT_TOKEN, to read the thread and reply, and both are checked at startup; an entry that is not a member ID is a startup error. Follows SLACK_LISTEN's mode: `dry` writes the edit to OUTPUT_DIR/slack/, `live` writes the label.",
-  },
-  {
-    name: "SLACK_DRAFT_USERS",
-    description:
-      "Comma-separated Slack member IDs (`U…`) of the people who may mention `@Bencebot draft` in a thread to have it drafted as a Jira ticket: the listener reads the whole thread, runs a read-only session over it that is paid for like a triage, and sends the draft to that person as a direct message. Drafting writes nothing to Jira; only a press on the draft's Post button files one, on a live listener (see DRAFT_PROJECTS). Nobody else may, whatever they type. Separate from SLACK_START_USERS, since starting a paid session that reads every configured checkout is a different privilege from writing agent:start. Empty, the listener answers no draft mention: it acknowledges each and logs `slack.draft_ignored`. No fallback, like SOLVE_REPOS, so emptying it takes the power away. Set, the listener also needs SLACK_BOT_TOKEN, checked at startup; an entry that is not a member ID is a startup error. Follows SLACK_LISTEN's mode: `dry` writes the direct message to OUTPUT_DIR/slack/ instead of sending it, and still runs the session.",
+      "Comma-separated Slack member IDs (`U…`) of the people who may run any Bencebot command by mentioning it: `@Bencebot start` and `clear` in a ticket's audit thread (start adds agent:start, manual mode's go-ahead for an unattended solve; clear takes agent:failed off), and `@Bencebot draft` in any thread, which reads the whole thread in a read-only session paid for like a triage and sends the draft as a direct message, whose Post to Jira button only they may press (see DRAFT_PROJECTS). One list for every command, so being on it is all of those powers at once, and a command added later is theirs too: it replaced SLACK_START_USERS and SLACK_DRAFT_USERS, which kept the two apart, and either still set is a startup error. Nobody else may, whatever they type. Empty, the listener answers no mention: it acknowledges each and logs `slack.mention_ignored` or `slack.draft_ignored`. No fallback, like SOLVE_REPOS, so emptying it takes the power away. Set, the listener also needs SLACK_BOT_TOKEN, checked at startup; an entry that is not a member ID is a startup error. Follows SLACK_LISTEN's mode: `dry` writes the edit and the direct message to OUTPUT_DIR/slack/, `live` writes the label.",
   },
   {
     name: "DRAFT_PROJECTS",
     description:
-      "Comma-separated Jira project keys (such as SSX) a drafted ticket may be posted to. Only a draft that names one of them, with a component and an issue type that project lists, carries a Post to Jira button in its direct message; any other says why it does not. No fallback, like SOLVE_REPOS, so emptying it takes the power away: empty, no draft carries a button and nothing a press could reach is built. An entry that is not a project key is a startup error. Only matters to someone on SLACK_DRAFT_USERS. A press checks the draft again against Jira. On a dry listener it writes the request it would make to OUTPUT_DIR/slack/<id>.issue.json and files nothing; on a live one (`slack:listen --write`, SLACK_LISTEN=live) it files the draft as one issue, reads it back from Jira and says in the thread what it found. A draft already filed, or whose filing began and did not end, is never filed again.",
+      "Comma-separated Jira project keys (such as SSX) a drafted ticket may be posted to. Only a draft that names one of them, with a component and an issue type that project lists, carries a Post to Jira button in its direct message; any other says why it does not. No fallback, like SOLVE_REPOS, so emptying it takes the power away: empty, no draft carries a button and nothing a press could reach is built. An entry that is not a project key is a startup error. Only matters to someone on SLACK_COMMAND_WHITELIST. A press checks the draft again against Jira. On a dry listener it writes the request it would make to OUTPUT_DIR/slack/<id>.issue.json and files nothing; on a live one (`slack:listen --write`, SLACK_LISTEN=live) it files the draft as one issue, reads it back from Jira and says in the thread what it found. A draft already filed, or whose filing began and did not end, is never filed again.",
   },
   {
     name: "CHANGELOG_COMPONENT",
@@ -509,14 +504,31 @@ function resolveDeclared(env: NodeJS.ProcessEnv): {
   return { settings: resolved as Settings, missing };
 }
 
+/** Names that no longer mean anything, each with what replaced it; one still set is refused, since ignoring it would quietly take access from everyone it listed. */
+export const RETIRED_SETTINGS: Readonly<Record<string, SettingName>> = {
+  SLACK_START_USERS: "SLACK_COMMAND_WHITELIST",
+  SLACK_DRAFT_USERS: "SLACK_COMMAND_WHITELIST",
+};
+
 /**
- * Resolves every declared setting, reporting all missing ones at once, then every `keychain:`
- * reference — after the missing check, so an incomplete configuration asks for no secret.
+ * Refuses a retired name still set, then resolves every declared setting, reporting all missing ones
+ * at once, then every `keychain:` reference — after the missing check, so an incomplete configuration asks for no secret.
  */
 export function readSettings(
   env: NodeJS.ProcessEnv = process.env,
   lookup: SecretLookup = lookupInKeychain,
 ): Settings {
+  // A blank value is unset, as everywhere else, so a line left empty in `.env` is not a refusal.
+  const retired = Object.entries(RETIRED_SETTINGS)
+    .filter(([name]) => (env[name]?.trim() ?? "") !== "")
+    .map(([name, replacement]) => `${name} (replaced by ${replacement})`);
+  if (retired.length > 0) {
+    throw new SettingsError(
+      retired,
+      "Retired configuration",
+      "Move what each listed into the setting that replaced it and delete the old line from .env.",
+    );
+  }
   const { settings, missing } = resolveDeclared(env);
   if (missing.length > 0) {
     throw new SettingsError(missing);
